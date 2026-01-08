@@ -1,4 +1,4 @@
-# Material Components for Slint Rust Template
+# Usher: Material Components for Slint Rust Template
 
 A template for a Rust Application using Slint with [material components](https://github.com/slint-ui/slint/tree/master/ui-libraries/material).
 
