@@ -4793,7 +4793,7 @@ dependencies = [
 
 [[package]]
 name = "usher"
-version = "0.1.0"
+version = "0.0.2"
 dependencies = [
  "lazy_static",
  "objc",
