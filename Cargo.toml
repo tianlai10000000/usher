@@ -21,6 +21,10 @@ slint = { version = "1.14.1", default-features = true, features = ["live-preview
 lazy_static = "1.4"
 # tracing = "0.1"
 # tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+self_update = { version = "0.41.0", features = ["archive-tar", "archive-zip", "compression-flate2", "rustls"] }
+tokio = { version = "1.40", features = ["full"] }
+anyhow = "1.0"
+reqwest = { version = "0.12", features = ["rustls-tls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 raw-window-handle = "0.6"

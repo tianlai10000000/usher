@@ -1,0 +1,59 @@
+import { Dialog, FilledButton, TextButton, LinearProgressIndicator, Vertical, Horizontal, MaterialText } from "@material";
+
+export global UpdateLogic {
+    in-out property <bool> update-available: false;
+    in-out property <string> new-version: "";
+    in-out property <float> progress: 0.0;
+    in-out property <string> error: "";
+
+    callback show-update-dialog();
+    callback install();
+    callback update-progress();
+    callback show-error();
+}
+
+export component UpdateDialog inherits Dialog {
+    in-out property <string> version;
+    in-out property <float> progress;
+    visible: UpdateLogic.update-available;
+
+    title: "更新可用";
+
+    Vertical {
+        spacing: 16px;
+        padding: 16px;
+
+        MaterialText {
+            text: "发现新版本 " + version;
+        }
+
+        if progress > 0 : LinearProgressIndicator {
+            progress: root.progress;
+            indeterminate: false;
+        }
+
+        Horizontal {
+            spacing: 8px;
+
+            FilledButton {
+                text: "立即更新";
+                clicked => {
+                    UpdateLogic.install();
+                }
+            }
+
+            TextButton {
+                text: "稍后";
+                clicked => {
+                    UpdateLogic.update-available = false;
+                    UpdateLogic.error = "";
+                }
+            }
+        }
+
+        if UpdateLogic.error != "" : MaterialText {
+            text: "错误: " + UpdateLogic.error;
+            color: #F44336;
+        }
+    }
+}

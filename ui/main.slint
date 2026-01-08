@@ -16,12 +16,14 @@ import { NotificationManager, Notification, NotificationType } from "./component
 import { NotificationItem } from "./components/notify/notification_item.slint";
 import { Toast } from "./components/toast/toast.slint";
 import { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
+import { UpdateDialog, UpdateLogic } from "./components/update/update.slint";
 
 export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
 export { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
 export { Toast } from "./components/toast/toast.slint";
 export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
+export { UpdateLogic } from "./components/update/update.slint";
 
 // import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
 
@@ -40,8 +42,20 @@ export component MainWindow inherits Window {
     // 导航信号（方便 Rust 端调用）
     callback navigate(Route);
     
+    // 更新相关回调
+    callback install();
+    callback show-error();
+    callback check-update();
+    callback reset-checking-state();
+    
     // 导航抽屉展开/收起状态
     in-out property <bool> drawer-expanded: true;
+
+    // Update Checker
+    UpdateDialog {
+        version: UpdateLogic.new-version;
+        progress: UpdateLogic.progress;
+    }
 
     Vertical {
         vertical-stretch: 1;
@@ -190,7 +204,14 @@ export component MainWindow inherits Window {
                             }
                             if root.current-route == Route.Home: HomePage {}
                             if root.current-route == Route.Search: SearchPage {}
-                            if root.current-route == Route.Settings: SettingsPage {}
+                            if root.current-route == Route.Settings: SettingsPage {
+                                check-update => {
+                                    root.check-update();
+                                }
+                                reset-checking-state => {
+                                    root.reset-checking-state();
+                                }
+                            }
                             if root.current-route == Route.Notification: NotificationPage {}
                             if root.current-route == Route.Toast: ToastPage {
                                 navigate(route) => {

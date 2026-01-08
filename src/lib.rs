@@ -1,6 +1,10 @@
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+use anyhow::{Context, Result};
+use std::sync::{Arc, Mutex};
+use tokio::runtime::Runtime;
+
 #[cfg(target_os = "macos")]
 #[macro_use]
 extern crate objc;
@@ -16,6 +20,11 @@ use notification::setup_notifications;
 
 mod toast;
 use toast::setup_toast;
+
+mod update;
+
+use update::updater::{check_for_update, perform_update, UpdateState};
+use update::check_update::init;
 
 #[cfg(target_os = "macos")]
 fn set_title_bar_color(_window: &MainWindow, is_dark: bool) {
@@ -128,8 +137,160 @@ impl Router {
     }
 }
 
-fn ui() -> MainWindow {
-    let app = MainWindow::new().unwrap();
+fn ui() -> Result<MainWindow> {
+
+    let app = MainWindow::new().context("Failed to create MainWindow")?;
+
+    // Update logic
+    let state = Arc::new(Mutex::new(UpdateState::default()));
+    let rt = Arc::new(Runtime::new().context("Failed to create Tokio runtime")?);
+    let app_weak = app.as_weak();
+    // 初始化更新检查（定时 + 通知逻辑）
+    init(app_weak.clone(), state.clone(), rt.clone());
+
+    // 手动检查更新
+    let state_clone_check = state.clone();
+    let app_weak_clone_check = app_weak.clone();
+    let rt_clone_check = rt.clone();
+    app.on_check_update(move || {
+        println!("[DEBUG] check-update 回调被调用");
+        let state = state_clone_check.clone();
+        let ui_weak = app_weak_clone_check.clone();
+        let rt = rt_clone_check.clone();
+        rt.spawn(async move {
+            println!("[DEBUG] 开始检查更新...");
+            // 重置状态
+            {
+                let mut s = state.lock().unwrap();
+                s.available = false;
+                s.version.clear();
+                s.error.clear();
+                s.progress = 0.0;
+            }
+
+            println!("[DEBUG] 调用 check_for_update...");
+            let result = check_for_update(&state).await;
+            println!("[DEBUG] check_for_update 完成，结果: {:?}", result.is_ok());
+            let (is_up_to_date, version) = {
+                match &result {
+                    Ok(up_to_date) => {
+                        let v = if !*up_to_date {
+                            let s = state.lock().unwrap();
+                            s.version.clone()
+                        } else {
+                            String::new()
+                        };
+                        (*up_to_date, v)
+                    }
+                    Err(_) => (false, String::new()),
+                }
+            };
+            
+            match result {
+                Ok(_) => {
+                    let version_clone = version.clone();
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_weak.upgrade() {
+                            let logic = ui.global::<UpdateLogic>();
+                            
+                            if is_up_to_date {
+                                // 当前版本是最新版本
+                                let manager = NotificationManager::get(&ui);
+                                manager.invoke_success(NotificationOptions {
+                                    message: "当前程序已是最新版本".into(),
+                                    title: "".into(),
+                                    duration: 3000,
+                                    icon: "".into(),
+                                    component: CustomComponentType::None,
+                                });
+                                // 重置检查状态
+                                logic.set_error("".into());
+                                logic.set_update_available(false);
+                                ui.invoke_reset_checking_state();
+                            } else {
+                                // 有新版本可用
+                                logic.set_update_available(true);
+                                logic.set_new_version(version_clone.into());
+                                logic.invoke_show_update_dialog();
+                                // 当对话框显示时，重置检查状态
+                                ui.invoke_reset_checking_state();
+                            }
+                        }
+                    }).ok();
+                }
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_weak.upgrade() {
+                            let manager = NotificationManager::get(&ui);
+                            manager.invoke_error(NotificationOptions {
+                                message: error_msg.clone().into(),
+                                title: "".into(),
+                                duration: 5000,
+                                icon: "".into(),
+                                component: CustomComponentType::None,
+                            });
+                            // 重置检查状态
+                            let logic = ui.global::<UpdateLogic>();
+                            logic.set_error("".into());
+                            logic.set_update_available(false);
+                            ui.invoke_reset_checking_state();
+                        }
+                    }).ok();
+                }
+            }
+        });
+    });
+
+    // 用户点击"立即更新"按钮
+    let state_clone = state.clone();
+    let app_weak_clone = app_weak.clone();
+    let rt_clone = rt.clone();
+    app.on_install(move || {
+        let state = state_clone.clone();
+        let ui_weak = app_weak_clone.clone();
+        let rt = rt_clone.clone();
+        rt.spawn(async move {
+            let update_result = perform_update(&state).await;
+            let error_msg = if let Err(e) = &update_result {
+                let mut s = state.lock().unwrap();
+                s.error = e.to_string();
+                s.error.clone()
+            } else {
+                String::new()
+            };
+            
+            if let Err(_) = update_result {
+                let error_msg_clone = error_msg.clone();
+                slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak.upgrade() {
+                        let manager = NotificationManager::get(&ui);
+                        manager.invoke_error(NotificationOptions {
+                            message: error_msg_clone.into(),
+                            title: "".into(),
+                            duration: 5000,
+                            icon: "".into(),
+                            component: CustomComponentType::None,
+                        });
+                    }
+                }).ok();
+            } else {
+                // 更新成功
+                slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak.upgrade() {
+                        let manager = NotificationManager::get(&ui);
+                        manager.invoke_success(NotificationOptions {
+                            message: "更新完成，请重启程序".into(),
+                            title: "".into(),
+                            duration: 5000,
+                            icon: "".into(),
+                            component: CustomComponentType::None,
+                        });
+                    }
+                }).ok();
+            }
+        });
+    });
 
     // ========= Router ========= //
     let router = Router::new(app.as_weak());
@@ -168,6 +329,10 @@ fn ui() -> MainWindow {
     let initial_theme = AppState::get(&app).get_theme_mode();
     set_title_bar_color(&app, initial_theme == 1);
 
+    // ========= App Info ========= //
+    // 设置应用版本号
+    AppState::get(&app).set_version(env!("CARGO_PKG_VERSION").into());
+
 
     // ========= Notification ========= //
     // 单窗口：不传共享队列（使用 None）
@@ -196,12 +361,12 @@ fn ui() -> MainWindow {
     //     }
     // }).ok();
 
-    return app;
+    Ok(app)
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 pub fn main() {
-    let ui: MainWindow = ui();
+    let ui: MainWindow = ui().unwrap();
     ui.run().unwrap();
 }
 

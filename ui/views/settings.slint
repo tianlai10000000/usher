@@ -1,15 +1,25 @@
-import { MaterialText, Vertical, FilledButton, RadioButtonTile, Horizontal } from "@material";
+import { MaterialText, Vertical, OutlineButton, Horizontal, RadioButtonTile, FilterChip, TonalIconButton, TonalButton } from "@material";
 import { AppState } from "../state/app_state.slint";
+import { UpdateLogic } from "../components/update/update.slint";
+import { NotificationManager } from "../components/notify/notification.slint";
 
 export component Settings {
+    private property <bool> checking-update: false;
+    
+    callback check-update();
+    callback reset-checking-state();
+    
+    reset-checking-state => {
+        root.checking-update = false;
+    }
+    
     Vertical {
         padding: 0px;
+        spacing: 0px;
         
         Horizontal {
-            height: 70px;
+            height: 56px;
             horizontal-stretch: 1;
-            // vertical-stretch: 0;
-            // padding: 0px;
 
             // Label
             MaterialText {
@@ -48,6 +58,37 @@ export component Settings {
                     radio_button_clicked => {
                         AppState.toggle-theme(2);
                     }
+                }
+            }
+        }
+
+        Horizontal {
+            height: 56px;
+            alignment: start;
+
+            // Label
+            MaterialText {
+                text: "Version";
+                vertical_alignment: center;
+                font-size: 16px;
+                font-weight: 400;
+            }
+
+            // current version
+            MaterialText {
+                text: "v" + AppState.version;
+                vertical_alignment: center;
+                font-size: 14px;
+                font-weight: 400;
+            }
+
+            OutlineButton {
+                text: "Check for Updates";
+                icon: root.checking-update ? @image-url("../assets/icons/loading.svg") : @image-url("");
+                enabled: !root.checking-update;
+                clicked => {
+                    root.checking-update = true;
+                    root.check-update();
                 }
             }
         }
