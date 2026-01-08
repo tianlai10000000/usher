@@ -2,6 +2,7 @@
 name = "usher"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/tianlai10000000/usher"
 
 [lib]
 crate-type = ["lib", "cdylib"]
@@ -47,3 +48,8 @@ codegen-units = 1  # Better optimization at cost of compile time
 panic = "abort"  # Reduce binary size by using abort instead of unwind
 debug = false  # No debug info in release builds
 incremental = false  # Disable incremental compilation for release
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
