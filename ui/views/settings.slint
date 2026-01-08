@@ -1,0 +1,55 @@
+import { MaterialText, Vertical, FilledButton, RadioButtonTile, Horizontal } from "@material";
+import { AppState } from "../state/app_state.slint";
+
+export component Settings {
+    Vertical {
+        padding: 0px;
+        
+        Horizontal {
+            height: 70px;
+            horizontal-stretch: 1;
+            // vertical-stretch: 0;
+            // padding: 0px;
+
+            // Label
+            MaterialText {
+                text: "Theme";
+                vertical_alignment: center;
+                font-size: 16px;
+                font-weight: 400;
+            }
+
+            Horizontal {
+                alignment: start;
+                spacing: 0px;
+
+                RadioButtonTile {
+                    text: "Light";
+                    checked: AppState.theme_mode == 0;
+        
+                    radio_button_clicked => {
+                        AppState.toggle-theme(0);
+                    }
+                }
+        
+                RadioButtonTile {
+                    text: "Dark";
+                    checked: AppState.theme_mode == 1;
+        
+                    radio_button_clicked => {
+                        AppState.toggle-theme(1);
+                    }
+                }
+
+                RadioButtonTile {
+                    text: "Auto";
+                    checked: AppState.theme_mode == 2;
+        
+                    radio_button_clicked => {
+                        AppState.toggle-theme(2);
+                    }
+                }
+            }
+        }
+    }
+}

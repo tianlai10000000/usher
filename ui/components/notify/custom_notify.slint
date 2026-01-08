@@ -1,0 +1,22 @@
+import { Horizontal } from "@material";
+
+export component CustomNotify inherits Rectangle {
+
+    in property <string> message;
+    in property <image> icon;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #c31010;
+
+        Horizontal {
+            Text {
+                text: message;
+            }
+        }
+        Image {
+            source: icon;
+        }
+    }
+}

@@ -1,0 +1,39 @@
+import { MaterialText, FilledButton, Horizontal } from "@material";
+import { Route } from "../route/routeMap.slint";
+
+export component About {
+    callback navigate(Route);
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        Horizontal {
+            alignment: center;
+            
+            FilledButton {
+                text: "Route to Home Page";
+
+                clicked => {
+                    root.navigate(Route.Home);
+                }
+            }
+
+            FilledButton {
+                text: "Route to Login Page";
+
+                clicked => {
+                    root.navigate(Route.Login);
+                }
+            }
+
+            MaterialText {
+                text: "About";
+                color: #c31010;
+                font_size: 26px;
+                font_weight: 600;
+                vertical_alignment: center;
+            }
+        }
+    }
+}

@@ -1,0 +1,42 @@
+import { Palette } from "std-widgets.slint";
+
+export global AppState {
+    /**
+     * properties
+    */
+
+    // theme
+    in-out property <int> theme-mode: 0; // 0=light, 1=dark, 2=auto
+
+    // auth
+    in-out property <bool> is-logged-in: false;
+
+    // user
+    in-out property <string> username: "";
+    in-out property <image> user-avatar;
+
+    /**
+     * methods
+    */
+
+    // theme
+    callback toggle-theme(mode: int);
+    
+    // 当 theme-mode 改变时，更新 Palette.color-scheme
+    changed theme-mode => {
+        if (root.theme-mode == 1) {
+            Palette.color-scheme = ColorScheme.dark;
+        } else if (root.theme-mode == 0) {
+            Palette.color-scheme = ColorScheme.light;
+        }
+        // mode == 2 (auto) 时保持系统默认，不修改 Palette.color-scheme
+    }
+
+    // auth
+    callback login(username: string, password: string);
+    callback logout();
+
+    // user
+    callback set-user-avatar(avatar: image);
+    callback set-username(username: string);
+}

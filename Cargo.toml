@@ -1,0 +1,49 @@
+[package]
+name = "usher"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["lib", "cdylib"]
+path = "src/lib.rs"
+name = "usher_lib"
+
+[[bin]]
+path = "src/main.rs"
+name = "usher"
+
+[dependencies]
+# "backend-android-activity-06",
+# 注意：live-preview feature 已移除以减小 release 构建体积
+# 如需开发时使用 live-preview，可以临时添加 features = ["live-preview"]
+slint = { version = "1.14.1", default-features = true, features = ["live-preview"] }
+lazy_static = "1.4"
+# tracing = "0.1"
+# tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+raw-window-handle = "0.6"
+objc = "0.2"
+
+# [target.'cfg(target_arch = "wasm32")'.dependencies]
+# wasm-bindgen = { version = "0.2" }
+# console_error_panic_hook = "0.1.5"
+
+[build-dependencies]
+slint-build = { version = "1.14"  }
+
+# [package.metadata.android]
+# package = "dev.slint.material_template"
+# apk_name = "usher"
+
+# [package.metadata.android.application]
+# label = "Usher"
+
+[profile.release]
+strip = true  # Automatically strip symbols from the binary.
+opt-level = "z"  # Optimize for size.
+lto = true  # Link-time optimization for smaller binaries
+codegen-units = 1  # Better optimization at cost of compile time
+panic = "abort"  # Reduce binary size by using abort instead of unwind
+debug = false  # No debug info in release builds
+incremental = false  # Disable incremental compilation for release

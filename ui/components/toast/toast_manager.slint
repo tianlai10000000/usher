@@ -1,0 +1,59 @@
+export enum ToastType {
+    Text,
+    Success,
+    Error,
+    Loading,
+}
+
+// Toast 选项结构体，用于类似 JavaScript 的对象参数传入
+export struct ToastOptions {
+    message: string,         // 默认为空字符串""，表示使用默认消息
+    duration: int,           // <= 0 表示使用默认值，0 表示永久显示
+    position: string,        // "top" | "middle" | "bottom"，默认为 "middle"
+    icon: string,            // 自定义图标路径，为空字符串时使用默认图标
+    overlay: bool,           // 是否显示遮罩层，默认为 false
+    close-on-click: bool,   // 是否点击关闭，默认为 false
+    loading-type: string,    // loading 类型，默认为 "circular"
+    width: string,          // 宽度设置：空字符串表示默认20%，"auto"表示内容宽度，"300px"或"50%"表示自定义值
+}
+
+export global ToastManager {
+    // Toast 显示状态
+    in-out property <bool> visible: false;
+    in-out property <string> message: "";
+    in-out property <ToastType> type: ToastType.Text;
+    in-out property <string> position: "middle";
+    in-out property <string> icon: "";
+    in-out property <bool> overlay: false;
+    in-out property <bool> close-on-click: false;
+    in-out property <string> loading-type: "circular";
+    in-out property <string> width: "";
+    in-out property <length> width-value: 0px;   // 解析后的宽度值（px）
+    in-out property <float> width-percent: 20.0;  // 百分比值（0表示不使用百分比）
+    in-out property <bool> width-is-auto: false;  // 是否为auto模式
+
+    // 便捷方法 - 使用对象参数，类似 JavaScript
+    // 示例：ToastManager.success({ message: "操作成功！", duration: 3000 })
+    // 示例：ToastManager.success({ message: "操作成功！" })  // 使用默认 duration
+    // 示例：ToastManager.success({})  // 使用所有默认值
+    callback success(options: ToastOptions);
+    callback error(options: ToastOptions);
+    callback info(options: ToastOptions);
+    callback loading(options: ToastOptions);
+
+    // 通用方法：手动指定 type
+    // 示例1：标准 Toast（使用默认消息）
+    // ToastManager.show(ToastType.Success, { message: "操作成功！" })
+    // 
+    // 示例2：带自定义位置和遮罩层
+    // ToastManager.show(ToastType.Success, { 
+    //     message: "操作成功！", 
+    //     position: "top",
+    //     overlay: true
+    // })
+    callback show(type: ToastType, options: ToastOptions);
+
+    // 关闭当前 Toast
+    callback dismiss();
+}
+

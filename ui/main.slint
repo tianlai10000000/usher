@@ -1,0 +1,340 @@
+import { FilledCard, AppBar, NavigationDrawer, Horizontal, Vertical, MaterialText, IconButton, MaterialPalette, MaterialStyleMetrics, CircularProgressIndicator } from "@material";
+import { ScrollView } from "../material-1.0/ui/components/scroll_view.slint";
+import { Login as LoginPage } from "./views/login.slint";
+import { Home as HomePage } from "./views/home.slint";
+import { Search as SearchPage } from "./views/search.slint";
+import { Settings as SettingsPage } from "./views/settings.slint";
+import { About as AboutPage } from "./views/about.slint";
+import { List as ListPage } from "./views/list.slint";
+import { Detail as DetailPage } from "./views/detail.slint";
+import { Notification as NotificationPage } from "./views/notification.slint";
+import { Toast as ToastPage } from "./views/toast.slint";
+import { Route } from "./route/routeMap.slint";
+import { AppState } from "./state/app_state.slint";
+import { Breadcrumb } from "views/breadcrumb.slint";
+import { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
+import { NotificationItem } from "./components/notify/notification_item.slint";
+import { Toast } from "./components/toast/toast.slint";
+import { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
+
+export { MaterialWindowAdapter } from "@material";
+export { AppState } from "./state/app_state.slint";
+export { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
+export { Toast } from "./components/toast/toast.slint";
+export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
+
+// import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
+
+export component MainWindow inherits Window {
+    min-width: 800px;
+    min-height: 600px;
+    title: "Usher";
+    // default-font-family: "Noto Sans SC";
+
+    // 路由状态 - 对外暴露
+    in-out property <Route> current-route: Route.Home;
+    
+    // 上一个路由，用于返回功能
+    private property <Route> previous-route: Route.Home;
+
+    // 导航信号（方便 Rust 端调用）
+    callback navigate(Route);
+    
+    // 导航抽屉展开/收起状态
+    in-out property <bool> drawer-expanded: true;
+
+    Vertical {
+        vertical-stretch: 1;
+
+        Horizontal {
+            padding: 0px;
+            vertical-stretch: 1;
+            // background: #00ff00;
+            
+            Vertical {
+                width: root.drawer-expanded ? 150px : 56px;
+                padding: 0px;
+                vertical-stretch: 1;
+                
+                // 容器：包含 navigation_drawer 和 toggle_button，背景色与 NavigationDrawer 一致
+                drawer_container := Rectangle {
+                    width: parent.width;
+                    vertical-stretch: 1;
+                    background: MaterialPalette.surface_container_low;
+                    border_radius: MaterialStyleMetrics.border_radius_16;
+                    
+                    Vertical {
+                        width: parent.width;
+                        vertical-stretch: 1;
+                        padding: 0px;
+                        
+                        // 滚动视图，用于支持上下滚动
+                        scroll_view := ScrollView {
+                            width: parent.width;
+                            vertical-stretch: 1;
+                            horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
+                            vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
+                            
+                            // 包装容器，用于减少 NavigationDrawer 的 padding
+                            drawer_wrapper := Rectangle {
+                                width: scroll_view.visible_width;
+                                height: navigation_drawer.height;
+                                background: transparent;
+                                
+                                navigation_drawer := NavigationDrawer {
+                                    // 通过负的 x 和 y 偏移来减少视觉上的 padding
+                                    x: -MaterialStyleMetrics.padding_12;
+                                    y: -MaterialStyleMetrics.padding_12;
+                                    width: parent.width + MaterialStyleMetrics.padding_12 * 2;
+                                    // height 会根据内容自动调整
+
+                                    groups: [
+                                        {
+                                            title: root.drawer-expanded ? "Menu" : "",
+                                            items: [
+                                                { icon: @image-url("./assets/icons/home.svg"), text: root.drawer-expanded ? "Home" : "" },
+                                                { icon: @image-url("./assets/icons/search.svg"), text: root.drawer-expanded ? "Search" : "" },
+                                                { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Settings" : "" },
+                                                { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Notify" : "" },
+                                                { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Toast" : "" },
+                                                { icon: @image-url("./assets/icons/about.svg"), text: root.drawer-expanded ? "About" : "" },
+                                                { icon: @image-url("./assets/icons/list.svg"), text: root.drawer-expanded ? "List" : "" },
+                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail" : ""},
+                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail2" : ""},
+                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail3" : ""},
+                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail4" : ""},
+                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail5" : ""},
+                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail6" : ""},
+                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail7" : ""},
+                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail8" : ""},
+                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail9" : ""}
+                                            ]
+                                        }
+                                    ];
+
+                                    selected(group_index, item_index) => {
+                                        if group_index == 0 {
+                                            // 路由映射数组：将菜单项索引映射到对应的路由
+                                            let routes: [Route] = [
+                                                Route.Home,
+                                                Route.Search,
+                                                Route.Settings,
+                                                Route.Notification,
+                                                Route.Toast,
+                                                Route.About,
+                                                Route.List,
+                                                Route.Detail
+                                            ];
+                                            
+                                            if item_index >= 0 && item_index < routes.length {
+                                                let route = routes[item_index];
+                                                root.previous-route = root.current-route;
+                                                root.current-route = route;
+                                                root.navigate(route);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 设置 viewport_height 为内容的实际高度
+                            viewport_height: drawer_wrapper.height;
+                        }
+                        
+                        // 切换按钮 - 放在底部
+                        toggle_button := IconButton {
+                            width: parent.width;
+                            // height: 40px;
+                            icon: root.drawer-expanded ? @image-url("./assets/icons/arrow_left.svg") : @image-url("./assets/icons/arrow_right.svg");
+                            // tooltip: root.drawer-expanded ? "Collapse" : "Expand";
+                            
+                            clicked => {
+                                root.drawer-expanded = !root.drawer-expanded;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle  {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+    
+                Vertical {
+                    width: parent.width;
+                    padding: 0px;
+                    
+                    // Breadcrumb
+                    Breadcrumb {
+                        horizontal-stretch: 1;
+                        current-route: root.current-route;
+                    }
+
+                    // Page Views
+                    page-scroll-view := ScrollView {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        horizontal_scrollbar_policy: ScrollBarPolicy.as_needed;
+                        vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
+
+                        Vertical {
+                            width: page-scroll-view.visible_width;
+                            spacing: 0px;
+
+                            if root.current-route == Route.Login: LoginPage {
+                                previous-route: root.previous-route;
+                                navigate(route) => {
+                                    root.previous-route = root.current-route;
+                                    root.navigate(route);
+                                }
+                            }
+                            if root.current-route == Route.Home: HomePage {}
+                            if root.current-route == Route.Search: SearchPage {}
+                            if root.current-route == Route.Settings: SettingsPage {}
+                            if root.current-route == Route.Notification: NotificationPage {}
+                            if root.current-route == Route.Toast: ToastPage {
+                                navigate(route) => {
+                                    root.previous-route = root.current-route;
+                                    root.navigate(route);
+                                }
+                            }
+                            if root.current-route == Route.About: AboutPage {
+                                navigate(route) => {
+                                    root.previous-route = root.current-route;
+                                    root.navigate(route);
+                                }
+                            }
+                            if root.current-route == Route.List: ListPage {}
+                            if root.current-route == Route.Detail: DetailPage {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // 通知显示区域 - 固定在右上角，距离右边界 16px
+    // 只在有通知时才创建，避免空队列时占用空间和阻挡点击
+    if NotificationManager.queue.length > 0: Rectangle {
+        x: root.width - 256px;  // 240px (宽度) + 16px (右边距)
+        y: 20px;
+        width: 240px;
+        height: root.height - 40px;
+        background: transparent;
+        
+        // hover 状态跟踪（从 hover-detector 或消息项的 hover 状态获取）
+        private property <bool> is-hovered: hover-detector.has-hover || any-item-hovered;
+        private property <bool> any-item-hovered: false;
+        
+        // hover 检测（在 ScrollView 后面，不拦截点击）
+        hover-detector := TouchArea {
+            width: parent.width;
+            height: parent.height;
+        }
+        
+        // 滚动视图
+        notification-scroll-view := ScrollView {
+            width: parent.width;
+            height: parent.height;
+            horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
+            // hover 时使用 as_needed（自动判断是否需要滚动条），否则隐藏
+            vertical_scrollbar_policy: is-hovered ? ScrollBarPolicy.as_needed : ScrollBarPolicy.always_off;
+            
+            VerticalLayout {
+                spacing: 0px;  // 间距已包含在 NotificationItem 内部
+                // 使用 visible_width 避免滚动条遮挡内容
+                width: notification-scroll-view.visible_width;
+                
+                for notification[index] in NotificationManager.queue : NotificationItem {
+                    notification: notification;
+                    index: index;
+                    dismissed(id) => {
+                        NotificationManager.dismiss-by-id(id);
+                    }
+                    hovered(id, is-hovered) => {
+                        NotificationManager.set-hovered(id, is-hovered);
+                        // 当消息项 hover 时，设置容器的 hover 状态
+                        any-item-hovered = is-hovered;
+                    }
+                }
+            }
+        }
+    }
+
+    // Toast 显示区域 - 只在有 overlay 时才覆盖整个窗口
+    if ToastManager.visible && ToastManager.overlay: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        z: 1000;
+        
+        Toast {
+            message: ToastManager.message;
+            type: ToastManager.type == ToastType.Success ? "success" :
+                  ToastManager.type == ToastType.Error ? "error" :
+                  ToastManager.type == ToastType.Loading ? "loading" : "text";
+            position: ToastManager.position;
+            icon: ToastManager.icon;
+            overlay: ToastManager.overlay;
+            close-on-click: ToastManager.close-on-click;
+            toast-visible: ToastManager.visible;
+            toast-width-str: ToastManager.width;
+            toast-width-value: ToastManager.width-value;
+            toast-width-percent: ToastManager.width-percent;
+            toast-width-is-auto: ToastManager.width-is-auto;
+            dismiss() => {
+                ToastManager.dismiss();
+            }
+        }
+    }
+    
+    // 当没有 overlay 时，Toast 内容区域直接定位，不覆盖整个窗口
+    if ToastManager.visible && !ToastManager.overlay: Rectangle {
+        width: ToastManager.width-is-auto ? 
+            max(200px, min(root.width * 0.8, 400px)) : // auto模式：使用内容宽度，但限制在200px-80%之间
+            (ToastManager.width-value > 0px ? ToastManager.width-value : 
+             (ToastManager.width-percent > 0 ? root.width * ToastManager.width-percent / 100 : root.width * 0.2));
+        height: content-container-height.preferred-height;
+        x: root.width / 2 - self.width / 2;
+        y: ToastManager.position == "top" ? 32px :
+           ToastManager.position == "bottom" ? root.height - self.height - 32px :
+           root.height / 2 - self.height / 2;
+        z: 1000;
+        background: ToastManager.type == ToastType.Success ? #4CAF50 :
+                    ToastManager.type == ToastType.Error ? #F44336 :
+                    ToastManager.type == ToastType.Loading ? MaterialPalette.primary_container :
+                    MaterialPalette.surface_container_highest;
+        border-radius: 12px;
+        
+        content-container-height := Horizontal {
+            spacing: 16px;
+            padding: 16px;
+            width: 100%;
+            min-height: 64px;
+            
+            if ToastManager.type == ToastType.Loading: CircularProgressIndicator {
+                width: 24px;
+                height: 24px;
+                indeterminate: true;
+                progress: 0;
+            }
+            
+            MaterialText {
+                text: ToastManager.message;
+                color: ToastManager.type == ToastType.Success ? #ffffff :
+                       ToastManager.type == ToastType.Error ? #ffffff :
+                       MaterialPalette.on_surface;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                width: parent.width - (ToastManager.type == ToastType.Loading ? 40px : 0px) - 32px; // 减去loading图标宽度和padding
+            }
+        }
+        
+        TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => { if ToastManager.close-on-click { ToastManager.dismiss(); } }
+        }
+    }
+
+}

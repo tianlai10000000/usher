@@ -1,0 +1,138 @@
+// notification_item.slint
+
+import { NotificationType, Notification, NotificationManager, CustomComponentType } from "notification.slint";
+import { CustomNotify } from "custom_notify.slint";
+
+export component NotificationItem inherits Rectangle {
+    in property <Notification> notification;
+    in property <int> index;
+    in property <bool> has-custom-content: false;
+    in property <length> custom-content-height: 0px;
+
+    // 关闭回调
+    callback dismissed(int);
+    // hover 状态变化回调
+    callback hovered(int, bool);
+
+    // 绑定 hover 状态到本地属性（用于检测变化）
+    private property <bool> is-hovered: touch-area.has-hover;
+    // 间距
+    private property <length> spacing: 12px;
+
+    width: 100%;
+    // 高度自适应内容，关闭时为 0（包含间距）
+    height: notification.dismissed ? 0px : content-container.preferred-height;
+    background: transparent;  // 外层透明
+    clip: true;
+
+    // 内容容器（包含卡片和间距）
+    content-container := VerticalLayout {
+        width: parent.width;
+        spacing: 0px;
+
+        // 实际的卡片内容
+        card := Rectangle {
+            width: parent.width;
+            min-height: notification.dismissed ? 0px : 64px;
+            border-radius: 4px;
+            clip: true;
+            
+            // 关闭时透明
+            opacity: notification.dismissed ? 0 : 1;
+            
+            // Vuetify Alert 颜色方案
+            background: notification.dismissed ? transparent :
+                        notification.custom-component != CustomComponentType.None ? transparent :
+                        notification.type == NotificationType.Success ? #4CAF50 :
+                        notification.type == NotificationType.Info ? #2196F3 :
+                        notification.type == NotificationType.Warning ? #FB8C00 :
+                        #F44336;  // Error
+
+            // 默认布局（非自定义组件）- Vuetify Alert 风格
+            content-layout := HorizontalLayout {
+                visible: notification.custom-component == CustomComponentType.None;
+                width: parent.width;
+                spacing: 16px;
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 12px;
+                padding-bottom: 12px;
+
+                // 图标（无背景圆）
+                Image {
+                    source: notification.icon;
+                    width: 24px;
+                    height: 24px;
+                    colorize: #ffffff;
+                }
+
+                // 文本容器
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+
+                    // 标题（如果有）
+                    if notification.title != "" : Text {
+                        text: notification.title;
+                        color: #ffffff;
+                        font-size: 16px;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                        horizontal-alignment: left;
+                    }
+
+                    // 消息内容
+                    Text {
+                        text: notification.message;
+                        color: notification.title != "" ? #ffffffcc : #ffffff;
+                        font-size: 14px;
+                        font-weight: notification.title != "" ? 400 : 500;
+                        wrap: word-wrap;
+                        horizontal-alignment: left;
+                        vertical-alignment: top;
+                    }
+                }
+            }
+
+            // 自定义组件渲染
+            if notification.custom-component == CustomComponentType.CustomNotify : CustomNotify {
+                width: parent.width;
+                height: parent.height;
+                message: notification.message;
+                icon: notification.icon;
+            }
+
+            // 自定义内容容器
+            custom-content-container := Rectangle {
+                x: 0;
+                y: 60px;
+                width: parent.width;
+                height: root.custom-content-height;
+                @children
+            }
+
+            // 点击和 hover 检测区域（只覆盖卡片）
+            touch-area := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                mouse-cursor: pointer;
+                
+                clicked => {
+                    root.dismissed(root.notification.id);
+                }
+            }
+        }
+
+        // 间距区域（在卡片下方）
+        Rectangle {
+            width: parent.width;
+            height: notification.dismissed ? 0px : root.spacing;
+            background: transparent;
+        }
+    }
+
+    // 检测 hover 状态变化
+    changed is-hovered => {
+        root.hovered(root.notification.id, root.is-hovered);
+    }
+}

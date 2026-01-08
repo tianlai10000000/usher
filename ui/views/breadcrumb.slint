@@ -1,0 +1,51 @@
+import { MaterialText, Horizontal } from "@material";
+import { Route } from "../route/routeMap.slint";
+
+export component Breadcrumb {
+    in property <Route> current-route: Route.Home;
+    
+    // 根据路由生成面包屑文本
+    function get-breadcrumb-text(route: Route) -> string {
+        if route == Route.Login {
+            return "Login";
+        } else if route == Route.Home {
+            return "Home";
+        } else if route == Route.Search {
+            return "Search";
+        } else if route == Route.Settings {
+            return "Settings";
+        } else if route == Route.Notification {
+            return "Notify";
+        } else if route == Route.Toast {
+            return "Toast";
+        } else if route == Route.About {
+            return "Home > About";
+        } else if route == Route.List {
+            return "List";
+        } else if route == Route.Detail {
+            return "List > Detail";
+        } else {
+            return "Home";
+        }
+    }
+    
+    Rectangle {
+        width: parent.width;
+        height: 36px;
+
+        Horizontal {
+            padding-left: 0px;
+            padding-right: 0px;
+            padding-bottom: 0px;
+            vertical-stretch: 1;
+            alignment: start;
+
+            MaterialText {
+                text: root.get-breadcrumb-text(root.current-route);
+                font_size: 20px;
+                font_weight: 600;
+                vertical_alignment: center;
+            }
+        }
+    }
+}

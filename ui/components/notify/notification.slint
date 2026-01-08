@@ -1,0 +1,81 @@
+export enum NotificationType {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+// 自定义组件类型枚举
+export enum CustomComponentType {
+    None,           // 不使用自定义组件
+    CustomNotify,   // 使用 CustomNotify 组件
+    // 可以添加更多自定义组件类型
+}
+
+export struct Notification {
+    id: int,               // 唯一标识符，用于精确删除
+    title: string,         // 标题（可选，参考 Vuetify Alert）
+    message: string,       // 消息内容
+    type: NotificationType,
+    duration: int,         // 默认 3000，0 表示永久
+    icon: image,           // icon 支持
+    custom-component: CustomComponentType,  // 自定义组件类型
+    dismissed: bool,       // 是否已被用户手动关闭
+    hovered: bool,         // 鼠标是否悬停（暂停计时器）
+}
+
+// 通知选项结构体，用于类似 JavaScript 的对象参数传入
+export struct NotificationOptions {
+    title: string,         // 标题（可选）
+    message: string,       // 默认为空字符串""，表示使用默认消息
+    duration: int,         // <= 0 表示使用默认值
+    icon: string,          // 自定义图标路径，为空字符串时使用默认图标
+    component: CustomComponentType,  // 自定义组件类型，默认为 None
+}
+
+export global NotificationManager {
+    // 消息队列（共享状态的核心）
+    in-out property <[Notification]> queue: [];
+
+    // 便捷方法 - 使用对象参数，类似 JavaScript
+    // 示例：NotificationManager.info({ title: "提示", message: "Hello", duration: 5000 })
+    // 示例：NotificationManager.info({ message: "Hello" })  // 无标题
+    // 示例：NotificationManager.info({})  // 使用所有默认值
+    callback info(options: NotificationOptions);
+    callback success(options: NotificationOptions);
+    callback warn(options: NotificationOptions);
+    callback error(options: NotificationOptions);
+
+    // 通用方法：手动指定 type
+    // 示例1：标准通知（无标题）
+    // NotificationManager.show(NotificationType.Info, { message: "Hello" })
+    // 
+    // 示例2：带标题的通知
+    // NotificationManager.show(NotificationType.Info, { title: "提示", message: "Hello" })
+    // 
+    // 示例3：带自定义图标
+    // NotificationManager.show(NotificationType.Info, { message: "Hello", icon: "ui/assets/icons/custom.svg" })
+    callback show(type: NotificationType, options: NotificationOptions);
+
+    // push 消息到队列
+    callback push(notification: Notification);
+
+    // remove 方法：移除指定索引的消息
+    callback remove(index: int);
+
+    // remove-by-id 方法：通过 ID 移除消息（更可靠）
+    callback remove-by-id(id: int);
+
+    // dismiss-by-id 方法：标记通知为已关闭（不从队列删除，由定时器稍后删除）
+    callback dismiss-by-id(id: int);
+
+    // set-hovered 方法：设置通知的 hover 状态（暂停/恢复计时器）
+    callback set-hovered(id: int, hovered: bool);
+
+    // remove-all（关闭所有消息：逐个 remove，支持动画等）
+    callback remove-all();
+
+    // clear（直接清除队列所有消息）
+    callback clear();
+}
+

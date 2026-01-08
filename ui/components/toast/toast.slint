@@ -1,0 +1,96 @@
+import { MaterialPalette, MaterialText, Horizontal, CircularProgressIndicator } from "@material";
+
+export component Toast inherits Rectangle {
+    in property <string> message;
+    in property <string> type;               // text, success, error, loading
+    in property <string> position: "middle"; // top | middle | bottom
+    in property <bool> overlay: false;
+    in property <string> icon: "";
+    in property <string> loading-type: "circular";
+    in property <bool> close-on-click: false;
+    in property <bool> toast-visible: false;
+    in property <string> toast-width-str: "20%"; // 宽度设置：默认"20%"，"auto"表示内容宽度，"300px"或"50%"表示自定义值
+    in property <length> toast-width-value: 0px; // 解析后的宽度值（px，0表示不使用px）
+    in property <float> toast-width-percent: 20.0; // 百分比值（0表示不使用百分比）
+    in property <bool> toast-width-is-auto: false; // 是否为auto模式
+    callback dismiss();
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    visible: toast-visible;
+
+    // 遮罩层（可选）- 只在有 overlay 时显示
+    if overlay && toast-visible: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #00000040;
+        z: 0;
+        
+        // 遮罩层上的 TouchArea，点击关闭
+        TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => { if root.close-on-click { root.dismiss(); } }
+        }
+    }
+
+    // Toast 内容区域
+    if toast-visible: Rectangle {
+        z: 1;
+        width: root.toast-width-is-auto ? 
+            max(200px, min(parent.width * 0.8, 400px)) : // auto模式：使用内容宽度，限制在200px-80%之间
+            (root.toast-width-value > 0px ? root.toast-width-value : 
+             (root.toast-width-percent > 0 ? parent.width * root.toast-width-percent / 100 : parent.width * 0.2));
+        height: content-container.preferred-height;
+        x: parent.width / 2 - self.width / 2;
+        y: position == "top" ? 32px :
+           position == "bottom" ? parent.height - self.height - 32px :
+           parent.height / 2 - self.height / 2;
+        background: root.type == "success" ? #4CAF50 :
+                    root.type == "error"    ? #F44336 :
+                    root.type == "loading" ? MaterialPalette.primary_container :
+                    MaterialPalette.surface_container_highest;
+        border-radius: 12px;
+        opacity: 1.0;
+
+        content-container := Horizontal {
+            spacing: 16px;
+            padding: 16px;
+            width: 100%;
+            min-height: 64px;
+
+            // Icon support can be added later with a predefined set of icons
+
+            if root.type == "loading": CircularProgressIndicator {
+                width: 24px;
+                height: 24px;
+                indeterminate: true;
+                progress: 0;
+            }
+
+            MaterialText {
+                text: root.message;
+                color: root.type == "success" ? #ffffff :
+                       root.type == "error"    ? #ffffff :
+                       MaterialPalette.on_surface;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                width: parent.width - (root.type == "loading" ? 40px : 0px) - 32px; // 减去loading图标宽度和padding
+            }
+        }
+
+        // Toast 内容区域的 TouchArea
+        TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => { if root.close-on-click { root.dismiss(); } }
+        }
+    }
+    
+    // 当没有 overlay 时，在容器上放置一个透明的 TouchArea，但不响应点击
+    // 这样可以避免阻挡其他元素的点击事件
+    // 注意：Slint 中没有 pointer-events，所以我们需要确保 Toast 容器本身不响应点击
+    // 实际上，由于 Toast 容器背景是透明的，且没有 TouchArea，它应该不会阻挡点击
+    // 但为了确保，我们只在有 overlay 时才在整个容器上放置 TouchArea
+}
