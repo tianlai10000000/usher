@@ -73,9 +73,22 @@ jobs:
       - name: Create App Bundle
         run: cargo bundle --release --target ${{ matrix.target }}
 
+      - name: Create tar.gz for self_update
+        run: |
+          # 创建 tar.gz 压缩包供 self_update 使用
+          # self_update 需要 tar.gz 格式，包含可执行文件
+          TAR_NAME="${{ env.APP_NAME }}-${{ matrix.target }}.tar.gz"
+          cd "target/${{ matrix.target }}/release"
+          # 打包可执行文件
+          tar -czf "../../../$TAR_NAME" usher
+          cd ../../..
+          echo "Created $TAR_NAME"
+
       - name: Create DMG Installer
         run: |
           # 创建 DMG 安装程序
+          # 使用完整的 target triple 作为文件名，以便 self_update 能够正确识别
+          DMG_NAME="${{ env.APP_NAME }}-${{ matrix.target }}.dmg"
           create-dmg \
             --volname "${{ env.APP_NAME }}" \
             --volicon "ui/slint-logo.svg" \
@@ -86,23 +99,25 @@ jobs:
             --hide-extension "${{ env.APP_NAME }}.app" \
             --app-drop-link 425 178 \
             --no-internet-enable \
-            "${{ env.APP_NAME }}-${{ matrix.arch }}.dmg" \
+            "$DMG_NAME" \
             "target/${{ matrix.target }}/release/bundle/osx/" \
           || true
           
           # 如果 create-dmg 失败，使用简单方式创建 DMG
-          if [ ! -f "${{ env.APP_NAME }}-${{ matrix.arch }}.dmg" ]; then
+          if [ ! -f "$DMG_NAME" ]; then
             hdiutil create -volname "${{ env.APP_NAME }}" \
               -srcfolder "target/${{ matrix.target }}/release/bundle/osx/${{ env.APP_NAME }}.app" \
               -ov -format UDZO \
-              "${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
+              "$DMG_NAME"
           fi
 
-      - name: Upload DMG Artifact
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-macos-${{ matrix.arch }}
-          path: ${{ env.APP_NAME }}-${{ matrix.arch }}.dmg
+          path: |
+            ${{ env.APP_NAME }}-${{ matrix.target }}.tar.gz
+            ${{ env.APP_NAME }}-${{ matrix.target }}.dmg
 
   release:
     name: Create Release
@@ -118,12 +133,12 @@ jobs:
           path: artifacts
 
       - name: List artifacts
-        run: find artifacts -type f -name "*.dmg"
+        run: find artifacts -type f \( -name "*.dmg" -o -name "*.tar.gz" \)
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/**/*.dmg
+          files: artifacts/**/*.{dmg,tar.gz}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

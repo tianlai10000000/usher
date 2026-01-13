@@ -156,15 +156,62 @@ pub async fn perform_update_with_progress(
             // 获取当前平台的下载 URL
             let target = self_update::get_target();
             println!("[DEBUG] 当前平台: {}", target);
+            println!("[DEBUG] 可用资产列表: {:?}", 
+                latest_release.assets.iter().map(|a| &a.name).collect::<Vec<_>>());
 
             // 查找匹配的 asset
+            // self_update 需要 tar.gz 或 zip 格式，优先查找这些格式
+            // 支持多种命名格式：
+            // 1. 完整 target triple (如 aarch64-apple-darwin.tar.gz)
+            // 2. 简化格式 (如 arm64, x64)
+            // 3. apple-darwin 通用匹配
+            
+            // 首先尝试查找 tar.gz 格式（self_update 首选）
             let asset = latest_release
                 .assets
                 .iter()
-                .find(|a| a.name.contains(&target) || a.name.contains("apple-darwin"))
-                .or_else(|| latest_release.assets.first())
+                .filter(|a| {
+                    let name_lower = a.name.to_lowercase();
+                    name_lower.ends_with(".tar.gz") || name_lower.ends_with(".zip")
+                })
+                .find(|a| {
+                    let name_lower = a.name.to_lowercase();
+                    let target_lower = target.to_lowercase();
+                    
+                    // 精确匹配完整 target
+                    name_lower.contains(&target_lower) ||
+                    // 匹配 apple-darwin
+                    name_lower.contains("apple-darwin") ||
+                    // 匹配简化格式：aarch64 -> arm64, x86_64 -> x64
+                    (target_lower.contains("aarch64") && name_lower.contains("arm64")) ||
+                    (target_lower.contains("x86_64") && (name_lower.contains("x64") || name_lower.contains("x86_64")))
+                })
+                .or_else(|| {
+                    // 如果找不到精确匹配的 tar.gz/zip，尝试查找任何包含平台相关关键词的压缩包
+                    latest_release.assets.iter()
+                        .filter(|a| {
+                            let name_lower = a.name.to_lowercase();
+                            name_lower.ends_with(".tar.gz") || name_lower.ends_with(".zip")
+                        })
+                        .find(|a| {
+                            let name_lower = a.name.to_lowercase();
+                            name_lower.contains("darwin") || 
+                            name_lower.contains("macos") ||
+                            name_lower.contains("osx")
+                        })
+                })
+                .or_else(|| {
+                    // 如果还是找不到，尝试查找任何 tar.gz 或 zip 文件
+                    latest_release.assets.iter()
+                        .find(|a| {
+                            let name_lower = a.name.to_lowercase();
+                            name_lower.ends_with(".tar.gz") || name_lower.ends_with(".zip")
+                        })
+                })
                 .ok_or_else(|| {
-                    anyhow::anyhow!("No suitable asset found for platform: {}", target)
+                    anyhow::anyhow!("No suitable asset found for platform: {}. Available assets: {:?}", 
+                        target, 
+                        latest_release.assets.iter().map(|a| &a.name).collect::<Vec<_>>())
                 })?;
 
             println!("[DEBUG] 下载 URL: {}", asset.download_url);
