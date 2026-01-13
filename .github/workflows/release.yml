@@ -75,77 +75,9 @@ jobs:
           name: ${{ env.APP_NAME }}-macos-${{ matrix.arch }}
           path: ${{ env.APP_NAME }}-${{ matrix.arch }}.dmg
 
-  # 可选：构建 Universal Binary (同时支持 ARM 和 Intel)
-  build-macos-universal:
-    name: Build macOS Universal App
-    runs-on: macos-latest
-    needs: build-macos
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-          override: true
-
-      - name: Install cargo-bundle
-        run: cargo install cargo-bundle
-
-      - name: Install create-dmg
-        run: brew install create-dmg
-
-      - name: Build for ARM64
-        run: cargo build --release --target aarch64-apple-darwin
-
-      - name: Build for x86_64
-        run: cargo build --release --target x86_64-apple-darwin
-
-      - name: Create Universal Binary
-        run: |
-          mkdir -p target/universal-apple-darwin/release
-          lipo -create \
-            target/aarch64-apple-darwin/release/usher \
-            target/x86_64-apple-darwin/release/usher \
-            -output target/universal-apple-darwin/release/usher
-
-      - name: Create App Bundle (ARM64 as base)
-        run: cargo bundle --release --target aarch64-apple-darwin
-
-      - name: Replace with Universal Binary
-        run: |
-          cp target/universal-apple-darwin/release/usher \
-            "target/aarch64-apple-darwin/release/bundle/osx/${{ env.APP_NAME }}.app/Contents/MacOS/usher"
-
-      - name: Create Universal DMG
-        run: |
-          create-dmg \
-            --volname "${{ env.APP_NAME }}" \
-            --window-pos 200 120 \
-            --window-size 600 400 \
-            --icon-size 100 \
-            --icon "${{ env.APP_NAME }}.app" 175 178 \
-            --hide-extension "${{ env.APP_NAME }}.app" \
-            --app-drop-link 425 178 \
-            --no-internet-enable \
-            "${{ env.APP_NAME }}-universal.dmg" \
-            "target/aarch64-apple-darwin/release/bundle/osx/" \
-          || hdiutil create -volname "${{ env.APP_NAME }}" \
-              -srcfolder "target/aarch64-apple-darwin/release/bundle/osx/${{ env.APP_NAME }}.app" \
-              -ov -format UDZO \
-              "${{ env.APP_NAME }}-universal.dmg"
-
-      - name: Upload Universal DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APP_NAME }}-macos-universal
-          path: ${{ env.APP_NAME }}-universal.dmg
-
   release:
     name: Create Release
-    needs: [build-macos, build-macos-universal]
+    needs: [build-macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
