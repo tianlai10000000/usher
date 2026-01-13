@@ -1,24 +1,18 @@
-import { MaterialText, Vertical, OutlineButton, Horizontal, RadioButtonTile, FilterChip, TonalIconButton, TonalButton } from "@material";
+import { MaterialText, Vertical, OutlineButton, Horizontal, RadioButtonTile, FilterChip, TonalIconButton, TonalButton, Switch } from "@material";
 import { AppState } from "../state/app_state.slint";
 import { UpdateLogic } from "../components/update/update.slint";
 import { NotificationManager } from "../components/notify/notification.slint";
+import { LoadingIconOutlineButton } from "../components/button/loading_icon_outline_button.slint";
 
 export component Settings {
-    private property <bool> checking-update: false;
-    
     callback check-update();
-    callback reset-checking-state();
-    
-    reset-checking-state => {
-        root.checking-update = false;
-    }
     
     Vertical {
         padding: 0px;
         spacing: 0px;
         
         Horizontal {
-            height: 56px;
+            height: 64px;
             horizontal-stretch: 1;
 
             // Label
@@ -63,12 +57,12 @@ export component Settings {
         }
 
         Horizontal {
-            height: 56px;
+            height: 50px;
             alignment: start;
 
             // Label
             MaterialText {
-                text: "Version";
+                text: "Current Version";
                 vertical_alignment: center;
                 font-size: 16px;
                 font-weight: 400;
@@ -82,14 +76,33 @@ export component Settings {
                 font-weight: 400;
             }
 
-            OutlineButton {
+            LoadingIconOutlineButton {
+                loading: UpdateLogic.checking-update;
                 text: "Check for Updates";
-                icon: root.checking-update ? @image-url("../assets/icons/loading.svg") : @image-url("");
-                enabled: !root.checking-update;
                 clicked => {
-                    root.checking-update = true;
+                    UpdateLogic.checking-update = true;
                     root.check-update();
                 }
+            }
+        }
+
+        Horizontal {
+            height: 46px;
+            alignment: start;
+            vertical-stretch: 0;
+
+            // Label
+            MaterialText {
+                text: "Auto Update";
+                vertical_alignment: center;
+                font-size: 16px;
+                font-weight: 400;
+            }
+
+            Switch {
+                checked: true;
+                width: 48px;
+                height: 28px;
             }
         }
     }

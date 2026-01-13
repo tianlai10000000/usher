@@ -1,0 +1,48 @@
+// Dialog 选项结构体，用于类似 JavaScript 的对象参数传入
+// 注意：Slint 结构体不支持回调类型字段，回调需要通过 DialogManager 的全局回调设置
+export struct DialogOptions {
+    id: string,              // 对话框唯一标识，用于区分不同的回调处理
+    title: string,           // 对话框标题
+    content: string,         // 对话框内容（文本）
+    actions: [string],       // 自定义操作按钮文本数组，如 ["Cancel", "Delete"]
+    default-action: string,  // 默认主按钮文本，如 "OK" 或 "Confirm"
+    overlay: bool,           // 是否显示遮罩层，默认为 true
+    modal: bool,             // 是否为模态对话框（点击背景不关闭），默认为 true
+    width: string,           // 对话框宽度，支持 "400px" 或 "80%"
+    height: string,          // 对话框高度，支持 "300px" 或 "50%"
+}
+
+export global DialogManager {
+    // Dialog 显示状态和属性
+    in-out property <bool> visible: false;
+    in-out property <string> id: "";             // 当前对话框的唯一标识
+    in-out property <string> title: "";
+    in-out property <string> content: "";
+    in-out property <[string]> actions: [];
+    in-out property <string> default-action: "";
+    in-out property <bool> overlay: true;
+    in-out property <bool> modal: true;          // 是否为模态对话框
+    
+    // 尺寸属性（由 Rust 解析后设置）
+    in-out property <length> width-px: 400px;        // 宽度像素值（当使用 px 时）
+    in-out property <float> width-percent: 0;        // 宽度百分比值（当使用 % 时，0-100）
+    in-out property <bool> width-is-percent: false;  // 宽度是否使用百分比
+    in-out property <length> height-px: 300px;       // 高度像素值（当使用 px 时）
+    in-out property <float> height-percent: 0;       // 高度百分比值（当使用 % 时，0-100）
+    in-out property <bool> height-is-percent: false; // 高度是否使用百分比
+
+    // 回调：当操作按钮被点击时触发（Rust 端监听）
+    callback action-clicked(/* id */ string, /* index */ int);
+    
+    // 回调：当默认按钮被点击时触发（Rust 端监听）
+    callback default-action-clicked(/* id */ string);
+
+    // 显示对话框（在 Rust 代码中实现）
+    callback show(options: DialogOptions);
+    
+    // 关闭对话框（在 Rust 代码中实现）
+    callback close();
+    
+    // 通过 id 隐藏特定对话框（在 Rust 代码中实现）
+    callback hide(id: string);
+}

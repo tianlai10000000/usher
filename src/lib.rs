@@ -9,7 +9,7 @@ use tokio::runtime::Runtime;
 #[macro_use]
 extern crate objc;
 
-use slint::{ComponentHandle, Weak};
+use slint::{ComponentHandle, Timer, Weak};
 
 // 必须在模块声明之前调用，以便生成的类型在所有模块中可用
 slint::include_modules!();
@@ -21,10 +21,15 @@ use notification::setup_notifications;
 mod toast;
 use toast::setup_toast;
 
+mod dialog;
+use dialog::setup_dialog;
+
 mod update;
 
-use update::updater::{check_for_update, perform_update, UpdateState};
+use update::updater::{check_for_update, perform_update_with_progress, reset_update_state, UpdateState, CancelFlag};
 use update::check_update::init;
+use self_update::cargo_crate_version;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(target_os = "macos")]
 fn set_title_bar_color(_window: &MainWindow, is_dark: bool) {
@@ -180,6 +185,7 @@ fn ui() -> Result<MainWindow> {
                         } else {
                             String::new()
                         };
+                        println!("[DEBUG] is_up_to_date: {}, version: {}", *up_to_date, v);
                         (*up_to_date, v)
                     }
                     Err(_) => (false, String::new()),
@@ -189,52 +195,150 @@ fn ui() -> Result<MainWindow> {
             match result {
                 Ok(_) => {
                     let version_clone = version.clone();
-                    slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = ui_weak.upgrade() {
-                            let logic = ui.global::<UpdateLogic>();
-                            
-                            if is_up_to_date {
-                                // 当前版本是最新版本
-                                let manager = NotificationManager::get(&ui);
-                                manager.invoke_success(NotificationOptions {
-                                    message: "当前程序已是最新版本".into(),
-                                    title: "".into(),
-                                    duration: 3000,
-                                    icon: "".into(),
-                                    component: CustomComponentType::None,
-                                });
-                                // 重置检查状态
-                                logic.set_error("".into());
-                                logic.set_update_available(false);
-                                ui.invoke_reset_checking_state();
-                            } else {
-                                // 有新版本可用
-                                logic.set_update_available(true);
-                                logic.set_new_version(version_clone.into());
-                                logic.invoke_show_update_dialog();
-                                // 当对话框显示时，重置检查状态
-                                ui.invoke_reset_checking_state();
+                    println!("[DEBUG] 处理结果: is_up_to_date={}, version={}", is_up_to_date, version_clone);
+                    
+                    if is_up_to_date {
+                        // 当前版本是最新版本
+                        let ui_weak_for_notification = ui_weak.clone();
+                        let ui_weak_for_logic = ui_weak.clone();
+                        let ui_weak_for_reset = ui_weak.clone();
+                        
+                        // 先调用通知
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_notification.upgrade() {
+                                {
+                                    let manager = NotificationManager::get(&ui);
+                                    manager.invoke_success(NotificationOptions {
+                                        message: "当前程序已是最新版本".into(),
+                                        title: "".into(),
+                                        duration: 3000,
+                                        icon: "".into(),
+                                        component: CustomComponentType::None,
+                                    });
+                                } // manager 借用在这里释放
                             }
-                        }
-                    }).ok();
+                        }).ok();
+                        
+                        // 使用 Timer 延迟执行逻辑重置，确保在下一个事件循环迭代中执行
+                        Timer::single_shot(std::time::Duration::from_millis(100), move || {
+                            slint::invoke_from_event_loop(move || {
+                                if let Some(ui) = ui_weak_for_logic.upgrade() {
+                                    {
+                                        let logic = ui.global::<UpdateLogic>();
+                                        logic.set_error("".into());
+                                        logic.set_update_available(false);
+                                    } // logic 借用在这里释放
+                                }
+                            }).ok();
+                        });
+                        
+                        // 立即重置按钮状态，确保用户可以看到按钮恢复
+                        println!("[DEBUG] 准备重置按钮状态（已是最新版本）");
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_reset.upgrade() {
+                                println!("[DEBUG] 重置 checking-update 状态（已是最新版本）");
+                                let logic = ui.global::<UpdateLogic>();
+                                logic.set_checking_update(false);
+                            } else {
+                                println!("[DEBUG] ui_weak_for_reset.upgrade() 失败（已是最新版本）");
+                            }
+                        }).ok();
+                    } else {
+                        println!("[DEBUG] 进入有新版本可用分支");
+                        // 有新版本可用
+                        let ui_weak_for_all = ui_weak.clone();
+                        let version_for_all = version.clone();
+                        
+                        // 设置状态
+                        let ui_weak_for_state = ui_weak_for_all.clone();
+                        let version_for_state = version_for_all.clone();
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_state.upgrade() {
+                                println!("[DEBUG] 设置状态");
+                                let logic = ui.global::<UpdateLogic>();
+                                logic.set_update_available(true);
+                                logic.set_new_version(version_for_state.clone().into());
+                                logic.set_checking_update(false);
+                                println!("[DEBUG] 已设置 update-available=true, new-version={}", version_for_state);
+                            }
+                        }).ok();
+                        
+                        // 延迟显示对话框，避免 RefCell 借用冲突
+                        // 使用 tokio sleep 代替 Slint Timer（在异步任务中 Slint Timer 无法正确触发）
+                        println!("[DEBUG] 准备延迟显示对话框...");
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        println!("[DEBUG] 延迟完成，显示对话框");
+                        
+                        let ui_weak_for_dialog = ui_weak_for_all.clone();
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_dialog.upgrade() {
+                                println!("[DEBUG] 调用 MainWindow.invoke_show_update_dialog()");
+                                let current_version = cargo_crate_version!();
+                                ui.invoke_show_update_dialog(
+                                    version_for_all.clone().into(),
+                                    current_version.into()
+                                );
+                                println!("[DEBUG] MainWindow.invoke_show_update_dialog() 已调用");
+                            } else {
+                                println!("[DEBUG] ui_weak_for_dialog.upgrade() 失败");
+                            }
+                        }).ok();
+                    }
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
+                    println!("[DEBUG] 检查更新出错: {}", error_msg);
+                    // 提供更友好的错误信息
+                    let friendly_msg = if error_msg.contains("404") || error_msg.contains("Not Found") {
+                        format!("仓库未找到或没有可用的发布版本。请检查仓库是否存在并已创建 releases, 失败原因：{}", error_msg)
+                    } else if error_msg.contains("NetworkError") || error_msg.contains("network") 
+                        || error_msg.contains("ReqwestError") || error_msg.contains("error sending request") {
+                        format!("网络连接失败，请检查网络连接后重试, 失败原因：{}", error_msg)
+                    } else {
+                        format!("未知错误, 错误原因：{}", error_msg)
+                    };
+                    let ui_weak_for_error = ui_weak.clone();
+                    let ui_weak_for_logic = ui_weak.clone();
+                    let ui_weak_for_reset = ui_weak.clone();
+                    
+                    // 显示错误通知
                     slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = ui_weak.upgrade() {
-                            let manager = NotificationManager::get(&ui);
-                            manager.invoke_error(NotificationOptions {
-                                message: error_msg.clone().into(),
-                                title: "".into(),
-                                duration: 5000,
-                                icon: "".into(),
-                                component: CustomComponentType::None,
-                            });
-                            // 重置检查状态
+                        if let Some(ui) = ui_weak_for_error.upgrade() {
+                            {
+                                let manager = NotificationManager::get(&ui);
+                                manager.invoke_error(NotificationOptions {
+                                    message: friendly_msg.clone().into(),
+                                    title: "检查更新失败".into(),
+                                    duration: 5000,
+                                    icon: "".into(),
+                                    component: CustomComponentType::None,
+                                });
+                            } // manager 借用在这里释放，避免与回调中的借用冲突
+                        }
+                    }).ok();
+                    
+                    // 使用 Timer 延迟执行逻辑重置，确保在下一个事件循环迭代中执行
+                    Timer::single_shot(std::time::Duration::from_millis(100), move || {
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_logic.upgrade() {
+                                {
+                                    let logic = ui.global::<UpdateLogic>();
+                                    logic.set_error("".into());
+                                    logic.set_update_available(false);
+                                } // logic 借用在这里释放
+                            }
+                        }).ok();
+                    });
+                    
+                    // 立即重置按钮状态，确保用户可以看到按钮恢复
+                    println!("[DEBUG] 准备重置按钮状态（检查失败）");
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_weak_for_reset.upgrade() {
+                            println!("[DEBUG] 重置 checking-update 状态（检查失败）");
                             let logic = ui.global::<UpdateLogic>();
-                            logic.set_error("".into());
-                            logic.set_update_available(false);
-                            ui.invoke_reset_checking_state();
+                            logic.set_checking_update(false);
+                        } else {
+                            println!("[DEBUG] ui_weak_for_reset.upgrade() 失败（检查失败）");
                         }
                     }).ok();
                 }
@@ -242,52 +346,132 @@ fn ui() -> Result<MainWindow> {
         });
     });
 
+    // 全局取消标志
+    let cancel_flag: CancelFlag = Arc::new(AtomicBool::new(false));
+    
     // 用户点击"立即更新"按钮
     let state_clone = state.clone();
     let app_weak_clone = app_weak.clone();
     let rt_clone = rt.clone();
+    let cancel_flag_clone = cancel_flag.clone();
     app.on_install(move || {
+        println!("[DEBUG] on_install 回调被调用");
         let state = state_clone.clone();
         let ui_weak = app_weak_clone.clone();
         let rt = rt_clone.clone();
-        rt.spawn(async move {
-            let update_result = perform_update(&state).await;
-            let error_msg = if let Err(e) = &update_result {
-                let mut s = state.lock().unwrap();
-                s.error = e.to_string();
-                s.error.clone()
-            } else {
-                String::new()
-            };
+        let cancel_flag = cancel_flag_clone.clone();
+        
+        // 重置取消标志
+        cancel_flag.store(false, Ordering::Relaxed);
+        
+        // 使用 Timer 延迟执行所有操作，避免 RefCell 借用冲突
+        Timer::single_shot(std::time::Duration::from_millis(100), move || {
+            println!("[DEBUG] Timer 回调执行，准备显示下载进度模态框");
             
-            if let Err(_) = update_result {
-                let error_msg_clone = error_msg.clone();
+            // 显示下载进度模态框
+            if let Some(ui) = ui_weak.upgrade() {
+                let logic = ui.global::<UpdateLogic>();
+                logic.set_is_downloading(true);
+                logic.set_download_progress(0.0);
+                logic.set_download_status("Preparing...".into());
+                println!("[DEBUG] 已显示下载进度模态框");
+            }
+            
+            // 创建进度回调
+            let ui_weak_for_progress = ui_weak.clone();
+            let progress_callback = Arc::new(move |progress: f32, downloaded: u64, total: u64, status: &str| {
+                let ui_weak = ui_weak_for_progress.clone();
+                let status_str = status.to_string();
                 slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {
-                        let manager = NotificationManager::get(&ui);
-                        manager.invoke_error(NotificationOptions {
-                            message: error_msg_clone.into(),
-                            title: "".into(),
-                            duration: 5000,
-                            icon: "".into(),
-                            component: CustomComponentType::None,
-                        });
+                        let logic = ui.global::<UpdateLogic>();
+                        logic.set_download_progress(progress);
+                        logic.set_download_status(status_str.into());
+                        logic.set_downloaded_bytes(downloaded as i32);
+                        logic.set_total_bytes(total as i32);
                     }
                 }).ok();
-            } else {
-                // 更新成功
-                slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui_weak.upgrade() {
-                        let manager = NotificationManager::get(&ui);
-                        manager.invoke_success(NotificationOptions {
-                            message: "更新完成，请重启程序".into(),
-                            title: "".into(),
-                            duration: 5000,
-                            icon: "".into(),
-                            component: CustomComponentType::None,
-                        });
+            });
+            
+            let ui_weak_for_error = ui_weak.clone();
+            rt.spawn(async move {
+                println!("[DEBUG] 开始执行带进度的更新...");
+                let update_result = perform_update_with_progress(&state, progress_callback, cancel_flag.clone()).await;
+                
+                match &update_result {
+                    Ok(_) => {
+                        println!("[DEBUG] 更新成功，程序即将重启");
+                        // 更新成功后程序会自动重启，这里不需要额外处理
                     }
-                }).ok();
+                    Err(e) => {
+                        let error_msg = e.to_string();
+                        println!("[DEBUG] 更新失败: {}", error_msg);
+                        
+                        // 重置状态
+                        reset_update_state(&state);
+                        
+                        let is_cancelled = error_msg.contains("cancelled");
+                        let ui_weak_for_error = ui_weak_for_error.clone();
+                        
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_error.upgrade() {
+                                // 隐藏下载进度模态框
+                                let logic = ui.global::<UpdateLogic>();
+                                logic.set_is_downloading(false);
+                                logic.set_download_progress(0.0);
+                                logic.set_download_status("".into());
+                                
+                                if !is_cancelled {
+                                    // 只有非取消的情况才显示错误通知
+                                    let manager = NotificationManager::get(&ui);
+                                    manager.invoke_error(NotificationOptions {
+                                        message: format!("更新失败: {}", error_msg).into(),
+                                        title: "".into(),
+                                        duration: 5000,
+                                        icon: "".into(),
+                                        component: CustomComponentType::None,
+                                    });
+                                }
+                            }
+                        }).ok();
+                    }
+                }
+            });
+        });
+    });
+    
+    // 用户点击取消下载按钮
+    let cancel_flag_clone = cancel_flag.clone();
+    let state_clone = state.clone();
+    let app_weak_clone = app_weak.clone();
+    app.on_cancel_download(move || {
+        println!("[DEBUG] on_cancel_download 回调被调用");
+        
+        // 设置取消标志
+        cancel_flag_clone.store(true, Ordering::Relaxed);
+        
+        // 重置状态
+        reset_update_state(&state_clone);
+        
+        // 使用 Timer 延迟执行 UI 更新，避免 RefCell 借用冲突
+        let ui_weak = app_weak_clone.clone();
+        Timer::single_shot(std::time::Duration::from_millis(10), move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let logic = ui.global::<UpdateLogic>();
+                logic.set_is_downloading(false);
+                logic.set_download_progress(0.0);
+                logic.set_download_status("".into());
+                logic.set_update_available(false);
+                
+                // 显示取消通知
+                let manager = NotificationManager::get(&ui);
+                manager.invoke_info(NotificationOptions {
+                    message: "更新已取消".into(),
+                    title: "".into(),
+                    duration: 3000,
+                    icon: "".into(),
+                    component: CustomComponentType::None,
+                });
             }
         });
     });
@@ -345,6 +529,9 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Toast ========= //
     setup_toast(&app);
+
+    // ========= Dialog ========= //
+    setup_dialog(&app);
 
     // 示例调用 - 延迟执行以确保窗口已完全初始化
     // let app_weak = app.as_weak();

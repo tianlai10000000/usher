@@ -1,11 +1,17 @@
-use slint::{ComponentHandle, Global, Model, ModelRc, SharedVector, Timer, VecModel};
-use std::sync::{Arc, RwLock, atomic::{AtomicI32, Ordering}};
-use std::time::Duration;
-use std::path::Path;
+use slint::{ComponentHandle, Global, Model, ModelRc, SharedVector, Timer, VecModel, Weak};
 use std::collections::HashMap;
+use std::path::Path;
+use std::sync::{
+    Arc, RwLock,
+    atomic::{AtomicI32, Ordering},
+};
+use std::time::Duration;
 
 // 使用从 crate 根重新导出的类型
-use crate::{MainWindow, Notification, NotificationManager, NotificationType, NotificationOptions};
+use crate::{
+    MainWindow, Notification, NotificationIcons, NotificationManager, NotificationOptions,
+    NotificationType,
+};
 
 // 全局计数器，用于生成唯一ID
 static NOTIFICATION_ID_COUNTER: AtomicI32 = AtomicI32::new(0);
@@ -25,7 +31,7 @@ const DEFAULT_DURATION_INFO: i32 = 3000;
 const DEFAULT_DURATION_SUCCESS: i32 = 3000;
 const DEFAULT_DURATION_WARNING: i32 = 3000;
 const DEFAULT_DURATION_ERROR: i32 = 5000;
-const DEFAULT_DURATION_GENERAL: i32 = 3000;
+// const DEFAULT_DURATION_GENERAL: i32 = 3000;
 
 // 默认消息常量
 const DEFAULT_MESSAGE_INFO: &str = "Info";
@@ -33,29 +39,36 @@ const DEFAULT_MESSAGE_SUCCESS: &str = "Success";
 const DEFAULT_MESSAGE_WARNING: &str = "Warning";
 const DEFAULT_MESSAGE_ERROR: &str = "Error";
 
-// 默认图标路径（相对于项目根目录）
-const DEFAULT_ICON_INFO_PATH: &str = "ui/assets/icons/info.svg";
-const DEFAULT_ICON_SUCCESS_PATH: &str = "ui/assets/icons/success.svg";
-const DEFAULT_ICON_WARNING_PATH: &str = "ui/assets/icons/warning.svg";
-const DEFAULT_ICON_ERROR_PATH: &str = "ui/assets/icons/error.svg";
+// 全局 UI 引用（用于获取嵌入的图标）
+lazy_static::lazy_static! {
+    static ref UI_WEAK: RwLock<Option<Weak<MainWindow>>> = RwLock::new(None);
+}
 
-// 辅助函数：加载默认图标
+// 辅助函数：获取嵌入的默认图标
 fn get_default_icon(notification_type: NotificationType) -> slint::Image {
+    // 尝试从 Slint global 获取嵌入的图标
+    if let Some(ui_weak) = UI_WEAK.read().ok().and_then(|guard| guard.clone()) {
+        if let Some(ui) = ui_weak.upgrade() {
+            let icons = NotificationIcons::get(&ui);
+            return match notification_type {
+                NotificationType::Info => icons.get_info(),
+                NotificationType::Success => icons.get_success(),
+                NotificationType::Warning => icons.get_warning(),
+                NotificationType::Error => icons.get_error(),
+            };
+        }
+    }
+
+    // 如果无法获取嵌入图标，尝试从文件系统加载（开发模式备用）
     let icon_path_str = match notification_type {
-        NotificationType::Info => DEFAULT_ICON_INFO_PATH,
-        NotificationType::Success => DEFAULT_ICON_SUCCESS_PATH,
-        NotificationType::Warning => DEFAULT_ICON_WARNING_PATH,
-        NotificationType::Error => DEFAULT_ICON_ERROR_PATH,
+        NotificationType::Info => "ui/assets/icons/info.svg",
+        NotificationType::Success => "ui/assets/icons/success.svg",
+        NotificationType::Warning => "ui/assets/icons/warning.svg",
+        NotificationType::Error => "ui/assets/icons/error.svg",
     };
-    
-    // 尝试从文件系统加载图标
+
     let icon_path = Path::new(icon_path_str);
-    slint::Image::load_from_path(icon_path)
-        .unwrap_or_else(|_| {
-            // 如果加载失败，返回默认空图像
-            // 注意：在实际应用中，可能需要记录错误或使用备用图标
-            slint::Image::default()
-        })
+    slint::Image::load_from_path(icon_path).unwrap_or_else(|_| slint::Image::default())
 }
 
 // 辅助函数：创建带默认值的通知
@@ -70,21 +83,21 @@ fn create_notification_with_defaults(
         NotificationType::Warning => DEFAULT_DURATION_WARNING,
         NotificationType::Error => DEFAULT_DURATION_ERROR,
     };
-    
+
     let default_message = match notification_type {
         NotificationType::Info => DEFAULT_MESSAGE_INFO,
         NotificationType::Success => DEFAULT_MESSAGE_SUCCESS,
         NotificationType::Warning => DEFAULT_MESSAGE_WARNING,
         NotificationType::Error => DEFAULT_MESSAGE_ERROR,
     };
-    
+
     // 如果 message 为空字符串，使用默认消息
     let final_message = if options.message.is_empty() {
         slint::SharedString::from(default_message)
     } else {
         options.message
     };
-    
+
     // duration 处理逻辑：
     // - duration < 0：使用默认值
     // - duration == 0：永久存在（不自动关闭）
@@ -92,26 +105,26 @@ fn create_notification_with_defaults(
     let final_duration = if options.duration < 0 {
         default_duration
     } else {
-        options.duration  // 包括 0（永久）和正数（指定时间）
+        options.duration // 包括 0（永久）和正数（指定时间）
     };
-    
+
     // icon 的处理：优先使用用户传入的图标，如果为空则使用默认图标
     // 检查用户传入的图标是否为空图像
     // 如果用户传入了有效图标，使用用户的图标；否则使用默认图标
-    // 
+    //
     // 注意：在 Slint 中，如果用户没有传入 icon 字段，结构体可能使用一个特殊的默认值
     // 这个默认值可能不等于 slint::Image::default()，所以我们需要更宽松的检测
-    // 
+    //
     // 策略：由于无法可靠检测空图像，我们采用保守策略：
     // 1. 如果传入的图标是空图像（通过 is_empty_image 检测），使用默认图标
     // 2. 否则，使用用户传入的图标
-    // 
+    //
     // 但是，如果用户在 Slint 中没有传入 icon，结构体可能使用一个特殊的默认值
     // 这个值可能不是空图像，但也不是用户想要的图标
-    // 
+    //
     // 解决方案：在 Slint 端，当用户没有传入 icon 时，应该显式传入一个空图像
     // 或者在 Rust 端，我们可以尝试一个更可靠的方法来检测空图像
-    // 
+    //
     // 当前实现：如果传入的图标是空图像，使用默认图标；否则使用用户传入的图标
     // 如果用户在 Slint 中没有传入 icon，结构体可能使用一个特殊的默认值
     // 这个值可能不是空图像，所以我们需要在 Slint 端处理，确保未传入时传入空图像
@@ -119,14 +132,14 @@ fn create_notification_with_defaults(
     // 逻辑：
     // - 如果 icon 为空字符串，使用默认图标
     // - 如果 icon 不为空，从路径加载图标
-    // 
+    //
     // 使用方式：
     // 1. 不传入 icon（使用默认图标）：
     //    NotificationManager.show(NotificationType.Success, { message: "Hello" })
-    // 
+    //
     // 2. 显式传入 icon（使用自定义图标）：
-    //    NotificationManager.show(NotificationType.Success, { 
-    //        message: "Hello", 
+    //    NotificationManager.show(NotificationType.Success, {
+    //        message: "Hello",
     //        icon: "ui/assets/icons/error.svg"
     //    })
     let final_icon = if options.icon.is_empty() {
@@ -135,23 +148,22 @@ fn create_notification_with_defaults(
     } else {
         // 从路径加载自定义图标
         let icon_path = Path::new(options.icon.as_str());
-        slint::Image::load_from_path(icon_path)
-            .unwrap_or_else(|_| {
-                // 如果加载失败，使用默认图标
-                get_default_icon(notification_type)
-            })
+        slint::Image::load_from_path(icon_path).unwrap_or_else(|_| {
+            // 如果加载失败，使用默认图标
+            get_default_icon(notification_type)
+        })
     };
-    
+
     Notification {
         id: next_notification_id(),
-        title: options.title.clone(),  // title 直接使用用户传入的值，空字符串表示无标题
+        title: options.title.clone(), // title 直接使用用户传入的值，空字符串表示无标题
         message: final_message,
         r#type: notification_type,
         duration: final_duration,
         icon: final_icon,
         custom_component: options.component,
-        dismissed: false,  // 初始为未关闭
-        hovered: false,    // 初始为未悬停
+        dismissed: false, // 初始为未关闭
+        hovered: false,   // 初始为未悬停
     }
 }
 
@@ -175,7 +187,7 @@ fn push_notification(
             }
         }
     } // queue_model 在这里被 drop，释放所有借用
-    
+
     // 创建新的 VecModel，复制现有元素并添加新元素
     let mut new_vec = VecModel::default();
     for item in items {
@@ -183,7 +195,7 @@ fn push_notification(
     }
     new_vec.push(notification.clone());
     manager.set_queue(ModelRc::new(new_vec));
-    
+
     // 可选：更新共享队列
     if let Some(queue) = shared_queue {
         if let Ok(mut q) = queue.write() {
@@ -202,7 +214,7 @@ fn remove_notification_by_id(
     if let Ok(mut state) = HOVER_STATE.write() {
         state.remove(&target_id);
     }
-    
+
     // 先收集所有数据到一个 Vec，避免持有 queue_model 的借用
     let mut items = Vec::new();
     {
@@ -217,14 +229,14 @@ fn remove_notification_by_id(
             }
         }
     } // queue_model 在这里被 drop，释放所有借用
-    
+
     // 创建新的 VecModel，排除匹配ID的通知
     let new_vec = VecModel::default();
     for item in items {
         new_vec.push(item);
     }
     manager.set_queue(ModelRc::new(new_vec));
-    
+
     // 可选：更新共享队列
     if let Some(queue) = shared_queue {
         if let Ok(mut q) = queue.write() {
@@ -260,7 +272,7 @@ fn dismiss_notification_by_id(
             }
         }
     }
-    
+
     // 创建新的 VecModel
     let new_vec = VecModel::default();
     for item in items {
@@ -332,16 +344,16 @@ fn start_auto_close_timer(
 ) {
     let ui_weak_clone = ui_weak.clone();
     let shared_queue_clone = shared_queue.clone();
-    
+
     Timer::single_shot(duration, move || {
         if let Some(ui) = ui_weak_clone.upgrade() {
             let manager = NotificationManager::get(&ui);
-            
+
             // 检查通知是否还存在
             if !notification_exists(&manager, notification_id) {
                 return;
             }
-            
+
             // 检查通知是否处于 hover 状态
             if is_notification_hovered(&manager, notification_id) {
                 // 如果 hover，继续等待（每 200ms 检查一次）
@@ -365,56 +377,94 @@ pub fn setup_notifications(
     shared_queue: Option<Arc<RwLock<SharedQueue>>>, // 可选：用于多窗口共享
 ) {
     let ui_weak = ui.as_weak();
+
+    // 存储 UI 引用，用于获取嵌入的图标
+    if let Ok(mut guard) = UI_WEAK.write() {
+        *guard = Some(ui_weak.clone());
+    }
+
     let manager = NotificationManager::get(ui);
 
     // 便捷方法回调
     let ui_weak_info = ui_weak.clone();
     let shared_queue_clone_info = shared_queue.clone();
     manager.on_info(move |options: NotificationOptions| {
-        if let Some(ui) = ui_weak_info.upgrade() {
-            let manager = NotificationManager::get(&ui);
-            let notif = create_notification_with_defaults(
-                NotificationType::Info,
-                options,
-            );
-            let notification_id = notif.id;
-            push_notification(&manager, notif.clone(), &shared_queue_clone_info);
-            
-            // 设置自动关闭定时器（支持 hover 暂停）
-            if notif.duration > 0 {
-                let duration = Duration::from_millis(notif.duration as u64);
-                start_auto_close_timer(
-                    ui_weak_info.clone(),
-                    notification_id,
-                    duration,
-                    shared_queue_clone_info.clone(),
+        let ui_weak = ui_weak_info.clone();
+        let shared_queue = shared_queue_clone_info.clone();
+        // 提取可以安全发送的数据（component 不能跨线程发送，使用 None）
+        let message = options.message.to_string();
+        let title = options.title.to_string();
+        let duration = options.duration;
+        let icon = options.icon.to_string();
+        // 使用 Timer 延迟执行，避免在 invoke_info 的回调中立即访问 RefCell
+        Timer::single_shot(Duration::from_millis(10), move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let manager = NotificationManager::get(&ui);
+                let notif = create_notification_with_defaults(
+                    NotificationType::Info,
+                    NotificationOptions {
+                        message: message.into(),
+                        title: title.into(),
+                        duration,
+                        icon: icon.into(),
+                        component: crate::CustomComponentType::None,
+                    },
                 );
+                let notification_id = notif.id;
+                push_notification(&manager, notif.clone(), &shared_queue);
+
+                // 设置自动关闭定时器（支持 hover 暂停）
+                if notif.duration > 0 {
+                    let duration = Duration::from_millis(notif.duration as u64);
+                    start_auto_close_timer(
+                        ui_weak.clone(),
+                        notification_id,
+                        duration,
+                        shared_queue.clone(),
+                    );
+                }
             }
-        }
+        });
     });
 
     let ui_weak_success = ui_weak.clone();
     let shared_queue_clone_success = shared_queue.clone();
     manager.on_success(move |options: NotificationOptions| {
-        if let Some(ui) = ui_weak_success.upgrade() {
-            let manager = NotificationManager::get(&ui);
-            let notif = create_notification_with_defaults(
-                NotificationType::Success,
-                options,
-            );
-            let notification_id = notif.id;
-            push_notification(&manager, notif.clone(), &shared_queue_clone_success);
-            
-            if notif.duration > 0 {
-                let duration = Duration::from_millis(notif.duration as u64);
-                start_auto_close_timer(
-                    ui_weak_success.clone(),
-                    notification_id,
-                    duration,
-                    shared_queue_clone_success.clone(),
+        let ui_weak = ui_weak_success.clone();
+        let shared_queue = shared_queue_clone_success.clone();
+        // 提取可以安全发送的数据（component 不能跨线程发送，使用 None）
+        let message = options.message.to_string();
+        let title = options.title.to_string();
+        let duration = options.duration;
+        let icon = options.icon.to_string();
+        // 使用 Timer 延迟执行，避免在 invoke_success 的回调中立即访问 RefCell
+        Timer::single_shot(Duration::from_millis(10), move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let manager = NotificationManager::get(&ui);
+                let notif = create_notification_with_defaults(
+                    NotificationType::Success,
+                    NotificationOptions {
+                        message: message.into(),
+                        title: title.into(),
+                        duration,
+                        icon: icon.into(),
+                        component: crate::CustomComponentType::None,
+                    },
                 );
+                let notification_id = notif.id;
+                push_notification(&manager, notif.clone(), &shared_queue);
+
+                if notif.duration > 0 {
+                    let duration = Duration::from_millis(notif.duration as u64);
+                    start_auto_close_timer(
+                        ui_weak.clone(),
+                        notification_id,
+                        duration,
+                        shared_queue.clone(),
+                    );
+                }
             }
-        }
+        });
     });
 
     let ui_weak_warning = ui_weak.clone();
@@ -422,13 +472,10 @@ pub fn setup_notifications(
     manager.on_warn(move |options: NotificationOptions| {
         if let Some(ui) = ui_weak_warning.upgrade() {
             let manager = NotificationManager::get(&ui);
-            let notif = create_notification_with_defaults(
-                NotificationType::Warning,
-                options,
-            );
+            let notif = create_notification_with_defaults(NotificationType::Warning, options);
             let notification_id = notif.id;
             push_notification(&manager, notif.clone(), &shared_queue_clone_warning);
-            
+
             if notif.duration > 0 {
                 let duration = Duration::from_millis(notif.duration as u64);
                 start_auto_close_timer(
@@ -444,25 +491,41 @@ pub fn setup_notifications(
     let ui_weak_error = ui_weak.clone();
     let shared_queue_clone_error = shared_queue.clone();
     manager.on_error(move |options: NotificationOptions| {
-        if let Some(ui) = ui_weak_error.upgrade() {
-            let manager = NotificationManager::get(&ui);
-            let notif = create_notification_with_defaults(
-                NotificationType::Error,
-                options,
-            );
-            let notification_id = notif.id;
-            push_notification(&manager, notif.clone(), &shared_queue_clone_error);
-            
-            if notif.duration > 0 {
-                let duration = Duration::from_millis(notif.duration as u64);
-                start_auto_close_timer(
-                    ui_weak_error.clone(),
-                    notification_id,
-                    duration,
-                    shared_queue_clone_error.clone(),
+        let ui_weak = ui_weak_error.clone();
+        let shared_queue = shared_queue_clone_error.clone();
+        // 提取可以安全发送的数据（component 不能跨线程发送，使用 None）
+        let message = options.message.to_string();
+        let title = options.title.to_string();
+        let duration = options.duration;
+        let icon = options.icon.to_string();
+        // 使用 Timer 延迟执行，避免在 invoke_error 的回调中立即访问 RefCell
+        Timer::single_shot(Duration::from_millis(10), move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let manager = NotificationManager::get(&ui);
+                let notif = create_notification_with_defaults(
+                    NotificationType::Error,
+                    NotificationOptions {
+                        message: message.into(),
+                        title: title.into(),
+                        duration,
+                        icon: icon.into(),
+                        component: crate::CustomComponentType::None,
+                    },
                 );
+                let notification_id = notif.id;
+                push_notification(&manager, notif.clone(), &shared_queue);
+
+                if notif.duration > 0 {
+                    let duration = Duration::from_millis(notif.duration as u64);
+                    start_auto_close_timer(
+                        ui_weak.clone(),
+                        notification_id,
+                        duration,
+                        shared_queue.clone(),
+                    );
+                }
             }
-        }
+        });
     });
 
     let ui_weak_show = ui_weak.clone();
@@ -470,13 +533,10 @@ pub fn setup_notifications(
     manager.on_show(move |type_, options: NotificationOptions| {
         if let Some(ui) = ui_weak_show.upgrade() {
             let manager = NotificationManager::get(&ui);
-            let notif = create_notification_with_defaults(
-                type_,
-                options,
-            );
+            let notif = create_notification_with_defaults(type_, options);
             let notification_id = notif.id;
             push_notification(&manager, notif.clone(), &shared_queue_clone_show);
-            
+
             if notif.duration > 0 {
                 let duration = Duration::from_millis(notif.duration as u64);
                 start_auto_close_timer(
@@ -615,13 +675,13 @@ pub fn setup_notifications(
     manager.on_set_hovered(move |id, hovered| {
         if let Some(ui) = ui_weak_set_hovered.upgrade() {
             let manager = NotificationManager::get(&ui);
-            
+
             // 获取通知的 duration（在更新状态前获取）
             let duration = get_notification_duration(&manager, id);
-            
+
             // 更新 hover 状态
             set_notification_hovered_by_id(&manager, id, hovered, &shared_queue_clone);
-            
+
             // 如果 hover 结束（从 true 变为 false），重启完整 duration 的计时器
             if !hovered {
                 if let Some(dur) = duration {
@@ -672,5 +732,4 @@ pub fn setup_notifications(
             }
         }
     });
-
 }

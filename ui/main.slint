@@ -1,4 +1,4 @@
-import { FilledCard, AppBar, NavigationDrawer, Horizontal, Vertical, MaterialText, IconButton, MaterialPalette, MaterialStyleMetrics, CircularProgressIndicator } from "@material";
+import { FilledCard, AppBar, NavigationDrawer, Horizontal, Vertical, MaterialText, IconButton, MaterialPalette, MaterialStyleMetrics, CircularProgressIndicator, Modal, TextButton, FilledButton, HorizontalDivider } from "@material";
 import { ScrollView } from "../material-1.0/ui/components/scroll_view.slint";
 import { Login as LoginPage } from "./views/login.slint";
 import { Home as HomePage } from "./views/home.slint";
@@ -9,20 +9,26 @@ import { List as ListPage } from "./views/list.slint";
 import { Detail as DetailPage } from "./views/detail.slint";
 import { Notification as NotificationPage } from "./views/notification.slint";
 import { Toast as ToastPage } from "./views/toast.slint";
+import { Dialog as DialogPage } from "./views/dialog.slint";
 import { Route } from "./route/routeMap.slint";
 import { AppState } from "./state/app_state.slint";
 import { Breadcrumb } from "views/breadcrumb.slint";
 import { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
+import { NotificationIcons } from "./components/notify/icons.slint";
 import { NotificationItem } from "./components/notify/notification_item.slint";
 import { Toast } from "./components/toast/toast.slint";
 import { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
-import { UpdateDialog, UpdateLogic } from "./components/update/update.slint";
+import { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
+import { DialogEnhance } from "./components/dialog/dialog_enhance.slint";
+import { UpdateDialog, UpdateLogic, DownloadProgressModal } from "./components/update/update.slint";
 
 export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
 export { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
+export { NotificationIcons } from "./components/notify/icons.slint";
 export { Toast } from "./components/toast/toast.slint";
 export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
+export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
 export { UpdateLogic } from "./components/update/update.slint";
 
 // import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
@@ -46,15 +52,34 @@ export component MainWindow inherits Window {
     callback install();
     callback show-error();
     callback check-update();
-    callback reset-checking-state();
+    callback cancel-download();
     
     // 导航抽屉展开/收起状态
     in-out property <bool> drawer-expanded: true;
 
     // Update Checker
-    UpdateDialog {
-        version: UpdateLogic.new-version;
-        progress: UpdateLogic.progress;
+    callback show-update-dialog(latest-version: string, current-version: string);
+
+    init => {
+        // TODO: delete
+        // update-dialog.show();
+    }
+    
+    show-update-dialog(latest-version, current-version) => {
+        debug("MainWindow: show-update-dialog 回调被调用, latest-version={}, current-version={}", latest-version, current-version);
+
+        DialogManager.show({
+            id: "update-dialog",
+            title: "Update Available",
+            content: "A new version (" + latest-version + ") is available. Current version: " + current-version + ". Please update to the latest version.",
+            actions: ["Cancel"],
+            default-action: "Update",
+            overlay: true,
+            modal: true,
+            width: "40%",
+            height: "50%",
+        });
+
     }
 
     Vertical {
@@ -111,6 +136,7 @@ export component MainWindow inherits Window {
                                                 { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Settings" : "" },
                                                 { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Notify" : "" },
                                                 { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Toast" : "" },
+                                                { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Dialog" : "" },
                                                 { icon: @image-url("./assets/icons/about.svg"), text: root.drawer-expanded ? "About" : "" },
                                                 { icon: @image-url("./assets/icons/list.svg"), text: root.drawer-expanded ? "List" : "" },
                                                 { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail" : ""},
@@ -135,6 +161,7 @@ export component MainWindow inherits Window {
                                                 Route.Settings,
                                                 Route.Notification,
                                                 Route.Toast,
+                                                Route.Dialog,
                                                 Route.About,
                                                 Route.List,
                                                 Route.Detail
@@ -208,9 +235,6 @@ export component MainWindow inherits Window {
                                 check-update => {
                                     root.check-update();
                                 }
-                                reset-checking-state => {
-                                    root.reset-checking-state();
-                                }
                             }
                             if root.current-route == Route.Notification: NotificationPage {}
                             if root.current-route == Route.Toast: ToastPage {
@@ -218,6 +242,9 @@ export component MainWindow inherits Window {
                                     root.previous-route = root.current-route;
                                     root.navigate(route);
                                 }
+                            }
+                            dialog-page := DialogPage {
+                                visible: root.current-route == Route.Dialog;
                             }
                             if root.current-route == Route.About: AboutPage {
                                 navigate(route) => {
@@ -358,4 +385,28 @@ export component MainWindow inherits Window {
         }
     }
 
+    // Dialog 组件（从 dialog_enhance.slint 导入）
+    DialogEnhance {
+        width: 100%;
+        height: 100%;
+        on-default-action-clicked(id) => {
+            debug("DialogEnhance: on-default-action-clicked, id={}", id);
+            // 所有的 default-action 处理都交给 Rust 端通过 DialogManager 回调处理
+            dialog-page.default-action-clicked(id);
+        }
+        on-action-clicked(id, index) => {
+            debug("DialogEnhance: on-action-clicked, id={}, index={}", id, index);
+            // 所有的 action 处理都交给 Rust 端通过 DialogManager 回调处理
+            dialog-page.action-clicked(id, index);
+        }
+    }
+    
+    // 下载进度模态框
+    DownloadProgressModal {
+        width: 100%;
+        height: 100%;
+        cancel-clicked => {
+            root.cancel-download();
+        }
+    }
 }

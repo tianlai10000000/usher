@@ -1,0 +1,76 @@
+import { MaterialText, FilledButton, Horizontal, Vertical } from "@material";
+import { Route } from "../route/routeMap.slint";
+import { DialogManager } from "../components/dialog/dialog_manager.slint";
+
+export component Dialog {
+    callback navigate(Route);
+    
+    // 定义回调，供外部（main.slint）调用
+    callback default-action-clicked(/* id */ string);
+    callback action-clicked(/* id */ string, /* index */ int);
+    
+    // 回调处理器
+    default-action-clicked(id) => {
+        debug("Dialog Page: Default Action Clicked, id={}, 11111111111", id);
+        // 在这里添加确认按钮的业务逻辑
+    }
+    action-clicked(id, index) => {
+        debug("Dialog Page: Action Clicked, id={}, index={}, 22222222222", id, index);
+        // 在这里添加操作按钮的业务逻辑
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        Vertical {
+            width: parent.width;
+            vertical-stretch: 1;
+            spacing: 16px;
+            padding: 16px;
+
+            // 标题
+            Horizontal {
+                width: parent.width;
+                height: 50px;
+                alignment: start;
+                vertical-stretch: 0;
+    
+                MaterialText {
+                    text: "Dialog Example";
+                    color: #c31010;
+                    font_size: 26px;
+                    font_weight: 600;
+                    vertical_alignment: center;
+                }
+            }
+
+            Horizontal {
+                width: parent.width;
+                height: 50px;
+                alignment: start;
+                vertical-stretch: 0;
+
+                FilledButton {
+                    text: "Open Dialog";
+                    clicked => {
+                        debug("Open Dialog Button Clicked");
+                        // 显示对话框，id 用于在回调中区分不同的对话框
+                        DialogManager.show({
+                            id: "confirm-action",
+                            title: "Confirm Action",
+                            content: "This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.This is an example dialog using DialogManager.",
+                            actions: ["Cancel"],
+                            default-action: "OK",
+                            overlay: true,
+                            modal: true,
+                            width: "40%",      // 支持 "400px" 或 "80%"
+                            height: "300px"      // 支持 "300px" 或 "50%"
+                        });
+                    }
+                }
+            }   
+        }
+    }
+}

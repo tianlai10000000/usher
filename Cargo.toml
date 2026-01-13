@@ -1,6 +1,6 @@
 [package]
 name = "usher"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 repository = "https://github.com/tianlai10000000/usher"
 
@@ -24,7 +24,10 @@ lazy_static = "1.4"
 self_update = { version = "0.41.0", features = ["archive-tar", "archive-zip", "compression-flate2", "rustls"] }
 tokio = { version = "1.40", features = ["full"] }
 anyhow = "1.0"
-reqwest = { version = "0.12", features = ["rustls-tls"] }
+reqwest = { version = "0.12", features = ["rustls-tls", "stream"] }
+semver = "1.0.27"
+futures-util = "0.3.31"
+bytes = "1.11.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 raw-window-handle = "0.6"
@@ -43,6 +46,16 @@ slint-build = { version = "1.14"  }
 
 # [package.metadata.android.application]
 # label = "Usher"
+
+# macOS .app bundle 配置
+[package.metadata.bundle]
+name = "Usher"
+identifier = "com.usher.app"
+icon = ["logo.png"]  # 需要 PNG 或 ICNS 格式的图标
+category = "Utility"
+short_description = "Usher Application"
+long_description = "A modern desktop application built with Slint"
+osx_minimum_system_version = "10.14"
 
 [profile.release]
 strip = true  # Automatically strip symbols from the binary.
