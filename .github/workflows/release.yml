@@ -75,20 +75,87 @@ jobs:
 
       - name: Create tar.gz for self_update
         run: |
-          # 创建 tar.gz 压缩包供 self_update 使用
-          # self_update 需要 tar.gz 格式，包含可执行文件
-          TAR_NAME="${{ env.APP_NAME }}-${{ matrix.target }}.tar.gz"
-          cd "target/${{ matrix.target }}/release"
-          # 打包可执行文件
-          tar -czf "../../../$TAR_NAME" usher
-          cd ../../..
-          echo "Created $TAR_NAME"
+          # 创建三个 tar.gz 文件：
+          # 1. 只包含可执行文件（用于 self_update 自动更新）
+          # 2. 包含整个 .app bundle（用于手动安装，解压后可直接使用）
+          # 3. 只包含可执行文件（用于调试/查看日志，直接运行会显示终端窗口）
+          
+          EXE_PATH="target/${{ matrix.target }}/release/usher"
+          BUNDLE_PATH="target/${{ matrix.target }}/release/bundle/osx/${{ env.APP_NAME }}.app"
+          
+          # 检查文件是否存在
+          if [ ! -f "$EXE_PATH" ]; then
+            echo "Error: Executable not found at $EXE_PATH"
+            exit 1
+          fi
+          
+          if [ ! -d "$BUNDLE_PATH" ]; then
+            echo "Error: App bundle not found at $BUNDLE_PATH"
+            exit 1
+          fi
+          
+          # 1. 创建只包含可执行文件的 tar.gz（用于 self_update）
+          TAR_EXE_NAME="${{ env.APP_NAME }}-${{ matrix.target }}.tar.gz"
+          tar -czf "$TAR_EXE_NAME" -C "target/${{ matrix.target }}/release" usher
+          
+          if [ ! -f "$TAR_EXE_NAME" ]; then
+            echo "Error: Failed to create $TAR_EXE_NAME"
+            exit 1
+          fi
+          
+          echo "Created $TAR_EXE_NAME ($(du -h "$TAR_EXE_NAME" | cut -f1)) - for self_update"
+          
+          # 2. 创建包含整个 .app bundle 的 tar.gz（用于手动安装）
+          TAR_BUNDLE_NAME="${{ env.APP_NAME }}-${{ matrix.target }}-bundle.tar.gz"
+          tar -czf "$TAR_BUNDLE_NAME" -C "target/${{ matrix.target }}/release/bundle/osx" "${{ env.APP_NAME }}.app"
+          
+          if [ ! -f "$TAR_BUNDLE_NAME" ]; then
+            echo "Error: Failed to create $TAR_BUNDLE_NAME"
+            exit 1
+          fi
+          
+          echo "Created $TAR_BUNDLE_NAME ($(du -h "$TAR_BUNDLE_NAME" | cut -f1)) - for manual install"
+          
+          # 3. 创建只包含可执行文件的 tar.gz（用于调试/查看日志）
+          # 这个版本可以直接运行，会显示终端窗口，方便查看运行日志
+          TAR_DEBUG_NAME="${{ env.APP_NAME }}-${{ matrix.target }}-debug.tar.gz"
+          tar -czf "$TAR_DEBUG_NAME" -C "target/${{ matrix.target }}/release" usher
+          
+          if [ ! -f "$TAR_DEBUG_NAME" ]; then
+            echo "Error: Failed to create $TAR_DEBUG_NAME"
+            exit 1
+          fi
+          
+          echo "Created $TAR_DEBUG_NAME ($(du -h "$TAR_DEBUG_NAME" | cut -f1)) - for debug/terminal mode"
+          
+          # 验证文件
+          echo ""
+          echo "Verifying tar.gz files:"
+          ls -lh "$TAR_EXE_NAME" "$TAR_BUNDLE_NAME" "$TAR_DEBUG_NAME"
+          echo ""
+          echo "Contents of $TAR_EXE_NAME (for self_update):"
+          tar -tzf "$TAR_EXE_NAME"
+          echo ""
+          echo "Contents of $TAR_BUNDLE_NAME (for manual install, first 10 entries):"
+          tar -tzf "$TAR_BUNDLE_NAME" | head -10
+          echo ""
+          echo "Contents of $TAR_DEBUG_NAME (for debug/terminal, same as self_update):"
+          tar -tzf "$TAR_DEBUG_NAME"
 
       - name: Create DMG Installer
         run: |
           # 创建 DMG 安装程序
           # 使用完整的 target triple 作为文件名，以便 self_update 能够正确识别
           DMG_NAME="${{ env.APP_NAME }}-${{ matrix.target }}.dmg"
+          BUNDLE_PATH="target/${{ matrix.target }}/release/bundle/osx/${{ env.APP_NAME }}.app"
+          
+          # 检查 bundle 是否存在
+          if [ ! -d "$BUNDLE_PATH" ]; then
+            echo "Error: App bundle not found at $BUNDLE_PATH"
+            exit 1
+          fi
+          
+          # 尝试使用 create-dmg 创建
           create-dmg \
             --volname "${{ env.APP_NAME }}" \
             --volicon "ui/slint-logo.svg" \
@@ -101,15 +168,32 @@ jobs:
             --no-internet-enable \
             "$DMG_NAME" \
             "target/${{ matrix.target }}/release/bundle/osx/" \
-          || true
-          
-          # 如果 create-dmg 失败，使用简单方式创建 DMG
-          if [ ! -f "$DMG_NAME" ]; then
+          || {
+            echo "create-dmg failed, trying hdiutil..."
+            # 如果 create-dmg 失败，使用简单方式创建 DMG
             hdiutil create -volname "${{ env.APP_NAME }}" \
-              -srcfolder "target/${{ matrix.target }}/release/bundle/osx/${{ env.APP_NAME }}.app" \
+              -srcfolder "$BUNDLE_PATH" \
               -ov -format UDZO \
               "$DMG_NAME"
+          }
+          
+          # 验证文件已创建
+          if [ ! -f "$DMG_NAME" ]; then
+            echo "Error: Failed to create $DMG_NAME"
+            exit 1
           fi
+          
+          echo "Created $DMG_NAME ($(du -h "$DMG_NAME" | cut -f1))"
+          ls -lh "$DMG_NAME"
+
+      - name: Verify artifacts before upload
+        run: |
+          echo "Checking artifacts..."
+          ls -lh "${{ env.APP_NAME }}-${{ matrix.target }}.tar.gz" || echo "tar.gz not found!"
+          ls -lh "${{ env.APP_NAME }}-${{ matrix.target }}.dmg" || echo "dmg not found!"
+          echo "Current directory: $(pwd)"
+          echo "Files in current directory:"
+          ls -lh | grep -E "\.(tar\.gz|dmg)$" || echo "No matching files found"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -117,7 +201,10 @@ jobs:
           name: ${{ env.APP_NAME }}-macos-${{ matrix.arch }}
           path: |
             ${{ env.APP_NAME }}-${{ matrix.target }}.tar.gz
+            ${{ env.APP_NAME }}-${{ matrix.target }}-bundle.tar.gz
+            ${{ env.APP_NAME }}-${{ matrix.target }}-debug.tar.gz
             ${{ env.APP_NAME }}-${{ matrix.target }}.dmg
+          if-no-files-found: error
 
   release:
     name: Create Release
@@ -133,12 +220,40 @@ jobs:
           path: artifacts
 
       - name: List artifacts
-        run: find artifacts -type f \( -name "*.dmg" -o -name "*.tar.gz" \)
+        run: |
+          echo "Artifacts directory structure:"
+          find artifacts -type f -o -type d | head -20
+          echo ""
+          echo "Looking for release files:"
+          find artifacts -type f \( -name "*.dmg" -o -name "*.tar.gz" \) || echo "No matching files found!"
+          echo ""
+          echo "All files:"
+          find artifacts -type f || echo "No files found!"
+          echo ""
+          echo "File summary:"
+          echo "- *.tar.gz: 用于 self_update 自动更新（只包含可执行文件）"
+          echo "- *-bundle.tar.gz: 用于手动安装（包含完整 .app bundle，解压后可直接使用）"
+          echo "- *-debug.tar.gz: 用于调试/查看日志（只包含可执行文件，直接运行会显示终端窗口）"
+          echo "- *.dmg: 用于手动安装（macOS 安装镜像）"
+
+      - name: Prepare release files
+        run: |
+          # 创建 release_files 目录并复制所有匹配的文件
+          mkdir -p release_files
+          find artifacts -type f \( -name "*.dmg" -o -name "*.tar.gz" \) -exec cp {} release_files/ \;
+          echo "Release files prepared:"
+          ls -lh release_files/ || echo "No files in release_files!"
+          echo ""
+          echo "文件说明:"
+          echo "  - *-{target}.tar.gz: 用于 self_update 自动更新（只包含可执行文件）"
+          echo "  - *-{target}-bundle.tar.gz: 用于手动安装（包含完整 .app bundle，解压后可直接使用）"
+          echo "  - *-{target}-debug.tar.gz: 用于调试/查看日志（只包含可执行文件，直接运行会显示终端窗口）"
+          echo "  - *-{target}.dmg: 用于手动安装（macOS 安装镜像）"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/**/*.{dmg,tar.gz}
+          files: release_files/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

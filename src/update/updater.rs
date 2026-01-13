@@ -334,13 +334,30 @@ pub async fn perform_update_with_progress(
     let install_result = tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
         progress_callback_for_install(0.90, downloaded, total_size, "Extracting update...");
 
+        // 记录当前可执行文件路径（用于调试）
+        if let Ok(current_exe) = std::env::current_exe() {
+            println!("[DEBUG] 当前可执行文件路径: {:?}", current_exe);
+            let exe_str = current_exe.to_string_lossy();
+            if exe_str.contains(".app/") {
+                println!("[DEBUG] 检测到 .app bundle，self_update 将替换 bundle 内的可执行文件");
+            } else {
+                println!("[DEBUG] 未检测到 .app bundle，将直接替换可执行文件");
+            }
+        }
+
         // 使用 self_update 的内置安装功能
         let updater = create_updater()?;
 
         progress_callback_for_install(0.95, downloaded, total_size, "Installing update...");
 
         // 执行更新（这会替换当前可执行文件）
+        // 如果从 .app bundle 运行，会替换 bundle 内的可执行文件
         updater.update()?;
+        
+        // 验证更新后的路径
+        if let Ok(updated_exe) = std::env::current_exe() {
+            println!("[DEBUG] 更新后，可执行文件路径: {:?}", updated_exe);
+        }
 
         progress_callback_for_install(1.0, downloaded, total_size, "Update complete!");
 
