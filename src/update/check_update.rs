@@ -4,19 +4,19 @@ use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
 pub fn init(ui_weak: Weak<crate::MainWindow>, state: Arc<Mutex<UpdateState>>, rt: Arc<Runtime>) {
-    // 每小时检查一次更新
+    // Check for updates every hour
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, std::time::Duration::from_secs(3600), {
         let state = state.clone();
         let ui_weak = ui_weak.clone();
-        let rt = rt.clone(); // Runtime 可以 clone 使用
+        let rt = rt.clone(); // Runtime can be cloned and used
         move || {
             let state = state.clone();
             let ui_weak = ui_weak.clone();
             rt.spawn(async move {
                 match check_for_update(&state).await {
                     Ok(_) => {
-                        // 检查到有更新可用时通知 UI
+                        // Notify UI when update is available
                         let s = state.lock().unwrap();
                         if s.available {
                             let version = s.version.clone();

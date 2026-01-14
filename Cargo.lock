@@ -5794,6 +5794,7 @@ version = "0.0.5"
 dependencies = [
  "anyhow",
  "bytes",
+ "flate2",
  "futures-util",
  "lazy_static",
  "objc",
@@ -5803,6 +5804,7 @@ dependencies = [
  "semver",
  "slint",
  "slint-build",
+ "tar",
  "tokio",
 ]
 
