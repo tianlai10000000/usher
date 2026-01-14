@@ -64,13 +64,6 @@ fn create_toast_with_defaults(
     String,
     String,
 ) {
-    let default_duration = match toast_type {
-        ToastType::Text => DEFAULT_DURATION_TEXT,
-        ToastType::Success => DEFAULT_DURATION_SUCCESS,
-        ToastType::Error => DEFAULT_DURATION_ERROR,
-        ToastType::Loading => DEFAULT_DURATION_LOADING,
-    };
-
     let default_message = match toast_type {
         ToastType::Text => DEFAULT_MESSAGE_TEXT,
         ToastType::Success => DEFAULT_MESSAGE_SUCCESS,

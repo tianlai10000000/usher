@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -9,7 +11,7 @@ use tokio::runtime::Runtime;
 #[macro_use]
 extern crate objc;
 
-use slint::{ComponentHandle, Timer, Weak};
+use slint::{Timer, Weak};
 
 // Must be called before module declarations so generated types are available in all modules
 slint::include_modules!();
@@ -23,6 +25,9 @@ use toast::setup_toast;
 
 mod dialog;
 use dialog::setup_dialog;
+
+mod tray;
+use tray::setup_tray;
 
 mod update;
 
@@ -538,6 +543,18 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Dialog ========= //
     setup_dialog(&app);
+
+    // ========= System Tray ========= //
+    // Setup system tray icon with context menu
+    // Using native macOS API implementation to avoid Objective-C class registration conflicts
+    let app_weak_tray = app.as_weak();
+    // Delay tray icon creation to ensure window is fully initialized
+    // and to run on main thread (required on macOS)
+    Timer::single_shot(std::time::Duration::from_millis(500), move || {
+        if let Err(e) = setup_tray(app_weak_tray) {
+            eprintln!("Failed to setup tray icon: {}", e);
+        }
+    });
 
     // Example call - delay execution to ensure window is fully initialized
     // let app_weak = app.as_weak();

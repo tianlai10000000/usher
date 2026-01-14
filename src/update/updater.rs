@@ -536,6 +536,7 @@ pub async fn perform_update_with_progress(
 }
 
 /// Perform update (original method, kept for compatibility)
+#[allow(dead_code)]
 pub async fn perform_update(_state: &Arc<Mutex<UpdateState>>) -> Result<()> {
     // Execute synchronous operations in blocking thread pool
     tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {

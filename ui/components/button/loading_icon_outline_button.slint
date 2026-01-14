@@ -20,8 +20,8 @@ component RotatingIcon {
             height: parent.height;
             // 将进度转换为角度：0-1 映射到 0-360度
             transform-rotation: root.rotation-progress * 360deg;
-            rotation-origin-x: self.width / 2;
-            rotation-origin-y: self.height / 2;
+            // 使用结构体语法设置 transform-origin
+            transform-origin: { x: self.width / 2, y: self.height / 2 };
         }
     }
 }

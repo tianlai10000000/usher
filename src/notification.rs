@@ -189,7 +189,7 @@ fn push_notification(
     } // queue_model is dropped here, releasing all borrows
 
     // Create new VecModel, copy existing elements and add new element
-    let mut new_vec = VecModel::default();
+    let new_vec = VecModel::default();
     for item in items {
         new_vec.push(item);
     }
@@ -576,7 +576,7 @@ pub fn setup_notifications(
                 }
             } // queue_model is dropped here, releasing all borrows
             // Create new VecModel, copy existing elements and add new element
-            let mut new_vec = VecModel::default();
+            let new_vec = VecModel::default();
             for item in items {
                 new_vec.push(item);
             }
@@ -623,7 +623,7 @@ pub fn setup_notifications(
                 }
             } // queue_model is dropped here, releasing all borrows
             // Create new VecModel
-            let mut new_vec = VecModel::default();
+            let new_vec = VecModel::default();
             for item in items {
                 new_vec.push(item);
             }
