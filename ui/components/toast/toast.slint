@@ -1,4 +1,5 @@
 import { MaterialPalette, MaterialText, Horizontal, CircularProgressIndicator } from "@material";
+import { ColorsTheme } from "../../theme/color.slint";
 
 export component Toast inherits Rectangle {
     in property <string> message;
@@ -47,8 +48,8 @@ export component Toast inherits Rectangle {
         y: position == "top" ? 32px :
            position == "bottom" ? parent.height - self.height - 32px :
            parent.height / 2 - self.height / 2;
-        background: root.type == "success" ? #4CAF50 :
-                    root.type == "error"    ? #F44336 :
+        background: root.type == "success" ? ColorsTheme.success :
+                    root.type == "error"    ? ColorsTheme.error :
                     root.type == "loading" ? MaterialPalette.primary_container :
                     MaterialPalette.surface_container_highest;
         border-radius: 12px;

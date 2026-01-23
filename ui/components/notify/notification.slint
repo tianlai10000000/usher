@@ -8,7 +8,7 @@ export enum NotificationType {
 // 自定义组件类型枚举
 export enum CustomComponentType {
     None,           // 不使用自定义组件
-    CustomNotify,   // 使用 CustomNotify 组件
+    ActionsNotify,   // 使用 ActionsNotify 组件
     // 可以添加更多自定义组件类型
 }
 
@@ -20,6 +20,8 @@ export struct Notification {
     duration: int,         // 默认 3000，0 表示永久
     icon: image,           // icon 支持
     custom-component: CustomComponentType,  // 自定义组件类型
+    actions: [string],     // 操作按钮文本数组（用于 ActionsNotify 组件）
+    tag: string,           // 标识符，用于在回调中区分不同业务场景
     dismissed: bool,       // 是否已被用户手动关闭
     hovered: bool,         // 鼠标是否悬停（暂停计时器）
 }
@@ -31,6 +33,8 @@ export struct NotificationOptions {
     duration: int,         // <= 0 表示使用默认值
     icon: string,          // 自定义图标路径，为空字符串时使用默认图标
     component: CustomComponentType,  // 自定义组件类型，默认为 None
+    actions: [string],     // 操作按钮文本数组（用于 ActionsNotify 组件）
+    tag: string,           // 标识符，用于在回调中区分不同业务场景
 }
 
 export global NotificationManager {
@@ -77,5 +81,8 @@ export global NotificationManager {
 
     // clear（直接清除队列所有消息）
     callback clear();
+
+    // action-clicked 回调：当 ActionsNotify 组件的操作按钮被点击时触发
+    callback action-clicked(/* notification-id */ int, /* action-index */ int);
 }
 

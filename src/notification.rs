@@ -10,7 +10,7 @@ use std::time::Duration;
 // Use types re-exported from crate root
 use crate::{
     MainWindow, Notification, NotificationIcons, NotificationManager, NotificationOptions,
-    NotificationType,
+    NotificationType, UpdateLogic,
 };
 
 // Global counter for generating unique IDs
@@ -162,8 +162,10 @@ fn create_notification_with_defaults(
         duration: final_duration,
         icon: final_icon,
         custom_component: options.component,
-        dismissed: false, // Initially not dismissed
-        hovered: false,   // Initially not hovered
+        actions: options.actions.clone(), // Copy actions array
+        tag: options.tag.clone(),         // Copy tag for callback identification
+        dismissed: false,                 // Initially not dismissed
+        hovered: false,                   // Initially not hovered
     }
 }
 
@@ -391,15 +393,30 @@ pub fn setup_notifications(
     manager.on_info(move |options: NotificationOptions| {
         let ui_weak = ui_weak_info.clone();
         let shared_queue = shared_queue_clone_info.clone();
-        // Extract data that can be safely sent (component cannot be sent across threads, use None)
+        // Extract data that can be safely sent
         let message = options.message.to_string();
         let title = options.title.to_string();
         let duration = options.duration;
         let icon = options.icon.to_string();
+        let component = options.component;
+        let tag = options.tag.to_string();
+        // Convert actions ModelRc to Vec<String> for thread safety
+        let actions_vec: Vec<String> = (0..options.actions.row_count())
+            .filter_map(|i| options.actions.row_data(i).map(|s| s.to_string()))
+            .collect();
+
         // Use Timer to delay execution, avoid immediately accessing RefCell in invoke_info callback
         Timer::single_shot(Duration::from_millis(10), move || {
             if let Some(ui) = ui_weak.upgrade() {
                 let manager = NotificationManager::get(&ui);
+                // Reconstruct actions as ModelRc
+                let actions: ModelRc<slint::SharedString> =
+                    ModelRc::new(std::rc::Rc::new(VecModel::from(
+                        actions_vec
+                            .iter()
+                            .map(|s| slint::SharedString::from(s.as_str()))
+                            .collect::<Vec<_>>(),
+                    )));
                 let notif = create_notification_with_defaults(
                     NotificationType::Info,
                     NotificationOptions {
@@ -407,7 +424,9 @@ pub fn setup_notifications(
                         title: title.into(),
                         duration,
                         icon: icon.into(),
-                        component: crate::CustomComponentType::None,
+                        component,
+                        actions,
+                        tag: tag.into(),
                     },
                 );
                 let notification_id = notif.id;
@@ -449,6 +468,8 @@ pub fn setup_notifications(
                         duration,
                         icon: icon.into(),
                         component: crate::CustomComponentType::None,
+                        actions: Default::default(),
+                        tag: Default::default(),
                     },
                 );
                 let notification_id = notif.id;
@@ -510,6 +531,8 @@ pub fn setup_notifications(
                         duration,
                         icon: icon.into(),
                         component: crate::CustomComponentType::None,
+                        actions: Default::default(),
+                        tag: Default::default(),
                     },
                 );
                 let notification_id = notif.id;
@@ -730,6 +753,100 @@ pub fn setup_notifications(
                     q.0.clear();
                 }
             }
+        }
+    });
+
+    // action-clicked callback: handle ActionsNotify component button clicks
+    let shared_queue_clone = shared_queue.clone();
+    let ui_weak_action = ui_weak.clone();
+    manager.on_action_clicked(move |notification_id, action_index| {
+        println!(
+            "[Notification] Action Clicked: notification_id={}, action_index={}",
+            notification_id, action_index
+        );
+
+        // Get notification info for logging/handling
+        if let Some(ui) = ui_weak_action.upgrade() {
+            let manager = NotificationManager::get(&ui);
+
+            // Find the notification to get action text and tag
+            let queue_model: ModelRc<Notification> = manager.get_queue();
+            let mut action_text = String::new();
+            let mut tag = String::new();
+            for i in 0..queue_model.row_count() {
+                if let Some(notification) = queue_model.row_data(i) {
+                    if notification.id == notification_id {
+                        // Get action text from actions array
+                        if let Some(text) = notification.actions.row_data(action_index as usize) {
+                            action_text = text.to_string();
+                        }
+                        // Get tag for callback identification
+                        tag = notification.tag.to_string();
+                        break;
+                    }
+                }
+            }
+
+            println!(
+                "[Notification] Action '{}' clicked on notification {} (tag: '{}')",
+                action_text, notification_id, tag
+            );
+
+            // Handle different actions based on tag
+            // Users can add their own business logic here
+            let ui_weak_for_action = ui_weak.clone();
+            match tag.as_str() {
+                "delete-file" => {
+                    if action_index == 1 {
+                        // User clicked "Delete" button
+                        println!("[Notification] Delete file action triggered");
+                        // Add your delete file logic here
+                    }
+                }
+                "confirm-update" => {
+                    if action_index == 1 {
+                        // User clicked "Update" button
+                        println!("[Notification] Update action triggered");
+                        // Add your update logic here
+                    }
+                }
+                "auto-update" => {
+                    if action_index == 0 {
+                        // User clicked "Cancel" button
+                        println!("[Notification] Auto-update cancelled by user");
+                        // Reset update state
+                        if let Some(ui) = ui_weak_for_action.upgrade() {
+                            let logic = ui.global::<UpdateLogic>();
+                            logic.set_update_available(false);
+                        }
+                    } else if action_index == 1 {
+                        // User clicked "Update Now" button
+                        println!("[Notification] Auto-update: starting update...");
+                        if let Some(ui) = ui_weak_for_action.upgrade() {
+                            let logic = ui.global::<UpdateLogic>();
+                            let new_version = logic.get_new_version().to_string();
+                            let current_version = env!("CARGO_PKG_VERSION").to_string();
+
+                            // Show update dialog to start download
+                            ui.invoke_show_update_dialog(
+                                new_version.into(),
+                                current_version.into(),
+                            );
+                        }
+                    }
+                }
+                // Add more tag handlers as needed
+                _ => {
+                    // Default: just log the action
+                    println!(
+                        "[Notification] Unhandled tag '{}', action: '{}'",
+                        tag, action_text
+                    );
+                }
+            }
+
+            // Default behavior: close notification after action is clicked
+            dismiss_notification_by_id(&manager, notification_id, &shared_queue_clone);
         }
     });
 }

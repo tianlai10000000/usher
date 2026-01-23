@@ -53,7 +53,7 @@ export component Notification {
                         //     message: "Hello, world!",
                         //     icon: "ui/assets/icons/error.svg",
                         //     duration: 5000,
-                        //     component: CustomComponentType.CustomNotify
+                        //     component: CustomComponentType.ActionsNotify
                         // });
                         
                         // 示例2：使用自定义图标（传入 icon）
@@ -74,6 +74,112 @@ export component Notification {
                     }
                 }
             }
+
+            Horizontal {
+                width: parent.width;
+                height: 50px;
+                alignment: start;
+                vertical-stretch: 0;
+    
+                MaterialText {
+                    text: "Notification";
+                    color: #c31010;
+                    font_size: 26px;
+                    font_weight: 600;
+                    vertical_alignment: center;
+                }
+    
+                FilledButton {
+                    text: "Show Notification With Actions ";
+    
+                    clicked => {
+
+                        root.message-counter += 1;
+                        
+                        // 使用 ActionsNotify 组件：带标题、消息和操作按钮
+                        // tag 用于在 Rust 回调中区分不同业务场景
+                        NotificationManager.show(
+                            NotificationType.Info, {
+                            title: "确认操作",
+                            message: "这是个带有两个操作按钮的通知消息 #" + root.message-counter,
+                            duration: 0, // 0 表示永久，需要用户手动关闭或点击按钮
+                            component: CustomComponentType.ActionsNotify,
+                            actions: ["取消", "确认"],
+                            tag: "confirm-action"  // 在 Rust on_action_clicked 中使用此 tag 区分
+                        });
+                    }
+                }
+            }
+
+            Horizontal {
+                width: parent.width;
+                height: 50px;
+                alignment: start;
+                vertical-stretch: 0;
+    
+                MaterialText {
+                    text: "Notification";
+                    color: #c31010;
+                    font_size: 26px;
+                    font_weight: 600;
+                    vertical_alignment: center;
+                }
+    
+                FilledButton {
+                    text: "Show Notification With Single Actions ";
+    
+                    clicked => {
+
+                        root.message-counter += 1;
+                        
+                        // 使用 ActionsNotify 组件：带标题、消息和单个操作按钮
+                        NotificationManager.show(
+                            NotificationType.Info, {
+                            title: "确认操作",
+                            message: "这是一个带有操作按钮的通知消息 #" + root.message-counter,
+                            duration: 0, // 0 表示永久，需要用户手动关闭或点击按钮
+                            component: CustomComponentType.ActionsNotify,
+                            actions: ["取消"],
+                            tag: "single-action"
+                        });
+                    }
+                }
+            }
+
+            Horizontal {
+                width: parent.width;
+                height: 50px;
+                alignment: start;
+                vertical-stretch: 0;
+    
+                MaterialText {
+                    text: "Notification";
+                    color: #c31010;
+                    font_size: 26px;
+                    font_weight: 600;
+                    vertical_alignment: center;
+                }
+    
+                FilledButton {
+                    text: "Show Notification Without Actions ";
+    
+                    clicked => {
+
+                        root.message-counter += 1;
+                        
+                        // 使用 ActionsNotify 组件：带标题、消息和操作按钮
+                        NotificationManager.show(
+                            NotificationType.Info, {
+                            title: "确认操作",
+                            message: "这是一个不带有任何操作按钮的通知消息 #" + root.message-counter,
+                            duration: 0, // 0 表示永久，需要用户手动关闭或点击按钮
+                            component: CustomComponentType.ActionsNotify,
+                            actions: []
+                        });
+                    }
+                }
+            }
+
 
             Horizontal {
                 width: parent.width;

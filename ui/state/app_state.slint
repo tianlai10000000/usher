@@ -17,6 +17,12 @@ export global AppState {
 
     // app info
     in-out property <string> version: "";
+    
+    // network
+    in-out property <bool> network-online: true;
+
+    // auto-update
+    in-out property <bool> auto-update: true; // default enabled
 
     /**
      * methods
@@ -24,6 +30,9 @@ export global AppState {
 
     // theme
     callback toggle-theme(mode: int);
+    
+    // auto-update
+    callback toggle-auto-update(enabled: bool);
     
     // 当 theme-mode 改变时，更新 Palette.color-scheme
     changed theme-mode => {

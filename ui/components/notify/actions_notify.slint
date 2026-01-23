@@ -1,0 +1,141 @@
+import { MaterialText, TextButton, FilledButton, Horizontal, Vertical } from "@material";
+import { NotificationType } from "notification.slint";
+
+export component ActionsNotify inherits Rectangle {
+    in property <int> notification-id;
+    in property <string> title;
+    in property <string> message;
+    in property <image> icon;
+    in property <[string]> actions: [];
+    in property <NotificationType> notification-type: NotificationType.Info;
+    
+    // 关闭按钮图标
+    private property <image> close-icon: @image-url("../../assets/icons/error.svg");
+    
+    // 回调事件
+    callback close-clicked();
+    callback action-clicked(/* action-index */ int);
+
+    // 根据通知类型设置背景颜色
+    background: notification-type == NotificationType.Success ? #4CAF50 :
+                notification-type == NotificationType.Info ? #2196F3 :
+                notification-type == NotificationType.Warning ? #FB8C00 :
+                #F44336;  // Error
+    border-radius: 4px;
+    min-height: 80px;
+
+    VerticalLayout {
+        width: parent.width;
+        spacing: 8px;
+        padding: 12px;
+        padding-right: 40px;  // 为关闭按钮留出空间
+
+        // 标题和图标行
+        HorizontalLayout {
+            width: parent.width;
+            spacing: 12px;
+            alignment: start;
+
+            // 图标
+            Image {
+                source: root.icon;
+                width: 24px;
+                height: 24px;
+                colorize: #ffffff;
+            }
+
+            // 标题（如果有）
+            if root.title != "" : Text {
+                text: root.title;
+                color: #ffffff;
+                font-size: 16px;
+                font-weight: 700;
+                font-family: "Hiragino Sans GB";
+                wrap: word-wrap;
+                horizontal-alignment: left;
+                horizontal-stretch: 1;
+            }
+        }
+
+        // 消息内容
+        if root.message != "" : Text {
+            text: root.message;
+            color: #ffffffcc;
+            font-size: 14px;
+            font-weight: 400;
+            font-family: "Hiragino Sans GB";
+            wrap: word-wrap;
+            horizontal-alignment: left;
+        }
+
+        // 底部操作按钮区域（仅当 actions 不为空时显示）
+        if root.actions.length > 0 : HorizontalLayout {
+            width: parent.width;
+            min-height: 36px;
+            spacing: 8px;
+            alignment: end;
+            padding-top: 4px;
+            padding-left: 24px;
+            padding-right: 24px;
+
+            for action[index] in root.actions : Rectangle {
+                min-width: 60px;
+                height: 32px;
+                background: action-touch.has-hover ? #ffffff30 : #ffffff20;
+                border-radius: 4px;
+
+                HorizontalLayout {
+                    alignment: center;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    
+                    Text {
+                        text: action;
+                        color: #ffffff;
+                        font-size: 13px;
+                        font-weight: 500;
+                        font-family: "Hiragino Sans GB";
+                        vertical-alignment: center;
+                    }
+                }
+
+                action-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.action-clicked(index);
+                    }
+                }
+            }
+        }
+    }
+
+    // 右上角关闭按钮
+    Rectangle {
+        x: parent.width - 32px;
+        y: 4px;
+        width: 28px;
+        height: 28px;
+        background: close-btn-touch.has-hover ? #ffffff20 : transparent;
+        border-radius: 14px;
+
+        Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            source: root.close-icon;
+            width: 18px;
+            height: 18px;
+            colorize: #ffffff;
+        }
+
+        close-btn-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: pointer;
+            clicked => {
+                root.close-clicked();
+            }
+        }
+    }
+}

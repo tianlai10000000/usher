@@ -1,0 +1,44 @@
+import { Palette } from "std-widgets.slint";
+import { AppState } from "../state/app_state.slint";
+
+// Theme Colors
+global lightTheme {
+    out property <color> primary: #4CAF50;
+    out property <color> secondary: #2E7D32;
+    out property <color> background: #FFFFFF;
+    out property <color> surface: #FFFFFF;
+    out property <color> error: #F44336;
+    out property <color> warning: #FB8C00;
+    out property <color> info: #2196F3;
+    out property <color> success: #4CAF50;
+}
+
+global darkTheme {
+    out property <color> primary: #4CAF50;
+    out property <color> secondary: #2E7D32;
+    out property <color> background: #FFFFFF;
+    out property <color> surface: #FFFFFF;
+    out property <color> error: #F44336;
+    out property <color> warning: #FB8C00;
+    out property <color> info: #2196F3;
+    out property <color> success: #4CAF50;
+}
+
+
+// TODO: 根据当前主题模式计算当前的颜色
+export global ColorsTheme {
+    // Resolve current theme mode (0=light, 1=dark, 2=auto)
+    property <bool> is-dark:
+        AppState.theme-mode == 1 ? true :
+        AppState.theme-mode == 0 ? false :
+        Palette.color_scheme == ColorScheme.dark;
+
+    out property <color> primary: is-dark ? darkTheme.primary : lightTheme.primary;
+    out property <color> secondary: is-dark ? darkTheme.secondary : lightTheme.secondary;
+    out property <color> background: is-dark ? darkTheme.background : lightTheme.background;
+    out property <color> surface: is-dark ? darkTheme.surface : lightTheme.surface;
+    out property <color> error: is-dark ? darkTheme.error : lightTheme.error;
+    out property <color> warning: is-dark ? darkTheme.warning : lightTheme.warning;
+    out property <color> info: is-dark ? darkTheme.info : lightTheme.info;
+    out property <color> success: is-dark ? darkTheme.success : lightTheme.success;
+}

@@ -1,7 +1,8 @@
 // notification_item.slint
 
 import { NotificationType, Notification, NotificationManager, CustomComponentType } from "notification.slint";
-import { CustomNotify } from "custom_notify.slint";
+import { ActionsNotify } from "actions_notify.slint";
+import { ColorsTheme } from "../../theme/color.slint";
 
 export component NotificationItem inherits Rectangle {
     in property <Notification> notification;
@@ -13,11 +14,15 @@ export component NotificationItem inherits Rectangle {
     callback dismissed(int);
     // hover 状态变化回调
     callback hovered(int, bool);
+    // actions 按钮点击回调
+    callback action-clicked(/* id */ int, /* action-index */ int);
 
     // 绑定 hover 状态到本地属性（用于检测变化）
     private property <bool> is-hovered: touch-area.has-hover;
     // 间距
     private property <length> spacing: 12px;
+    // 关闭按钮图标
+    private property <image> close-icon: @image-url("../../assets/icons/error.svg");
 
     width: 100%;
     // 高度自适应内容，关闭时为 0（包含间距）
@@ -25,103 +30,138 @@ export component NotificationItem inherits Rectangle {
     background: transparent;  // 外层透明
     clip: true;
 
+    // hover 检测区域（覆盖整个组件）
+    touch-area := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: default;
+    }
+
     // 内容容器（包含卡片和间距）
     content-container := VerticalLayout {
         width: parent.width;
         spacing: 0px;
 
-        // 实际的卡片内容
-        card := Rectangle {
+        // 实际的卡片内容 - 使用 VerticalLayout 让高度自适应内容
+        card := VerticalLayout {
             width: parent.width;
-            min-height: notification.dismissed ? 0px : 64px;
-            border-radius: 4px;
-            clip: true;
+            spacing: 0px;
             
-            // 关闭时透明
-            opacity: notification.dismissed ? 0 : 1;
-            
-            // Vuetify Alert 颜色方案
-            background: notification.dismissed ? transparent :
-                        notification.custom-component != CustomComponentType.None ? transparent :
-                        notification.type == NotificationType.Success ? #4CAF50 :
-                        notification.type == NotificationType.Info ? #2196F3 :
-                        notification.type == NotificationType.Warning ? #FB8C00 :
-                        #F44336;  // Error
-
             // 默认布局（非自定义组件）- Vuetify Alert 风格
-            content-layout := HorizontalLayout {
-                visible: notification.custom-component == CustomComponentType.None;
+            if notification.custom-component == CustomComponentType.None : Rectangle {
                 width: parent.width;
-                spacing: 16px;
-                padding-left: 16px;
-                padding-right: 16px;
-                padding-top: 12px;
-                padding-bottom: 12px;
+                min-height: notification.dismissed ? 0px : 64px;
+                border-radius: 4px;
+                
+                // 关闭时透明
+                opacity: notification.dismissed ? 0 : 1;
+                
+                // Vuetify Alert 颜色方案
+                background: notification.dismissed ? transparent :
+                            notification.type == NotificationType.Success ? ColorsTheme.success :
+                            notification.type == NotificationType.Info ? ColorsTheme.info :
+                            notification.type == NotificationType.Warning ? ColorsTheme.warning :
+                            ColorsTheme.error;
+                
 
-                // 图标（无背景圆）
-                Image {
-                    source: notification.icon;
-                    width: 24px;
-                    height: 24px;
-                    colorize: #ffffff;
-                }
+                content-layout := HorizontalLayout {
+                    width: parent.width;
+                    spacing: 16px;
+                    padding-left: 16px;
+                    padding-right: 40px;  // 为关闭按钮留出空间
+                    padding-top: 12px;
+                    padding-bottom: 12px;
 
-                // 文本容器
-                VerticalLayout {
-                    spacing: 2px;
-                    horizontal-stretch: 1;
-
-                    // 标题（如果有）
-                    if notification.title != "" : Text {
-                        text: notification.title;
-                        color: #ffffff;
-                        font-size: 16px;
-                        font-weight: 700;
-                        font-family: "Hiragino Sans GB";
-                        wrap: word-wrap;
-                        horizontal-alignment: left;
+                    // 图标（无背景圆）
+                    Image {
+                        source: notification.icon;
+                        width: 24px;
+                        height: 24px;
+                        colorize: #ffffff;
                     }
 
-                    // 消息内容
-                    Text {
-                        text: notification.message;
-                        color: notification.title != "" ? #ffffffcc : #ffffff;
-                        font-size: 14px;
-                        font-weight: notification.title != "" ? 400 : 500;
-                        font-family: "Hiragino Sans GB";
-                        wrap: word-wrap;
-                        horizontal-alignment: left;
-                        vertical-alignment: top;
+                    // 文本容器
+                    VerticalLayout {
+                        spacing: 2px;
+                        horizontal-stretch: 1;
+
+                        // 标题（如果有）
+                        if notification.title != "" : Text {
+                            text: notification.title;
+                            color: #ffffff;
+                            font-size: 16px;
+                            font-weight: 700;
+                            font-family: "Hiragino Sans GB";
+                            wrap: word-wrap;
+                            horizontal-alignment: left;
+                        }
+
+                        // 消息内容
+                        Text {
+                            text: notification.message;
+                            color: notification.title != "" ? #ffffffcc : #ffffff;
+                            font-size: 14px;
+                            font-weight: notification.title != "" ? 400 : 500;
+                            font-family: "Hiragino Sans GB";
+                            wrap: word-wrap;
+                            horizontal-alignment: left;
+                            vertical-alignment: top;
+                        }
+                    }
+                }
+
+                // 右上角关闭按钮（放在最后确保在最上层）
+                close-btn := Rectangle {
+                    x: parent.width - 32px;
+                    y: 4px;
+                    width: 28px;
+                    height: 28px;
+                    background: close-btn-touch-default.has-hover ? #ffffff20 : transparent;
+                    border-radius: 14px;
+
+                    Image {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        source: root.close-icon;
+                        width: 18px;
+                        height: 18px;
+                        colorize: #ffffff;
+                    }
+
+                    close-btn-touch-default := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.dismissed(root.notification.id);
+                        }
                     }
                 }
             }
 
-            // 自定义组件渲染
-            if notification.custom-component == CustomComponentType.CustomNotify : CustomNotify {
+            // 自定义组件渲染 - ActionsNotify
+            if notification.custom-component == CustomComponentType.ActionsNotify : ActionsNotify {
                 width: parent.width;
-                height: parent.height;
+                notification-id: root.notification.id;
+                title: notification.title;
                 message: notification.message;
                 icon: notification.icon;
+                actions: notification.actions;
+                notification-type: notification.type;
+                
+                close-clicked => {
+                    root.dismissed(root.notification.id);
+                }
+                action-clicked(action-index) => {
+                    root.action-clicked(root.notification.id, action-index);
+                }
             }
 
             // 自定义内容容器
             custom-content-container := Rectangle {
-                x: 0;
-                y: 60px;
                 width: parent.width;
                 height: root.custom-content-height;
                 @children
-            }
-
-            // 点击和 hover 检测区域（只覆盖卡片）
-            touch-area := TouchArea {
-                width: parent.width;
-                height: parent.height;
-                mouse-cursor: pointer;
-                
-                clicked => {
-                    root.dismissed(root.notification.id);
-                }
             }
         }
 

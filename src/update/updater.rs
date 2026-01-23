@@ -1,8 +1,15 @@
 use anyhow::{Context, Result};
 use self_update::cargo_crate_version;
 use semver::Version;
+use slint::{ComponentHandle, Global, Timer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::runtime::Runtime;
+
+use crate::{
+    AppState, CustomComponentType, MainWindow, NotificationManager, NotificationOptions,
+    UpdateLogic,
+};
 
 #[derive(Default, Clone)]
 pub struct UpdateState {
@@ -76,11 +83,21 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
         );
 
         // Use semver for semantic version comparison
-        let current_ver = Version::parse(current_version_str)
-            .map_err(|e| anyhow::anyhow!("Failed to parse current version '{}': {}", current_version_str, e))?;
+        let current_ver = Version::parse(current_version_str).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse current version '{}': {}",
+                current_version_str,
+                e
+            )
+        })?;
 
-        let latest_ver = Version::parse(&latest_release.version)
-            .map_err(|e| anyhow::anyhow!("Failed to parse remote version '{}': {}", latest_release.version, e))?;
+        let latest_ver = Version::parse(&latest_release.version).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse remote version '{}': {}",
+                latest_release.version,
+                e
+            )
+        })?;
 
         // If current version >= latest version, consider it up to date
         if current_ver >= latest_ver {
@@ -91,7 +108,10 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
             return Ok((true, String::new()));
         }
 
-        println!("[DEBUG] New version found: {} (current: {})", latest_ver, current_ver);
+        println!(
+            "[DEBUG] New version found: {} (current: {})",
+            latest_ver, current_ver
+        );
         Ok((false, latest_release.version))
     })
     .await
@@ -156,8 +176,14 @@ pub async fn perform_update_with_progress(
             // Get download URL for current platform
             let target = self_update::get_target();
             println!("[DEBUG] Current platform: {}", target);
-            println!("[DEBUG] Available assets list: {:?}", 
-                latest_release.assets.iter().map(|a| &a.name).collect::<Vec<_>>());
+            println!(
+                "[DEBUG] Available assets list: {:?}",
+                latest_release
+                    .assets
+                    .iter()
+                    .map(|a| &a.name)
+                    .collect::<Vec<_>>()
+            );
 
             // Find matching asset
             // self_update requires tar.gz or zip format, prioritize these formats
@@ -187,30 +213,37 @@ pub async fn perform_update_with_progress(
                 })
                 .or_else(|| {
                     // If no exact match for tar.gz/zip found, try to find any archive containing platform-related keywords
-                    latest_release.assets.iter()
+                    latest_release
+                        .assets
+                        .iter()
                         .filter(|a| {
                             let name_lower = a.name.to_lowercase();
                             name_lower.ends_with(".tar.gz") || name_lower.ends_with(".zip")
                         })
                         .find(|a| {
                             let name_lower = a.name.to_lowercase();
-                            name_lower.contains("darwin") || 
-                            name_lower.contains("macos") ||
-                            name_lower.contains("osx")
+                            name_lower.contains("darwin")
+                                || name_lower.contains("macos")
+                                || name_lower.contains("osx")
                         })
                 })
                 .or_else(|| {
                     // If still not found, try to find any tar.gz or zip file
-                    latest_release.assets.iter()
-                        .find(|a| {
-                            let name_lower = a.name.to_lowercase();
-                            name_lower.ends_with(".tar.gz") || name_lower.ends_with(".zip")
-                        })
+                    latest_release.assets.iter().find(|a| {
+                        let name_lower = a.name.to_lowercase();
+                        name_lower.ends_with(".tar.gz") || name_lower.ends_with(".zip")
+                    })
                 })
                 .ok_or_else(|| {
-                    anyhow::anyhow!("No suitable asset found for platform: {}. Available assets: {:?}", 
+                    anyhow::anyhow!(
+                        "No suitable asset found for platform: {}. Available assets: {:?}",
                         target,
-                        latest_release.assets.iter().map(|a| &a.name).collect::<Vec<_>>())
+                        latest_release
+                            .assets
+                            .iter()
+                            .map(|a| &a.name)
+                            .collect::<Vec<_>>()
+                    )
                 })?;
 
             println!("[DEBUG] Download URL: {}", asset.download_url);
@@ -618,4 +651,410 @@ pub fn reset_update_state(state: &Arc<Mutex<UpdateState>>) {
     s.downloaded_bytes = 0;
     s.total_bytes = 0;
     s.error = String::new();
+}
+
+/// Setup updater - initialize all update-related callbacks and logic
+///
+/// This function sets up:
+/// - Auto-update toggle callback (on_toggle_auto_update)
+/// - Manual update check callback (on_check_update)
+/// - Install update callback (on_install)
+/// - Cancel download callback (on_cancel_download)
+pub fn setup_updater(app: &MainWindow) -> Result<()> {
+    let state = Arc::new(Mutex::new(UpdateState::default()));
+    let rt = Arc::new(Runtime::new().context("Failed to create Tokio runtime")?);
+    let app_weak = app.as_weak();
+
+    // ========= Auto-update toggle callback ========= //
+    // This is called when user toggles auto-update switch in Settings
+    let state_clone_auto = state.clone();
+    let app_weak_clone_auto = app_weak.clone();
+    let rt_clone_auto = rt.clone();
+    AppState::get(app).on_toggle_auto_update(move |enabled| {
+        println!(
+            "[DEBUG] toggle-auto-update callback called, enabled: {}",
+            enabled
+        );
+        if enabled {
+            super::check_update::start_auto_update(
+                app_weak_clone_auto.clone(),
+                state_clone_auto.clone(),
+                rt_clone_auto.clone(),
+            );
+        } else {
+            super::check_update::stop_auto_update();
+        }
+    });
+
+    // Initialize auto-update based on initial state (default is enabled)
+    let initial_auto_update = AppState::get(app).get_auto_update();
+    if initial_auto_update {
+        super::check_update::start_auto_update(app_weak.clone(), state.clone(), rt.clone());
+    }
+
+    // Global cancel flag
+    let cancel_flag: CancelFlag = Arc::new(AtomicBool::new(false));
+
+    // ========= Manual update check callback ========= //
+    let state_clone_check = state.clone();
+    let app_weak_clone_check = app_weak.clone();
+    let rt_clone_check = rt.clone();
+    app.on_check_update(move || {
+        println!("[DEBUG] check-update callback called");
+        let state = state_clone_check.clone();
+        let ui_weak = app_weak_clone_check.clone();
+        let rt = rt_clone_check.clone();
+        rt.spawn(async move {
+            println!("[DEBUG] Starting update check...");
+            // Reset state
+            {
+                let mut s = state.lock().unwrap();
+                s.available = false;
+                s.version.clear();
+                s.error.clear();
+                s.progress = 0.0;
+            }
+
+            println!("[DEBUG] Calling check_for_update...");
+            let result = check_for_update(&state).await;
+            println!(
+                "[DEBUG] check_for_update completed, result: {:?}",
+                result.is_ok()
+            );
+            let (is_up_to_date, version) = {
+                match &result {
+                    Ok(up_to_date) => {
+                        let v = if !*up_to_date {
+                            let s = state.lock().unwrap();
+                            s.version.clone()
+                        } else {
+                            String::new()
+                        };
+                        println!("[DEBUG] is_up_to_date: {}, version: {}", *up_to_date, v);
+                        (*up_to_date, v)
+                    }
+                    Err(_) => (false, String::new()),
+                }
+            };
+
+            match result {
+                Ok(_) => {
+                    let version_clone = version.clone();
+                    println!(
+                        "[DEBUG] Processing result: is_up_to_date={}, version={}",
+                        is_up_to_date, version_clone
+                    );
+
+                    if is_up_to_date {
+                        // Current version is the latest
+                        let ui_weak_for_notification = ui_weak.clone();
+                        let ui_weak_for_logic = ui_weak.clone();
+                        let ui_weak_for_reset = ui_weak.clone();
+
+                        // Call notification first
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_notification.upgrade() {
+                                {
+                                    let manager = NotificationManager::get(&ui);
+                                    manager.invoke_success(NotificationOptions {
+                                        message: "Current version is up to date."
+                                            .into(),
+                                        title: "".into(),
+                                        duration: 3000,
+                                        icon: "".into(),
+                                        component: CustomComponentType::None,
+                                        actions: Default::default(),
+                                        tag: Default::default(),
+                                    });
+                                } // manager borrow released here
+                            }
+                        })
+                        .ok();
+
+                        // Use Timer to delay logic reset, ensure execution in next event loop iteration
+                        Timer::single_shot(std::time::Duration::from_millis(100), move || {
+                            slint::invoke_from_event_loop(move || {
+                                if let Some(ui) = ui_weak_for_logic.upgrade() {
+                                    {
+                                        let logic = ui.global::<UpdateLogic>();
+                                        logic.set_error("".into());
+                                        logic.set_update_available(false);
+                                    } // logic borrow released here
+                                }
+                            })
+                            .ok();
+                        });
+
+                        // Immediately reset button state to ensure user can see button restored
+                        println!("[DEBUG] Preparing to reset button state (already latest version)");
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_reset.upgrade() {
+                                println!(
+                                    "[DEBUG] Resetting checking-update state (already latest version)"
+                                );
+                                let logic = ui.global::<UpdateLogic>();
+                                logic.set_checking_update(false);
+                            } else {
+                                println!(
+                                    "[DEBUG] ui_weak_for_reset.upgrade() failed (already latest version)"
+                                );
+                            }
+                        })
+                        .ok();
+                    } else {
+                        println!("[DEBUG] Entering branch with new version available");
+                        // New version available
+                        let ui_weak_for_all = ui_weak.clone();
+                        let version_for_all = version.clone();
+
+                        // Set state
+                        let ui_weak_for_state = ui_weak_for_all.clone();
+                        let version_for_state = version_for_all.clone();
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_state.upgrade() {
+                                println!("[DEBUG] Setting state");
+                                let logic = ui.global::<UpdateLogic>();
+                                logic.set_update_available(true);
+                                logic.set_new_version(version_for_state.clone().into());
+                                logic.set_checking_update(false);
+                                println!(
+                                    "[DEBUG] Set update-available=true, new-version={}",
+                                    version_for_state
+                                );
+                            }
+                        })
+                        .ok();
+
+                        // Delay showing dialog to avoid RefCell borrow conflict
+                        // Use tokio sleep instead of Slint Timer (Slint Timer cannot trigger correctly in async tasks)
+                        println!("[DEBUG] Preparing to delay showing dialog...");
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        println!("[DEBUG] Delay completed, showing dialog");
+
+                        let ui_weak_for_dialog = ui_weak_for_all.clone();
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_dialog.upgrade() {
+                                println!("[DEBUG] Calling MainWindow.invoke_show_update_dialog()");
+                                let current_version = cargo_crate_version!();
+                                ui.invoke_show_update_dialog(
+                                    version_for_all.clone().into(),
+                                    current_version.into(),
+                                );
+                                println!("[DEBUG] MainWindow.invoke_show_update_dialog() called");
+                            } else {
+                                println!("[DEBUG] ui_weak_for_dialog.upgrade() failed");
+                            }
+                        })
+                        .ok();
+                    }
+                }
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    println!("[DEBUG] Update check error: {}", error_msg);
+                    // Provide more user-friendly error message
+                    let friendly_msg = if error_msg.contains("404")
+                        || error_msg.contains("Not Found")
+                    {
+                        format!("Repository not found or no available release versions. Please check if the repository exists and has created releases, failure reason: {}", error_msg)
+                    } else if error_msg.contains("NetworkError")
+                        || error_msg.contains("network")
+                        || error_msg.contains("ReqwestError")
+                        || error_msg.contains("error sending request")
+                    {
+                        format!("Network connection failed, please check your network connection and retry, failure reason: {}", error_msg)
+                    } else {
+                        format!("Unknown error, error reason: {}", error_msg)
+                    };
+                    let ui_weak_for_error = ui_weak.clone();
+                    let ui_weak_for_logic = ui_weak.clone();
+                    let ui_weak_for_reset = ui_weak.clone();
+
+                    // Show error notification
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_weak_for_error.upgrade() {
+                            {
+                                let manager = NotificationManager::get(&ui);
+                                manager.invoke_error(NotificationOptions {
+                                    message: friendly_msg.clone().into(),
+                                    title: "Update check failed".into(),
+                                    duration: 5000,
+                                    icon: "".into(),
+                                    component: CustomComponentType::None,
+                                    actions: Default::default(),
+                                    tag: Default::default(),
+                                });
+                            } // manager borrow released here, avoid conflict with borrow in callback
+                        }
+                    })
+                    .ok();
+
+                    // Use Timer to delay logic reset, ensure execution in next event loop iteration
+                    Timer::single_shot(std::time::Duration::from_millis(100), move || {
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_logic.upgrade() {
+                                {
+                                    let logic = ui.global::<UpdateLogic>();
+                                    logic.set_error("".into());
+                                    logic.set_update_available(false);
+                                } // logic borrow released here
+                            }
+                        })
+                        .ok();
+                    });
+
+                    // Immediately reset button state to ensure user can see button restored
+                    println!("[DEBUG] Preparing to reset button state (check failed)");
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_weak_for_reset.upgrade() {
+                            println!("[DEBUG] Resetting checking-update state (check failed)");
+                            let logic = ui.global::<UpdateLogic>();
+                            logic.set_checking_update(false);
+                        } else {
+                            println!("[DEBUG] ui_weak_for_reset.upgrade() failed (check failed)");
+                        }
+                    })
+                    .ok();
+                }
+            }
+        });
+    });
+
+    // ========= Install update callback ========= //
+    let state_clone = state.clone();
+    let app_weak_clone = app_weak.clone();
+    let rt_clone = rt.clone();
+    let cancel_flag_clone = cancel_flag.clone();
+    app.on_install(move || {
+        println!("[DEBUG] on_install callback called");
+        let state = state_clone.clone();
+        let ui_weak = app_weak_clone.clone();
+        let rt = rt_clone.clone();
+        let cancel_flag = cancel_flag_clone.clone();
+
+        // Reset cancel flag
+        cancel_flag.store(false, Ordering::Relaxed);
+
+        // Use Timer to delay all operations, avoid RefCell borrow conflict
+        Timer::single_shot(std::time::Duration::from_millis(100), move || {
+            println!("[DEBUG] Timer callback executed, preparing to show download progress modal");
+
+            // Show download progress modal
+            if let Some(ui) = ui_weak.upgrade() {
+                let logic = ui.global::<UpdateLogic>();
+                logic.set_is_downloading(true);
+                logic.set_download_progress(0.0);
+                logic.set_download_status("Preparing...".into());
+                println!("[DEBUG] Download progress modal shown");
+            }
+
+            // Create progress callback
+            let ui_weak_for_progress = ui_weak.clone();
+            let progress_callback = Arc::new(
+                move |progress: f32, downloaded: u64, total: u64, status: &str| {
+                    let ui_weak = ui_weak_for_progress.clone();
+                    let status_str = status.to_string();
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_weak.upgrade() {
+                            let logic = ui.global::<UpdateLogic>();
+                            logic.set_download_progress(progress);
+                            logic.set_download_status(status_str.into());
+                            logic.set_downloaded_bytes(downloaded as i32);
+                            logic.set_total_bytes(total as i32);
+                        }
+                    })
+                    .ok();
+                },
+            );
+
+            let ui_weak_for_error = ui_weak.clone();
+            rt.spawn(async move {
+                println!("[DEBUG] Starting update with progress...");
+                let update_result =
+                    perform_update_with_progress(&state, progress_callback, cancel_flag.clone())
+                        .await;
+
+                match &update_result {
+                    Ok(_) => {
+                        println!("[DEBUG] Update successful, program will restart");
+                        // After successful update, program will automatically restart, no additional handling needed here
+                    }
+                    Err(e) => {
+                        let error_msg = e.to_string();
+                        println!("[DEBUG] Update failed: {}", error_msg);
+
+                        // Reset state
+                        reset_update_state(&state);
+
+                        let is_cancelled = error_msg.contains("cancelled");
+                        let ui_weak_for_error = ui_weak_for_error.clone();
+
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak_for_error.upgrade() {
+                                // Hide download progress modal
+                                let logic = ui.global::<UpdateLogic>();
+                                logic.set_is_downloading(false);
+                                logic.set_download_progress(0.0);
+                                logic.set_download_status("".into());
+
+                                if !is_cancelled {
+                                    // Only show error notification for non-cancelled cases
+                                    let manager = NotificationManager::get(&ui);
+                                    manager.invoke_error(NotificationOptions {
+                                        message: format!("Update failed: {}", error_msg).into(),
+                                        title: "".into(),
+                                        duration: 5000,
+                                        icon: "".into(),
+                                        component: CustomComponentType::None,
+                                        actions: Default::default(),
+                                        tag: Default::default(),
+                                    });
+                                }
+                            }
+                        })
+                        .ok();
+                    }
+                }
+            });
+        });
+    });
+
+    // ========= Cancel download callback ========= //
+    let cancel_flag_clone = cancel_flag.clone();
+    let state_clone = state.clone();
+    let app_weak_clone = app_weak.clone();
+    app.on_cancel_download(move || {
+        println!("[DEBUG] on_cancel_download callback called");
+
+        // Set cancel flag
+        cancel_flag_clone.store(true, Ordering::Relaxed);
+
+        // Reset state
+        reset_update_state(&state_clone);
+
+        // Use Timer to delay UI update, avoid RefCell borrow conflict
+        let ui_weak = app_weak_clone.clone();
+        Timer::single_shot(std::time::Duration::from_millis(10), move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let logic = ui.global::<UpdateLogic>();
+                logic.set_is_downloading(false);
+                logic.set_download_progress(0.0);
+                logic.set_download_status("".into());
+                logic.set_update_available(false);
+
+                // Show cancel notification
+                let manager = NotificationManager::get(&ui);
+                manager.invoke_info(NotificationOptions {
+                    message: "Update cancelled".into(),
+                    title: "".into(),
+                    duration: 3000,
+                    icon: "".into(),
+                    component: CustomComponentType::None,
+                    actions: Default::default(),
+                    tag: Default::default(),
+                });
+            }
+        });
+    });
+
+    Ok(())
 }

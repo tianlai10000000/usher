@@ -100,9 +100,13 @@ export component Settings {
             }
 
             Switch {
-                checked: true;
+                checked: AppState.auto-update;
                 width: 48px;
                 height: 28px;
+                checked_state_changed(checked) => {
+                    AppState.auto-update = checked;
+                    AppState.toggle-auto-update(checked);
+                }
             }
         }
     }
