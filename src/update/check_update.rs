@@ -100,8 +100,34 @@ fn perform_startup_check(
                 }
             }
             Err(e) => {
-                // For auto-update, silently log errors instead of showing to user
-                println!("[AUTO-UPDATE] Startup check failed: {}", e);
+                let error_msg = e.to_string();
+                println!("[AUTO-UPDATE] Startup check failed: {}", error_msg);
+                
+                // Show error notification to user
+                let friendly_msg = if error_msg.contains("404") || error_msg.contains("Not Found") {
+                    "Repository not found or no releases available. Please check if the repository exists.".to_string()
+                } else if error_msg.contains("NetworkError") || error_msg.contains("network") 
+                    || error_msg.contains("ReqwestError") || error_msg.contains("error sending request") {
+                    "Network connection failed. Please check your network and try again.".to_string()
+                } else {
+                    format!("Update check failed: {}", error_msg)
+                };
+                
+                let ui_weak_for_error = ui_weak.clone();
+                slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak_for_error.upgrade() {
+                        let manager = NotificationManager::get(&ui);
+                        manager.invoke_error(NotificationOptions {
+                            message: friendly_msg.into(),
+                            title: "Update Check Failed".into(),
+                            duration: 5000,
+                            icon: "".into(),
+                            component: CustomComponentType::None,
+                            actions: Default::default(),
+                            tag: Default::default(),
+                        });
+                    }
+                }).ok();
             }
         }
     });
@@ -159,10 +185,39 @@ pub fn start_auto_update(
                         }
                     }
                     Err(e) => {
-                        // For auto-update, we silently log errors instead of showing to user
-                        println!("[AUTO-UPDATE] Periodic check failed: {}", e);
-                        let mut s = state.lock().unwrap();
-                        s.error = e.to_string();
+                        let error_msg = e.to_string();
+                        println!("[AUTO-UPDATE] Periodic check failed: {}", error_msg);
+                        
+                        // Store error in state
+                        {
+                            let mut s = state.lock().unwrap();
+                            s.error = error_msg.clone();
+                        }
+                        
+                        // Show error notification to user
+                        let friendly_msg = if error_msg.contains("404") || error_msg.contains("Not Found") {
+                            "Repository not found or no releases available.".to_string()
+                        } else if error_msg.contains("NetworkError") || error_msg.contains("network") 
+                            || error_msg.contains("ReqwestError") || error_msg.contains("error sending request") {
+                            "Network connection failed. Please check your network.".to_string()
+                        } else {
+                            format!("Update check failed: {}", error_msg)
+                        };
+                        
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak.upgrade() {
+                                let manager = NotificationManager::get(&ui);
+                                manager.invoke_error(NotificationOptions {
+                                    message: friendly_msg.into(),
+                                    title: "Update Check Failed".into(),
+                                    duration: 5000,
+                                    icon: "".into(),
+                                    component: CustomComponentType::None,
+                                    actions: Default::default(),
+                                    tag: Default::default(),
+                                });
+                            }
+                        }).ok();
                     }
                 }
             });

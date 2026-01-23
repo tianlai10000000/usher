@@ -28,10 +28,149 @@ mod tray;
 use tray::setup_tray;
 
 mod update;
-use update::setup_updater;
+use update::{setup_updater, start_auto_update, stop_auto_update};
 
 mod network;
 use network::setup_network_monitor;
+
+mod settings;
+use settings::setup_settings;
+
+/// Set application-level appearance on macOS (called BEFORE window is shown)
+/// This prevents the flash of wrong theme on startup
+#[cfg(target_os = "macos")]
+fn set_app_appearance(is_dark: bool) {
+    use objc::msg_send;
+    use objc::runtime::{Class, Object};
+    use std::ffi::CString;
+
+    unsafe {
+        let ns_app_class = match Class::get("NSApplication") {
+            Some(cls) => cls,
+            None => return,
+        };
+
+        let ns_app: *mut Object = msg_send![ns_app_class, sharedApplication];
+        if ns_app.is_null() {
+            return;
+        }
+
+        let ns_appearance_class = match Class::get("NSAppearance") {
+            Some(cls) => cls,
+            None => return,
+        };
+
+        let ns_string_class = match Class::get("NSString") {
+            Some(cls) => cls,
+            None => return,
+        };
+
+        let appearance_name = if is_dark {
+            "NSAppearanceNameDarkAqua"
+        } else {
+            "NSAppearanceNameAqua"
+        };
+
+        if let Ok(c_str) = CString::new(appearance_name) {
+            let name_obj: *mut Object =
+                msg_send![ns_string_class, stringWithUTF8String: c_str.as_ptr()];
+            if !name_obj.is_null() {
+                let appearance: *mut Object =
+                    msg_send![ns_appearance_class, appearanceNamed: name_obj];
+                if !appearance.is_null() {
+                    let _: () = msg_send![ns_app, setAppearance: appearance];
+                    println!(
+                        "[Theme] Set app appearance to: {}",
+                        if is_dark { "dark" } else { "light" }
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_app_appearance(_is_dark: bool) {
+    // Other platforms not supported yet
+}
+
+/// Detect system theme preference on macOS
+/// Returns true if system is in dark mode, false for light mode
+#[cfg(target_os = "macos")]
+fn detect_system_dark_mode() -> bool {
+    use objc::msg_send;
+    use objc::runtime::{Class, Object};
+    use std::ffi::CString;
+
+    unsafe {
+        // Get NSUserDefaults.standardUserDefaults
+        let ns_user_defaults_class = match Class::get("NSUserDefaults") {
+            Some(cls) => cls,
+            None => return false,
+        };
+
+        let user_defaults: *mut Object = msg_send![ns_user_defaults_class, standardUserDefaults];
+        if user_defaults.is_null() {
+            return false;
+        }
+
+        // Get "AppleInterfaceStyle" key
+        let ns_string_class = match Class::get("NSString") {
+            Some(cls) => cls,
+            None => return false,
+        };
+
+        let key_cstr = match CString::new("AppleInterfaceStyle") {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        let key: *mut Object = msg_send![ns_string_class, stringWithUTF8String: key_cstr.as_ptr()];
+        if key.is_null() {
+            return false;
+        }
+
+        // Get the value
+        let value: *mut Object = msg_send![user_defaults, stringForKey: key];
+        if value.is_null() {
+            // If nil, system is in light mode
+            return false;
+        }
+
+        // Check if value is "Dark"
+        let dark_cstr = match CString::new("Dark") {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        let dark_str: *mut Object =
+            msg_send![ns_string_class, stringWithUTF8String: dark_cstr.as_ptr()];
+        if dark_str.is_null() {
+            return false;
+        }
+
+        let is_equal: bool = msg_send![value, isEqualToString: dark_str];
+        is_equal
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn detect_system_dark_mode() -> bool {
+    // Default to light mode on other platforms
+    // TODO: Implement for Windows and Linux
+    false
+}
+
+/// Get the effective theme (resolves Auto mode to actual light/dark)
+/// Returns true if dark mode should be used
+fn get_effective_dark_mode(theme_mode: i32) -> bool {
+    match theme_mode {
+        0 => false,                     // Light
+        1 => true,                      // Dark
+        2 => detect_system_dark_mode(), // Auto - use system preference
+        _ => false,                     // Default to light
+    }
+}
 
 #[cfg(target_os = "macos")]
 fn set_title_bar_color(_window: &MainWindow, is_dark: bool) {
@@ -145,10 +284,56 @@ impl Router {
 }
 
 fn ui() -> Result<MainWindow> {
+    // ========= Pre-Window Settings ========= //
+    // Load settings BEFORE creating window to set app appearance early (prevents theme flash)
+    let loaded_settings = settings::load_settings();
+
+    // Set app-level appearance before window is created (prevents flash on macOS)
+    let is_dark = get_effective_dark_mode(loaded_settings.theme_mode);
+    set_app_appearance(is_dark);
+
+    // Now create the MainWindow (will inherit app appearance)
     let app = MainWindow::new().context("Failed to create MainWindow")?;
 
+    // ========= Settings ========= //
+    // Apply loaded settings to AppState
+    setup_settings(&app, &loaded_settings);
+
     // ========= Update ========= //
-    setup_updater(&app)?;
+    // setup_updater must be called AFTER setup_settings so it reads the correct auto_update value
+    let updater_ctx = setup_updater(&app)?;
+
+    // ========= Auto Update ========= //
+    // Initialize auto-update based on loaded settings
+    if loaded_settings.auto_update {
+        start_auto_update(
+            app.as_weak(),
+            updater_ctx.state.clone(),
+            updater_ctx.rt.clone(),
+        );
+    }
+
+    // Set up auto-update toggle callback (saves settings AND controls auto-update)
+    let app_weak_auto = app.as_weak();
+    let rt_for_auto = updater_ctx.rt.clone();
+    let state_for_auto = updater_ctx.state.clone();
+    AppState::get(&app).on_toggle_auto_update(move |enabled| {
+        // Save to config file
+        settings::save_auto_update(enabled);
+
+        // Control auto-update
+        if enabled {
+            start_auto_update(
+                app_weak_auto.clone(),
+                state_for_auto.clone(),
+                rt_for_auto.clone(),
+            );
+        } else {
+            stop_auto_update();
+        }
+
+        println!("[Settings] Auto update changed to: {}", enabled);
+    });
 
     // ========= Router ========= //
     let router = Router::new(app.as_weak());
@@ -159,33 +344,107 @@ fn ui() -> Result<MainWindow> {
         router_clone.navigate(route);
     });
 
-    // Optional: default to a page on program startup (already set by .slint default)
-
-    // Optional: example - auto navigate after 3 seconds (for demo)
-    // let router_clone = router.clone();
-    // slint::Timer::single_shot(std::time::Duration::from_secs(3), move || {
-    //     router_clone.navigate(Route::Profile);
-    // });
-
     // ========= Theme ========= //
     let app_weak = app.as_weak();
-    AppState::get(&app).on_toggle_theme(move |_mode| {
+    AppState::get(&app).on_toggle_theme(move |mode| {
         if let Some(win) = app_weak.upgrade() {
             let app_state = AppState::get(&win);
-            let current = app_state.get_theme_mode();
-            let new_mode = if current == 0 { 1 } else { 0 };
-            app_state.set_theme_mode(new_mode);
-            // Theme switching logic is handled in app_state.slint's changed theme-mode callback
+
+            // Update UI state
+            app_state.set_theme_mode(mode);
+
+            // Save to config file
+            settings::save_theme_mode(mode);
+
+            // Get effective dark mode (resolves Auto to actual light/dark)
+            let is_dark = get_effective_dark_mode(mode);
+
+            // For Auto mode, set the effective-dark-mode property so Slint can update Palette
+            if mode == 2 {
+                app_state.set_effective_dark_mode(is_dark);
+            }
 
             // Set title bar color
-            set_title_bar_color(&win, new_mode == 1);
+            set_title_bar_color(&win, is_dark);
+
+            println!(
+                "[Theme] Changed to mode: {} (effective dark: {})",
+                mode, is_dark
+            );
         }
     });
 
-    // ========= Title Bar ========= //
-    // Set title bar color based on current theme on initialization
-    let initial_theme = AppState::get(&app).get_theme_mode();
-    set_title_bar_color(&app, initial_theme == 1);
+    // ========= Title Bar Customization ========= //
+    // App appearance is already set before window creation (no flash)
+    // Now set title bar-specific customizations (transparent title bar, custom background)
+    // Use minimal delay to ensure window is ready
+    let initial_theme = loaded_settings.theme_mode;
+    let app_weak_init = app.as_weak();
+    Timer::single_shot(std::time::Duration::from_millis(10), move || {
+        // Get effective dark mode (resolves Auto to actual light/dark)
+        let is_dark = get_effective_dark_mode(initial_theme);
+
+        // For Auto mode, set effective-dark-mode so Slint can update Palette
+        if initial_theme == 2 {
+            if let Some(win) = app_weak_init.upgrade() {
+                AppState::get(&win).set_effective_dark_mode(is_dark);
+            }
+        }
+
+        // Set title bar customizations (transparent, custom background color)
+        #[cfg(target_os = "macos")]
+        slint::invoke_from_event_loop(move || {
+            use objc::msg_send;
+            use objc::runtime::{Class, Object};
+            use std::ptr;
+
+            unsafe {
+                let ns_app_class = match Class::get("NSApplication") {
+                    Some(cls) => cls,
+                    None => return,
+                };
+
+                let ns_app: *mut Object = msg_send![ns_app_class, sharedApplication];
+                if ns_app.is_null() {
+                    return;
+                }
+
+                let ns_window: *mut Object = msg_send![ns_app, mainWindow];
+                if ns_window.is_null() {
+                    return;
+                }
+
+                if is_dark {
+                    // Make title bar transparent and set custom background color
+                    let _: () =
+                        msg_send![ns_window, setTitlebarAppearsTransparent: objc::runtime::YES];
+
+                    if let Some(ns_color_class) = Class::get("NSColor") {
+                        let r = 17.0 / 255.0;
+                        let g = 19.0 / 255.0;
+                        let b = 24.0 / 255.0;
+                        let dark_bg_color: *mut Object =
+                            msg_send![ns_color_class, colorWithRed: r green: g blue: b alpha: 1.0];
+                        let _: () = msg_send![ns_window, setBackgroundColor: dark_bg_color];
+                    }
+                    println!(
+                        "[Theme] Initial title bar: dark (auto: {})",
+                        initial_theme == 2
+                    );
+                } else {
+                    // Reset to default title bar
+                    let _: () =
+                        msg_send![ns_window, setTitlebarAppearsTransparent: objc::runtime::NO];
+                    let _: () = msg_send![ns_window, setBackgroundColor: ptr::null_mut::<Object>()];
+                    println!(
+                        "[Theme] Initial title bar: light (auto: {})",
+                        initial_theme == 2
+                    );
+                }
+            }
+        })
+        .ok();
+    });
 
     // ========= App Info ========= //
     // Set application version number

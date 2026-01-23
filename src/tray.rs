@@ -22,8 +22,11 @@ mod macos {
     // Store main window reference (retained)
     static mut MAIN_WINDOW: *mut Object = std::ptr::null_mut();
 
-    // Store show/hide menu item reference for dynamic text update
-    static mut SHOW_HIDE_MENU_ITEM: *mut Object = std::ptr::null_mut();
+    // Store delegate reference for button action
+    static mut BUTTON_DELEGATE: *mut Object = std::ptr::null_mut();
+
+    // Store menu reference for programmatic display (right-click menu)
+    static mut TRAY_MENU: *mut Object = std::ptr::null_mut();
 
     /// Setup system tray icon with context menu on macOS
     pub fn setup_tray_macos(ui_weak: Weak<MainWindow>) -> Result<()> {
@@ -51,6 +54,13 @@ mod macos {
             let _: () = msg_send![status_item, retain];
             STATUS_ITEM = status_item;
 
+            // Register delegate class first
+            let delegate_class = register_menu_delegate_class();
+            let delegate: *mut Object = msg_send![delegate_class, alloc];
+            let delegate: *mut Object = msg_send![delegate, init];
+            let _: () = msg_send![delegate, retain];
+            BUTTON_DELEGATE = delegate;
+
             // Get the button of the status item
             let button: *mut Object = msg_send![status_item, button];
             if !button.is_null() {
@@ -63,11 +73,21 @@ mod macos {
                     let _: () = msg_send![button, setImage: image];
                     let _: () = msg_send![button, setTitle: create_nsstring("")];
                 }
+
+                // Set click action on the button
+                let _: () = msg_send![button, setTarget: delegate];
+                let _: () = msg_send![button, setAction: sel!(trayIconClicked:)];
+                // Send action on both left and right mouse down events
+                // NSEventMaskLeftMouseDown = 1 << 1 = 2
+                // NSEventMaskRightMouseDown = 1 << 3 = 8
+                // Combined: 2 | 8 = 10
+                let _: () = msg_send![button, sendActionOn: 10u64];
             }
 
-            // Create and set menu
-            let menu = create_menu()?;
-            let _: () = msg_send![status_item, setMenu: menu];
+            // Create simple menu with only Quit option (shown on right-click)
+            let menu = create_quit_menu(delegate)?;
+            let _: () = msg_send![menu, retain];
+            TRAY_MENU = menu;
 
             // Store main window reference for later use (for show/hide functionality)
             let main_window: *mut Object = msg_send![ns_app, mainWindow];
@@ -118,38 +138,21 @@ mod macos {
         Some(image)
     }
 
-    /// Create context menu
-    unsafe fn create_menu() -> Result<*mut Object> {
-        let ns_menu_class =
-            Class::get("NSMenu").ok_or_else(|| anyhow::anyhow!("Failed to get NSMenu class"))?;
-
-        let menu: *mut Object = msg_send![ns_menu_class, alloc];
-        let menu: *mut Object = msg_send![menu, init];
-
-        // Register our custom delegate class
-        let delegate_class = register_menu_delegate_class();
-        let delegate: *mut Object = msg_send![delegate_class, alloc];
-        let delegate: *mut Object = msg_send![delegate, init];
-
-        // Show/Hide Window menu item (initially "Hide Window" since window starts visible)
-        let show_item = unsafe { create_menu_item("Hide Window", sel!(showWindow:), delegate)? };
-        let _: () = msg_send![show_item, retain];
+    /// Create simple quit menu (only Quit option)
+    unsafe fn create_quit_menu(delegate: *mut Object) -> Result<*mut Object> {
         unsafe {
-            SHOW_HIDE_MENU_ITEM = show_item;
+            let ns_menu_class = Class::get("NSMenu")
+                .ok_or_else(|| anyhow::anyhow!("Failed to get NSMenu class"))?;
+
+            let menu: *mut Object = msg_send![ns_menu_class, alloc];
+            let menu: *mut Object = msg_send![menu, init];
+
+            // Only Quit menu item
+            let quit_item = create_menu_item("Quit", sel!(quitApp:), delegate)?;
+            let _: () = msg_send![menu, addItem: quit_item];
+
+            Ok(menu)
         }
-        let _: () = msg_send![menu, addItem: show_item];
-
-        // Separator
-        let ns_menu_item_class = Class::get("NSMenuItem")
-            .ok_or_else(|| anyhow::anyhow!("Failed to get NSMenuItem class"))?;
-        let separator: *mut Object = msg_send![ns_menu_item_class, separatorItem];
-        let _: () = msg_send![menu, addItem: separator];
-
-        // Quit menu item
-        let quit_item = unsafe { create_menu_item("Quit", sel!(quitApp:), delegate)? };
-        let _: () = msg_send![menu, addItem: quit_item];
-
-        Ok(menu)
     }
 
     /// Create a menu item
@@ -178,6 +181,62 @@ mod macos {
         msg_send![ns_string_class, stringWithUTF8String: c_str.as_ptr()]
     }
 
+    /// Show and activate the main window
+    unsafe fn show_main_window() {
+        unsafe {
+            if MAIN_WINDOW.is_null() {
+                return;
+            }
+            let ns_app_class = Class::get("NSApplication").unwrap();
+            let ns_app: *mut Object = msg_send![ns_app_class, sharedApplication];
+
+            // If window is minimized, deminiaturize it
+            let is_miniaturized: BOOL = msg_send![MAIN_WINDOW, isMiniaturized];
+            if is_miniaturized == YES {
+                let _: () = msg_send![MAIN_WINDOW, deminiaturize: std::ptr::null::<Object>()];
+            }
+
+            // Show and bring to front
+            let _: () = msg_send![MAIN_WINDOW, makeKeyAndOrderFront: std::ptr::null::<Object>()];
+            let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
+        }
+    }
+
+    /// Show the tray menu at the status item location
+    unsafe fn show_tray_menu() {
+        unsafe {
+            if TRAY_MENU.is_null() || STATUS_ITEM.is_null() {
+                return;
+            }
+            // Pop up the menu below the status item
+            let _: () = msg_send![STATUS_ITEM, popUpStatusItemMenu: TRAY_MENU];
+        }
+    }
+
+    /// Check if current event is a right-click
+    unsafe fn is_right_click() -> bool {
+        unsafe {
+            let ns_app_class = Class::get("NSApplication").unwrap();
+            let ns_app: *mut Object = msg_send![ns_app_class, sharedApplication];
+            let current_event: *mut Object = msg_send![ns_app, currentEvent];
+
+            if current_event.is_null() {
+                return false;
+            }
+
+            // NSEventTypeRightMouseDown = 3
+            // NSEventTypeRightMouseUp = 4
+            let event_type: u64 = msg_send![current_event, type];
+
+            // Also check for control+click (which is also right-click on macOS)
+            let modifier_flags: u64 = msg_send![current_event, modifierFlags];
+            // NSEventModifierFlagControl = 1 << 18 = 262144
+            let control_pressed = (modifier_flags & 262144) != 0;
+
+            event_type == 3 || event_type == 4 || control_pressed
+        }
+    }
+
     /// Register custom delegate class for menu actions
     fn register_menu_delegate_class() -> &'static Class {
         use objc::declare::ClassDecl;
@@ -190,40 +249,17 @@ mod macos {
             let superclass = Class::get("NSObject").unwrap();
             let mut decl = ClassDecl::new("UsherMenuDelegate", superclass).unwrap();
 
-            // Add showWindow: method - toggle window visibility
-            extern "C" fn show_window(_this: &Object, _cmd: Sel, _sender: *mut Object) {
+            // Add trayIconClicked: method
+            // Left click: show window
+            // Right click: show menu
+            extern "C" fn tray_icon_clicked(_this: &Object, _cmd: Sel, _sender: *mut Object) {
                 unsafe {
-                    // Use the saved window reference
-                    if !MAIN_WINDOW.is_null() {
-                        let ns_app_class = Class::get("NSApplication").unwrap();
-                        let ns_app: *mut Object = msg_send![ns_app_class, sharedApplication];
-
-                        let is_visible: BOOL = msg_send![MAIN_WINDOW, isVisible];
-
-                        if is_visible == YES {
-                            // Hide window
-                            let _: () = msg_send![MAIN_WINDOW, orderOut: std::ptr::null::<Object>()];
-                            // Update menu item text to "Show Window"
-                            update_menu_item_title("Show Window");
-                        } else {
-                            // Show window and bring to front
-                            let _: () = msg_send![MAIN_WINDOW, makeKeyAndOrderFront: std::ptr::null::<Object>()];
-                            let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
-                            // Update menu item text to "Hide Window"
-                            update_menu_item_title("Hide Window");
-                        }
-                    }
-                }
-            }
-
-            // Helper function to update menu item title
-            fn update_menu_item_title(title: &str) {
-                unsafe {
-                    if !SHOW_HIDE_MENU_ITEM.is_null() {
-                        let c_str = std::ffi::CString::new(title).unwrap();
-                        let ns_string_class = Class::get("NSString").unwrap();
-                        let title_ns: *mut Object = msg_send![ns_string_class, stringWithUTF8String: c_str.as_ptr()];
-                        let _: () = msg_send![SHOW_HIDE_MENU_ITEM, setTitle: title_ns];
+                    if is_right_click() {
+                        // Right click: show menu
+                        show_tray_menu();
+                    } else {
+                        // Left click: show window
+                        show_main_window();
                     }
                 }
             }
@@ -235,8 +271,8 @@ mod macos {
 
             unsafe {
                 decl.add_method(
-                    sel!(showWindow:),
-                    show_window as extern "C" fn(&Object, Sel, *mut Object),
+                    sel!(trayIconClicked:),
+                    tray_icon_clicked as extern "C" fn(&Object, Sel, *mut Object),
                 );
                 decl.add_method(
                     sel!(quitApp:),

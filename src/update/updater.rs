@@ -7,8 +7,7 @@ use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
 use crate::{
-    AppState, CustomComponentType, MainWindow, NotificationManager, NotificationOptions,
-    UpdateLogic,
+    CustomComponentType, MainWindow, NotificationManager, NotificationOptions, UpdateLogic,
 };
 
 #[derive(Default, Clone)]
@@ -653,44 +652,26 @@ pub fn reset_update_state(state: &Arc<Mutex<UpdateState>>) {
     s.error = String::new();
 }
 
+/// Updater context returned from setup_updater
+/// Contains the runtime and state needed for auto-update control
+pub struct UpdaterContext {
+    pub rt: Arc<Runtime>,
+    pub state: Arc<Mutex<UpdateState>>,
+}
+
 /// Setup updater - initialize all update-related callbacks and logic
 ///
 /// This function sets up:
-/// - Auto-update toggle callback (on_toggle_auto_update)
 /// - Manual update check callback (on_check_update)
 /// - Install update callback (on_install)
 /// - Cancel download callback (on_cancel_download)
-pub fn setup_updater(app: &MainWindow) -> Result<()> {
+///
+/// Note: Auto-update initialization and callback should be done in lib.rs
+/// after settings are loaded, using the returned UpdaterContext.
+pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
     let state = Arc::new(Mutex::new(UpdateState::default()));
     let rt = Arc::new(Runtime::new().context("Failed to create Tokio runtime")?);
     let app_weak = app.as_weak();
-
-    // ========= Auto-update toggle callback ========= //
-    // This is called when user toggles auto-update switch in Settings
-    let state_clone_auto = state.clone();
-    let app_weak_clone_auto = app_weak.clone();
-    let rt_clone_auto = rt.clone();
-    AppState::get(app).on_toggle_auto_update(move |enabled| {
-        println!(
-            "[DEBUG] toggle-auto-update callback called, enabled: {}",
-            enabled
-        );
-        if enabled {
-            super::check_update::start_auto_update(
-                app_weak_clone_auto.clone(),
-                state_clone_auto.clone(),
-                rt_clone_auto.clone(),
-            );
-        } else {
-            super::check_update::stop_auto_update();
-        }
-    });
-
-    // Initialize auto-update based on initial state (default is enabled)
-    let initial_auto_update = AppState::get(app).get_auto_update();
-    if initial_auto_update {
-        super::check_update::start_auto_update(app_weak.clone(), state.clone(), rt.clone());
-    }
 
     // Global cancel flag
     let cancel_flag: CancelFlag = Arc::new(AtomicBool::new(false));
@@ -1056,5 +1037,6 @@ pub fn setup_updater(app: &MainWindow) -> Result<()> {
         });
     });
 
-    Ok(())
+    // Return the context for auto-update control
+    Ok(UpdaterContext { rt, state })
 }

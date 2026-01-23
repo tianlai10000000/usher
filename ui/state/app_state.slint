@@ -7,6 +7,9 @@ export global AppState {
 
     // theme
     in-out property <int> theme-mode: 0; // 0=light, 1=dark, 2=auto
+    // effective-dark-mode is the actual dark mode state after resolving Auto
+    // This is set by Rust code when theme-mode is 2 (Auto)
+    in-out property <bool> effective-dark-mode: false;
 
     // auth
     in-out property <bool> is-logged-in: false;
@@ -34,14 +37,29 @@ export global AppState {
     // auto-update
     callback toggle-auto-update(enabled: bool);
     
-    // 当 theme-mode 改变时，更新 Palette.color-scheme
+    // Update Palette.color-scheme when theme-mode changes
     changed theme-mode => {
         if (root.theme-mode == 1) {
             Palette.color-scheme = ColorScheme.dark;
+            root.effective-dark-mode = true;
         } else if (root.theme-mode == 0) {
             Palette.color-scheme = ColorScheme.light;
+            root.effective-dark-mode = false;
         }
-        // mode == 2 (auto) 时保持系统默认，不修改 Palette.color-scheme
+        // mode == 2 (auto): effective-dark-mode is set by Rust code
+        // and we update Palette based on that
+    }
+    
+    // When effective-dark-mode changes (set by Rust for Auto mode), update Palette
+    changed effective-dark-mode => {
+        if (root.theme-mode == 2) {
+            // Only apply when in Auto mode
+            if (root.effective-dark-mode) {
+                Palette.color-scheme = ColorScheme.dark;
+            } else {
+                Palette.color-scheme = ColorScheme.light;
+            }
+        }
     }
 
     // auth
