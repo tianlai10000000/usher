@@ -760,7 +760,7 @@ pub fn setup_notifications(
     let shared_queue_clone = shared_queue.clone();
     let ui_weak_action = ui_weak.clone();
     manager.on_action_clicked(move |notification_id, action_index| {
-        println!(
+        log::debug!(
             "[Notification] Action Clicked: notification_id={}, action_index={}",
             notification_id, action_index
         );
@@ -787,7 +787,7 @@ pub fn setup_notifications(
                 }
             }
 
-            println!(
+            log::debug!(
                 "[Notification] Action '{}' clicked on notification {} (tag: '{}')",
                 action_text, notification_id, tag
             );
@@ -799,21 +799,21 @@ pub fn setup_notifications(
                 "delete-file" => {
                     if action_index == 1 {
                         // User clicked "Delete" button
-                        println!("[Notification] Delete file action triggered");
+                        log::info!("[Notification] Delete file action triggered");
                         // Add your delete file logic here
                     }
                 }
                 "confirm-update" => {
                     if action_index == 1 {
                         // User clicked "Update" button
-                        println!("[Notification] Update action triggered");
+                        log::info!("[Notification] Update action triggered");
                         // Add your update logic here
                     }
                 }
                 "auto-update" => {
                     if action_index == 0 {
                         // User clicked "Cancel" button
-                        println!("[Notification] Auto-update cancelled by user");
+                        log::info!("[Notification] Auto-update cancelled by user");
                         // Reset update state
                         if let Some(ui) = ui_weak_for_action.upgrade() {
                             let logic = ui.global::<UpdateLogic>();
@@ -821,7 +821,7 @@ pub fn setup_notifications(
                         }
                     } else if action_index == 1 {
                         // User clicked "Update Now" button
-                        println!("[Notification] Auto-update: starting update...");
+                        log::info!("[Notification] Auto-update: starting update...");
                         if let Some(ui) = ui_weak_for_action.upgrade() {
                             let logic = ui.global::<UpdateLogic>();
                             let new_version = logic.get_new_version().to_string();
@@ -838,7 +838,7 @@ pub fn setup_notifications(
                 // Add more tag handlers as needed
                 _ => {
                     // Default: just log the action
-                    println!(
+                    log::debug!(
                         "[Notification] Unhandled tag '{}', action: '{}'",
                         tag, action_text
                     );

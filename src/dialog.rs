@@ -143,7 +143,7 @@ pub fn setup_dialog(ui: &MainWindow) {
     // Default button click callback (with id parameter)
     let ui_weak_default = ui_weak.clone();
     manager.on_default_action_clicked(move |id| {
-        println!("[Dialog] Default Action Clicked: id={}", id);
+        log::debug!("[Dialog] Default Action Clicked: id={}", id);
         let id_str = id.to_string();
         let ui_weak = ui_weak_default.clone();
 
@@ -173,7 +173,7 @@ pub fn setup_dialog(ui: &MainWindow) {
     // Action button click callback (with id and index parameters)
     let ui_weak_action = ui_weak.clone();
     manager.on_action_clicked(move |id, index| {
-        println!("[Dialog] Action Clicked: id={}, index={}", id, index);
+        log::debug!("[Dialog] Action Clicked: id={}, index={}", id, index);
         let ui_weak = ui_weak_action.clone();
 
         // Use Timer to delay execution, avoid RefCell borrow conflict

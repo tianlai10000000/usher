@@ -1,0 +1,154 @@
+import { MaterialText, MaterialPalette, MaterialStyleMetrics } from "@material";
+import { Route } from "../route/routeMap.slint";
+
+export component TitleBar {
+    in property <string> title: "Usher";
+    in property <Route> current-route: Route.Home;
+    callback navigate(Route);
+    
+    // macOS 交通灯按钮区域预留宽度
+    property <length> traffic_light_width: 78px;
+    
+    height: 38px;
+    
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: MaterialPalette.surface;
+        
+        // 三列布局：左侧占位 | 中间标题 | 右侧按钮
+        HorizontalLayout {
+            width: 100%;
+            height: 100%;
+            
+            // 左侧：交通灯占位区域
+            Rectangle {
+                width: traffic_light_width;
+            }
+            
+            // 中间：标题区域（水平居中）
+            Rectangle {
+                horizontal-stretch: 1;
+                
+                HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
+                    alignment: center;
+                    spacing: 8px;
+                    
+                    // App Logo - 绝对定位确保垂直居中
+                    Rectangle {
+                        width: 18px;
+                        height: 38px;
+                        
+                        Image {
+                            width: 18px;
+                            height: 18px;
+                            x: 0;
+                            y: (parent.height - self.height) / 2;
+                            source: @image-url("../../logo.png");
+                        }
+                    }
+                    
+                    // 文字容器
+                    Rectangle {
+                        height: 38px;
+                        
+                        MaterialText {
+                            text: title;
+                            font_size: 13px;
+                            font_weight: 600;
+                            color: MaterialPalette.on_surface;
+                            vertical_alignment: center;
+                        }
+                    }
+                }
+            }
+            
+            // 右侧：操作按钮区域
+            Rectangle {
+                width: traffic_light_width;
+                
+                // 使用绝对定位实现垂直居中
+                HorizontalLayout {
+                    x: 0;
+                    y: (parent.height - 28px) / 2;
+                    width: 100%;
+                    height: 28px;
+                    padding-right: 12px;
+                    spacing: 4px;
+                    alignment: end;
+                    
+                    // Settings 按钮
+                    settings_btn := Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border_radius: 6px;
+                        background: settings_touch.has-hover ? MaterialPalette.surface_container_high : transparent;
+                        
+                        animate background { duration: 120ms; easing: ease-out; }
+                        
+                        Image {
+                            width: 16px;
+                            height: 16px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            source: @image-url("../assets/icons/settings.svg");
+                            colorize: current-route == Route.Settings 
+                                ? MaterialPalette.primary 
+                                : MaterialPalette.on_surface_variant;
+                        }
+                        
+                        settings_touch := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.navigate(Route.Settings);
+                            }
+                        }
+                    }
+                    
+                    // About 按钮
+                    about_btn := Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border_radius: 6px;
+                        background: about_touch.has-hover ? MaterialPalette.surface_container_high : transparent;
+                        
+                        animate background { duration: 120ms; easing: ease-out; }
+                        
+                        Image {
+                            width: 16px;
+                            height: 16px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            source: @image-url("../assets/icons/about.svg");
+                            colorize: current-route == Route.About 
+                                ? MaterialPalette.primary 
+                                : MaterialPalette.on_surface_variant;
+                        }
+                        
+                        about_touch := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.navigate(Route.About);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 底部分隔线
+        Rectangle {
+            x: 0;
+            y: parent.height - 1px;
+            width: 100%;
+            height: 1px;
+            background: MaterialPalette.outline_variant;
+        }
+    }
+}

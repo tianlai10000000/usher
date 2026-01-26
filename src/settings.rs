@@ -20,6 +20,10 @@ pub struct AppSettings {
     /// Auto update enabled
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
+
+    /// Navigation drawer expanded state
+    #[serde(default = "default_navigation_drawer_expanded")]
+    pub navigation_drawer_expanded: bool,
 }
 
 fn default_theme_mode() -> i32 {
@@ -30,11 +34,16 @@ fn default_auto_update() -> bool {
     true // Default to enabled
 }
 
+fn default_navigation_drawer_expanded() -> bool {
+    true // Default to expanded
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme_mode: default_theme_mode(),
             auto_update: default_auto_update(),
+            navigation_drawer_expanded: default_navigation_drawer_expanded(),
         }
     }
 }
@@ -78,7 +87,7 @@ impl SettingsManager {
         if let Some(parent) = config_path.parent() {
             if !parent.exists() {
                 if let Err(e) = fs::create_dir_all(parent) {
-                    eprintln!("[Settings] Failed to create config directory: {}", e);
+                    log::error!("[Settings] Failed to create config directory: {}", e);
                     return AppSettings::default();
                 }
             }
@@ -86,7 +95,7 @@ impl SettingsManager {
 
         // If config file doesn't exist, return default settings
         if !config_path.exists() {
-            println!("[Settings] Config file not found, using defaults");
+            log::info!("[Settings] Config file not found, using defaults");
             return AppSettings::default();
         }
 
@@ -97,16 +106,16 @@ impl SettingsManager {
         {
             Ok(config) => match config.try_deserialize::<AppSettings>() {
                 Ok(settings) => {
-                    println!("[Settings] Loaded settings from {:?}", config_path);
+                    log::info!("[Settings] Loaded settings from {:?}", config_path);
                     settings
                 }
                 Err(e) => {
-                    eprintln!("[Settings] Failed to deserialize settings: {}", e);
+                    log::error!("[Settings] Failed to deserialize settings: {}", e);
                     AppSettings::default()
                 }
             },
             Err(e) => {
-                eprintln!("[Settings] Failed to load config: {}", e);
+                log::error!("[Settings] Failed to load config: {}", e);
                 AppSettings::default()
             }
         }
@@ -135,7 +144,7 @@ impl SettingsManager {
         fs::write(&self.config_path, toml_content)
             .map_err(|e| format!("Failed to write config file: {}", e))?;
 
-        println!("[Settings] Saved settings to {:?}", self.config_path);
+        log::info!("[Settings] Saved settings to {:?}", self.config_path);
         Ok(())
     }
 
@@ -157,6 +166,13 @@ impl SettingsManager {
             settings.auto_update = enabled;
         }
     }
+
+    /// Update drawer expanded setting
+    pub fn set_navigation_drawer_expanded(&self, expanded: bool) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.navigation_drawer_expanded = expanded;
+        }
+    }
 }
 
 // Global settings manager instance
@@ -174,7 +190,7 @@ pub fn save_theme_mode(mode: i32) {
     get_settings_manager().set_theme_mode(mode);
     Timer::single_shot(std::time::Duration::from_millis(100), || {
         if let Err(e) = get_settings_manager().save() {
-            eprintln!("[Settings] Failed to save settings: {}", e);
+            log::error!("[Settings] Failed to save settings: {}", e);
         }
     });
 }
@@ -184,7 +200,17 @@ pub fn save_auto_update(enabled: bool) {
     get_settings_manager().set_auto_update(enabled);
     Timer::single_shot(std::time::Duration::from_millis(100), || {
         if let Err(e) = get_settings_manager().save() {
-            eprintln!("[Settings] Failed to save settings: {}", e);
+            log::error!("[Settings] Failed to save settings: {}", e);
+        }
+    });
+}
+
+/// Save drawer expanded setting asynchronously
+pub fn save_navigation_drawer_expanded(expanded: bool) {
+    get_settings_manager().set_navigation_drawer_expanded(expanded);
+    Timer::single_shot(std::time::Duration::from_millis(100), || {
+        if let Err(e) = get_settings_manager().save() {
+            log::error!("[Settings] Failed to save settings: {}", e);
         }
     });
 }
@@ -195,7 +221,7 @@ pub fn load_settings() -> AppSettings {
     get_settings_manager().get()
 }
 
-/// Setup settings module - Apply loaded settings to AppState
+/// Setup settings module - Apply loaded settings to AppState and MainWindow
 ///
 /// Note: This function only applies settings to UI state.
 /// Callbacks for saving settings are set up in lib.rs to coordinate with other UI logic.
@@ -205,8 +231,11 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app_state.set_theme_mode(settings.theme_mode);
     app_state.set_auto_update(settings.auto_update);
 
-    println!(
-        "[Settings] Applied settings: theme_mode={}, auto_update={}",
-        settings.theme_mode, settings.auto_update
+    // Apply drawer expanded state to MainWindow
+    app.set_navigation_drawer_expanded(settings.navigation_drawer_expanded);
+
+    log::info!(
+        "[Settings] Applied settings: theme_mode={}, auto_update={}, navigation_drawer_expanded={}",
+        settings.theme_mode, settings.auto_update, settings.navigation_drawer_expanded
     );
 }

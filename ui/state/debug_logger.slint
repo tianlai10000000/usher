@@ -1,0 +1,69 @@
+// Debug Logger - Slint logging interface
+//
+// Usage examples:
+// DebugLogger.info("User clicked button");
+// DebugLogger.error("Failed to load data");
+// DebugLogger.debug("Current value: " + value);
+
+export global DebugLogger {
+    // ========= Log Level Constants ========= //
+    // Use these to set the log level in Slint
+    pure public function level-error() -> int { return 0; }
+    pure public function level-warn() -> int { return 1; }
+    pure public function level-info() -> int { return 2; }
+    pure public function level-debug() -> int { return 3; }
+    pure public function level-trace() -> int { return 4; }
+
+    // ========= Logger Configuration ========= //
+    // Current log level (only logs >= this level will be recorded)
+    in-out property <int> current-level: 2; // Default: Info
+    
+    // Whether to write logs to file
+    in-out property <bool> write-to-file: false;
+
+    // ========= Log Callbacks (Implemented by Rust) ========= //
+    // These callbacks are bound by Rust code to forward logs to the Rust logging system
+    callback log-error(message: string);
+    callback log-warn(message: string);
+    callback log-info(message: string);
+    callback log-debug(message: string);
+    callback log-trace(message: string);
+
+    // ========= Convenience Log Functions ========= //
+    // These functions check the log level and call the appropriate callback
+    
+    public function error(message: string) {
+        if (current-level >= 0) {
+            log-error(message);
+        }
+    }
+    
+    public function warn(message: string) {
+        if (current-level >= 1) {
+            log-warn(message);
+        }
+    }
+    
+    public function info(message: string) {
+        if (current-level >= 2) {
+            log-info(message);
+        }
+    }
+    
+    public function debug(message: string) {
+        if (current-level >= 3) {
+            log-debug(message);
+        }
+    }
+    
+    public function trace(message: string) {
+        if (current-level >= 4) {
+            log-trace(message);
+        }
+    }
+
+    // ========= Configuration Callbacks ========= //
+    // Used to change logger configuration from the Slint side
+    callback set-level(level: int);
+    callback set-write-to-file(enabled: bool);
+}

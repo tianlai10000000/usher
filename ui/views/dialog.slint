@@ -1,4 +1,4 @@
-import { MaterialText, FilledButton, Horizontal, Vertical } from "@material";
+import { MaterialText, FilledButton, Horizontal, Vertical, MaterialStyleMetrics } from "@material";
 import { Route } from "../route/routeMap.slint";
 import { DialogManager } from "../components/dialog/dialog_manager.slint";
 
@@ -33,9 +33,10 @@ export component Dialog {
             // 标题
             Horizontal {
                 width: parent.width;
-                height: 50px;
+                height: 60px;
                 alignment: start;
                 vertical-stretch: 0;
+                padding-top: MaterialStyleMetrics.padding_24;
     
                 MaterialText {
                     text: "Dialog Example";

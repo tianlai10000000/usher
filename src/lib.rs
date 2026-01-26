@@ -36,6 +36,47 @@ use network::setup_network_monitor;
 mod settings;
 use settings::setup_settings;
 
+pub mod debug_logger;
+use debug_logger::{init_logger, LogConfig};
+
+/// Setup Slint logger callback bindings
+fn setup_debug_logger(app: &MainWindow) {
+    // Bind log callbacks
+    DebugLogger::get(app).on_log_error(|msg| {
+        debug_logger::slint_log_error(&msg);
+    });
+
+    DebugLogger::get(app).on_log_warn(|msg| {
+        debug_logger::slint_log_warn(&msg);
+    });
+
+    DebugLogger::get(app).on_log_info(|msg| {
+        debug_logger::slint_log_info(&msg);
+    });
+
+    DebugLogger::get(app).on_log_debug(|msg| {
+        debug_logger::slint_log_debug(&msg);
+    });
+
+    DebugLogger::get(app).on_log_trace(|msg| {
+        debug_logger::slint_log_trace(&msg);
+    });
+
+    // Configuration callbacks (optional implementation)
+    DebugLogger::get(app).on_set_level(|level| {
+        log::info!("[Logger] Level change requested to: {}", level);
+        // Note: fern cannot dynamically change level after initialization
+        // This only logs the request, actual change requires app restart
+    });
+
+    DebugLogger::get(app).on_set_write_to_file(|enabled| {
+        log::info!("[Logger] Write to file change requested: {}", enabled);
+        // Same as above, requires app restart to take effect
+    });
+
+    log::debug!("[Logger] Slint callbacks bound");
+}
+
 /// Set application-level appearance on macOS (called BEFORE window is shown)
 /// This prevents the flash of wrong theme on startup
 #[cfg(target_os = "macos")]
@@ -79,7 +120,7 @@ fn set_app_appearance(is_dark: bool) {
                     msg_send![ns_appearance_class, appearanceNamed: name_obj];
                 if !appearance.is_null() {
                     let _: () = msg_send![ns_app, setAppearance: appearance];
-                    println!(
+                    log::info!(
                         "[Theme] Set app appearance to: {}",
                         if is_dark { "dark" } else { "light" }
                     );
@@ -172,88 +213,50 @@ fn get_effective_dark_mode(theme_mode: i32) -> bool {
     }
 }
 
+/// Update window appearance when theme changes (native title bar)
 #[cfg(target_os = "macos")]
-fn set_title_bar_color(_window: &MainWindow, is_dark: bool) {
+fn set_title_bar_color(window: &MainWindow, is_dark: bool) {
+    use raw_window_handle::HasWindowHandle;
     use objc::msg_send;
     use objc::runtime::{Class, Object};
     use std::ffi::CString;
-    use std::ptr;
 
-    // Use delayed execution to ensure window is created and execute on main thread
-    slint::invoke_from_event_loop(move || {
-        unsafe {
-            // Get application's main window
-            let ns_app_class = match Class::get("NSApplication") {
-                Some(cls) => cls,
-                None => return,
-            };
-
-            let ns_app: *mut Object = msg_send![ns_app_class, sharedApplication];
-            if ns_app.is_null() {
-                return;
-            }
-
-            let ns_window: *mut Object = msg_send![ns_app, mainWindow];
-            if ns_window.is_null() {
-                return;
-            }
-
-            if is_dark {
-                // Set title bar to dark mode
-                // Make title bar transparent so background color shows through
-                let _: () = msg_send![ns_window, setTitlebarAppearsTransparent: objc::runtime::YES];
-
-                // Set window background to Material Design dark theme background color rgb(17, 19, 24)
-                if let Some(ns_color_class) = Class::get("NSColor") {
-                    // Use colorWithRed:green:blue:alpha: to create color
-                    // Convert RGB(17, 19, 24) to 0-1 range: (17/255.0, 19/255.0, 24/255.0)
-                    let r = 17.0 / 255.0;
-                    let g = 19.0 / 255.0;
-                    let b = 24.0 / 255.0;
-                    let dark_bg_color: *mut Object = msg_send![ns_color_class, colorWithRed: r green: g blue: b alpha: 1.0];
-                    let _: () = msg_send![ns_window, setBackgroundColor: dark_bg_color];
+    if let Ok(handle) = window.window().window_handle().window_handle() {
+        if let raw_window_handle::RawWindowHandle::AppKit(appkit_handle) = handle.as_ref() {
+            let ns_view = appkit_handle.ns_view.as_ptr() as *mut Object;
+            
+            unsafe {
+                let ns_window: *mut Object = msg_send![ns_view, window];
+                if ns_window.is_null() {
+                    return;
                 }
 
-                // Set window appearance to dark mode so title text becomes white
+                // Set window appearance (light/dark)
                 if let Some(ns_appearance_class) = Class::get("NSAppearance") {
                     if let Some(ns_string_class) = Class::get("NSString") {
-                        // Create NSString "NSAppearanceNameDarkAqua"
-                        if let Ok(c_str) = CString::new("NSAppearanceNameDarkAqua") {
-                            let appearance_name: *mut Object = msg_send![ns_string_class, stringWithUTF8String: c_str.as_ptr()];
-                            if !appearance_name.is_null() {
-                                let dark_appearance: *mut Object = msg_send![ns_appearance_class, appearanceNamed: appearance_name];
-                                if !dark_appearance.is_null() {
-                                    let _: () = msg_send![ns_window, setAppearance: dark_appearance];
+                        let appearance_name = if is_dark {
+                            "NSAppearanceNameDarkAqua"
+                        } else {
+                            "NSAppearanceNameAqua"
+                        };
+                        if let Ok(c_str) = CString::new(appearance_name) {
+                            let name_obj: *mut Object =
+                                msg_send![ns_string_class, stringWithUTF8String: c_str.as_ptr()];
+                            if !name_obj.is_null() {
+                                let appearance: *mut Object =
+                                    msg_send![ns_appearance_class, appearanceNamed: name_obj];
+                                if !appearance.is_null() {
+                                    let _: () = msg_send![ns_window, setAppearance: appearance];
                                 }
                             }
                         }
                     }
                 }
-            } else {
-                // Restore light mode
-                let _: () = msg_send![ns_window, setTitlebarAppearsTransparent: objc::runtime::NO];
 
-                // Restore default background color (nil means use system default)
-                let _: () = msg_send![ns_window, setBackgroundColor: ptr::null_mut::<Object>()];
-
-                // Set window appearance to light mode
-                if let Some(ns_appearance_class) = Class::get("NSAppearance") {
-                    if let Some(ns_string_class) = Class::get("NSString") {
-                        // Create NSString "NSAppearanceNameAqua"
-                        if let Ok(c_str) = CString::new("NSAppearanceNameAqua") {
-                            let appearance_name: *mut Object = msg_send![ns_string_class, stringWithUTF8String: c_str.as_ptr()];
-                            if !appearance_name.is_null() {
-                                let light_appearance: *mut Object = msg_send![ns_appearance_class, appearanceNamed: appearance_name];
-                                if !light_appearance.is_null() {
-                                    let _: () = msg_send![ns_window, setAppearance: light_appearance];
-                                }
-                            }
-                        }
-                    }
-                }
+                log::info!("[Theme] Window appearance updated (dark: {})", is_dark);
             }
         }
-    }).ok();
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -278,12 +281,24 @@ impl Router {
             // - Record route history
             // - Send analytics events
             // - Lazy load certain resources, etc.
-            println!("→ Navigate to: {:?}", route);
+            log::debug!("→ Navigate to: {:?}", route);
         }
     }
 }
 
 fn ui() -> Result<MainWindow> {
+    // ========= Logger Initialization ========= //
+    // Initialize debug logger early, before other components
+    init_logger(LogConfig {
+        level: log::LevelFilter::Debug,
+        write_to_file: cfg!(debug_assertions), // Write to file in debug mode
+        log_file_path: None,                   // Use default path
+        log_per_day: true,                     // Organize logs by date (YYYY-MM-DD/usher.log)
+    })
+    .unwrap_or_else(|e| eprintln!("Logger init failed: {}", e)); // eprintln here since logger not yet initialized
+
+    log::info!("Usher v{} starting...", env!("CARGO_PKG_VERSION"));
+
     // ========= Pre-Window Settings ========= //
     // Load settings BEFORE creating window to set app appearance early (prevents theme flash)
     let loaded_settings = settings::load_settings();
@@ -293,7 +308,11 @@ fn ui() -> Result<MainWindow> {
     set_app_appearance(is_dark);
 
     // Now create the MainWindow (will inherit app appearance)
+    // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
+
+    // ========= Debug Logger Slint Bindings ========= //
+    setup_debug_logger(&app);
 
     // ========= Settings ========= //
     // Apply loaded settings to AppState
@@ -332,7 +351,14 @@ fn ui() -> Result<MainWindow> {
             stop_auto_update();
         }
 
-        println!("[Settings] Auto update changed to: {}", enabled);
+        log::info!("[Settings] Auto update changed to: {}", enabled);
+    });
+
+    // ========= Navigation Drawer Expanded ========= //
+    // Save navigation drawer expanded state when toggled
+    app.on_toggle_navigation_drawer_expanded(move |expanded| {
+        settings::save_navigation_drawer_expanded(expanded);
+        log::info!("[Settings] Navigation drawer expanded changed to: {}", expanded);
     });
 
     // ========= Router ========= //
@@ -367,84 +393,20 @@ fn ui() -> Result<MainWindow> {
             // Set title bar color
             set_title_bar_color(&win, is_dark);
 
-            println!(
+            log::info!(
                 "[Theme] Changed to mode: {} (effective dark: {})",
                 mode, is_dark
             );
         }
     });
 
-    // ========= Title Bar Customization ========= //
-    // App appearance is already set before window creation (no flash)
-    // Now set title bar-specific customizations (transparent title bar, custom background)
-    // Use minimal delay to ensure window is ready
+    // ========= Auto Theme Mode ========= //
+    // For Auto mode, set effective-dark-mode so Slint can update Palette
     let initial_theme = loaded_settings.theme_mode;
-    let app_weak_init = app.as_weak();
-    Timer::single_shot(std::time::Duration::from_millis(10), move || {
-        // Get effective dark mode (resolves Auto to actual light/dark)
+    if initial_theme == 2 {
         let is_dark = get_effective_dark_mode(initial_theme);
-
-        // For Auto mode, set effective-dark-mode so Slint can update Palette
-        if initial_theme == 2 {
-            if let Some(win) = app_weak_init.upgrade() {
-                AppState::get(&win).set_effective_dark_mode(is_dark);
-            }
-        }
-
-        // Set title bar customizations (transparent, custom background color)
-        #[cfg(target_os = "macos")]
-        slint::invoke_from_event_loop(move || {
-            use objc::msg_send;
-            use objc::runtime::{Class, Object};
-            use std::ptr;
-
-            unsafe {
-                let ns_app_class = match Class::get("NSApplication") {
-                    Some(cls) => cls,
-                    None => return,
-                };
-
-                let ns_app: *mut Object = msg_send![ns_app_class, sharedApplication];
-                if ns_app.is_null() {
-                    return;
-                }
-
-                let ns_window: *mut Object = msg_send![ns_app, mainWindow];
-                if ns_window.is_null() {
-                    return;
-                }
-
-                if is_dark {
-                    // Make title bar transparent and set custom background color
-                    let _: () =
-                        msg_send![ns_window, setTitlebarAppearsTransparent: objc::runtime::YES];
-
-                    if let Some(ns_color_class) = Class::get("NSColor") {
-                        let r = 17.0 / 255.0;
-                        let g = 19.0 / 255.0;
-                        let b = 24.0 / 255.0;
-                        let dark_bg_color: *mut Object =
-                            msg_send![ns_color_class, colorWithRed: r green: g blue: b alpha: 1.0];
-                        let _: () = msg_send![ns_window, setBackgroundColor: dark_bg_color];
-                    }
-                    println!(
-                        "[Theme] Initial title bar: dark (auto: {})",
-                        initial_theme == 2
-                    );
-                } else {
-                    // Reset to default title bar
-                    let _: () =
-                        msg_send![ns_window, setTitlebarAppearsTransparent: objc::runtime::NO];
-                    let _: () = msg_send![ns_window, setBackgroundColor: ptr::null_mut::<Object>()];
-                    println!(
-                        "[Theme] Initial title bar: light (auto: {})",
-                        initial_theme == 2
-                    );
-                }
-            }
-        })
-        .ok();
-    });
+        AppState::get(&app).set_effective_dark_mode(is_dark);
+    }
 
     // ========= App Info ========= //
     // Set application version number
@@ -476,7 +438,7 @@ fn ui() -> Result<MainWindow> {
     // and to run on main thread (required on macOS)
     Timer::single_shot(std::time::Duration::from_millis(500), move || {
         if let Err(e) = setup_tray(app_weak_tray) {
-            eprintln!("Failed to setup tray icon: {}", e);
+            log::error!("Failed to setup tray icon: {}", e);
         }
     });
 

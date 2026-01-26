@@ -72,6 +72,8 @@ mod macos {
                 if let Some(image) = load_status_bar_icon() {
                     let _: () = msg_send![button, setImage: image];
                     let _: () = msg_send![button, setTitle: create_nsstring("")];
+                } else {
+                    log::warn!("Failed to load tray icon, using text fallback 'U'");
                 }
 
                 // Set click action on the button
@@ -105,15 +107,69 @@ mod macos {
                 }
             }
 
-            println!("macOS tray icon created successfully");
+            log::info!("macOS tray icon created successfully");
             Ok(())
         }
     }
 
+    /// Find logo.png file in various possible locations
+    fn find_logo_path() -> Option<std::path::PathBuf> {
+        // Try multiple locations:
+        // 1. Current working directory (for development)
+        let cwd_path = std::path::Path::new("logo.png");
+        if cwd_path.exists() {
+            return Some(cwd_path.to_path_buf());
+        }
+
+        // 2. Executable directory
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                let exe_dir_logo = exe_dir.join("logo.png");
+                if exe_dir_logo.exists() {
+                    return Some(exe_dir_logo);
+                }
+            }
+        }
+
+        // 3. .app bundle Resources directory (for packaged app)
+        if let Ok(exe_path) = std::env::current_exe() {
+            let exe_str = exe_path.to_string_lossy();
+            if let Some(app_pos) = exe_str.find(".app/") {
+                // We're in a .app bundle
+                let app_path = std::path::Path::new(&exe_str[..app_pos + 4]);
+                let resources_path = app_path.join("Contents/Resources/logo.png");
+                if resources_path.exists() {
+                    return Some(resources_path);
+                }
+            }
+        }
+
+        // 4. Try to find from executable path going up to find project root
+        if let Ok(exe_path) = std::env::current_exe() {
+            let mut current = exe_path.parent();
+            while let Some(dir) = current {
+                let logo_path = dir.join("logo.png");
+                if logo_path.exists() {
+                    return Some(logo_path);
+                }
+                // Stop if we've gone too far up (e.g., reached /)
+                if dir.parent() == Some(dir) {
+                    break;
+                }
+                current = dir.parent();
+            }
+        }
+
+        None
+    }
+
     /// Load icon for status bar
     unsafe fn load_status_bar_icon() -> Option<*mut Object> {
-        // Try to load from logo.png
-        let path = CString::new("logo.png").ok()?;
+        // Find logo.png in various locations
+        let logo_path = find_logo_path()?;
+        let path_str = logo_path.to_string_lossy();
+        
+        let path = CString::new(path_str.as_ref()).ok()?;
         let ns_string: *mut Object =
             msg_send![Class::get("NSString")?, stringWithUTF8String: path.as_ptr()];
 
@@ -122,6 +178,7 @@ mod macos {
         let image: *mut Object = msg_send![image, initWithContentsOfFile: ns_string];
 
         if image.is_null() {
+            log::error!("Failed to load tray icon from: {}", path_str);
             return None;
         }
 
@@ -132,9 +189,10 @@ mod macos {
         };
         let _: () = msg_send![image, setSize: size];
 
-        // Set as template image for proper dark/light mode support
+        // Do not force template rendering to preserve logo shape/colors
         let _: () = msg_send![image, setTemplate: YES];
 
+        log::debug!("Successfully loaded tray icon from: {}", path_str);
         Some(image)
     }
 
@@ -361,14 +419,62 @@ mod other {
         Ok(())
     }
 
-    fn load_tray_icon() -> Result<tray_icon::Icon> {
-        if let Ok(img) = image::open("logo.png") {
-            let resized = img.resize_exact(32, 32, image::imageops::FilterType::Lanczos3);
-            let rgba = resized.to_rgba8();
-            let (width, height) = rgba.dimensions();
-            return Ok(tray_icon::Icon::from_rgba(rgba.into_raw(), width, height)?);
+    /// Find logo.png file in various possible locations
+    fn find_logo_path() -> Option<std::path::PathBuf> {
+        // Try multiple locations:
+        // 1. Current working directory (for development)
+        let cwd_path = std::path::Path::new("logo.png");
+        if cwd_path.exists() {
+            return Some(cwd_path.to_path_buf());
         }
 
+        // 2. Executable directory
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                let exe_dir_logo = exe_dir.join("logo.png");
+                if exe_dir_logo.exists() {
+                    return Some(exe_dir_logo);
+                }
+            }
+        }
+
+        // 3. Try to find from executable path going up to find project root
+        if let Ok(exe_path) = std::env::current_exe() {
+            let mut current = exe_path.parent();
+            while let Some(dir) = current {
+                let logo_path = dir.join("logo.png");
+                if logo_path.exists() {
+                    return Some(logo_path);
+                }
+                // Stop if we've gone too far up (e.g., reached /)
+                if dir.parent() == Some(dir) {
+                    break;
+                }
+                current = dir.parent();
+            }
+        }
+
+        None
+    }
+
+    fn load_tray_icon() -> Result<tray_icon::Icon> {
+        // Try to find logo.png in various locations
+        if let Some(logo_path) = find_logo_path() {
+            if let Ok(img) = image::open(&logo_path) {
+                log::debug!("Successfully loaded tray icon from: {:?}", logo_path);
+                let resized = img.resize_exact(32, 32, image::imageops::FilterType::Lanczos3);
+                let rgba = resized.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                return Ok(tray_icon::Icon::from_rgba(rgba.into_raw(), width, height)?);
+            } else {
+                log::error!("Failed to open logo.png from: {:?}", logo_path);
+            }
+        } else {
+            log::warn!("Could not find logo.png in any expected location");
+        }
+
+        // Fallback: create a default blue icon
+        log::info!("Using fallback icon for tray");
         let mut rgba_data = Vec::new();
         for _ in 0..32 {
             for _ in 0..32 {

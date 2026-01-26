@@ -1,15 +1,85 @@
-import { MaterialText } from "@material";
+import { MaterialText, MaterialPalette } from "@material";
+import { AppState } from "../state/app_state.slint";
+import { PageView } from "../components/page/page_view.slint";
 
-export component Home {
+export component Home inherits PageView {
+    HorizontalLayout {
+        spacing: 16px;
+        alignment: start;
+
+        logo_wrap := Rectangle {
+            width: 80px;
+            height: 80px;
+            border_radius: 40px;
+            background: MaterialPalette.surface_container_high;
+            clip: true;
+
+            Image {
+                width: 56px;
+                height: 56px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                source: @image-url("../../logo.png");
+            }
+        }
+
+        VerticalLayout {
+            spacing: 6px;
+            alignment: start;
+
+            MaterialText {
+                text: "Usher";
+                font_size: 26px;
+                font_weight: 600;
+                color: MaterialPalette.on_surface;
+            }
+
+            Rectangle {
+                height: 24px;
+                border_radius: 12px;
+                background: MaterialPalette.surface_container_highest;
+
+                HorizontalLayout {
+                    height: 24px;
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    alignment: center;
+
+                    MaterialText {
+                        text: "v" + AppState.version;
+                        font_size: 12px;
+                        color: MaterialPalette.on_surface_variant;
+                        vertical_alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
     Rectangle {
-        width: parent.width;
-        height: parent.height;
-        
-        MaterialText {
-            text: "Home1";
-            color: #c31010;
-            font_size: 26px;
-            font_weight: 600;
+        height: 1px;
+        background: MaterialPalette.outline_variant;
+    }
+
+    VerticalLayout {
+        spacing: 10px;
+        alignment: start;
+
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+
+            MaterialText {
+                text: "Page";
+                font_size: 13px;
+                color: MaterialPalette.on_surface_variant;
+                min_width: 80px;
+            }
+            MaterialText {
+                text: "Home";
+                font_size: 14px;
+                color: MaterialPalette.on_surface;
+            }
         }
     }
 }

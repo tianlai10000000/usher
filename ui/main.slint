@@ -1,7 +1,8 @@
 import { 
-    FilledCard, AppBar, NavigationDrawer, Horizontal, Vertical, MaterialText, IconButton, 
+    FilledCard, AppBar, Horizontal, Vertical, MaterialText, IconButton, 
     MaterialPalette, MaterialStyleMetrics, CircularProgressIndicator, Modal, TextButton, 
     FilledButton, HorizontalDivider } from "@material";
+import { CustomNavDrawer, NavItem } from "./components/navigation/custom_nav_drawer.slint";
 import { ScrollView } from "../material-1.0-fixed/ui/components/scroll_view.slint";
 import { Login as LoginPage } from "./views/login.slint";
 import { Home as HomePage } from "./views/home.slint";
@@ -10,11 +11,14 @@ import { Settings as SettingsPage } from "./views/settings.slint";
 import { About as AboutPage } from "./views/about.slint";
 import { List as ListPage } from "./views/list.slint";
 import { Detail as DetailPage } from "./views/detail.slint";
+import { Tools as ToolsPage } from "./views/tools.slint";
+import { Chat as ChatPage } from "./views/chat.slint";
 import { Notification as NotificationPage } from "./views/notification.slint";
 import { Toast as ToastPage } from "./views/toast.slint";
 import { Dialog as DialogPage } from "./views/dialog.slint";
 import { Route } from "./route/routeMap.slint";
 import { AppState } from "./state/app_state.slint";
+import { DebugLogger } from "./state/debug_logger.slint";
 import { Breadcrumb } from "views/breadcrumb.slint";
 import { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
 import { NotificationIcons } from "./components/notify/icons.slint";
@@ -29,6 +33,7 @@ import { LayoutConstants } from "./layout_constants.slint";
 
 export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
+export { DebugLogger } from "./state/debug_logger.slint";
 export { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
 export { NotificationIcons } from "./components/notify/icons.slint";
 export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
@@ -59,7 +64,10 @@ export component MainWindow inherits Window {
     callback cancel-download();
     
     // 导航抽屉展开/收起状态
-    in-out property <bool> drawer-expanded: true;
+    in-out property <bool> navigation-drawer-expanded: true;
+    
+    // 抽屉展开/收起状态变化回调（用于保存设置）
+    callback toggle-navigation-drawer-expanded(bool);
 
     // Update Checker
     callback show-update-dialog(latest-version: string, current-version: string);
@@ -86,17 +94,16 @@ export component MainWindow inherits Window {
 
     }
 
-    // 主内容区域（菜单栏 + 右侧内容）- 占据窗口高度减去状态栏
+    // 主内容区域（菜单栏 + 右侧内容）- 使用原生标题栏，只减去状态栏高度
     Horizontal {
         x: 0;
         y: 0;
         width: root.width;
         height: root.height - LayoutConstants.status-bar-height;
         padding: 0px;
-        // background: #00ff00;
         
         Vertical {
-            width: root.drawer-expanded ? 150px : 56px;
+            width: root.navigation-drawer-expanded ? 120px : 56px;
             height: parent.height;
             padding: 0px;
             
@@ -104,8 +111,7 @@ export component MainWindow inherits Window {
             drawer_container := Rectangle {
                 width: parent.width;
                 height: parent.height;
-                    background: MaterialPalette.surface_container_low;
-                    border_radius: MaterialStyleMetrics.border_radius_16;
+                background: MaterialPalette.background;
                     
                     Vertical {
                         width: parent.width;
@@ -119,83 +125,74 @@ export component MainWindow inherits Window {
                             horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
                             vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
                             
-                            // 包装容器，用于减少 NavigationDrawer 的 padding
-                            drawer_wrapper := Rectangle {
+                            // 使用自定义导航组件（无标题，较小的菜单项高度）
+                            custom_nav := CustomNavDrawer {
                                 width: scroll_view.visible_width;
-                                height: navigation_drawer.height;
-                                background: transparent;
                                 
-                                navigation_drawer := NavigationDrawer {
-                                    // 通过负的 x 和 y 偏移来减少视觉上的 padding
-                                    x: -MaterialStyleMetrics.padding_12;
-                                    y: -MaterialStyleMetrics.padding_12;
-                                    width: parent.width + MaterialStyleMetrics.padding_12 * 2;
-                                    // height 会根据内容自动调整
+                                // 根据当前路由计算菜单索引，非菜单页面（Settings/About/Login）时为 -1
+                                current_index: root.current-route == Route.Home ? 0 :
+                                              root.current-route == Route.Search ? 1 :
+                                              root.current-route == Route.Notification ? 2 :
+                                              root.current-route == Route.Toast ? 3 :
+                                              root.current-route == Route.Dialog ? 4 :
+                                              root.current-route == Route.Tools ? 5 :
+                                              root.current-route == Route.Chat ? 6 :
+                                              root.current-route == Route.List ? 7 :
+                                              root.current-route == Route.Detail ? 8 : -1;
+                                
+                                items: [
+                                    { icon: @image-url("./assets/icons/home.svg"), text: root.navigation-drawer-expanded ? "Home" : "" },
+                                    { icon: @image-url("./assets/icons/search.svg"), text: root.navigation-drawer-expanded ? "Search" : "" },
+                                    { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Notify" : "" },
+                                    { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Toast" : "" },
+                                    { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Dialog" : "" },
+                                    { icon: @image-url("./assets/icons/tools.svg"), text: root.navigation-drawer-expanded ? "Tools" : ""},
+                                    { icon: @image-url("./assets/icons/chat.svg"), text: root.navigation-drawer-expanded ? "Chat" : ""},
+                                    { icon: @image-url("./assets/icons/list.svg"), text: root.navigation-drawer-expanded ? "List" : "" },
+                                    { icon: @image-url("./assets/icons/detail.svg"), text: root.navigation-drawer-expanded ? "Detail" : ""},
+                                    { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Settings" : ""},
+                                    { icon: @image-url("./assets/icons/about.svg"), text: root.navigation-drawer-expanded ? "About" : ""},
+                                ];
 
-                                    groups: [
-                                        {
-                                            title: root.drawer-expanded ? "Menu" : "",
-                                            items: [
-                                                { icon: @image-url("./assets/icons/home.svg"), text: root.drawer-expanded ? "Home" : "" },
-                                                { icon: @image-url("./assets/icons/search.svg"), text: root.drawer-expanded ? "Search" : "" },
-                                                { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Settings" : "" },
-                                                { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Notify" : "" },
-                                                { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Toast" : "" },
-                                                { icon: @image-url("./assets/icons/settings.svg"), text: root.drawer-expanded ? "Dialog" : "" },
-                                                { icon: @image-url("./assets/icons/about.svg"), text: root.drawer-expanded ? "About" : "" },
-                                                { icon: @image-url("./assets/icons/list.svg"), text: root.drawer-expanded ? "List" : "" },
-                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail" : ""},
-                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail2" : ""},
-                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail3" : ""},
-                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail4" : ""},
-                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail5" : ""},
-                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail6" : ""},
-                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail7" : ""},
-                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail8" : ""},
-                                                { icon: @image-url("./assets/icons/detail.svg"), text: root.drawer-expanded ? "Detail9" : ""}
-                                            ]
-                                        }
+                                selected(item_index) => {
+                                    // 路由映射数组：将菜单项索引映射到对应的路由
+                                    let routes: [Route] = [
+                                        Route.Home,
+                                        Route.Search,
+                                        Route.Notification,
+                                        Route.Toast,
+                                        Route.Dialog,
+                                        Route.Tools,
+                                        Route.Chat,
+                                        Route.List,
+                                        Route.Detail,
+                                        Route.Settings,
+                                        Route.About
                                     ];
-
-                                    selected(group_index, item_index) => {
-                                        if group_index == 0 {
-                                            // 路由映射数组：将菜单项索引映射到对应的路由
-                                            let routes: [Route] = [
-                                                Route.Home,
-                                                Route.Search,
-                                                Route.Settings,
-                                                Route.Notification,
-                                                Route.Toast,
-                                                Route.Dialog,
-                                                Route.About,
-                                                Route.List,
-                                                Route.Detail
-                                            ];
-                                            
-                                            if item_index >= 0 && item_index < routes.length {
-                                                let route = routes[item_index];
-                                                root.previous-route = root.current-route;
-                                                root.current-route = route;
-                                                root.navigate(route);
-                                            }
-                                        }
+                                    
+                                    if item_index >= 0 && item_index < routes.length {
+                                        let route = routes[item_index];
+                                        root.previous-route = root.current-route;
+                                        root.current-route = route;
+                                        root.navigate(route);
                                     }
                                 }
                             }
                             
                             // 设置 viewport_height 为内容的实际高度
-                            viewport_height: drawer_wrapper.height;
+                            viewport_height: custom_nav.height;
                         }
                         
                         // 切换按钮 - 放在底部
                         toggle_button := IconButton {
                             width: parent.width;
                             // height: 40px;
-                            icon: root.drawer-expanded ? @image-url("./assets/icons/arrow_left.svg") : @image-url("./assets/icons/arrow_right.svg");
-                            // tooltip: root.drawer-expanded ? "Collapse" : "Expand";
+                            icon: root.navigation-drawer-expanded ? @image-url("./assets/icons/arrow_left.svg") : @image-url("./assets/icons/arrow_right.svg");
+                            // tooltip: root.navigation-drawer-expanded ? "Collapse" : "Expand";
                             
                             clicked => {
-                                root.drawer-expanded = !root.drawer-expanded;
+                                root.navigation-drawer-expanded = !root.navigation-drawer-expanded;
+                                root.toggle-navigation-drawer-expanded(root.navigation-drawer-expanded);
                             }
                         }
                     }
@@ -206,7 +203,7 @@ export component MainWindow inherits Window {
             horizontal-stretch: 1;
             height: parent.height;
 
-            Vertical {
+            content := Vertical {
                 width: parent.width;
                 height: parent.height;
                 padding: 0px;
@@ -215,6 +212,10 @@ export component MainWindow inherits Window {
                 Breadcrumb {
                     horizontal-stretch: 1;
                     current-route: root.current-route;
+                    navigate(route) => {
+                        root.previous-route = root.current-route;
+                        root.navigate(route);
+                    }
                 }
 
                 // Page Views
@@ -227,6 +228,11 @@ export component MainWindow inherits Window {
                     Vertical {
                         width: page-scroll-view.visible_width;
                         spacing: 0px;
+                        alignment: start;
+                        padding-left: MaterialStyleMetrics.padding_4;
+                        padding-right: MaterialStyleMetrics.padding_4;
+                        padding-top: 0;
+                        padding-bottom: 0;
 
                         if root.current-route == Route.Login: LoginPage {
                             previous-route: root.previous-route;
@@ -235,8 +241,12 @@ export component MainWindow inherits Window {
                                 root.navigate(route);
                             }
                         }
-                        if root.current-route == Route.Home: HomePage {}
-                        if root.current-route == Route.Search: SearchPage {}
+                        if root.current-route == Route.Home: HomePage {
+                            viewport-height: page-scroll-view.visible-height - 2px;
+                        }
+                        if root.current-route == Route.Search: SearchPage {
+                            viewport-height: page-scroll-view.visible-height - 2px;
+                        }
                         if root.current-route == Route.Settings: SettingsPage {
                             check-update => {
                                 root.check-update();
@@ -249,10 +259,8 @@ export component MainWindow inherits Window {
                                 root.navigate(route);
                             }
                         }
-                        dialog-page := DialogPage {
-                            visible: root.current-route == Route.Dialog;
-                        }
                         if root.current-route == Route.About: AboutPage {
+                            viewport-height: page-scroll-view.visible-height - 2px;
                             navigate(route) => {
                                 root.previous-route = root.current-route;
                                 root.navigate(route);
@@ -260,7 +268,34 @@ export component MainWindow inherits Window {
                         }
                         if root.current-route == Route.List: ListPage {}
                         if root.current-route == Route.Detail: DetailPage {}
+                        if root.current-route == Route.Tools: ToolsPage {
+                            viewport-height: page-scroll-view.visible-height;
+                            navigate(route) => {
+                                root.previous-route = root.current-route;
+                                root.navigate(route);
+                            }
+                        }
+                        if root.current-route == Route.Chat: ChatPage {
+                            viewport-height: page-scroll-view.visible-height - 2px;
+                            navigate(route) => {
+                                root.previous-route = root.current-route;
+                                root.navigate(route);
+                            }
+                        }
                     }
+                }
+
+            }
+
+            dialog-page := DialogPage {
+                visible: root.current-route == Route.Dialog;
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                navigate(route) => {
+                    root.previous-route = root.current-route;
+                    root.navigate(route);
                 }
             }
         }

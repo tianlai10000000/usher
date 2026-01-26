@@ -34,7 +34,7 @@ fn perform_startup_check(
     .ok();
 
     rt.spawn(async move {
-        println!("[AUTO-UPDATE] Performing startup update check...");
+        log::info!("[AUTO-UPDATE] Performing startup update check...");
 
         let result = check_for_update(&state).await;
 
@@ -57,7 +57,7 @@ fn perform_startup_check(
                     drop(s);
 
                     let current_version = cargo_crate_version!().to_string();
-                    println!(
+                    log::info!(
                         "[AUTO-UPDATE] Update available: {} -> {}",
                         current_version, new_version
                     );
@@ -96,12 +96,12 @@ fn perform_startup_check(
                     })
                     .ok();
                 } else {
-                    println!("[AUTO-UPDATE] Already up to date");
+                    log::info!("[AUTO-UPDATE] Already up to date");
                 }
             }
             Err(e) => {
                 let error_msg = e.to_string();
-                println!("[AUTO-UPDATE] Startup check failed: {}", error_msg);
+                log::info!("[AUTO-UPDATE] Startup check failed: {}", error_msg);
                 
                 // Show error notification to user
                 let friendly_msg = if error_msg.contains("404") || error_msg.contains("Not Found") {
@@ -186,7 +186,7 @@ pub fn start_auto_update(
                     }
                     Err(e) => {
                         let error_msg = e.to_string();
-                        println!("[AUTO-UPDATE] Periodic check failed: {}", error_msg);
+                        log::info!("[AUTO-UPDATE] Periodic check failed: {}", error_msg);
                         
                         // Store error in state
                         {
@@ -229,7 +229,7 @@ pub fn start_auto_update(
         *t.borrow_mut() = Some(timer);
     });
 
-    println!("[AUTO-UPDATE] Started auto-update (immediate check + hourly timer)");
+    log::info!("[AUTO-UPDATE] Started auto-update (immediate check + hourly timer)");
 }
 
 /// Stop auto-update timer
@@ -240,7 +240,7 @@ pub fn stop_auto_update() {
         let mut timer_opt = t.borrow_mut();
         if timer_opt.is_some() {
             *timer_opt = None;
-            println!("[AUTO-UPDATE] Stopped auto-update timer");
+            log::info!("[AUTO-UPDATE] Stopped auto-update timer");
         }
     });
 }

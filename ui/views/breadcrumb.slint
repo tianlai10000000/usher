@@ -1,52 +1,235 @@
-import { MaterialText, Horizontal } from "@material";
+import { MaterialText, Horizontal, MaterialStyleMetrics, MaterialPalette, Icon, StateLayerArea } from "@material";
 import { Route } from "../route/routeMap.slint";
+
+// 面包屑项组件
+component BreadcrumbItem {
+    in property <image> icon;
+    in property <string> text;
+    in property <bool> is-current: false;  // 是否是当前页面
+    in property <bool> clickable: true;
+    
+    callback clicked();
+    
+    private property <bool> has-icon: icon.width > 0 && icon.height > 0;
+    private property <color> item-color: is-current ? MaterialPalette.primary : MaterialPalette.on-surface-variant;
+    private property <color> hover-color: MaterialPalette.primary;
+    
+    height: 28px;
+    width: item-layout.preferred-width;
+    
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: 6px;
+        background: touch.has-hover && clickable && !is-current ? MaterialPalette.surface-container-high : transparent;
+        
+        touch := TouchArea {
+            mouse-cursor: clickable && !is-current ? pointer : default;
+            
+            clicked => {
+                if clickable && !is-current {
+                    root.clicked();
+                }
+            }
+        }
+        
+        item-layout := HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 6px;
+            alignment: start;
+            
+            if has-icon: VerticalLayout {
+                alignment: center;
+                
+                Icon {
+                    width: 16px;
+                    height: 16px;
+                    source: icon;
+                    colorize: touch.has-hover && clickable && !is-current ? hover-color : item-color;
+                }
+            }
+            
+            VerticalLayout {
+                alignment: center;
+                
+                MaterialText {
+                    text: root.text;
+                    font-size: 14px;
+                    font-weight: is-current ? 600 : 400;
+                    color: touch.has-hover && clickable && !is-current ? hover-color : item-color;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+// 面包屑分隔符
+component BreadcrumbSeparator {
+    width: 20px;
+    height: 28px;
+    
+    VerticalLayout {
+        alignment: center;
+        
+        HorizontalLayout {
+            alignment: center;
+            
+            MaterialText {
+                text: "/";
+                font-size: 14px;
+                color: MaterialPalette.outline;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
 
 export component Breadcrumb {
     in property <Route> current-route: Route.Home;
     
-    // 根据路由生成面包屑文本
-    function get-breadcrumb-text(route: Route) -> string {
-        if route == Route.Login {
-            return "Login";
-        } else if route == Route.Home {
-            return "Home";
-        } else if route == Route.Search {
-            return "Search";
-        } else if route == Route.Settings {
-            return "Settings";
-        } else if route == Route.Notification {
-            return "Notify";
-        } else if route == Route.Toast {
-            return "Toast";
-        } else if route == Route.Dialog {
-            return "Dialog";
-        } else if route == Route.About {
-            return "Home > About";
-        } else if route == Route.List {
-            return "List";
-        } else if route == Route.Detail {
-            return "List > Detail";
-        } else {
-            return "Home";
-        }
+    callback navigate(Route);
+    
+    // 判断是否是子页面（需要显示父级路径）
+    private property <bool> is-about-page: current-route == Route.About;
+    private property <bool> is-detail-page: current-route == Route.Detail;
+    private property <bool> is-settings-page: current-route == Route.Settings;
+    
+    // 判断当前页面是否是首页
+    private property <bool> is-home: current-route == Route.Home;
+    
+    // 获取当前页面名称
+    function get-page-name(route: Route) -> string {
+        if route == Route.Login { return "Login"; }
+        if route == Route.Home { return "Home"; }
+        if route == Route.Search { return "Search"; }
+        if route == Route.Settings { return "Settings"; }
+        if route == Route.Notification { return "Notify"; }
+        if route == Route.Toast { return "Toast"; }
+        if route == Route.Dialog { return "Dialog"; }
+        if route == Route.About { return "About"; }
+        if route == Route.Tools { return "Tools"; }
+        if route == Route.Chat { return "Chat"; }
+        if route == Route.List { return "List"; }
+        if route == Route.Detail { return "Detail"; }
+        return "Home";
     }
     
     Rectangle {
         width: parent.width;
-        height: 36px;
+        height: 44px;
+        background: rgba(255, 255, 255, 0.05);
 
         Horizontal {
-            padding-left: 0px;
+            padding-left: 4px;
             padding-right: 0px;
             padding-bottom: 0px;
+            padding-top: MaterialStyleMetrics.padding_8;
             vertical-stretch: 1;
             alignment: start;
-
-            MaterialText {
-                text: root.get-breadcrumb-text(root.current-route);
-                font_size: 20px;
-                font_weight: 600;
-                vertical_alignment: center;
+            spacing: 0px;
+            
+            // 首页项（始终显示）
+            BreadcrumbItem {
+                icon: @image-url("../assets/icons/home.svg");
+                text: "Home";
+                is-current: is-home;
+                clickable: !is-home;
+                
+                clicked => {
+                    root.navigate(Route.Home);
+                }
+            }
+            
+            // About 页面：Home > About
+            if is-about-page: BreadcrumbSeparator {}
+            if is-about-page: BreadcrumbItem {
+                icon: @image-url("../assets/icons/about.svg");
+                text: "About";
+                is-current: true;
+            }
+            
+            // Settings 页面：Home > Settings
+            if is-settings-page: BreadcrumbSeparator {}
+            if is-settings-page: BreadcrumbItem {
+                icon: @image-url("../assets/icons/settings.svg");
+                text: "Settings";
+                is-current: true;
+            }
+            
+            // Detail 页面：Home > List > Detail
+            if is-detail-page: BreadcrumbSeparator {}
+            if is-detail-page: BreadcrumbItem {
+                icon: @image-url("../assets/icons/list.svg");
+                text: "List";
+                is-current: false;
+                
+                clicked => {
+                    root.navigate(Route.List);
+                }
+            }
+            if is-detail-page: BreadcrumbSeparator {}
+            if is-detail-page: BreadcrumbItem {
+                icon: @image-url("../assets/icons/detail.svg");
+                text: "Detail";
+                is-current: true;
+            }
+            
+            // Search 页面：Home > Search
+            if current-route == Route.Search: BreadcrumbSeparator {}
+            if current-route == Route.Search: BreadcrumbItem {
+                icon: @image-url("../assets/icons/search.svg");
+                text: "Search";
+                is-current: true;
+            }
+            
+            // Notification 页面：Home > Notify
+            if current-route == Route.Notification: BreadcrumbSeparator {}
+            if current-route == Route.Notification: BreadcrumbItem {
+                icon: @image-url("../assets/icons/settings.svg");
+                text: "Notify";
+                is-current: true;
+            }
+            
+            // Toast 页面：Home > Toast
+            if current-route == Route.Toast: BreadcrumbSeparator {}
+            if current-route == Route.Toast: BreadcrumbItem {
+                icon: @image-url("../assets/icons/settings.svg");
+                text: "Toast";
+                is-current: true;
+            }
+            
+            // Dialog 页面：Home > Dialog
+            if current-route == Route.Dialog: BreadcrumbSeparator {}
+            if current-route == Route.Dialog: BreadcrumbItem {
+                icon: @image-url("../assets/icons/settings.svg");
+                text: "Dialog";
+                is-current: true;
+            }
+            
+            // Tools 页面：Home > Tools
+            if current-route == Route.Tools: BreadcrumbSeparator {}
+            if current-route == Route.Tools: BreadcrumbItem {
+                icon: @image-url("../assets/icons/tools.svg");
+                text: "Tools";
+                is-current: true;
+            }
+            
+            // Chat 页面：Home > Chat
+            if current-route == Route.Chat: BreadcrumbSeparator {}
+            if current-route == Route.Chat: BreadcrumbItem {
+                icon: @image-url("../assets/icons/chat.svg");
+                text: "Chat";
+                is-current: true;
+            }
+            
+            // List 页面：Home > List
+            if current-route == Route.List: BreadcrumbSeparator {}
+            if current-route == Route.List: BreadcrumbItem {
+                icon: @image-url("../assets/icons/list.svg");
+                text: "List";
+                is-current: true;
             }
         }
     }

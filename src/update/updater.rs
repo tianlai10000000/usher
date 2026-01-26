@@ -31,8 +31,8 @@ pub type ProgressCallback = Arc<dyn Fn(f32, u64, u64, &str) + Send + Sync>;
 pub type CancelFlag = Arc<AtomicBool>;
 
 fn create_updater() -> Result<Box<dyn self_update::update::ReleaseUpdate>> {
-    println!(
-        "[DEBUG] Creating updater, repo: tianlai10000000/usher, current version: {}",
+    log::debug!(
+        "Creating updater, repo: tianlai10000000/usher, current version: {}",
         cargo_crate_version!()
     );
     self_update::backends::github::Update::configure()
@@ -45,21 +45,21 @@ fn create_updater() -> Result<Box<dyn self_update::update::ReleaseUpdate>> {
 }
 
 pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
-    println!("[DEBUG] check_for_update started");
+    log::debug!(" check_for_update started");
 
     let state_clone = state.clone();
     // Execute synchronous operations in blocking thread pool
     let result = tokio::task::spawn_blocking(move || -> Result<(bool, String), anyhow::Error> {
         let updater = create_updater().map_err(|e| {
-            println!("[DEBUG] Failed to create updater: {}", e);
+            log::debug!(" Failed to create updater: {}", e);
             e
         })?;
-        println!("[DEBUG] Updater created successfully");
+        log::debug!(" Updater created successfully");
 
         // Get latest version information
-        println!("[DEBUG] Getting latest version information...");
+        log::debug!(" Getting latest version information...");
         let latest_release = updater.get_latest_release().map_err(|e| {
-            println!("[DEBUG] Failed to get latest version: {}", e);
+            log::debug!(" Failed to get latest version: {}", e);
             let error_msg = e.to_string();
             // Provide more user-friendly error messages
             if error_msg.contains("404") || error_msg.contains("Not Found") {
@@ -76,8 +76,8 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
             }
         })?;
         let current_version_str = cargo_crate_version!();
-        println!(
-            "[DEBUG] Current version: {}, Latest version: {}",
+        log::debug!(
+            "Current version: {}, Latest version: {}",
             current_version_str, latest_release.version
         );
 
@@ -100,15 +100,15 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
 
         // If current version >= latest version, consider it up to date
         if current_ver >= latest_ver {
-            println!(
-                "[DEBUG] Already up to date (current: {} >= remote: {})",
+            log::debug!(
+                "Already up to date (current: {} >= remote: {})",
                 current_ver, latest_ver
             );
             return Ok((true, String::new()));
         }
 
-        println!(
-            "[DEBUG] New version found: {} (current: {})",
+        log::info!(
+            "New version found: {} (current: {})",
             latest_ver, current_ver
         );
         Ok((false, latest_release.version))
@@ -139,7 +139,7 @@ pub async fn perform_update_with_progress(
     progress_callback: ProgressCallback,
     cancel_flag: CancelFlag,
 ) -> Result<()> {
-    println!("[DEBUG] perform_update_with_progress started");
+    log::debug!(" perform_update_with_progress started");
 
     // Set download status
     {
@@ -153,7 +153,7 @@ pub async fn perform_update_with_progress(
 
     // Check if cancelled
     if cancel_flag.load(Ordering::Relaxed) {
-        println!("[DEBUG] Download cancelled (preparation phase)");
+        log::debug!(" Download cancelled (preparation phase)");
         return Err(anyhow::anyhow!("Download cancelled"));
     }
 
@@ -170,13 +170,13 @@ pub async fn perform_update_with_progress(
             progress_callback_clone(0.1, 0, 0, "Fetching release info...");
 
             let latest_release = updater.get_latest_release()?;
-            println!("[DEBUG] Got latest version: {}", latest_release.version);
+            log::debug!(" Got latest version: {}", latest_release.version);
 
             // Get download URL for current platform
             let target = self_update::get_target();
-            println!("[DEBUG] Current platform: {}", target);
-            println!(
-                "[DEBUG] Available assets list: {:?}",
+            log::debug!(" Current platform: {}", target);
+            log::debug!(
+                "Available assets list: {:?}",
                 latest_release
                     .assets
                     .iter()
@@ -245,7 +245,7 @@ pub async fn perform_update_with_progress(
                     )
                 })?;
 
-            println!("[DEBUG] Download URL: {}", asset.download_url);
+            log::debug!(" Download URL: {}", asset.download_url);
             Ok((asset.download_url.clone(), latest_release.version))
         })
         .await
@@ -255,7 +255,7 @@ pub async fn perform_update_with_progress(
 
     // Check if cancelled
     if cancel_flag.load(Ordering::Relaxed) {
-        println!("[DEBUG] Download cancelled (after getting version info)");
+        log::debug!(" Download cancelled (after getting version info)");
         return Err(anyhow::anyhow!("Download cancelled"));
     }
 
@@ -279,7 +279,7 @@ pub async fn perform_update_with_progress(
     }
 
     let total_size = response.content_length().unwrap_or(0);
-    println!("[DEBUG] File size: {} bytes", total_size);
+    log::debug!(" File size: {} bytes", total_size);
 
     // Create temporary file to save downloaded content
     let temp_dir = std::env::temp_dir();
@@ -298,7 +298,7 @@ pub async fn perform_update_with_progress(
     while let Some(chunk_result) = stream.next().await {
         // Check if cancelled
         if cancel_flag.load(Ordering::Relaxed) {
-            println!("[DEBUG] Download cancelled");
+            log::debug!(" Download cancelled");
             // Clean up temporary file
             let _ = tokio::fs::remove_file(&temp_file_path).await;
             return Err(anyhow::anyhow!("Download cancelled"));
@@ -343,7 +343,7 @@ pub async fn perform_update_with_progress(
     temp_file.flush().await?;
     drop(temp_file);
 
-    println!("[DEBUG] Download complete, starting installation...");
+    log::debug!(" Download complete, starting installation...");
     progress_callback(
         0.85,
         downloaded,
@@ -368,18 +368,18 @@ pub async fn perform_update_with_progress(
         // Record current executable path (for debugging)
         let current_exe =
             std::env::current_exe().context("Failed to get current executable path")?;
-        println!("[DEBUG] Current executable path: {:?}", current_exe);
+        log::debug!(" Current executable path: {:?}", current_exe);
 
         let exe_str = current_exe.to_string_lossy();
         if exe_str.contains(".app/") {
-            println!("[DEBUG] Detected .app bundle, will replace executable file in bundle");
+            log::debug!(" Detected .app bundle, will replace executable file in bundle");
         } else {
-            println!("[DEBUG] No .app bundle detected, will directly replace executable file");
+            log::debug!(" No .app bundle detected, will directly replace executable file");
         }
 
         // Use downloaded file for installation, instead of re-downloading
-        println!(
-            "[DEBUG] Installing update from local file: {:?}",
+        log::debug!(
+            "Installing update from local file: {:?}",
             temp_file_path_clone
         );
 
@@ -395,8 +395,8 @@ pub async fn perform_update_with_progress(
         }
         std::fs::create_dir_all(&extract_path).context("Failed to create extraction directory")?;
 
-        println!(
-            "[DEBUG] Extracting to temporary directory: {:?}",
+        log::debug!(
+            "Extracting to temporary directory: {:?}",
             extract_path
         );
 
@@ -417,7 +417,7 @@ pub async fn perform_update_with_progress(
         let decompressor_list = GzDecoder::new(tar_gz_file_list);
         let mut archive_list = Archive::new(decompressor_list);
 
-        println!("[DEBUG] File list in tar.gz:");
+        log::debug!(" File list in tar.gz:");
         let mut found_usher = false;
         let mut usher_path_in_archive = String::new();
         for entry_result in archive_list
@@ -427,7 +427,7 @@ pub async fn perform_update_with_progress(
             if let Ok(entry) = entry_result {
                 if let Ok(path) = entry.path() {
                     let path_str = path.to_string_lossy().to_string();
-                    println!("[DEBUG]   - {}", path_str);
+                    log::debug!("   - {}", path_str);
                     // Check if it's the usher file (may have path prefix)
                     if path_str == "usher" || path_str.ends_with("/usher") {
                         found_usher = true;
@@ -444,14 +444,14 @@ pub async fn perform_update_with_progress(
             ));
         }
 
-        println!("[DEBUG] Found usher in tar.gz: {}", usher_path_in_archive);
+        log::debug!(" Found usher in tar.gz: {}", usher_path_in_archive);
 
         // Extract all files to temporary directory
         archive
             .unpack(&extract_path)
             .context("Failed to extract tar.gz archive")?;
 
-        println!("[DEBUG] Extraction complete, looking for usher file...");
+        log::debug!(" Extraction complete, looking for usher file...");
 
         // Find extracted usher file
         let new_exe_path = if extract_path.join("usher").exists() {
@@ -484,11 +484,11 @@ pub async fn perform_update_with_progress(
                 path
             } else {
                 // List extracted files for debugging
-                println!("[DEBUG] Extracted file list:");
+                log::debug!(" Extracted file list:");
                 if let Ok(entries) = std::fs::read_dir(&extract_path) {
                     for entry in entries {
                         if let Ok(entry) = entry {
-                            println!("[DEBUG]   - {:?}", entry.path());
+                            log::debug!("   - {:?}", entry.path());
                         }
                     }
                 }
@@ -499,8 +499,8 @@ pub async fn perform_update_with_progress(
             }
         };
 
-        println!(
-            "[DEBUG] Found extracted executable file: {:?}",
+        log::debug!(
+            "Found extracted executable file: {:?}",
             new_exe_path
         );
 
@@ -519,12 +519,12 @@ pub async fn perform_update_with_progress(
         use self_update::self_replace;
         self_replace::self_replace(&new_exe_path).context("Failed to replace executable")?;
 
-        println!("[DEBUG] Executable file replaced successfully");
+        log::debug!(" Executable file replaced successfully");
 
         // Verify updated path
         if let Ok(updated_exe) = std::env::current_exe() {
-            println!(
-                "[DEBUG] After update, executable file path: {:?}",
+            log::debug!(
+                "After update, executable file path: {:?}",
                 updated_exe
             );
         }
@@ -589,11 +589,11 @@ pub async fn perform_update(_state: &Arc<Mutex<UpdateState>>) -> Result<()> {
 
 /// Restart application
 fn restart_application() {
-    println!("[DEBUG] Preparing to restart application...");
+    log::debug!(" Preparing to restart application...");
 
     // Get current executable file path
     if let Ok(current_exe) = std::env::current_exe() {
-        println!("[DEBUG] Current executable file: {:?}", current_exe);
+        log::debug!(" Current executable file: {:?}", current_exe);
 
         // Get command line arguments (excluding first argument, which is program name)
         let args: Vec<String> = std::env::args().skip(1).collect();
@@ -618,12 +618,12 @@ fn restart_application() {
                 // Find .app directory
                 if let Some(app_pos) = exe_path.find(".app/") {
                     let app_path = &exe_path[..app_pos + 4];
-                    println!("[DEBUG] Restarting macOS app: {}", app_path);
+                    log::debug!(" Restarting macOS app: {}", app_path);
                     let _ = Command::new("open").arg("-n").arg(app_path).spawn();
                 }
             } else {
                 // Directly run executable file
-                println!("[DEBUG] Directly running executable file: {}", exe_path);
+                log::debug!(" Directly running executable file: {}", exe_path);
                 let _ = Command::new(&*exe_path).args(&args).spawn();
             }
         }
@@ -637,7 +637,7 @@ fn restart_application() {
     }
 
     // Exit current process
-    println!("[DEBUG] Exiting current process");
+    log::debug!(" Exiting current process");
     std::process::exit(0);
 }
 
@@ -681,12 +681,12 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
     let app_weak_clone_check = app_weak.clone();
     let rt_clone_check = rt.clone();
     app.on_check_update(move || {
-        println!("[DEBUG] check-update callback called");
+        log::debug!(" check-update callback called");
         let state = state_clone_check.clone();
         let ui_weak = app_weak_clone_check.clone();
         let rt = rt_clone_check.clone();
         rt.spawn(async move {
-            println!("[DEBUG] Starting update check...");
+            log::debug!(" Starting update check...");
             // Reset state
             {
                 let mut s = state.lock().unwrap();
@@ -696,10 +696,10 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                 s.progress = 0.0;
             }
 
-            println!("[DEBUG] Calling check_for_update...");
+            log::debug!(" Calling check_for_update...");
             let result = check_for_update(&state).await;
-            println!(
-                "[DEBUG] check_for_update completed, result: {:?}",
+            log::debug!(
+                "check_for_update completed, result: {:?}",
                 result.is_ok()
             );
             let (is_up_to_date, version) = {
@@ -711,7 +711,7 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                         } else {
                             String::new()
                         };
-                        println!("[DEBUG] is_up_to_date: {}, version: {}", *up_to_date, v);
+                        log::debug!(" is_up_to_date: {}, version: {}", *up_to_date, v);
                         (*up_to_date, v)
                     }
                     Err(_) => (false, String::new()),
@@ -721,8 +721,8 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
             match result {
                 Ok(_) => {
                     let version_clone = version.clone();
-                    println!(
-                        "[DEBUG] Processing result: is_up_to_date={}, version={}",
+                    log::debug!(
+                        "Processing result: is_up_to_date={}, version={}",
                         is_up_to_date, version_clone
                     );
 
@@ -767,23 +767,23 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                         });
 
                         // Immediately reset button state to ensure user can see button restored
-                        println!("[DEBUG] Preparing to reset button state (already latest version)");
+                        log::debug!(" Preparing to reset button state (already latest version)");
                         slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_weak_for_reset.upgrade() {
-                                println!(
-                                    "[DEBUG] Resetting checking-update state (already latest version)"
+                                log::debug!(
+                                    "Resetting checking-update state (already latest version)"
                                 );
                                 let logic = ui.global::<UpdateLogic>();
                                 logic.set_checking_update(false);
                             } else {
-                                println!(
-                                    "[DEBUG] ui_weak_for_reset.upgrade() failed (already latest version)"
+                                log::warn!(
+                                    "ui_weak_for_reset.upgrade() failed (already latest version)"
                                 );
                             }
                         })
                         .ok();
                     } else {
-                        println!("[DEBUG] Entering branch with new version available");
+                        log::debug!(" Entering branch with new version available");
                         // New version available
                         let ui_weak_for_all = ui_weak.clone();
                         let version_for_all = version.clone();
@@ -793,13 +793,13 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                         let version_for_state = version_for_all.clone();
                         slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_weak_for_state.upgrade() {
-                                println!("[DEBUG] Setting state");
+                                log::debug!(" Setting state");
                                 let logic = ui.global::<UpdateLogic>();
                                 logic.set_update_available(true);
                                 logic.set_new_version(version_for_state.clone().into());
                                 logic.set_checking_update(false);
-                                println!(
-                                    "[DEBUG] Set update-available=true, new-version={}",
+                                log::debug!(
+                                    "Set update-available=true, new-version={}",
                                     version_for_state
                                 );
                             }
@@ -808,22 +808,22 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
 
                         // Delay showing dialog to avoid RefCell borrow conflict
                         // Use tokio sleep instead of Slint Timer (Slint Timer cannot trigger correctly in async tasks)
-                        println!("[DEBUG] Preparing to delay showing dialog...");
+                        log::debug!(" Preparing to delay showing dialog...");
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        println!("[DEBUG] Delay completed, showing dialog");
+                        log::debug!(" Delay completed, showing dialog");
 
                         let ui_weak_for_dialog = ui_weak_for_all.clone();
                         slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_weak_for_dialog.upgrade() {
-                                println!("[DEBUG] Calling MainWindow.invoke_show_update_dialog()");
+                                log::debug!(" Calling MainWindow.invoke_show_update_dialog()");
                                 let current_version = cargo_crate_version!();
                                 ui.invoke_show_update_dialog(
                                     version_for_all.clone().into(),
                                     current_version.into(),
                                 );
-                                println!("[DEBUG] MainWindow.invoke_show_update_dialog() called");
+                                log::debug!(" MainWindow.invoke_show_update_dialog() called");
                             } else {
-                                println!("[DEBUG] ui_weak_for_dialog.upgrade() failed");
+                                log::debug!(" ui_weak_for_dialog.upgrade() failed");
                             }
                         })
                         .ok();
@@ -831,7 +831,7 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
-                    println!("[DEBUG] Update check error: {}", error_msg);
+                    log::debug!(" Update check error: {}", error_msg);
                     // Provide more user-friendly error message
                     let friendly_msg = if error_msg.contains("404")
                         || error_msg.contains("Not Found")
@@ -884,14 +884,14 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                     });
 
                     // Immediately reset button state to ensure user can see button restored
-                    println!("[DEBUG] Preparing to reset button state (check failed)");
+                    log::debug!(" Preparing to reset button state (check failed)");
                     slint::invoke_from_event_loop(move || {
                         if let Some(ui) = ui_weak_for_reset.upgrade() {
-                            println!("[DEBUG] Resetting checking-update state (check failed)");
+                            log::debug!(" Resetting checking-update state (check failed)");
                             let logic = ui.global::<UpdateLogic>();
                             logic.set_checking_update(false);
                         } else {
-                            println!("[DEBUG] ui_weak_for_reset.upgrade() failed (check failed)");
+                            log::debug!(" ui_weak_for_reset.upgrade() failed (check failed)");
                         }
                     })
                     .ok();
@@ -906,7 +906,7 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
     let rt_clone = rt.clone();
     let cancel_flag_clone = cancel_flag.clone();
     app.on_install(move || {
-        println!("[DEBUG] on_install callback called");
+        log::debug!(" on_install callback called");
         let state = state_clone.clone();
         let ui_weak = app_weak_clone.clone();
         let rt = rt_clone.clone();
@@ -917,7 +917,7 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
 
         // Use Timer to delay all operations, avoid RefCell borrow conflict
         Timer::single_shot(std::time::Duration::from_millis(100), move || {
-            println!("[DEBUG] Timer callback executed, preparing to show download progress modal");
+            log::debug!(" Timer callback executed, preparing to show download progress modal");
 
             // Show download progress modal
             if let Some(ui) = ui_weak.upgrade() {
@@ -925,7 +925,7 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                 logic.set_is_downloading(true);
                 logic.set_download_progress(0.0);
                 logic.set_download_status("Preparing...".into());
-                println!("[DEBUG] Download progress modal shown");
+                log::debug!(" Download progress modal shown");
             }
 
             // Create progress callback
@@ -949,19 +949,19 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
 
             let ui_weak_for_error = ui_weak.clone();
             rt.spawn(async move {
-                println!("[DEBUG] Starting update with progress...");
+                log::debug!(" Starting update with progress...");
                 let update_result =
                     perform_update_with_progress(&state, progress_callback, cancel_flag.clone())
                         .await;
 
                 match &update_result {
                     Ok(_) => {
-                        println!("[DEBUG] Update successful, program will restart");
+                        log::debug!(" Update successful, program will restart");
                         // After successful update, program will automatically restart, no additional handling needed here
                     }
                     Err(e) => {
                         let error_msg = e.to_string();
-                        println!("[DEBUG] Update failed: {}", error_msg);
+                        log::debug!(" Update failed: {}", error_msg);
 
                         // Reset state
                         reset_update_state(&state);
@@ -1004,7 +1004,7 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
     let state_clone = state.clone();
     let app_weak_clone = app_weak.clone();
     app.on_cancel_download(move || {
-        println!("[DEBUG] on_cancel_download callback called");
+        log::debug!(" on_cancel_download callback called");
 
         // Set cancel flag
         cancel_flag_clone.store(true, Ordering::Relaxed);
