@@ -62,6 +62,7 @@ slint-build = { version = "1.14"  }
 name = "Usher"
 identifier = "com.usher.app"
 icon = ["logo.png"]  # 需要 PNG 或 ICNS 格式的图标
+resources = ["logo.png"]  # 将 logo.png 复制到 .app/Contents/Resources/ 用于托盘图标
 category = "Utility"
 short_description = "Usher Application"
 long_description = "A modern desktop application built with Slint"

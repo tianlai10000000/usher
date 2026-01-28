@@ -161,9 +161,13 @@ export component StatusBar inherits Rectangle {
                     visible: UpdateLogic.checking-update;
                     
                     clicked => {
-                        root.popup-title = "Update Check";
-                        root.popup-content = "Checking if an update is available, please wait...";
-                        root.active-popup = ActivePopup.UpdateCheck;
+                        if (root.active-popup == ActivePopup.UpdateCheck) {
+                            root.active-popup = ActivePopup.None;
+                        } else {
+                            root.popup-title = "Update Check";
+                            root.popup-content = "Checking if an update is available, please wait...";
+                            root.active-popup = ActivePopup.UpdateCheck;
+                        }
                     }
                 }
                 
@@ -182,11 +186,15 @@ export component StatusBar inherits Rectangle {
                         height: 100%;
                         
                         clicked => {
-                            root.popup-title = "Download Progress";
-                            root.popup-content = "Downloading: " + UpdateLogic.new-version + "\n" +
-                                "Progress: " + Math.round(UpdateLogic.download-progress * 100) + "%\n" +
-                                "Status: " + UpdateLogic.download-status;
-                            root.active-popup = ActivePopup.DownloadProgress;
+                            if (root.active-popup == ActivePopup.DownloadProgress) {
+                                root.active-popup = ActivePopup.None;
+                            } else {
+                                root.popup-title = "Download Progress";
+                                root.popup-content = "Downloading: " + UpdateLogic.new-version + "\n" +
+                                    "Progress: " + Math.round(UpdateLogic.download-progress * 100) + "%\n" +
+                                    "Status: " + UpdateLogic.download-status;
+                                root.active-popup = ActivePopup.DownloadProgress;
+                            }
                         }
                     }
                     
@@ -235,11 +243,15 @@ export component StatusBar inherits Rectangle {
                     visible: true;
                     
                     clicked => {
-                        root.popup-title = "Notifications";
-                        root.popup-content = NotificationManager.queue.length > 0 ? 
-                            ("Currently " + NotificationManager.queue.length + " unread notifications") :
-                            "No notifications";
-                        root.active-popup = ActivePopup.Notification;
+                        if (root.active-popup == ActivePopup.Notification) {
+                            root.active-popup = ActivePopup.None;
+                        } else {
+                            root.popup-title = "Notifications";
+                            root.popup-content = NotificationManager.queue.length > 0 ? 
+                                ("Currently " + NotificationManager.queue.length + " unread notifications") :
+                                "No notifications";
+                            root.active-popup = ActivePopup.Notification;
+                        }
                     }
                 }
             }
@@ -266,9 +278,13 @@ export component StatusBar inherits Rectangle {
                     icon-color: AppState.network-online ? ColorsTheme.success : ColorsTheme.error;
                     
                     clicked => {
-                        root.popup-title = "Network Status";
-                        root.popup-content = AppState.network-online ? "Network connected" : "Network disconnected";
-                        root.active-popup = ActivePopup.Network;
+                        if (root.active-popup == ActivePopup.Network) {
+                            root.active-popup = ActivePopup.None;
+                        } else {
+                            root.popup-title = "Network Status";
+                            root.popup-content = AppState.network-online ? "Network connected" : "Network disconnected";
+                            root.active-popup = ActivePopup.Network;
+                        }
                     }
                 }
                 
@@ -281,10 +297,13 @@ export component StatusBar inherits Rectangle {
                     clickable: true;
                     
                     clicked => {
-                        root.popup-title = "Version: ";
-                        root.popup-content = "Version: " + AppState.version;
-                        root.active-popup = ActivePopup.Version;
-                        // debug("Version: " + AppState.version);
+                        if (root.active-popup == ActivePopup.Version) {
+                            root.active-popup = ActivePopup.None;
+                        } else {
+                            root.popup-title = "Version: ";
+                            root.popup-content = "Version: " + AppState.version;
+                            root.active-popup = ActivePopup.Version;
+                        }
                     }
                 }
             }

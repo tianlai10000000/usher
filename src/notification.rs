@@ -681,13 +681,27 @@ pub fn setup_notifications(
         }
     });
 
-    // dismiss-by-id callback (mark as dismissed, don't delete)
+    // dismiss-by-id callback (mark as dismissed, then remove after animation delay)
     let shared_queue_clone = shared_queue.clone();
     let ui_weak_dismiss = ui_weak.clone();
     manager.on_dismiss_by_id(move |id| {
-        if let Some(ui) = ui_weak_dismiss.upgrade() {
+        let ui_weak = ui_weak_dismiss.clone();
+        let shared_queue = shared_queue_clone.clone();
+        if let Some(ui) = ui_weak.upgrade() {
             let manager = NotificationManager::get(&ui);
-            dismiss_notification_by_id(&manager, id, &shared_queue_clone);
+            // First mark as dismissed (triggers UI animation)
+            dismiss_notification_by_id(&manager, id, &shared_queue);
+
+            // After animation delay, remove from queue to update count
+            // Animation duration is typically around 200-300ms, use 350ms to be safe
+            let ui_weak_for_remove = ui_weak.clone();
+            let shared_queue_for_remove = shared_queue.clone();
+            Timer::single_shot(Duration::from_millis(350), move || {
+                if let Some(ui) = ui_weak_for_remove.upgrade() {
+                    let manager = NotificationManager::get(&ui);
+                    remove_notification_by_id(&manager, id, &shared_queue_for_remove);
+                }
+            });
         }
     });
 
@@ -762,7 +776,8 @@ pub fn setup_notifications(
     manager.on_action_clicked(move |notification_id, action_index| {
         log::debug!(
             "[Notification] Action Clicked: notification_id={}, action_index={}",
-            notification_id, action_index
+            notification_id,
+            action_index
         );
 
         // Get notification info for logging/handling
@@ -789,7 +804,9 @@ pub fn setup_notifications(
 
             log::debug!(
                 "[Notification] Action '{}' clicked on notification {} (tag: '{}')",
-                action_text, notification_id, tag
+                action_text,
+                notification_id,
+                tag
             );
 
             // Handle different actions based on tag
@@ -840,13 +857,24 @@ pub fn setup_notifications(
                     // Default: just log the action
                     log::debug!(
                         "[Notification] Unhandled tag '{}', action: '{}'",
-                        tag, action_text
+                        tag,
+                        action_text
                     );
                 }
             }
 
             // Default behavior: close notification after action is clicked
             dismiss_notification_by_id(&manager, notification_id, &shared_queue_clone);
+
+            // After animation delay, remove from queue to update count
+            let ui_weak_for_remove = ui_weak_action.clone();
+            let shared_queue_for_remove = shared_queue_clone.clone();
+            Timer::single_shot(Duration::from_millis(350), move || {
+                if let Some(ui) = ui_weak_for_remove.upgrade() {
+                    let manager = NotificationManager::get(&ui);
+                    remove_notification_by_id(&manager, notification_id, &shared_queue_for_remove);
+                }
+            });
         }
     });
 }
