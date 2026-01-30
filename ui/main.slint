@@ -12,7 +12,7 @@ import { About as AboutPage } from "./views/about.slint";
 import { List as ListPage } from "./views/list.slint";
 import { Detail as DetailPage } from "./views/detail.slint";
 import { Tools as ToolsPage } from "./views/tools.slint";
-import { Chat as ChatPage } from "./views/chat.slint";
+import { Chat as ChatPage, ChatMessage, MessageRole } from "./views/chat.slint";
 import { Notification as NotificationPage } from "./views/notification.slint";
 import { Toast as ToastPage } from "./views/toast.slint";
 import { Dialog as DialogPage } from "./views/dialog.slint";
@@ -39,6 +39,7 @@ export { NotificationIcons } from "./components/notify/icons.slint";
 export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
 export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
 export { UpdateLogic } from "./components/update/update.slint";
+export { ChatMessage, MessageRole } from "./views/chat.slint";
 
 // import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
 
@@ -71,6 +72,15 @@ export component MainWindow inherits Window {
 
     // Update Checker
     callback show-update-dialog(latest-version: string, current-version: string);
+
+    // Chat 相关属性和回调
+    in property <[ChatMessage]> chat-messages: [];
+    in-out property <string> chat-input-text: "";
+    in property <bool> chat-is-sending: false;
+    in-out property <length> chat-scroll-position: 0px;
+    in-out property <int> chat-copied-message-index: -1;
+    callback chat-send-message(string);
+    callback chat-copy-to-clipboard(int, string);
 
     init => {
         // TODO: delete
@@ -275,16 +285,33 @@ export component MainWindow inherits Window {
                                 root.navigate(route);
                             }
                         }
-                        if root.current-route == Route.Chat: ChatPage {
-                            viewport-height: page-scroll-view.visible-height - 2px;
-                            navigate(route) => {
-                                root.previous-route = root.current-route;
-                                root.navigate(route);
-                            }
-                        }
                     }
                 }
 
+            }
+
+            // Chat 页面 - 放在 ScrollView 外面，因为它有自己的滚动和固定底部输入框
+            chat-page := ChatPage {
+                visible: root.current-route == Route.Chat;
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                messages: root.chat-messages;
+                input-text <=> root.chat-input-text;
+                is-sending: root.chat-is-sending;
+                scroll-position <=> root.chat-scroll-position;
+                copied-message-index <=> root.chat-copied-message-index;
+                navigate(route) => {
+                    root.previous-route = root.current-route;
+                    root.navigate(route);
+                }
+                send-message(text) => {
+                    root.chat-send-message(text);
+                }
+                copy-to-clipboard(index, text) => {
+                    root.chat-copy-to-clipboard(index, text);
+                }
             }
 
             dialog-page := DialogPage {

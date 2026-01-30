@@ -36,8 +36,11 @@ use network::setup_network_monitor;
 mod settings;
 use settings::setup_settings;
 
+mod chat;
+use chat::setup_chat;
+
 pub mod debug_logger;
-use debug_logger::{init_logger, LogConfig};
+use debug_logger::{LogConfig, init_logger};
 
 /// Setup Slint logger callback bindings
 fn setup_debug_logger(app: &MainWindow) {
@@ -216,15 +219,15 @@ fn get_effective_dark_mode(theme_mode: i32) -> bool {
 /// Update window appearance when theme changes (native title bar)
 #[cfg(target_os = "macos")]
 fn set_title_bar_color(window: &MainWindow, is_dark: bool) {
-    use raw_window_handle::HasWindowHandle;
     use objc::msg_send;
     use objc::runtime::{Class, Object};
+    use raw_window_handle::HasWindowHandle;
     use std::ffi::CString;
 
     if let Ok(handle) = window.window().window_handle().window_handle() {
         if let raw_window_handle::RawWindowHandle::AppKit(appkit_handle) = handle.as_ref() {
             let ns_view = appkit_handle.ns_view.as_ptr() as *mut Object;
-            
+
             unsafe {
                 let ns_window: *mut Object = msg_send![ns_view, window];
                 if ns_window.is_null() {
@@ -358,7 +361,10 @@ fn ui() -> Result<MainWindow> {
     // Save navigation drawer expanded state when toggled
     app.on_toggle_navigation_drawer_expanded(move |expanded| {
         settings::save_navigation_drawer_expanded(expanded);
-        log::info!("[Settings] Navigation drawer expanded changed to: {}", expanded);
+        log::info!(
+            "[Settings] Navigation drawer expanded changed to: {}",
+            expanded
+        );
     });
 
     // ========= Router ========= //
@@ -395,7 +401,8 @@ fn ui() -> Result<MainWindow> {
 
             log::info!(
                 "[Theme] Changed to mode: {} (effective dark: {})",
-                mode, is_dark
+                mode,
+                is_dark
             );
         }
     });
@@ -429,6 +436,9 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Dialog ========= //
     setup_dialog(&app);
+
+    // ========= Chat ========= //
+    setup_chat(&app);
 
     // ========= System Tray ========= //
     // Setup system tray icon with context menu

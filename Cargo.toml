@@ -38,6 +38,7 @@ config = "0.14.0"
 directories = "5.0.1"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"  # 用于 TOML 序列化
+arboard = "3.6.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 raw-window-handle = "0.6"
