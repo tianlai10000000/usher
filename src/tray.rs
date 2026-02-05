@@ -168,7 +168,7 @@ mod macos {
         // Find logo.png in various locations
         let logo_path = find_logo_path()?;
         let path_str = logo_path.to_string_lossy();
-        
+
         let path = CString::new(path_str.as_ref()).ok()?;
         let ns_string: *mut Object =
             msg_send![Class::get("NSString")?, stringWithUTF8String: path.as_ptr()];
@@ -192,7 +192,7 @@ mod macos {
         // Do not force template rendering to preserve logo shape/colors
         let _: () = msg_send![image, setTemplate: YES];
 
-        log::debug!("Successfully loaded tray icon from: {}", path_str);
+        log::info!("Successfully loaded tray icon from: {}", path_str);
         Some(image)
     }
 
@@ -461,7 +461,7 @@ mod other {
         // Try to find logo.png in various locations
         if let Some(logo_path) = find_logo_path() {
             if let Ok(img) = image::open(&logo_path) {
-                log::debug!("Successfully loaded tray icon from: {:?}", logo_path);
+                log::info!("Successfully loaded tray icon from: {:?}", logo_path);
                 let resized = img.resize_exact(32, 32, image::imageops::FilterType::Lanczos3);
                 let rgba = resized.to_rgba8();
                 let (width, height) = rgba.dimensions();

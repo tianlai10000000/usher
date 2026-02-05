@@ -4,7 +4,7 @@ use semver::Version;
 use slint::{ComponentHandle, Global, Timer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::runtime::Runtime;
+use tokio::runtime::{Builder, Runtime};
 
 use crate::{
     CustomComponentType, MainWindow, NotificationManager, NotificationOptions, UpdateLogic,
@@ -395,10 +395,7 @@ pub async fn perform_update_with_progress(
         }
         std::fs::create_dir_all(&extract_path).context("Failed to create extraction directory")?;
 
-        log::debug!(
-            "Extracting to temporary directory: {:?}",
-            extract_path
-        );
+        log::debug!("Extracting to temporary directory: {:?}", extract_path);
 
         // Use tar and flate2 to manually extract tar.gz
         use flate2::read::GzDecoder;
@@ -499,10 +496,7 @@ pub async fn perform_update_with_progress(
             }
         };
 
-        log::debug!(
-            "Found extracted executable file: {:?}",
-            new_exe_path
-        );
+        log::debug!("Found extracted executable file: {:?}", new_exe_path);
 
         // Set executable permissions
         #[cfg(unix)]
@@ -523,10 +517,7 @@ pub async fn perform_update_with_progress(
 
         // Verify updated path
         if let Ok(updated_exe) = std::env::current_exe() {
-            log::debug!(
-                "After update, executable file path: {:?}",
-                updated_exe
-            );
+            log::debug!("After update, executable file path: {:?}", updated_exe);
         }
 
         progress_callback_for_install(1.0, downloaded, total_size, "Update complete!");
@@ -670,7 +661,13 @@ pub struct UpdaterContext {
 /// after settings are loaded, using the returned UpdaterContext.
 pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
     let state = Arc::new(Mutex::new(UpdateState::default()));
-    let rt = Arc::new(Runtime::new().context("Failed to create Tokio runtime")?);
+    let rt = Arc::new(
+        Builder::new_multi_thread()
+            .enable_all()
+            .on_thread_start(|| crate::logger::tracing_logger::install_thread_dispatch())
+            .build()
+            .context("Failed to create Tokio runtime")?,
+    );
     let app_weak = app.as_weak();
 
     // Global cancel flag

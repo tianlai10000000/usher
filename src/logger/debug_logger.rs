@@ -32,7 +32,7 @@ use std::sync::OnceLock;
 
 /// Logger configuration
 #[derive(Clone, Debug)]
-pub struct LogConfig {
+pub struct DebugLogConfig {
     /// Log level
     pub level: LevelFilter,
     /// Whether to write to file
@@ -43,7 +43,7 @@ pub struct LogConfig {
     pub log_per_day: bool,
 }
 
-impl Default for LogConfig {
+impl Default for DebugLogConfig {
     fn default() -> Self {
         Self {
             level: LevelFilter::Info,
@@ -99,7 +99,7 @@ pub fn get_default_log_path(log_per_day: bool) -> PathBuf {
 ///
 /// # Note
 /// This function can only be called once. Subsequent calls will return Ok but won't reconfigure.
-pub fn init_logger(config: LogConfig) -> Result<(), String> {
+pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
     // Check if already initialized
     if LOGGER_INITIALIZED.get().is_some() {
         return Ok(());
@@ -139,14 +139,19 @@ pub fn init_logger(config: LogConfig) -> Result<(), String> {
     // Create main dispatch
     let mut main_dispatch = fern::Dispatch::new().chain(console_dispatch);
 
-    // If file output is enabled
-    if config.write_to_file {
-        let log_per_day = config.log_per_day;
-        let log_path = config
-            .log_file_path
-            .clone()
-            .unwrap_or_else(|| get_default_log_path(log_per_day));
+    let resolved_log_path = if config.write_to_file {
+        Some(
+            config
+                .log_file_path
+                .clone()
+                .unwrap_or_else(|| get_default_log_path(config.log_per_day)),
+        )
+    } else {
+        None
+    };
 
+    // If file output is enabled
+    if let Some(log_path) = resolved_log_path.clone() {
         // Ensure log directory exists
         if let Some(parent) = log_path.parent() {
             std::fs::create_dir_all(parent)
@@ -184,10 +189,6 @@ pub fn init_logger(config: LogConfig) -> Result<(), String> {
             .chain(log_file);
 
         main_dispatch = main_dispatch.chain(file_dispatch);
-
-        // Note: Using println here since logger is being configured
-        // After apply(), we use log::info! instead
-        println!("[Logger] Log file path: {:?}", log_path);
     }
 
     // Apply logger configuration
@@ -198,10 +199,13 @@ pub fn init_logger(config: LogConfig) -> Result<(), String> {
     // Mark as initialized
     LOGGER_INITIALIZED.set(true).ok();
 
-    log::info!(
-        "Logger initialized - Level: {:?}, WriteToFile: {}",
+    // TODO: Print actual resolved config values
+    log::debug!(
+        "Debug Logger initialized successfully! - Level: {:?}, PerDay: {:?}, WriteToFile: {:?}, Log file path: {:?}",
         config.level,
-        config.write_to_file
+        config.log_per_day,
+        config.write_to_file,
+        resolved_log_path
     );
 
     Ok(())
@@ -215,6 +219,7 @@ pub fn init_logger(config: LogConfig) -> Result<(), String> {
 /// - "info" / "2" -> Info
 /// - "debug" / "3" -> Debug
 /// - "trace" / "4" -> Trace
+#[allow(dead_code)]
 pub fn parse_level(level_str: &str) -> LevelFilter {
     match level_str.to_lowercase().as_str() {
         "error" | "0" => LevelFilter::Error,
@@ -228,6 +233,7 @@ pub fn parse_level(level_str: &str) -> LevelFilter {
 }
 
 /// Convert log level to integer (for Slint binding)
+#[allow(dead_code)]
 pub fn level_to_i32(level: LevelFilter) -> i32 {
     match level {
         LevelFilter::Off => -1,
@@ -240,6 +246,7 @@ pub fn level_to_i32(level: LevelFilter) -> i32 {
 }
 
 /// Convert integer to log level (for Slint binding)
+#[allow(dead_code)]
 pub fn i32_to_level(level: i32) -> LevelFilter {
     match level {
         0 => LevelFilter::Error,
@@ -312,7 +319,7 @@ mod tests {
 
     #[test]
     fn test_default_log_path() {
-        let path = get_default_log_path();
+        let path = get_default_log_path(false);
         assert!(path.to_string_lossy().contains("usher.log"));
     }
 }

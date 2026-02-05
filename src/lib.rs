@@ -39,46 +39,10 @@ use settings::setup_settings;
 mod chat;
 use chat::setup_chat;
 
-pub mod debug_logger;
-use debug_logger::{LogConfig, init_logger};
-
-/// Setup Slint logger callback bindings
-fn setup_debug_logger(app: &MainWindow) {
-    // Bind log callbacks
-    DebugLogger::get(app).on_log_error(|msg| {
-        debug_logger::slint_log_error(&msg);
-    });
-
-    DebugLogger::get(app).on_log_warn(|msg| {
-        debug_logger::slint_log_warn(&msg);
-    });
-
-    DebugLogger::get(app).on_log_info(|msg| {
-        debug_logger::slint_log_info(&msg);
-    });
-
-    DebugLogger::get(app).on_log_debug(|msg| {
-        debug_logger::slint_log_debug(&msg);
-    });
-
-    DebugLogger::get(app).on_log_trace(|msg| {
-        debug_logger::slint_log_trace(&msg);
-    });
-
-    // Configuration callbacks (optional implementation)
-    DebugLogger::get(app).on_set_level(|level| {
-        log::info!("[Logger] Level change requested to: {}", level);
-        // Note: fern cannot dynamically change level after initialization
-        // This only logs the request, actual change requires app restart
-    });
-
-    DebugLogger::get(app).on_set_write_to_file(|enabled| {
-        log::info!("[Logger] Write to file change requested: {}", enabled);
-        // Same as above, requires app restart to take effect
-    });
-
-    log::debug!("[Logger] Slint callbacks bound");
-}
+mod logger;
+use logger::error_handing;
+use logger::tracing_logger;
+use logger::{setup_debug_logger, setup_tracing_logger};
 
 /// Set application-level appearance on macOS (called BEFORE window is shown)
 /// This prevents the flash of wrong theme on startup
@@ -290,16 +254,6 @@ impl Router {
 }
 
 fn ui() -> Result<MainWindow> {
-    // ========= Logger Initialization ========= //
-    // Initialize debug logger early, before other components
-    init_logger(LogConfig {
-        level: log::LevelFilter::Debug,
-        write_to_file: cfg!(debug_assertions), // Write to file in debug mode
-        log_file_path: None,                   // Use default path
-        log_per_day: true,                     // Organize logs by date (YYYY-MM-DD/usher.log)
-    })
-    .unwrap_or_else(|e| eprintln!("Logger init failed: {}", e)); // eprintln here since logger not yet initialized
-
     log::info!("Usher v{} starting...", env!("CARGO_PKG_VERSION"));
 
     // ========= Pre-Window Settings ========= //
@@ -314,12 +268,23 @@ fn ui() -> Result<MainWindow> {
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
 
-    // ========= Debug Logger Slint Bindings ========= //
-    setup_debug_logger(&app);
+    // Initialize debug logger after window is created (needs app for callbacks)
+    setup_debug_logger(&app, true).unwrap_or_else(|e| eprintln!("Debug Logger init failed: {}", e)); // eprintln here since logger not yet initialized
+
+    // ========= Trace Logger Initialization ========= //
+    setup_tracing_logger(&app, loaded_settings.tracing_logger_active)
+        .unwrap_or_else(|e| eprintln!("Tracing Logger init failed: {}", e));
 
     // ========= Settings ========= //
     // Apply loaded settings to AppState
     setup_settings(&app, &loaded_settings);
+
+    // ========= Debug: Simulate Crash ========= //
+    app.on_simulate_crash(|| {
+        if let Err(e) = error_handing::do_something_that_might_fail() {
+            log::error!("[Debug] simulate crash returned error: {}", e);
+        }
+    });
 
     // ========= Update ========= //
     // setup_updater must be called AFTER setup_settings so it reads the correct auto_update value
@@ -355,6 +320,15 @@ fn ui() -> Result<MainWindow> {
         }
 
         log::info!("[Settings] Auto update changed to: {}", enabled);
+    });
+
+    // ========= Tracing Logs Active ========= //
+    AppState::get(&app).on_toggle_tracing_logger_active(move |enabled| {
+        settings::save_tracing_logger_active(enabled);
+        if let Err(e) = tracing_logger::set_tracing_active(enabled) {
+            log::error!("[Logger] Failed to toggle tracing logs: {}", e);
+        }
+        log::info!("[Settings] Tracing logger active changed to: {}", enabled);
     });
 
     // ========= Navigation Drawer Expanded ========= //

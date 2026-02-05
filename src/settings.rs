@@ -21,6 +21,10 @@ pub struct AppSettings {
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
 
+    /// Tracing logger active
+    #[serde(default = "default_tracing_logger_active")]
+    pub tracing_logger_active: bool,
+
     /// Navigation drawer expanded state
     #[serde(default = "default_navigation_drawer_expanded")]
     pub navigation_drawer_expanded: bool,
@@ -34,6 +38,10 @@ fn default_auto_update() -> bool {
     true // Default to enabled
 }
 
+fn default_tracing_logger_active() -> bool {
+    true // Default to enabled
+}
+
 fn default_navigation_drawer_expanded() -> bool {
     true // Default to expanded
 }
@@ -43,6 +51,7 @@ impl Default for AppSettings {
         Self {
             theme_mode: default_theme_mode(),
             auto_update: default_auto_update(),
+            tracing_logger_active: default_tracing_logger_active(),
             navigation_drawer_expanded: default_navigation_drawer_expanded(),
         }
     }
@@ -106,7 +115,7 @@ impl SettingsManager {
         {
             Ok(config) => match config.try_deserialize::<AppSettings>() {
                 Ok(settings) => {
-                    log::info!("[Settings] Loaded settings from {:?}", config_path);
+                    log::debug!("[Settings] Loaded settings from {:?}", config_path);
                     settings
                 }
                 Err(e) => {
@@ -167,6 +176,13 @@ impl SettingsManager {
         }
     }
 
+    /// Update tracing logger active setting
+    pub fn set_tracing_logger_active(&self, enabled: bool) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.tracing_logger_active = enabled;
+        }
+    }
+
     /// Update drawer expanded setting
     pub fn set_navigation_drawer_expanded(&self, expanded: bool) {
         if let Ok(mut settings) = self.settings.write() {
@@ -205,6 +221,16 @@ pub fn save_auto_update(enabled: bool) {
     });
 }
 
+/// Save tracing logger active setting asynchronously
+pub fn save_tracing_logger_active(enabled: bool) {
+    get_settings_manager().set_tracing_logger_active(enabled);
+    Timer::single_shot(std::time::Duration::from_millis(100), || {
+        if let Err(e) = get_settings_manager().save() {
+            log::error!("[Settings] Failed to save settings: {}", e);
+        }
+    });
+}
+
 /// Save drawer expanded setting asynchronously
 pub fn save_navigation_drawer_expanded(expanded: bool) {
     get_settings_manager().set_navigation_drawer_expanded(expanded);
@@ -230,12 +256,16 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     let app_state = AppState::get(app);
     app_state.set_theme_mode(settings.theme_mode);
     app_state.set_auto_update(settings.auto_update);
+    app_state.set_tracing_logger_active(settings.tracing_logger_active);
 
     // Apply drawer expanded state to MainWindow
     app.set_navigation_drawer_expanded(settings.navigation_drawer_expanded);
 
     log::info!(
-        "[Settings] Applied settings: theme_mode={}, auto_update={}, navigation_drawer_expanded={}",
-        settings.theme_mode, settings.auto_update, settings.navigation_drawer_expanded
+        "[Settings] Applied settings: theme_mode={}, auto_update={}, tracing_logger_active={}, navigation_drawer_expanded={}",
+        settings.theme_mode,
+        settings.auto_update,
+        settings.tracing_logger_active,
+        settings.navigation_drawer_expanded
     );
 }

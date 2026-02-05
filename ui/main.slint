@@ -72,6 +72,9 @@ export component MainWindow inherits Window {
 
     // Update Checker
     callback show-update-dialog(latest-version: string, current-version: string);
+    
+    // Debug: simulate crash
+    callback simulate-crash();
 
     // Chat 相关属性和回调
     in property <[ChatMessage]> chat-messages: [];
@@ -260,6 +263,9 @@ export component MainWindow inherits Window {
                         if root.current-route == Route.Settings: SettingsPage {
                             check-update => {
                                 root.check-update();
+                            }
+                            simulate-crash => {
+                                root.simulate-crash();
                             }
                         }
                         if root.current-route == Route.Notification: NotificationPage {}

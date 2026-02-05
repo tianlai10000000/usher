@@ -26,6 +26,9 @@ export global AppState {
 
     // auto-update
     in-out property <bool> auto-update: true; // default enabled
+    
+    // tracing logger
+    in-out property <bool> tracing-logger-active: true; // default enabled
 
     /**
      * methods
@@ -36,6 +39,9 @@ export global AppState {
     
     // auto-update
     callback toggle-auto-update(enabled: bool);
+    
+    // tracing logger
+    callback toggle-tracing-logger-active(enabled: bool);
     
     // Update Palette.color-scheme when theme-mode changes
     changed theme-mode => {

@@ -6,6 +6,9 @@ import { LoadingIconOutlineButton } from "../components/button/loading_icon_outl
 
 export component Settings {
     callback check-update();
+    callback simulate-crash();
+
+    in-out property <bool> simulate-crash-active: false;
     
     Vertical {
         padding: 0px;
@@ -106,6 +109,55 @@ export component Settings {
                 checked_state_changed(checked) => {
                     AppState.auto-update = checked;
                     AppState.toggle-auto-update(checked);
+                }
+            }
+        }
+
+        Horizontal {
+            height: 46px;
+            alignment: start;
+            vertical-stretch: 0;
+
+            // Label
+            MaterialText {
+                text: "Logs Active";
+                vertical_alignment: center;
+                font-size: 16px;
+                font-weight: 400;
+            }
+
+            Switch {
+                checked: AppState.tracing-logger-active;
+                width: 48px;
+                height: 28px;
+                checked_state_changed(checked) => {
+                    AppState.tracing-logger-active = checked;
+                    AppState.toggle-tracing-logger-active(checked);
+                }
+            }
+        }
+
+        Horizontal {
+            height: 46px;
+            alignment: start;
+            vertical-stretch: 0;
+
+            // Label
+            MaterialText {
+                text: "Simulate Crash";
+                vertical_alignment: center;
+                font-size: 16px;
+                font-weight: 400;
+            }
+
+            Switch {
+                checked: root.simulate-crash-active;
+                width: 48px;
+                height: 28px;
+                checked_state_changed(checked) => {
+                    if (checked) {
+                        root.simulate-crash();
+                    }
                 }
             }
         }

@@ -102,7 +102,7 @@ fn perform_startup_check(
             Err(e) => {
                 let error_msg = e.to_string();
                 log::info!("[AUTO-UPDATE] Startup check failed: {}", error_msg);
-                
+
                 // Show error notification to user
                 let friendly_msg = if error_msg.contains("404") || error_msg.contains("Not Found") {
                     "Repository not found or no releases available. Please check if the repository exists.".to_string()
@@ -112,7 +112,7 @@ fn perform_startup_check(
                 } else {
                     format!("Update check failed: {}", error_msg)
                 };
-                
+
                 let ui_weak_for_error = ui_weak.clone();
                 slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak_for_error.upgrade() {
@@ -187,23 +187,27 @@ pub fn start_auto_update(
                     Err(e) => {
                         let error_msg = e.to_string();
                         log::info!("[AUTO-UPDATE] Periodic check failed: {}", error_msg);
-                        
+
                         // Store error in state
                         {
                             let mut s = state.lock().unwrap();
                             s.error = error_msg.clone();
                         }
-                        
+
                         // Show error notification to user
-                        let friendly_msg = if error_msg.contains("404") || error_msg.contains("Not Found") {
-                            "Repository not found or no releases available.".to_string()
-                        } else if error_msg.contains("NetworkError") || error_msg.contains("network") 
-                            || error_msg.contains("ReqwestError") || error_msg.contains("error sending request") {
-                            "Network connection failed. Please check your network.".to_string()
-                        } else {
-                            format!("Update check failed: {}", error_msg)
-                        };
-                        
+                        let friendly_msg =
+                            if error_msg.contains("404") || error_msg.contains("Not Found") {
+                                "Repository not found or no releases available.".to_string()
+                            } else if error_msg.contains("NetworkError")
+                                || error_msg.contains("network")
+                                || error_msg.contains("ReqwestError")
+                                || error_msg.contains("error sending request")
+                            {
+                                "Network connection failed. Please check your network.".to_string()
+                            } else {
+                                format!("Update check failed: {}", error_msg)
+                            };
+
                         slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_weak.upgrade() {
                                 let manager = NotificationManager::get(&ui);
@@ -217,7 +221,8 @@ pub fn start_auto_update(
                                     tag: Default::default(),
                                 });
                             }
-                        }).ok();
+                        })
+                        .ok();
                     }
                 }
             });

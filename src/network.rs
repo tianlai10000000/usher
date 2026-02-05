@@ -6,10 +6,15 @@ use crate::{AppState, MainWindow};
 
 /// Check network connectivity using HTTP request (more reliable than raw TCP)
 fn check_online() -> bool {
-    let rt = match tokio::runtime::Runtime::new() {
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(_) => return false,
     };
+
+    crate::logger::tracing_logger::install_thread_dispatch();
 
     rt.block_on(async {
         let client = match reqwest::Client::builder()
