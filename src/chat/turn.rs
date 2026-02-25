@@ -1,4 +1,6 @@
+use crate::chat::markdown::{build_assistant_render_payload, plain_text_to_display};
 use crate::{ChatMessage, MessageRole};
+use slint::ModelRc;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 /// 消息 ID 计数器
@@ -17,6 +19,9 @@ pub fn create_user_message(content: String) -> ChatMessage {
     ChatMessage {
         id,
         role: MessageRole::User,
+        rendered_content: content.clone().into(),
+        is_markdown: false,
+        markdown_blocks: ModelRc::default(),
         content: content.into(),
         timestamp: get_current_timestamp(),
     }
@@ -26,10 +31,14 @@ pub fn create_user_message(content: String) -> ChatMessage {
 pub fn create_assistant_message(content: String) -> ChatMessage {
     let id = next_message_id();
     log::debug!("[Chat::Turn] Creating assistant message (id: {})", id);
+    let payload = build_assistant_render_payload(&content);
 
     ChatMessage {
         id,
         role: MessageRole::Assistant,
+        rendered_content: payload.rendered_text.into(),
+        is_markdown: payload.is_markdown,
+        markdown_blocks: payload.blocks.as_slice().into(),
         content: content.into(),
         timestamp: get_current_timestamp(),
     }
@@ -43,6 +52,9 @@ pub fn create_loading_message() -> ChatMessage {
     ChatMessage {
         id,
         role: MessageRole::Assistant,
+        rendered_content: "".into(),
+        is_markdown: false,
+        markdown_blocks: ModelRc::default(),
         content: "".into(), // 空内容表示加载中
         timestamp: "".into(),
     }
@@ -57,10 +69,14 @@ pub fn create_error_message(error: String) -> ChatMessage {
         error
     );
 
+    let error_content = format!("❌ {}", error);
     ChatMessage {
         id,
         role: MessageRole::Assistant,
-        content: format!("❌ {}", error).into(),
+        rendered_content: plain_text_to_display(&error_content).into(),
+        is_markdown: false,
+        markdown_blocks: ModelRc::default(),
+        content: error_content.into(),
         timestamp: get_current_timestamp(),
     }
 }

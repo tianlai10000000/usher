@@ -36,6 +36,8 @@ use network::setup_network_monitor;
 mod settings;
 use settings::setup_settings;
 
+mod constants;
+
 mod chat;
 use chat::setup_chat;
 
@@ -346,8 +348,12 @@ fn ui() -> Result<MainWindow> {
 
     // Connect navigate callback in slint
     let router_clone = router.clone();
+    let app_for_chat_route = app.as_weak();
     app.on_navigate(move |route| {
         router_clone.navigate(route);
+        if let Some(ui) = app_for_chat_route.upgrade() {
+            ui.invoke_chat_route_visible_changed(route == Route::Chat);
+        }
     });
 
     // ========= Theme ========= //

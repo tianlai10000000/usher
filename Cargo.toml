@@ -18,7 +18,7 @@ name = "usher"
 # "backend-android-activity-06",
 # 注意：live-preview feature 已移除以减小 release 构建体积
 # 如需开发时使用 live-preview，可以临时添加 features = ["live-preview"]
-slint = { version = "1.14.1", default-features = true, features = ["live-preview", "raw-window-handle-06"] }
+slint = { version = "1.15.0", default-features = true, features = ["live-preview", "raw-window-handle-06"] }
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
@@ -37,6 +37,9 @@ image = "0.25"
 config = "0.14.0"
 directories = "5.0.1"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+pulldown-cmark = "0.13"
+webbrowser = "1.0"
 toml = "0.8"  # 用于 TOML 序列化
 arboard = "3.6.1"
 tracing = "0.1"

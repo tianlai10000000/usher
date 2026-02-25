@@ -47,6 +47,7 @@ export component MainWindow inherits Window {
     min-width: 800px;
     min-height: 600px;
     title: "Usher";
+    out property <length> chat-layout-window-width: self.width;
     // default-font-family: "Noto Sans SC";
 
     // 路由状态 - 对外暴露
@@ -84,6 +85,8 @@ export component MainWindow inherits Window {
     in-out property <int> chat-copied-message-index: -1;
     callback chat-send-message(string);
     callback chat-copy-to-clipboard(int, string);
+    callback chat-open-link(string);
+    callback chat-route-visible-changed(bool);
 
     init => {
         // TODO: delete
@@ -317,6 +320,9 @@ export component MainWindow inherits Window {
                 }
                 copy-to-clipboard(index, text) => {
                     root.chat-copy-to-clipboard(index, text);
+                }
+                open-link(url) => {
+                    root.chat-open-link(url);
                 }
             }
 

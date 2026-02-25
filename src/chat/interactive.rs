@@ -1,12 +1,111 @@
 use crate::chat::chat::send_message_to_server;
+use crate::chat::markdown::build_assistant_render_payload_with_wrap_cols;
 use crate::chat::turn::{
     create_loading_message, create_user_message, handle_error_response, serialize_server_response,
 };
 use crate::logger::tracing_logger;
-use crate::{ChatMessage, MainWindow, MessageRole};
+use crate::{ChatMessage, MainWindow, MessageRole, Route};
 use slint::{ComponentHandle, Model};
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 use tokio::runtime::{Builder, Runtime};
+
+fn compute_wrap_cols(ui: &MainWindow) -> i32 {
+    // 与 chat.slint 的断点策略保持一致，按窗口可用宽度估算气泡宽度
+    let window_width = ui.get_chat_layout_window_width();
+    let nav_width = if ui.get_navigation_drawer_expanded() {
+        120.0
+    } else {
+        56.0
+    };
+    let chat_content_width = (window_width - nav_width - 24.0).max(320.0);
+
+    let ratio = if chat_content_width < 720.0 {
+        0.58
+    } else if chat_content_width < 1200.0 {
+        0.62
+    } else {
+        0.66
+    };
+    let bubble_width = (chat_content_width * ratio).clamp(280.0, 960.0);
+    (((bubble_width - 24.0) / 8.4).floor() as i32).clamp(16, 140)
+}
+
+fn schedule_markdown_reflow_poll_with_interval(
+    ui_weak: slint::Weak<MainWindow>,
+    last_wrap_cols: Rc<Cell<i32>>,
+    polling_active: Rc<Cell<bool>>,
+    interval_ms: u64,
+) {
+    slint::Timer::single_shot(std::time::Duration::from_millis(interval_ms), move || {
+        if !polling_active.get() {
+            return;
+        }
+
+        if let Some(ui) = ui_weak.upgrade() {
+            // 仅在 Chat 页面可见时执行重排，减少无关页面开销
+            if ui.get_current_route() != Route::Chat {
+                polling_active.set(false);
+                return;
+            }
+
+            let cols = compute_wrap_cols(&ui);
+            if cols != last_wrap_cols.get() {
+                last_wrap_cols.set(cols);
+
+                let mut messages: Vec<ChatMessage> = ui.get_chat_messages().iter().collect();
+                let mut changed = false;
+
+                for message in &mut messages {
+                    if message.role == MessageRole::Assistant && message.content.as_str() != "" {
+                        let raw_content = message.content.to_string();
+                        let payload = build_assistant_render_payload_with_wrap_cols(
+                            &raw_content,
+                            Some(cols as usize),
+                        );
+
+                        if message.is_markdown || payload.is_markdown {
+                            message.rendered_content = payload.rendered_text.into();
+                            message.is_markdown = payload.is_markdown;
+                            message.markdown_blocks = payload.blocks.as_slice().into();
+                            changed = true;
+                        }
+                    }
+                }
+
+                if changed {
+                    ui.set_chat_messages(messages.as_slice().into());
+                    log::debug!(
+                        "[Chat::Wrap] Reflowed assistant markdown with cols={}",
+                        cols
+                    );
+                }
+            }
+
+            schedule_markdown_reflow_poll_with_interval(
+                ui_weak.clone(),
+                last_wrap_cols.clone(),
+                polling_active.clone(),
+                250,
+            );
+        } else {
+            polling_active.set(false);
+        }
+    });
+}
+
+fn start_markdown_reflow_poll_if_needed(
+    ui_weak: slint::Weak<MainWindow>,
+    last_wrap_cols: Rc<Cell<i32>>,
+    polling_active: Rc<Cell<bool>>,
+) {
+    if polling_active.get() {
+        return;
+    }
+    polling_active.set(true);
+    schedule_markdown_reflow_poll_with_interval(ui_weak, last_wrap_cols, polling_active, 0);
+}
 
 // 全局 Tokio Runtime（用于异步操作）
 lazy_static::lazy_static! {
@@ -117,100 +216,58 @@ pub fn setup_interactive(ui: &MainWindow) {
                             Ok(response) => {
                                 log::info!("[Chat::Interactive] Server response received, length: {}", response.len());
 
-                                // 序列化服务器响应
-                                log::debug!("[Chat::Interactive] Serializing server response...");
-                                match serialize_server_response(response) {
-                                    Ok(ai_message) => {
-                                        log::info!("[Chat::Interactive] AI message created (id: {})", ai_message.id);
+                                // 在主线程中进行序列化与 UI 更新，避免跨线程传递 Slint Model 数据
+                                log::debug!("[Chat::Interactive] Invoking from event loop to update UI...");
+                                match slint::invoke_from_event_loop(move || {
+                                    log::debug!("[Chat::Interactive] Event loop callback executing");
 
-                                        // 在主线程中更新 UI
-                                        log::debug!("[Chat::Interactive] Invoking from event loop to update UI...");
-                                        match slint::invoke_from_event_loop(move || {
-                                            log::debug!("[Chat::Interactive] Event loop callback executing");
+                                    if let Some(ui) = ui_weak_clone.upgrade() {
+                                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                            let mut messages: Vec<ChatMessage> =
+                                                ui.get_chat_messages().iter().collect::<Vec<ChatMessage>>();
 
-                                            match ui_weak_clone.upgrade() {
-                                                Some(ui) => {
-                                                    log::debug!("[Chat::Interactive] UI upgraded in event loop");
-
-                                                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                                        let mut messages: Vec<ChatMessage> = ui.get_chat_messages().iter().collect::<Vec<ChatMessage>>();
-
-                                                        // 移除加载占位消息（空白回复）
-                                                        if messages.len() > 0 &&
-                                                           messages[messages.len() - 1].role == MessageRole::Assistant &&
-                                                           messages[messages.len() - 1].content.as_str() == "" {
-                                                            log::debug!("[Chat::Interactive] Removing loading placeholder message before adding AI response");
-                                                            messages.pop();
-                                                        }
-
-                                                        // 添加 AI 回复
-                                                        messages.push(ai_message);
-                                                        ui.set_chat_messages(messages.as_slice().into());
-                                                        ui.set_chat_is_sending(false);
-
-                                                        messages.len()
-                                                    })) {
-                                                        Ok(count) => {
-                                                            log::info!("[Chat::Interactive] AI response added successfully, total messages: {}", count);
-
-                                                            // 延迟设置滚动位置，确保内容已渲染
-                                                            let ui_weak_scroll = ui.as_weak();
-                                                            slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
-                                                                if let Some(ui) = ui_weak_scroll.upgrade() {
-                                                                    ui.set_chat_scroll_position(-99999.0);
-                                                                    log::debug!("[Chat::Interactive] Triggered scroll to bottom after AI response");
-                                                                }
-                                                            });
-                                                        }
-                                                        Err(e) => {
-                                                            log::error!("[Chat::Interactive] Panic while updating UI with AI message: {:?}", e);
-                                                        }
-                                                    }
-                                                }
-                                                None => {
-                                                    log::warn!("[Chat::Interactive] UI weak reference expired in event loop");
-                                                }
+                                            // 移除加载占位消息（空白回复）
+                                            if !messages.is_empty()
+                                                && messages[messages.len() - 1].role == MessageRole::Assistant
+                                                && messages[messages.len() - 1].content.as_str() == ""
+                                            {
+                                                log::debug!("[Chat::Interactive] Removing loading placeholder message before adding AI response");
+                                                messages.pop();
                                             }
-                                        }) {
+
+                                            // 在 UI 线程序列化，避免把 ChatMessage(含 ModelRc) 从 worker 线程 move 过来
+                                            match serialize_server_response(response) {
+                                                Ok(ai_message) => messages.push(ai_message),
+                                                Err(err) => messages.push(handle_error_response(err)),
+                                            }
+
+                                            ui.set_chat_messages(messages.as_slice().into());
+                                            ui.set_chat_is_sending(false);
+                                        })) {
                                             Ok(_) => {
-                                                log::debug!("[Chat::Interactive] Event loop invocation successful");
+                                                log::info!("[Chat::Interactive] Response added successfully");
+                                                let ui_weak_scroll = ui.as_weak();
+                                                slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
+                                                    if let Some(ui) = ui_weak_scroll.upgrade() {
+                                                        ui.set_chat_scroll_position(-99999.0);
+                                                        log::debug!("[Chat::Interactive] Triggered scroll to bottom after AI response");
+                                                    }
+                                                });
                                             }
                                             Err(e) => {
-                                                log::error!("[Chat::Interactive] Failed to invoke from event loop: {:?}", e);
+                                                log::error!("[Chat::Interactive] Panic while updating UI with response: {:?}", e);
                                             }
                                         }
+                                    } else {
+                                        log::warn!("[Chat::Interactive] UI weak reference expired in event loop");
                                     }
-                                    Err(e) => {
-                                        log::error!("[Chat::Interactive] Failed to serialize response: {}", e);
-                                        let error_message = handle_error_response(e);
-
-                                        slint::invoke_from_event_loop(move || {
-                                            if let Some(ui) = ui_weak_clone.upgrade() {
-                                                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                                    let mut messages: Vec<ChatMessage> = ui.get_chat_messages().iter().collect::<Vec<ChatMessage>>();
-
-                                                    // 移除加载占位消息
-                                                    if messages.len() > 0 &&
-                                                       messages[messages.len() - 1].role == MessageRole::Assistant &&
-                                                       messages[messages.len() - 1].content.as_str() == "" {
-                                                        messages.pop();
-                                                    }
-
-                                                    messages.push(error_message);
-                                                    ui.set_chat_messages(messages.as_slice().into());
-                                                    ui.set_chat_is_sending(false);
-                                                })) {
-                                                    Ok(_) => log::debug!("[Chat::Interactive] Error message added to UI"),
-                                                    Err(e) => log::error!("[Chat::Interactive] Panic while adding error message: {:?}", e),
-                                                }
-                                            }
-                                        }).ok();
-                                    }
+                                }) {
+                                    Ok(_) => log::debug!("[Chat::Interactive] Event loop invocation successful"),
+                                    Err(e) => log::error!("[Chat::Interactive] Failed to invoke from event loop: {:?}", e),
                                 }
                             }
                             Err(e) => {
                                 log::error!("[Chat::Interactive] Failed to send message to server: {}", e);
-                                let error_message = handle_error_response(e);
 
                                 slint::invoke_from_event_loop(move || {
                                     if let Some(ui) = ui_weak_clone.upgrade() {
@@ -224,6 +281,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                                                 messages.pop();
                                             }
 
+                                            let error_message = handle_error_response(e);
                                             messages.push(error_message);
                                             ui.set_chat_messages(messages.as_slice().into());
                                             ui.set_chat_is_sending(false);
@@ -296,6 +354,45 @@ pub fn setup_interactive(ui: &MainWindow) {
             Err(e) => {
                 log::error!("[Chat::Copy] Step 3: FAILED to create clipboard instance: {}", e);
             }
+        }
+    });
+
+    // 处理打开链接回调（来自 Markdown 渲染块）
+    ui.on_chat_open_link(move |url: slint::SharedString| {
+        let url = url.to_string();
+        if url.trim().is_empty() {
+            return;
+        }
+
+        match webbrowser::open(&url) {
+            Ok(_) => log::info!("[Chat::Link] Opened URL: {}", url),
+            Err(e) => log::error!("[Chat::Link] Failed to open URL '{}': {}", url, e),
+        }
+    });
+
+    // 仅在 Chat 页面可见时启动轮询；离开 Chat 立即停止
+    let last_wrap_cols = Rc::new(Cell::new(-1));
+    let polling_active = Rc::new(Cell::new(false));
+    if ui.get_current_route() == Route::Chat {
+        start_markdown_reflow_poll_if_needed(
+            ui.as_weak(),
+            last_wrap_cols.clone(),
+            polling_active.clone(),
+        );
+    }
+
+    let ui_weak_route = ui.as_weak();
+    let last_wrap_cols_route = last_wrap_cols.clone();
+    let polling_active_route = polling_active.clone();
+    ui.on_chat_route_visible_changed(move |visible| {
+        if visible {
+            start_markdown_reflow_poll_if_needed(
+                ui_weak_route.clone(),
+                last_wrap_cols_route.clone(),
+                polling_active_route.clone(),
+            );
+        } else {
+            polling_active_route.set(false);
         }
     });
 

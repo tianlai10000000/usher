@@ -14,11 +14,48 @@ export enum MessageRole {
     Assistant,
 }
 
+export enum MarkdownBlockKind {
+    Paragraph,
+    Heading1,
+    Heading2,
+    Heading3,
+    ListItem,
+    CodeBlock,
+    Quote,
+}
+
+export enum MarkdownInlineKind {
+    Text,
+    Strong,
+    Emphasis,
+    Code,
+    Link,
+}
+
+export struct MarkdownInlineSpan {
+    kind: MarkdownInlineKind,
+    text: string,
+    href: string,
+}
+
+export struct MarkdownInlineLine {
+    spans: [MarkdownInlineSpan],
+}
+
+export struct MarkdownBlock {
+    kind: MarkdownBlockKind,
+    text: string,
+    inline_lines: [MarkdownInlineLine],
+}
+
 // 消息数据结构
 export struct ChatMessage {
     id: int,
     role: MessageRole,
     content: string,
+    rendered_content: string,
+    is_markdown: bool,
+    markdown_blocks: [MarkdownBlock],
     timestamp: string,
 }
 
@@ -26,14 +63,20 @@ export struct ChatMessage {
 component MessageBubble inherits Rectangle {
     in property <MessageRole> role;
     in property <string> content;
+    in property <string> rendered-content;
+    in property <bool> is-markdown: false;
+    in property <[MarkdownBlock]> markdown-blocks: [];
     in property <string> timestamp;
     in property <bool> is-loading: false;
+    // 消息最大宽度（由外层 Chat 根据窗口宽度动态计算）
+    in property <length> max-bubble-width: 420px;
     
     // 复制成功状态（由外部控制）
     in property <bool> show-copied: false;
     
     // 复制回调 - 传递消息内容
     callback copy-message(string);
+    callback open-link(string);
     
     background: transparent;
     
@@ -46,7 +89,7 @@ component MessageBubble inherits Rectangle {
         
         // 发送的消息内容
         Rectangle {
-            max-width: 420px;
+            max-width: root.max-bubble-width;
             background: MaterialPalette.primary;
             border-radius: 16px;
             border-top-right-radius: 4px;
@@ -171,7 +214,7 @@ component MessageBubble inherits Rectangle {
         
         // 消息内容
         Rectangle {
-            max-width: 420px;
+            max-width: root.max-bubble-width;
             background: MaterialPalette.surface_container_high;
             border-radius: 16px;
             border-top-left-radius: 4px;
@@ -207,11 +250,79 @@ component MessageBubble inherits Rectangle {
                     }
                 }
                 
-                // 消息内容
+                // Markdown 富文本块渲染（仅 AI 消息）
+                VerticalLayout {
+                    visible: !root.is-loading && root.is-markdown && root.markdown-blocks.length > 0;
+                    height: (!root.is-loading && root.is-markdown && root.markdown-blocks.length > 0) ? self.preferred-height : 0px;
+                    spacing: 6px;
+
+                    for block[index] in root.markdown-blocks: VerticalLayout {
+                        spacing: 2px;
+
+                        // 细粒度行内渲染（同一段落内粗体/斜体/链接）
+                        if block.inline_lines.length > 0: VerticalLayout {
+                            spacing: 2px;
+
+                            for line[line_index] in block.inline_lines: HorizontalLayout {
+                                spacing: 0px;
+                                alignment: start;
+
+                                for span[span_index] in line.spans: Rectangle {
+                                    background: transparent;
+                                    height: span-text.preferred-height;
+                                    width: span-text.preferred-width;
+
+                                    span-touch := TouchArea {
+                                        enabled: span.kind == MarkdownInlineKind.Link && span.href != "";
+                                        clicked => {
+                                            if (span.href != "") {
+                                                root.open-link(span.href);
+                                            }
+                                        }
+                                    }
+
+                                    span-text := Text {
+                                        text: span.text;
+                                        color: span.kind == MarkdownInlineKind.Link ? MaterialPalette.primary : MaterialPalette.on_surface;
+                                        font-size: block.kind == MarkdownBlockKind.Heading1 ? 20px :
+                                                   block.kind == MarkdownBlockKind.Heading2 ? 18px :
+                                                   block.kind == MarkdownBlockKind.Heading3 ? 16px :
+                                                   block.kind == MarkdownBlockKind.CodeBlock ? 13px :
+                                                   14px;
+                                        font-weight: (block.kind == MarkdownBlockKind.Heading1 ||
+                                                      block.kind == MarkdownBlockKind.Heading2 ||
+                                                      block.kind == MarkdownBlockKind.Heading3 ||
+                                                      span.kind == MarkdownInlineKind.Strong) ? 700 : 400;
+                                        font-italic: span.kind == MarkdownInlineKind.Emphasis;
+                                        font-family: (block.kind == MarkdownBlockKind.CodeBlock || span.kind == MarkdownInlineKind.Code) ? "Menlo" : "Hiragino Sans GB";
+                                    }
+                                }
+                            }
+                        }
+
+                        // 降级文本（如 code block 或无行内切分结果）
+                        if block.inline_lines.length == 0: Text {
+                            text: block.text;
+                            color: MaterialPalette.on_surface;
+                            wrap: word-wrap;
+                            font-size: block.kind == MarkdownBlockKind.Heading1 ? 20px :
+                                       block.kind == MarkdownBlockKind.Heading2 ? 18px :
+                                       block.kind == MarkdownBlockKind.Heading3 ? 16px :
+                                       block.kind == MarkdownBlockKind.CodeBlock ? 13px :
+                                       14px;
+                            font-weight: (block.kind == MarkdownBlockKind.Heading1 ||
+                                          block.kind == MarkdownBlockKind.Heading2 ||
+                                          block.kind == MarkdownBlockKind.Heading3) ? 700 : 400;
+                            font-family: block.kind == MarkdownBlockKind.CodeBlock ? "Menlo" : "Hiragino Sans GB";
+                        }
+                    }
+                }
+
+                // 纯文本/降级渲染
                 Text {
-                    visible: !root.is-loading;
-                    height: !root.is-loading ? self.preferred-height : 0px;
-                    text: root.content;
+                    visible: !root.is-loading && (!root.is-markdown || root.markdown-blocks.length == 0);
+                    height: (!root.is-loading && (!root.is-markdown || root.markdown-blocks.length == 0)) ? self.preferred-height : 0px;
+                    text: root.rendered-content;
                     color: MaterialPalette.on_surface;
                     wrap: word-wrap;
                     font-size: 14px;
@@ -388,6 +499,8 @@ export component Chat inherits Rectangle {
     
     // 回调 - 复制消息到剪贴板（传递索引和内容）
     callback copy-to-clipboard(int, string);
+    // 回调 - 打开链接
+    callback open-link(string);
     
     // 最后复制成功的消息索引（-1 表示无）
     in-out property <int> copied-message-index: -1;
@@ -404,6 +517,20 @@ export component Chat inherits Rectangle {
     
     // 滚动位置控制（从 Rust 端设置来触发滚动）
     in-out property <length> scroll-position: 0px;
+    // 类似微信：按窗口宽度分段，小屏更紧凑，大屏更宽
+    // < 720px: 0.58, 720px~1200px: 0.62, > 1200px: 0.66
+    private property <length> message-bubble-max-width: max(
+        280px,
+        min(
+            960px,
+            chat-content.width
+                * (chat-content.width < 720px
+                    ? 0.58
+                    : chat-content.width < 1200px
+                        ? 0.62
+                        : 0.66)
+        )
+    );
     
     // 使用 ElevatedCard 包装，与其他页面风格一致
     Horizontal {
@@ -456,7 +583,11 @@ export component Chat inherits Rectangle {
                             // 消息列表：使用统一的 MessageBubble 组件
                             for message[index] in root.messages: MessageBubble {
                                 role: message.role;
+                                max-bubble-width: root.message-bubble-max-width;
                                 content: message.content;
+                                rendered-content: message.rendered_content;
+                                is-markdown: message.is_markdown;
+                                markdown-blocks: message.markdown_blocks;
                                 timestamp: message.timestamp;
                                 // 只有最后一条消息且内容为空时才显示 loading
                                 is-loading: message.content == "" && 
@@ -468,6 +599,9 @@ export component Chat inherits Rectangle {
                                 copy-message(text) => {
                                     root.copy-to-clipboard(index, text);
                                 }
+                                open-link(url) => {
+                                    root.open-link(url);
+                                }
                             }
                             
                             // 发送中的加载指示器（当没有 AI 占位消息时显示）
@@ -475,7 +609,11 @@ export component Chat inherits Rectangle {
                                 visible: root.is-sending && root.messages.length == 0;
                                 height: root.is-sending && root.messages.length == 0 ? self.preferred-height : 0px;
                                 role: MessageRole.Assistant;
+                                max-bubble-width: root.message-bubble-max-width;
                                 content: "";
+                                rendered-content: "";
+                                is-markdown: false;
+                                markdown-blocks: [];
                                 timestamp: "";
                                 is-loading: true;
                                 show-copied: false;

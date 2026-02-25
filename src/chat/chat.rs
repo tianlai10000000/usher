@@ -1,4 +1,22 @@
-use anyhow::Result;
+use crate::constants::chat::RAG_API_URL;
+use serde::Deserialize;
+use serde_json::json;
+
+/// RAG API 引用条目
+#[derive(Debug, Deserialize)]
+pub struct ChatReference {
+    pub reference_id: String,
+    pub file_path: String,
+}
+
+/// RAG API 响应结构
+#[derive(Debug, Deserialize)]
+pub struct ChatResponse {
+    #[serde(default)]
+    pub response: String,
+    #[serde(default)]
+    pub references: Vec<ChatReference>,
+}
 
 /// 发送消息到服务器/LLM 并获取响应
 ///
@@ -11,27 +29,26 @@ use anyhow::Result;
 pub async fn send_message_to_server(user_message: &str) -> Result<String, String> {
     log::debug!("[Chat] Sending message to server: {}", user_message);
 
-    // TODO: 实际应用中这里应该调用真实的 API
-    // 例如：
-    // let client = reqwest::Client::new();
-    // let response = client.post("https://api.example.com/chat")
-    //     .json(&json!({"message": user_message}))
-    //     .send()
-    //     .await?;
-    // let result = response.json::<ChatResponse>().await?;
-    // Ok(result.content)
+    let client = reqwest::Client::new();
+    let response = client
+        .post(RAG_API_URL)
+        .json(&json!({
+            "query": user_message,
+            "mode": "hybrid",
+            "include_references": true,
+            "response_type": "Multiple Paragraphs",
+            "top_k": 10
+        }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    // 模拟 API 调用延迟
-    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    let result = response
+        .json::<ChatResponse>()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    // 模拟成功响应
-    let response = format!(
-        "我收到了你的消息：\"{}\"。这是一个模拟回复，实际应用中这里会调用 AI API。",
-        user_message
-    );
-
-    log::info!("[Chat] Received response from server");
-    Ok(response)
+    Ok(result.response)
 }
 
 /// 处理 API 错误并转换为用户友好的错误消息
