@@ -206,9 +206,85 @@ jobs:
             ${{ env.APP_NAME }}-${{ matrix.target }}.dmg
           if-no-files-found: error
 
+  build-windows:
+    name: Build Windows App
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            arch: x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build Release
+        shell: bash
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_INCREMENTAL: 0
+          CARGO_NET_GIT_FETCH_WITH_CLI: true
+
+      - name: Create zip artifacts
+        shell: pwsh
+        run: |
+          $exePath = "target/${{ matrix.target }}/release/usher.exe"
+          if (-not (Test-Path $exePath)) {
+            throw "Executable not found at $exePath"
+          }
+
+          $selfZip = "${{ env.APP_NAME }}-${{ matrix.target }}.zip"
+          $bundleZip = "${{ env.APP_NAME }}-${{ matrix.target }}-bundle.zip"
+          $debugZip = "${{ env.APP_NAME }}-${{ matrix.target }}-debug.zip"
+
+          $stagingRoot = Join-Path $pwd "staging"
+          Remove-Item $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+          $selfDir = Join-Path $stagingRoot "self"
+          $bundleDir = Join-Path $stagingRoot "bundle"
+          $debugDir = Join-Path $stagingRoot "debug"
+          New-Item -ItemType Directory -Path $selfDir, $bundleDir, $debugDir | Out-Null
+
+          Copy-Item $exePath (Join-Path $selfDir "usher.exe")
+          Copy-Item $exePath (Join-Path $debugDir "usher.exe")
+          Copy-Item $exePath (Join-Path $bundleDir "usher.exe")
+
+          if (Test-Path "logo.png") {
+            Copy-Item "logo.png" (Join-Path $bundleDir "logo.png")
+          }
+
+          @"
+          Usher Windows Bundle
+          ====================
+          1) 直接运行 usher.exe
+          2) 如果启动报缺少 DLL，请补齐依赖到同目录后重试
+          3) 若托盘图标异常，请确认 logo.png 存在
+          "@ | Set-Content -Path (Join-Path $bundleDir "README.txt")
+
+          Compress-Archive -Path (Join-Path $selfDir "*") -DestinationPath $selfZip -Force
+          Compress-Archive -Path (Join-Path $bundleDir "*") -DestinationPath $bundleZip -Force
+          Compress-Archive -Path (Join-Path $debugDir "*") -DestinationPath $debugZip -Force
+
+          Get-Item $selfZip, $bundleZip, $debugZip | Format-Table Name, Length
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-windows-${{ matrix.arch }}
+          path: |
+            ${{ env.APP_NAME }}-${{ matrix.target }}.zip
+            ${{ env.APP_NAME }}-${{ matrix.target }}-bundle.zip
+            ${{ env.APP_NAME }}-${{ matrix.target }}-debug.zip
+          if-no-files-found: error
+
   release:
     name: Create Release
-    needs: [build-macos]
+    needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -225,7 +301,7 @@ jobs:
           find artifacts -type f -o -type d | head -20
           echo ""
           echo "Looking for release files:"
-          find artifacts -type f \( -name "*.dmg" -o -name "*.tar.gz" \) || echo "No matching files found!"
+          find artifacts -type f \( -name "*.dmg" -o -name "*.tar.gz" -o -name "*.zip" \) || echo "No matching files found!"
           echo ""
           echo "All files:"
           find artifacts -type f || echo "No files found!"
@@ -235,12 +311,13 @@ jobs:
           echo "- *-bundle.tar.gz: 用于手动安装（包含完整 .app bundle，解压后可直接使用）"
           echo "- *-debug.tar.gz: 用于调试/查看日志（只包含可执行文件，直接运行会显示终端窗口）"
           echo "- *.dmg: 用于手动安装（macOS 安装镜像）"
+          echo "- *.zip: 用于 Windows 分发（self_update/手动安装/调试）"
 
       - name: Prepare release files
         run: |
           # 创建 release_files 目录并复制所有匹配的文件
           mkdir -p release_files
-          find artifacts -type f \( -name "*.dmg" -o -name "*.tar.gz" \) -exec cp {} release_files/ \;
+          find artifacts -type f \( -name "*.dmg" -o -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release_files/ \;
           echo "Release files prepared:"
           ls -lh release_files/ || echo "No files in release_files!"
           echo ""
@@ -249,6 +326,9 @@ jobs:
           echo "  - *-{target}-bundle.tar.gz: 用于手动安装（包含完整 .app bundle，解压后可直接使用）"
           echo "  - *-{target}-debug.tar.gz: 用于调试/查看日志（只包含可执行文件，直接运行会显示终端窗口）"
           echo "  - *-{target}.dmg: 用于手动安装（macOS 安装镜像）"
+          echo "  - *-{target}.zip: 用于 Windows self_update 自动更新"
+          echo "  - *-{target}-bundle.zip: 用于 Windows 手动安装（包含 exe + 资源）"
+          echo "  - *-{target}-debug.zip: 用于 Windows 调试/查看日志"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1

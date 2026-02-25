@@ -384,6 +384,7 @@ mod macos {
 mod other {
     use super::*;
     use anyhow::Context;
+    use slint::ComponentHandle;
     use std::thread;
     use tray_icon::{
         TrayIcon, TrayIconBuilder, TrayIconEvent,
