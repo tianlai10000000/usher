@@ -6813,7 +6813,7 @@ checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "usher"
-version = "0.0.6-alpha.2"
+version = "0.0.6-alpha.3"
 dependencies = [
  "anyhow",
  "arboard",
