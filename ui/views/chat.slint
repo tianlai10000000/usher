@@ -97,7 +97,7 @@ component MessageBubble inherits Rectangle {
             // 消息内容的 hover 检测
             message-hover := TouchArea {}
             
-            VerticalLayout {
+            user-content := VerticalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
                 padding-top: 8px;
@@ -121,24 +121,22 @@ component MessageBubble inherits Rectangle {
                 }
             }
             
-            // 悬浮工具栏 - 使用绝对定位，不占据布局空间
+            // 悬浮工具栏 - 绝对定位在消息下方，不影响气泡高度
             Rectangle {
                 x: 0;
-                y: parent.height;
+                y: user-content.preferred-height + 4px;
                 width: parent.width;
                 height: 32px;
                 visible: (message-hover.has-hover || toolbar-hover.has-hover || copy-touch.has-hover || root.show-copied) && !root.is-loading;
 
-                // 工具栏的 hover 检测
                 toolbar-hover := TouchArea {}
-                
+
                 HorizontalLayout {
                     alignment: end;
                     padding-top: 4px;
                     padding-right: 4px;
                     spacing: 4px;
                     
-                    // 复制按钮
                     Rectangle {
                         width: 28px;
                         height: 28px;
@@ -147,7 +145,6 @@ component MessageBubble inherits Rectangle {
                         
                         copy-touch := TouchArea {
                             clicked => {
-                                // 如果在冷却期内（2s），不触发复制
                                 if (!root.show-copied) {
                                     root.copy-message(root.content);
                                 }
@@ -157,7 +154,6 @@ component MessageBubble inherits Rectangle {
                         Image {
                             width: 16px;
                             height: 16px;
-                            // 根据复制状态显示不同图标
                             source: root.show-copied 
                                 ? @image-url("../assets/icons/done.svg") 
                                 : @image-url("../assets/icons/copy.svg");
@@ -191,7 +187,7 @@ component MessageBubble inherits Rectangle {
     // AI 消息布局（左对齐）
     HorizontalLayout {
         visible: root.role == MessageRole.Assistant;
-        height: root.role == MessageRole.Assistant ? self.preferred-height : 0px;
+        // height: root.role == MessageRole.Assistant ? self.preferred-height : 0px;
         spacing: 8px;
         alignment: start;
         
@@ -222,7 +218,7 @@ component MessageBubble inherits Rectangle {
             // AI 消息内容的 hover 检测
             ai-message-hover := TouchArea {}
             
-            VerticalLayout {
+            ai-content := VerticalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
                 padding-top: 8px;
@@ -253,7 +249,7 @@ component MessageBubble inherits Rectangle {
                 // Markdown 富文本块渲染（仅 AI 消息）
                 VerticalLayout {
                     visible: !root.is-loading && root.is-markdown && root.markdown-blocks.length > 0;
-                    height: (!root.is-loading && root.is-markdown && root.markdown-blocks.length > 0) ? self.preferred-height : 0px;
+                    // height: (!root.is-loading && root.is-markdown && root.markdown-blocks.length > 0) ? self.preferred-height : 0px;
                     spacing: 6px;
 
                     for block[index] in root.markdown-blocks: VerticalLayout {
@@ -266,10 +262,14 @@ component MessageBubble inherits Rectangle {
                             for line[line_index] in block.inline_lines: HorizontalLayout {
                                 spacing: 0px;
                                 alignment: start;
+                                private property <length> line-height: block.kind == MarkdownBlockKind.Heading1 ? 30px :
+                                                                       block.kind == MarkdownBlockKind.Heading2 ? 28px :
+                                                                       block.kind == MarkdownBlockKind.Heading3 ? 24px :
+                                                                       22px;
 
                                 for span[span_index] in line.spans: Rectangle {
                                     background: transparent;
-                                    height: span-text.preferred-height;
+                                    height: parent.line-height;
                                     width: span-text.preferred-width;
 
                                     span-touch := TouchArea {
@@ -282,6 +282,7 @@ component MessageBubble inherits Rectangle {
                                     }
 
                                     span-text := Text {
+                                        y: (parent.height - self.preferred-height) / 2;
                                         text: span.text;
                                         color: span.kind == MarkdownInlineKind.Link ? MaterialPalette.primary : MaterialPalette.on_surface;
                                         font-size: block.kind == MarkdownBlockKind.Heading1 ? 20px :
@@ -294,7 +295,9 @@ component MessageBubble inherits Rectangle {
                                                       block.kind == MarkdownBlockKind.Heading3 ||
                                                       span.kind == MarkdownInlineKind.Strong) ? 700 : 400;
                                         font-italic: span.kind == MarkdownInlineKind.Emphasis;
-                                        font-family: (block.kind == MarkdownBlockKind.CodeBlock || span.kind == MarkdownInlineKind.Code) ? "Menlo" : "Hiragino Sans GB";
+                                        font-family: (block.kind == MarkdownBlockKind.CodeBlock || span.kind == MarkdownInlineKind.Code)
+                                            ? "Menlo, Hiragino Sans GB"
+                                            : "Hiragino Sans GB";
                                     }
                                 }
                             }
@@ -313,7 +316,7 @@ component MessageBubble inherits Rectangle {
                             font-weight: (block.kind == MarkdownBlockKind.Heading1 ||
                                           block.kind == MarkdownBlockKind.Heading2 ||
                                           block.kind == MarkdownBlockKind.Heading3) ? 700 : 400;
-                            font-family: block.kind == MarkdownBlockKind.CodeBlock ? "Menlo" : "Hiragino Sans GB";
+                            font-family: block.kind == MarkdownBlockKind.CodeBlock ? "Hiragino Sans GB" : "Hiragino Sans GB";
                         }
                     }
                 }
@@ -341,15 +344,14 @@ component MessageBubble inherits Rectangle {
                 }
             }
             
-            // AI 消息的悬浮工具栏 - 使用绝对定位，不占据布局空间
+            // 悬浮工具栏 - 绝对定位在消息下方，不影响气泡高度
             Rectangle {
                 x: 0;
-                y: parent.height;
+                y: ai-content.preferred-height + 4px;
                 width: parent.width;
                 height: 32px;
                 visible: (ai-message-hover.has-hover || ai-toolbar-hover.has-hover || ai-copy-touch.has-hover || root.show-copied) && !root.is-loading;
-
-                // 工具栏的 hover 检测
+                
                 ai-toolbar-hover := TouchArea {}
                 
                 HorizontalLayout {
