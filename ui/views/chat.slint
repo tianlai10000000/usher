@@ -73,15 +73,20 @@ component MessageBubble inherits Rectangle {
     
     // 复制成功状态（由外部控制）
     in property <bool> show-copied: false;
+    // 低频等待动效相位（由 Rust 定时器每 500ms 更新一次）
+    in property <int> loading-phase: 0;
     
     // 复制回调 - 传递消息内容
     callback copy-message(string);
     callback open-link(string);
     
+    // 高度跟随当前角色对应行的内容高度，避免根容器产生额外空白
+    height: root.role == MessageRole.User ? user-row.preferred-height : ai-row.preferred-height;
     background: transparent;
+
     
     // 用户消息布局（右对齐）
-    HorizontalLayout {
+    user-row := HorizontalLayout {
         visible: root.role == MessageRole.User;
         height: root.role == MessageRole.User ? self.preferred-height : 0px;
         spacing: 8px;
@@ -90,6 +95,7 @@ component MessageBubble inherits Rectangle {
         // 发送的消息内容
         Rectangle {
             max-width: root.max-bubble-width;
+            height: user-content.preferred-height;
             background: MaterialPalette.primary;
             border-radius: 16px;
             border-top-right-radius: 4px;
@@ -124,7 +130,7 @@ component MessageBubble inherits Rectangle {
             // 悬浮工具栏 - 绝对定位在消息下方，不影响气泡高度
             Rectangle {
                 x: 0;
-                y: user-content.preferred-height + 4px;
+                y: user-content.preferred-height;
                 width: parent.width;
                 height: 32px;
                 visible: (message-hover.has-hover || toolbar-hover.has-hover || copy-touch.has-hover || root.show-copied) && !root.is-loading;
@@ -185,9 +191,9 @@ component MessageBubble inherits Rectangle {
     }
     
     // AI 消息布局（左对齐）
-    HorizontalLayout {
+    ai-row := HorizontalLayout {
         visible: root.role == MessageRole.Assistant;
-        // height: root.role == MessageRole.Assistant ? self.preferred-height : 0px;
+        height: root.role == MessageRole.Assistant ? self.preferred-height : 0px;
         spacing: 8px;
         alignment: start;
         
@@ -211,6 +217,7 @@ component MessageBubble inherits Rectangle {
         // 消息内容
         Rectangle {
             max-width: root.max-bubble-width;
+            height: ai-content.preferred-height;
             background: MaterialPalette.surface_container_high;
             border-radius: 16px;
             border-top-left-radius: 4px;
@@ -229,17 +236,26 @@ component MessageBubble inherits Rectangle {
                 HorizontalLayout {
                     visible: root.is-loading;
                     height: root.is-loading ? self.preferred-height : 0px;
-                    spacing: 8px;
+                    spacing: 6px;
                     alignment: start;
                     
-                    CircularProgressIndicator {
-                        width: 16px;
-                        height: 16px;
-                        indeterminate: true;
-                    }
-                    
                     Text {
-                        text: "Thinking...";
+                        text: "●";
+                        color: MaterialPalette.primary;
+                        font-size: 12px;
+                        font-family: "Hiragino Sans GB";
+                    }
+
+                    Text {
+                        text: "Thinking";
+                        color: MaterialPalette.on_surface_variant;
+                        font-size: 14px;
+                        font-family: "Hiragino Sans GB";
+                    }
+
+                    Text {
+                        text: root.loading-phase == 0 ? "." :
+                              root.loading-phase == 1 ? ".." : "...";
                         color: MaterialPalette.on_surface_variant;
                         font-size: 14px;
                         font-family: "Hiragino Sans GB";
@@ -249,7 +265,6 @@ component MessageBubble inherits Rectangle {
                 // Markdown 富文本块渲染（仅 AI 消息）
                 VerticalLayout {
                     visible: !root.is-loading && root.is-markdown && root.markdown-blocks.length > 0;
-                    // height: (!root.is-loading && root.is-markdown && root.markdown-blocks.length > 0) ? self.preferred-height : 0px;
                     spacing: 6px;
 
                     for block[index] in root.markdown-blocks: VerticalLayout {
@@ -347,7 +362,7 @@ component MessageBubble inherits Rectangle {
             // 悬浮工具栏 - 绝对定位在消息下方，不影响气泡高度
             Rectangle {
                 x: 0;
-                y: ai-content.preferred-height + 4px;
+                y: ai-content.preferred-height;
                 width: parent.width;
                 height: 32px;
                 visible: (ai-message-hover.has-hover || ai-toolbar-hover.has-hover || ai-copy-touch.has-hover || root.show-copied) && !root.is-loading;
@@ -491,6 +506,8 @@ export component Chat inherits Rectangle {
     // 输入状态
     in-out property <string> input-text: "";
     in property <bool> is-sending: false;
+    // 低频等待动效相位（0,1,2）
+    in-out property <int> loading-phase: 0;
     
     // 与其他页面保持一致的属性
     in property <length> viewport-height;
@@ -586,6 +603,7 @@ export component Chat inherits Rectangle {
                             for message[index] in root.messages: MessageBubble {
                                 role: message.role;
                                 max-bubble-width: root.message-bubble-max-width;
+                                loading-phase: root.loading-phase;
                                 content: message.content;
                                 rendered-content: message.rendered_content;
                                 is-markdown: message.is_markdown;
@@ -612,6 +630,7 @@ export component Chat inherits Rectangle {
                                 height: root.is-sending && root.messages.length == 0 ? self.preferred-height : 0px;
                                 role: MessageRole.Assistant;
                                 max-bubble-width: root.message-bubble-max-width;
+                                loading-phase: root.loading-phase;
                                 content: "";
                                 rendered-content: "";
                                 is-markdown: false;

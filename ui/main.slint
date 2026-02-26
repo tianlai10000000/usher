@@ -52,13 +52,24 @@ export component MainWindow inherits Window {
 
     // 路由状态 - 对外暴露
     in-out property <Route> current-route: Route.Home;
+    // Breadcrumb 显示控制（由路由策略统一计算）
+    in-out property <bool> show-breadcrumb: true;
+    // 导航抽屉显示控制（由路由策略统一计算）
+    in-out property <bool> show-navigation-drawer: true;
+    // 导航抽屉当前选中项（由路由策略统一计算）
+    in-out property <int> navigation-current-index: 0;
+    // 页面可见性控制（由路由策略统一计算）
+    in-out property <bool> show-page-scroll-view: true;
+    in-out property <bool> show-chat-page: false;
+    in-out property <bool> show-dialog-page: false;
     
     // 上一个路由，用于返回功能
     private property <Route> previous-route: Route.Home;
 
     // 导航信号（方便 Rust 端调用）
     callback navigate(Route);
-    
+    callback navigate-from-nav-index(int);
+
     // 更新相关回调
     callback install();
     callback show-error();
@@ -83,6 +94,7 @@ export component MainWindow inherits Window {
     in property <bool> chat-is-sending: false;
     in-out property <length> chat-scroll-position: 0px;
     in-out property <int> chat-copied-message-index: -1;
+    in-out property <int> chat-loading-phase: 0;
     callback chat-send-message(string);
     callback chat-copy-to-clipboard(int, string);
     callback chat-open-link(string);
@@ -118,7 +130,7 @@ export component MainWindow inherits Window {
         height: root.height - LayoutConstants.status-bar-height;
         padding: 0px;
         
-        Vertical {
+        if root.show-navigation-drawer: Vertical {
             width: root.navigation-drawer-expanded ? 120px : 56px;
             height: parent.height;
             padding: 0px;
@@ -145,52 +157,27 @@ export component MainWindow inherits Window {
                             custom_nav := CustomNavDrawer {
                                 width: scroll_view.visible_width;
                                 
-                                // 根据当前路由计算菜单索引，非菜单页面（Settings/About/Login）时为 -1
-                                current_index: root.current-route == Route.Home ? 0 :
-                                              root.current-route == Route.Search ? 1 :
-                                              root.current-route == Route.Notification ? 2 :
-                                              root.current-route == Route.Toast ? 3 :
-                                              root.current-route == Route.Dialog ? 4 :
-                                              root.current-route == Route.Tools ? 5 :
-                                              root.current-route == Route.Chat ? 6 :
-                                              root.current-route == Route.List ? 7 :
-                                              root.current-route == Route.Detail ? 8 : -1;
+                                // 当前菜单选中索引由路由策略统一计算
+                                current_index: root.navigation-current-index;
                                 
                                 items: [
-                                    { icon: @image-url("./assets/icons/home.svg"), text: root.navigation-drawer-expanded ? "Home" : "" },
-                                    { icon: @image-url("./assets/icons/search.svg"), text: root.navigation-drawer-expanded ? "Search" : "" },
-                                    { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Notify" : "" },
-                                    { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Toast" : "" },
-                                    { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Dialog" : "" },
-                                    { icon: @image-url("./assets/icons/tools.svg"), text: root.navigation-drawer-expanded ? "Tools" : ""},
+                                    // { icon: @image-url("./assets/icons/home.svg"), text: root.navigation-drawer-expanded ? "Home" : "" },
+                                    // { icon: @image-url("./assets/icons/search.svg"), text: root.navigation-drawer-expanded ? "Search" : "" },
+                                    // { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Notify" : "" },
+                                    // { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Toast" : "" },
+                                    // { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Dialog" : "" },
+                                    // { icon: @image-url("./assets/icons/tools.svg"), text: root.navigation-drawer-expanded ? "Tools" : ""},
                                     { icon: @image-url("./assets/icons/chat.svg"), text: root.navigation-drawer-expanded ? "Chat" : ""},
-                                    { icon: @image-url("./assets/icons/list.svg"), text: root.navigation-drawer-expanded ? "List" : "" },
-                                    { icon: @image-url("./assets/icons/detail.svg"), text: root.navigation-drawer-expanded ? "Detail" : ""},
+                                    // { icon: @image-url("./assets/icons/list.svg"), text: root.navigation-drawer-expanded ? "List" : "" },
+                                    // { icon: @image-url("./assets/icons/detail.svg"), text: root.navigation-drawer-expanded ? "Detail" : ""},
                                     { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Settings" : ""},
                                     { icon: @image-url("./assets/icons/about.svg"), text: root.navigation-drawer-expanded ? "About" : ""},
                                 ];
 
                                 selected(item_index) => {
-                                    // 路由映射数组：将菜单项索引映射到对应的路由
-                                    let routes: [Route] = [
-                                        Route.Home,
-                                        Route.Search,
-                                        Route.Notification,
-                                        Route.Toast,
-                                        Route.Dialog,
-                                        Route.Tools,
-                                        Route.Chat,
-                                        Route.List,
-                                        Route.Detail,
-                                        Route.Settings,
-                                        Route.About
-                                    ];
-                                    
-                                    if item_index >= 0 && item_index < routes.length {
-                                        let route = routes[item_index];
+                                    if item_index >= 0 {
                                         root.previous-route = root.current-route;
-                                        root.current-route = route;
-                                        root.navigate(route);
+                                        root.navigate-from-nav-index(item_index);
                                     }
                                 }
                             }
@@ -224,8 +211,8 @@ export component MainWindow inherits Window {
                 height: parent.height;
                 padding: 0px;
                 
-                // Breadcrumb
-                Breadcrumb {
+                // Breadcrumb (hidden for configured routes)
+                if root.show-breadcrumb: Breadcrumb {
                     horizontal-stretch: 1;
                     current-route: root.current-route;
                     navigate(route) => {
@@ -236,6 +223,7 @@ export component MainWindow inherits Window {
 
                 // Page Views
                 page-scroll-view := ScrollView {
+                    visible: root.show-page-scroll-view;
                     horizontal-stretch: 1;
                     vertical-stretch: 1;
                     horizontal_scrollbar_policy: ScrollBarPolicy.as_needed;
@@ -301,7 +289,7 @@ export component MainWindow inherits Window {
 
             // Chat 页面 - 放在 ScrollView 外面，因为它有自己的滚动和固定底部输入框
             chat-page := ChatPage {
-                visible: root.current-route == Route.Chat;
+                visible: root.show-chat-page;
                 x: 0px;
                 y: 0px;
                 width: parent.width;
@@ -311,6 +299,7 @@ export component MainWindow inherits Window {
                 is-sending: root.chat-is-sending;
                 scroll-position <=> root.chat-scroll-position;
                 copied-message-index <=> root.chat-copied-message-index;
+                loading-phase <=> root.chat-loading-phase;
                 navigate(route) => {
                     root.previous-route = root.current-route;
                     root.navigate(route);
@@ -327,7 +316,7 @@ export component MainWindow inherits Window {
             }
 
             dialog-page := DialogPage {
-                visible: root.current-route == Route.Dialog;
+                visible: root.show-dialog-page;
                 x: 0px;
                 y: 0px;
                 width: parent.width;

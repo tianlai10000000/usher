@@ -3,6 +3,15 @@ use crate::{
 };
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
+// 微调字符宽度估算：偏保守会导致提前换行和右侧留白，因此这里适度下调。
+const WIDTH_TAB_PX: f32 = 14.0;
+const WIDTH_SPACE_PX: f32 = 3.8;
+const WIDTH_CJK_PX: f32 = 12.4;
+const WIDTH_ASCII_PUNCT_PX: f32 = 6.4;
+const WIDTH_ASCII_DIGIT_PX: f32 = 7.2;
+const WIDTH_ASCII_LETTER_PX: f32 = 7.6;
+const WIDTH_OTHER_UNICODE_PX: f32 = 9.8;
+
 pub struct AssistantRenderPayload {
     pub rendered_text: String,
     pub is_markdown: bool,
@@ -19,13 +28,13 @@ struct PendingBlock {
 
 /// 使用 pulldown-cmark 做 Markdown 解析，产出 UI 渲染块。
 pub fn build_assistant_render_payload(content: &str) -> AssistantRenderPayload {
-    build_assistant_render_payload_with_wrap_cols(content, None)
+    build_assistant_render_payload_with_wrap_width(content, None)
 }
 
-/// 使用 pulldown-cmark 做 Markdown 解析，支持传入动态换行列数。
-pub fn build_assistant_render_payload_with_wrap_cols(
+/// 使用 pulldown-cmark 做 Markdown 解析，支持传入动态换行像素宽度。
+pub fn build_assistant_render_payload_with_wrap_width(
     content: &str,
-    wrap_cols: Option<usize>,
+    wrap_width_px: Option<f32>,
 ) -> AssistantRenderPayload {
     if !looks_like_markdown(content) {
         return AssistantRenderPayload {
@@ -35,7 +44,7 @@ pub fn build_assistant_render_payload_with_wrap_cols(
         };
     }
 
-    let blocks = markdown_to_blocks(content, wrap_cols);
+    let blocks = markdown_to_blocks(content, wrap_width_px);
     AssistantRenderPayload {
         rendered_text: plain_text_to_display(content),
         is_markdown: !blocks.is_empty(),
@@ -84,7 +93,7 @@ pub fn plain_text_to_display(content: &str) -> String {
     content.to_string()
 }
 
-fn markdown_to_blocks(markdown: &str, wrap_cols: Option<usize>) -> Vec<MarkdownBlock> {
+fn markdown_to_blocks(markdown: &str, wrap_width_px: Option<f32>) -> Vec<MarkdownBlock> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
@@ -121,8 +130,8 @@ fn markdown_to_blocks(markdown: &str, wrap_cols: Option<usize>) -> Vec<MarkdownB
             } else if p.has_rich_inline {
                 // 仅在真正存在行内样式时启用 span 渲染。
                 // 普通文本块走 Slint Text 自适应换行，避免窗口变宽后仍提前换行。
-                let cols = wrap_cols.unwrap_or_else(|| max_cols_for_block(p.kind));
-                wrap_inline_spans(&p.spans, cols)
+                let max_width = wrap_width_px.unwrap_or_else(|| max_width_for_block_px(p.kind));
+                wrap_inline_spans(&p.spans, max_width)
             } else {
                 Vec::new()
             };
@@ -336,24 +345,25 @@ fn push_span_text(block: &mut PendingBlock, kind: MarkdownInlineKind, href: &str
     });
 }
 
-fn max_cols_for_block(kind: MarkdownBlockKind) -> usize {
+fn max_width_for_block_px(kind: MarkdownBlockKind) -> f32 {
     match kind {
-        MarkdownBlockKind::Heading1 => 20,
-        MarkdownBlockKind::Heading2 => 24,
-        MarkdownBlockKind::Heading3 => 28,
-        MarkdownBlockKind::CodeBlock => 36,
-        _ => 44,
+        MarkdownBlockKind::Heading1 => 420.0,
+        MarkdownBlockKind::Heading2 => 500.0,
+        MarkdownBlockKind::Heading3 => 560.0,
+        MarkdownBlockKind::CodeBlock => 620.0,
+        _ => 760.0,
     }
 }
 
-fn wrap_inline_spans(spans: &[MarkdownInlineSpan], max_cols: usize) -> Vec<MarkdownInlineLine> {
+fn wrap_inline_spans(spans: &[MarkdownInlineSpan], max_width_px: f32) -> Vec<MarkdownInlineLine> {
     if spans.is_empty() {
         return Vec::new();
     }
 
     let mut lines: Vec<Vec<MarkdownInlineSpan>> = Vec::new();
     let mut current_line: Vec<MarkdownInlineSpan> = Vec::new();
-    let mut current_cols = 0usize;
+    let mut current_width = 0.0f32;
+    let max_width_px = max_width_px.max(160.0);
 
     for span in spans {
         let text = span.text.to_string();
@@ -365,19 +375,19 @@ fn wrap_inline_spans(spans: &[MarkdownInlineSpan], max_cols: usize) -> Vec<Markd
                 } else {
                     lines.push(Vec::new());
                 }
-                current_cols = 0;
+                current_width = 0.0;
                 continue;
             }
 
-            let char_width = if ch.is_ascii() { 1 } else { 2 };
-            if current_cols + char_width > max_cols && !current_line.is_empty() {
+            let char_width = estimated_char_width_px(ch);
+            if current_width + char_width > max_width_px && !current_line.is_empty() {
                 lines.push(current_line);
                 current_line = Vec::new();
-                current_cols = 0;
+                current_width = 0.0;
             }
 
             append_char_to_line(&mut current_line, &span.kind, &span.href.to_string(), ch);
-            current_cols += char_width;
+            current_width += char_width;
         }
     }
 
@@ -391,6 +401,39 @@ fn wrap_inline_spans(spans: &[MarkdownInlineSpan], max_cols: usize) -> Vec<Markd
             spans: line_spans.as_slice().into(),
         })
         .collect()
+}
+
+fn estimated_char_width_px(ch: char) -> f32 {
+    if ch == '\t' {
+        return WIDTH_TAB_PX;
+    }
+    if ch.is_whitespace() {
+        return WIDTH_SPACE_PX;
+    }
+    if is_cjk(ch) {
+        return WIDTH_CJK_PX;
+    }
+    if ch.is_ascii_punctuation() {
+        return WIDTH_ASCII_PUNCT_PX;
+    }
+    if ch.is_ascii_digit() {
+        return WIDTH_ASCII_DIGIT_PX;
+    }
+    if ch.is_ascii() {
+        return WIDTH_ASCII_LETTER_PX;
+    }
+    WIDTH_OTHER_UNICODE_PX
+}
+
+fn is_cjk(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x3400..=0x4DBF   // CJK Unified Ideographs Extension A
+            | 0x4E00..=0x9FFF // CJK Unified Ideographs
+            | 0xF900..=0xFAFF // CJK Compatibility Ideographs
+            | 0x3040..=0x30FF // Hiragana + Katakana
+            | 0xAC00..=0xD7AF // Hangul Syllables
+    )
 }
 
 fn append_char_to_line(

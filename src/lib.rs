@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 #[macro_use]
 extern crate objc;
 
-use slint::{Timer, Weak};
+use slint::Timer;
 
 // Must be called before module declarations so generated types are available in all modules
 slint::include_modules!();
@@ -45,6 +45,9 @@ mod logger;
 use logger::error_handing;
 use logger::tracing_logger;
 use logger::{setup_debug_logger, setup_tracing_logger};
+
+mod router;
+use router::{Router, route_for_navigation_index};
 
 /// Set application-level appearance on macOS (called BEFORE window is shown)
 /// This prevents the flash of wrong theme on startup
@@ -233,28 +236,6 @@ fn set_title_bar_color(_window: &MainWindow, _is_dark: bool) {
     // Other platforms not supported yet
 }
 
-#[derive(Clone)]
-struct Router {
-    window: Weak<MainWindow>,
-}
-
-impl Router {
-    fn new(window: Weak<MainWindow>) -> Self {
-        Self { window }
-    }
-
-    fn navigate(&self, route: Route) {
-        if let Some(win) = self.window.upgrade() {
-            win.set_current_route(route);
-            // Can add other global side effects here, such as:
-            // - Record route history
-            // - Send analytics events
-            // - Lazy load certain resources, etc.
-            log::debug!("→ Navigate to: {:?}", route);
-        }
-    }
-}
-
 fn ui() -> Result<MainWindow> {
     log::info!("Usher v{} starting...", env!("CARGO_PKG_VERSION"));
 
@@ -280,6 +261,7 @@ fn ui() -> Result<MainWindow> {
     // ========= Settings ========= //
     // Apply loaded settings to AppState
     setup_settings(&app, &loaded_settings);
+    Router::apply_route_ui_state(&app, app.get_current_route());
 
     // ========= Debug: Simulate Crash ========= //
     app.on_simulate_crash(|| {
@@ -346,13 +328,26 @@ fn ui() -> Result<MainWindow> {
     // ========= Router ========= //
     let router = Router::new(app.as_weak());
 
+    let router_for_nav_index = router.clone();
+    let app_for_nav_index = app.as_weak();
+    app.on_navigate_from_nav_index(move |item_index| {
+        if let Some(route) = route_for_navigation_index(item_index) {
+            if let Some(state) = router_for_nav_index.navigate(route) {
+                if let Some(ui) = app_for_nav_index.upgrade() {
+                    ui.invoke_chat_route_visible_changed(state.chat_route_visible);
+                }
+            }
+        }
+    });
+
     // Connect navigate callback in slint
     let router_clone = router.clone();
     let app_for_chat_route = app.as_weak();
     app.on_navigate(move |route| {
-        router_clone.navigate(route);
-        if let Some(ui) = app_for_chat_route.upgrade() {
-            ui.invoke_chat_route_visible_changed(route == Route::Chat);
+        if let Some(state) = router_clone.navigate(route) {
+            if let Some(ui) = app_for_chat_route.upgrade() {
+                ui.invoke_chat_route_visible_changed(state.chat_route_visible);
+            }
         }
     });
 
