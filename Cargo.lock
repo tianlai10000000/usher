@@ -1943,6 +1943,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5642,6 +5652,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "signal-hook"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b57709da74f9ff9f4a27dce9526eec25ca8407c45a7887243b031a58935fb8e"
+dependencies = [
+ "libc",
+ "signal-hook-registry",
+]
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6817,12 +6837,12 @@ version = "0.0.6-alpha.3"
 dependencies = [
  "anyhow",
  "arboard",
- "bytes",
  "chrono",
  "config",
  "directories",
  "fern",
  "flate2",
+ "fs2",
  "futures-util",
  "image",
  "lazy_static",
@@ -6836,6 +6856,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "signal-hook",
  "slint",
  "slint-build",
  "tar",

@@ -1,0 +1,446 @@
+//! Unified graceful-shutdown pipeline.
+//!
+//! Team conventions (important):
+//! - Stages run in fixed order:
+//!   1) `pre_shutdown`  -> stop producers / timers / inflight work
+//!   2) `ui_shutdown`   -> detach UI and OS integrations
+//!   3) `post_shutdown` -> best-effort tail cleanup
+//! - Inside the same stage, task execution order is:
+//!   - higher `priority` first
+//!   - if equal priority, later registration first (LIFO tie-break)
+//! - Prefer priority constants from `crate::constants::shutdown_priority`:
+//!   - `PRIORITY_CRITICAL` for strict order-sensitive and safety-critical teardown
+//!   - `PRIORITY_HIGH` for high-impact resources that should stop early
+//!   - `PRIORITY_NORMAL` as default choice
+//!   - `PRIORITY_LOW` for best-effort, non-blocking tail tasks
+//!
+//! Practical registration guideline:
+//! - Start with `*_task(...)` (default normal priority).
+//! - Use `*_task_with_priority(...)` only when ordering requirements are clear.
+//! - Keep callbacks short and panic-safe; this module already guards panics and logs each step.
+//!
+//! Shutdown Checklist (for code review):
+//! 1) Register cleanup in the correct stage (`pre`/`ui`/`post`) with a documented reason.
+//! 2) Choose priority intentionally (default `PRIORITY_NORMAL`; avoid unnecessary escalation).
+//! 3) Ensure cleanup is idempotent, non-blocking when possible, and emits useful logs.
+
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
+
+use crate::constants::shutdown_priority::PRIORITY_NORMAL;
+
+type CleanupFn = Box<dyn Fn() + Send + Sync + 'static>;
+
+struct CleanupTask {
+    name: &'static str,
+    priority: i32,
+    order: u64,
+    callback: CleanupFn,
+}
+
+#[derive(Default)]
+struct CleanupRegistry {
+    pre_shutdown: Vec<CleanupTask>,
+    ui_shutdown: Vec<CleanupTask>,
+    post_shutdown: Vec<CleanupTask>,
+}
+
+#[derive(Copy, Clone)]
+enum ShutdownStage {
+    PreShutdown,
+    UiShutdown,
+    PostShutdown,
+}
+
+impl ShutdownStage {
+    fn as_str(self) -> &'static str {
+        match self {
+            ShutdownStage::PreShutdown => "pre_shutdown",
+            ShutdownStage::UiShutdown => "ui_shutdown",
+            ShutdownStage::PostShutdown => "post_shutdown",
+        }
+    }
+}
+
+static CLEANUP_REGISTRY: OnceLock<Mutex<CleanupRegistry>> = OnceLock::new();
+static CLEANUP_EXECUTED: AtomicBool = AtomicBool::new(false);
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+static SIGNAL_HANDLERS_INITIALIZED: AtomicBool = AtomicBool::new(false);
+static TASK_ORDER_COUNTER: OnceLock<std::sync::atomic::AtomicU64> = OnceLock::new();
+
+fn next_task_order() -> u64 {
+    TASK_ORDER_COUNTER
+        .get_or_init(|| std::sync::atomic::AtomicU64::new(1))
+        .fetch_add(1, Ordering::Relaxed)
+}
+
+fn cleanup_registry() -> &'static Mutex<CleanupRegistry> {
+    CLEANUP_REGISTRY.get_or_init(|| Mutex::new(CleanupRegistry::default()))
+}
+
+fn register_task(
+    stage: ShutdownStage,
+    name: &'static str,
+    priority: i32,
+    callback: impl Fn() + Send + Sync + 'static,
+) {
+    let mut registry = cleanup_registry().lock().unwrap();
+    let stage_tasks = match stage {
+        ShutdownStage::PreShutdown => &mut registry.pre_shutdown,
+        ShutdownStage::UiShutdown => &mut registry.ui_shutdown,
+        ShutdownStage::PostShutdown => &mut registry.post_shutdown,
+    };
+
+    stage_tasks.push(CleanupTask {
+        name,
+        priority,
+        order: next_task_order(),
+        callback: Box::new(callback),
+    });
+
+    log::info!(
+        "[Shutdown] Registered task '{}' in stage '{}' with priority {}",
+        name,
+        stage.as_str(),
+        priority
+    );
+}
+
+/// Register a task executed before UI shutdown work starts.
+#[allow(dead_code)]
+pub fn register_pre_shutdown_task(name: &'static str, callback: impl Fn() + Send + Sync + 'static) {
+    register_task(ShutdownStage::PreShutdown, name, PRIORITY_NORMAL, callback);
+}
+
+/// Register a pre-shutdown task with custom priority.
+pub fn register_pre_shutdown_task_with_priority(
+    name: &'static str,
+    priority: i32,
+    callback: impl Fn() + Send + Sync + 'static,
+) {
+    register_task(ShutdownStage::PreShutdown, name, priority, callback);
+}
+
+/// Register a task executed during UI shutdown.
+#[allow(dead_code)]
+pub fn register_ui_shutdown_task(name: &'static str, callback: impl Fn() + Send + Sync + 'static) {
+    register_task(ShutdownStage::UiShutdown, name, PRIORITY_NORMAL, callback);
+}
+
+/// Register a ui-shutdown task with custom priority.
+pub fn register_ui_shutdown_task_with_priority(
+    name: &'static str,
+    priority: i32,
+    callback: impl Fn() + Send + Sync + 'static,
+) {
+    register_task(ShutdownStage::UiShutdown, name, priority, callback);
+}
+
+/// Register a task executed after UI shutdown work.
+#[allow(dead_code)]
+pub fn register_post_shutdown_task(
+    name: &'static str,
+    callback: impl Fn() + Send + Sync + 'static,
+) {
+    register_task(ShutdownStage::PostShutdown, name, PRIORITY_NORMAL, callback);
+}
+
+/// Register a post-shutdown task with custom priority.
+#[allow(dead_code)]
+pub fn register_post_shutdown_task_with_priority(
+    name: &'static str,
+    priority: i32,
+    callback: impl Fn() + Send + Sync + 'static,
+) {
+    register_task(ShutdownStage::PostShutdown, name, priority, callback);
+}
+
+/// Install signal handlers for graceful shutdown.
+/// Handles SIGTERM/SIGINT/SIGHUP/SIGQUIT (where available).
+pub fn init_signal_handlers() {
+    if SIGNAL_HANDLERS_INITIALIZED.swap(true, Ordering::SeqCst) {
+        log::info!("[Shutdown] Signal handlers already initialized, skipping");
+        return;
+    }
+
+    #[cfg(target_os = "macos")]
+    register_atexit_cleanup();
+
+    log::info!("[Shutdown] Initializing signal handlers");
+    std::thread::spawn(|| {
+        use signal_hook::iterator::Signals;
+
+        #[cfg(unix)]
+        let signal_list = {
+            use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
+            vec![SIGTERM, SIGINT, SIGHUP, SIGQUIT]
+        };
+
+        #[cfg(not(unix))]
+        let signal_list = {
+            use signal_hook::consts::signal::SIGINT;
+            vec![SIGINT]
+        };
+
+        let mut signals = match Signals::new(signal_list) {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("[Shutdown] Failed to initialize signal handlers: {}", e);
+                return;
+            }
+        };
+
+        log::info!("[Shutdown] Signal handlers are active");
+        for signal in signals.forever() {
+            log::warn!("[Shutdown] Received OS signal: {}", signal);
+            request_shutdown(&format!("signal({})", signal));
+            break;
+        }
+    });
+}
+
+/// Run all registered cleanup tasks once.
+pub fn run_cleanup_once(trigger: &str) {
+    if CLEANUP_EXECUTED.swap(true, Ordering::SeqCst) {
+        log::info!(
+            "[Shutdown] Cleanup already executed, skipping (trigger: {})",
+            trigger
+        );
+        return;
+    }
+
+    let total_start = Instant::now();
+    log::info!("[Shutdown] Cleanup pipeline started (trigger: {})", trigger);
+
+    let mut registry = {
+        let mut guard = cleanup_registry().lock().unwrap();
+        std::mem::take(&mut *guard)
+    };
+
+    run_stage_tasks(ShutdownStage::PreShutdown, &mut registry.pre_shutdown);
+    run_stage_tasks(ShutdownStage::UiShutdown, &mut registry.ui_shutdown);
+    run_stage_tasks(ShutdownStage::PostShutdown, &mut registry.post_shutdown);
+
+    #[cfg(target_os = "macos")]
+    cleanup_associated_helpers();
+
+    log::info!(
+        "[Shutdown] Cleanup pipeline finished in {} ms",
+        total_start.elapsed().as_millis()
+    );
+}
+
+fn run_stage_tasks(stage: ShutdownStage, tasks: &mut Vec<CleanupTask>) {
+    let stage_start = Instant::now();
+    let task_count = tasks.len();
+    log::info!(
+        "[Shutdown] Stage '{}' started (tasks: {})",
+        stage.as_str(),
+        task_count
+    );
+
+    if task_count == 0 {
+        log::info!("[Shutdown] Stage '{}' skipped (no tasks)", stage.as_str());
+        return;
+    }
+
+    tasks.sort_by(|a, b| b.priority.cmp(&a.priority).then(b.order.cmp(&a.order)));
+
+    log::info!(
+        "[Shutdown] Stage '{}' sorted by priority (desc), order (desc)",
+        stage.as_str()
+    );
+
+    for (index, task) in tasks.drain(..).enumerate() {
+        let task_start = Instant::now();
+        log::info!(
+            "[Shutdown] Stage '{}' task {}/{} '{}' started (priority: {}, order: {})",
+            stage.as_str(),
+            index + 1,
+            task_count,
+            task.name,
+            task.priority,
+            task.order
+        );
+
+        if catch_unwind(AssertUnwindSafe(|| (task.callback)())).is_err() {
+            log::error!(
+                "[Shutdown] Stage '{}' task '{}' panicked after {} ms",
+                stage.as_str(),
+                task.name,
+                task_start.elapsed().as_millis()
+            );
+        } else {
+            log::info!(
+                "[Shutdown] Stage '{}' task '{}' finished in {} ms",
+                stage.as_str(),
+                task.name,
+                task_start.elapsed().as_millis()
+            );
+        }
+    }
+
+    log::info!(
+        "[Shutdown] Stage '{}' finished in {} ms",
+        stage.as_str(),
+        stage_start.elapsed().as_millis()
+    );
+}
+
+/// Request graceful shutdown through a single shared entry point.
+pub fn request_shutdown(trigger: &str) {
+    if SHUTDOWN_REQUESTED.swap(true, Ordering::SeqCst) {
+        log::info!(
+            "[Shutdown] Shutdown already requested, ignoring duplicate trigger: {}",
+            trigger
+        );
+        return;
+    }
+
+    log::warn!(
+        "[Shutdown] Shutdown requested (trigger: {}), dispatching to UI loop",
+        trigger
+    );
+    let trigger_owned = trigger.to_string();
+    if slint::invoke_from_event_loop(move || perform_shutdown(&trigger_owned)).is_err() {
+        log::error!("[Shutdown] Failed to dispatch shutdown to UI loop, running fallback path");
+        run_cleanup_once(trigger);
+        log::warn!("[Shutdown] Fallback shutdown: process::exit(0)");
+        std::process::exit(0);
+    }
+}
+
+fn perform_shutdown(trigger: &str) {
+    log::warn!("[Shutdown] perform_shutdown started (trigger: {})", trigger);
+    run_cleanup_once(trigger);
+    log::warn!("[Shutdown] Calling platform termination API");
+    terminate_application();
+}
+
+fn terminate_application() {
+    log::warn!("[Shutdown] Requesting event loop exit for clean teardown");
+    if slint::quit_event_loop().is_err() {
+        log::warn!("[Shutdown] quit_event_loop failed, force exiting");
+        std::process::exit(0);
+    }
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        log::warn!("[Shutdown] Event loop did not stop in time, force exiting");
+        std::process::exit(0);
+    });
+}
+
+/// Terminate any XPC helper processes that macOS spawned on behalf of this app.
+///
+/// macOS automatically launches helper services (e.g. AutoFill via
+/// `SafariPlatformSupport`) when a Cocoa window contains text inputs.
+/// These helpers are parented to launchd (PID 1), so they survive a normal
+/// `process::exit`. Activity Monitor shows them as `<ServiceType> (<AppName>)`,
+/// but `ps` lists them under their real binary path — making them invisible to
+/// naïve string matching.
+///
+/// We use `NSWorkspace.runningApplications` which exposes the same
+/// Register an `atexit` handler so that `cleanup_associated_helpers` runs
+/// regardless of how the process exits (Dock quit, `[NSApplication terminate:]`,
+/// or any other `exit()` call that bypasses our shutdown pipeline).
+#[cfg(target_os = "macos")]
+fn register_atexit_cleanup() {
+    unsafe extern "C" {
+        fn atexit(func: extern "C" fn()) -> std::os::raw::c_int;
+    }
+    extern "C" fn on_exit() {
+        cleanup_associated_helpers();
+    }
+    unsafe {
+        atexit(on_exit);
+    }
+}
+
+/// `localizedName` as Activity Monitor, then dynamically derive our own
+/// process name from `NSProcessInfo` (no hard-coded strings).
+#[cfg(target_os = "macos")]
+fn cleanup_associated_helpers() {
+    use objc::msg_send;
+    use objc::runtime::{Class, Object};
+    use std::ffi::CStr;
+
+    unsafe {
+        let process_info_class = match Class::get("NSProcessInfo") {
+            Some(cls) => cls,
+            None => return,
+        };
+        let process_info: *mut Object = msg_send![process_info_class, processInfo];
+        if process_info.is_null() {
+            return;
+        }
+        let our_name_ns: *mut Object = msg_send![process_info, processName];
+        if our_name_ns.is_null() {
+            return;
+        }
+        let our_name_cstr: *const std::os::raw::c_char = msg_send![our_name_ns, UTF8String];
+        if our_name_cstr.is_null() {
+            return;
+        }
+        let our_name = CStr::from_ptr(our_name_cstr)
+            .to_string_lossy()
+            .to_lowercase();
+        let our_pid = std::process::id() as i32;
+
+        let workspace_class = match Class::get("NSWorkspace") {
+            Some(cls) => cls,
+            None => return,
+        };
+        let workspace: *mut Object = msg_send![workspace_class, sharedWorkspace];
+        if workspace.is_null() {
+            return;
+        }
+        let apps: *mut Object = msg_send![workspace, runningApplications];
+        if apps.is_null() {
+            return;
+        }
+
+        let count: usize = msg_send![apps, count];
+        let mut terminated = 0u32;
+
+        for i in 0..count {
+            let app: *mut Object = msg_send![apps, objectAtIndex: i];
+            if app.is_null() {
+                continue;
+            }
+
+            let pid: i32 = msg_send![app, processIdentifier];
+            if pid == our_pid {
+                continue;
+            }
+
+            let name: *mut Object = msg_send![app, localizedName];
+            if name.is_null() {
+                continue;
+            }
+            let name_cstr: *const std::os::raw::c_char = msg_send![name, UTF8String];
+            if name_cstr.is_null() {
+                continue;
+            }
+            let name_str = CStr::from_ptr(name_cstr).to_string_lossy();
+
+            if name_str.to_lowercase().contains(&our_name) {
+                let ok: bool = msg_send![app, forceTerminate];
+                log::info!(
+                    "[Shutdown] Terminated helper '{}' (PID {}, ok: {})",
+                    name_str,
+                    pid,
+                    ok
+                );
+                terminated += 1;
+            }
+        }
+
+        if terminated > 0 {
+            log::info!("[Shutdown] Cleaned up {} helper process(es)", terminated);
+        } else {
+            log::info!("[Shutdown] No associated helper processes found");
+        }
+    }
+}

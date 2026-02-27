@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 #[macro_use]
 extern crate objc;
 
-use slint::Timer;
+use slint::{CloseRequestResponse, ComponentHandle, Timer};
 
 // Must be called before module declarations so generated types are available in all modules
 slint::include_modules!();
@@ -37,6 +37,7 @@ mod settings;
 use settings::setup_settings;
 
 mod constants;
+use constants::shutdown_priority::PRIORITY_HIGH;
 
 mod chat;
 use chat::setup_chat;
@@ -48,6 +49,9 @@ use logger::{setup_debug_logger, setup_tracing_logger};
 
 mod router;
 use router::{Router, route_for_navigation_index};
+
+mod shutdown;
+mod single_instance;
 
 /// Set application-level appearance on macOS (called BEFORE window is shown)
 /// This prevents the flash of wrong theme on startup
@@ -251,6 +255,12 @@ fn ui() -> Result<MainWindow> {
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
 
+    // Intercept title-bar close button: hide window instead of terminating process.
+    app.window().on_close_requested(|| {
+        log::info!("[Window] Close button clicked, hiding window to tray");
+        CloseRequestResponse::HideWindow
+    });
+
     // Initialize debug logger after window is created (needs app for callbacks)
     setup_debug_logger(&app, true).unwrap_or_else(|e| eprintln!("Debug Logger init failed: {}", e)); // eprintln here since logger not yet initialized
 
@@ -442,13 +452,39 @@ fn ui() -> Result<MainWindow> {
     //     }
     // }).ok();
 
+    shutdown::init_signal_handlers();
+    shutdown::register_pre_shutdown_task_with_priority("stop_auto_update", PRIORITY_HIGH, || {
+        stop_auto_update();
+    });
+    shutdown::register_ui_shutdown_task_with_priority("remove_tray", PRIORITY_HIGH, || {
+        tray::remove_tray();
+    });
+
     Ok(app)
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 pub fn main() {
+    match single_instance::acquire_instance_lock() {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!("[Usher] Another instance is already running, exiting this process.");
+            return;
+        }
+        Err(e) => {
+            eprintln!(
+                "[Usher] Failed to acquire instance lock (continuing anyway): {}",
+                e
+            );
+        }
+    }
+
     let ui: MainWindow = ui().unwrap();
-    ui.run().unwrap();
+    ui.show().unwrap();
+    slint::run_event_loop_until_quit().unwrap();
+    shutdown::run_cleanup_once("event-loop-exit");
+    drop(ui);
+    log::info!("[Shutdown] MainWindow dropped, native resources released");
 }
 
 // #[cfg(target_os = "android")]

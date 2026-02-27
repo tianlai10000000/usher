@@ -314,8 +314,7 @@ pub fn setup_global_panic_hook() {
             }
         }
 
-        // Optional: add more context here, e.g.
-        // current thread name, process ID, memory usage, etc.
+        crate::shutdown::request_shutdown("panic-hook");
     }));
 }
 

@@ -10,11 +10,10 @@ mod macos {
     use objc::runtime::{BOOL, Class, Object, Sel, YES};
     use objc::{msg_send, sel, sel_impl};
     use std::ffi::CString;
-    use std::sync::Once;
+    use std::sync::OnceLock;
 
     // Store the UI weak reference globally for callbacks
-    static mut UI_WEAK: Option<Weak<MainWindow>> = None;
-    static INIT: Once = Once::new();
+    static UI_WEAK: OnceLock<Weak<MainWindow>> = OnceLock::new();
 
     // Store status item reference
     static mut STATUS_ITEM: *mut Object = std::ptr::null_mut();
@@ -32,8 +31,7 @@ mod macos {
     pub fn setup_tray_macos(ui_weak: Weak<MainWindow>) -> Result<()> {
         unsafe {
             // Store UI weak reference for callbacks
-            INIT.call_once(|| {});
-            UI_WEAK = Some(ui_weak);
+            let _ = UI_WEAK.set(ui_weak);
 
             // Set activation policy to prevent app from quitting when window is hidden
             // NSApplicationActivationPolicyAccessory = 1 (app runs in background, no dock icon)
@@ -242,9 +240,22 @@ mod macos {
     /// Show and activate the main window
     unsafe fn show_main_window() {
         unsafe {
+            // Prefer Slint API to keep internal visibility state in sync.
+            if let Some(ui_weak) = UI_WEAK.get() {
+                if let Some(ui) = ui_weak.upgrade() {
+                    use slint::ComponentHandle;
+                    if let Err(e) = ui.show() {
+                        log::error!("[Tray] Failed to show window via Slint API: {}", e);
+                    } else {
+                        log::info!("[Tray] Window shown via Slint API");
+                    }
+                }
+            }
+
             if MAIN_WINDOW.is_null() {
                 return;
             }
+
             let ns_app_class = Class::get("NSApplication").unwrap();
             let ns_app: *mut Object = msg_send![ns_app_class, sharedApplication];
 
@@ -324,7 +335,7 @@ mod macos {
 
             // Add quitApp: method
             extern "C" fn quit_app(_this: &Object, _cmd: Sel, _sender: *mut Object) {
-                std::process::exit(0);
+                crate::shutdown::request_shutdown("tray-quit");
             }
 
             unsafe {
@@ -514,7 +525,7 @@ mod other {
                     })
                     .ok();
                 } else if event.id == quit_id {
-                    std::process::exit(0);
+                    crate::shutdown::request_shutdown("tray-quit");
                 }
             }
 

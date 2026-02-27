@@ -627,9 +627,9 @@ fn restart_application() {
         }
     }
 
-    // Exit current process
-    log::debug!(" Exiting current process");
-    std::process::exit(0);
+    // Gracefully stop current process to allow cleanup hooks to run.
+    log::debug!(" Requesting graceful shutdown for restart");
+    crate::shutdown::request_shutdown("update-restart");
 }
 
 /// Reset update state
