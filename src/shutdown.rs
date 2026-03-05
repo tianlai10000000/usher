@@ -169,22 +169,12 @@ pub fn init_signal_handlers() {
     register_atexit_cleanup();
 
     log::info!("[Shutdown] Initializing signal handlers");
+    #[cfg(unix)]
     std::thread::spawn(|| {
+        use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
         use signal_hook::iterator::Signals;
 
-        #[cfg(unix)]
-        let signal_list = {
-            use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
-            vec![SIGTERM, SIGINT, SIGHUP, SIGQUIT]
-        };
-
-        #[cfg(not(unix))]
-        let signal_list = {
-            use signal_hook::consts::signal::SIGINT;
-            vec![SIGINT]
-        };
-
-        let mut signals = match Signals::new(signal_list) {
+        let mut signals = match Signals::new([SIGTERM, SIGINT, SIGHUP, SIGQUIT]) {
             Ok(s) => s,
             Err(e) => {
                 log::error!("[Shutdown] Failed to initialize signal handlers: {}", e);
@@ -199,6 +189,9 @@ pub fn init_signal_handlers() {
             break;
         }
     });
+
+    #[cfg(not(unix))]
+    log::info!("[Shutdown] OS signal handlers are not enabled on this platform");
 }
 
 /// Run all registered cleanup tasks once.

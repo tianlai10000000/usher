@@ -23,6 +23,8 @@ mod macos {
 
     // Store delegate reference for button action
     static mut BUTTON_DELEGATE: *mut Object = std::ptr::null_mut();
+    // Store observer for app-activation notifications (Dock click, Cmd-Tab, etc.)
+    static mut REOPEN_OBSERVER: *mut Object = std::ptr::null_mut();
 
     // Store menu reference for programmatic display (right-click menu)
     static mut TRAY_MENU: *mut Object = std::ptr::null_mut();
@@ -58,6 +60,7 @@ mod macos {
             let delegate: *mut Object = msg_send![delegate, init];
             let _: () = msg_send![delegate, retain];
             BUTTON_DELEGATE = delegate;
+            register_reopen_observer(ns_app)?;
 
             // Get the button of the status item
             let button: *mut Object = msg_send![status_item, button];
@@ -353,6 +356,118 @@ mod macos {
         });
 
         unsafe { &*DELEGATE_CLASS }
+    }
+
+    /// Register observer for application activation notifications.
+    /// This avoids replacing Winit's NSApplication delegate.
+    unsafe fn register_reopen_observer(_ns_app: *mut Object) -> Result<()> {
+        use objc::declare::ClassDecl;
+        use std::sync::Once;
+
+        static mut OBSERVER_CLASS: *const Class = std::ptr::null();
+        static REGISTER: Once = Once::new();
+
+        REGISTER.call_once(|| {
+            let superclass = Class::get("NSObject").unwrap();
+            let mut decl = ClassDecl::new("UsherReopenObserver", superclass).unwrap();
+
+            extern "C" fn app_did_become_active(
+                _this: &Object,
+                _cmd: Sel,
+                _notification: *mut Object,
+            ) {
+                unsafe {
+                    if MAIN_WINDOW.is_null() {
+                        return;
+                    }
+                    let is_visible: BOOL = msg_send![MAIN_WINDOW, isVisible];
+                    if is_visible == YES {
+                        return;
+                    }
+                    log::info!("[Dock] Reopen handled");
+                    show_main_window();
+                }
+            }
+
+            // Handle Dock "reopen" AppleEvent directly.
+            // This event is delivered even when the app is already active,
+            // which avoids the timing gap where DidBecomeActive may not fire.
+            extern "C" fn handle_reopen_event(
+                _this: &Object,
+                _cmd: Sel,
+                _event: *mut Object,
+                _reply_event: *mut Object,
+            ) {
+                unsafe {
+                    if MAIN_WINDOW.is_null() {
+                        return;
+                    }
+                    let is_visible: BOOL = msg_send![MAIN_WINDOW, isVisible];
+                    if is_visible == YES {
+                        return;
+                    }
+                    log::info!("[Dock] Reopen handled");
+                    show_main_window();
+                }
+            }
+
+            unsafe {
+                decl.add_method(
+                    sel!(appDidBecomeActive:),
+                    app_did_become_active as extern "C" fn(&Object, Sel, *mut Object),
+                );
+                decl.add_method(
+                    sel!(handleReopenEvent:withReplyEvent:),
+                    handle_reopen_event as extern "C" fn(&Object, Sel, *mut Object, *mut Object),
+                );
+                OBSERVER_CLASS = decl.register();
+            }
+        });
+
+        let observer_class = unsafe { &*OBSERVER_CLASS };
+        let observer: *mut Object = msg_send![observer_class, alloc];
+        let observer: *mut Object = msg_send![observer, init];
+        let _: () = msg_send![observer, retain];
+        unsafe {
+            REOPEN_OBSERVER = observer;
+        }
+
+        let center_class = Class::get("NSNotificationCenter")
+            .ok_or_else(|| anyhow::anyhow!("Failed to get NSNotificationCenter class"))?;
+        let center: *mut Object = msg_send![center_class, defaultCenter];
+
+        let ns_string_class = Class::get("NSString")
+            .ok_or_else(|| anyhow::anyhow!("Failed to get NSString class"))?;
+        let name_cstr = CString::new("NSApplicationDidBecomeActiveNotification")
+            .map_err(|_| anyhow::anyhow!("Invalid notification name"))?;
+        let name: *mut Object =
+            msg_send![ns_string_class, stringWithUTF8String: name_cstr.as_ptr()];
+
+        let _: () = msg_send![
+            center,
+            addObserver: observer
+            selector: sel!(appDidBecomeActive:)
+            name: name
+            object: std::ptr::null::<Object>()
+        ];
+
+        let apple_event_manager_class = Class::get("NSAppleEventManager")
+            .ok_or_else(|| anyhow::anyhow!("Failed to get NSAppleEventManager class"))?;
+        let apple_event_manager: *mut Object =
+            msg_send![apple_event_manager_class, sharedAppleEventManager];
+        // Four-char OSType constants:
+        // kCoreEventClass = 'aevt', kAEReopenApplication = 'rapp'
+        const K_CORE_EVENT_CLASS: u32 = 0x6165_7674;
+        const K_AE_REOPEN_APPLICATION: u32 = 0x7261_7070;
+        let _: () = msg_send![
+            apple_event_manager,
+            setEventHandler: observer
+            andSelector: sel!(handleReopenEvent:withReplyEvent:)
+            forEventClass: K_CORE_EVENT_CLASS
+            andEventID: K_AE_REOPEN_APPLICATION
+        ];
+
+        Ok(())
     }
 
     /// Remove tray icon
