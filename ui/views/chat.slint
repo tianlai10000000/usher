@@ -506,6 +506,10 @@ export component Chat inherits Rectangle {
     // 输入状态
     in-out property <string> input-text: "";
     in property <bool> is-sending: false;
+    in property <bool> can-load-more-history: false;
+    in property <bool> loading-history: false;
+    in property <length> virtual-top-spacer: 0px;
+    in property <length> virtual-bottom-spacer: 0px;
     // 低频等待动效相位（0,1,2）
     in-out property <int> loading-phase: 0;
     
@@ -515,6 +519,7 @@ export component Chat inherits Rectangle {
     
     // 回调 - 发送消息给 Rust 端处理
     callback send-message(string);
+    callback load-more-history();
     
     // 回调 - 复制消息到剪贴板（传递索引和内容）
     callback copy-to-clipboard(int, string);
@@ -566,7 +571,7 @@ export component Chat inherits Rectangle {
                     vertical-stretch: 1;
                     background: MaterialPalette.surface;
                     clip: true;
-                    
+
                     // 欢迎界面（无消息时显示）
                     WelcomeView {
                         visible: root.messages.length == 0 && !root.is-sending;
@@ -598,6 +603,12 @@ export component Chat inherits Rectangle {
                             padding-top: MaterialStyleMetrics.padding_16;
                             padding-bottom: MaterialStyleMetrics.padding_24;
                             alignment: start;
+
+                            Rectangle {
+                                width: 1px;
+                                height: root.virtual-top-spacer;
+                                background: transparent;
+                            }
                             
                             // 消息列表：使用统一的 MessageBubble 组件
                             for message[index] in root.messages: MessageBubble {
@@ -638,6 +649,49 @@ export component Chat inherits Rectangle {
                                 timestamp: "";
                                 is-loading: true;
                                 show-copied: false;
+                            }
+
+                            Rectangle {
+                                width: 1px;
+                                height: root.virtual-bottom-spacer;
+                                background: transparent;
+                            }
+                        }
+                    }
+
+                    // 微信式顶部加载提示（固定层，放在 ScrollView 之后，确保可见）
+                    Rectangle {
+                        visible: root.loading-history || root.can-load-more-history;
+                        x: (parent.width - self.width) / 2;
+                        y: 8px;
+                        width: 190px;
+                        height: 30px;
+                        border-radius: 15px;
+                        background: MaterialPalette.surface_container;
+                        z: 100;
+
+                        HorizontalLayout {
+                            x: 0;
+                            y: 0;
+                            width: parent.width;
+                            height: parent.height;
+                            spacing: 6px;
+                            alignment: center;
+
+                            if root.loading-history: CircularProgressIndicator {
+                                // 在独立容器内居中，避免受文本基线导致的视觉偏移
+                                width: 14px;
+                                height: 14px;
+                                y: (parent.height - self.height) / 2;
+                                indeterminate: true;
+                            }
+
+                            MaterialText {
+                                text: root.loading-history ? "Loading more..." : "Pull down to load more";
+                                color: MaterialPalette.on_surface_variant;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
                             }
                         }
                     }

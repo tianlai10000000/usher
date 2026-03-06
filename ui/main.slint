@@ -48,6 +48,7 @@ export component MainWindow inherits Window {
     min-height: 600px;
     title: "Usher";
     out property <length> chat-layout-window-width: self.width;
+    out property <length> chat-layout-window-height: self.height;
     // default-font-family: "Noto Sans SC";
 
     // 路由状态 - 对外暴露
@@ -92,10 +93,15 @@ export component MainWindow inherits Window {
     in property <[ChatMessage]> chat-messages: [];
     in-out property <string> chat-input-text: "";
     in property <bool> chat-is-sending: false;
+    in property <bool> chat-can-load-more-history: false;
+    in property <bool> chat-loading-history: false;
+    in property <length> chat-virtual-top-spacer: 0px;
+    in property <length> chat-virtual-bottom-spacer: 0px;
     in-out property <length> chat-scroll-position: 0px;
     in-out property <int> chat-copied-message-index: -1;
     in-out property <int> chat-loading-phase: 0;
     callback chat-send-message(string);
+    callback chat-load-more-history();
     callback chat-copy-to-clipboard(int, string);
     callback chat-open-link(string);
     callback chat-route-visible-changed(bool);
@@ -297,6 +303,10 @@ export component MainWindow inherits Window {
                 messages: root.chat-messages;
                 input-text <=> root.chat-input-text;
                 is-sending: root.chat-is-sending;
+                can-load-more-history: root.chat-can-load-more-history;
+                loading-history: root.chat-loading-history;
+                virtual-top-spacer: root.chat-virtual-top-spacer;
+                virtual-bottom-spacer: root.chat-virtual-bottom-spacer;
                 scroll-position <=> root.chat-scroll-position;
                 copied-message-index <=> root.chat-copied-message-index;
                 loading-phase <=> root.chat-loading-phase;
@@ -306,6 +316,9 @@ export component MainWindow inherits Window {
                 }
                 send-message(text) => {
                     root.chat-send-message(text);
+                }
+                load-more-history() => {
+                    root.chat-load-more-history();
                 }
                 copy-to-clipboard(index, text) => {
                     root.chat-copy-to-clipboard(index, text);

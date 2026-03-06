@@ -4,10 +4,11 @@ use semver::Version;
 use slint::{ComponentHandle, Global, Timer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::Runtime;
 
 use crate::{
     CustomComponentType, MainWindow, NotificationManager, NotificationOptions, UpdateLogic,
+    app_runtime::shared_runtime,
 };
 
 #[derive(Default, Clone)]
@@ -661,13 +662,7 @@ pub struct UpdaterContext {
 /// after settings are loaded, using the returned UpdaterContext.
 pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
     let state = Arc::new(Mutex::new(UpdateState::default()));
-    let rt = Arc::new(
-        Builder::new_multi_thread()
-            .enable_all()
-            .on_thread_start(|| crate::logger::tracing_logger::install_thread_dispatch())
-            .build()
-            .context("Failed to create Tokio runtime")?,
-    );
+    let rt = shared_runtime();
     let app_weak = app.as_weak();
 
     // Global cancel flag

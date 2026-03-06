@@ -1,7 +1,9 @@
 pub mod chat;
 pub mod interactive;
 pub mod markdown;
-pub mod turn;
+pub mod persistence;
+pub mod renderer;
+pub mod session;
 
 use crate::MainWindow;
 

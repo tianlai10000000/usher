@@ -1,31 +1,24 @@
 use std::time::Duration;
 
 use slint::{ComponentHandle, Global, Weak};
+use std::sync::OnceLock;
 
+use crate::app_runtime::shared_runtime;
 use crate::{AppState, MainWindow};
 
 /// Check network connectivity using HTTP request (more reliable than raw TCP)
 fn check_online() -> bool {
-    let rt = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(_) => return false,
-    };
-
-    crate::logger::tracing_logger::install_thread_dispatch();
-
-    rt.block_on(async {
-        let client = match reqwest::Client::builder()
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    let client = CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
             .timeout(Duration::from_secs(3))
             .no_proxy()
             .build()
-        {
-            Ok(c) => c,
-            Err(_) => return false,
-        };
+            .unwrap_or_else(|_| reqwest::Client::new())
+    });
+    let runtime = shared_runtime();
 
+    runtime.block_on(async {
         // Try multiple connectivity check endpoints
         let urls = [
             "http://connectivitycheck.gstatic.com/generate_204",

@@ -42,6 +42,8 @@ use constants::shutdown_priority::PRIORITY_HIGH;
 mod chat;
 use chat::setup_chat;
 
+mod app_runtime;
+
 mod logger;
 use logger::error_handing;
 use logger::tracing_logger;
