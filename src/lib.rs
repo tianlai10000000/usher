@@ -55,6 +55,16 @@ use router::{Router, route_for_navigation_index};
 mod shutdown;
 mod single_instance;
 
+#[cfg(target_os = "macos")]
+static TITLEBAR_SETTINGS_UI_WEAK: std::sync::OnceLock<slint::Weak<MainWindow>> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "macos")]
+static mut TITLEBAR_SETTINGS_DELEGATE: *mut objc::runtime::Object = std::ptr::null_mut();
+
+#[cfg(target_os = "macos")]
+static mut TITLEBAR_SETTINGS_INSTALLED: bool = false;
+
 /// Set application-level appearance on macOS (called BEFORE window is shown)
 /// This prevents the flash of wrong theme on startup
 #[cfg(target_os = "macos")]
@@ -241,6 +251,287 @@ fn set_title_bar_color(window: &MainWindow, is_dark: bool) {
 fn set_title_bar_color(_window: &MainWindow, _is_dark: bool) {
     // Other platforms not supported yet
 }
+
+#[cfg(target_os = "macos")]
+fn register_titlebar_settings_delegate_class() -> &'static objc::runtime::Class {
+    use objc::declare::ClassDecl;
+    use objc::runtime::{Class, Object, Sel};
+    use std::sync::Once;
+
+    static mut DELEGATE_CLASS: *const Class = std::ptr::null();
+    static REGISTER: Once = Once::new();
+
+    REGISTER.call_once(|| {
+        let superclass = Class::get("NSObject").expect("NSObject class not found");
+        let mut decl = ClassDecl::new("UsherTitlebarSettingsDelegate", superclass)
+            .expect("failed to declare delegate class");
+
+        extern "C" fn open_settings(_this: &Object, _cmd: Sel, _sender: *mut Object) {
+            if let Some(ui_weak) = TITLEBAR_SETTINGS_UI_WEAK.get() {
+                let ui_weak_local = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak_local.upgrade() {
+                        ui.invoke_navigate(Route::Settings);
+                    }
+                });
+            }
+        }
+
+        extern "C" fn open_about(_this: &Object, _cmd: Sel, _sender: *mut Object) {
+            if let Some(ui_weak) = TITLEBAR_SETTINGS_UI_WEAK.get() {
+                let ui_weak_local = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak_local.upgrade() {
+                        ui.invoke_navigate(Route::About);
+                    }
+                });
+            }
+        }
+
+        unsafe {
+            decl.add_method(
+                sel!(usherOpenSettings:),
+                open_settings as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            decl.add_method(
+                sel!(usherOpenAbout:),
+                open_about as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            DELEGATE_CLASS = decl.register();
+        }
+    });
+
+    unsafe { &*DELEGATE_CLASS }
+}
+
+#[cfg(target_os = "macos")]
+fn install_titlebar_settings_button(window: &MainWindow) {
+    use objc::msg_send;
+    use objc::runtime::{Class, Object};
+    use raw_window_handle::HasWindowHandle;
+    use std::ffi::CString;
+
+    #[repr(C)]
+    struct NSPoint {
+        x: f64,
+        y: f64,
+    }
+    #[repr(C)]
+    struct NSSize {
+        width: f64,
+        height: f64,
+    }
+    #[repr(C)]
+    struct NSRect {
+        origin: NSPoint,
+        size: NSSize,
+    }
+
+    unsafe fn create_nsstring(s: &str) -> Option<*mut Object> {
+        let ns_string_class = Class::get("NSString")?;
+        let c_str = CString::new(s).ok()?;
+        let ns: *mut Object = msg_send![ns_string_class, stringWithUTF8String: c_str.as_ptr()];
+        if ns.is_null() { None } else { Some(ns) }
+    }
+
+    let _ = TITLEBAR_SETTINGS_UI_WEAK.set(window.as_weak());
+
+    unsafe {
+        if TITLEBAR_SETTINGS_INSTALLED {
+            return;
+        }
+
+        let window_handle = window.window().window_handle();
+        let Ok(handle) = window_handle.window_handle() else {
+            return;
+        };
+        let raw = handle.as_ref();
+        let raw_window_handle::RawWindowHandle::AppKit(appkit_handle) = raw else {
+            return;
+        };
+
+        let ns_view = appkit_handle.ns_view.as_ptr() as *mut Object;
+        if ns_view.is_null() {
+            log::warn!("[TitleBar] ns_view is null, skip install this round");
+            return;
+        }
+        let ns_window: *mut Object = msg_send![ns_view, window];
+        if ns_window.is_null() {
+            log::warn!("[TitleBar] ns_window is null, skip install this round");
+            return;
+        }
+
+        if TITLEBAR_SETTINGS_DELEGATE.is_null() {
+            let delegate_class = register_titlebar_settings_delegate_class();
+            let delegate: *mut Object = msg_send![delegate_class, alloc];
+            let delegate: *mut Object = msg_send![delegate, init];
+            let _: () = msg_send![delegate, retain];
+            TITLEBAR_SETTINGS_DELEGATE = delegate;
+        }
+
+        let accessory_class = match Class::get("NSTitlebarAccessoryViewController") {
+            Some(c) => c,
+            None => return,
+        };
+        let view_class = match Class::get("NSView") {
+            Some(c) => c,
+            None => return,
+        };
+        let button_class = match Class::get("NSButton") {
+            Some(c) => c,
+            None => return,
+        };
+
+        let accessory: *mut Object = msg_send![accessory_class, alloc];
+        let accessory: *mut Object = msg_send![accessory, init];
+        if accessory.is_null() {
+            return;
+        }
+
+        let container_frame = NSRect {
+            origin: NSPoint { x: 0.0, y: 0.0 },
+            size: NSSize {
+                width: 104.0,
+                height: 32.0,
+            },
+        };
+        let container: *mut Object = msg_send![view_class, alloc];
+        let container: *mut Object = msg_send![container, initWithFrame: container_frame];
+        if container.is_null() {
+            return;
+        }
+
+        let settings_button_frame = NSRect {
+            // Keep super-large icon button vertically centered in the titlebar.
+            // y = (container_h - button_h) / 2 = (32 - 36) / 2 = -2
+            origin: NSPoint { x: 20.0, y: -2.0 },
+            size: NSSize {
+                width: 48.0,
+                height: 36.0,
+            },
+        };
+        let settings_button: *mut Object = msg_send![button_class, alloc];
+        let settings_button: *mut Object =
+            msg_send![settings_button, initWithFrame: settings_button_frame];
+        if settings_button.is_null() {
+            return;
+        }
+
+        let about_button_frame = NSRect {
+            origin: NSPoint { x: 52.0, y: -1.0 },
+            size: NSSize {
+                width: 48.0,
+                height: 36.0,
+            },
+        };
+        let about_button: *mut Object = msg_send![button_class, alloc];
+        let about_button: *mut Object = msg_send![about_button, initWithFrame: about_button_frame];
+        if about_button.is_null() {
+            return;
+        }
+
+        // Prefer native gear-style images.
+        // If unavailable on current macOS runtime, fallback to a gear glyph ("⚙︎")
+        // so the control is always icon-like instead of text-like.
+        let ns_image_class = Class::get("NSImage");
+        if let Some(ns_image_class) = ns_image_class {
+            let settings_symbol_candidates = [
+                "NSImageNamePreferencesGeneral",
+                "NSImageNameAdvanced",
+                "NSImageNameActionTemplate",
+            ];
+            let mut settings_image_set = false;
+            for name in settings_symbol_candidates {
+                if let Some(symbol_name) = create_nsstring(name) {
+                    let image: *mut Object = msg_send![ns_image_class, imageNamed: symbol_name];
+                    if !image.is_null() {
+                        let _: () = msg_send![settings_button, setImage: image];
+                        if let Some(empty) = create_nsstring("") {
+                            let _: () = msg_send![settings_button, setTitle: empty];
+                        }
+                        // NSImageOnly
+                        let _: () = msg_send![settings_button, setImagePosition: 2u64];
+                        // NSImageScaleProportionallyUpOrDown
+                        let _: () = msg_send![settings_button, setImageScaling: 3u64];
+                        settings_image_set = true;
+                        break;
+                    }
+                }
+            }
+            if !settings_image_set {
+                if let Some(gear) = create_nsstring("⚙︎") {
+                    let _: () = msg_send![settings_button, setTitle: gear];
+                }
+            }
+            let about_symbol_candidates = ["NSImageNameInfo", "NSImageNameActionTemplate"];
+            let mut about_image_set = false;
+            for name in about_symbol_candidates {
+                if let Some(symbol_name) = create_nsstring(name) {
+                    let image: *mut Object = msg_send![ns_image_class, imageNamed: symbol_name];
+                    if !image.is_null() {
+                        let _: () = msg_send![about_button, setImage: image];
+                        if let Some(empty) = create_nsstring("") {
+                            let _: () = msg_send![about_button, setTitle: empty];
+                        }
+                        let _: () = msg_send![about_button, setImagePosition: 2u64];
+                        let _: () = msg_send![about_button, setImageScaling: 3u64];
+                        about_image_set = true;
+                        break;
+                    }
+                }
+            }
+            if !about_image_set {
+                if let Some(info) = create_nsstring("ℹ︎") {
+                    let _: () = msg_send![about_button, setTitle: info];
+                }
+            }
+        } else {
+            if let Some(gear) = create_nsstring("⚙︎") {
+                let _: () = msg_send![settings_button, setTitle: gear];
+            }
+            if let Some(info) = create_nsstring("ℹ︎") {
+                let _: () = msg_send![about_button, setTitle: info];
+            }
+        }
+
+        // Increase fallback glyph readability for compact icon button.
+        if let Some(ns_font_class) = Class::get("NSFont") {
+            let font: *mut Object = msg_send![ns_font_class, systemFontOfSize: 24.0f64];
+            if !font.is_null() {
+                let _: () = msg_send![settings_button, setFont: font];
+                let _: () = msg_send![about_button, setFont: font];
+            }
+        }
+
+        // True icon-button style: remove default capsule background/border.
+        let _: () = msg_send![settings_button, setBordered: false];
+        let _: () = msg_send![about_button, setBordered: false];
+        if let Some(tooltip) = create_nsstring("Settings") {
+            let _: () = msg_send![settings_button, setToolTip: tooltip];
+        }
+        if let Some(tooltip) = create_nsstring("About") {
+            let _: () = msg_send![about_button, setToolTip: tooltip];
+        }
+        let _: () = msg_send![settings_button, setTarget: TITLEBAR_SETTINGS_DELEGATE];
+        let _: () = msg_send![settings_button, setAction: sel!(usherOpenSettings:)];
+        let _: () = msg_send![about_button, setTarget: TITLEBAR_SETTINGS_DELEGATE];
+        let _: () = msg_send![about_button, setAction: sel!(usherOpenAbout:)];
+
+        let _: () = msg_send![container, addSubview: settings_button];
+        let _: () = msg_send![container, addSubview: about_button];
+        let _: () = msg_send![accessory, setView: container];
+        // NSTitlebarAccessoryLayoutAttributeRight
+        // Different SDK headers may map raw values differently; `2` works as right-side in current target.
+        let _: () = msg_send![accessory, setLayoutAttribute: 2u64];
+        let _: () = msg_send![ns_window, addTitlebarAccessoryViewController: accessory];
+
+        TITLEBAR_SETTINGS_INSTALLED = true;
+        log::info!("[TitleBar] Added native Settings/About buttons to macOS title bar");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_titlebar_settings_button(_window: &MainWindow) {}
 
 fn ui() -> Result<MainWindow> {
     log::info!("Usher v{} starting...", env!("CARGO_PKG_VERSION"));
@@ -483,6 +774,19 @@ pub fn main() {
 
     let ui: MainWindow = ui().unwrap();
     ui.show().unwrap();
+    install_titlebar_settings_button(&ui);
+    let ui_weak_titlebar_retry_1 = ui.as_weak();
+    Timer::single_shot(std::time::Duration::from_millis(300), move || {
+        if let Some(win) = ui_weak_titlebar_retry_1.upgrade() {
+            install_titlebar_settings_button(&win);
+        }
+    });
+    let ui_weak_titlebar_retry_2 = ui.as_weak();
+    Timer::single_shot(std::time::Duration::from_millis(900), move || {
+        if let Some(win) = ui_weak_titlebar_retry_2.upgrade() {
+            install_titlebar_settings_button(&win);
+        }
+    });
     slint::run_event_loop_until_quit().unwrap();
     shutdown::run_cleanup_once("event-loop-exit");
     drop(ui);

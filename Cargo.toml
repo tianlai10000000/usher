@@ -18,7 +18,7 @@ name = "usher"
 # "backend-android-activity-06",
 # 注意：live-preview feature 已移除以减小 release 构建体积
 # 如需开发时使用 live-preview，可以临时添加 features = ["live-preview"]
-slint = { version = "1.15.0", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "raw-window-handle-06"] }
+slint = { version = "1.15.0", default-features = false, features = ["live-preview", "std", "compat-1-2", "backend-winit", "renderer-femtovg", "raw-window-handle-06"] }
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }

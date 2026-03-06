@@ -12,8 +12,8 @@ const NAVIGATION_ROUTES: &[Route] = &[
     Route::Chat,
     // Route::List,
     // Route::Detail,
-    Route::Settings,
-    Route::About,
+    // Route::Settings,
+    // Route::About,
 ];
 
 #[derive(Debug, Clone, Copy)]
