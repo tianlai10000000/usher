@@ -1,0 +1,238 @@
+import { FilledButton, MaterialPalette, MaterialText, Switch } from "@material";
+
+component PrField {
+    in property <string> label;
+    in-out property <string> value;
+    in property <string> placeholder;
+    in property <length> field-width: 280px;
+
+    VerticalLayout {
+        spacing: 6px;
+
+        MaterialText {
+            text: root.label;
+            font_size: 12px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        Rectangle {
+            width: root.field-width;
+            height: 42px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_highest;
+            clip: true;
+
+            TextInput {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                width: parent.width - 24px;
+                text <=> root.value;
+                color: MaterialPalette.on_surface;
+                font-size: 14px;
+                single-line: true;
+            }
+
+            if root.value == "": MaterialText {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                text: root.placeholder;
+                font_size: 14px;
+                color: MaterialPalette.on_surface_variant;
+            }
+        }
+    }
+}
+
+export component PrFlow {
+    in property <string> ai-decision;
+    in property <string> ai-summary;
+    in property <string> manual-status;
+    callback analyze(string, string, string, bool, bool);
+    callback confirm(bool);
+
+    private property <string> pr-number: "1024";
+    private property <string> pr-title: "";
+    private property <string> pr-summary: "";
+    private property <bool> ci-green: true;
+    private property <bool> reviewers-ready: false;
+
+    VerticalLayout {
+        spacing: 14px;
+        alignment: start;
+
+        MaterialText {
+            text: "AI gives a recommendation, but the final approve or reject decision must still be made by a person.";
+            font_size: 14px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+
+            PrField {
+                label: "PR number";
+                value <=> root.pr-number;
+                placeholder: "1024";
+                field-width: 180px;
+            }
+
+            PrField {
+                label: "PR title";
+                value <=> root.pr-title;
+                placeholder: "Refactor workflow status panel";
+                field-width: 420px;
+            }
+        }
+
+        VerticalLayout {
+            spacing: 6px;
+
+            MaterialText {
+                text: "PR summary";
+                font_size: 12px;
+                color: MaterialPalette.on_surface_variant;
+            }
+
+            Rectangle {
+                width: 100%;
+                height: 108px;
+                border-radius: 10px;
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                background: MaterialPalette.surface_container_highest;
+                clip: true;
+
+                pr-summary-input := TextInput {
+                    x: 12px;
+                    y: 10px;
+                    width: parent.width - 24px;
+                    height: parent.height - 20px;
+                    text <=> root.pr-summary;
+                    color: MaterialPalette.on_surface;
+                    font-size: 14px;
+                    single-line: false;
+                    wrap: word-wrap;
+                }
+
+                if root.pr-summary == "": MaterialText {
+                    x: 12px;
+                    y: 12px;
+                    text: "Describe changes, affected modules, rollout notes, and known risks.";
+                    font_size: 14px;
+                    color: MaterialPalette.on_surface_variant;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 18px;
+
+            HorizontalLayout {
+                spacing: 10px;
+                MaterialText {
+                    text: "CI green";
+                    font_size: 14px;
+                    color: MaterialPalette.on_surface;
+                    vertical_alignment: center;
+                }
+                Switch {
+                    checked <=> root.ci-green;
+                    width: 48px;
+                    height: 28px;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                MaterialText {
+                    text: "Reviewers ready";
+                    font_size: 14px;
+                    color: MaterialPalette.on_surface;
+                    vertical_alignment: center;
+                }
+                Switch {
+                    checked <=> root.reviewers-ready;
+                    width: 48px;
+                    height: 28px;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+
+            FilledButton {
+                text: "Analyze PR";
+                clicked => {
+                    root.analyze(
+                        root.pr-number,
+                        root.pr-title,
+                        root.pr-summary,
+                        root.ci-green,
+                        root.reviewers-ready,
+                    );
+                }
+            }
+
+            FilledButton {
+                text: "Approve";
+                clicked => {
+                    root.confirm(true);
+                }
+            }
+
+            FilledButton {
+                text: "Reject";
+                clicked => {
+                    root.confirm(false);
+                }
+            }
+        }
+
+        Rectangle {
+            width: 100%;
+            min-height: 146px;
+            border-radius: 14px;
+            background: MaterialPalette.surface_container_high;
+
+            VerticalLayout {
+                padding: 14px;
+                spacing: 8px;
+
+                MaterialText {
+                    text: "AI recommendation";
+                    font_size: 13px;
+                    color: MaterialPalette.on_surface_variant;
+                }
+
+                MaterialText {
+                    text: root.ai-decision;
+                    font_size: 18px;
+                    font_weight: 600;
+                    color: MaterialPalette.primary;
+                }
+
+                Text {
+                    text: root.ai-summary;
+                    wrap: word-wrap;
+                    color: MaterialPalette.on_surface;
+                    font-size: 14px;
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: MaterialPalette.outline_variant;
+                }
+
+                Text {
+                    text: "Manual confirmation: " + root.manual-status;
+                    wrap: word-wrap;
+                    color: MaterialPalette.on_surface_variant;
+                    font-size: 13px;
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,199 @@
+import { FilledButton, MaterialPalette, MaterialText, CircularProgressIndicator } from "@material";
+import { TagField, TagStepCard, TagStepItem } from "./tag_add.slint";
+
+export component TagRemovePanel {
+    in property <bool> running: false;
+    in property <bool> initializing: false;
+    in property <bool> loading-animated: true;
+    in property <string> result: "Ready to remove a tag.";
+    in property <[TagStepItem]> steps: [];
+    in-out property <string> tag-to-remove: "";
+    callback remove-tag(string);
+    callback stop();
+
+    private property <int> expanded-step-index: -1;
+    width: 100%;
+
+    VerticalLayout {
+        width: root.width;
+        spacing: 16px;
+        alignment: start;
+        padding: 8px;
+        padding-top: 16px;
+
+        TagField {
+            // width: parent.width;
+            label: "Tag to remove";
+            value <=> root.tag-to-remove;
+            placeholder: "v1.2.3";
+            enabled: !root.running && !root.initializing;
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+            height: 40px;
+
+            FilledButton {
+                enabled: !root.running && !root.initializing;
+                height: 40px;
+                text: root.initializing ? "Loading..." : (root.running ? "Removing..." : "Remove");
+                clicked => {
+                    root.remove-tag(root.tag-to-remove);
+                }
+            }
+
+            if root.running || root.initializing: Rectangle {
+                width: 24px;
+                height: parent.height;
+                background: transparent;
+                CircularProgressIndicator {
+                    width: 20px;
+                    height: 20px;
+                    indeterminate: root.loading-animated;
+                    progress: root.loading-animated ? 0 : 0.72;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: transparent;
+                horizontal-stretch: 1;
+            }
+
+            if root.running: FilledButton {
+                height: 40px;
+                text: "Stop";
+                clicked => {
+                    root.stop();
+                }
+            }
+        }
+
+        Rectangle {
+            width: parent.width - 16px;
+            // height: max(22px, status-text.preferred-height);
+            clip: true;
+            background: MaterialPalette.surface_container;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            border-radius: 4px;
+
+            VerticalLayout {
+                width: parent.width;
+                padding: 8px;
+                spacing: 4px;
+
+                if root.initializing: MaterialText {
+                    text: "Loading latest remote tag…";
+                    font-family: "Hiragino Sans GB";
+                    font_size: 10px;
+                    color: MaterialPalette.on_surface_variant;
+                }
+
+                status-text := Text {
+                    width: parent.width - 2px;
+                    text: root.result;
+                    wrap: word-wrap;
+                    color: MaterialPalette.on_background;
+                    font-size: 10px;
+                    font-family: "Hiragino Sans GB";
+                }
+            }
+        }
+
+        steps-panel := Rectangle {
+            width: 100%;
+            height: max(140px, steps-content.preferred-height + 28px);
+            // border-radius: 14px;
+            // border-width: 1px;
+            // border-color: MaterialPalette.surface_container_highest;
+
+            steps-content := VerticalLayout {
+                x: 14px;
+                y: 14px;
+                width: steps-panel.width - 28px;
+                spacing: 0px;
+
+                Rectangle {
+                    width: parent.width;
+                    height: 16px;
+
+                    MaterialText {
+                        text: "Tag remove workflow steps";
+                        vertical_alignment: center;
+                        font_size: 13px;
+                        color: MaterialPalette.on_surface_variant;
+                    }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    height: 6px;
+                    background: transparent;
+                }
+
+                if root.steps.length == 0: Text {
+                    width: parent.width;
+                    text: "No workflow steps yet.";
+                    color: MaterialPalette.on_surface_variant;
+                    font-size: 13px;
+                }
+
+                if root.steps.length > 0: VerticalLayout {
+                    width: parent.width;
+                    spacing: 8px;
+
+                    for step[index] in root.steps: VerticalLayout {
+                        width: parent.width;
+                        spacing: 6px;
+
+                        TagStepCard {
+                            width: parent.width / 2;
+                            x: (parent.width - self.width) / 2;
+                            step: step;
+                            step-index: index;
+                            expanded: root.expanded-step-index == index;
+                            animations-enabled: root.loading-animated;
+                            toggle => {
+                                root.expanded-step-index = root.expanded-step-index == index ? -1 : index;
+                            }
+                        }
+
+                        if index < root.steps.length - 1: Rectangle {
+                            width: parent.width;
+                            height: 26px;
+                            background: transparent;
+
+                            MaterialText {
+                                x: (parent.width - self.width) / 2;
+                                y: 0px;
+                                text: "|";
+                                font_size: 12px;
+                                color: MaterialPalette.on_surface_variant;
+                            }
+
+                            MaterialText {
+                                x: (parent.width - self.width) / 2;
+                                y: 8px;
+                                text: "|";
+                                font_size: 12px;
+                                color: MaterialPalette.on_surface_variant;
+                            }
+
+                            MaterialText {
+                                x: (parent.width - self.width) / 2;
+                                y: 16px;
+                                text: "↓";
+                                font_size: 12px;
+                                color: MaterialPalette.on_surface_variant;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

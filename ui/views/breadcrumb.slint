@@ -110,6 +110,7 @@ export component Breadcrumb {
         if route == Route.Dialog { return "Dialog"; }
         if route == Route.About { return "About"; }
         if route == Route.Tools { return "Tools"; }
+        if route == Route.Project { return "Project"; }
         if route == Route.Chat { return "Chat"; }
         if route == Route.List { return "List"; }
         if route == Route.Detail { return "Detail"; }
@@ -118,7 +119,7 @@ export component Breadcrumb {
     
     Rectangle {
         width: parent.width;
-        height: 44px;
+        height: 34px;
         background: rgba(255, 255, 255, 0.05);
 
         Horizontal {
@@ -213,6 +214,31 @@ export component Breadcrumb {
             if current-route == Route.Tools: BreadcrumbItem {
                 icon: @image-url("../assets/icons/tools.svg");
                 text: "Tools";
+                is-current: true;
+            }
+
+            // Project 页面：Home > Project
+            if current-route == Route.Project: BreadcrumbSeparator {}
+            if current-route == Route.Project: BreadcrumbItem {
+                icon: @image-url("../assets/icons/project.svg");
+                text: "Project";
+                is-current: true;
+            }
+
+            // Workflow 页面：Home > Project > Workflow
+            if current-route == Route.Workflow: BreadcrumbSeparator {}
+            if current-route == Route.Workflow: BreadcrumbItem {
+                icon: @image-url("../assets/icons/project.svg");
+                text: "Project";
+                is-current: false;
+                clicked => {
+                    root.navigate(Route.Project);
+                }
+            }
+            if current-route == Route.Workflow: BreadcrumbSeparator {}
+            if current-route == Route.Workflow: BreadcrumbItem {
+                icon: @image-url("../assets/icons/commit.svg");
+                text: "Workflow";
                 is-current: true;
             }
             

@@ -9,8 +9,12 @@ import { Home as HomePage } from "./views/home.slint";
 import { Search as SearchPage } from "./views/search.slint";
 import { Settings as SettingsPage } from "./views/settings.slint";
 import { About as AboutPage } from "./views/about.slint";
+import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
+import { TagStepItem } from "./views/workflow/tag_add.slint";
+
 import { List as ListPage } from "./views/list.slint";
 import { Detail as DetailPage } from "./views/detail.slint";
+import { Project as ProjectPage, ProjectItem, ProjectAddModal } from "./views/project.slint";
 import { Tools as ToolsPage } from "./views/tools.slint";
 import { Chat as ChatPage, ChatMessage, MessageRole } from "./views/chat.slint";
 import { Notification as NotificationPage } from "./views/notification.slint";
@@ -40,6 +44,7 @@ export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_
 export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
 export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole } from "./views/chat.slint";
+export { TagStepItem } from "./views/workflow/tag_add.slint";
 
 // import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
 
@@ -106,6 +111,74 @@ export component MainWindow inherits Window {
     callback chat-open-link(string);
     callback chat-route-visible-changed(bool);
 
+    // Workflow state and callbacks
+    in property <string> workflow-branch-result: "Ready to recreate branches.";
+    in property <string> workflow-tag-result: "Ready to add or remove a tag.";
+    in-out property <string> workflow-tag-mode: "local";
+    in-out property <string> workflow-tag-version-mode: "patch";
+    in property <string> workflow-tag-current-version: "v0.0.0";
+    in-out property <string> workflow-tag-next-version: "v0.0.1";
+    in-out property <string> workflow-tag-remove-target: "";
+    in property <bool> workflow-tag-add-initializing: false;
+    in property <bool> workflow-tag-remove-initializing: false;
+    in property <bool> workflow-tag-running: false;
+    in property <bool> workflow-tag-loading-animated: true;
+    in property <[TagStepItem]> workflow-tag-steps: [];
+    in property <string> workflow-project-id: "default";
+    in property <string> workflow-project-name: "Default Project";
+    in property <string> workflow-project-alias: "";
+    in property <string> workflow-project-local-repo: "";
+    in property <string> workflow-project-remote-repo: "";
+    in property <string> workflow-project-logo: "";
+    in property <image> workflow-project-logo-image: @image-url("../logo.png");
+    in property <[ProjectItem]> project-items: [];
+    in-out property <bool> project-show-add-modal: false;
+    in-out property <string> project-new-name: "";
+    in-out property <string> project-new-alias: "";
+    in-out property <string> project-new-local-repo: "";
+    in-out property <string> project-new-remote-repo: "";
+    in-out property <string> project-new-logo: "";
+    in-out property <string> project-new-tags: "";
+    in property <image> project-logo-preview-image: @image-url("../logo.png");
+    in property <string> project-logo-preview-status: "Using app default logo";
+    in-out property <string> project-add-error: "";
+    in-out property <string> project-modal-mode: "add";
+    in-out property <string> project-modal-original-alias: "";
+    in-out property <string> project-search-query: "";
+    in property <bool> platform-is-macos: false;
+    in property <string> workflow-pr-ai-decision: "Awaiting analysis";
+    in property <string> workflow-pr-ai-summary: "Run AI analysis to get a recommendation.";
+    in property <string> workflow-pr-manual-status: "Waiting for human confirmation.";
+    in property <bool> workflow-cd-running: false;
+    in property <string> workflow-cd-summary: "No deployment started.";
+    in property <string> workflow-cd-build-status: "pending";
+    in property <string> workflow-cd-build-detail: "Waiting to start.";
+    in property <string> workflow-cd-test-status: "pending";
+    in property <string> workflow-cd-test-detail: "Waiting to start.";
+    in property <string> workflow-cd-deploy-status: "pending";
+    in property <string> workflow-cd-deploy-detail: "Waiting to start.";
+    in property <string> workflow-cd-verify-status: "pending";
+    in property <string> workflow-cd-verify-detail: "Waiting to start.";
+    callback workflow-branch-submit(string, string, bool);
+    callback workflow-tag-change-mode(string);
+    callback workflow-tag-select-version-mode(string);
+    callback workflow-tag-run(string, string);
+    callback workflow-tag-remove(string);
+    callback workflow-tag-open-add();
+    callback workflow-tag-open-remove();
+    callback workflow-tag-stop();
+    callback workflow-pr-analyze(string, string, string, bool, bool);
+    callback workflow-pr-confirm(bool);
+    callback workflow-cd-start(string, string, string);
+    callback workflow-cd-rollback(string);
+    callback workflow-open-project(string, string, string, string, string, image);
+    callback project-add-project(string, string, string, string, string, string);
+    callback project-preview-logo(string);
+    callback project-update-project(string, string, string, string, string, string, string);
+    callback project-delete-project(string);
+    callback project-search-projects(string);
+    callback project-reload-projects();
+
     init => {
         // TODO: delete
         // update-dialog.show();
@@ -167,13 +240,15 @@ export component MainWindow inherits Window {
                                 current_index: root.navigation-current-index;
                                 
                                 items: [
-                                    // { icon: @image-url("./assets/icons/home.svg"), text: root.navigation-drawer-expanded ? "Home" : "" },
+                                    //  { icon: @image-url("./assets/icons/home.svg"), text: root.navigation-drawer-expanded ? "Home" : "" },
                                     // { icon: @image-url("./assets/icons/search.svg"), text: root.navigation-drawer-expanded ? "Search" : "" },
-                                    // { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Notify" : "" },
-                                    // { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Toast" : "" },
-                                    // { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Dialog" : "" },
-                                    // { icon: @image-url("./assets/icons/tools.svg"), text: root.navigation-drawer-expanded ? "Tools" : ""},
+                                    //  { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Notify" : "" },
+                                    //  { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Toast" : "" },
+                                    //  { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Dialog" : "" },
+                                    //  { icon: @image-url("./assets/icons/tools.svg"), text: root.navigation-drawer-expanded ? "Tools" : ""},
                                     { icon: @image-url("./assets/icons/chat.svg"), text: root.navigation-drawer-expanded ? "Chat" : ""},
+                                    { icon: @image-url("./assets/icons/project.svg"), text: root.navigation-drawer-expanded ? "Project" : ""},
+                                    // { icon: @image-url("./assets/icons/commit.svg"), text: root.navigation-drawer-expanded ? "Workflow" : ""},
                                     // { icon: @image-url("./assets/icons/list.svg"), text: root.navigation-drawer-expanded ? "List" : "" },
                                     // { icon: @image-url("./assets/icons/detail.svg"), text: root.navigation-drawer-expanded ? "Detail" : ""},
 //                                    { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Settings" : ""},
@@ -279,8 +354,120 @@ export component MainWindow inherits Window {
                                 root.navigate(route);
                             }
                         }
+                        if root.current-route == Route.Workflow: WorkflowPage {
+                            viewport-height: page-scroll-view.visible-height - 2px;
+                            navigate(route) => {
+                                root.previous-route = root.current-route;
+                                root.navigate(route);
+                            }
+                            branch-result: root.workflow-branch-result;
+                            tag-result: root.workflow-tag-result;
+                            tag-mode <=> root.workflow-tag-mode;
+                            tag-version-mode <=> root.workflow-tag-version-mode;
+                            tag-current-version: root.workflow-tag-current-version;
+                            tag-next-version <=> root.workflow-tag-next-version;
+                            tag-remove-target <=> root.workflow-tag-remove-target;
+                            tag-add-initializing: root.workflow-tag-add-initializing;
+                            tag-remove-initializing: root.workflow-tag-remove-initializing;
+                            tag-running: root.workflow-tag-running;
+                            tag-loading-animated: root.workflow-tag-loading-animated;
+                            tag-steps: root.workflow-tag-steps;
+                            project-id: root.workflow-project-id;
+                            project-name: root.workflow-project-name;
+                            project-alias: root.workflow-project-alias;
+                            project-local-repo: root.workflow-project-local-repo;
+                            project-remote-repo: root.workflow-project-remote-repo;
+                            project-logo: root.workflow-project-logo;
+                            project-logo-image: root.workflow-project-logo-image;
+                            pr-ai-decision: root.workflow-pr-ai-decision;
+                            pr-ai-summary: root.workflow-pr-ai-summary;
+                            pr-manual-status: root.workflow-pr-manual-status;
+                            cd-running: root.workflow-cd-running;
+                            cd-summary: root.workflow-cd-summary;
+                            cd-build-status: root.workflow-cd-build-status;
+                            cd-build-detail: root.workflow-cd-build-detail;
+                            cd-test-status: root.workflow-cd-test-status;
+                            cd-test-detail: root.workflow-cd-test-detail;
+                            cd-deploy-status: root.workflow-cd-deploy-status;
+                            cd-deploy-detail: root.workflow-cd-deploy-detail;
+                            cd-verify-status: root.workflow-cd-verify-status;
+                            cd-verify-detail: root.workflow-cd-verify-detail;
+                            branch-submit(source, target, recreate-remote) => {
+                                root.workflow-branch-submit(source, target, recreate-remote);
+                            }
+                            tag-change-mode(mode) => {
+                                root.workflow-tag-change-mode(mode);
+                            }
+                            tag-select-version-mode(mode) => {
+                                root.workflow-tag-select-version-mode(mode);
+                            }
+                            tag-run(version, description) => {
+                                root.workflow-tag-run(version, description);
+                            }
+                            tag-remove(tag) => {
+                                root.workflow-tag-remove(tag);
+                            }
+                            tag-open-add => {
+                                root.workflow-tag-open-add();
+                            }
+                            tag-open-remove => {
+                                root.workflow-tag-open-remove();
+                            }
+                            tag-stop => {
+                                root.workflow-tag-stop();
+                            }
+                            pr-analyze(pr-number, pr-title, pr-summary, ci-green, reviewers-ready) => {
+                                root.workflow-pr-analyze(pr-number, pr-title, pr-summary, ci-green, reviewers-ready);
+                            }
+                            pr-confirm(approved) => {
+                                root.workflow-pr-confirm(approved);
+                            }
+                            cd-start(environment-name, release-name, commit-hash) => {
+                                root.workflow-cd-start(environment-name, release-name, commit-hash);
+                            }
+                            cd-rollback(commit-hash) => {
+                                root.workflow-cd-rollback(commit-hash);
+                            }
+                        }
                         if root.current-route == Route.List: ListPage {}
                         if root.current-route == Route.Detail: DetailPage {}
+                        if root.current-route == Route.Project: ProjectPage {
+                            viewport-height: page-scroll-view.visible-height;
+                            viewport-width: page-scroll-view.visible-width;
+                            navigate(route) => {
+                                root.previous-route = root.current-route;
+                                root.navigate(route);
+                            }
+                            projects: root.project-items;
+                            search-query <=> root.project-search-query;
+                            show-add-modal <=> root.project-show-add-modal;
+                            new-project-name <=> root.project-new-name;
+                            new-project-alias <=> root.project-new-alias;
+                            new-project-local-repo <=> root.project-new-local-repo;
+                            new-project-remote-repo <=> root.project-new-remote-repo;
+                            new-project-logo <=> root.project-new-logo;
+                            new-project-tags <=> root.project-new-tags;
+                            logo-preview-image: root.project-logo-preview-image;
+                            logo-preview-status: root.project-logo-preview-status;
+                            add-error <=> root.project-add-error;
+                            modal-mode <=> root.project-modal-mode;
+                            modal-original-alias <=> root.project-modal-original-alias;
+                            open-project(project-name, project-alias, local-repo, remote-repo, logo, logo-image) => {
+                                root.workflow-open-project(project-name, project-alias, local-repo, remote-repo, logo, logo-image);
+                            }
+                            add-project(project-name, project-alias, local-repo, remote-repo, logo, project-tags) => {
+                                root.project-add-project(project-name, project-alias, local-repo, remote-repo, logo, project-tags);
+                            }
+                            preview-logo(logo) => {
+                                root.project-preview-logo(logo);
+                            }
+                            search-projects(query) => {
+                                root.project-search-projects(query);
+                            }
+                            reload-projects() => {
+                                root.project-reload-projects();
+                            }
+                        }
                         if root.current-route == Route.Tools: ToolsPage {
                             viewport-height: page-scroll-view.visible-height;
                             navigate(route) => {
@@ -341,13 +528,64 @@ export component MainWindow inherits Window {
             }
         }
     }
-    
+
     // 底部状态栏 - 固定在窗口底部，高度 40px
     StatusBar {
         x: 0;
         y: root.height - LayoutConstants.status-bar-height;
         width: root.width;
         height: LayoutConstants.status-bar-height;
+    }
+
+    ProjectAddModal {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        modal-visible: root.project-show-add-modal;
+        mode: root.project-modal-mode;
+        original-alias: root.project-modal-original-alias;
+        name <=> root.project-new-name;
+        alias <=> root.project-new-alias;
+        local-repo <=> root.project-new-local-repo;
+        remote-repo <=> root.project-new-remote-repo;
+        logo <=> root.project-new-logo;
+        project-tags <=> root.project-new-tags;
+        logo-preview-image: root.project-logo-preview-image;
+        logo-preview-status: root.project-logo-preview-status;
+        error-text <=> root.project-add-error;
+        preview-logo(logo) => {
+            root.project-preview-logo(logo);
+        }
+        submit(name, alias, local-repo, remote-repo, logo, project-tags) => {
+            if root.project-modal-mode == "edit" {
+                root.project-update-project(root.project-modal-original-alias, name, alias, local-repo, remote-repo, logo, project-tags);
+            } else {
+                root.project-add-project(name, alias, local-repo, remote-repo, logo, project-tags);
+            }
+            root.project-show-add-modal = false;
+            root.project-modal-mode = "add";
+            root.project-modal-original-alias = "";
+        }
+        confirm-delete(alias) => {
+            root.project-delete-project(alias);
+            root.project-show-add-modal = false;
+            root.project-modal-mode = "add";
+            root.project-modal-original-alias = "";
+        }
+        cancel => {
+            root.project-new-name = "";
+            root.project-new-alias = "";
+            root.project-new-local-repo = "";
+            root.project-new-remote-repo = "";
+            root.project-new-logo = "";
+            root.project-new-tags = "";
+            root.project-preview-logo("");
+            root.project-add-error = "";
+            root.project-show-add-modal = false;
+            root.project-modal-mode = "add";
+            root.project-modal-original-alias = "";
+        }
     }
     
     // 通知显示区域 - 固定在右上角，距离右边界 16px
@@ -457,79 +695,28 @@ export component MainWindow inherits Window {
         }
     }
 
-    // Toast 显示区域 - 只在有 overlay 时才覆盖整个窗口
-    if ToastManager.visible && ToastManager.overlay: Rectangle {
+    // Toast 显示区域 - 统一使用组件版 Toast，由组件内部处理 overlay 与非 overlay 场景
+    if ToastManager.visible: Rectangle {
         width: 100%;
         height: 100%;
         background: transparent;
         z: 1000;
-        
+
         Toast {
             message: ToastManager.message;
             type: ToastManager.type == ToastType.Success ? "success" :
                   ToastManager.type == ToastType.Error ? "error" :
                   ToastManager.type == ToastType.Loading ? "loading" : "text";
             position: ToastManager.position;
-            icon: ToastManager.icon;
             overlay: ToastManager.overlay;
             close-on-click: ToastManager.close-on-click;
             toast-visible: ToastManager.visible;
-            toast-width-str: ToastManager.width;
             toast-width-value: ToastManager.width-value;
             toast-width-percent: ToastManager.width-percent;
             toast-width-is-auto: ToastManager.width-is-auto;
             dismiss() => {
                 ToastManager.dismiss();
             }
-        }
-    }
-    
-    // 当没有 overlay 时，Toast 内容区域直接定位，不覆盖整个窗口
-    if ToastManager.visible && !ToastManager.overlay: Rectangle {
-        width: ToastManager.width-is-auto ? 
-            max(200px, min(root.width * 0.8, 400px)) : // auto模式：使用内容宽度，但限制在200px-80%之间
-            (ToastManager.width-value > 0px ? ToastManager.width-value : 
-             (ToastManager.width-percent > 0 ? root.width * ToastManager.width-percent / 100 : root.width * 0.2));
-        height: content-container-height.preferred-height;
-        x: root.width / 2 - self.width / 2;
-        y: ToastManager.position == "top" ? 32px :
-           ToastManager.position == "bottom" ? root.height - self.height - 32px :
-           root.height / 2 - self.height / 2;
-        z: 1000;
-        background: ToastManager.type == ToastType.Success ? #4CAF50 :
-                    ToastManager.type == ToastType.Error ? #F44336 :
-                    ToastManager.type == ToastType.Loading ? MaterialPalette.primary_container :
-                    MaterialPalette.surface_container_highest;
-        border-radius: 12px;
-        
-        content-container-height := Horizontal {
-            spacing: 16px;
-            padding: 16px;
-            width: 100%;
-            min-height: 64px;
-            
-            if ToastManager.type == ToastType.Loading: CircularProgressIndicator {
-                width: 24px;
-                height: 24px;
-                indeterminate: true;
-                progress: 0;
-            }
-            
-            MaterialText {
-                text: ToastManager.message;
-                color: ToastManager.type == ToastType.Success ? #ffffff :
-                       ToastManager.type == ToastType.Error ? #ffffff :
-                       MaterialPalette.on_surface;
-                vertical-alignment: center;
-                wrap: word-wrap;
-                width: parent.width - (ToastManager.type == ToastType.Loading ? 40px : 0px) - 32px; // 减去loading图标宽度和padding
-            }
-        }
-        
-        TouchArea {
-            width: 100%;
-            height: 100%;
-            clicked => { if ToastManager.close-on-click { ToastManager.dismiss(); } }
         }
     }
 

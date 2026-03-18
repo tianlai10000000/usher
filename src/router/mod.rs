@@ -10,6 +10,8 @@ const NAVIGATION_ROUTES: &[Route] = &[
     // Route::Dialog,
     // Route::Tools,
     Route::Chat,
+    Route::Project,
+    // Route::Workflow,
     // Route::List,
     // Route::Detail,
     // Route::Settings,

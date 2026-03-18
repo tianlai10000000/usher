@@ -1,0 +1,941 @@
+import { MaterialText, FilledButton, Horizontal, Vertical, ElevatedCard, MaterialStyleMetrics,
+     MaterialPalette, Modal, HorizontalDivider, TextButton, IconButton, FilterChip } from "@material";
+import { Route } from "../route/routeMap.slint";
+import { ScrollView } from "../../material-1.0-fixed/ui/components/scroll_view.slint";
+import { Home } from "home.slint";
+
+export struct ProjectItem {
+    project_name: string,
+    project_alias: string,
+    local_repo: string,
+    remote_repo: string,
+    logo: string,
+    logo_image: image,
+    project_tags: [string],
+    project_tags_text: string,
+}
+
+component ProjectField {
+    in property <string> label;
+    in-out property <string> value;
+    in property <string> placeholder;
+    callback edited(string);
+
+    VerticalLayout {
+        spacing: 6px;
+
+        MaterialText {
+            text: root.label;
+            font_size: 12px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        Rectangle {
+            height: 40px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_highest;
+            clip: true;
+
+            TextInput {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                width: parent.width - 24px;
+                text <=> root.value;
+                color: MaterialPalette.on_surface;
+                font-size: 14px;
+                single-line: true;
+                font-family: "Hiragino Sans GB";
+
+                edited => {
+                    root.edited(self.text);
+                }
+            }
+
+            if root.value == "": MaterialText {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                text: root.placeholder;
+                font_size: 14px;
+                color: MaterialPalette.on_surface_variant;
+            }
+        }
+    }
+}
+
+component SearchField {
+    in-out property <string> value;
+    in property <string> placeholder;
+    callback accepted(string);
+
+    Rectangle {
+        preferred-width: 240px;
+        height: 40px;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: MaterialPalette.outline_variant;
+        background: MaterialPalette.surface_container_highest;
+        clip: true;
+
+        TextInput {
+            x: 12px;
+            y: (parent.height - self.preferred-height) / 2;
+            width: parent.width - 24px;
+            text <=> root.value;
+            color: MaterialPalette.on_surface;
+            font-size: 14px;
+            font-family: "Hiragino Sans GB";
+            single-line: true;
+
+            accepted => {
+                root.accepted(self.text);
+            }
+        }
+
+        if root.value == "": MaterialText {
+            x: 12px;
+            y: (parent.height - self.preferred-height) / 2;
+            text: root.placeholder;
+            font_size: 14px;
+            color: MaterialPalette.on_surface_variant;
+        }
+    }
+}
+
+export component Project {
+    callback navigate(Route);
+    callback open-project(string, string, string, string, string, image);
+    callback add-project(string, string, string, string, string, string);
+    callback preview-logo(string);
+    callback search-projects(string);
+    callback reload-projects();
+
+    // Input property for available viewport height
+    in property <length> viewport-height;
+    in property <length> viewport-width;
+
+    // Dynamic data source for cards (loaded from config in Rust).
+    in property <[ProjectItem]> projects: [];
+    in-out property <bool> show-add-modal: false;
+    in-out property <string> new-project-name: "";
+    in-out property <string> new-project-alias: "";
+    in-out property <string> new-project-local-repo: "";
+    in-out property <string> new-project-remote-repo: "";
+    in-out property <string> new-project-logo: "";
+    in-out property <string> new-project-tags: "";
+    in property <image> logo-preview-image: @image-url("../../logo.png");
+    in property <string> logo-preview-status: "Using app default logo";
+    in-out property <string> add-error: "";
+    in-out property <string> modal-mode: "add";
+    in-out property <string> modal-original-alias: "";
+    in-out property <string> search-query: "";
+
+    // Responsive columns based on width
+    property <int> columns: root.width >= 1000px ? 5 :
+        root.width >= 800px ? 4 :
+        root.width >= 600px ? 3 :
+        root.width >= 400px ? 2 :
+        1;
+
+    // Calculate number of rows needed
+    property <int> item-count: projects.length + 1;
+    property <int> rows: Math.ceil(item-count / columns);
+
+    // Layout constants
+    property <length> padding-size: MaterialStyleMetrics.padding_16;
+    property <length> row-spacing: MaterialStyleMetrics.padding_8;
+    property <length> col-spacing: MaterialStyleMetrics.padding_16;
+
+    // Calculate available dimensions
+    property <length> available-width: root.width - (padding-size * 2);
+
+    // Calculate card dimensions
+    property <length> card-width: (available-width - ((columns - 1) * col-spacing)) / columns;
+    property <length> card-height: 160px;
+
+    Rectangle {
+        width: parent.width;
+
+        Vertical {
+            width: parent.width;
+            padding-left: MaterialStyleMetrics.padding_8;
+            padding-right: MaterialStyleMetrics.padding_8;
+            padding-top: 0;
+            padding-bottom: 0;
+            spacing: row-spacing;
+            alignment: start;
+
+            HorizontalLayout {
+                width: parent.width;
+                height: 40px;
+                spacing: MaterialStyleMetrics.spacing_8;
+                alignment: center;
+
+                SearchField {
+                    horizontal-stretch: 1;
+                    min-width: 200px;
+                    placeholder: "Search by name or alias";
+                    value <=> root.search-query;
+                    accepted(text) => {
+                        root.search-projects(text);
+                    }
+                }
+
+                FilledButton {
+                    text: "Search";
+                    height: 36px;
+                    clicked => {
+                        root.search-projects(root.search-query);
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Rectangle {
+                    width: 28px;
+                    height: 40px;
+                    border-radius: 6px;
+                    background: reload_hover.has-hover ? MaterialPalette.surface_container_high : transparent;
+                    animate background { duration: 120ms; }
+
+                    reload_btn := IconButton {
+                        width: 28px;
+                        height: 28px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        icon: @image-url("../assets/icons/loading.svg");
+                        tooltip: "Reload";
+                        inline: true;
+                        clicked => {
+                            root.reload-projects();
+                        }
+                    }
+
+                    reload_hover := TouchArea {
+                        width: 100%;
+                        height: 100%;
+                        mouse-cursor: pointer;
+                        clicked => {
+                            reload_btn.clicked();
+                        }
+                    }
+                }
+            }
+
+            // Create rows dynamically (same structure as Tools)
+            for row_index in rows : Horizontal {
+                spacing: col-spacing;
+                alignment: start;
+
+                    // Calculate start and end indices for this row
+                    property <int> start_index: row_index * columns;
+                    property <int> end_index: Math.min(start_index + columns, item-count);
+                    property <int> cards_in_row: end_index - start_index;
+
+                // Display cards for this row
+                for col_index in cards_in_row : Rectangle {
+                    width: card-width;
+                    height: card-height;
+                    
+                    property <int> card_index: start_index + col_index;
+                        if card_index < projects.length: Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+
+                            property <ProjectItem> card_data: projects[card_index];
+
+                            ElevatedCard {
+                                width: 100%;
+                                height: 100%;
+                                clickable: true;
+
+                                Rectangle {
+                                    width: 100%;
+                                    height: 100%;
+                                    border_radius: MaterialStyleMetrics.border_radius_12;
+                                    background: @linear-gradient(45deg, MaterialPalette.surface_container_highest 0%, MaterialPalette.surface_container_lowest 100%);
+                                }
+
+                                Rectangle {
+                                    width: 100%;
+                                    height: 100%;
+                                    border_radius: MaterialStyleMetrics.border_radius_12;
+                                    background: MaterialPalette.secondary_container;
+                                    opacity: hover-area_project.has-hover ? 1 : 0;
+                                    animate opacity { duration: 150ms; }
+                                }
+
+                                Rectangle {
+                                    width: 100%;
+                                    height: 100%;
+                                    border_radius: MaterialStyleMetrics.border_radius_12;
+                                    background: MaterialPalette.primary;
+                                    opacity: hover-area_project.has-hover ? 0.06 : 0;
+                                    animate opacity { duration: 120ms; }
+                                }
+
+                                VerticalLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    padding: MaterialStyleMetrics.padding_16;
+                                    spacing: 8px;
+                                    alignment: start;
+
+                                    HorizontalLayout {
+                                        width: parent.width - 32px;
+                                        spacing: 12px;
+                                        alignment: center;
+
+                                        Rectangle {
+                                            width: 48px;
+                                            height: 48px;
+                                            border-radius: 16px;
+                                            background: MaterialPalette.surface_container_highest;
+                                            clip: true;
+
+                                            Image {
+                                                width: 32px;
+                                                height: 32px;
+                                                x: (parent.width - self.width) / 2;
+                                                y: (parent.height - self.height) / 2;
+                                                source: card_data.logo_image;
+                                            }
+                                        }
+
+                                        VerticalLayout {
+                                            width: parent.width - 60px;
+                                            spacing: 2px;
+                                            alignment: start;
+
+                                            MaterialText {
+                                                text: "Project";
+                                                color: MaterialPalette.primary;
+                                                font_size: 11px;
+                                                font_weight: 500;
+                                            }
+
+                                            Text {
+                                                width: parent.width;
+                                                text: card_data.project_name;
+                                                font-size: 16px;
+                                                font-weight: 600;
+                                                color: MaterialPalette.on_surface;
+                                                font-family: "Hiragino Sans GB";
+                                                overflow: elide;
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        vertical-stretch: 1;
+                                        background: transparent;
+                                    }
+
+                                    Rectangle {
+                                        width: parent.width - 32px;
+                                        border-radius: 10px;
+
+                                        VerticalLayout {
+                                            spacing: 4px;
+                                            alignment: center;
+
+                                            MaterialText {
+                                                text: "Alias";
+                                                color: MaterialPalette.primary;
+                                                font_size: 12px;
+                                                font_weight: 500;
+                                            }
+
+                                            Text {
+                                                text: card_data.project_alias == "" ? "Not set" : card_data.project_alias;
+                                                font-size: 11px;
+                                                color: MaterialPalette.on_surface_variant;
+                                                font-family: "Hiragino Sans GB";
+                                                overflow: elide;
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: parent.width - 32px;
+                                        border-radius: 10px;
+
+                                        HorizontalLayout {
+                                            width: parent.width;
+                                            padding-top: 8px;
+                                            padding-bottom: 8px;
+                                            spacing: 6px;
+                                            alignment: end;
+
+                                            if card_data.project_tags.length == 0: MaterialText {
+                                                text: "";
+                                                font_size: 11px;
+                                                color: MaterialPalette.on_surface_variant;
+                                            }
+
+                                            for project_tag in card_data.project_tags: Rectangle {
+                                                height: 20px;
+                                                width: max(32px, tag-text.preferred-width + 18px);
+                                                border-radius: 4px;
+                                                background: MaterialPalette.secondary_container;
+                                                border-width: 1px;
+                                                border-color: MaterialPalette.outline_variant;
+
+                                                tag-text := Text {
+                                                    x: 9px;
+                                                    y: (parent.height - self.preferred-height) / 2;
+                                                    text: project_tag;
+                                                    font-size: 10px;
+                                                    font-weight: 500;
+                                                    color: MaterialPalette.on_secondary_container;
+                                                    font-family: "Hiragino Sans GB";
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            hover-area_project := TouchArea {
+                                width: 100%;
+                                height: 100%;
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.open-project(card_data.project_name, card_data.project_alias, card_data.local_repo, card_data.remote_repo, card_data.logo, card_data.logo_image);
+                                    root.navigate(Route.Workflow);
+                                }
+                            }
+
+                            property <bool> actions_visible: hover-area_project.has-hover || settings_hover.has-hover || delete_hover.has-hover;
+
+                            Rectangle {
+                                width: 64px;
+                                height: 28px;
+                                x: parent.width - self.width - 8px;
+                                y: 8px;
+                                background: transparent;
+                                opacity: actions_visible ? 1 : 0;
+                                animate opacity { duration: 120ms; }
+
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 2px;
+                                    alignment: center;
+
+                                    Rectangle {
+                                        width: 28px;
+                                        height: 28px;
+                                        border-radius: 6px;
+                                        background: settings_hover.has-hover ? MaterialPalette.surface_container_high : transparent;
+                                        animate background { duration: 120ms; }
+
+                                        settings_btn := IconButton {
+                                            width: 28px;
+                                            height: 28px;
+                                            icon: @image-url("../assets/icons/settings.svg");
+                                            tooltip: "Settings";
+                                            inline: true;
+                                            clicked => {
+                                                root.modal-mode = "edit";
+                                                root.modal-original-alias = card_data.project_alias;
+                                                root.new-project-name = card_data.project_name;
+                                                root.new-project-alias = card_data.project_alias;
+                                                root.new-project-local-repo = card_data.local_repo;
+                                                root.new-project-remote-repo = card_data.remote_repo;
+                                                root.new-project-logo = card_data.logo;
+                                            root.new-project-tags = card_data.project_tags_text;
+                                                root.preview-logo(root.new-project-logo);
+                                                root.add-error = "";
+                                                root.show-add-modal = true;
+                                            }
+                                        }
+
+                                        settings_hover := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                settings_btn.clicked();
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 28px;
+                                        height: 28px;
+                                        border-radius: 6px;
+                                        background: delete_hover.has-hover ? MaterialPalette.surface_container_high : transparent;
+                                        animate background { duration: 120ms; }
+
+                                        delete_btn := IconButton {
+                                            width: 28px;
+                                            height: 28px;
+                                            icon: @image-url("../assets/icons/delete.svg");
+                                            tooltip: "Delete";
+                                            has_error: true;
+                                            inline: true;
+                                            clicked => {
+                                                root.modal-mode = "delete";
+                                                root.modal-original-alias = card_data.project_alias;
+                                                root.new-project-name = card_data.project_name;
+                                                root.new-project-alias = card_data.project_alias;
+                                                root.new-project-local-repo = card_data.local_repo;
+                                                root.new-project-remote-repo = card_data.remote_repo;
+                                                root.new-project-logo = card_data.logo;
+                                                root.new-project-tags = card_data.project_tags_text;
+                                                root.preview-logo(root.new-project-logo);
+                                                root.add-error = "";
+                                                root.show-add-modal = true;
+                                            }
+                                        }
+
+                                        delete_hover := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                delete_btn.clicked();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                    if card_index == projects.length: Rectangle {
+                        width: parent.width;
+                        height: parent.height;
+
+                            ElevatedCard {
+                                width: 100%;
+                                height: 100%;
+                                clickable: true;
+
+                                Rectangle {
+                                    width: 100%;
+                                    height: 100%;
+                                    border_radius: MaterialStyleMetrics.border_radius_12;
+                                    background: @linear-gradient(45deg, MaterialPalette.surface_container_highest 0%, MaterialPalette.surface_container_lowest 100%);
+                                }
+
+                                Rectangle {
+                                    width: 100%;
+                                    height: 100%;
+                                    border_radius: MaterialStyleMetrics.border_radius_12;
+                                    background: @linear-gradient(45deg, MaterialPalette.secondary_container 90%, MaterialPalette.secondary_fixed_dim 100%);
+                                    opacity: hover-area_add.has-hover ? 1 : 0;
+                                    animate opacity { duration: 150ms; }
+                                }
+
+                                Rectangle {
+                                    width: 100%;
+                                    height: 100%;
+                                    border_radius: MaterialStyleMetrics.border_radius_12;
+                                    background: MaterialPalette.primary;
+                                    opacity: hover-area_add.has-hover ? 0.04 : 0.02;
+                                    animate opacity { duration: 120ms; }
+                                }
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 6px;
+
+                                    MaterialText {
+                                        text: "+";
+                                        font_size: 28px;
+                                        font_weight: 600;
+                                        color: MaterialPalette.on_surface_variant;
+                                        horizontal_alignment: center;
+                                    }
+
+                                    Text {
+                                        text: "New Project";
+                                        font-size: 12px;
+                                        color: MaterialPalette.on_surface_variant;
+                                        horizontal_alignment: center;
+                                    }
+                                }
+                            }
+
+                            hover-area_add := TouchArea {
+                                width: 100%;
+                                height: 100%;
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    debug("[Project] New card clicked.");
+                                    root.modal-mode = "add";
+                                    root.modal-original-alias = "";
+                                    root.new-project-name = "";
+                                    root.new-project-alias = "";
+                                    root.new-project-local-repo = "";
+                                    root.new-project-remote-repo = "";
+                                    root.new-project-logo = "";
+                                    root.new-project-tags = "";
+                                    root.preview-logo(root.new-project-logo);
+                                    root.add-error = "";
+                                    root.show-add-modal = true;
+                                    debug("[Project] show-add-modal set to true.");
+                                    // No-op: visual only.
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+    }
+
+}
+
+export component ProjectAddModal {
+    in property <bool> modal-visible: false;
+    in property <string> mode: "add";
+    in property <string> original-alias: "";
+    in-out property <string> name;
+    in-out property <string> alias;
+    in-out property <string> local-repo;
+    in-out property <string> remote-repo;
+    in-out property <string> logo;
+    in-out property <string> project-tags;
+    in property <image> logo-preview-image: @image-url("../../logo.png");
+    in property <string> logo-preview-status: "Using app default logo";
+    in-out property <string> error-text;
+    callback submit(string, string, string, string, string, string);
+    callback preview-logo(string);
+    callback confirm-delete(string);
+    callback cancel();
+
+    private property <bool> logo-status-loading: root.logo-preview-status == "Remote URL, loading preview...";
+    private property <bool> logo-status-invalid: root.logo-preview-status == "Invalid input, using default logo";
+    private property <bool> logo-status-remote-ready: root.logo-preview-status == "Remote URL";
+    private property <bool> logo-status-local: root.logo-preview-status == "Local file";
+    private property <bool> logo-status-base64: root.logo-preview-status == "Base64 image";
+    private property <color> logo-status-color:
+        root.logo-status-invalid ? MaterialPalette.error :
+        (root.logo-status-loading || root.logo-status-remote-ready) ? MaterialPalette.primary :
+        (root.logo-status-local || root.logo-status-base64) ? MaterialPalette.tertiary :
+        MaterialPalette.on_surface_variant;
+    private property <brush> logo-status-chip-background:
+        root.logo-status-invalid ? MaterialPalette.error_container :
+        (root.logo-status-loading || root.logo-status-remote-ready) ? MaterialPalette.primary_container :
+        (root.logo-status-local || root.logo-status-base64) ? MaterialPalette.tertiary_container :
+        MaterialPalette.surface_container_high;
+    private property <length> dialog-header-height: root.mode == "delete" ? 46px : 60px;
+    private property <length> dialog-footer-height: 58px;
+
+    if root.modal-visible: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        z: 3000;
+
+        Modal {
+            width: parent.width;
+            height: parent.height;
+
+            TouchArea {
+                width: 100%;
+                height: 100%;
+                clicked => {
+                    root.cancel();
+                }
+            }
+
+            dialog := Rectangle {
+                width: min(520px, parent.width - 32px);
+                height: min(parent.height - 32px, root.mode == "delete" ? 240px : 640px);
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                border-radius: 18px;
+                background: MaterialPalette.background;
+                clip: true;
+
+                TouchArea {
+                    width: 100%;
+                    height: 100%;
+                }
+
+                header-section := Rectangle {
+                    x: 0;
+                    y: 0;
+                    z: 3;
+                    width: parent.width;
+                    height: root.dialog-header-height;
+                    clip: true;
+                    background: MaterialPalette.background;
+
+                    header-content := VerticalLayout {
+                        x: MaterialStyleMetrics.padding_16;
+                        y: MaterialStyleMetrics.padding_16;
+                        width: parent.width - MaterialStyleMetrics.padding_16 * 2;
+                        spacing: 4px;
+                        alignment: start;
+
+                        MaterialText {
+                            text: root.mode == "edit" ? "Edit Project" : root.mode == "delete" ? "Delete Project" : "New Project";
+                            font_size: 18px;
+                            font_weight: 600;
+                            color: MaterialPalette.on_surface;
+                        }
+
+                        if root.mode != "delete": Text {
+                            width: parent.width;
+                            text: "Fill in project metadata. The content area scrolls when space is limited.";
+                            font-size: 12px;
+                            color: MaterialPalette.on_surface_variant;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                HorizontalDivider {
+                    x: 0;
+                    y: header-section.height;
+                    z: 3;
+                    width: parent.width;
+                }
+
+                body-section := Rectangle {
+                    x: 0;
+                    y: header-section.height + 1px;
+                    z: 1;
+                    width: parent.width;
+                    height: max(0px, parent.height - root.dialog-header-height - root.dialog-footer-height - 2px);
+                    clip: true;
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        alignment: center;
+
+                        content-scroll := Rectangle {
+                            width: parent.width - 16px;
+                            height: parent.height;
+
+                            body-scroll := ScrollView {
+                                width: parent.width;
+                                height: parent.height;
+                                horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
+                                vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
+
+                                body-content := VerticalLayout {
+                                    width: body-scroll.visible_width;
+                                    padding: MaterialStyleMetrics.padding_16;
+                                    spacing: 12px;
+                                    alignment: start;
+
+                                    if root.mode != "delete": ProjectField {
+                                        label: "Project name";
+                                        value <=> root.name;
+                                        placeholder: "e.g. Atlas";
+                                    }
+
+                                    if root.mode != "delete": ProjectField {
+                                        label: "Project alias";
+                                        value <=> root.alias;
+                                        placeholder: "e.g. atlas";
+                                    }
+
+                                    if root.mode != "delete": ProjectField {
+                                        label: "Local repo";
+                                        value <=> root.local-repo;
+                                        placeholder: "/path/to/repo";
+                                    }
+
+                                    if root.mode != "delete": ProjectField {
+                                        label: "Remote repo";
+                                        value <=> root.remote-repo;
+                                        placeholder: "git@github.com:org/repo.git";
+                                    }
+
+                                    if root.mode != "delete": ProjectField {
+                                        label: "Logo (optional)";
+                                        value <=> root.logo;
+                                        placeholder: "local path / https URL / data:image/...;base64,...";
+                                        edited(text) => {
+                                            root.preview-logo(text);
+                                        }
+                                    }
+
+                                    if root.mode != "delete": ProjectField {
+                                        label: "Project type tags (optional)";
+                                        value <=> root.project-tags;
+                                        placeholder: "comma-separated, e.g. H5, Web, RN";
+                                    }
+
+                                    if root.mode != "delete": Rectangle {
+                                        width: 100%;
+                                        height: 96px;
+                                        border-radius: 14px;
+                                        border-width: 1px;
+                                        border-color: MaterialPalette.outline_variant;
+                                        background: MaterialPalette.surface_container_low;
+
+                                        Rectangle {
+                                            x: 14px;
+                                            y: (parent.height - self.height) / 2;
+                                            width: 56px;
+                                            height: 56px;
+                                            border-radius: 16px;
+                                            background: MaterialPalette.surface_container_highest;
+                                            clip: true;
+
+                                            Image {
+                                                width: 40px;
+                                                height: 40px;
+                                                x: (parent.width - self.width) / 2;
+                                                y: (parent.height - self.height) / 2;
+                                                source: root.logo-preview-image;
+                                            }
+                                        }
+
+                                        right-panel := Rectangle {
+                                            x: 82px;
+                                            y: 0;
+                                            width: parent.width - 96px;
+                                            height: parent.height;
+                                            background: transparent;
+
+                                            VerticalLayout {
+                                                y: (parent.height - self.preferred-height) / 2;
+                                                width: parent.width;
+                                                spacing: 3px;
+                                                alignment: start;
+
+                                                MaterialText {
+                                                    text: "Preview";
+                                                    font_size: 11px;
+                                                    font_weight: 500;
+                                                    color: MaterialPalette.primary;
+                                                }
+
+                                                HorizontalLayout {
+                                                    width: parent.width;
+                                                    spacing: 6px;
+                                                    alignment: center;
+
+                                                    MaterialText {
+                                                        text: "Logo preview";
+                                                        font_size: 13px;
+                                                        font_weight: 600;
+                                                        color: MaterialPalette.on_surface;
+                                                    }
+
+                                                    if root.logo-status-loading || root.logo-status-invalid || root.logo-status-remote-ready || root.logo-status-local || root.logo-status-base64: Rectangle {
+                                                        height: 18px;
+                                                        border-radius: 9px;
+                                                        background: root.logo-status-chip-background;
+
+                                                        MaterialText {
+                                                            x: 8px;
+                                                            y: (parent.height - self.preferred-height) / 2;
+                                                            text:
+                                                                root.logo-status-invalid ? "Fallback" :
+                                                                root.logo-status-loading ? "Loading" :
+                                                                root.logo-status-remote-ready ? "Remote" :
+                                                                root.logo-status-local ? "Local" :
+                                                                "Base64";
+                                                            font_size: 10px;
+                                                            color: root.logo-status-invalid ? MaterialPalette.on_error_container :
+                                                                (root.logo-status-loading || root.logo-status-remote-ready) ? MaterialPalette.on_primary_container :
+                                                                MaterialPalette.on_tertiary_container;
+                                                        }
+                                                    }
+                                                }
+
+                                                Text {
+                                                    width: parent.width;
+                                                    text: root.logo-preview-status;
+                                                    font-size: 12px;
+                                                    color: root.logo-status-color;
+                                                    wrap: word-wrap;
+                                                }
+
+                                                Text {
+                                                    width: parent.width;
+                                                    text: "Used on the project card and workflow header.";
+                                                    font-size: 11px;
+                                                    color: MaterialPalette.on_surface_variant;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if root.mode == "delete": Text {
+                                        text: "Are you sure to delete " + root.name + " ?";
+                                        wrap: word-wrap;
+                                        font-size: 14px;
+                                        font-family: "Hiragino Sans GB";
+                                        color: MaterialPalette.on_surface;
+                                    }
+
+                                    if root.error-text != "": MaterialText {
+                                        text: root.error-text;
+                                        font_size: 12px;
+                                        color: MaterialPalette.error;
+                                    }
+                                }
+
+                                viewport_height: body-content.preferred-height;
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider {
+                    x: 0;
+                    y: parent.height - root.dialog-footer-height - 1px;
+                    z: 3;
+                    width: parent.width;
+                }
+
+                footer-section := Rectangle {
+                    x: 0;
+                    y: parent.height - self.height;
+                    z: 3;
+                    width: parent.width;
+                    height: root.dialog-footer-height;
+                    background: MaterialPalette.background;
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        padding-left: MaterialStyleMetrics.padding_8;
+                        padding-right: MaterialStyleMetrics.padding_8;
+                        padding-top: 12px;
+                        padding-bottom: 4px;
+                        alignment: end;
+                        spacing: MaterialStyleMetrics.spacing_8;
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        TextButton {
+                            text: "Cancel";
+                            height: 36px;
+                            clicked => {
+                                root.cancel();
+                            }
+                        }
+
+                        FilledButton {
+                            text: root.mode == "edit" ? "Save" : root.mode == "delete" ? "Confirm" : "OK";
+                            height: 36px;
+                            clicked => {
+                                if root.mode == "delete" {
+                                    root.confirm-delete(root.original-alias);
+                                    return;
+                                }
+                                if root.name == "" || root.alias == "" || root.local-repo == "" || root.remote-repo == "" {
+                                    root.error-text = "Please fill in all fields.";
+                                    return;
+                                }
+                                root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

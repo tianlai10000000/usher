@@ -1,0 +1,545 @@
+/// Workflow main entrance page and sub-flow workspace.
+import { FilledButton, MaterialPalette, MaterialText } from "@material";
+import { AppState } from "../../state/app_state.slint";
+import { PageView } from "../../components/page/page_view.slint";
+import { Route } from "../../route/routeMap.slint";
+import { BranchFlow } from "./branch.slint";
+import { CdFlow } from "./cd.slint";
+import { PrFlow } from "./pr.slint";
+import { TagFlow } from "./tag.slint";
+import { TagStepItem } from "./tag_add.slint";
+
+component WorkflowTabButton inherits Rectangle {
+    in property <string> label;
+    in property <string> caption;
+    in property <bool> selected: false;
+    in property <length> card-width: 180px;
+    callback clicked();
+
+    width: root.card-width;
+    height: 64px;
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: MaterialPalette.outline_variant;
+    background: root.selected ? MaterialPalette.secondary_container : @linear-gradient(45deg, MaterialPalette.surface_container_highest 0%, MaterialPalette.surface_container_lowest 100%);
+
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding: 14px;
+        spacing: 6px;
+        alignment: start;
+
+        MaterialText {
+            text: root.label;
+            font_size: 18px;
+            font_weight: 600;
+            color: root.selected ? MaterialPalette.on_secondary_container : MaterialPalette.on_surface;
+        }
+
+        Text {
+            width: parent.width - 28px;
+            text: root.caption;
+            wrap: word-wrap;
+            font-size: 12px;
+            color: root.selected ? MaterialPalette.on_secondary_container : MaterialPalette.on_surface_variant;
+        }
+    }
+}
+
+export component Workflow inherits PageView {
+    callback branch-submit(string, string, bool);
+    callback tag-change-mode(string);
+    callback tag-select-version-mode(string);
+    callback tag-run(string, string);
+    callback tag-remove(string);
+    callback tag-open-add();
+    callback tag-open-remove();
+    callback tag-stop();
+    callback pr-analyze(string, string, string, bool, bool);
+    callback pr-confirm(bool);
+    callback cd-start(string, string, string);
+    callback cd-rollback(string);
+
+    in property <string> branch-result: "Ready to recreate branches.";
+    in property <string> tag-result: "Ready to add or remove a tag.";
+    in-out property <string> tag-mode: "local";
+    in-out property <string> tag-version-mode: "patch";
+    in property <string> tag-current-version: "v0.0.0";
+    in-out property <string> tag-next-version: "v0.0.1";
+    in-out property <string> tag-remove-target: "";
+    in property <bool> tag-add-initializing: false;
+    in property <bool> tag-remove-initializing: false;
+    in property <bool> tag-running: false;
+    in property <bool> tag-loading-animated: true;
+    in property <[TagStepItem]> tag-steps: [];
+    in property <string> project-id: "default";
+    in property <string> project-name: "Default Project";
+    in property <string> project-alias: "";
+    in property <string> project-local-repo: "";
+    in property <string> project-remote-repo: "";
+    in property <string> project-logo: "";
+    in property <image> project-logo-image: @image-url("../../../logo.png");
+    in property <string> pr-ai-decision: "Awaiting analysis";
+    in property <string> pr-ai-summary: "Run AI analysis to get a recommendation.";
+    in property <string> pr-manual-status: "Waiting for human confirmation.";
+    in property <bool> cd-running: false;
+    in property <string> cd-summary: "No deployment started.";
+    in property <string> cd-build-status: "pending";
+    in property <string> cd-build-detail: "Waiting to start.";
+    in property <string> cd-test-status: "pending";
+    in property <string> cd-test-detail: "Waiting to start.";
+    in property <string> cd-deploy-status: "pending";
+    in property <string> cd-deploy-detail: "Waiting to start.";
+    in property <string> cd-verify-status: "pending";
+    in property <string> cd-verify-detail: "Waiting to start.";
+
+    private property <int> selected-flow: 0;
+    private property <length> tabs-spacing: 12px;
+    private property <length> workflow-content-width: root.width - 32px;
+    private property <bool> workflow-header-stacked: root.workflow-content-width < 980px;
+    private property <bool> workflow-tabs-single-column: root.workflow-content-width < 760px;
+    private property <bool> workflow-tabs-two-columns: root.workflow-content-width >= 760px && root.workflow-content-width < 1160px;
+    private property <length> workflow-tabs-quad-width: (root.workflow-content-width - 3 * tabs-spacing) / 4;
+    private property <length> workflow-tabs-dual-width: (root.workflow-content-width - tabs-spacing) / 2;
+    private property <length> workflow-tabs-single-width: root.workflow-content-width;
+
+    if !root.workflow-header-stacked: HorizontalLayout {
+        spacing: 16px;
+        alignment: start;
+
+        Rectangle {
+            width: 80px;
+            height: 80px;
+            border-radius: 40px;
+            background: MaterialPalette.surface_container_high;
+            clip: true;
+
+            Image {
+                width: 56px;
+                height: 56px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                source: root.project-logo-image;
+            }
+        }
+
+        VerticalLayout {
+            width: root.workflow-content-width - 96px;
+            spacing: 6px;
+            alignment: start;
+
+            MaterialText {
+                text: root.project-name + (root.project-alias == "" ? "" : "  (" + root.project-alias + ")");
+                font-family: "Hiragino Sans GB";
+                font_size: 24px;
+                font_weight: 600;
+                color: MaterialPalette.on_surface;
+            }
+
+            // Rectangle {
+            //     width: parent.width;
+            //     height: 24px;
+            //     border-radius: 12px;
+            //     background: MaterialPalette.secondary_container;
+
+            //     HorizontalLayout {
+            //         width: parent.width;
+            //         height: 24px;
+            //         padding-left: 10px;
+            //         padding-right: 10px;
+            //         alignment: center;
+
+            //         MaterialText {
+            //             text: "Project: " + root.project-name + (root.project-alias == "" ? "" : "  (" + root.project-alias + ")");
+            //             font-family: "Hiragino Sans GB";
+            //             font_size: 12px;
+            //             color: MaterialPalette.on_secondary_container;
+            //             vertical_alignment: center;
+            //         }
+            //     }
+            // }
+
+            Text {
+                width: parent.width;
+                text: "Manage branch recreation, tag operations, PR decisions, and interactive CD rollout from one workspace.";
+                wrap: word-wrap;
+                font-size: 14px;
+                color: MaterialPalette.on_surface_variant;
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 24px;
+                border-radius: 12px;
+                background: MaterialPalette.surface_container_high;
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: 24px;
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    alignment: center;
+
+                    MaterialText {
+                        text: "Local: " + (root.project-local-repo == "" ? "-" : root.project-local-repo) + "  |  Remote: " + (root.project-remote-repo == "" ? "-" : root.project-remote-repo);
+                        font-family: "Hiragino Sans GB";
+                        font_size: 11px;
+                        color: MaterialPalette.on_surface_variant;
+                        vertical_alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    if root.workflow-header-stacked: VerticalLayout {
+        width: root.workflow-content-width;
+        spacing: 12px;
+        alignment: start;
+
+        HorizontalLayout {
+            width: parent.width;
+            height: 80px;
+            spacing: 12px;
+            alignment: start;
+
+            Rectangle {
+                width: 80px;
+                height: 80px;
+                border-radius: 40px;
+                background: MaterialPalette.surface_container_high;
+                clip: true;
+
+                Image {
+                    width: 56px;
+                    height: 56px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: root.project-logo-image;
+                }
+            }
+
+            MaterialText {
+                text: root.project-name + (root.project-alias == "" ? "" : "  (" + root.project-alias + ")");
+                font-family: "Hiragino Sans GB";
+                font_size: 24px;
+                font_weight: 600;
+                color: MaterialPalette.on_surface;
+                vertical_alignment: center;
+            }
+        }
+
+
+        // Rectangle {
+        //     width: parent.width;
+        //     height: 24px;
+        //     border-radius: 12px;
+        //     background: MaterialPalette.secondary_container;
+
+        //     HorizontalLayout {
+        //         width: parent.width;
+        //         height: 24px;
+        //         padding-left: 10px;
+        //         padding-right: 10px;
+        //         alignment: center;
+
+        //         MaterialText {
+        //             text: "Project: " + root.project-name + (root.project-alias == "" ? "" : "  (" + root.project-alias + ")");
+        //             font-family: "Hiragino Sans GB";
+        //             font_size: 12px;
+        //             color: MaterialPalette.on_secondary_container;
+        //             vertical_alignment: center;
+        //         }
+        //     }
+        // }
+
+        Text {
+            width: parent.width;
+            text: "Manage branch recreation, tag operations, PR decisions, and interactive CD rollout from one workspace.";
+            wrap: word-wrap;
+            font-size: 14px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        Rectangle {
+            width: parent.width;
+            height: 24px;
+            border-radius: 12px;
+            background: MaterialPalette.surface_container_high;
+
+            HorizontalLayout {
+                width: parent.width;
+                height: 24px;
+                padding-left: 10px;
+                padding-right: 10px;
+                alignment: center;
+
+                MaterialText {
+                    text: "Local: " + (root.project-local-repo == "" ? "-" : root.project-local-repo) + "  |  Remote: " + (root.project-remote-repo == "" ? "-" : root.project-remote-repo);
+                    font-family: "Hiragino Sans GB";
+                    font_size: 11px;
+                    color: MaterialPalette.on_surface_variant;
+                    vertical_alignment: center;
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        height: 1px;
+        background: MaterialPalette.outline_variant;
+    }
+
+    if !root.workflow-tabs-single-column && !root.workflow-tabs-two-columns: Rectangle {
+        width: root.workflow-content-width;
+        height: 64px;
+
+        HorizontalLayout {
+            width: parent.width;
+            spacing: root.tabs-spacing;
+            alignment: start;
+
+            WorkflowTabButton {
+                card-width: root.workflow-tabs-quad-width;
+                label: "Branch";
+                caption: "Recreate or reset delivery branches.";
+                selected: root.selected-flow == 0;
+                clicked => {
+                    root.selected-flow = 0;
+                }
+            }
+
+            WorkflowTabButton {
+                card-width: root.workflow-tabs-quad-width;
+                label: "CD";
+                caption: "Run staged deployment and rollback.";
+                selected: root.selected-flow == 1;
+                clicked => {
+                    root.selected-flow = 1;
+                }
+            }
+
+            WorkflowTabButton {
+                card-width: root.workflow-tabs-quad-width;
+                label: "PR";
+                caption: "AI recommendation with human final approval.";
+                selected: root.selected-flow == 2;
+                clicked => {
+                    root.selected-flow = 2;
+                }
+            }
+
+            WorkflowTabButton {
+                card-width: root.workflow-tabs-quad-width;
+                label: "Tag";
+                caption: "Add or remove repository tags.";
+                selected: root.selected-flow == 3;
+                clicked => {
+                    root.selected-flow = 3;
+                }
+            }
+        }
+    }
+
+    if root.workflow-tabs-two-columns: Rectangle {
+        width: root.workflow-content-width;
+        height: 140px;
+
+        VerticalLayout {
+            width: parent.width;
+            spacing: root.tabs-spacing;
+            alignment: start;
+
+            HorizontalLayout {
+                width: parent.width;
+                spacing: root.tabs-spacing;
+                alignment: start;
+
+                WorkflowTabButton {
+                    card-width: root.workflow-tabs-dual-width;
+                    label: "Branch";
+                    caption: "Recreate or reset delivery branches.";
+                    selected: root.selected-flow == 0;
+                    clicked => {
+                        root.selected-flow = 0;
+                    }
+                }
+
+                WorkflowTabButton {
+                    card-width: root.workflow-tabs-dual-width;
+                    label: "CD";
+                    caption: "Run staged deployment and rollback.";
+                    selected: root.selected-flow == 1;
+                    clicked => {
+                        root.selected-flow = 1;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                width: parent.width;
+                spacing: root.tabs-spacing;
+                alignment: start;
+
+                WorkflowTabButton {
+                    card-width: root.workflow-tabs-dual-width;
+                    label: "PR";
+                    caption: "AI recommendation with human final approval.";
+                    selected: root.selected-flow == 2;
+                    clicked => {
+                        root.selected-flow = 2;
+                    }
+                }
+
+                WorkflowTabButton {
+                    card-width: root.workflow-tabs-dual-width;
+                    label: "Tag";
+                    caption: "Add or remove repository tags.";
+                    selected: root.selected-flow == 3;
+                    clicked => {
+                        root.selected-flow = 3;
+                    }
+                }
+            }
+        }
+    }
+
+    if root.workflow-tabs-single-column: Rectangle {
+        width: root.workflow-content-width;
+        height: 292px;
+
+        VerticalLayout {
+            width: parent.width;
+            spacing: root.tabs-spacing;
+            alignment: start;
+
+            WorkflowTabButton {
+                card-width: root.workflow-tabs-single-width;
+                label: "Branch";
+                caption: "Recreate or reset delivery branches.";
+                selected: root.selected-flow == 0;
+                clicked => {
+                    root.selected-flow = 0;
+                }
+            }
+
+            WorkflowTabButton {
+                card-width: root.workflow-tabs-single-width;
+                label: "CD";
+                caption: "Run staged deployment and rollback.";
+                selected: root.selected-flow == 1;
+                clicked => {
+                    root.selected-flow = 1;
+                }
+            }
+
+            WorkflowTabButton {
+                card-width: root.workflow-tabs-single-width;
+                label: "PR";
+                caption: "AI recommendation with human final approval.";
+                selected: root.selected-flow == 2;
+                clicked => {
+                    root.selected-flow = 2;
+                }
+            }
+
+            WorkflowTabButton {
+                card-width: root.workflow-tabs-single-width;
+                label: "Tag";
+                caption: "Add or remove repository tags.";
+                selected: root.selected-flow == 3;
+                clicked => {
+                    root.selected-flow = 3;
+                }
+            }
+        }
+    }
+
+    if root.selected-flow == 0: BranchFlow {
+        result: root.branch-result;
+        submit(source, target, recreate-remote) => {
+            root.branch-submit(source, target, recreate-remote);
+        }
+    }
+
+    if root.selected-flow == 1: CdFlow {
+        running: root.cd-running;
+        summary: root.cd-summary;
+        build-status: root.cd-build-status;
+        build-detail: root.cd-build-detail;
+        test-status: root.cd-test-status;
+        test-detail: root.cd-test-detail;
+        deploy-status: root.cd-deploy-status;
+        deploy-detail: root.cd-deploy-detail;
+        verify-status: root.cd-verify-status;
+        verify-detail: root.cd-verify-detail;
+        start-deploy(environment-name, release-name, commit-hash) => {
+            root.cd-start(environment-name, release-name, commit-hash);
+        }
+        request-rollback(commit-hash) => {
+            root.cd-rollback(commit-hash);
+        }
+    }
+
+    if root.selected-flow == 2: PrFlow {
+        ai-decision: root.pr-ai-decision;
+        ai-summary: root.pr-ai-summary;
+        manual-status: root.pr-manual-status;
+        analyze(pr-number, pr-title, pr-summary, ci-green, reviewers-ready) => {
+            root.pr-analyze(pr-number, pr-title, pr-summary, ci-green, reviewers-ready);
+        }
+        confirm(approved) => {
+            root.pr-confirm(approved);
+        }
+    }
+
+    if root.selected-flow == 3: Rectangle {
+        width: root.workflow-content-width;
+        background: transparent;
+
+        TagFlow {
+            width: parent.width;
+            mode: root.tag-mode;
+            version-mode: root.tag-version-mode;
+            current-version: root.tag-current-version;
+            next-version <=> root.tag-next-version;
+            remove-target <=> root.tag-remove-target;
+            add-initializing: root.tag-add-initializing;
+            remove-initializing: root.tag-remove-initializing;
+            running: root.tag-running;
+            loading-animated: root.tag-loading-animated;
+            result: root.tag-result;
+            steps: root.tag-steps;
+            change-mode(mode) => {
+                root.tag-change-mode(mode);
+            }
+            select-version-mode(mode) => {
+                root.tag-select-version-mode(mode);
+            }
+            run(version, description) => {
+                root.tag-run(version, description);
+            }
+            remove-tag(tag) => {
+                root.tag-remove(tag);
+            }
+            open-add-tab => {
+                root.tag-open-add();
+            }
+            open-remove-tab => {
+                root.tag-open-remove();
+            }
+            stop => {
+                root.tag-stop();
+            }
+        }
+    }
+}

@@ -54,6 +54,10 @@ use router::{Router, route_for_navigation_index};
 
 mod shutdown;
 mod single_instance;
+mod workflow;
+use workflow::setup_workflow;
+mod project;
+use project::setup_project;
 
 #[cfg(target_os = "macos")]
 static TITLEBAR_SETTINGS_UI_WEAK: std::sync::OnceLock<slint::Weak<MainWindow>> =
@@ -64,6 +68,10 @@ static mut TITLEBAR_SETTINGS_DELEGATE: *mut objc::runtime::Object = std::ptr::nu
 
 #[cfg(target_os = "macos")]
 static mut TITLEBAR_SETTINGS_INSTALLED: bool = false;
+
+#[cfg(target_os = "macos")]
+static WINDOW_INTERACTION_MOVE_SEQ: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 
 /// Set application-level appearance on macOS (called BEFORE window is shown)
 /// This prevents the flash of wrong theme on startup
@@ -288,6 +296,54 @@ fn register_titlebar_settings_delegate_class() -> &'static objc::runtime::Class 
             }
         }
 
+        extern "C" fn window_interaction_begin(
+            _this: &Object,
+            _cmd: Sel,
+            _notification: *mut Object,
+        ) {
+            if let Some(ui_weak) = TITLEBAR_SETTINGS_UI_WEAK.get() {
+                let ui_weak_local = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak_local.upgrade() {
+                        ui.set_workflow_tag_loading_animated(false);
+                    }
+                });
+            }
+        }
+
+        extern "C" fn window_did_move(_this: &Object, _cmd: Sel, _notification: *mut Object) {
+            use std::sync::atomic::Ordering;
+            let seq = WINDOW_INTERACTION_MOVE_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+            let _ = slint::invoke_from_event_loop(move || {
+                slint::Timer::single_shot(std::time::Duration::from_millis(180), move || {
+                    use std::sync::atomic::Ordering;
+                    if WINDOW_INTERACTION_MOVE_SEQ.load(Ordering::SeqCst) != seq {
+                        return;
+                    }
+                    if let Some(ui_weak) = TITLEBAR_SETTINGS_UI_WEAK.get() {
+                        if let Some(ui) = ui_weak.upgrade() {
+                            ui.set_workflow_tag_loading_animated(true);
+                        }
+                    }
+                });
+            });
+        }
+
+        extern "C" fn window_interaction_end(
+            _this: &Object,
+            _cmd: Sel,
+            _notification: *mut Object,
+        ) {
+            if let Some(ui_weak) = TITLEBAR_SETTINGS_UI_WEAK.get() {
+                let ui_weak_local = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak_local.upgrade() {
+                        ui.set_workflow_tag_loading_animated(true);
+                    }
+                });
+            }
+        }
+
         unsafe {
             decl.add_method(
                 sel!(usherOpenSettings:),
@@ -296,6 +352,18 @@ fn register_titlebar_settings_delegate_class() -> &'static objc::runtime::Class 
             decl.add_method(
                 sel!(usherOpenAbout:),
                 open_about as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            decl.add_method(
+                sel!(usherWindowInteractionBegin:),
+                window_interaction_begin as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            decl.add_method(
+                sel!(usherWindowDidMove:),
+                window_did_move as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            decl.add_method(
+                sel!(usherWindowInteractionEnd:),
+                window_interaction_end as extern "C" fn(&Object, Sel, *mut Object),
             );
             DELEGATE_CLASS = decl.register();
         }
@@ -367,6 +435,50 @@ fn install_titlebar_settings_button(window: &MainWindow) {
             let delegate: *mut Object = msg_send![delegate, init];
             let _: () = msg_send![delegate, retain];
             TITLEBAR_SETTINGS_DELEGATE = delegate;
+        }
+
+        // Reuse the existing native delegate to observe window interaction events.
+        // During drag/resize, temporarily downgrade Tag loading animation to reduce repaint pressure.
+        if let Some(center_class) = Class::get("NSNotificationCenter") {
+            let center: *mut Object = msg_send![center_class, defaultCenter];
+            if !center.is_null() {
+                if let Some(name) = create_nsstring("NSWindowWillMoveNotification") {
+                    let _: () = msg_send![
+                        center,
+                        addObserver: TITLEBAR_SETTINGS_DELEGATE
+                        selector: sel!(usherWindowInteractionBegin:)
+                        name: name
+                        object: ns_window
+                    ];
+                }
+                if let Some(name) = create_nsstring("NSWindowDidMoveNotification") {
+                    let _: () = msg_send![
+                        center,
+                        addObserver: TITLEBAR_SETTINGS_DELEGATE
+                        selector: sel!(usherWindowDidMove:)
+                        name: name
+                        object: ns_window
+                    ];
+                }
+                if let Some(name) = create_nsstring("NSWindowWillStartLiveResizeNotification") {
+                    let _: () = msg_send![
+                        center,
+                        addObserver: TITLEBAR_SETTINGS_DELEGATE
+                        selector: sel!(usherWindowInteractionBegin:)
+                        name: name
+                        object: ns_window
+                    ];
+                }
+                if let Some(name) = create_nsstring("NSWindowDidEndLiveResizeNotification") {
+                    let _: () = msg_send![
+                        center,
+                        addObserver: TITLEBAR_SETTINGS_DELEGATE
+                        selector: sel!(usherWindowInteractionEnd:)
+                        name: name
+                        object: ns_window
+                    ];
+                }
+            }
         }
 
         let accessory_class = match Class::get("NSTitlebarAccessoryViewController") {
@@ -715,8 +827,14 @@ fn ui() -> Result<MainWindow> {
     // ========= Dialog ========= //
     setup_dialog(&app);
 
+    // ========= Project ========= //
+    setup_project(&app);
+
     // ========= Chat ========= //
     setup_chat(&app);
+
+    // ========= Workflow ========= //
+    setup_workflow(&app);
 
     // ========= System Tray ========= //
     // Setup system tray icon with context menu

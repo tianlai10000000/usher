@@ -1,0 +1,131 @@
+import { FilledButton, MaterialPalette, MaterialText, Switch } from "@material";
+
+component BranchField {
+    in property <string> label;
+    in-out property <string> value;
+    in property <string> placeholder;
+
+    VerticalLayout {
+        spacing: 6px;
+
+        MaterialText {
+            text: root.label;
+            font_size: 12px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        Rectangle {
+            min-width: 240px;
+            height: 42px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_highest;
+            clip: true;
+
+            TextInput {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                width: parent.width - 24px;
+                text <=> root.value;
+                color: MaterialPalette.on_surface;
+                font-size: 14px;
+                single-line: true;
+            }
+
+            if root.value == "": MaterialText {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                text: root.placeholder;
+                font_size: 14px;
+                color: MaterialPalette.on_surface_variant;
+            }
+        }
+    }
+}
+
+export component BranchFlow {
+    in property <string> result;
+    callback submit(string, string, bool);
+
+    private property <string> source-branch: "main";
+    private property <string> target-branch: "release/candidate";
+    private property <bool> recreate-remote: true;
+
+    VerticalLayout {
+        spacing: 14px;
+        alignment: start;
+
+        MaterialText {
+            text: "Recreate branches from a clean source branch. This only prepares the workflow plan and validation.";
+            font_size: 14px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+
+            BranchField {
+                label: "Source branch";
+                value <=> root.source-branch;
+                placeholder: "main";
+            }
+
+            BranchField {
+                label: "Target branch";
+                value <=> root.target-branch;
+                placeholder: "release/x.y";
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+
+            MaterialText {
+                text: "Recreate remote tracking";
+                font_size: 14px;
+                color: MaterialPalette.on_surface;
+                vertical_alignment: center;
+            }
+
+            Switch {
+                checked <=> root.recreate-remote;
+                width: 48px;
+                height: 28px;
+            }
+        }
+
+        FilledButton {
+            text: "Recreate branch plan";
+            clicked => {
+                root.submit(root.source-branch, root.target-branch, root.recreate-remote);
+            }
+        }
+
+        Rectangle {
+            width: 100%;
+            min-height: 108px;
+            border-radius: 14px;
+            background: MaterialPalette.surface_container_high;
+
+            VerticalLayout {
+                padding: 14px;
+                spacing: 8px;
+
+                MaterialText {
+                    text: "Execution plan";
+                    font_size: 13px;
+                    color: MaterialPalette.on_surface_variant;
+                }
+
+                Text {
+                    text: root.result;
+                    wrap: word-wrap;
+                    color: MaterialPalette.on_surface;
+                    font-size: 14px;
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,604 @@
+import { FilledButton, MaterialPalette, MaterialText, CircularProgressIndicator } from "@material";
+
+export struct TagStepItem {
+    name: string,
+    status: string,
+    detail: string,
+    log: string,
+}
+
+export component TagField {
+    in property <string> label;
+    in-out property <string> value;
+    in property <string> placeholder;
+    in property <bool> enabled: true;
+    in property <length> min-field-width: 220px;
+    private property <length> label-height: 16px;
+    private property <length> input-height: 42px;
+    height: root.label-height + 8px + root.input-height;
+
+    VerticalLayout {
+        width: root.width;
+        height: root.height;
+        spacing: 8px;
+
+        MaterialText {
+            text: root.label;
+            height: root.label-height;
+            vertical_alignment: center;
+            font_size: 12px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        Rectangle {
+            width: root.width - 2px;
+            height: root.input-height;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_highest;
+            clip: true;
+
+            TextInput {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                width: parent.width - 24px;
+                text <=> root.value;
+                enabled: root.enabled;
+                color: MaterialPalette.on_surface;
+                font-family: "Hiragino Sans GB";
+                font-size: 14px;
+                single-line: true;
+            }
+
+            if root.value == "": MaterialText {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                text: root.placeholder;
+                font-family: "Hiragino Sans GB";
+                font_size: 14px;
+                color: MaterialPalette.on_surface_variant;
+            }
+        }
+    }
+}
+
+export component TagReadonlyField {
+    in property <string> label;
+    in property <string> value;
+    private property <length> label-height: 16px;
+    private property <length> input-height: 42px;
+    height: root.label-height + 8px + root.input-height;
+
+    VerticalLayout {
+        width: root.width;
+        height: root.height;
+        spacing: 8px;
+
+        MaterialText {
+            text: root.label;
+            height: root.label-height;
+            vertical_alignment: center;
+            font_size: 12px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        Rectangle {
+            width: root.width - 2px;
+            height: root.input-height;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_highest;
+
+            MaterialText {
+                text: root.value;
+                font-family: "Hiragino Sans GB";
+                color: MaterialPalette.on_surface;
+                font_size: 14px;
+                x: 12px;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+    }
+}
+
+export component TagModeChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: 110px;
+    height: 34px;
+    border-radius: 17px;
+    border-width: 1px;
+    border-color: root.selected ? MaterialPalette.primary : MaterialPalette.outline_variant;
+    background: root.selected ? MaterialPalette.primary_container : MaterialPalette.surface_container_highest;
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    MaterialText {
+        text: root.label;
+        color: root.selected ? MaterialPalette.on_primary_container : MaterialPalette.on_surface;
+        font_size: 13px;
+        font_weight: root.selected ? 600 : 500;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+export component TagStepCard inherits Rectangle {
+    in property <TagStepItem> step;
+    in property <int> step-index: 0;
+    in property <bool> expanded: false;
+    in property <bool> animations-enabled: true;
+    private property <bool> pulse-on: false;
+    callback toggle();
+    pulse-timer := Timer {
+        interval: 220ms;
+        running: step.status == "running" && root.animations-enabled;
+        triggered => {
+            root.pulse-on = !root.pulse-on;
+        }
+    }
+
+    width: 100%;
+    height: content.preferred-height + 16px;
+    clip: true;
+    border-radius: 12px;
+    background: MaterialPalette.surface_container_high;
+    border-width: 1px;
+    border-color: step.status == "success" ? #4CAF50 :
+                  step.status == "error" ? #F44336 :
+                  step.status == "paused" ? #D97706 :
+                  step.status == "running" ? MaterialPalette.primary :
+                  MaterialPalette.outline_variant;
+
+    content := VerticalLayout {
+        x: 12px;
+        y: 8px;
+        width: root.width - 24px;
+        spacing: 8px;
+
+        header := Rectangle {
+            width: parent.width;
+            height: max(52px, body-column.preferred-height);
+            background: transparent;
+
+            if step.status == "running": Rectangle {
+                width: 30px;
+                height: 30px;
+                x: -3px;
+                y: (header.height - self.height) / 2;
+                border-radius: 15px;
+                border-width: 2px;
+                border-color: #2196F3;
+                background: transparent;
+                opacity: root.animations-enabled ? (root.pulse-on ? 0.5 : 0.2) : 0.2;
+            }
+
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                x: 0px;
+                y: (header.height - self.height) / 2;
+                border-radius: 12px;
+                background: step.status == "success" ? #4CAF50 :
+                            step.status == "error" ? #F44336 :
+                            step.status == "paused" ? #D97706 :
+                            step.status == "running" ? #2196F3 :
+                            MaterialPalette.surface_container_highest;
+                border-width: step.status == "pending" ? 1px : 0px;
+                border-color: MaterialPalette.outline_variant;
+
+                MaterialText {
+                    text: root.step-index + 1;
+                    color: step.status == "pending" ? MaterialPalette.on_surface_variant : #ffffff;
+                    font_size: 12px;
+                    font_weight: 700;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+
+            body := Rectangle {
+                x: 34px;
+                width: max(120px, header.width - 34px - 52px);
+                height: header.height;
+                background: transparent;
+
+                body-column := VerticalLayout {
+                    width: parent.width;
+                    y: (parent.height - self.preferred-height) / 2;
+                    spacing: 2px;
+                    alignment: start;
+
+                    MaterialText {
+                        text: step.name;
+                        font_size: 14px;
+                        font_weight: 600;
+                        color: MaterialPalette.on_surface;
+                    }
+
+                    if step.status == "running": MaterialText {
+                        text: "Running...";
+                        font_size: 11px;
+                        font_weight: 600;
+                        color: #1D4ED8;
+                    }
+
+                    if step.status == "paused": MaterialText {
+                        text: "Paused";
+                        font_size: 11px;
+                        font_weight: 600;
+                        color: #B45309;
+                    }
+
+                    Text {
+                        width: parent.width;
+                        text: step.detail;
+                        wrap: word-wrap;
+                        color: MaterialPalette.on_surface_variant;
+                        font-size: 12px;
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 44px;
+                height: 20px;
+                x: header.width - self.width - 8px;
+                y: (header.height - self.height) / 2;
+                background: transparent;
+
+                TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    clicked => { root.toggle(); }
+                }
+
+                MaterialText {
+                    text: root.expanded ? "Hide" : "Logs";
+                    color: MaterialPalette.primary;
+                    font_size: 12px;
+                    vertical_alignment: center;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+        }
+
+        if root.expanded: Rectangle {
+            width: parent.width;
+            border-radius: 10px;
+            background: MaterialPalette.surface_container_highest;
+            height: max(60px, log-text.preferred-height + 20px);
+
+            log-text := Text {
+                width: parent.width - 20px;
+                x: 10px;
+                y: 10px;
+                text: step.log == "" ? "No logs yet." : step.log;
+                wrap: word-wrap;
+                color: MaterialPalette.on_surface;
+                font-family: "Menlo";
+                font-size: 12px;
+            }
+        }
+    }
+}
+
+export component TagAddPanel {
+    in property <string> version-mode: "patch";
+    in property <string> current-version: "v0.0.0";
+    in-out property <string> next-version: "v0.0.1";
+    in property <bool> initializing: false;
+    in property <bool> running: false;
+    in property <bool> loading-animated: true;
+    in property <string> result: "Ready to create a tag.";
+    in property <[TagStepItem]> steps: [];
+    callback select-version-mode(string);
+    callback run(string, string);
+    callback stop();
+
+    private property <string> description: "";
+    private property <int> expanded-step-index: -1;
+    private property <bool> stacked-fields: root.width < 1020px;
+    private property <bool> stacked-chip-row: root.width < 560px;
+    width: 100%;
+
+    VerticalLayout {
+        spacing: 16px;
+        alignment: start;
+        padding: 8px;
+
+        if !root.stacked-chip-row: HorizontalLayout {
+            width: parent.width;
+            spacing: 16px;
+            alignment: start;
+            padding-top: 8px;
+        
+
+            TagModeChip {
+                label: "Patch";
+                selected: root.version-mode == "patch";
+                enabled: !root.running && !root.initializing;
+                clicked => { root.select-version-mode("patch"); }
+            }
+
+            TagModeChip {
+                label: "Minor";
+                selected: root.version-mode == "minor";
+                enabled: !root.running && !root.initializing;
+                clicked => { root.select-version-mode("minor"); }
+            }
+
+            TagModeChip {
+                label: "Major";
+                selected: root.version-mode == "major";
+                enabled: !root.running && !root.initializing;
+                clicked => { root.select-version-mode("major"); }
+            }
+        }
+
+        if root.stacked-chip-row: VerticalLayout {
+            width: parent.width;
+            spacing: 8px;
+            alignment: start;
+
+            HorizontalLayout {
+                width: parent.width;
+                spacing: 10px;
+                alignment: start;
+
+                TagModeChip {
+                    label: "Major";
+                    selected: root.version-mode == "major";
+                    enabled: !root.running && !root.initializing;
+                    clicked => { root.select-version-mode("major"); }
+                }
+                TagModeChip {
+                    label: "Minor";
+                    selected: root.version-mode == "minor";
+                    enabled: !root.running && !root.initializing;
+                    clicked => { root.select-version-mode("minor"); }
+                }
+            }
+
+            HorizontalLayout {
+                width: parent.width;
+                spacing: 10px;
+                alignment: start;
+
+                TagModeChip {
+                    label: "Patch";
+                    selected: root.version-mode == "patch";
+                    enabled: !root.running && !root.initializing;
+                    clicked => { root.select-version-mode("patch"); }
+                }
+            }
+        }
+
+        if !root.stacked-fields: HorizontalLayout {
+            width: parent.width - 16px - 12px;
+            spacing: 12px;
+
+            TagReadonlyField {
+                width: parent.width / 2;
+                label: "Current tag version";
+                value: root.current-version;
+            }
+
+            TagField {
+                width: parent.width / 2;
+                label: "New tag version";
+                value <=> root.next-version;
+                placeholder: "v1.2.3";
+                enabled: !root.running && !root.initializing;
+                min-field-width: 160px;
+            }
+        }
+
+        if root.stacked-fields: VerticalLayout {
+            width: parent.width - 16px;
+            spacing: 12px;
+
+            TagReadonlyField {
+                width: parent.width;
+                label: "Current tag version";
+                value: root.current-version;
+            }
+
+            TagField {
+                width: parent.width;
+                label: "New tag version";
+                value <=> root.next-version;
+                placeholder: "v1.2.3";
+                enabled: !root.running && !root.initializing;
+                min-field-width: 160px;
+            }
+        }
+
+        TagField {
+            // width: parent.width;
+            label: "Tag description";
+            value <=> root.description;
+            placeholder: "";
+            enabled: !root.running && !root.initializing;
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+            height: 40px;
+
+            FilledButton {
+                enabled: !root.running && !root.initializing;
+                height: 40px;
+                text: root.initializing ? "Loading..." : (root.running ? "Running..." : "Run");
+                clicked => {
+                    root.run(root.next-version, root.description);
+                }
+            }
+
+            if root.running || root.initializing: Rectangle {
+                width: 24px;
+                height: parent.height;
+                background: transparent;
+                CircularProgressIndicator {
+                    width: 20px;
+                    height: 20px;
+                    indeterminate: root.loading-animated;
+                    progress: root.loading-animated ? 0 : 0.72;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: transparent;
+                horizontal-stretch: 1;
+            }
+
+            if root.running: FilledButton {
+                height: 40px;
+                text: "Stop";
+                clicked => {
+                    root.stop();
+                }
+            }
+        }
+
+        Rectangle {
+            width: parent.width - 16px;
+            // height: max(22px, status-text.preferred-height);
+            clip: true;
+            background: MaterialPalette.surface_container;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            border-radius: 4px;
+
+            VerticalLayout {
+                width: parent.width;
+                padding: 8px;
+                spacing: 4px;
+
+                if root.initializing: MaterialText {
+                    text: "Loading latest local tag…";
+                    font-family: "Hiragino Sans GB";
+                    font_size: 10px;
+                    color: MaterialPalette.on_surface_variant;
+                }
+
+                status-text := Text {
+                    width: parent.width - 2px;
+                    text: root.result;
+                    wrap: word-wrap;
+                    color: MaterialPalette.on_background;
+                    font-size: 10px;
+                    font-family: "Hiragino Sans GB";
+                }
+            }
+        }
+
+        steps-panel := Rectangle {
+            width: 100%;
+            height: max(140px, steps-content.preferred-height + 28px);
+            // background: MaterialPalette.surface_container;
+            // border-radius: 14px;
+            // border-width: 1px;
+            // border-color: MaterialPalette.surface_container_highest;
+
+            steps-content := VerticalLayout {
+                x: 14px;
+                y: 14px;
+                width: steps-panel.width - 28px;
+                spacing: 0px;
+
+                Rectangle {
+                    width: parent.width;
+                    height: 16px;
+
+                    MaterialText {
+                        text: "Tag workflow steps";
+                        vertical_alignment: center;
+                        font_size: 13px;
+                        color: MaterialPalette.on_surface_variant;
+                    }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    height: 6px;
+                    background: transparent;
+                }
+
+                if root.steps.length == 0: Text {
+                    width: parent.width;
+                    text: "No workflow steps yet.";
+                    color: MaterialPalette.on_surface_variant;
+                    font-size: 13px;
+                }
+
+                if root.steps.length > 0: VerticalLayout {
+                    width: parent.width;
+                    spacing: 8px;
+
+                    for step[index] in root.steps: VerticalLayout {
+                        width: parent.width;
+                        spacing: 6px;
+
+                        TagStepCard {
+                            width: parent.width / 2;
+                            x: (parent.width - self.width) / 2;
+                            step: step;
+                            step-index: index;
+                            expanded: root.expanded-step-index == index;
+                            animations-enabled: root.loading-animated;
+                            toggle => {
+                                root.expanded-step-index = root.expanded-step-index == index ? -1 : index;
+                            }
+                        }
+
+                        if index < root.steps.length - 1: Rectangle {
+                            width: parent.width;
+                            height: 26px;
+                            background: transparent;
+
+                            MaterialText {
+                                x: (parent.width - self.width) / 2;
+                                y: 0px;
+                                text: "|";
+                                font_size: 12px;
+                                color: MaterialPalette.on_surface_variant;
+                            }
+
+                            MaterialText {
+                                x: (parent.width - self.width) / 2;
+                                y: 8px;
+                                text: "|";
+                                font_size: 12px;
+                                color: MaterialPalette.on_surface_variant;
+                            }
+
+                            MaterialText {
+                                x: (parent.width - self.width) / 2;
+                                y: 16px;
+                                text: "↓";
+                                font_size: 12px;
+                                color: MaterialPalette.on_surface_variant;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,268 @@
+import { MaterialPalette, MaterialText, Switch } from "@material";
+import { TagAddPanel, TagStepItem } from "./tag_add.slint";
+import { TagRemovePanel } from "./tag_remove.slint";
+
+component TagTabChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked();
+
+    width: 120px;
+    height: 30px;
+    // border-radius: 16px;
+    // border-width: 1px;
+    // border-color: root.selected ? MaterialPalette.primary : MaterialPalette.outline_variant;
+    background: root.selected ? MaterialPalette.background : MaterialPalette.surface_container;
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.clicked(); }
+    }
+
+    MaterialText {
+        text: root.label;
+        font_size: 13px;
+        font_weight: root.selected ? 600 : 500;
+        color: root.selected ? MaterialPalette.on_primary_container : MaterialPalette.on_surface;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+export component TagFlow {
+    in property <string> mode: "local";
+    in property <string> version-mode: "patch";
+    in property <string> current-version: "v0.0.0";
+    in-out property <string> next-version: "v0.0.1";
+    in-out property <string> remove-target: "";
+    in property <bool> add-initializing: false;
+    in property <bool> remove-initializing: false;
+    in property <bool> running: false;
+    in property <bool> loading-animated: true;
+    in property <string> result: "Ready to create a tag.";
+    in property <[TagStepItem]> steps: [];
+    callback change-mode(string);
+    callback select-version-mode(string);
+    callback run(string, string);
+    callback remove-tag(string);
+    callback open-add-tab();
+    callback open-remove-tab();
+    callback stop();
+
+    private property <bool> stacked-mode-row: root.width < 900px;
+    private property <int> selected-tab: 0; // 0: Add, 1: Remove
+    width: 100%;
+    init => {
+        root.open-add-tab();
+    }
+
+    content := VerticalLayout {
+        width: root.width;
+        spacing: 14px;
+        alignment: start;
+
+        MaterialText {
+            text: "Create or remove release tags with local/remote mode switching and step-by-step workflow logs.";
+            font_size: 14px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        config-panel := Rectangle {
+            width: 100%;
+            height: config-content.preferred-height + 36px;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: MaterialPalette.surface_container_highest;
+            clip: true;
+
+            config-content := VerticalLayout {
+                x: 16px;
+                y: 16px;
+                width: config-panel.width - 32px;
+                spacing: 12px;
+
+                if !root.stacked-mode-row: HorizontalLayout {
+                    width: parent.width;
+                    spacing: 12px;
+                    alignment: start;
+
+                    MaterialText {
+                        text: "Local mode";
+                        font_size: 14px;
+                        color: MaterialPalette.on_surface;
+                        vertical_alignment: center;
+                    }
+
+                    Switch {
+                        checked: root.mode == "remote";
+                        width: 48px;
+                        height: 28px;
+                        checked_state_changed(checked) => {
+                            root.change-mode(checked ? "remote" : "local");
+                        }
+                    }
+
+                    MaterialText {
+                        text: "Remote mode";
+                        font_size: 14px;
+                        color: MaterialPalette.on_surface;
+                        vertical_alignment: center;
+                    }
+
+                    Rectangle {
+                        height: 1px;
+                        background: transparent;
+                        horizontal-stretch: 1;
+                    }
+
+                    MaterialText {
+                        text: "Current mode: " + (root.mode == "remote" ? "remote" : "local");
+                        font_size: 13px;
+                        font_weight: 600;
+                        color: MaterialPalette.primary;
+                        vertical_alignment: center;
+                    }
+                }
+
+                if root.stacked-mode-row: VerticalLayout {
+                    width: parent.width;
+                    spacing: 8px;
+                    alignment: start;
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        spacing: 12px;
+                        alignment: start;
+
+                        MaterialText {
+                            text: "Local mode";
+                            font_size: 14px;
+                            color: MaterialPalette.on_surface;
+                            vertical_alignment: center;
+                        }
+
+                        Switch {
+                            checked: root.mode == "remote";
+                            width: 48px;
+                            height: 28px;
+                            checked_state_changed(checked) => {
+                                root.change-mode(checked ? "remote" : "local");
+                            }
+                        }
+
+                        MaterialText {
+                            text: "Remote mode";
+                            font_size: 14px;
+                            color: MaterialPalette.on_surface;
+                            vertical_alignment: center;
+                        }
+                    }
+
+                    MaterialText {
+                        text: "Current mode: " + (root.mode == "remote" ? "remote" : "local");
+                        font_size: 13px;
+                        font_weight: 600;
+                        color: MaterialPalette.primary;
+                    }
+                }
+            }
+        }
+
+        // 自定义分段 Tabs（不再使用 TabWidget）
+        tabs-and-content := VerticalLayout {
+            width: root.width;
+            spacing: 0px;
+
+            tabs-row := Rectangle {
+                width: parent.width;
+                height: 34px;
+                border-top-left-radius: 17px;
+                border-top-right-radius: 17px;
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                background: MaterialPalette.surface_container;
+                clip: true;
+
+                HorizontalLayout {
+                    x: 2px;
+                    y: 2px;
+                    width: parent.width - 4px;
+                    height: parent.height - 4px;
+                    spacing: 0px;
+
+                    TagTabChip {
+                        label: "Add Tag";
+                        selected: root.selected-tab == 0;
+                        clicked => {
+                            root.selected-tab = 0;
+                            root.open-add-tab();
+                        }
+                    }
+
+                    TagTabChip {
+                        label: "Remove Tag";
+                        selected: root.selected-tab == 1;
+                        clicked => {
+                            root.selected-tab = 1;
+                            root.open-remove-tab();
+                        }
+                    }
+                }
+            }
+
+            if root.selected-tab == 0: Rectangle {
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+
+                TagAddPanel {
+                    width: parent.width;
+                    initializing: root.add-initializing;
+                    version-mode: root.version-mode;
+                    current-version: root.current-version;
+                    next-version <=> root.next-version;
+                    running: root.running;
+                    loading-animated: root.loading-animated;
+                    result: root.result;
+                    steps: root.steps;
+                    select-version-mode(mode) => {
+                        root.select-version-mode(mode);
+                    }
+                    run(version, description) => {
+                        root.run(version, description);
+                    }
+                    stop => {
+                        root.stop();
+                    }
+                }
+            }
+
+            if root.selected-tab == 1: Rectangle {
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+
+                TagRemovePanel {
+                    width: parent.width;
+                    tag-to-remove <=> root.remove-target;
+                    initializing: root.remove-initializing;
+                    running: root.running;
+                    loading-animated: root.loading-animated;
+                    result: root.result;
+                    steps: root.steps;
+                    remove-tag(tag) => {
+                        root.remove-tag(tag);
+                    }
+                    stop => {
+                        root.stop();
+                    }
+                }
+            }
+        }
+    }
+
+    height: content.preferred-height;
+}
