@@ -583,9 +583,32 @@ fn schedule_markdown_reflow_poll_with_interval(
                 resize_activity_ticks.set(resize_activity_ticks.get().saturating_sub(1));
             }
 
+            let is_window_interacting = crate::is_window_interacting();
             let should_reflow = pending_reflow_width_px.get() != -1
                 && stable_polls.get() >= REFLOW_STABLE_POLLS_REQUIRED
-                && pending_reflow_width_px.get() != last_wrap_width_px.get();
+                && pending_reflow_width_px.get() != last_wrap_width_px.get()
+                && !is_window_interacting;
+
+            if is_window_interacting && pending_reflow_width_px.get() != -1 {
+                schedule_markdown_reflow_poll_with_interval(
+                    ui_weak.clone(),
+                    session.clone(),
+                    last_wrap_width_px.clone(),
+                    observed_scroll_bucket.clone(),
+                    applied_scroll_bucket.clone(),
+                    scroll_idle_polls.clone(),
+                    scroll_coarse_cooldown_polls.clone(),
+                    pending_precise_scroll_recompute.clone(),
+                    observed_width_px.clone(),
+                    pending_reflow_width_px.clone(),
+                    stable_polls.clone(),
+                    polling_active.clone(),
+                    deferred_log_printed.clone(),
+                    resize_activity_ticks.clone(),
+                    50,
+                );
+                return;
+            }
 
             if should_reflow {
                 if ui.get_chat_is_sending() {

@@ -1,0 +1,117 @@
+export component AppWindow inherits Window {
+    title: "DPI Flicker Repro (Slint + winit)";
+    width: 900px;
+    height: 600px;
+
+    in-out property <float> phase: 0.0;
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #101418;
+
+        // A simple, stable layout that should not "jump" unless the backend/surface is recreated.
+        VerticalLayout {
+            width: 100%;
+            height: 100%;
+            padding: 24px;
+            spacing: 16px;
+            alignment: start;
+
+            Text {
+                text: "Drag this window between monitors with different DPI/scale.";
+                color: #E6EEF7;
+                font-size: 22px;
+                font-weight: 600;
+            }
+
+            Text {
+                text: "Expected: continuous redraw only (no flash). If you see a clear flash, it's likely backend/surface recreation.";
+                color: #A9B6C4;
+                font-size: 14px;
+                wrap: word-wrap;
+            }
+
+            Rectangle {
+                width: 100%;
+                height: 1px;
+                background: #FFFFFF1A;
+            }
+
+            HorizontalLayout {
+                width: 100%;
+                spacing: 16px;
+                alignment: start;
+
+                Rectangle {
+                    width: 220px;
+                    height: 220px;
+                    border-radius: 16px;
+                    background: #1C2330;
+                    border-width: 1px;
+                    border-color: #FFFFFF1A;
+
+                    // A subtle "phase" visualization that should remain stable in position/size.
+                    Rectangle {
+                        x: 16px;
+                        y: 16px;
+                        width: (parent.width - 32px) * root.phase;
+                        height: 10px;
+                        border-radius: 5px;
+                        background: #4DA3FF;
+                    }
+
+                    Text {
+                        x: 16px;
+                        y: 40px;
+                        width: parent.width - 32px;
+                        text: "phase = " + root.phase;
+                        color: #E6EEF7;
+                        font-size: 13px;
+                    }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    height: 220px;
+                    background: #FFFFFF1A;
+                }
+
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 10px;
+                    alignment: start;
+
+                    Text {
+                        text: "Notes";
+                        color: #E6EEF7;
+                        font-size: 16px;
+                        font-weight: 600;
+                    }
+
+                    Text {
+                        text: "- This UI avoids ScrollView/ListView/Markdown to minimize layout work.";
+                        color: #A9B6C4;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: "- Toggle animation: set DPI_REPRO_ANIMATE=1 (optional).";
+                        color: #A9B6C4;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: "- Switch renderer at runtime via SLINT_BACKEND (if compiled in).";
+                        color: #A9B6C4;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}
+

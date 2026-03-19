@@ -73,6 +73,21 @@ static mut TITLEBAR_SETTINGS_INSTALLED: bool = false;
 static WINDOW_INTERACTION_MOVE_SEQ: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+#[cfg(target_os = "macos")]
+static WINDOW_IS_INTERACTING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+pub fn is_window_interacting() -> bool {
+    use std::sync::atomic::Ordering;
+    WINDOW_IS_INTERACTING.load(Ordering::SeqCst)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn is_window_interacting() -> bool {
+    false
+}
+
 /// Set application-level appearance on macOS (called BEFORE window is shown)
 /// This prevents the flash of wrong theme on startup
 #[cfg(target_os = "macos")]
@@ -301,14 +316,8 @@ fn register_titlebar_settings_delegate_class() -> &'static objc::runtime::Class 
             _cmd: Sel,
             _notification: *mut Object,
         ) {
-            if let Some(ui_weak) = TITLEBAR_SETTINGS_UI_WEAK.get() {
-                let ui_weak_local = ui_weak.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui_weak_local.upgrade() {
-                        ui.set_workflow_tag_loading_animated(false);
-                    }
-                });
-            }
+            use std::sync::atomic::Ordering;
+            WINDOW_IS_INTERACTING.store(true, Ordering::SeqCst);
         }
 
         extern "C" fn window_did_move(_this: &Object, _cmd: Sel, _notification: *mut Object) {
@@ -320,11 +329,7 @@ fn register_titlebar_settings_delegate_class() -> &'static objc::runtime::Class 
                     if WINDOW_INTERACTION_MOVE_SEQ.load(Ordering::SeqCst) != seq {
                         return;
                     }
-                    if let Some(ui_weak) = TITLEBAR_SETTINGS_UI_WEAK.get() {
-                        if let Some(ui) = ui_weak.upgrade() {
-                            ui.set_workflow_tag_loading_animated(true);
-                        }
-                    }
+                    WINDOW_IS_INTERACTING.store(false, Ordering::SeqCst);
                 });
             });
         }
@@ -334,14 +339,8 @@ fn register_titlebar_settings_delegate_class() -> &'static objc::runtime::Class 
             _cmd: Sel,
             _notification: *mut Object,
         ) {
-            if let Some(ui_weak) = TITLEBAR_SETTINGS_UI_WEAK.get() {
-                let ui_weak_local = ui_weak.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui_weak_local.upgrade() {
-                        ui.set_workflow_tag_loading_animated(true);
-                    }
-                });
-            }
+            use std::sync::atomic::Ordering;
+            WINDOW_IS_INTERACTING.store(false, Ordering::SeqCst);
         }
 
         unsafe {
