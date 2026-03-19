@@ -1,0 +1,127 @@
+import { MaterialPalette, MaterialText } from "@material";
+
+export component TagField {
+    in property <string> label;
+    in-out property <string> value;
+    in property <string> placeholder;
+    in property <bool> enabled: true;
+    in property <length> min-field-width: 220px;
+    private property <length> label-height: 16px;
+    private property <length> input-height: 42px;
+    height: root.label-height + 8px + root.input-height;
+
+    VerticalLayout {
+        width: root.width;
+        height: root.height;
+        spacing: 8px;
+
+        MaterialText {
+            text: root.label;
+            height: root.label-height;
+            vertical_alignment: center;
+            font_size: 12px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        Rectangle {
+            width: root.width - 2px;
+            height: root.input-height;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_highest;
+            clip: true;
+
+            TextInput {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                width: parent.width - 24px;
+                text <=> root.value;
+                enabled: root.enabled;
+                color: MaterialPalette.on_surface;
+                font-family: "Hiragino Sans GB";
+                font-size: 14px;
+                single-line: true;
+            }
+
+            if root.value == "": MaterialText {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                text: root.placeholder;
+                font-family: "Hiragino Sans GB";
+                font_size: 14px;
+                color: MaterialPalette.on_surface_variant;
+            }
+        }
+    }
+}
+
+export component TagReadonlyField {
+    in property <string> label;
+    in property <string> value;
+    private property <length> label-height: 16px;
+    private property <length> input-height: 42px;
+    height: root.label-height + 8px + root.input-height;
+
+    VerticalLayout {
+        width: root.width;
+        height: root.height;
+        spacing: 8px;
+
+        MaterialText {
+            text: root.label;
+            height: root.label-height;
+            vertical_alignment: center;
+            font_size: 12px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        Rectangle {
+            width: root.width - 2px;
+            height: root.input-height;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_highest;
+
+            MaterialText {
+                text: root.value;
+                font-family: "Hiragino Sans GB";
+                color: MaterialPalette.on_surface;
+                font_size: 14px;
+                x: 12px;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+    }
+}
+
+export component TagModeChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: 110px;
+    height: 34px;
+    border-radius: 17px;
+    border-width: 1px;
+    border-color: root.selected ? MaterialPalette.primary : MaterialPalette.outline_variant;
+    background: root.selected ? MaterialPalette.primary_container : MaterialPalette.surface_container_highest;
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    MaterialText {
+        text: root.label;
+        color: root.selected ? MaterialPalette.on_primary_container : MaterialPalette.on_surface;
+        font_size: 13px;
+        font_weight: root.selected ? 600 : 500;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+}

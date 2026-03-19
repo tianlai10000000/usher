@@ -1,0 +1,271 @@
+import { MaterialPalette, MaterialText } from "@material";
+
+export struct StepItem {
+    name: string,
+    status: string,
+    detail: string,
+    log: string,
+}
+
+export component StepCard inherits Rectangle {
+    in property <StepItem> step;
+    in property <int> step-index: 0;
+    in property <bool> expanded: false;
+    in property <bool> animations-enabled: true;
+    private property <bool> pulse-on: false;
+    callback toggle();
+
+    pulse-timer := Timer {
+        interval: 220ms;
+        running: step.status == "running" && root.animations-enabled;
+        triggered => {
+            root.pulse-on = !root.pulse-on;
+        }
+    }
+
+    width: 100%;
+    height: content.preferred-height + 16px;
+    clip: true;
+    border-radius: 12px;
+    background: MaterialPalette.surface_container_high;
+    border-width: 1px;
+    border-color: step.status == "success" ? #4CAF50 :
+                  step.status == "error" ? #F44336 :
+                  step.status == "paused" ? #D97706 :
+                  step.status == "running" ? MaterialPalette.primary :
+                  MaterialPalette.outline_variant;
+
+    content := VerticalLayout {
+        x: 12px;
+        y: 8px;
+        width: root.width - 24px;
+        spacing: 8px;
+
+        header := Rectangle {
+            width: parent.width;
+            height: max(52px, body-column.preferred-height);
+            background: transparent;
+
+            if step.status == "running": Rectangle {
+                width: 30px;
+                height: 30px;
+                x: -3px;
+                y: (header.height - self.height) / 2;
+                border-radius: 15px;
+                border-width: 2px;
+                border-color: #2196F3;
+                background: transparent;
+                opacity: root.animations-enabled ? (root.pulse-on ? 0.5 : 0.2) : 0.2;
+            }
+
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                x: 0px;
+                y: (header.height - self.height) / 2;
+                border-radius: 12px;
+                background: step.status == "success" ? #4CAF50 :
+                            step.status == "error" ? #F44336 :
+                            step.status == "paused" ? #D97706 :
+                            step.status == "running" ? #2196F3 :
+                            MaterialPalette.surface_container_highest;
+                border-width: step.status == "pending" ? 1px : 0px;
+                border-color: MaterialPalette.outline_variant;
+
+                MaterialText {
+                    text: root.step-index + 1;
+                    color: step.status == "pending" ? MaterialPalette.on_surface_variant : #ffffff;
+                    font_size: 12px;
+                    font_weight: 700;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+
+            body := Rectangle {
+                x: 34px;
+                width: max(120px, header.width - 34px - 52px);
+                height: header.height;
+                background: transparent;
+
+                body-column := VerticalLayout {
+                    width: parent.width;
+                    y: (parent.height - self.preferred-height) / 2;
+                    spacing: 2px;
+                    alignment: start;
+
+                    MaterialText {
+                        text: step.name;
+                        font_size: 14px;
+                        font_weight: 600;
+                        color: MaterialPalette.on_surface;
+                    }
+
+                    if step.status == "running": MaterialText {
+                        text: "Running...";
+                        font_size: 11px;
+                        font_weight: 600;
+                        color: #1D4ED8;
+                    }
+
+                    if step.status == "paused": MaterialText {
+                        text: "Paused";
+                        font_size: 11px;
+                        font_weight: 600;
+                        color: #B45309;
+                    }
+
+                    Text {
+                        width: parent.width;
+                        text: step.detail;
+                        wrap: word-wrap;
+                        color: MaterialPalette.on_surface_variant;
+                        font-size: 12px;
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 44px;
+                height: 20px;
+                x: header.width - self.width - 8px;
+                y: (header.height - self.height) / 2;
+                background: transparent;
+
+                TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    clicked => { root.toggle(); }
+                }
+
+                MaterialText {
+                    text: root.expanded ? "Hide" : "Logs";
+                    color: MaterialPalette.primary;
+                    font_size: 12px;
+                    vertical_alignment: center;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+        }
+
+        if root.expanded: Rectangle {
+            width: parent.width;
+            border-radius: 10px;
+            background: MaterialPalette.surface_container_highest;
+            height: max(60px, log-text.preferred-height + 20px);
+
+            log-text := Text {
+                width: parent.width - 20px;
+                x: 10px;
+                y: 10px;
+                text: step.log == "" ? "No logs yet." : step.log;
+                wrap: word-wrap;
+                color: MaterialPalette.on_surface;
+                font-family: "Menlo";
+                font-size: 12px;
+            }
+        }
+    }
+}
+
+export component Steps inherits Rectangle {
+    in property <string> title: "Workflow steps";
+    in property <string> empty-text: "No workflow steps yet.";
+    in property <[StepItem]> steps: [];
+    in property <bool> animations-enabled: true;
+    in property <int> current-step-index: -1;
+    in-out property <int> expanded-step-index: -1;
+    callback step-toggled(int);
+
+    width: 100%;
+    height: max(140px, steps-content.preferred-height + 28px);
+
+    steps-content := VerticalLayout {
+        x: 14px;
+        y: 14px;
+        width: root.width - 28px;
+        spacing: 0px;
+
+        Rectangle {
+            width: parent.width;
+            height: 16px;
+
+            MaterialText {
+                text: root.title;
+                vertical_alignment: center;
+                font_size: 13px;
+                color: MaterialPalette.on_surface_variant;
+            }
+        }
+
+        Rectangle {
+            width: 1px;
+            height: 6px;
+            background: transparent;
+        }
+
+        if root.steps.length == 0: Text {
+            width: parent.width;
+            text: root.empty-text;
+            color: MaterialPalette.on_surface_variant;
+            font-size: 13px;
+        }
+
+        if root.steps.length > 0: VerticalLayout {
+            width: parent.width;
+            spacing: 8px;
+
+            for step[index] in root.steps: VerticalLayout {
+                width: parent.width;
+                spacing: 6px;
+
+                StepCard {
+                    width: min(parent.width, max(320px, parent.width / 2));
+                    x: (parent.width - self.width) / 2;
+                    step: step;
+                    step-index: index;
+                    expanded: root.expanded-step-index == index;
+                    animations-enabled: root.animations-enabled;
+                    toggle => {
+                        root.expanded-step-index = root.expanded-step-index == index ? -1 : index;
+                        root.step-toggled(index);
+                    }
+                }
+
+                if index < root.steps.length - 1: Rectangle {
+                    width: parent.width;
+                    height: 26px;
+                    background: transparent;
+                    private property <color> connector-color:
+                        root.current-step-index == index + 1 ? MaterialPalette.primary :
+                        MaterialPalette.on_surface_variant;
+
+                    MaterialText {
+                        x: (parent.width - self.width) / 2;
+                        y: 0px;
+                        text: "|";
+                        font_size: 12px;
+                        color: parent.connector-color;
+                    }
+
+                    MaterialText {
+                        x: (parent.width - self.width) / 2;
+                        y: 8px;
+                        text: "|";
+                        font_size: 12px;
+                        color: parent.connector-color;
+                    }
+
+                    MaterialText {
+                        x: (parent.width - self.width) / 2;
+                        y: 16px;
+                        text: "↓";
+                        font_size: 12px;
+                        color: parent.connector-color;
+                    }
+                }
+            }
+        }
+    }
+}

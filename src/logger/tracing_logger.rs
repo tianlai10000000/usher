@@ -1,4 +1,4 @@
-use std::backtrace::Backtrace;
+use std::backtrace::{Backtrace, BacktraceStatus};
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::panic;
@@ -47,6 +47,11 @@ static TRACING_LOGGER_INITIALIZED: OnceLock<bool> = OnceLock::new();
 static TRACING_THREAD_DISPATCH: OnceLock<tracing::Dispatch> = OnceLock::new();
 static TRACING_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 static TRACING_ACTIVE: AtomicBool = AtomicBool::new(true);
+
+fn is_expected_dual_stack_init_error(err: &impl std::fmt::Display) -> bool {
+    let err = err.to_string();
+    err.contains("attempted to set a logger after the logging system was already initialized")
+}
 
 fn is_tracing_active() -> bool {
     TRACING_ACTIVE.load(Ordering::Relaxed)
@@ -199,12 +204,22 @@ pub fn init_tracing_logger(config: TraceLogConfig) -> Result<()> {
         .with(file_layer)
         .try_init()
     {
-        // If a global subscriber is already set (e.g. Slint),
-        // add a file-only layer on the current thread without changing existing behavior.
-        warn!(
-            "Tracing subscriber already exists, enabling thread-local file layer: {}",
-            err
-        );
+        // In dual-stack mode, the `log` logger may already be initialized by the debug logger.
+        // This fallback is expected in that case, so keep it out of the tracing file to avoid
+        // making the local tracing log look broken on every startup.
+        if is_expected_dual_stack_init_error(&err) {
+            log::debug!(
+                "Tracing logger detected pre-initialized global logger; enabling fallback file dispatch: {}",
+                err
+            );
+        } else {
+            // If a global subscriber is already set (e.g. by another framework),
+            // add a file-only layer on the current thread without changing existing behavior.
+            warn!(
+                "Tracing subscriber initialization fell back to thread-local file dispatch: {}",
+                err
+            );
+        }
         let current = tracing::dispatcher::get_default(|d| d.clone());
         let file_for_fallback = OpenOptions::new()
             .create(true)
@@ -237,6 +252,15 @@ pub fn init_tracing_logger(config: TraceLogConfig) -> Result<()> {
         config.level,
         log_per_day,
         log_path.display().to_string()
+    );
+    tracing::info!(
+        event = "tracing_logger_initialized",
+        source = "tracing_logger",
+        tracing_active = config.active,
+        level = %config.level,
+        log_per_day = log_per_day,
+        log_path = %log_path.display(),
+        "Tracing logger file sink is ready"
     );
 
     Ok(())
@@ -293,23 +317,39 @@ pub fn setup_global_panic_hook() {
             .payload()
             .downcast_ref::<&str>()
             .copied()
+            .or_else(|| {
+                panic_info
+                    .payload()
+                    .downcast_ref::<String>()
+                    .map(|s| s.as_str())
+            })
             .unwrap_or("(unparseable payload)");
 
         let backtrace = Backtrace::capture();
+        let backtrace_status = match backtrace.status() {
+            BacktraceStatus::Captured => "captured",
+            BacktraceStatus::Disabled => "disabled",
+            BacktraceStatus::Unsupported => "unsupported",
+            _ => "unknown",
+        };
+        let note = "Unhandled panic captured by global panic hook; this indicates an upstream runtime failure, not a tracing logger write failure.";
 
         error!(
+            source          = "global_panic_hook",
             panic_location = %location,
             panic_payload  = %payload_str,
+            backtrace_status = backtrace_status,
             backtrace      = ?backtrace,
-            "Unhandled panic occurred (captured by global hook)"
+            note = note,
+            "Unhandled panic captured"
         );
 
         if let Some(path) = TRACING_LOG_PATH.get() {
             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
                 let _ = writeln!(
                     file,
-                    "{{\"level\":\"ERROR\",\"event\":\"panic\",\"location\":\"{}\",\"payload\":\"{}\",\"backtrace\":\"{:?}\"}}",
-                    location, payload_str, backtrace
+                    "{{\"level\":\"ERROR\",\"event\":\"panic\",\"source\":\"global_panic_hook\",\"location\":\"{}\",\"payload\":\"{}\",\"backtrace_status\":\"{}\",\"note\":\"{}\",\"backtrace\":\"{:?}\"}}",
+                    location, payload_str, backtrace_status, note, backtrace
                 );
             }
         }

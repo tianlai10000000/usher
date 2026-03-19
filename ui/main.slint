@@ -10,7 +10,7 @@ import { Search as SearchPage } from "./views/search.slint";
 import { Settings as SettingsPage } from "./views/settings.slint";
 import { About as AboutPage } from "./views/about.slint";
 import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
-import { TagStepItem } from "./views/workflow/tag_add.slint";
+import { StepItem } from "./components/workflow/steps.slint";
 
 import { List as ListPage } from "./views/list.slint";
 import { Detail as DetailPage } from "./views/detail.slint";
@@ -44,7 +44,7 @@ export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_
 export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
 export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole } from "./views/chat.slint";
-export { TagStepItem } from "./views/workflow/tag_add.slint";
+export { StepItem } from "./components/workflow/steps.slint";
 
 // import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
 
@@ -123,7 +123,7 @@ export component MainWindow inherits Window {
     in property <bool> workflow-tag-remove-initializing: false;
     in property <bool> workflow-tag-running: false;
     in property <bool> workflow-tag-loading-animated: true;
-    in property <[TagStepItem]> workflow-tag-steps: [];
+    in property <[StepItem]> workflow-tag-steps: [];
     in property <string> workflow-project-id: "default";
     in property <string> workflow-project-name: "Default Project";
     in property <string> workflow-project-alias: "";

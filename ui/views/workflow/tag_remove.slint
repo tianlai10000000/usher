@@ -1,12 +1,13 @@
 import { FilledButton, MaterialPalette, MaterialText, CircularProgressIndicator } from "@material";
-import { TagField, TagStepCard, TagStepItem } from "./tag_add.slint";
+import { StepItem, Steps } from "../../components/workflow/steps.slint";
+import { TagField } from "../../components/workflow/fields.slint";
 
 export component TagRemovePanel {
     in property <bool> running: false;
     in property <bool> initializing: false;
     in property <bool> loading-animated: true;
     in property <string> result: "Ready to remove a tag.";
-    in property <[TagStepItem]> steps: [];
+    in property <[StepItem]> steps: [];
     in-out property <string> tag-to-remove: "";
     callback remove-tag(string);
     callback stop();
@@ -104,96 +105,12 @@ export component TagRemovePanel {
             }
         }
 
-        steps-panel := Rectangle {
+        Steps {
             width: 100%;
-            height: max(140px, steps-content.preferred-height + 28px);
-            // border-radius: 14px;
-            // border-width: 1px;
-            // border-color: MaterialPalette.surface_container_highest;
-
-            steps-content := VerticalLayout {
-                x: 14px;
-                y: 14px;
-                width: steps-panel.width - 28px;
-                spacing: 0px;
-
-                Rectangle {
-                    width: parent.width;
-                    height: 16px;
-
-                    MaterialText {
-                        text: "Tag remove workflow steps";
-                        vertical_alignment: center;
-                        font_size: 13px;
-                        color: MaterialPalette.on_surface_variant;
-                    }
-                }
-
-                Rectangle {
-                    width: 1px;
-                    height: 6px;
-                    background: transparent;
-                }
-
-                if root.steps.length == 0: Text {
-                    width: parent.width;
-                    text: "No workflow steps yet.";
-                    color: MaterialPalette.on_surface_variant;
-                    font-size: 13px;
-                }
-
-                if root.steps.length > 0: VerticalLayout {
-                    width: parent.width;
-                    spacing: 8px;
-
-                    for step[index] in root.steps: VerticalLayout {
-                        width: parent.width;
-                        spacing: 6px;
-
-                        TagStepCard {
-                            width: parent.width / 2;
-                            x: (parent.width - self.width) / 2;
-                            step: step;
-                            step-index: index;
-                            expanded: root.expanded-step-index == index;
-                            animations-enabled: root.loading-animated;
-                            toggle => {
-                                root.expanded-step-index = root.expanded-step-index == index ? -1 : index;
-                            }
-                        }
-
-                        if index < root.steps.length - 1: Rectangle {
-                            width: parent.width;
-                            height: 26px;
-                            background: transparent;
-
-                            MaterialText {
-                                x: (parent.width - self.width) / 2;
-                                y: 0px;
-                                text: "|";
-                                font_size: 12px;
-                                color: MaterialPalette.on_surface_variant;
-                            }
-
-                            MaterialText {
-                                x: (parent.width - self.width) / 2;
-                                y: 8px;
-                                text: "|";
-                                font_size: 12px;
-                                color: MaterialPalette.on_surface_variant;
-                            }
-
-                            MaterialText {
-                                x: (parent.width - self.width) / 2;
-                                y: 16px;
-                                text: "↓";
-                                font_size: 12px;
-                                color: MaterialPalette.on_surface_variant;
-                            }
-                        }
-                    }
-                }
-            }
+            title: "Tag remove workflow steps";
+            steps: root.steps;
+            expanded-step-index <=> root.expanded-step-index;
+            animations-enabled: root.loading-animated;
         }
     }
 }

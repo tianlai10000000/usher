@@ -1,7 +1,7 @@
 use crate::app_runtime::shared_runtime;
 use crate::workflow::bindings::{show_error, show_success};
 use crate::workflow::state::{SharedWorkflowState, default_tag_steps, initialize_current_ui};
-use crate::{MainWindow, TagStepItem};
+use crate::{MainWindow, StepItem};
 use slint::ComponentHandle;
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
@@ -13,6 +13,28 @@ const TAG_MODE_REMOTE: &str = "remote";
 const TAG_BUMP_MAJOR: &str = "major";
 const TAG_BUMP_MINOR: &str = "minor";
 const TAG_BUMP_PATCH: &str = "patch";
+
+const MAX_STEP_LOG_BYTES: usize = 32 * 1024;
+
+fn clamp_step_log(mut log: String) -> String {
+    if log.len() <= MAX_STEP_LOG_BYTES {
+        return log;
+    }
+
+    let keep_from = log.len().saturating_sub(MAX_STEP_LOG_BYTES);
+    let mut start = keep_from;
+    while start < log.len() && !log.is_char_boundary(start) {
+        start += 1;
+    }
+
+    let tail = log.split_off(start);
+    format!(
+        "[Truncated] Log was {} bytes; showing last {} bytes.\n\n{}",
+        keep_from + tail.len(),
+        tail.len(),
+        tail
+    )
+}
 
 static TAG_CANCEL_TOKEN: OnceLock<Mutex<Option<Arc<AtomicBool>>>> = OnceLock::new();
 
@@ -308,7 +330,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                         latest_tag
                                     )
                                     .into();
-                                    first.log = lookup_log.into();
+                                    first.log = clamp_step_log(lookup_log).into();
                                 }
                             }
                             Err(error) => {
@@ -908,43 +930,43 @@ pub(crate) fn refresh_tag_context(
 struct TagRunSuccess {
     summary: String,
     current_version: String,
-    steps: Vec<TagStepItem>,
+    steps: Vec<StepItem>,
 }
 
 struct TagRunFailure {
     summary: String,
-    steps: Vec<TagStepItem>,
+    steps: Vec<StepItem>,
 }
 
-type TagProgressReporter = Arc<dyn Fn(Vec<TagStepItem>, String) + Send + Sync>;
+type TagProgressReporter = Arc<dyn Fn(Vec<StepItem>, String) + Send + Sync>;
 
-fn default_remove_tag_steps() -> Vec<TagStepItem> {
+fn default_remove_tag_steps() -> Vec<StepItem> {
     vec![
-        TagStepItem {
+        StepItem {
             name: "Enter local repository".into(),
             status: "pending".into(),
             detail: "Resolve git repository path.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Delete local tag".into(),
             status: "pending".into(),
             detail: "Delete tag from local repository.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Delete remote tag".into(),
             status: "pending".into(),
             detail: "Delete tag from origin remote.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Refresh latest remote tag".into(),
             status: "pending".into(),
             detail: "Fetch and resolve the latest remote semantic tag.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Workflow complete".into(),
             status: "pending".into(),
             detail: "Waiting for remove workflow completion.".into(),
@@ -1098,7 +1120,7 @@ async fn run_local_tag_flow(
         match result {
             Ok(log) => {
                 steps[index].status = "success".into();
-                steps[index].log = log.into();
+                steps[index].log = clamp_step_log(log).into();
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
                         steps.clone(),
@@ -1119,7 +1141,7 @@ async fn run_local_tag_flow(
             Err(log) => {
                 if cancel_token.load(Ordering::SeqCst) {
                     steps[index].status = "paused".into();
-                    steps[index].log = log.clone().into();
+                    steps[index].log = clamp_step_log(log.clone()).into();
                     steps[index].detail = "Cancelled by user. Workflow paused.".into();
                     for remaining in steps.iter_mut().skip(index + 1) {
                         if remaining.status.as_str() == "pending" {
@@ -1148,7 +1170,7 @@ async fn run_local_tag_flow(
                     });
                 }
                 steps[index].status = "error".into();
-                steps[index].log = log.clone().into();
+                steps[index].log = clamp_step_log(log.clone()).into();
                 steps[index].detail = "Command failed. Check logs below.".into();
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
@@ -1274,7 +1296,7 @@ async fn run_local_remove_tag_flow(
         match run_command(command.clone(), &cancel_token).await {
             Ok(log) => {
                 steps[index].status = "success".into();
-                steps[index].log = log.into();
+                steps[index].log = clamp_step_log(log).into();
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
                         steps.clone(),
@@ -1290,7 +1312,7 @@ async fn run_local_remove_tag_flow(
             Err(log) => {
                 if cancel_token.load(Ordering::SeqCst) {
                     steps[index].status = "paused".into();
-                    steps[index].log = log.clone().into();
+                    steps[index].log = clamp_step_log(log.clone()).into();
                     steps[index].detail = "Cancelled by user. Workflow paused.".into();
                     for remaining in steps.iter_mut().skip(index + 1) {
                         if remaining.status.as_str() == "pending" {
@@ -1317,7 +1339,7 @@ async fn run_local_remove_tag_flow(
                     });
                 }
                 steps[index].status = "error".into();
-                steps[index].log = log.into();
+                steps[index].log = clamp_step_log(log).into();
                 steps[index].detail = "Command failed. Check logs below.".into();
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
@@ -1540,10 +1562,10 @@ async fn run_command(
 
     let stdout = String::from_utf8_lossy(&stdout_bytes);
     let stderr = String::from_utf8_lossy(&stderr_bytes);
-    let log = format!(
+    let log = clamp_step_log(format!(
         "$ {}\n\nstdout:\n{}\n\nstderr:\n{}",
         rendered, stdout, stderr
-    );
+    ));
     if status.success() {
         log::info!("[Workflow][Tag] Command succeeded: {}", rendered);
         Ok(log)
@@ -1664,10 +1686,10 @@ fn inspect_latest_remote_tag(local_repo: &str) -> Result<(String, String), Strin
     let latest_tag = latest
         .map(|(tag, _)| tag)
         .unwrap_or_else(|| "v0.0.0".to_string());
-    let combined_log = format!(
+    let combined_log = clamp_step_log(format!(
         "{}\n\n{}\n\n[Resolve] Latest remote semantic tag: {}",
         fetch_log, list_log, latest_tag
-    );
+    ));
     log::info!(
         "[Workflow][Tag] Latest remote semantic tag resolved: '{}'",
         latest_tag
@@ -1689,10 +1711,10 @@ fn run_command_blocking(command: Vec<String>) -> Result<String, String> {
         .map_err(|error| format!("$ {}\n\nFailed to spawn command:\n{}", rendered, error))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let log = format!(
+    let log = clamp_step_log(format!(
         "$ {}\n\nstdout:\n{}\n\nstderr:\n{}",
         rendered, stdout, stderr
-    );
+    ));
     if output.status.success() {
         Ok(log)
     } else {

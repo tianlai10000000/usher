@@ -1,97 +1,6 @@
 import { FilledButton, MaterialPalette, MaterialText } from "@material";
-
-component CdField {
-    in property <string> label;
-    in-out property <string> value;
-    in property <string> placeholder;
-    in property <length> field-width: 220px;
-
-    VerticalLayout {
-        spacing: 6px;
-
-        MaterialText {
-            text: root.label;
-            font_size: 12px;
-            color: MaterialPalette.on_surface_variant;
-        }
-
-        Rectangle {
-            width: root.field-width;
-            height: 42px;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            background: MaterialPalette.surface_container_highest;
-            clip: true;
-
-            TextInput {
-                x: 12px;
-                y: (parent.height - self.preferred-height) / 2;
-                width: parent.width - 24px;
-                text <=> root.value;
-                color: MaterialPalette.on_surface;
-                font-size: 14px;
-                single-line: true;
-            }
-
-            if root.value == "": MaterialText {
-                x: 12px;
-                y: (parent.height - self.preferred-height) / 2;
-                text: root.placeholder;
-                font_size: 14px;
-                color: MaterialPalette.on_surface_variant;
-            }
-        }
-    }
-}
-
-component CdStageRow {
-    in property <string> label;
-    in property <string> status;
-    in property <string> detail;
-
-    HorizontalLayout {
-        spacing: 12px;
-        alignment: start;
-
-        MaterialText {
-            text: root.label;
-            font_size: 14px;
-            color: MaterialPalette.on_surface;
-            min_width: 70px;
-        }
-
-        Rectangle {
-            min-width: 92px;
-            height: 28px;
-            border-radius: 14px;
-            background: root.status == "success" ? #D7F7DF :
-                        root.status == "running" ? #DDEAFE :
-                        root.status == "rolled_back" ? #FFE8CC :
-                        root.status == "failed" ? #FFD8D8 :
-                        MaterialPalette.surface_container_highest;
-
-            MaterialText {
-                x: 10px;
-                y: (parent.height - self.preferred-height) / 2;
-                text: root.status;
-                font_size: 12px;
-                color: root.status == "success" ? #146C2E :
-                       root.status == "running" ? #1D4ED8 :
-                       root.status == "rolled_back" ? #B45309 :
-                       root.status == "failed" ? #B42318 :
-                       MaterialPalette.on_surface_variant;
-            }
-        }
-
-        Text {
-            text: root.detail;
-            wrap: word-wrap;
-            color: MaterialPalette.on_surface_variant;
-            font-size: 13px;
-        }
-    }
-}
+import { StepItem, Steps } from "../../components/workflow/steps.slint";
+import { TagField } from "../../components/workflow/fields.slint";
 
 export component CdFlow {
     in property <bool> running;
@@ -111,6 +20,58 @@ export component CdFlow {
     private property <string> release-name: "2026.03.09";
     private property <string> commit-hash: "HEAD";
     private property <string> rollback-commit: "";
+    private property <int> expanded-step-index: -1;
+    private property <string> build-step-status:
+        root.build-status == "failed" ? "error" :
+        root.build-status == "rolled_back" ? "paused" :
+        root.build-status;
+    private property <string> test-step-status:
+        root.test-status == "failed" ? "error" :
+        root.test-status == "rolled_back" ? "paused" :
+        root.test-status;
+    private property <string> deploy-step-status:
+        root.deploy-status == "failed" ? "error" :
+        root.deploy-status == "rolled_back" ? "paused" :
+        root.deploy-status;
+    private property <string> verify-step-status:
+        root.verify-status == "failed" ? "error" :
+        root.verify-status == "rolled_back" ? "paused" :
+        root.verify-status;
+    private property <int> current-step-index:
+        root.build-status == "running" ? 0 :
+        root.test-status == "running" ? 1 :
+        root.deploy-status == "running" ? 2 :
+        root.verify-status == "running" ? 3 :
+        (root.build-status == "success" && root.test-status == "pending") ? 1 :
+        (root.test-status == "success" && root.deploy-status == "pending") ? 2 :
+        (root.deploy-status == "success" && root.verify-status == "pending") ? 3 :
+        -1;
+    private property <[StepItem]> cd-steps: [
+        {
+            name: "Build",
+            status: root.build-step-status,
+            detail: root.build-detail,
+            log: "Stage: Build\\nStatus: " + root.build-status + "\\n\\n" + root.build-detail,
+        },
+        {
+            name: "Test",
+            status: root.test-step-status,
+            detail: root.test-detail,
+            log: "Stage: Test\\nStatus: " + root.test-status + "\\n\\n" + root.test-detail,
+        },
+        {
+            name: "Deploy",
+            status: root.deploy-step-status,
+            detail: root.deploy-detail,
+            log: "Stage: Deploy\\nStatus: " + root.deploy-status + "\\n\\n" + root.deploy-detail,
+        },
+        {
+            name: "Verify",
+            status: root.verify-step-status,
+            detail: root.verify-detail,
+            log: "Stage: Verify\\nStatus: " + root.verify-status + "\\n\\n" + root.verify-detail,
+        }
+    ];
 
     VerticalLayout {
         spacing: 14px;
@@ -125,25 +86,25 @@ export component CdFlow {
         HorizontalLayout {
             spacing: 12px;
 
-            CdField {
+            TagField {
+                width: 180px;
                 label: "Environment";
                 value <=> root.environment-name;
                 placeholder: "production";
-                field-width: 180px;
             }
 
-            CdField {
+            TagField {
+                width: 220px;
                 label: "Release";
                 value <=> root.release-name;
                 placeholder: "2026.03.09";
-                field-width: 220px;
             }
 
-            CdField {
+            TagField {
+                width: 220px;
                 label: "Commit";
                 value <=> root.commit-hash;
                 placeholder: "abcdef1";
-                field-width: 220px;
             }
         }
 
@@ -157,11 +118,11 @@ export component CdFlow {
                 }
             }
 
-            CdField {
+            TagField {
+                width: 220px;
                 label: "Rollback commit";
                 value <=> root.rollback-commit;
                 placeholder: "previous stable hash";
-                field-width: 220px;
             }
 
             FilledButton {
@@ -174,11 +135,11 @@ export component CdFlow {
 
         Rectangle {
             width: 100%;
-            min-height: 188px;
+            height: max(72px, summary-column.preferred-height + 28px);
             border-radius: 14px;
             background: MaterialPalette.surface_container_high;
 
-            VerticalLayout {
+            summary-column := VerticalLayout {
                 padding: 14px;
                 spacing: 10px;
 
@@ -192,31 +153,16 @@ export component CdFlow {
                     height: 1px;
                     background: MaterialPalette.outline_variant;
                 }
-
-                CdStageRow {
-                    label: "Build";
-                    status: root.build-status;
-                    detail: root.build-detail;
-                }
-
-                CdStageRow {
-                    label: "Test";
-                    status: root.test-status;
-                    detail: root.test-detail;
-                }
-
-                CdStageRow {
-                    label: "Deploy";
-                    status: root.deploy-status;
-                    detail: root.deploy-detail;
-                }
-
-                CdStageRow {
-                    label: "Verify";
-                    status: root.verify-status;
-                    detail: root.verify-detail;
-                }
             }
+        }
+
+        Steps {
+            width: 100%;
+            title: "CD workflow steps";
+            steps: root.cd-steps;
+            current-step-index: root.current-step-index;
+            expanded-step-index <=> root.expanded-step-index;
+            animations-enabled: root.running;
         }
     }
 }

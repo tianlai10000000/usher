@@ -7,7 +7,7 @@ import { BranchFlow } from "./branch.slint";
 import { CdFlow } from "./cd.slint";
 import { PrFlow } from "./pr.slint";
 import { TagFlow } from "./tag.slint";
-import { TagStepItem } from "./tag_add.slint";
+import { StepItem } from "../../components/workflow/steps.slint";
 
 component WorkflowTabButton inherits Rectangle {
     in property <string> label;
@@ -80,7 +80,7 @@ export component Workflow inherits PageView {
     in property <bool> tag-remove-initializing: false;
     in property <bool> tag-running: false;
     in property <bool> tag-loading-animated: true;
-    in property <[TagStepItem]> tag-steps: [];
+    in property <[StepItem]> tag-steps: [];
     in property <string> project-id: "default";
     in property <string> project-name: "Default Project";
     in property <string> project-alias: "";

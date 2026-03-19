@@ -1,6 +1,7 @@
 import { MaterialPalette, MaterialText, Switch } from "@material";
-import { TagAddPanel, TagStepItem } from "./tag_add.slint";
+import { TagAddPanel } from "./tag_add.slint";
 import { TagRemovePanel } from "./tag_remove.slint";
+import { StepItem } from "../../components/workflow/steps.slint";
 
 component TagTabChip inherits Rectangle {
     in property <string> label;
@@ -41,7 +42,7 @@ export component TagFlow {
     in property <bool> running: false;
     in property <bool> loading-animated: true;
     in property <string> result: "Ready to create a tag.";
-    in property <[TagStepItem]> steps: [];
+    in property <[StepItem]> steps: [];
     callback change-mode(string);
     callback select-version-mode(string);
     callback run(string, string);

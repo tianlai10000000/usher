@@ -1,5 +1,5 @@
 use crate::{MainWindow, Route};
-use slint::Weak;
+use slint::{ModelRc, VecModel, Weak};
 
 const BREADCRUMB_HIDDEN_ROUTES: &[Route] = &[Route::Chat, Route::Login];
 const NAVIGATION_ROUTES: &[Route] = &[
@@ -77,8 +77,21 @@ impl Router {
 
     pub fn navigate(&self, route: Route) -> Option<RouteUiState> {
         self.window.upgrade().map(|win| {
+            let previous = win.get_current_route();
             win.set_current_route(route);
             let state = Self::apply_route_ui_state(&win, route);
+
+            // Proactively drop large workflow logs/details when leaving the workflow page.
+            // This reduces resident memory after visiting Tag/CD tabs (git command logs can be large).
+            if previous == Route::Workflow && route != Route::Workflow {
+                win.set_workflow_tag_result("".into());
+                win.set_workflow_tag_steps(ModelRc::new(VecModel::from(Vec::new())));
+                win.set_workflow_cd_summary("".into());
+                win.set_workflow_cd_build_detail("".into());
+                win.set_workflow_cd_test_detail("".into());
+                win.set_workflow_cd_deploy_detail("".into());
+                win.set_workflow_cd_verify_detail("".into());
+            }
             // Can add other global side effects here, such as:
             // - Record route history
             // - Send analytics events

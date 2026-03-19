@@ -1,5 +1,5 @@
 use crate::workflow::cd::{CdSnapshot, apply_cd_snapshot, default_cd_snapshot};
-use crate::{MainWindow, TagStepItem};
+use crate::{MainWindow, StepItem};
 use slint::{ModelRc, VecModel};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -77,7 +77,7 @@ pub(crate) struct WorkflowViewState {
     pub(crate) tag_add_initializing: bool,
     pub(crate) tag_remove_initializing: bool,
     pub(crate) tag_running: bool,
-    pub(crate) tag_steps: Vec<TagStepItem>,
+    pub(crate) tag_steps: Vec<StepItem>,
     pub(crate) pr_ai_decision: String,
     pub(crate) pr_ai_summary: String,
     pub(crate) pr_manual_status: String,
@@ -189,57 +189,57 @@ pub(crate) fn normalize_project_alias(value: &str) -> String {
     value.trim().to_string()
 }
 
-pub(crate) fn default_tag_steps() -> Vec<TagStepItem> {
+pub(crate) fn default_tag_steps() -> Vec<StepItem> {
     vec![
-        TagStepItem {
+        StepItem {
             name: "Enter local repository".into(),
             status: "pending".into(),
             detail: "Resolve the configured local repository path.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Checkout release".into(),
             status: "pending".into(),
             detail: "Switch to the release branch.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Pull release".into(),
             status: "pending".into(),
             detail: "Pull the latest release branch changes.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Checkout main".into(),
             status: "pending".into(),
             detail: "Switch back to the main branch.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Rebase main on release".into(),
             status: "pending".into(),
             detail: "Rebase main onto release.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Push main".into(),
             status: "pending".into(),
             detail: "Push rebased main to the remote.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Create annotated tag".into(),
             status: "pending".into(),
             detail: "Create the new annotated semantic version tag.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Push tag".into(),
             status: "pending".into(),
             detail: "Push the new tag to the remote.".into(),
             log: "".into(),
         },
-        TagStepItem {
+        StepItem {
             name: "Complete".into(),
             status: "pending".into(),
             detail: "Finish the local tag workflow.".into(),
