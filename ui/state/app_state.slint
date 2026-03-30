@@ -30,6 +30,11 @@ export global AppState {
     // tracing logger
     in-out property <bool> tracing-logger-active: true; // default enabled
 
+    // git platform tokens
+    in-out property <string> git-github-token: "";
+    in-out property <string> git-gitlab-token: "";
+    in-out property <string> git-gitee-token: "";
+
     /**
      * methods
     */
@@ -42,6 +47,9 @@ export global AppState {
     
     // tracing logger
     callback toggle-tracing-logger-active(enabled: bool);
+
+    // git token settings
+    callback save-git-tokens(github-token: string, gitlab-token: string, gitee-token: string);
     
     // Update Palette.color-scheme when theme-mode changes
     changed theme-mode => {

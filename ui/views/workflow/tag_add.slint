@@ -19,6 +19,8 @@ export component TagAddPanel {
     private property <int> expanded-step-index: -1;
     private property <bool> stacked-fields: root.width < 1020px;
     private property <bool> stacked-chip-row: root.width < 560px;
+    private property <bool> show-steps:
+        root.running || (root.steps.length > 0 && root.steps[0].status != "pending");
     width: 100%;
 
     VerticalLayout {
@@ -216,12 +218,30 @@ export component TagAddPanel {
             }
         }
 
-        Steps {
+        if root.show-steps: Steps {
             width: 100%;
             title: "Tag workflow steps";
             steps: root.steps;
             expanded-step-index <=> root.expanded-step-index;
             animations-enabled: root.loading-animated;
+        }
+
+        if !root.show-steps: Rectangle {
+            width: parent.width - 16px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_low;
+            height: 44px;
+
+            Text {
+                x: 12px;
+                y: (parent.height - self.height) / 2;
+                width: parent.width - 24px;
+                text: "Workflow steps will appear after the tag process starts.";
+                color: MaterialPalette.on_surface_variant;
+                font-size: 12px;
+            }
         }
     }
 }

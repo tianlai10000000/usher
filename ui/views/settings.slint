@@ -1,162 +1,372 @@
-import { MaterialText, Vertical, OutlineButton, Horizontal, RadioButtonTile, FilterChip, TonalIconButton, TonalButton, Switch } from "@material";
+import { MaterialText, Vertical, Horizontal, RadioButtonTile, TonalButton, Switch, MaterialPalette } from "@material";
 import { AppState } from "../state/app_state.slint";
 import { UpdateLogic } from "../components/update/update.slint";
-import { NotificationManager } from "../components/notify/notification.slint";
 import { LoadingIconOutlineButton } from "../components/button/loading_icon_outline_button.slint";
+import { PageView } from "../components/page/page_view.slint";
 
-export component Settings {
+component TokenField {
+    in property <string> label;
+    in-out property <string> value;
+    in property <string> placeholder;
+    in property <bool> reveal: false;
+    callback edited(string);
+
+    VerticalLayout {
+        width: parent.width;
+        spacing: 6px;
+
+        MaterialText {
+            text: root.label;
+            font-size: 12px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        Rectangle {
+            width: parent.width;
+            height: 38px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_lowest;
+            clip: true;
+
+            TextInput {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                width: parent.width - 24px;
+                text <=> root.value;
+                color: MaterialPalette.on_surface;
+                single-line: true;
+                font-size: 13px;
+                input-type: root.reveal ? InputType.text : InputType.password;
+                edited => { root.edited(self.text); }
+            }
+
+            if root.value == "": MaterialText {
+                x: 12px;
+                y: (parent.height - self.preferred-height) / 2;
+                text: root.placeholder;
+                font-size: 12px;
+                color: MaterialPalette.on_surface_variant;
+            }
+        }
+    }
+}
+
+export component Settings inherits PageView {
     callback check-update();
     callback simulate-crash();
 
     in-out property <bool> simulate-crash-active: false;
-    
-    Vertical {
-        padding: 0px;
-        spacing: 0px;
-        
-        Horizontal {
-            height: 64px;
-            horizontal-stretch: 1;
+    in-out property <bool> reveal-git-tokens: false;
+    in-out property <bool> git-tokens-saved: false;
+    in property <length> viewport-width: 0px;
+    private property <length> host-width: root.viewport-width > 0px ? root.viewport-width : root.width;
+    private property <length> content-width: max(320px, min(920px, root.host-width - 24px));
+    private property <bool> compact-layout: root.content-width < 720px;
 
-            // Label
-            MaterialText {
-                text: "Theme";
-                vertical_alignment: center;
-                font-size: 16px;
-                font-weight: 400;
-            }
+    Rectangle {
+        width: parent.width - 32px;
+        height: content-column.preferred-height + 12px;
 
-            Horizontal {
-                alignment: start;
-                spacing: 0px;
+        content-column := VerticalLayout {
+            width: root.content-width;
+            spacing: 16px;
+            alignment: start;
 
-                RadioButtonTile {
-                    text: "Light";
-                    checked: AppState.theme_mode == 0;
-        
-                    radio_button_clicked => {
-                        AppState.toggle-theme(0);
+            appearance-card := Rectangle {
+                width: root.content-width;
+                height: appearance-content.preferred-height + 32px;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                background: MaterialPalette.surface_container_low;
+
+                appearance-content := VerticalLayout {
+                    x: 16px;
+                    y: 16px;
+                    width: parent.width - 32px;
+                    spacing: 12px;
+                    alignment: start;
+
+                    MaterialText {
+                        text: "Appearance";
+                        font_size: 16px;
+                        font_weight: 600;
+                        color: MaterialPalette.on_surface;
+                    }
+
+                    if !root.compact-layout: HorizontalLayout {
+                        width: parent.width;
+                        spacing: 14px;
+                        alignment: start;
+
+                        MaterialText {
+                            text: "Theme";
+                            font-size: 14px;
+                            color: MaterialPalette.on_surface;
+                            vertical_alignment: center;
+                        }
+                        RadioButtonTile { text: "Light"; checked: AppState.theme_mode == 0; radio_button_clicked => { AppState.toggle-theme(0); } }
+                        RadioButtonTile { text: "Dark"; checked: AppState.theme_mode == 1; radio_button_clicked => { AppState.toggle-theme(1); } }
+                        RadioButtonTile { text: "Auto"; checked: AppState.theme_mode == 2; radio_button_clicked => { AppState.toggle-theme(2); } }
+                    }
+
+                    if root.compact-layout: VerticalLayout {
+                        width: parent.width;
+                        spacing: 8px;
+                        alignment: start;
+
+                        MaterialText {
+                            text: "Theme";
+                            font-size: 14px;
+                            color: MaterialPalette.on_surface;
+                        }
+                        HorizontalLayout {
+                            width: parent.width;
+                            spacing: 10px;
+                            alignment: start;
+                            RadioButtonTile { text: "Light"; checked: AppState.theme_mode == 0; radio_button_clicked => { AppState.toggle-theme(0); } }
+                            RadioButtonTile { text: "Dark"; checked: AppState.theme_mode == 1; radio_button_clicked => { AppState.toggle-theme(1); } }
+                            RadioButtonTile { text: "Auto"; checked: AppState.theme_mode == 2; radio_button_clicked => { AppState.toggle-theme(2); } }
+                        }
                     }
                 }
-        
-                RadioButtonTile {
-                    text: "Dark";
-                    checked: AppState.theme_mode == 1;
-        
-                    radio_button_clicked => {
-                        AppState.toggle-theme(1);
+            }
+
+            updates-card := Rectangle {
+                width: root.content-width;
+                height: updates-content.preferred-height + 32px;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                background: MaterialPalette.surface_container_low;
+
+                updates-content := VerticalLayout {
+                    x: 16px;
+                    y: 16px;
+                    width: parent.width - 32px;
+                    spacing: 12px;
+                    alignment: start;
+
+                    MaterialText {
+                        text: "Updates";
+                        font_size: 16px;
+                        font_weight: 600;
+                        color: MaterialPalette.on_surface;
+                    }
+
+                    if !root.compact-layout: HorizontalLayout {
+                        width: parent.width;
+                        spacing: 12px;
+                        alignment: center;
+
+                        MaterialText { text: "Current Version"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
+                        MaterialText { text: "v" + AppState.version; font-size: 14px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        LoadingIconOutlineButton {
+                            loading: UpdateLogic.checking-update;
+                            text: "Check for Updates";
+                            min-height: 36px;
+                            clicked => {
+                                UpdateLogic.checking-update = true;
+                                root.check-update();
+                            }
+                        }
+                    }
+
+                    if root.compact-layout: VerticalLayout {
+                        width: parent.width;
+                        spacing: 8px;
+                        alignment: start;
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            spacing: 10px;
+                            alignment: start;
+                            MaterialText { text: "Current Version"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
+                            MaterialText { text: "v" + AppState.version; font-size: 14px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        }
+                        LoadingIconOutlineButton {
+                            loading: UpdateLogic.checking-update;
+                            text: "Check for Updates";
+                            min-height: 36px;
+                            clicked => {
+                                UpdateLogic.checking-update = true;
+                                root.check-update();
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        spacing: 12px;
+                        alignment: center;
+                        MaterialText { text: "Auto Update"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        Switch {
+                            checked: AppState.auto-update;
+                            width: 48px;
+                            height: 28px;
+                            checked_state_changed(checked) => {
+                                AppState.auto-update = checked;
+                                AppState.toggle-auto-update(checked);
+                            }
+                        }
                     }
                 }
+            }
 
-                RadioButtonTile {
-                    text: "Auto";
-                    checked: AppState.theme_mode == 2;
-        
-                    radio_button_clicked => {
-                        AppState.toggle-theme(2);
+            tokens-card := Rectangle {
+                width: root.content-width;
+                height: tokens-content.preferred-height + 32px;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                background: MaterialPalette.surface_container_low;
+
+                tokens-content := VerticalLayout {
+                    x: 16px;
+                    y: 16px;
+                    width: parent.width - 32px;
+                    spacing: 10px;
+                    alignment: start;
+
+                    MaterialText {
+                        text: "Git Platform Tokens";
+                        font_size: 16px;
+                        font_weight: 600;
+                        color: MaterialPalette.on_surface;
+                    }
+                    Text {
+                        width: parent.width;
+                        text: "Used for PR count requests in Project and Workflow pages.";
+                        font-size: 12px;
+                        color: MaterialPalette.on_surface_variant;
+                        wrap: word-wrap;
+                    }
+
+                    TokenField {
+                        label: "GitHub Token";
+                        value <=> AppState.git-github-token;
+                        placeholder: "ghp_xxx";
+                        reveal: root.reveal-git-tokens;
+                        edited(_) => { root.git-tokens-saved = false; }
+                    }
+                    TokenField {
+                        label: "GitLab Token";
+                        value <=> AppState.git-gitlab-token;
+                        placeholder: "glpat-xxx";
+                        reveal: root.reveal-git-tokens;
+                        edited(_) => { root.git-tokens-saved = false; }
+                    }
+                    TokenField {
+                        label: "Gitee Enterprise Token";
+                        value <=> AppState.git-gitee-token;
+                        placeholder: "token";
+                        reveal: root.reveal-git-tokens;
+                        edited(_) => { root.git-tokens-saved = false; }
+                    }
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: 36px;
+                        alignment: space-between;
+
+                        Rectangle {
+                            width: 180px;
+                            height: parent.height;
+                            background: transparent;
+
+                            Text {
+                                x: 0;
+                                y: (parent.height - self.preferred-height) / 2;
+                                text: root.reveal-git-tokens ? "Hide Tokens" : "Show Tokens";
+                                font-size: 12px;
+                                color: MaterialPalette.on_surface_variant;
+                                vertical_alignment: center;
+                            }
+
+                            Switch {
+                                x: 82px;
+                                y: (parent.height - self.height) / 2;
+                                checked <=> root.reveal-git-tokens;
+                                width: 48px;
+                                height: 28px;
+                            }
+                        }
+
+                        TonalButton {
+                            height: parent.height;
+                            text: root.git-tokens-saved ? "Saved" : "Save Git Tokens";
+                            clicked => {
+                                AppState.save-git-tokens(
+                                    AppState.git-github-token,
+                                    AppState.git-gitlab-token,
+                                    AppState.git-gitee-token
+                                );
+                                root.git-tokens-saved = true;
+                            }
+                        }
                     }
                 }
             }
-        }
 
-        Horizontal {
-            height: 50px;
-            alignment: start;
+            diagnostics-card := Rectangle {
+                width: root.content-width;
+                height: diagnostics-content.preferred-height + 32px;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                background: MaterialPalette.surface_container_low;
 
-            // Label
-            MaterialText {
-                text: "Current Version";
-                vertical_alignment: center;
-                font-size: 16px;
-                font-weight: 400;
-            }
+                diagnostics-content := VerticalLayout {
+                    x: 16px;
+                    y: 16px;
+                    width: parent.width - 32px;
+                    spacing: 12px;
+                    alignment: start;
 
-            // current version
-            MaterialText {
-                text: "v" + AppState.version;
-                vertical_alignment: center;
-                font-size: 14px;
-                font-weight: 400;
-            }
+                    MaterialText {
+                        text: "Diagnostics";
+                        font_size: 16px;
+                        font_weight: 600;
+                        color: MaterialPalette.on_surface;
+                    }
 
-            LoadingIconOutlineButton {
-                loading: UpdateLogic.checking-update;
-                text: "Check for Updates";
-                clicked => {
-                    UpdateLogic.checking-update = true;
-                    root.check-update();
-                }
-            }
-        }
+                    HorizontalLayout {
+                        width: parent.width;
+                        spacing: 12px;
+                        alignment: center;
+                        MaterialText { text: "Logs Active"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        Switch {
+                            checked: AppState.tracing-logger-active;
+                            width: 48px;
+                            height: 28px;
+                            checked_state_changed(checked) => {
+                                AppState.tracing-logger-active = checked;
+                                AppState.toggle-tracing-logger-active(checked);
+                            }
+                        }
+                    }
 
-        Horizontal {
-            height: 46px;
-            alignment: start;
-            vertical-stretch: 0;
-
-            // Label
-            MaterialText {
-                text: "Auto Update";
-                vertical_alignment: center;
-                font-size: 16px;
-                font-weight: 400;
-            }
-
-            Switch {
-                checked: AppState.auto-update;
-                width: 48px;
-                height: 28px;
-                checked_state_changed(checked) => {
-                    AppState.auto-update = checked;
-                    AppState.toggle-auto-update(checked);
-                }
-            }
-        }
-
-        Horizontal {
-            height: 46px;
-            alignment: start;
-            vertical-stretch: 0;
-
-            // Label
-            MaterialText {
-                text: "Logs Active";
-                vertical_alignment: center;
-                font-size: 16px;
-                font-weight: 400;
-            }
-
-            Switch {
-                checked: AppState.tracing-logger-active;
-                width: 48px;
-                height: 28px;
-                checked_state_changed(checked) => {
-                    AppState.tracing-logger-active = checked;
-                    AppState.toggle-tracing-logger-active(checked);
-                }
-            }
-        }
-
-        Horizontal {
-            height: 46px;
-            alignment: start;
-            vertical-stretch: 0;
-
-            // Label
-            MaterialText {
-                text: "Simulate Crash";
-                vertical_alignment: center;
-                font-size: 16px;
-                font-weight: 400;
-            }
-
-            Switch {
-                checked: root.simulate-crash-active;
-                width: 48px;
-                height: 28px;
-                checked_state_changed(checked) => {
-                    if (checked) {
-                        root.simulate-crash();
+                    HorizontalLayout {
+                        width: parent.width;
+                        spacing: 12px;
+                        alignment: center;
+                        MaterialText { text: "Simulate Crash"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        Switch {
+                            checked: root.simulate-crash-active;
+                            width: 48px;
+                            height: 28px;
+                            checked_state_changed(checked) => {
+                                if (checked) {
+                                    root.simulate-crash();
+                                }
+                            }
+                        }
                     }
                 }
             }

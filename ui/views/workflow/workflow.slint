@@ -55,6 +55,80 @@ component WorkflowTabButton inherits Rectangle {
     }
 }
 
+component WorkflowPrOverview inherits Rectangle {
+    in property <bool> enabled: false;
+    in property <bool> loading: false;
+    in property <bool> failed: false;
+    in property <string> fat-count: "-";
+    in property <string> uat-count: "-";
+    in property <string> prod-count: "-";
+    height: root.enabled ? 30px : 0px;
+
+    if root.enabled: Rectangle {
+        width: parent.width;
+        height: 30px;
+        border-radius: 12px;
+        background: MaterialPalette.surface_container_high;
+
+        HorizontalLayout {
+            width: parent.width;
+            height: parent.height;
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 10px;
+            alignment: center;
+
+            MaterialText {
+                text: "PR";
+                font_size: 11px;
+                font_weight: 600;
+                color: MaterialPalette.primary;
+                vertical_alignment: center;
+            }
+
+            Image {
+                width: 12px;
+                height: 12px;
+                source: root.loading
+                    ? @image-url("../../assets/icons/loading.svg")
+                    : (root.failed
+                        ? @image-url("../../assets/icons/warning.svg")
+                        : @image-url("../../assets/icons/done.svg"));
+            }
+
+            Text {
+                text: root.loading ? "Loading" : (root.failed ? "Unknown" : "Ready");
+                font-size: 11px;
+                color: root.failed ? MaterialPalette.error : MaterialPalette.on_surface_variant;
+                vertical-alignment: center;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: "FAT " + root.fat-count;
+                font-size: 11px;
+                font-weight: 500;
+                color: MaterialPalette.on_surface_variant;
+            }
+
+            Text {
+                text: "UAT " + root.uat-count;
+                font-size: 11px;
+                font-weight: 500;
+                color: MaterialPalette.on_surface_variant;
+            }
+
+            Text {
+                text: "PROD " + root.prod-count;
+                font-size: 11px;
+                font-weight: 500;
+                color: MaterialPalette.on_surface_variant;
+            }
+        }
+    }
+}
+
 export component Workflow inherits PageView {
     callback branch-submit(string, string, bool);
     callback tag-change-mode(string);
@@ -91,6 +165,12 @@ export component Workflow inherits PageView {
     in property <string> pr-ai-decision: "Awaiting analysis";
     in property <string> pr-ai-summary: "Run AI analysis to get a recommendation.";
     in property <string> pr-manual-status: "Waiting for human confirmation.";
+    in property <bool> pr-count-auto-update: false;
+    in property <bool> pr-count-loading: false;
+    in property <bool> pr-count-failed: false;
+    in property <string> pr-fat-count: "-";
+    in property <string> pr-uat-count: "-";
+    in property <string> pr-prod-count: "-";
     in property <bool> cd-running: false;
     in property <string> cd-summary: "No deployment started.";
     in property <string> cd-build-status: "pending";
@@ -198,6 +278,16 @@ export component Workflow inherits PageView {
                     }
                 }
             }
+
+            WorkflowPrOverview {
+                width: parent.width;
+                enabled: root.pr-count-auto-update;
+                loading: root.pr-count-loading;
+                failed: root.pr-count-failed;
+                fat-count: root.pr-fat-count;
+                uat-count: root.pr-uat-count;
+                prod-count: root.pr-prod-count;
+            }
         }
     }
 
@@ -291,6 +381,16 @@ export component Workflow inherits PageView {
                     vertical_alignment: center;
                 }
             }
+        }
+
+        WorkflowPrOverview {
+            width: parent.width;
+            enabled: root.pr-count-auto-update;
+            loading: root.pr-count-loading;
+            failed: root.pr-count-failed;
+            fat-count: root.pr-fat-count;
+            uat-count: root.pr-uat-count;
+            prod-count: root.pr-prod-count;
         }
     }
 

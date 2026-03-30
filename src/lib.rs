@@ -729,6 +729,43 @@ fn ui() -> Result<MainWindow> {
         log::info!("[Settings] Tracing logger active changed to: {}", enabled);
     });
 
+    // ========= Git Tokens ========= //
+    let app_weak_git_tokens = app.as_weak();
+    AppState::get(&app).on_save_git_tokens(move |github_token, gitlab_token, gitee_token| {
+        settings::save_git_platform_tokens(
+            github_token.as_str(),
+            gitlab_token.as_str(),
+            gitee_token.as_str(),
+        );
+        if let Some(win) = app_weak_git_tokens.upgrade() {
+            win.set_settings_git_tokens_saved(true);
+            let win_weak = win.as_weak();
+            Timer::single_shot(std::time::Duration::from_secs(2), move || {
+                if let Some(win) = win_weak.upgrade() {
+                    win.set_settings_git_tokens_saved(false);
+                }
+            });
+        }
+        log::info!(
+            "[Settings] Git tokens updated: github={}, gitlab={}, gitee={}",
+            if github_token.is_empty() {
+                "empty"
+            } else {
+                "set"
+            },
+            if gitlab_token.is_empty() {
+                "empty"
+            } else {
+                "set"
+            },
+            if gitee_token.is_empty() {
+                "empty"
+            } else {
+                "set"
+            }
+        );
+    });
+
     // ========= Navigation Drawer Expanded ========= //
     // Save navigation drawer expanded state when toggled
     app.on_toggle_navigation_drawer_expanded(move |expanded| {

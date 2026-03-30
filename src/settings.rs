@@ -28,6 +28,39 @@ pub struct AppSettings {
     /// Navigation drawer expanded state
     #[serde(default = "default_navigation_drawer_expanded")]
     pub navigation_drawer_expanded: bool,
+
+    /// Git platform credentials
+    #[serde(default)]
+    pub git: GitSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GitSettings {
+    #[serde(default)]
+    pub platform: GitPlatformSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GitPlatformSettings {
+    #[serde(default)]
+    pub github: GitTokenSettings,
+    #[serde(default)]
+    pub gitlab: GitTokenSettings,
+    #[serde(default)]
+    pub gitee: GitTokenSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GitTokenSettings {
+    #[serde(default)]
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct GitPlatformTokens {
+    pub github: String,
+    pub gitlab: String,
+    pub gitee: String,
 }
 
 fn default_theme_mode() -> i32 {
@@ -53,6 +86,7 @@ impl Default for AppSettings {
             auto_update: default_auto_update(),
             tracing_logger_active: default_tracing_logger_active(),
             navigation_drawer_expanded: default_navigation_drawer_expanded(),
+            git: GitSettings::default(),
         }
     }
 }
@@ -189,6 +223,15 @@ impl SettingsManager {
             settings.navigation_drawer_expanded = expanded;
         }
     }
+
+    /// Update git platform tokens
+    pub fn set_git_platform_tokens(&self, github: &str, gitlab: &str, gitee: &str) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.git.platform.github.token = github.trim().to_string();
+            settings.git.platform.gitlab.token = gitlab.trim().to_string();
+            settings.git.platform.gitee.token = gitee.trim().to_string();
+        }
+    }
 }
 
 // Global settings manager instance
@@ -241,10 +284,29 @@ pub fn save_navigation_drawer_expanded(expanded: bool) {
     });
 }
 
+/// Save git platform tokens asynchronously
+pub fn save_git_platform_tokens(github: &str, gitlab: &str, gitee: &str) {
+    get_settings_manager().set_git_platform_tokens(github, gitlab, gitee);
+    Timer::single_shot(std::time::Duration::from_millis(100), || {
+        if let Err(e) = get_settings_manager().save() {
+            log::error!("[Settings] Failed to save settings: {}", e);
+        }
+    });
+}
+
 /// Load settings from file (can be called before MainWindow is created)
 /// This is useful for setting app appearance before showing the window
 pub fn load_settings() -> AppSettings {
     get_settings_manager().get()
+}
+
+pub fn load_git_platform_tokens() -> GitPlatformTokens {
+    let settings = get_settings_manager().get();
+    GitPlatformTokens {
+        github: settings.git.platform.github.token.trim().to_string(),
+        gitlab: settings.git.platform.gitlab.token.trim().to_string(),
+        gitee: settings.git.platform.gitee.token.trim().to_string(),
+    }
 }
 
 /// Setup settings module - Apply loaded settings to AppState and MainWindow
@@ -257,15 +319,33 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app_state.set_theme_mode(settings.theme_mode);
     app_state.set_auto_update(settings.auto_update);
     app_state.set_tracing_logger_active(settings.tracing_logger_active);
+    app_state.set_git_github_token(settings.git.platform.github.token.clone().into());
+    app_state.set_git_gitlab_token(settings.git.platform.gitlab.token.clone().into());
+    app_state.set_git_gitee_token(settings.git.platform.gitee.token.clone().into());
 
     // Apply drawer expanded state to MainWindow
     app.set_navigation_drawer_expanded(settings.navigation_drawer_expanded);
 
     log::info!(
-        "[Settings] Applied settings: theme_mode={}, auto_update={}, tracing_logger_active={}, navigation_drawer_expanded={}",
+        "[Settings] Applied settings: theme_mode={}, auto_update={}, tracing_logger_active={}, navigation_drawer_expanded={}, git_tokens=({}/{}/{})",
         settings.theme_mode,
         settings.auto_update,
         settings.tracing_logger_active,
-        settings.navigation_drawer_expanded
+        settings.navigation_drawer_expanded,
+        if settings.git.platform.github.token.is_empty() {
+            "empty"
+        } else {
+            "set"
+        },
+        if settings.git.platform.gitlab.token.is_empty() {
+            "empty"
+        } else {
+            "set"
+        },
+        if settings.git.platform.gitee.token.is_empty() {
+            "empty"
+        } else {
+            "set"
+        },
     );
 }

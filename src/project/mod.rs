@@ -1,3 +1,6 @@
+pub(crate) mod pr_stats;
+
+use crate::project::pr_stats::{PullRequestStateFilter, fetch_standard_environment_pr_counts};
 use crate::{MainWindow, ProjectItem, ToastManager, ToastOptions};
 use base64::Engine as _;
 use directories::ProjectDirs;
@@ -19,17 +22,32 @@ struct ProjectConfig {
     logo: String,
     #[serde(default)]
     project_tags: Vec<String>,
+    #[serde(default)]
+    is_pr_auto_update: bool,
+    #[serde(skip, default)]
+    pr_overview: ProjectPrOverview,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ProjectPrOverview {
+    loading: bool,
+    failed: bool,
+    fat_display: String,
+    uat_display: String,
+    prod_display: String,
 }
 
 pub fn setup_project(ui: &MainWindow) {
     let projects = load_projects();
     let state = Arc::new(Mutex::new(projects));
     let pending_remote_logos = Arc::new(Mutex::new(HashSet::<String>::new()));
+    let pending_pr_overview = Arc::new(Mutex::new(HashSet::<String>::new()));
 
     refresh_project_items(
         ui,
         &state,
         &pending_remote_logos,
+        &pending_pr_overview,
         &ui.get_project_search_query(),
     );
     ui.set_project_logo_preview_image(resolve_project_logo_image(""));
@@ -47,8 +65,9 @@ pub fn setup_project(ui: &MainWindow) {
     let ui_weak = ui.as_weak();
     let state_add = state.clone();
     let pending_remote_logos_add = pending_remote_logos.clone();
+    let pending_pr_overview_add = pending_pr_overview.clone();
     ui.on_project_add_project(
-        move |name, alias, local_repo, remote_repo, logo, project_tags| {
+        move |name, alias, local_repo, remote_repo, logo, project_tags, is_pr_auto_update| {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
@@ -95,6 +114,8 @@ pub fn setup_project(ui: &MainWindow) {
                 remote_repo: remote_repo.to_string(),
                 logo,
                 project_tags,
+                is_pr_auto_update,
+                pr_overview: ProjectPrOverview::default(),
             });
 
             if let Err(err) = write_projects(&guard) {
@@ -103,14 +124,14 @@ pub fn setup_project(ui: &MainWindow) {
                 return;
             }
 
+            drop(guard);
             let query = ui.get_project_search_query();
-            let (ui_items, remote_urls) = prepare_project_items(&guard, &query);
-            ui.set_project_items(ModelRc::new(VecModel::from(ui_items)));
-            prefetch_remote_logos(
-                ui.as_weak(),
-                state_add.clone(),
-                pending_remote_logos_add.clone(),
-                remote_urls,
+            refresh_project_items(
+                &ui,
+                &state_add,
+                &pending_remote_logos_add,
+                &pending_pr_overview_add,
+                &query,
             );
             show_success(&ui, "Project added.");
         },
@@ -119,8 +140,16 @@ pub fn setup_project(ui: &MainWindow) {
     let ui_weak = ui.as_weak();
     let state_update = state.clone();
     let pending_remote_logos_update = pending_remote_logos.clone();
+    let pending_pr_overview_update = pending_pr_overview.clone();
     ui.on_project_update_project(
-        move |original_alias, name, alias, local_repo, remote_repo, logo, project_tags| {
+        move |original_alias,
+              name,
+              alias,
+              local_repo,
+              remote_repo,
+              logo,
+              project_tags,
+              is_pr_auto_update| {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
@@ -180,6 +209,8 @@ pub fn setup_project(ui: &MainWindow) {
                 remote_repo: remote_repo.to_string(),
                 logo,
                 project_tags,
+                is_pr_auto_update,
+                pr_overview: ProjectPrOverview::default(),
             };
 
             if let Err(err) = write_projects(&guard) {
@@ -187,14 +218,14 @@ pub fn setup_project(ui: &MainWindow) {
                 return;
             }
 
+            drop(guard);
             let query = ui.get_project_search_query();
-            let (ui_items, remote_urls) = prepare_project_items(&guard, &query);
-            ui.set_project_items(ModelRc::new(VecModel::from(ui_items)));
-            prefetch_remote_logos(
-                ui.as_weak(),
-                state_update.clone(),
-                pending_remote_logos_update.clone(),
-                remote_urls,
+            refresh_project_items(
+                &ui,
+                &state_update,
+                &pending_remote_logos_update,
+                &pending_pr_overview_update,
+                &query,
             );
             show_success(&ui, "Project updated.");
         },
@@ -203,6 +234,7 @@ pub fn setup_project(ui: &MainWindow) {
     let ui_weak = ui.as_weak();
     let state_delete = state.clone();
     let pending_remote_logos_delete = pending_remote_logos.clone();
+    let pending_pr_overview_delete = pending_pr_overview.clone();
     ui.on_project_delete_project(move |alias| {
         let Some(ui) = ui_weak.upgrade() else {
             return;
@@ -235,14 +267,14 @@ pub fn setup_project(ui: &MainWindow) {
             return;
         }
 
+        drop(guard);
         let query = ui.get_project_search_query();
-        let (ui_items, remote_urls) = prepare_project_items(&guard, &query);
-        ui.set_project_items(ModelRc::new(VecModel::from(ui_items)));
-        prefetch_remote_logos(
-            ui.as_weak(),
-            state_delete.clone(),
-            pending_remote_logos_delete.clone(),
-            remote_urls,
+        refresh_project_items(
+            &ui,
+            &state_delete,
+            &pending_remote_logos_delete,
+            &pending_pr_overview_delete,
+            &query,
         );
         show_success(&ui, "Project deleted.");
     });
@@ -250,29 +282,25 @@ pub fn setup_project(ui: &MainWindow) {
     let ui_weak = ui.as_weak();
     let state_search = state.clone();
     let pending_remote_logos_search = pending_remote_logos.clone();
+    let pending_pr_overview_search = pending_pr_overview.clone();
     ui.on_project_search_projects(move |query| {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
 
-        let Ok(guard) = state_search.lock() else {
-            show_error(&ui, "Failed to search projects.");
-            return;
-        };
-
-        let (ui_items, remote_urls) = prepare_project_items(&guard, &query);
-        ui.set_project_items(ModelRc::new(VecModel::from(ui_items)));
-        prefetch_remote_logos(
-            ui.as_weak(),
-            state_search.clone(),
-            pending_remote_logos_search.clone(),
-            remote_urls,
+        refresh_project_items(
+            &ui,
+            &state_search,
+            &pending_remote_logos_search,
+            &pending_pr_overview_search,
+            &query,
         );
     });
 
     let ui_weak = ui.as_weak();
     let state_reload = state.clone();
     let pending_remote_logos_reload = pending_remote_logos.clone();
+    let pending_pr_overview_reload = pending_pr_overview.clone();
     ui.on_project_reload_projects(move || {
         let Some(ui) = ui_weak.upgrade() else {
             return;
@@ -290,14 +318,14 @@ pub fn setup_project(ui: &MainWindow) {
         };
 
         *guard = list;
+        drop(guard);
         let query = ui.get_project_search_query();
-        let (ui_items, remote_urls) = prepare_project_items(&guard, &query);
-        ui.set_project_items(ModelRc::new(VecModel::from(ui_items)));
-        prefetch_remote_logos(
-            ui.as_weak(),
-            state_reload.clone(),
-            pending_remote_logos_reload.clone(),
-            remote_urls,
+        refresh_project_items(
+            &ui,
+            &state_reload,
+            &pending_remote_logos_reload,
+            &pending_pr_overview_reload,
+            &query,
         );
         show_success(&ui, "Projects reloaded.");
     });
@@ -355,11 +383,13 @@ fn refresh_project_items(
     ui: &MainWindow,
     state: &Arc<Mutex<Vec<ProjectConfig>>>,
     pending_remote_logos: &Arc<Mutex<HashSet<String>>>,
+    pending_pr_overview: &Arc<Mutex<HashSet<String>>>,
     query: &str,
 ) {
-    let Ok(guard) = state.lock() else {
+    let Ok(mut guard) = state.lock() else {
         return;
     };
+    let pr_tasks = collect_pr_overview_tasks(&mut guard, query);
     let (ui_items, remote_urls) = prepare_project_items(&guard, query);
     drop(guard);
     ui.set_project_items(ModelRc::new(VecModel::from(ui_items)));
@@ -367,7 +397,15 @@ fn refresh_project_items(
         ui.as_weak(),
         state.clone(),
         pending_remote_logos.clone(),
+        pending_pr_overview.clone(),
         remote_urls,
+    );
+    prefetch_project_pr_overview(
+        ui.as_weak(),
+        state.clone(),
+        pending_remote_logos.clone(),
+        pending_pr_overview.clone(),
+        pr_tasks,
     );
 }
 
@@ -393,6 +431,24 @@ fn to_ui_items_filtered(items: &[ProjectConfig], query: &str) -> Vec<ProjectItem
                 remote_repo: item.remote_repo.into(),
                 logo: logo.clone().into(),
                 logo_image: resolve_project_logo_image(logo.as_str()),
+                is_pr_auto_update: item.is_pr_auto_update,
+                pr_count_loading: item.pr_overview.loading,
+                pr_count_failed: item.pr_overview.failed,
+                pr_fat_count_text: pr_count_display(
+                    &item.pr_overview.fat_display,
+                    item.pr_overview.failed,
+                )
+                .into(),
+                pr_uat_count_text: pr_count_display(
+                    &item.pr_overview.uat_display,
+                    item.pr_overview.failed,
+                )
+                .into(),
+                pr_prod_count_text: pr_count_display(
+                    &item.pr_overview.prod_display,
+                    item.pr_overview.failed,
+                )
+                .into(),
                 project_tags_text: item.project_tags.join(", ").into(),
                 project_tags: ModelRc::new(VecModel::from(
                     item.project_tags
@@ -427,6 +483,54 @@ fn matches_query(item: &ProjectConfig, needle: &str) -> bool {
     let name = item.project_name.to_lowercase();
     let alias = item.project_alias.to_lowercase();
     name.contains(needle) || alias.contains(needle)
+}
+
+fn pr_count_display(value: &str, failed: bool) -> &str {
+    if failed {
+        "unknown"
+    } else if value.is_empty() {
+        "-"
+    } else {
+        value
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ProjectPrOverviewTask {
+    project_alias: String,
+    remote_repo: String,
+}
+
+fn collect_pr_overview_tasks(
+    items: &mut [ProjectConfig],
+    query: &str,
+) -> Vec<ProjectPrOverviewTask> {
+    let needle = query.trim().to_lowercase();
+    let mut tasks = Vec::new();
+
+    for item in items.iter_mut().filter(|item| matches_query(item, &needle)) {
+        if !item.is_pr_auto_update || item.pr_overview.loading || item.pr_overview.failed {
+            continue;
+        }
+        if !item.pr_overview.fat_display.is_empty()
+            && !item.pr_overview.uat_display.is_empty()
+            && !item.pr_overview.prod_display.is_empty()
+        {
+            continue;
+        }
+
+        item.pr_overview.loading = true;
+        item.pr_overview.failed = false;
+        item.pr_overview.fat_display = "-".to_string();
+        item.pr_overview.uat_display = "-".to_string();
+        item.pr_overview.prod_display = "-".to_string();
+        tasks.push(ProjectPrOverviewTask {
+            project_alias: item.project_alias.clone(),
+            remote_repo: item.remote_repo.clone(),
+        });
+    }
+
+    tasks
 }
 
 pub(crate) fn normalize_project_logo(value: &str) -> String {
@@ -654,6 +758,7 @@ fn prefetch_remote_logos(
     ui_weak: slint::Weak<MainWindow>,
     state: Arc<Mutex<Vec<ProjectConfig>>>,
     pending_remote_logos: Arc<Mutex<HashSet<String>>>,
+    pending_pr_overview: Arc<Mutex<HashSet<String>>>,
     remote_urls: Vec<String>,
 ) {
     for url in remote_urls {
@@ -671,10 +776,11 @@ fn prefetch_remote_logos(
 
         let ui_weak_task = ui_weak.clone();
         let state_task = state.clone();
-        let pending_task = pending_remote_logos.clone();
+        let pending_logo_task = pending_remote_logos.clone();
+        let pending_pr_task = pending_pr_overview.clone();
         std::thread::spawn(move || {
             let downloaded = download_remote_logo_to_cache(url.as_str()).is_some();
-            if let Ok(mut guard) = pending_task.lock() {
+            if let Ok(mut guard) = pending_logo_task.lock() {
                 guard.remove(url.as_str());
             }
             if !downloaded {
@@ -686,7 +792,83 @@ fn prefetch_remote_logos(
                     return;
                 };
                 let query = ui.get_project_search_query();
-                refresh_project_items(&ui, &state_task, &pending_task, &query);
+                refresh_project_items(
+                    &ui,
+                    &state_task,
+                    &pending_logo_task,
+                    &pending_pr_task,
+                    &query,
+                );
+            });
+        });
+    }
+}
+
+fn prefetch_project_pr_overview(
+    ui_weak: slint::Weak<MainWindow>,
+    state: Arc<Mutex<Vec<ProjectConfig>>>,
+    pending_remote_logos: Arc<Mutex<HashSet<String>>>,
+    pending_pr_overview: Arc<Mutex<HashSet<String>>>,
+    tasks: Vec<ProjectPrOverviewTask>,
+) {
+    for task in tasks {
+        let mut should_spawn = false;
+        if let Ok(mut guard) = pending_pr_overview.lock() {
+            should_spawn = guard.insert(task.project_alias.clone());
+        }
+        if !should_spawn {
+            continue;
+        }
+
+        let ui_weak_task = ui_weak.clone();
+        let state_task = state.clone();
+        let pending_logo_task = pending_remote_logos.clone();
+        let pending_task = pending_pr_overview.clone();
+        std::thread::spawn(move || {
+            let result = fetch_standard_environment_pr_counts(
+                &task.remote_repo,
+                PullRequestStateFilter::Open,
+                None,
+            );
+
+            if let Ok(mut guard) = state_task.lock() {
+                if let Some(item) = guard
+                    .iter_mut()
+                    .find(|item| item.project_alias == task.project_alias)
+                {
+                    item.pr_overview.loading = false;
+                    match result {
+                        Ok(counts) => {
+                            item.pr_overview.failed = false;
+                            item.pr_overview.fat_display = counts.fat.to_string();
+                            item.pr_overview.uat_display = counts.uat.to_string();
+                            item.pr_overview.prod_display = counts.prod.to_string();
+                        }
+                        Err(error) => {
+                            log::warn!(
+                                "[Project] Failed to load PR overview for '{}': {}",
+                                task.project_alias,
+                                error
+                            );
+                            item.pr_overview.failed = true;
+                            item.pr_overview.fat_display.clear();
+                            item.pr_overview.uat_display.clear();
+                            item.pr_overview.prod_display.clear();
+                        }
+                    }
+                }
+            }
+
+            if let Ok(mut guard) = pending_task.lock() {
+                guard.remove(task.project_alias.as_str());
+            }
+
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = ui_weak_task.upgrade() else {
+                    return;
+                };
+                let query = ui.get_project_search_query();
+                refresh_project_items(&ui, &state_task, &pending_logo_task, &pending_task, &query);
             });
         });
     }

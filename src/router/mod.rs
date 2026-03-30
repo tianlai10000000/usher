@@ -84,6 +84,15 @@ impl Router {
             // Proactively drop large workflow logs/details when leaving the workflow page.
             // This reduces resident memory after visiting Tag/CD tabs (git command logs can be large).
             if previous == Route::Workflow && route != Route::Workflow {
+                crate::workflow::state::clear_current_project_heavy_state();
+                win.set_workflow_project_logo("".into());
+                win.set_workflow_project_logo_image(crate::project::resolve_project_logo_image(""));
+                win.set_workflow_pr_count_auto_update(false);
+                win.set_workflow_pr_count_loading(false);
+                win.set_workflow_pr_count_failed(false);
+                win.set_workflow_pr_fat_count("".into());
+                win.set_workflow_pr_uat_count("".into());
+                win.set_workflow_pr_prod_count("".into());
                 win.set_workflow_tag_result("".into());
                 win.set_workflow_tag_steps(ModelRc::new(VecModel::from(Vec::new())));
                 win.set_workflow_cd_summary("".into());

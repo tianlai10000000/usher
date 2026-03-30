@@ -139,16 +139,24 @@ export component MainWindow inherits Window {
     in-out property <string> project-new-remote-repo: "";
     in-out property <string> project-new-logo: "";
     in-out property <string> project-new-tags: "";
+    in-out property <bool> project-new-pr-auto-update: false;
     in property <image> project-logo-preview-image: @image-url("../logo.png");
     in property <string> project-logo-preview-status: "Using app default logo";
     in-out property <string> project-add-error: "";
     in-out property <string> project-modal-mode: "add";
     in-out property <string> project-modal-original-alias: "";
     in-out property <string> project-search-query: "";
+    in-out property <bool> settings-git-tokens-saved: false;
     in property <bool> platform-is-macos: false;
     in property <string> workflow-pr-ai-decision: "Awaiting analysis";
     in property <string> workflow-pr-ai-summary: "Run AI analysis to get a recommendation.";
     in property <string> workflow-pr-manual-status: "Waiting for human confirmation.";
+    in property <bool> workflow-pr-count-auto-update: false;
+    in property <bool> workflow-pr-count-loading: false;
+    in property <bool> workflow-pr-count-failed: false;
+    in property <string> workflow-pr-fat-count: "-";
+    in property <string> workflow-pr-uat-count: "-";
+    in property <string> workflow-pr-prod-count: "-";
     in property <bool> workflow-cd-running: false;
     in property <string> workflow-cd-summary: "No deployment started.";
     in property <string> workflow-cd-build-status: "pending";
@@ -171,10 +179,10 @@ export component MainWindow inherits Window {
     callback workflow-pr-confirm(bool);
     callback workflow-cd-start(string, string, string);
     callback workflow-cd-rollback(string);
-    callback workflow-open-project(string, string, string, string, string, image);
-    callback project-add-project(string, string, string, string, string, string);
+    callback workflow-open-project(string, string, string, string, string, image, bool);
+    callback project-add-project(string, string, string, string, string, string, bool);
     callback project-preview-logo(string);
-    callback project-update-project(string, string, string, string, string, string, string);
+    callback project-update-project(string, string, string, string, string, string, string, bool);
     callback project-delete-project(string);
     callback project-search-projects(string);
     callback project-reload-projects();
@@ -333,6 +341,10 @@ export component MainWindow inherits Window {
                             viewport-height: page-scroll-view.visible-height - 2px;
                         }
                         if root.current-route == Route.Settings: SettingsPage {
+                            // width: page-scroll-view.visible_width;
+                            viewport-height: page-scroll-view.visible-height - 2px;
+                            // viewport-width: page-scroll-view.visible_width;
+                            git-tokens-saved <=> root.settings-git-tokens-saved;
                             check-update => {
                                 root.check-update();
                             }
@@ -382,6 +394,12 @@ export component MainWindow inherits Window {
                             pr-ai-decision: root.workflow-pr-ai-decision;
                             pr-ai-summary: root.workflow-pr-ai-summary;
                             pr-manual-status: root.workflow-pr-manual-status;
+                            pr-count-auto-update: root.workflow-pr-count-auto-update;
+                            pr-count-loading: root.workflow-pr-count-loading;
+                            pr-count-failed: root.workflow-pr-count-failed;
+                            pr-fat-count: root.workflow-pr-fat-count;
+                            pr-uat-count: root.workflow-pr-uat-count;
+                            pr-prod-count: root.workflow-pr-prod-count;
                             cd-running: root.workflow-cd-running;
                             cd-summary: root.workflow-cd-summary;
                             cd-build-status: root.workflow-cd-build-status;
@@ -452,11 +470,11 @@ export component MainWindow inherits Window {
                             add-error <=> root.project-add-error;
                             modal-mode <=> root.project-modal-mode;
                             modal-original-alias <=> root.project-modal-original-alias;
-                            open-project(project-name, project-alias, local-repo, remote-repo, logo, logo-image) => {
-                                root.workflow-open-project(project-name, project-alias, local-repo, remote-repo, logo, logo-image);
+                            open-project(project-name, project-alias, local-repo, remote-repo, logo, logo-image, is-pr-auto-update) => {
+                                root.workflow-open-project(project-name, project-alias, local-repo, remote-repo, logo, logo-image, is-pr-auto-update);
                             }
-                            add-project(project-name, project-alias, local-repo, remote-repo, logo, project-tags) => {
-                                root.project-add-project(project-name, project-alias, local-repo, remote-repo, logo, project-tags);
+                            add-project(project-name, project-alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update) => {
+                                root.project-add-project(project-name, project-alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update);
                             }
                             preview-logo(logo) => {
                                 root.project-preview-logo(logo);
@@ -551,17 +569,18 @@ export component MainWindow inherits Window {
         remote-repo <=> root.project-new-remote-repo;
         logo <=> root.project-new-logo;
         project-tags <=> root.project-new-tags;
+        is-pr-auto-update <=> root.project-new-pr-auto-update;
         logo-preview-image: root.project-logo-preview-image;
         logo-preview-status: root.project-logo-preview-status;
         error-text <=> root.project-add-error;
         preview-logo(logo) => {
             root.project-preview-logo(logo);
         }
-        submit(name, alias, local-repo, remote-repo, logo, project-tags) => {
+        submit(name, alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update) => {
             if root.project-modal-mode == "edit" {
-                root.project-update-project(root.project-modal-original-alias, name, alias, local-repo, remote-repo, logo, project-tags);
+                root.project-update-project(root.project-modal-original-alias, name, alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update);
             } else {
-                root.project-add-project(name, alias, local-repo, remote-repo, logo, project-tags);
+                root.project-add-project(name, alias, local-repo, remote-repo, logo, project-tags, is-pr-auto-update);
             }
             root.project-show-add-modal = false;
             root.project-modal-mode = "add";
@@ -580,6 +599,7 @@ export component MainWindow inherits Window {
             root.project-new-remote-repo = "";
             root.project-new-logo = "";
             root.project-new-tags = "";
+            root.project-new-pr-auto-update = false;
             root.project-preview-logo("");
             root.project-add-error = "";
             root.project-show-add-modal = false;

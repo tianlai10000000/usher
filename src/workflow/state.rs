@@ -2,9 +2,11 @@ use crate::workflow::cd::{CdSnapshot, apply_cd_snapshot, default_cd_snapshot};
 use crate::{MainWindow, StepItem};
 use slint::{ModelRc, VecModel};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub(crate) type SharedWorkflowState = Arc<Mutex<WorkflowStore>>;
+
+static WORKFLOW_SHARED_STATE: OnceLock<SharedWorkflowState> = OnceLock::new();
 
 #[derive(Debug, Default)]
 pub(crate) struct WorkflowStore {
@@ -14,14 +16,15 @@ pub(crate) struct WorkflowStore {
 }
 
 impl WorkflowStore {
-    pub(crate) fn current_state(&self) -> WorkflowViewState {
+    pub(crate) fn current_state_ref(&self) -> &WorkflowViewState {
+        static DEFAULT_VIEW: std::sync::LazyLock<WorkflowViewState> =
+            std::sync::LazyLock::new(WorkflowViewState::default);
         self.projects
             .get(&self.current_project.id)
-            .cloned()
-            .unwrap_or_default()
+            .unwrap_or(&DEFAULT_VIEW)
     }
 
-    pub(crate) fn upsert_current<F>(&mut self, updater: F) -> WorkflowViewState
+    pub(crate) fn upsert_current<F>(&mut self, updater: F)
     where
         F: FnOnce(&mut WorkflowViewState),
     {
@@ -30,15 +33,27 @@ impl WorkflowStore {
             .entry(self.current_project.id.clone())
             .or_default();
         updater(entry);
-        entry.clone()
+    }
+
+    pub(crate) fn with_current<R, F>(&self, reader: F) -> R
+    where
+        F: FnOnce(&WorkflowProjectContext, &WorkflowViewState) -> R,
+    {
+        static DEFAULT_VIEW: std::sync::LazyLock<WorkflowViewState> =
+            std::sync::LazyLock::new(WorkflowViewState::default);
+        let view = self
+            .projects
+            .get(&self.current_project.id)
+            .unwrap_or(&DEFAULT_VIEW);
+        reader(&self.current_project, view)
     }
 
     pub(crate) fn set_project(&mut self, context: WorkflowProjectContext) -> WorkflowViewState {
         self.current_project = context;
+        let current_id = self.current_project.id.clone();
         self.projects
-            .entry(self.current_project.id.clone())
-            .or_default()
-            .clone()
+            .retain(|id, _| id == "default" || id == &current_id);
+        self.projects.entry(current_id).or_default().clone()
     }
 }
 
@@ -76,6 +91,10 @@ pub(crate) struct WorkflowViewState {
     pub(crate) tag_remove_target: String,
     pub(crate) tag_add_initializing: bool,
     pub(crate) tag_remove_initializing: bool,
+    pub(crate) tag_add_ready: bool,
+    pub(crate) tag_remove_ready: bool,
+    pub(crate) tag_add_request_seq: u64,
+    pub(crate) tag_remove_request_seq: u64,
     pub(crate) tag_running: bool,
     pub(crate) tag_steps: Vec<StepItem>,
     pub(crate) pr_ai_decision: String,
@@ -97,6 +116,10 @@ impl Default for WorkflowViewState {
             tag_remove_target: "v0.0.0".to_string(),
             tag_add_initializing: false,
             tag_remove_initializing: false,
+            tag_add_ready: false,
+            tag_remove_ready: false,
+            tag_add_request_seq: 0,
+            tag_remove_request_seq: 0,
             tag_running: false,
             tag_steps: default_tag_steps(),
             pr_ai_decision: "Awaiting analysis".to_string(),
@@ -121,18 +144,45 @@ pub(crate) fn new_shared_state() -> SharedWorkflowState {
     Arc::new(Mutex::new(initial_store))
 }
 
+pub(crate) fn register_shared_state(shared_state: &SharedWorkflowState) {
+    let _ = WORKFLOW_SHARED_STATE.set(shared_state.clone());
+}
+
+pub(crate) fn clear_current_project_heavy_state() {
+    let Some(shared_state) = WORKFLOW_SHARED_STATE.get() else {
+        return;
+    };
+
+    let Ok(mut guard) = shared_state.lock() else {
+        return;
+    };
+
+    guard.upsert_current(|view| {
+        view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+        view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
+        for step in &mut view.tag_steps {
+            step.log = "".into();
+        }
+        view.cd.summary = "Workflow state cleared after leaving the page.".to_string();
+        view.cd.build_detail =
+            "Re-open Workflow to inspect the latest CD step details.".to_string();
+        view.cd.test_detail = "Re-open Workflow to inspect the latest CD step details.".to_string();
+        view.cd.deploy_detail =
+            "Re-open Workflow to inspect the latest CD step details.".to_string();
+        view.cd.verify_detail =
+            "Re-open Workflow to inspect the latest CD step details.".to_string();
+    });
+}
+
 pub(crate) fn initialize_current_ui(ui: &MainWindow, shared_state: &SharedWorkflowState) {
-    let snapshot = shared_state
-        .lock()
-        .ok()
-        .map(|guard| (guard.current_project.clone(), guard.current_state()))
-        .unwrap_or_else(|| {
-            (
-                WorkflowProjectContext::default(),
-                WorkflowViewState::default(),
-            )
-        });
-    initialize_ui(ui, &snapshot.0, &snapshot.1);
+    let Ok(guard) = shared_state.lock() else {
+        let ctx = WorkflowProjectContext::default();
+        let st = WorkflowViewState::default();
+        initialize_ui(ui, &ctx, &st);
+        return;
+    };
+    let state = guard.current_state_ref();
+    initialize_ui(ui, &guard.current_project, state);
 }
 
 pub(crate) fn initialize_ui(

@@ -122,7 +122,7 @@ pub(crate) fn bind_pr(ui: &MainWindow, shared_state: SharedWorkflowState) {
         let ai_decision = state_confirm
             .lock()
             .ok()
-            .map(|guard| guard.current_state().last_pr_decision)
+            .map(|guard| guard.with_current(|_, view| view.last_pr_decision.clone()))
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "No AI recommendation yet".to_string());
         let status = confirm_pr(approved, &ai_decision);

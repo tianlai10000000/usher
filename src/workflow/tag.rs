@@ -84,6 +84,10 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 view.tag_running = false;
                 view.tag_add_initializing = false;
                 view.tag_remove_initializing = false;
+                view.tag_add_ready = false;
+                view.tag_remove_ready = false;
+                view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+                view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
                 view.tag_steps = default_tag_steps();
             });
             log::info!(
@@ -133,17 +137,22 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             return;
         };
 
-        let (project_id, project_name, local_repo, mode, bump_mode) = state_add
+        let (project_id, project_name, local_repo, mode, bump_mode, add_ready, add_initializing, running) = state_add
             .lock()
             .ok()
             .map(|guard| {
-                (
-                    guard.current_project.id.clone(),
-                    guard.current_project.name.clone(),
-                    guard.current_project.local_repo.clone(),
-                    guard.current_state().tag_mode,
-                    guard.current_state().tag_version_mode,
-                )
+                guard.with_current(|ctx, view| {
+                    (
+                        ctx.id.clone(),
+                        ctx.name.clone(),
+                        ctx.local_repo.clone(),
+                        view.tag_mode.clone(),
+                        view.tag_version_mode.clone(),
+                        view.tag_add_ready,
+                        view.tag_add_initializing,
+                        view.tag_running,
+                    )
+                })
             })
             .unwrap_or_else(|| {
                 (
@@ -152,14 +161,25 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     String::new(),
                     TAG_MODE_LOCAL.to_string(),
                     TAG_BUMP_PATCH.to_string(),
+                    false,
+                    false,
+                    false,
                 )
             });
+
+        if mode == TAG_MODE_LOCAL && add_ready && !add_initializing && !running {
+            log::debug!("[Workflow][Tag] open add tab reused cached initialization for '{}'", project_id);
+            initialize_current_ui(&ui, &state_add);
+            return;
+        }
 
         if mode == TAG_MODE_REMOTE {
             if let Ok(mut guard) = state_add.lock() {
                 guard.upsert_current(|view| {
+                    view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
                     view.tag_result = "Remote mode is TODO in this iteration.".to_string();
                     view.tag_add_initializing = false;
+                    view.tag_add_ready = false;
                     view.tag_steps = default_tag_steps();
                 });
             }
@@ -167,16 +187,23 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             return;
         }
 
-        if let Ok(mut guard) = state_add.lock() {
+        let request_seq = if let Ok(mut guard) = state_add.lock() {
+            let mut request_seq = 0;
             guard.upsert_current(|view| {
+                view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+                request_seq = view.tag_add_request_seq;
                 view.tag_add_initializing = true;
+                view.tag_add_ready = false;
                 view.tag_result = format!(
                     "Loading latest local tag for add workflow in project '{}'.",
                     project_name
                 );
                 view.tag_steps = default_tag_steps();
             });
-        }
+            request_seq
+        } else {
+            0
+        };
         initialize_current_ui(&ui, &state_add);
 
         let ui_weak_task = ui_weak.clone();
@@ -200,6 +227,9 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     if let Ok(mut guard) = state_task.lock() {
                         let current_project_id = guard.current_project.id.clone();
                         let entry = guard.projects.entry(project_id.clone()).or_default();
+                        if entry.tag_add_request_seq != request_seq {
+                            return;
+                        }
                         match resolved {
                             Ok(latest_tag) => {
                                 log::info!(
@@ -210,6 +240,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_next_version = next_semver_for_mode(&latest_tag, &bump_mode);
                                 entry.tag_remove_target = latest_tag.clone();
                                 entry.tag_add_initializing = false;
+                                entry.tag_add_ready = true;
                                 entry.tag_result = format!(
                                     "Local mode ready. Current latest tag is '{}', next {} version prepared.",
                                     latest_tag, bump_mode
@@ -221,6 +252,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_next_version = next_semver_for_mode("v0.0.0", &bump_mode);
                                 entry.tag_remove_target = "v0.0.0".to_string();
                                 entry.tag_add_initializing = false;
+                                entry.tag_add_ready = false;
                                 entry.tag_result = error;
                             }
                         }
@@ -244,16 +276,21 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             return;
         };
 
-        let (project_id, project_name, local_repo, mode) = state_open_remove
+        let (project_id, project_name, local_repo, mode, remove_ready, remove_initializing, running) = state_open_remove
             .lock()
             .ok()
             .map(|guard| {
-                (
-                    guard.current_project.id.clone(),
-                    guard.current_project.name.clone(),
-                    guard.current_project.local_repo.clone(),
-                    guard.current_state().tag_mode,
-                )
+                guard.with_current(|ctx, view| {
+                    (
+                        ctx.id.clone(),
+                        ctx.name.clone(),
+                        ctx.local_repo.clone(),
+                        view.tag_mode.clone(),
+                        view.tag_remove_ready,
+                        view.tag_remove_initializing,
+                        view.tag_running,
+                    )
+                })
             })
             .unwrap_or_else(|| {
                 (
@@ -261,14 +298,25 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     "Default Project".to_string(),
                     String::new(),
                     TAG_MODE_LOCAL.to_string(),
+                    false,
+                    false,
+                    false,
                 )
             });
+
+        if mode == TAG_MODE_LOCAL && remove_ready && !remove_initializing && !running {
+            log::debug!("[Workflow][Tag] open remove tab reused cached initialization for '{}'", project_id);
+            initialize_current_ui(&ui, &state_open_remove);
+            return;
+        }
 
         if mode == TAG_MODE_REMOTE {
             if let Ok(mut guard) = state_open_remove.lock() {
                 guard.upsert_current(|view| {
+                    view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
                     view.tag_result = "Remote mode is TODO in this iteration.".to_string();
                     view.tag_remove_initializing = false;
+                    view.tag_remove_ready = false;
                     view.tag_remove_target = "TODO".to_string();
                     view.tag_steps = default_remove_tag_steps();
                 });
@@ -277,17 +325,24 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             return;
         }
 
-        if let Ok(mut guard) = state_open_remove.lock() {
+        let request_seq = if let Ok(mut guard) = state_open_remove.lock() {
+            let mut request_seq = 0;
             guard.upsert_current(|view| {
+                view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
+                request_seq = view.tag_remove_request_seq;
                 view.tag_add_initializing = false;
                 view.tag_remove_initializing = true;
+                view.tag_remove_ready = false;
                 view.tag_result = format!(
                     "Loading latest remote tag for remove workflow in project '{}'.",
                     project_name
                 );
                 view.tag_steps = default_remove_tag_steps();
             });
-        }
+            request_seq
+        } else {
+            0
+        };
         initialize_current_ui(&ui, &state_open_remove);
 
         let ui_weak_task = ui_weak.clone();
@@ -311,6 +366,9 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     if let Ok(mut guard) = state_task.lock() {
                         let current_project_id = guard.current_project.id.clone();
                         let entry = guard.projects.entry(project_id.clone()).or_default();
+                        if entry.tag_remove_request_seq != request_seq {
+                            return;
+                        }
                         match resolved {
                             Ok((latest_tag, lookup_log)) => {
                                 log::info!(
@@ -320,6 +378,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_remove_target = latest_tag.clone();
                                 entry.tag_add_initializing = false;
                                 entry.tag_remove_initializing = false;
+                                entry.tag_remove_ready = true;
                                 entry.tag_result = format!(
                                     "Remove mode ready. Latest remote tag is '{}'.",
                                     latest_tag
@@ -341,6 +400,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_remove_target = "v0.0.0".to_string();
                                 entry.tag_add_initializing = false;
                                 entry.tag_remove_initializing = false;
+                                entry.tag_remove_ready = false;
                                 entry.tag_result = error;
                             }
                         }
@@ -372,14 +432,16 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             .lock()
             .ok()
             .map(|guard| {
-                (
-                    guard.current_project.name.clone(),
-                    guard.current_project.local_repo.clone(),
-                    guard.current_state().tag_mode,
-                    guard.current_state().tag_version_mode,
-                    guard.current_state().tag_running,
-                    guard.current_state().tag_add_initializing,
-                )
+                guard.with_current(|ctx, view| {
+                    (
+                        ctx.name.clone(),
+                        ctx.local_repo.clone(),
+                        view.tag_mode.clone(),
+                        view.tag_version_mode.clone(),
+                        view.tag_running,
+                        view.tag_add_initializing,
+                    )
+                })
             })
             .unwrap_or_else(|| {
                 (
@@ -417,6 +479,10 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 guard.upsert_current(|view| {
                     view.tag_result = "Remote mode is TODO in this iteration.".to_string();
                     view.tag_running = false;
+                    view.tag_add_ready = false;
+                    view.tag_remove_ready = false;
+                    view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+                    view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
                     view.tag_steps = default_tag_steps();
                 });
             } else {
@@ -454,6 +520,10 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             guard.upsert_current(|view| {
                 view.tag_running = true;
                 view.tag_add_initializing = false;
+                view.tag_add_ready = false;
+                view.tag_remove_ready = false;
+                view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+                view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
                 view.tag_result = format!(
                     "Running local tag workflow for project '{}' in {} mode.",
                     project_name, mode
@@ -551,10 +621,15 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                     success.current_version.clone();
                                 guard.projects.entry(project_id.clone()).or_default().tag_next_version =
                                     next_semver_for_mode(&success.current_version, &bump_mode);
+                                guard.projects.entry(project_id.clone()).or_default().tag_remove_target =
+                                    success.current_version.clone();
+                                guard.projects.entry(project_id.clone()).or_default().tag_add_ready = false;
+                                guard.projects.entry(project_id.clone()).or_default().tag_remove_ready = false;
                                 guard.projects.entry(project_id.clone()).or_default().tag_steps =
                                     success.steps.clone();
                             }
                             Err(ref failure) => {
+                                guard.projects.entry(project_id.clone()).or_default().tag_add_ready = false;
                                 guard.projects.entry(project_id.clone()).or_default().tag_steps =
                                     failure.steps.clone();
                             }
@@ -600,14 +675,16 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 .lock()
                 .ok()
                 .map(|guard| {
-                    (
-                        guard.current_project.name.clone(),
-                        guard.current_project.local_repo.clone(),
-                        guard.current_state().tag_mode,
-                        guard.current_state().tag_version_mode,
-                        guard.current_state().tag_running,
-                        guard.current_state().tag_remove_initializing,
-                    )
+                    guard.with_current(|ctx, view| {
+                        (
+                            ctx.name.clone(),
+                            ctx.local_repo.clone(),
+                            view.tag_mode.clone(),
+                            view.tag_version_mode.clone(),
+                            view.tag_running,
+                            view.tag_remove_initializing,
+                        )
+                    })
                 })
                 .unwrap_or_else(|| {
                     (
@@ -640,6 +717,10 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     view.tag_running = false;
                     view.tag_add_initializing = false;
                     view.tag_remove_initializing = false;
+                    view.tag_add_ready = false;
+                    view.tag_remove_ready = false;
+                    view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+                    view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
                     view.tag_steps = default_remove_tag_steps();
                 });
             }
@@ -670,6 +751,10 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 view.tag_running = true;
                 view.tag_add_initializing = false;
                 view.tag_remove_initializing = false;
+                view.tag_add_ready = false;
+                view.tag_remove_ready = false;
+                view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+                view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
                 view.tag_result = format!(
                     "Running local tag remove workflow for project '{}' in {} mode.",
                     project_name, mode
@@ -758,14 +843,14 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_next_version =
                                     next_semver_for_mode(&success.current_version, &bump_mode);
                                 entry.tag_remove_target = success.current_version.clone();
+                                entry.tag_add_ready = false;
+                                entry.tag_remove_ready = false;
                                 entry.tag_steps = success.steps.clone();
                             }
                             Err(ref failure) => {
-                                guard
-                                    .projects
-                                    .entry(project_id.clone())
-                                    .or_default()
-                                    .tag_steps = failure.steps.clone();
+                                let entry = guard.projects.entry(project_id.clone()).or_default();
+                                entry.tag_remove_ready = false;
+                                entry.tag_steps = failure.steps.clone();
                             }
                         }
                         if current_project_id != project_id {
@@ -794,7 +879,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
         let is_running = state_stop
             .lock()
             .ok()
-            .map(|guard| guard.current_state().tag_running)
+            .map(|guard| guard.with_current(|_, view| view.tag_running))
             .unwrap_or(false);
         if !is_running {
             log::warn!("[Workflow][Tag] stop ignored: no active workflow");
@@ -850,12 +935,13 @@ pub(crate) fn refresh_tag_context(
         .lock()
         .ok()
         .map(|guard| {
-            let view = guard.current_state();
-            (
-                view.tag_mode,
-                guard.current_project.local_repo.clone(),
-                view.tag_version_mode,
-            )
+            guard.with_current(|ctx, view| {
+                (
+                    view.tag_mode.clone(),
+                    ctx.local_repo.clone(),
+                    view.tag_version_mode.clone(),
+                )
+            })
         })
         .unwrap_or_else(|| {
             (
@@ -875,8 +961,12 @@ pub(crate) fn refresh_tag_context(
     if let Ok(mut guard) = shared_state.lock() {
         guard.upsert_current(|view| {
             view.tag_running = false;
-                view.tag_add_initializing = false;
+            view.tag_add_initializing = false;
             view.tag_remove_initializing = false;
+            view.tag_add_ready = false;
+            view.tag_remove_ready = false;
+            view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+            view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
             view.tag_steps = default_tag_steps();
             if mode == TAG_MODE_REMOTE {
                 log::info!("[Workflow][Tag] Refresh context -> remote TODO state");
@@ -896,6 +986,7 @@ pub(crate) fn refresh_tag_context(
                     view.tag_current_version = current_tag.clone();
                     view.tag_next_version = next_semver_for_mode(&current_tag, &bump_mode);
                     view.tag_remove_target = current_tag.clone();
+                    view.tag_add_ready = true;
                     view.tag_result = if local_repo.trim().is_empty() {
                         "Select a project to load the local repository context.".to_string()
                     } else {
@@ -911,6 +1002,7 @@ pub(crate) fn refresh_tag_context(
                     view.tag_current_version = "v0.0.0".to_string();
                     view.tag_next_version = next_semver_for_mode("v0.0.0", &bump_mode);
                     view.tag_remove_target = "v0.0.0".to_string();
+                    view.tag_add_ready = false;
                     view.tag_result = error;
                 }
             }
@@ -1644,7 +1736,7 @@ fn inspect_latest_remote_tag(local_repo: &str) -> Result<(String, String), Strin
         "--tags".to_string(),
         "--force".to_string(),
     ];
-    let fetch_log = run_command_blocking(fetch_cmd)?;
+    run_command_blocking(fetch_cmd)?;
 
     let list_cmd = vec![
         "git".to_string(),
@@ -1655,7 +1747,7 @@ fn inspect_latest_remote_tag(local_repo: &str) -> Result<(String, String), Strin
         "--refs".to_string(),
         "origin".to_string(),
     ];
-    let list_log = run_command_blocking(list_cmd.clone())?;
+    run_command_blocking(list_cmd.clone())?;
 
     let output = StdCommand::new(&list_cmd[0])
         .args(list_cmd.iter().skip(1))
@@ -1686,10 +1778,10 @@ fn inspect_latest_remote_tag(local_repo: &str) -> Result<(String, String), Strin
     let latest_tag = latest
         .map(|(tag, _)| tag)
         .unwrap_or_else(|| "v0.0.0".to_string());
-    let combined_log = clamp_step_log(format!(
-        "{}\n\n{}\n\n[Resolve] Latest remote semantic tag: {}",
-        fetch_log, list_log, latest_tag
-    ));
+    let combined_log = format!(
+        "[Init] Refreshed remote tags and resolved latest semantic tag: {}",
+        latest_tag
+    );
     log::info!(
         "[Workflow][Tag] Latest remote semantic tag resolved: '{}'",
         latest_tag

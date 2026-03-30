@@ -10,6 +10,7 @@ use crate::MainWindow;
 pub fn setup_workflow(ui: &MainWindow) {
     log::info!("[Workflow] Initializing workflow module");
     let shared_state = state::new_shared_state();
+    state::register_shared_state(&shared_state);
     state::initialize_current_ui(ui, &shared_state);
     bindings::bind_project_context(ui, shared_state.clone());
     branch::bind_branch(ui, shared_state.clone());

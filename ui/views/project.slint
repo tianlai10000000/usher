@@ -1,8 +1,9 @@
 import { MaterialText, FilledButton, Horizontal, Vertical, ElevatedCard, MaterialStyleMetrics,
-     MaterialPalette, Modal, HorizontalDivider, TextButton, IconButton, FilterChip } from "@material";
+     MaterialPalette, Modal, HorizontalDivider, TextButton, IconButton, FilterChip, Switch } from "@material";
 import { Route } from "../route/routeMap.slint";
 import { ScrollView } from "../../material-1.0-fixed/ui/components/scroll_view.slint";
 import { Home } from "home.slint";
+import { StyleMetrics } from "std-widgets.slint";
 
 export struct ProjectItem {
     project_name: string,
@@ -11,6 +12,12 @@ export struct ProjectItem {
     remote_repo: string,
     logo: string,
     logo_image: image,
+    is_pr_auto_update: bool,
+    pr_count_loading: bool,
+    pr_count_failed: bool,
+    pr_fat_count_text: string,
+    pr_uat_count_text: string,
+    pr_prod_count_text: string,
     project_tags: [string],
     project_tags_text: string,
 }
@@ -75,7 +82,7 @@ component SearchField {
         border-radius: 10px;
         border-width: 1px;
         border-color: MaterialPalette.outline_variant;
-        background: MaterialPalette.surface_container_highest;
+        background: MaterialPalette.surface_container_low;
         clip: true;
 
         TextInput {
@@ -103,10 +110,28 @@ component SearchField {
     }
 }
 
+component RotatingStatusIcon {
+    in property <bool> rotating: false;
+    in property <image> source;
+
+    width: 12px;
+    height: 12px;
+
+    property <float> rotation-progress: root.rotating ? mod(animation-tick(), 1s) / 1s : 0;
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.source;
+        transform-rotation: root.rotation-progress * 360deg;
+        transform-origin: { x: self.width / 2, y: self.height / 2 };
+    }
+}
+
 export component Project {
     callback navigate(Route);
-    callback open-project(string, string, string, string, string, image);
-    callback add-project(string, string, string, string, string, string);
+    callback open-project(string, string, string, string, string, image, bool);
+    callback add-project(string, string, string, string, string, string, bool);
     callback preview-logo(string);
     callback search-projects(string);
     callback reload-projects();
@@ -124,6 +149,7 @@ export component Project {
     in-out property <string> new-project-remote-repo: "";
     in-out property <string> new-project-logo: "";
     in-out property <string> new-project-tags: "";
+    in-out property <bool> new-project-pr-auto-update: false;
     in property <image> logo-preview-image: @image-url("../../logo.png");
     in property <string> logo-preview-status: "Using app default logo";
     in-out property <string> add-error: "";
@@ -152,7 +178,7 @@ export component Project {
 
     // Calculate card dimensions
     property <length> card-width: (available-width - ((columns - 1) * col-spacing)) / columns;
-    property <length> card-height: 160px;
+    property <length> card-height: 188px;
 
     Rectangle {
         width: parent.width;
@@ -228,10 +254,10 @@ export component Project {
                 spacing: col-spacing;
                 alignment: start;
 
-                    // Calculate start and end indices for this row
-                    property <int> start_index: row_index * columns;
-                    property <int> end_index: Math.min(start_index + columns, item-count);
-                    property <int> cards_in_row: end_index - start_index;
+                // Calculate start and end indices for this row
+                property <int> start_index: row_index * columns;
+                property <int> end_index: Math.min(start_index + columns, item-count);
+                property <int> cards_in_row: end_index - start_index;
 
                 // Display cards for this row
                 for col_index in cards_in_row : Rectangle {
@@ -337,7 +363,6 @@ export component Project {
                                         border-radius: 10px;
 
                                         VerticalLayout {
-                                            spacing: 4px;
                                             alignment: center;
 
                                             MaterialText {
@@ -359,12 +384,119 @@ export component Project {
 
                                     Rectangle {
                                         width: parent.width - 32px;
-                                        border-radius: 10px;
+                                        height: 28px;
+
+                                        if card_data.is_pr_auto_update: VerticalLayout {
+                                            spacing: 6px;
+
+                                            HorizontalLayout {
+                                                spacing: 4px;
+                                                alignment: start;
+
+                                                MaterialText {
+                                                    text: "PR";
+                                                    color: MaterialPalette.primary;
+                                                    font_size: 12px;
+                                                    font_weight: 500;
+                                                    vertical-alignment: center;
+                                                }
+
+                                                Rectangle {
+                                                    width: 12px;
+                                                    height: 12px;
+                                                    clip: true;
+
+                                                    if card_data.pr_count_loading: RotatingStatusIcon {
+                                                        width: 12px;
+                                                        height: 12px;
+                                                        rotating: true;
+                                                        source: @image-url("../assets/icons/loading.svg");
+                                                    }
+
+                                                    if card_data.pr_count_failed: RotatingStatusIcon {
+                                                        width: 12px;
+                                                        height: 12px;
+                                                        rotating: false;
+                                                        source: @image-url("../assets/icons/warning.svg");
+                                                    }
+                                                }
+                                            }
+
+                                            HorizontalLayout {
+                                                alignment: space-between;
+
+                                                HorizontalLayout {
+                                                    spacing: 8px;
+
+                                                    Text {
+                                                        text: "FAT";
+                                                        font-size: 10px;
+                                                        font-weight: 500;
+                                                        color: MaterialPalette.on_secondary_container;
+                                                        vertical-alignment: center;
+                                                    }
+    
+                                                    Text {
+                                                        text: card_data.pr_fat_count_text;
+                                                        color: MaterialPalette.primary;
+                                                        font_size: 10px;
+                                                        font_weight: 500;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+    
+
+                                                HorizontalLayout {
+                                                    spacing: 8px;
+
+                                                    Text {
+                                                        text: "UAT";
+                                                        font-size: 10px;
+                                                        font-weight: 500;
+                                                        color: MaterialPalette.on_secondary_container;
+                                                        vertical-alignment: center;
+                                                    }
+    
+                                                    Text {
+                                                        text: card_data.pr_uat_count_text;
+                                                        color: MaterialPalette.primary;
+                                                        font_size: 10px;
+                                                        font_weight: 500;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+
+                                                HorizontalLayout {
+                                                    spacing: 8px;
+
+                                                    Text {
+                                                        text: "PROD";
+                                                        font-size: 10px;
+                                                        font-weight: 500;
+                                                        color: MaterialPalette.on_secondary_container;
+                                                        vertical-alignment: center;
+                                                    }
+    
+                                                    Text {
+                                                        text: card_data.pr_prod_count_text;
+                                                        color: MaterialPalette.primary;
+                                                        font_size: 10px;
+                                                        font_weight: 500;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: parent.width - 32px;
+                                        border-radius: 10px;                
 
                                         HorizontalLayout {
                                             width: parent.width;
-                                            padding-top: 8px;
-                                            padding-bottom: 8px;
+                                            padding-top: 4px;
+                                            padding-bottom: 4px;
                                             spacing: 6px;
                                             alignment: end;
 
@@ -402,7 +534,7 @@ export component Project {
                                 height: 100%;
                                 mouse-cursor: pointer;
                                 clicked => {
-                                    root.open-project(card_data.project_name, card_data.project_alias, card_data.local_repo, card_data.remote_repo, card_data.logo, card_data.logo_image);
+                                    root.open-project(card_data.project_name, card_data.project_alias, card_data.local_repo, card_data.remote_repo, card_data.logo, card_data.logo_image, card_data.is_pr_auto_update);
                                     root.navigate(Route.Workflow);
                                 }
                             }
@@ -445,7 +577,8 @@ export component Project {
                                                 root.new-project-local-repo = card_data.local_repo;
                                                 root.new-project-remote-repo = card_data.remote_repo;
                                                 root.new-project-logo = card_data.logo;
-                                            root.new-project-tags = card_data.project_tags_text;
+                                                root.new-project-tags = card_data.project_tags_text;
+                                                root.new-project-pr-auto-update = card_data.is_pr_auto_update;
                                                 root.preview-logo(root.new-project-logo);
                                                 root.add-error = "";
                                                 root.show-add-modal = true;
@@ -485,6 +618,7 @@ export component Project {
                                                 root.new-project-remote-repo = card_data.remote_repo;
                                                 root.new-project-logo = card_data.logo;
                                                 root.new-project-tags = card_data.project_tags_text;
+                                                root.new-project-pr-auto-update = card_data.is_pr_auto_update;
                                                 root.preview-logo(root.new-project-logo);
                                                 root.add-error = "";
                                                 root.show-add-modal = true;
@@ -564,7 +698,6 @@ export component Project {
                                 height: 100%;
                                 mouse-cursor: pointer;
                                 clicked => {
-                                    debug("[Project] New card clicked.");
                                     root.modal-mode = "add";
                                     root.modal-original-alias = "";
                                     root.new-project-name = "";
@@ -573,10 +706,10 @@ export component Project {
                                     root.new-project-remote-repo = "";
                                     root.new-project-logo = "";
                                     root.new-project-tags = "";
+                                    root.new-project-pr-auto-update = false;
                                     root.preview-logo(root.new-project-logo);
                                     root.add-error = "";
                                     root.show-add-modal = true;
-                                    debug("[Project] show-add-modal set to true.");
                                     // No-op: visual only.
                                 }
                             }
@@ -598,10 +731,11 @@ export component ProjectAddModal {
     in-out property <string> remote-repo;
     in-out property <string> logo;
     in-out property <string> project-tags;
+    in-out property <bool> is-pr-auto-update;
     in property <image> logo-preview-image: @image-url("../../logo.png");
     in property <string> logo-preview-status: "Using app default logo";
     in-out property <string> error-text;
-    callback submit(string, string, string, string, string, string);
+    callback submit(string, string, string, string, string, string, bool);
     callback preview-logo(string);
     callback confirm-delete(string);
     callback cancel();
@@ -763,6 +897,56 @@ export component ProjectAddModal {
                                         label: "Project type tags (optional)";
                                         value <=> root.project-tags;
                                         placeholder: "comma-separated, e.g. H5, Web, RN";
+                                    }
+
+                                    if root.mode != "delete": Rectangle {
+                                        width: 100%;
+                                        height: 78px;
+                                        border-radius: 14px;
+                                        border-width: 1px;
+                                        border-color: MaterialPalette.outline_variant;
+                                        background: MaterialPalette.surface_container_low;
+
+                                        HorizontalLayout {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            padding: MaterialStyleMetrics.padding_8;
+                                            spacing: MaterialStyleMetrics.padding_16;
+                                            alignment: start;
+
+                                            Rectangle {
+                                                width: parent.width / 2;
+                                                height: parent.height - 16px;
+
+                                                VerticalLayout {
+                                                    width: parent.width;
+                                                    alignment: space-around;
+
+                                                    MaterialText {
+                                                        text: "Auto refresh PR counts";
+                                                        font_size: 13px;
+                                                        font_weight: 600;
+                                                        color: MaterialPalette.on_surface;
+                                                    }
+
+                                                    Text {
+                                                        width: parent.width;
+                                                        text: "Fetch FAT/UAT/PROD pull request counts from the server when showing the project.";
+                                                        font-size: 11px;
+                                                        color: MaterialPalette.on_surface_variant;
+                                                        wrap: word-wrap;
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                Switch {
+                                                    checked <=> root.is-pr-auto-update;
+                                                    width: 48px;
+                                                    height: 28px;
+                                                }
+                                            }
+                                        }
                                     }
 
                                     if root.mode != "delete": Rectangle {
@@ -932,7 +1116,7 @@ export component ProjectAddModal {
                                     root.error-text = "Please fill in all fields.";
                                     return;
                                 }
-                                root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags);
+                                root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags, root.is-pr-auto-update);
                             }
                         }
                     }

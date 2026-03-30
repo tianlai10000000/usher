@@ -1,3 +1,4 @@
+use crate::project::pr_stats::{PullRequestStateFilter, fetch_standard_environment_pr_counts};
 use crate::workflow::state::{
     SharedWorkflowState, WorkflowProjectContext, initialize_ui, normalize_project_alias,
     normalize_project_id, normalize_project_name,
@@ -9,7 +10,13 @@ use slint::{ComponentHandle, Global};
 pub(crate) fn bind_project_context(ui: &MainWindow, shared_state: SharedWorkflowState) {
     let ui_weak = ui.as_weak();
     ui.on_workflow_open_project(
-        move |project_name, project_alias, local_repo, remote_repo, logo, logo_image| {
+        move |project_name,
+              project_alias,
+              local_repo,
+              remote_repo,
+              logo,
+              logo_image,
+              is_pr_auto_update| {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
@@ -26,11 +33,75 @@ pub(crate) fn bind_project_context(ui: &MainWindow, shared_state: SharedWorkflow
                     return;
                 };
                 guard.cd_running = false;
+                guard.upsert_current(|view| {
+                    view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+                    view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
+                    view.tag_add_initializing = false;
+                    view.tag_remove_initializing = false;
+                });
                 guard.set_project(context.clone())
             };
             initialize_ui(&ui, &context, &snapshot);
             ui.set_workflow_project_logo_image(logo_image);
+            ui.set_workflow_pr_count_auto_update(is_pr_auto_update);
+            ui.set_workflow_pr_count_loading(is_pr_auto_update);
+            ui.set_workflow_pr_count_failed(false);
+            ui.set_workflow_pr_fat_count(if is_pr_auto_update {
+                "-".into()
+            } else {
+                "".into()
+            });
+            ui.set_workflow_pr_uat_count(if is_pr_auto_update {
+                "-".into()
+            } else {
+                "".into()
+            });
+            ui.set_workflow_pr_prod_count(if is_pr_auto_update {
+                "-".into()
+            } else {
+                "".into()
+            });
             refresh_tag_context(&ui, &shared_state, false);
+            if is_pr_auto_update {
+                let ui_weak_task = ui.as_weak();
+                let project_id = context.id.clone();
+                let remote_repo = context.remote_repo.clone();
+                std::thread::spawn(move || {
+                    let result = fetch_standard_environment_pr_counts(
+                        &remote_repo,
+                        PullRequestStateFilter::Open,
+                        None,
+                    );
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let Some(ui) = ui_weak_task.upgrade() else {
+                            return;
+                        };
+                        if ui.get_workflow_project_id() != project_id {
+                            return;
+                        }
+                        ui.set_workflow_pr_count_loading(false);
+                        match result {
+                            Ok(counts) => {
+                                ui.set_workflow_pr_count_failed(false);
+                                ui.set_workflow_pr_fat_count(counts.fat.to_string().into());
+                                ui.set_workflow_pr_uat_count(counts.uat.to_string().into());
+                                ui.set_workflow_pr_prod_count(counts.prod.to_string().into());
+                            }
+                            Err(error) => {
+                                log::warn!(
+                                    "[Workflow] Failed to fetch PR counts for '{}': {}",
+                                    project_id,
+                                    error
+                                );
+                                ui.set_workflow_pr_count_failed(true);
+                                ui.set_workflow_pr_fat_count("unknown".into());
+                                ui.set_workflow_pr_uat_count("unknown".into());
+                                ui.set_workflow_pr_prod_count("unknown".into());
+                            }
+                        }
+                    });
+                });
+            }
             show_success(
                 &ui,
                 &format!("Switched workflow context to '{}'.", context.name),
