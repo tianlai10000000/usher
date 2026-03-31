@@ -1,4 +1,5 @@
 use crate::project::pr_stats::{PullRequestStateFilter, fetch_standard_environment_pr_counts};
+use crate::terminal::reset_terminal_for_project;
 use crate::workflow::state::{
     SharedWorkflowState, WorkflowProjectContext, initialize_ui, normalize_project_alias,
     normalize_project_id, normalize_project_name,
@@ -28,6 +29,7 @@ pub(crate) fn bind_project_context(ui: &MainWindow, shared_state: SharedWorkflow
                 remote_repo: remote_repo.to_string(),
                 logo: logo.to_string(),
             };
+            let previous_project_id = ui.get_workflow_project_id().to_string();
             let snapshot = {
                 let Ok(mut guard) = shared_state.lock() else {
                     return;
@@ -42,6 +44,12 @@ pub(crate) fn bind_project_context(ui: &MainWindow, shared_state: SharedWorkflow
                 guard.set_project(context.clone())
             };
             initialize_ui(&ui, &context, &snapshot);
+            reset_terminal_for_project(
+                &ui,
+                &context.id,
+                &context.local_repo,
+                previous_project_id == context.id,
+            );
             ui.set_workflow_project_logo_image(logo_image);
             ui.set_workflow_pr_count_auto_update(is_pr_auto_update);
             ui.set_workflow_pr_count_loading(is_pr_auto_update);

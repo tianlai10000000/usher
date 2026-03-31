@@ -1,0 +1,45 @@
+import { IconButton, MaterialPalette } from "@material";
+
+export component IconActionButton inherits Rectangle {
+    in property <image> icon: @image-url("../../assets/icons/terminal.svg");
+    in property <string> tooltip-text: "";
+    in property <bool> has-error: false;
+    callback clicked();
+    out property <bool> has-hover: hover.has-hover;
+
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: hover.has-hover ? MaterialPalette.surface_container_high : transparent;
+    animate background { duration: 120ms; }
+
+    IconButton {
+        width: 28px;
+        height: 28px;
+        icon: root.icon;
+        tooltip: root.tooltip-text;
+        has_error: root.has-error;
+        inline: true;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    hover := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component TerminalActionButton inherits IconActionButton {
+    callback request-open-terminal();
+    icon: @image-url("../../assets/icons/terminal.svg");
+    tooltip-text: "Open terminal";
+    clicked => {
+        root.request-open-terminal();
+    }
+}

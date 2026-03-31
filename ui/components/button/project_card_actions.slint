@@ -1,0 +1,43 @@
+import { IconActionButton, TerminalActionButton } from "./terminal_action_button.slint";
+
+export component ProjectCardActions inherits Rectangle {
+    out property <bool> has-hover: terminal-btn.has-hover || settings-btn.has-hover || delete-btn.has-hover;
+    callback request-open-terminal();
+    callback request-open-settings();
+    callback request-delete();
+
+    width: 96px;
+    height: 28px;
+    background: transparent;
+
+    HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 2px;
+        alignment: center;
+
+        terminal-btn := TerminalActionButton {
+            tooltip-text: "Open terminal";
+            request-open-terminal => {
+                root.request-open-terminal();
+            }
+        }
+
+        settings-btn := IconActionButton {
+            icon: @image-url("../../assets/icons/settings.svg");
+            tooltip-text: "Settings";
+            clicked => {
+                root.request-open-settings();
+            }
+        }
+
+        delete-btn := IconActionButton {
+            icon: @image-url("../../assets/icons/delete.svg");
+            tooltip-text: "Delete";
+            has-error: true;
+            clicked => {
+                root.request-delete();
+            }
+        }
+    }
+}

@@ -1,6 +1,7 @@
 pub(crate) mod pr_stats;
 
 use crate::project::pr_stats::{PullRequestStateFilter, fetch_standard_environment_pr_counts};
+use crate::terminal::open_terminal_for_project;
 use crate::{MainWindow, ProjectItem, ToastManager, ToastOptions};
 use base64::Engine as _;
 use directories::ProjectDirs;
@@ -328,6 +329,20 @@ pub fn setup_project(ui: &MainWindow) {
             &query,
         );
         show_success(&ui, "Projects reloaded.");
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.on_project_open_terminal(move |project_name, project_alias, local_repo| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+
+        open_terminal_for_project(
+            &ui,
+            project_name.trim(),
+            project_alias.trim(),
+            local_repo.trim(),
+        );
     });
 }
 

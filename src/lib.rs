@@ -43,6 +43,7 @@ mod chat;
 use chat::setup_chat;
 
 mod app_runtime;
+mod terminal;
 
 mod logger;
 use logger::error_handing;
@@ -58,6 +59,7 @@ mod workflow;
 use workflow::setup_workflow;
 mod project;
 use project::setup_project;
+use terminal::setup_terminal;
 
 #[cfg(target_os = "macos")]
 static TITLEBAR_SETTINGS_UI_WEAK: std::sync::OnceLock<slint::Weak<MainWindow>> =
@@ -868,6 +870,9 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Chat ========= //
     setup_chat(&app);
+
+    // ========= Terminal Drawer ========= //
+    setup_terminal(&app);
 
     // ========= Workflow ========= //
     setup_workflow(&app);

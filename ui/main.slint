@@ -34,6 +34,9 @@ import { DialogEnhance } from "./components/dialog/dialog_enhance.slint";
 import { UpdateDialog, UpdateLogic, DownloadProgressModal } from "./components/update/update.slint";
 import { StatusBar } from "./components/status_bar.slint";
 import { LayoutConstants } from "./layout_constants.slint";
+import { PageScrollActions } from "./components/fab/page_scroll_actions.slint";
+import { TerminalDrawer } from "./components/drawer/terminal_drawer.slint";
+import { MaterialPalette } from "../material-1.0-fixed/ui/styling/material_palette.slint";
 
 export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
@@ -71,6 +74,18 @@ export component MainWindow inherits Window {
     
     // 上一个路由，用于返回功能
     private property <Route> previous-route: Route.Home;
+    private property <bool> shell-drawer-docked-route: root.current-route == Route.Workflow || root.current-route == Route.Project;
+    private property <length> page-scroll-offset: (root.current-route == Route.Workflow || root.current-route == Route.Project)
+        ? max(0px, -page-scroll-view.viewport_y)
+        : 0px;
+    private property <length> workflow-terminal-max-height: max(180px, main-content-host.height - breadcrumb-host.height - 32px);
+    private property <length> workflow-terminal-fullscreen-height: max(180px, main-content-host.height - breadcrumb-host.height);
+    private property <length> workflow-fab-bottom-offset: root.shell-drawer-visible ? 24px : 16px;
+    private property <length> workflow-terminal-docked-height: root.shell-drawer-docked-route && root.shell-drawer-visible
+        ? (root.shell-drawer-fullscreen
+            ? root.workflow-terminal-fullscreen-height
+            : min(root.shell-drawer-height > 0px ? root.shell-drawer-height : 280px, root.workflow-terminal-max-height))
+        : 0px;
 
     // 导航信号（方便 Rust 端调用）
     callback navigate(Route);
@@ -167,6 +182,15 @@ export component MainWindow inherits Window {
     in property <string> workflow-cd-deploy-detail: "Waiting to start.";
     in property <string> workflow-cd-verify-status: "pending";
     in property <string> workflow-cd-verify-detail: "Waiting to start.";
+    in-out property <bool> shell-drawer-visible: false;
+    in-out property <string> shell-drawer-input-text: "";
+    in property <string> shell-drawer-cwd: "";
+    in property <string> shell-drawer-output: "Terminal ready.\n";
+    in property <bool> shell-drawer-running: false;
+    in-out property <[string]> shell-drawer-init-commands: [];
+    in-out property <length> shell-drawer-height: 280px;
+    in-out property <bool> shell-drawer-fullscreen: false;
+    in-out property <string> shell-drawer-title: "Project Terminal";
     callback workflow-branch-submit(string, string, bool);
     callback workflow-tag-change-mode(string);
     callback workflow-tag-select-version-mode(string);
@@ -179,6 +203,9 @@ export component MainWindow inherits Window {
     callback workflow-pr-confirm(bool);
     callback workflow-cd-start(string, string, string);
     callback workflow-cd-rollback(string);
+    callback shell-drawer-toggle();
+    callback shell-drawer-close();
+    callback shell-drawer-submit(string);
     callback workflow-open-project(string, string, string, string, string, image, bool);
     callback project-add-project(string, string, string, string, string, string, bool);
     callback project-preview-logo(string);
@@ -186,6 +213,7 @@ export component MainWindow inherits Window {
     callback project-delete-project(string);
     callback project-search-projects(string);
     callback project-reload-projects();
+    callback project-open-terminal(string, string, string);
 
     init => {
         // TODO: delete
@@ -291,9 +319,10 @@ export component MainWindow inherits Window {
                 }
             }
 
-        Rectangle  {
+        main-content-host := Rectangle  {
             horizontal-stretch: 1;
             height: parent.height;
+            // background: MaterialPalette.background.with-alpha(0.15);
 
             content := Vertical {
                 width: parent.width;
@@ -301,20 +330,30 @@ export component MainWindow inherits Window {
                 padding: 0px;
                 
                 // Breadcrumb (hidden for configured routes)
-                if root.show-breadcrumb: Breadcrumb {
+                breadcrumb-host := Rectangle {
                     horizontal-stretch: 1;
-                    current-route: root.current-route;
-                    navigate(route) => {
-                        root.previous-route = root.current-route;
-                        root.navigate(route);
+                    height: root.show-breadcrumb ? 34px : 0px;
+                    background: transparent;
+
+                    if root.show-breadcrumb: Breadcrumb {
+                        width: parent.width;
+                        height: parent.height;
+                        current-route: root.current-route;
+                        navigate(route) => {
+                            root.previous-route = root.current-route;
+                            root.navigate(route);
+                        }
                     }
                 }
 
                 // Page Views
                 page-scroll-view := ScrollView {
-                    visible: root.show-page-scroll-view;
+                    visible: root.show-page-scroll-view
+                        && !(root.shell-drawer-docked-route
+                            && root.shell-drawer-visible
+                            && root.shell-drawer-fullscreen);
                     horizontal-stretch: 1;
-                    vertical-stretch: 1;
+                    height: parent.height - breadcrumb-host.height - terminal-dock-host.height;
                     horizontal_scrollbar_policy: ScrollBarPolicy.as_needed;
                     vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
 
@@ -485,6 +524,9 @@ export component MainWindow inherits Window {
                             reload-projects() => {
                                 root.project-reload-projects();
                             }
+                            open-terminal(project-name, project-alias, local-repo) => {
+                                root.project-open-terminal(project-name, project-alias, local-repo);
+                            }
                         }
                         if root.current-route == Route.Tools: ToolsPage {
                             viewport-height: page-scroll-view.visible-height;
@@ -492,6 +534,44 @@ export component MainWindow inherits Window {
                                 root.previous-route = root.current-route;
                                 root.navigate(route);
                             }
+                        }
+                    }
+                }
+
+                terminal-dock-host := Rectangle {
+                    horizontal-stretch: 1;
+                    height: root.workflow-terminal-docked-height;
+                    background: transparent;
+
+                    if root.shell-drawer-docked-route && root.shell-drawer-visible: TerminalDrawer {
+                        x: MaterialStyleMetrics.padding_4;
+                        width: max(320px, parent.width - MaterialStyleMetrics.padding_4 * 2);
+                        height: parent.height;
+                        docked: true;
+                        drawer-open: true;
+                        input-text <=> root.shell-drawer-input-text;
+                        title: root.shell-drawer-title;
+                        cwd: root.shell-drawer-cwd;
+                        output: root.shell-drawer-output;
+                        running: root.shell-drawer-running;
+                        initial-height: 280px;
+                        available-height: root.shell-drawer-fullscreen
+                            ? root.workflow-terminal-fullscreen-height
+                            : root.workflow-terminal-max-height;
+                        drawer-height <=> root.shell-drawer-height;
+                        fullscreen <=> root.shell-drawer-fullscreen;
+                        min-drawer-height: 180px;
+                        top-safe-margin: 0px;
+                        side-margin: 0px;
+                        bottom-margin: 0px;
+                        close-requested => {
+                            root.shell-drawer-close();
+                            root.shell-drawer-visible = false;
+                            root.shell-drawer-fullscreen = false;
+                        }
+                        submit-command(command) => {
+                            root.shell-drawer-submit(command);
+                            root.shell-drawer-input-text = "";
                         }
                     }
                 }
@@ -553,6 +633,38 @@ export component MainWindow inherits Window {
         y: root.height - LayoutConstants.status-bar-height;
         width: root.width;
         height: LayoutConstants.status-bar-height;
+    }
+
+    if (root.current-route == Route.Workflow || root.current-route == Route.Project) && root.show-page-scroll-view: Rectangle {
+        x: main-content-host.x + page-scroll-view.x;
+        y: main-content-host.y + page-scroll-view.y;
+        width: page-scroll-view.width;
+        height: page-scroll-view.height;
+        background: transparent;
+        z: 500;
+        visible: !root.shell-drawer-fullscreen;
+
+        PageScrollActions {
+            container-width: parent.width;
+            container-height: parent.height;
+            right-offset: LayoutConstants.page-fab-right-offset;
+            enable-terminal: root.current-route == Route.Workflow;
+            terminal-bottom-offset: root.workflow-fab-bottom-offset;
+            terminal-active: root.shell-drawer-visible;
+            terminal-tooltip-text: "Open terminal";
+            enable-to-top: true;
+            to-top-bottom-offset: root.current-route == Route.Workflow
+                ? root.workflow-fab-bottom-offset + LayoutConstants.page-fab-stack-spacing
+                : LayoutConstants.page-fab-bottom-offset;
+            scroll-offset: root.page-scroll-offset;
+            show-threshold: LayoutConstants.to-top-show-threshold;
+            request-open-terminal => {
+                root.shell-drawer-toggle();
+            }
+            request-scroll-to-top => {
+                page-scroll-view.viewport_y = 0px;
+            }
+        }
     }
 
     ProjectAddModal {

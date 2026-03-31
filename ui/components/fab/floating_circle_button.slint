@@ -1,0 +1,47 @@
+import { MaterialPalette } from "@material";
+
+export component FloatingCircleButton inherits Rectangle {
+    in property <image> icon;
+    in property <bool> emphasized: false;
+    in property <bool> interactive: true;
+    out property <bool> has-hover: touch.has-hover;
+    callback clicked();
+
+    width: 40px;
+    height: 40px;
+    border-radius: 20px;
+    border-width: 1px;
+    border-color: root.emphasized ? MaterialPalette.primary : MaterialPalette.outline_variant;
+    background: root.emphasized ? MaterialPalette.primary : MaterialPalette.surface_container_high;
+
+    Image {
+        width: 16px;
+        height: 16px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        source: root.icon;
+        colorize: root.emphasized ? MaterialPalette.on_primary : MaterialPalette.on_surface;
+    }
+
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.interactive;
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    animate background { duration: 120ms; }
+    animate opacity { duration: 220ms; }
+    animate y { duration: 240ms; }
+
+    states [
+        hover when touch.has-hover : {
+            root.background: root.emphasized
+                ? MaterialPalette.primary.darker(0.06)
+                : MaterialPalette.surface_container_highest;
+        }
+    ]
+}

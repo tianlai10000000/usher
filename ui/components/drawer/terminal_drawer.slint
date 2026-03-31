@@ -1,0 +1,326 @@
+import { FilledButton, HorizontalDivider, MaterialPalette, MaterialText } from "@material";
+import { ScrollView } from "../../../material-1.0-fixed/ui/components/scroll_view.slint";
+
+export component TerminalDrawer inherits Rectangle {
+    in property <bool> drawer-open: false;
+    in property <bool> docked: false;
+    in-out property <string> input-text: "";
+    in property <string> title: "Terminal";
+    in property <string> cwd: "";
+    in property <string> output: "Terminal ready.\n";
+    in property <bool> running: false;
+    in property <length> initial-height: 280px;
+    in property <length> available-height: self.height;
+    in-out property <length> drawer-height: 0px;
+    in-out property <bool> fullscreen: false;
+    in property <length> side-margin: 16px;
+    in property <length> bottom-margin: 16px;
+    in property <length> max-drawer-width: 960px;
+    in property <length> min-drawer-height: 180px;
+    in property <length> top-safe-margin: 16px;
+    callback close-requested();
+    callback submit-command(string);
+
+    private property <length> max-available-height: max(root.min-drawer-height, root.available-height - root.top-safe-margin - root.bottom-margin);
+    private property <length> effective-drawer-height: root.drawer-height > 0px ? root.drawer-height : root.initial-height;
+    private property <length> resolved-drawer-height: root.fullscreen
+        ? root.max-available-height
+        : max(root.min-drawer-height, min(root.effective-drawer-height, root.max-available-height));
+    private property <length> resolved-drawer-width: root.fullscreen
+        ? max(320px, root.width - root.side-margin * 2)
+        : min(root.width - root.side-margin * 2, root.max-drawer-width);
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+
+    drawer := Rectangle {
+        // x: root.docked ? 0px : max(root.side-margin, (parent.width - self.width) / 2);
+        x: -12px;
+        y: root.docked ? 0px : (root.drawer-open
+            ? parent.height - self.height - root.bottom-margin
+            : parent.height + 8px);
+        width: (root.docked ? parent.width : root.resolved-drawer-width) + 17px;
+        height: root.docked ? parent.height : root.resolved-drawer-height;
+        // border-radius: root.docked ? 12px : 18px;
+        border-width: 1px;
+        border-color: MaterialPalette.outline_variant;
+        // background: MaterialPalette.surface_container_high;
+        background: MaterialPalette.background;
+        opacity: root.docked ? 1 : (root.drawer-open ? 1 : 0);
+        animate opacity { duration: 220ms; }
+
+        TouchArea {
+            width: 100%;
+            height: 100%;
+            enabled: root.drawer-open;
+        }
+
+        VerticalLayout {
+            width: 100%;
+            height: 100%;
+            spacing: 0px;
+
+            Rectangle {
+                width: parent.width;
+                height: 30px;
+                background: transparent;
+
+                drag-indicator := Rectangle {
+                    width: 44px;
+                    height: 4px;
+                    x: (parent.width - self.width) / 2;
+                    y: 8px;
+                    border-radius: 2px;
+                    background: resize-handle.has-hover || resize-handle.pressed
+                        ? MaterialPalette.outline
+                        : MaterialPalette.outline_variant;
+                    opacity: 0.75;
+                }
+
+                resize-handle := TouchArea {
+                    x: (parent.width - 64px) / 2;
+                    y: 0px;
+                    width: 64px;
+                    height: 18px;
+                    enabled: root.drawer-open;
+                    mouse-cursor: n-resize;
+                    moved => {
+                        if max(root.min-drawer-height,
+                            min(root.max-available-height,
+                                root.resolved-drawer-height - (self.mouse-y - self.pressed-y))) < root.max-available-height {
+                            root.fullscreen = false;
+                        }
+                        root.drawer-height = max(root.min-drawer-height,
+                            min(root.max-available-height,
+                                root.resolved-drawer-height - (self.mouse-y - self.pressed-y)));
+                    }
+                }
+
+                Text {
+                    x: 10px;
+                    y: 8px;
+                    width: parent.width - 124px;
+                    text: root.title;
+                    font-size: 10px;
+                    font-weight: 600;
+                    color: MaterialPalette.on_surface;
+                    overflow: elide;
+                    font-family: "Hiragino Sans GB";
+                }
+
+                Rectangle {
+                    x: parent.width - self.width - 16px;
+                    y: 2px;
+                    width: 68px;
+                    height: 28px;
+                    background: transparent;
+
+                    Rectangle {
+                        width: 24px;
+                        height: 24px;
+                        x: 0px;
+                        y: 2px;
+                        border-radius: 4px;
+                        background: fullscreen_hover.has-hover
+                            ? MaterialPalette.surface_container_highest
+                            : transparent;
+                        animate background { duration: 120ms; }
+
+                        Image {
+                            width: 16px;
+                            height: 16px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            source: root.fullscreen
+                                ? @image-url("../../assets/icons/close_fullscreen.svg")
+                                : @image-url("../../assets/icons/fullscreen.svg");
+                            colorize: MaterialPalette.on_surface_variant;
+                        }
+
+                        fullscreen_hover := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.fullscreen = !root.fullscreen;
+                            }
+                        }
+
+                        if fullscreen_hover.has-hover: Rectangle {
+                            x: -30px;
+                            y: -28px;
+                            width: 88px;
+                            height: 24px;
+                            border-radius: 8px;
+                            background: MaterialPalette.inverse_surface;
+
+                            Text {
+                                x: 8px;
+                                y: (parent.height - self.preferred-height) / 2;
+                                width: parent.width - 16px;
+                                text: root.fullscreen ? "Exit fullscreen" : "Fullscreen";
+                                font-size: 10px;
+                                color: MaterialPalette.inverse_on_surface;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 24px;
+                        height: 24px;
+                        x: 42px;
+                        y: 2px;
+                        border-radius: 4px;
+                        background: close_hover.has-hover
+                            ? MaterialPalette.surface_container_highest
+                            : transparent;
+                        animate background { duration: 120ms; }
+
+                        Image {
+                            width: 18px;
+                            height: 18px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            source: @image-url("../../assets/icons/close.svg");
+                            colorize: MaterialPalette.on_surface_variant;
+                        }
+
+                        close_hover := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.close-requested();
+                            }
+                        }
+
+                        if close_hover.has-hover: Rectangle {
+                            x: -12px;
+                            y: -28px;
+                            width: 52px;
+                            height: 24px;
+                            border-radius: 8px;
+                            background: MaterialPalette.inverse_surface;
+
+                            Text {
+                                x: 8px;
+                                y: (parent.height - self.preferred-height) / 2;
+                                width: parent.width - 16px;
+                                text: "Close";
+                                font-size: 10px;
+                                color: MaterialPalette.inverse_on_surface;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider {
+                width: 100%;
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: parent.height - 61px;
+                background: transparent;
+
+                VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    spacing: 10px;
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    padding-top: 10px;
+                    padding-bottom: 10px;
+
+                    Rectangle {
+                        width: parent.width - 32px;
+                        vertical-stretch: 1;
+                        min-height: 120px;
+                        border-radius: 12px;
+                        border-width: 1px;
+                        border-color: MaterialPalette.outline_variant;
+                        background: MaterialPalette.surface_container_low;
+                        clip: true;
+
+                        ScrollView {
+                            width: parent.width;
+                            height: parent.height;
+                            horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
+                            vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
+
+                            Text {
+                                x: 12px;
+                                y: 12px;
+                                width: parent.width - 24px;
+                                text: root.output;
+                                wrap: word-wrap;
+                                font-size: 12px;
+                                font-family: "Hiragino Sans GB";
+                                color: MaterialPalette.on_surface_variant;
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        width: parent.width - 32px;
+                        height: 40px;
+                        spacing: 12px;
+                        alignment: center;
+
+                        Text {
+                            text: "$";
+                            font-size: 14px;
+                            color: MaterialPalette.primary;
+                            vertical_alignment: center;
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: parent.height;
+                            border-radius: 12px;
+                            border-width: 1px;
+                            border-color: MaterialPalette.outline_variant;
+                            background: MaterialPalette.surface_container_low;
+                            clip: true;
+
+                            TextInput {
+                                x: 12px;
+                                y: (parent.height - self.preferred-height) / 2;
+                                width: parent.width - 24px;
+                                text <=> root.input-text;
+                                color: MaterialPalette.on_surface;
+                                font-size: 13px;
+                                font-family: "Hiragino Sans GB";
+                                single-line: true;
+                                accepted => {
+                                    root.submit-command(self.text);
+                                }
+                            }
+
+                            if root.input-text == "": Text {
+                                x: 12px;
+                                y: (parent.height - self.preferred-height) / 2;
+                                text: "Run shell command in current project directory";
+                                font-size: 12px;
+                                color: MaterialPalette.on_surface_variant;
+                            }
+                        }
+
+                        FilledButton {
+                            width: 92px;
+                            text: root.running ? "Running..." : "Run";
+                            enabled: !root.running;
+                            clicked => {
+                                root.submit-command(root.input-text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

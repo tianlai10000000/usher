@@ -1,0 +1,51 @@
+import { LayoutConstants } from "../../layout_constants.slint";
+import { BackToTopFab } from "./back_to_top_fab.slint";
+import { TerminalFab } from "./terminal_fab.slint";
+
+export component PageScrollActions inherits Rectangle {
+    in property <length> container-width: 0px;
+    in property <length> container-height: 0px;
+    in property <bool> enable-to-top: true;
+    in property <bool> enable-terminal: false;
+    in property <length> scroll-offset: 0px;
+    in property <length> show-threshold: LayoutConstants.to-top-show-threshold;
+    in property <length> right-offset: LayoutConstants.page-fab-right-offset;
+    in property <length> to-top-bottom-offset: LayoutConstants.page-fab-bottom-offset;
+    in property <length> terminal-bottom-offset: LayoutConstants.page-fab-bottom-offset;
+    in property <bool> terminal-active: false;
+    in property <bool> terminal-interactive: true;
+    in property <string> terminal-tooltip-text: "Open terminal";
+    callback request-scroll-to-top();
+    callback request-open-terminal();
+
+    x: 0px;
+    y: 0px;
+    width: root.container-width;
+    height: root.container-height;
+    background: transparent;
+
+    if root.enable-terminal: TerminalFab {
+        container-width: parent.width;
+        container-height: parent.height;
+        bottom-offset: root.terminal-bottom-offset;
+        right-offset: root.right-offset;
+        active: root.terminal-active;
+        interactive: root.terminal-interactive;
+        tooltip-text: root.terminal-tooltip-text;
+        request-open-terminal => {
+            root.request-open-terminal();
+        }
+    }
+
+    if root.enable-to-top: BackToTopFab {
+        container-width: parent.width;
+        container-height: parent.height;
+        bottom-offset: root.to-top-bottom-offset;
+        right-offset: root.right-offset;
+        scroll-offset: root.scroll-offset;
+        show-threshold: root.show-threshold;
+        request-scroll-to-top => {
+            root.request-scroll-to-top();
+        }
+    }
+}

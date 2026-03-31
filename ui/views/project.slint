@@ -4,6 +4,7 @@ import { Route } from "../route/routeMap.slint";
 import { ScrollView } from "../../material-1.0-fixed/ui/components/scroll_view.slint";
 import { Home } from "home.slint";
 import { StyleMetrics } from "std-widgets.slint";
+import { ProjectCardActions } from "../components/button/project_card_actions.slint";
 
 export struct ProjectItem {
     project_name: string,
@@ -131,6 +132,7 @@ component RotatingStatusIcon {
 export component Project {
     callback navigate(Route);
     callback open-project(string, string, string, string, string, image, bool);
+    callback open-terminal(string, string, string);
     callback add-project(string, string, string, string, string, string, bool);
     callback preview-logo(string);
     callback search-projects(string);
@@ -539,101 +541,43 @@ export component Project {
                                 }
                             }
 
-                            property <bool> actions_visible: hover-area_project.has-hover || settings_hover.has-hover || delete_hover.has-hover;
+                            property <bool> actions_visible: hover-area_project.has-hover || card_actions.has-hover;
 
-                            Rectangle {
-                                width: 64px;
-                                height: 28px;
+                            card_actions := ProjectCardActions {
                                 x: parent.width - self.width - 8px;
                                 y: 8px;
-                                background: transparent;
                                 opacity: actions_visible ? 1 : 0;
                                 animate opacity { duration: 120ms; }
-
-                                HorizontalLayout {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    spacing: 2px;
-                                    alignment: center;
-
-                                    Rectangle {
-                                        width: 28px;
-                                        height: 28px;
-                                        border-radius: 6px;
-                                        background: settings_hover.has-hover ? MaterialPalette.surface_container_high : transparent;
-                                        animate background { duration: 120ms; }
-
-                                        settings_btn := IconButton {
-                                            width: 28px;
-                                            height: 28px;
-                                            icon: @image-url("../assets/icons/settings.svg");
-                                            tooltip: "Settings";
-                                            inline: true;
-                                            clicked => {
-                                                root.modal-mode = "edit";
-                                                root.modal-original-alias = card_data.project_alias;
-                                                root.new-project-name = card_data.project_name;
-                                                root.new-project-alias = card_data.project_alias;
-                                                root.new-project-local-repo = card_data.local_repo;
-                                                root.new-project-remote-repo = card_data.remote_repo;
-                                                root.new-project-logo = card_data.logo;
-                                                root.new-project-tags = card_data.project_tags_text;
-                                                root.new-project-pr-auto-update = card_data.is_pr_auto_update;
-                                                root.preview-logo(root.new-project-logo);
-                                                root.add-error = "";
-                                                root.show-add-modal = true;
-                                            }
-                                        }
-
-                                        settings_hover := TouchArea {
-                                            width: 100%;
-                                            height: 100%;
-                                            mouse-cursor: pointer;
-                                            clicked => {
-                                                settings_btn.clicked();
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        width: 28px;
-                                        height: 28px;
-                                        border-radius: 6px;
-                                        background: delete_hover.has-hover ? MaterialPalette.surface_container_high : transparent;
-                                        animate background { duration: 120ms; }
-
-                                        delete_btn := IconButton {
-                                            width: 28px;
-                                            height: 28px;
-                                            icon: @image-url("../assets/icons/delete.svg");
-                                            tooltip: "Delete";
-                                            has_error: true;
-                                            inline: true;
-                                            clicked => {
-                                                root.modal-mode = "delete";
-                                                root.modal-original-alias = card_data.project_alias;
-                                                root.new-project-name = card_data.project_name;
-                                                root.new-project-alias = card_data.project_alias;
-                                                root.new-project-local-repo = card_data.local_repo;
-                                                root.new-project-remote-repo = card_data.remote_repo;
-                                                root.new-project-logo = card_data.logo;
-                                                root.new-project-tags = card_data.project_tags_text;
-                                                root.new-project-pr-auto-update = card_data.is_pr_auto_update;
-                                                root.preview-logo(root.new-project-logo);
-                                                root.add-error = "";
-                                                root.show-add-modal = true;
-                                            }
-                                        }
-
-                                        delete_hover := TouchArea {
-                                            width: 100%;
-                                            height: 100%;
-                                            mouse-cursor: pointer;
-                                            clicked => {
-                                                delete_btn.clicked();
-                                            }
-                                        }
-                                    }
+                                request-open-terminal => {
+                                    root.open-terminal(card_data.project_name, card_data.project_alias, card_data.local_repo);
+                                }
+                                request-open-settings => {
+                                    root.modal-mode = "edit";
+                                    root.modal-original-alias = card_data.project_alias;
+                                    root.new-project-name = card_data.project_name;
+                                    root.new-project-alias = card_data.project_alias;
+                                    root.new-project-local-repo = card_data.local_repo;
+                                    root.new-project-remote-repo = card_data.remote_repo;
+                                    root.new-project-logo = card_data.logo;
+                                    root.new-project-tags = card_data.project_tags_text;
+                                    root.new-project-pr-auto-update = card_data.is_pr_auto_update;
+                                    root.preview-logo(root.new-project-logo);
+                                    root.add-error = "";
+                                    root.show-add-modal = true;
+                                }
+                                request-delete => {
+                                    root.modal-mode = "delete";
+                                    root.modal-original-alias = card_data.project_alias;
+                                    root.new-project-name = card_data.project_name;
+                                    root.new-project-alias = card_data.project_alias;
+                                    root.new-project-local-repo = card_data.local_repo;
+                                    root.new-project-remote-repo = card_data.remote_repo;
+                                    root.new-project-logo = card_data.logo;
+                                    root.new-project-tags = card_data.project_tags_text;
+                                    root.new-project-pr-auto-update = card_data.is_pr_auto_update;
+                                    root.preview-logo(root.new-project-logo);
+                                    root.add-error = "";
+                                    root.show-add-modal = true;
                                 }
                             }
                         }
