@@ -54,6 +54,12 @@ Then, you can run the demo on an Android device with the following command:
 cargo apk run --target aarch64-linux-android --lib
 ```
 
+## Terminal Notes / Troubleshooting
+
+Terminal 相关的排障记录、已知坑和迭代说明统一维护在这里：
+
+- [docs/terminal_viewport_iteration_notes.md](docs/terminal_viewport_iteration_notes.md)
+
 ## Next Steps
 
 We hope that this template helps you get started, and that you enjoy exploring making user interfaces with Slint. To learn more

@@ -35,7 +35,7 @@ import { UpdateDialog, UpdateLogic, DownloadProgressModal } from "./components/u
 import { StatusBar } from "./components/status_bar.slint";
 import { LayoutConstants } from "./layout_constants.slint";
 import { PageScrollActions } from "./components/fab/page_scroll_actions.slint";
-import { TerminalDrawer } from "./components/drawer/terminal_drawer.slint";
+import { TerminalDrawer, TerminalLine } from "./components/drawer/terminal_drawer.slint";
 import { MaterialPalette } from "../material-1.0-fixed/ui/styling/material_palette.slint";
 
 export { MaterialWindowAdapter } from "@material";
@@ -186,7 +186,15 @@ export component MainWindow inherits Window {
     in-out property <string> shell-drawer-input-text: "";
     in property <string> shell-drawer-cwd: "";
     in property <string> shell-drawer-output: "Terminal ready.\n";
+    in property <int> shell-drawer-output-line-count: 1;
+    in property <[TerminalLine]> shell-drawer-lines: [];
+    in property <int> shell-drawer-scrollback-offset: 0;
+    in property <int> shell-drawer-max-scrollback: 0;
+    in property <int> shell-drawer-cursor-row: 0;
+    in property <int> shell-drawer-cursor-col: 0;
+    in property <bool> shell-drawer-cursor-visible: false;
     in property <bool> shell-drawer-running: false;
+    in property <bool> shell-drawer-connected: false;
     in-out property <[string]> shell-drawer-init-commands: [];
     in-out property <length> shell-drawer-height: 280px;
     in-out property <bool> shell-drawer-fullscreen: false;
@@ -206,6 +214,11 @@ export component MainWindow inherits Window {
     callback shell-drawer-toggle();
     callback shell-drawer-close();
     callback shell-drawer-submit(string);
+    callback shell-drawer-key-pressed(string, bool, bool, bool, bool);
+    callback shell-drawer-resize(int, int);
+    callback shell-drawer-scrollback-requested(int);
+    callback shell-drawer-copy-selection(int, int, int, int);
+    callback shell-drawer-paste();
     callback workflow-open-project(string, string, string, string, string, image, bool);
     callback project-add-project(string, string, string, string, string, string, bool);
     callback project-preview-logo(string);
@@ -553,7 +566,15 @@ export component MainWindow inherits Window {
                         title: root.shell-drawer-title;
                         cwd: root.shell-drawer-cwd;
                         output: root.shell-drawer-output;
+                        output-line-count: root.shell-drawer-output-line-count;
+                        lines: root.shell-drawer-lines;
+                        scrollback-offset: root.shell-drawer-scrollback-offset;
+                        max-scrollback: root.shell-drawer-max-scrollback;
+                        cursor-row: root.shell-drawer-cursor-row;
+                        cursor-col: root.shell-drawer-cursor-col;
+                        cursor-visible: root.shell-drawer-cursor-visible;
                         running: root.shell-drawer-running;
+                        connected: root.shell-drawer-connected;
                         initial-height: 280px;
                         available-height: root.shell-drawer-fullscreen
                             ? root.workflow-terminal-fullscreen-height
@@ -572,6 +593,18 @@ export component MainWindow inherits Window {
                         submit-command(command) => {
                             root.shell-drawer-submit(command);
                             root.shell-drawer-input-text = "";
+                        }
+                        key-pressed(text, ctrl, alt, shift, meta) => {
+                            root.shell-drawer-key-pressed(text, ctrl, alt, shift, meta);
+                        }
+                        viewport-resized(cols, rows) => {
+                            root.shell-drawer-resize(cols, rows);
+                        }
+                        scrollback-requested(delta) => {
+                            root.shell-drawer-scrollback-requested(delta);
+                        }
+                        paste-requested => {
+                            root.shell-drawer-paste();
                         }
                     }
                 }

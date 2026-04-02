@@ -129,6 +129,9 @@ UI 展示模型由 Rust 转换并注入 `project-items`，支持：
 - `output`
 - `running`
 
+相关排障记录与历史坑位统一维护在：
+- [terminal_viewport_iteration_notes.md](./terminal_viewport_iteration_notes.md)
+
 行为约束：
 - 同项目重复打开：
   - 保持终端内容、cwd、输入状态

@@ -1,5 +1,19 @@
-import { FilledButton, HorizontalDivider, MaterialPalette, MaterialText } from "@material";
-import { ScrollView } from "../../../material-1.0-fixed/ui/components/scroll_view.slint";
+import { HorizontalDivider, MaterialPalette } from "@material";
+
+export struct TerminalSpan {
+    start_col: int,
+    text: string,
+    cells: int,
+    foreground: color,
+    background: color,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+}
+
+export struct TerminalLine {
+    spans: [TerminalSpan],
+}
 
 export component TerminalDrawer inherits Rectangle {
     in property <bool> drawer-open: false;
@@ -8,11 +22,20 @@ export component TerminalDrawer inherits Rectangle {
     in property <string> title: "Terminal";
     in property <string> cwd: "";
     in property <string> output: "Terminal ready.\n";
+    in property <int> output-line-count: 1;
+    in property <[TerminalLine]> lines: [];
+    in property <int> scrollback-offset: 0;
+    in property <int> max-scrollback: 0;
+    in property <int> cursor-row: 0;
+    in property <int> cursor-col: 0;
+    in property <bool> cursor-visible: false;
     in property <bool> running: false;
+    in property <bool> connected: false;
     in property <length> initial-height: 280px;
     in property <length> available-height: self.height;
     in-out property <length> drawer-height: 0px;
     in-out property <bool> fullscreen: false;
+    in-out property <bool> selection-mode: false;
     in property <length> side-margin: 16px;
     in property <length> bottom-margin: 16px;
     in property <length> max-drawer-width: 960px;
@@ -20,6 +43,10 @@ export component TerminalDrawer inherits Rectangle {
     in property <length> top-safe-margin: 16px;
     callback close-requested();
     callback submit-command(string);
+    callback key-pressed(string, bool, bool, bool, bool);
+    callback viewport-resized(int, int);
+    callback scrollback-requested(int);
+    callback paste-requested();
 
     private property <length> max-available-height: max(root.min-drawer-height, root.available-height - root.top-safe-margin - root.bottom-margin);
     private property <length> effective-drawer-height: root.drawer-height > 0px ? root.drawer-height : root.initial-height;
@@ -29,32 +56,137 @@ export component TerminalDrawer inherits Rectangle {
     private property <length> resolved-drawer-width: root.fullscreen
         ? max(320px, root.width - root.side-margin * 2)
         : min(root.width - root.side-margin * 2, root.max-drawer-width);
+    private property <length> terminal-font-size: 12px;
+    private property <length> terminal-padding: 12px;
+    private property <length> terminal-line-height: 20px;
+    private property <length> terminal-char-width: max(1px, char-measure.preferred-width / 16);
+    private property <length> terminal-scrollbar-gutter: root.max-scrollback > 0 ? 16px : 0px;
+    private property <length> terminal-content-width: max(1px, terminal-body.width - root.terminal-padding * 2 - root.terminal-scrollbar-gutter);
+    private property <int> terminal-cols: max(20, Math.floor(root.terminal-content-width / root.terminal-char-width));
+    private property <length> terminal-cell-width: root.terminal-char-width;
+    private property <int> terminal-rows: max(4, Math.floor(max(1px, terminal-body.height - root.terminal-padding * 2) / root.terminal-line-height));
+    private property <bool> viewport-ready: root.drawer-open
+        && terminal-body.width > root.terminal-padding * 2
+        && terminal-body.height > root.terminal-padding * 2;
+    private property <bool> initial-viewport-synced: false;
+    private property <bool> cursor-blink-on: true;
+    private property <length> terminal-cursor-height: root.terminal-line-height * 0.72;
+    private property <int> selection-anchor-row: 0;
+    private property <int> selection-anchor-col: 0;
+    private property <int> selection-start-row: 0;
+    private property <int> selection-start-col: 0;
+    private property <int> selection-end-row: 0;
+    private property <int> selection-end-col: 0;
+    private property <bool> has-selection: false;
+    private property <bool> is-macos: Platform.os == OperatingSystemType.macos;
+
+    callback update-selection(length, length, bool);
+    update-selection(mouse_x, mouse_y, reset) => {
+        let raw_row = Math.floor((mouse_y - root.terminal-padding) / root.terminal-line-height);
+        let raw_col = Math.floor((mouse_x - root.terminal-padding) / root.terminal-cell-width);
+        let row = max(0, min(root.terminal-rows - 1, raw_row));
+        let col = max(0, min(root.terminal-cols, raw_col));
+
+        if (reset) {
+            root.selection-anchor-row = row;
+            root.selection-anchor-col = col;
+            root.selection-start-row = row;
+            root.selection-start-col = col;
+            root.selection-end-row = row;
+            root.selection-end-col = col;
+            root.has-selection = false;
+        } else if (row < root.selection-anchor-row || (row == root.selection-anchor-row && col < root.selection-anchor-col)) {
+            root.selection-start-row = row;
+            root.selection-start-col = col;
+            root.selection-end-row = root.selection-anchor-row;
+            root.selection-end-col = root.selection-anchor-col;
+            root.has-selection = root.selection-start-row != root.selection-end-row || root.selection-start-col != root.selection-end-col;
+        } else {
+            root.selection-start-row = root.selection-anchor-row;
+            root.selection-start-col = root.selection-anchor-col;
+            root.selection-end-row = row;
+            root.selection-end-col = col;
+            root.has-selection = root.selection-start-row != root.selection-end-row || root.selection-start-col != root.selection-end-col;
+        }
+    }
+
+    changed drawer-open => {
+        if (self.drawer-open) {
+            root.initial-viewport-synced = false;
+            if (root.viewport-ready) {
+                root.viewport-resized(root.terminal-cols, root.terminal-rows);
+            }
+            if (root.selection-mode) {
+                selection-overlay.focus();
+            } else {
+                terminal-focus.focus();
+            }
+        }
+        root.cursor-blink-on = true;
+    }
+
+    changed selection-mode => {
+        if (root.selection-mode) {
+            root.cursor-blink-on = false;
+            selection-overlay.focus();
+        } else if (root.drawer-open) {
+            root.cursor-blink-on = true;
+            terminal-focus.focus();
+        }
+    }
+
+    changed terminal-cols => {
+        root.initial-viewport-synced = false;
+        if (root.viewport-ready) {
+            root.viewport-resized(root.terminal-cols, root.terminal-rows);
+        }
+    }
+
+    changed terminal-rows => {
+        root.initial-viewport-synced = false;
+        if (root.viewport-ready) {
+            root.viewport-resized(root.terminal-cols, root.terminal-rows);
+        }
+    }
+
+    changed cursor-visible => {
+        root.cursor-blink-on = true;
+    }
+
+    blink-timer := Timer {
+        interval: 600ms;
+        running: root.drawer-open && root.cursor-visible;
+        triggered => {
+            root.cursor-blink-on = !root.cursor-blink-on;
+        }
+    }
+
+    initial-viewport-sync := Timer {
+        interval: 16ms;
+        running: root.viewport-ready && !root.initial-viewport-synced;
+        triggered => {
+            root.initial-viewport-synced = true;
+            root.viewport-resized(root.terminal-cols, root.terminal-rows);
+        }
+    }
 
     width: 100%;
     height: 100%;
     background: transparent;
 
     drawer := Rectangle {
-        // x: root.docked ? 0px : max(root.side-margin, (parent.width - self.width) / 2);
-        x: -12px;
+        x: root.docked ? 0px : max(root.side-margin, (parent.width - self.width) / 2);
         y: root.docked ? 0px : (root.drawer-open
             ? parent.height - self.height - root.bottom-margin
             : parent.height + 8px);
-        width: (root.docked ? parent.width : root.resolved-drawer-width) + 17px;
+        width: root.docked ? parent.width : root.resolved-drawer-width;
         height: root.docked ? parent.height : root.resolved-drawer-height;
-        // border-radius: root.docked ? 12px : 18px;
+        border-radius: root.docked ? 12px : 18px;
         border-width: 1px;
         border-color: MaterialPalette.outline_variant;
-        // background: MaterialPalette.surface_container_high;
         background: MaterialPalette.background;
         opacity: root.docked ? 1 : (root.drawer-open ? 1 : 0);
         animate opacity { duration: 220ms; }
-
-        TouchArea {
-            width: 100%;
-            height: 100%;
-            enabled: root.drawer-open;
-        }
 
         VerticalLayout {
             width: 100%;
@@ -100,7 +232,7 @@ export component TerminalDrawer inherits Rectangle {
                 Text {
                     x: 10px;
                     y: 8px;
-                    width: parent.width - 124px;
+                    width: parent.width - 178px;
                     text: root.title;
                     font-size: 10px;
                     font-weight: 600;
@@ -112,14 +244,48 @@ export component TerminalDrawer inherits Rectangle {
                 Rectangle {
                     x: parent.width - self.width - 16px;
                     y: 2px;
-                    width: 68px;
+                    width: 122px;
                     height: 28px;
                     background: transparent;
 
                     Rectangle {
-                        width: 24px;
+                        width: 44px;
                         height: 24px;
                         x: 0px;
+                        y: 2px;
+                        border-radius: 6px;
+                        background: select_hover.has-hover || root.selection-mode
+                            ? MaterialPalette.surface_container_highest
+                            : transparent;
+                        animate background { duration: 120ms; }
+
+                        Text {
+                            x: 0px;
+                            y: (parent.height - self.preferred-height) / 2;
+                            width: parent.width;
+                            text: "Select";
+                            font-size: 9px;
+                            font-weight: 600;
+                            color: root.selection-mode
+                                ? MaterialPalette.primary
+                                : MaterialPalette.on_surface_variant;
+                            horizontal-alignment: center;
+                        }
+
+                        select_hover := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.selection-mode = !root.selection-mode;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 24px;
+                        height: 24px;
+                        x: 54px;
                         y: 2px;
                         border-radius: 4px;
                         background: fullscreen_hover.has-hover
@@ -170,7 +336,7 @@ export component TerminalDrawer inherits Rectangle {
                     Rectangle {
                         width: 24px;
                         height: 24px;
-                        x: 42px;
+                        x: 96px;
                         y: 2px;
                         border-radius: 4px;
                         background: close_hover.has-hover
@@ -224,101 +390,260 @@ export component TerminalDrawer inherits Rectangle {
 
             Rectangle {
                 width: parent.width;
-                height: parent.height - 61px;
-                background: transparent;
+                height: parent.height - 31px;
 
                 VerticalLayout {
                     width: parent.width;
                     height: parent.height;
-                    spacing: 10px;
-                    padding-left: 16px;
-                    padding-right: 16px;
-                    padding-top: 10px;
-                    padding-bottom: 10px;
 
                     Rectangle {
-                        width: parent.width - 32px;
+                        width: parent.width;
                         vertical-stretch: 1;
                         min-height: 120px;
-                        border-radius: 12px;
-                        border-width: 1px;
-                        border-color: MaterialPalette.outline_variant;
                         background: MaterialPalette.surface_container_low;
                         clip: true;
 
-                        ScrollView {
+                        terminal-body := Rectangle {
                             width: parent.width;
                             height: parent.height;
-                            horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
-                            vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
+                            background: transparent;
 
-                            Text {
-                                x: 12px;
-                                y: 12px;
-                                width: parent.width - 24px;
-                                text: root.output;
-                                wrap: word-wrap;
-                                font-size: 12px;
-                                font-family: "Hiragino Sans GB";
-                                color: MaterialPalette.on_surface_variant;
-                            }
-                        }
-                    }
+                            terminal-interaction-area := TouchArea {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                enabled: root.drawer-open && !root.selection-mode;
 
-                    HorizontalLayout {
-                        width: parent.width - 32px;
-                        height: 40px;
-                        spacing: 12px;
-                        alignment: center;
+                                pointer-event(event) => {
+                                    if (event.kind == PointerEventKind.down) {
+                                        terminal-focus.focus();
+                                    }
+                                }
 
-                        Text {
-                            text: "$";
-                            font-size: 14px;
-                            color: MaterialPalette.primary;
-                            vertical_alignment: center;
-                        }
+                                moved => {}
 
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            height: parent.height;
-                            border-radius: 12px;
-                            border-width: 1px;
-                            border-color: MaterialPalette.outline_variant;
-                            background: MaterialPalette.surface_container_low;
-                            clip: true;
-
-                            TextInput {
-                                x: 12px;
-                                y: (parent.height - self.preferred-height) / 2;
-                                width: parent.width - 24px;
-                                text <=> root.input-text;
-                                color: MaterialPalette.on_surface;
-                                font-size: 13px;
-                                font-family: "Hiragino Sans GB";
-                                single-line: true;
-                                accepted => {
-                                    root.submit-command(self.text);
+                                scroll-event(event) => {
+                                    if (event.delta-y > 0px) {
+                                        root.scrollback-requested(3);
+                                    } else if (event.delta-y < 0px) {
+                                        root.scrollback-requested(-3);
+                                    }
+                                    return accept;
                                 }
                             }
 
-                            if root.input-text == "": Text {
-                                x: 12px;
-                                y: (parent.height - self.preferred-height) / 2;
-                                text: "Run shell command in current project directory";
-                                font-size: 12px;
+                            terminal-focus := FocusScope {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                enabled: root.drawer-open && !root.selection-mode;
+
+                                key_pressed(event) => {
+                                    let shortcut_modifier = event.modifiers.control;
+                                    let terminal_control_modifier = root.is-macos ? event.modifiers.meta : event.modifiers.control;
+
+                                    if (event.text == Key.Control || event.text == Key.ControlR
+                                            || event.text == Key.Shift || event.text == Key.ShiftR
+                                            || event.text == Key.Meta || event.text == Key.MetaR
+                                            || event.text == Key.Alt || event.text == Key.AltGr) {
+                                        return accept;
+                                    }
+
+                                    if (shortcut_modifier && (event.text == "c" || event.text == "C")) {
+                                        return accept;
+                                    }
+
+                                    if (shortcut_modifier && (event.text == "v" || event.text == "V")) {
+                                        root.paste-requested();
+                                        return accept;
+                                    }
+
+                                    root.has-selection = false;
+                                    root.key-pressed(
+                                        terminal_control_modifier && (event.text == "c" || event.text == "C") ? "__CTRL_C__"
+                                            : terminal_control_modifier && (event.text == "d" || event.text == "D") ? "__CTRL_D__"
+                                            : terminal_control_modifier && (event.text == "l" || event.text == "L") ? "__CTRL_L__"
+                                            : terminal_control_modifier && (event.text == "z" || event.text == "Z") ? "__CTRL_Z__"
+                                            : event.text == Key.Return ? "__RETURN__"
+                                            : event.text == Key.Backspace ? "__BACKSPACE__"
+                                            : event.text == Key.Delete ? "__DELETE__"
+                                            : event.text == Key.Tab ? "__TAB__"
+                                            : event.text == Key.Escape ? "__ESCAPE__"
+                                            : event.text == Key.LeftArrow ? "__LEFT__"
+                                            : event.text == Key.RightArrow ? "__RIGHT__"
+                                            : event.text == Key.UpArrow ? "__UP__"
+                                            : event.text == Key.DownArrow ? "__DOWN__"
+                                            : event.text == Key.Home ? "__HOME__"
+                                            : event.text == Key.End ? "__END__"
+                                            : event.text,
+                                        terminal_control_modifier,
+                                        event.modifiers.alt,
+                                        event.modifiers.shift,
+                                        root.is-macos ? false : event.modifiers.meta
+                                    );
+                                    return accept;
+                                }
+                            }
+
+                            terminal-lines := Rectangle {
+                                visible: root.lines.length > 0 && !root.selection-mode;
+                                x: root.terminal-padding;
+                                y: root.terminal-padding;
+                                width: root.terminal-content-width;
+                                height: root.terminal-rows * root.terminal-line-height;
+                                background: transparent;
+
+                                for line[line_index] in root.lines: Rectangle {
+                                    x: 0px;
+                                    y: line_index * root.terminal-line-height;
+                                    width: parent.width;
+                                    height: root.terminal-line-height;
+                                    background: transparent;
+                                    private property <int> line-selection-start: line_index < root.selection-start-row || line_index > root.selection-end-row
+                                        ? -1
+                                        : line_index == root.selection-start-row
+                                            ? root.selection-start-col
+                                            : 0;
+                                    private property <int> line-selection-end: line_index < root.selection-start-row || line_index > root.selection-end-row
+                                        ? -1
+                                        : line_index == root.selection-end-row
+                                            ? root.selection-end-col
+                                            : root.terminal-cols;
+
+                                    if root.has-selection && self.line-selection-end > self.line-selection-start: Rectangle {
+                                        x: parent.line-selection-start * root.terminal-cell-width;
+                                        y: 0px;
+                                        width: max(root.terminal-cell-width, (parent.line-selection-end - parent.line-selection-start) * root.terminal-cell-width);
+                                        height: parent.height;
+                                        background: MaterialPalette.primary.with-alpha(0.22);
+                                    }
+
+                                    for span[span_index] in line.spans: Rectangle {
+                                        x: span.start_col * root.terminal-cell-width;
+                                        y: 0px;
+                                        height: parent.height;
+                                        width: max(1px, span.cells * root.terminal-cell-width);
+                                        background: span.background;
+
+                                        span-text := Text {
+                                            x: 0px;
+                                            y: (parent.height - self.preferred-height) / 2;
+                                            width: parent.width;
+                                            text: span.text;
+                                            color: span.foreground;
+                                            font-size: root.terminal-font-size;
+                                            font-family: "Menlo";
+                                            font-weight: span.bold ? 600 : 400;
+                                            font-italic: span.italic;
+                                            wrap: no-wrap;
+                                        }
+
+                                        if span.underline: Rectangle {
+                                            x: 0px;
+                                            y: parent.height - 1px;
+                                            width: parent.width;
+                                            height: 1px;
+                                            background: span.foreground;
+                                        }
+                                    }
+                                }
+                            }
+
+                            terminal-text := Text {
+                                visible: root.lines.length == 0 && !root.selection-mode;
+                                x: root.terminal-padding;
+                                y: root.terminal-padding;
+                                width: root.terminal-content-width;
+                                text: root.output;
+                                wrap: no-wrap;
+                                font-size: root.terminal-font-size;
+                                font-family: "Menlo";
                                 color: MaterialPalette.on_surface_variant;
                             }
-                        }
 
-                        FilledButton {
-                            width: 92px;
-                            text: root.running ? "Running..." : "Run";
-                            enabled: !root.running;
-                            clicked => {
-                                root.submit-command(root.input-text);
+                            selection-overlay := TextInput {
+                                visible: root.selection-mode;
+                                x: root.terminal-padding;
+                                y: root.terminal-padding;
+                                width: root.terminal-content-width;
+                                height: parent.height - 24px;
+                                text: root.output;
+                                single-line: false;
+                                read-only: true;
+                                wrap: no-wrap;
+                                font-size: root.terminal-font-size;
+                                font-family: "Menlo";
+                                color: MaterialPalette.on_surface_variant;
+                                selection-background-color: MaterialPalette.primary.with-alpha(0.22);
+                                selection-foreground-color: MaterialPalette.on_surface;
+
+                                key_pressed(event) => {
+                                    let shortcut_modifier = event.modifiers.control;
+
+                                    if (event.text == Key.Escape) {
+                                        root.selection-mode = false;
+                                        return accept;
+                                    }
+
+                                    if (shortcut_modifier && (event.text == "c" || event.text == "C")) {
+                                        self.copy();
+                                        return accept;
+                                    }
+
+                                    if (shortcut_modifier && (event.text == "a" || event.text == "A")) {
+                                        self.select-all();
+                                        return accept;
+                                    }
+
+                                    return accept;
+                                }
+                            }
+
+                            if root.cursor-visible && root.cursor-blink-on && !root.selection-mode: Rectangle {
+                                x: root.terminal-padding + root.cursor-col * root.terminal-cell-width;
+                                y: root.terminal-padding + root.cursor-row * root.terminal-line-height
+                                    + (root.terminal-line-height - root.terminal-cursor-height) / 2;
+                                width: 2px;
+                                height: root.terminal-cursor-height;
+                                background: MaterialPalette.primary;
+                            }
+
+                            char-measure := Text {
+                                visible: false;
+                                text: "MMMMMMMMMMMMMMMM";
+                                font-size: root.terminal-font-size;
+                                font-family: "Menlo";
+                                wrap: no-wrap;
+                            }
+
+                            if root.max-scrollback > 0: Rectangle {
+                                x: parent.width - 8px;
+                                y: 8px;
+                                width: 4px;
+                                height: parent.height - 16px;
+                                border-radius: 2px;
+                                background: MaterialPalette.surface_container_highest;
+
+                                Rectangle {
+                                    property <length> thumb-height: max(
+                                        24px,
+                                        parent.height * root.terminal-rows / (root.max-scrollback + root.terminal-rows)
+                                    );
+                                    x: 0px;
+                                    y: (parent.height - self.thumb-height)
+                                        * (root.max-scrollback - root.scrollback-offset)
+                                        / root.max-scrollback;
+                                    width: parent.width;
+                                    height: self.thumb-height;
+                                    border-radius: 2px;
+                                    background: MaterialPalette.outline;
+                                }
                             }
                         }
                     }
+
                 }
             }
         }
