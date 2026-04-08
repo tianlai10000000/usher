@@ -1,6 +1,7 @@
 import { ElevatedCard, MaterialStyleMetrics, OutlinedCard } from "@material";
 import { Route } from "../../route/routeMap.slint";
 import { LayoutConstants } from "../../layout_constants.slint";
+import { MaterialPalette } from "../../../material-1.0-fixed/material.slint";
 
 export component PageView {
     callback navigate(Route);
@@ -8,7 +9,7 @@ export component PageView {
 
     property <length> page_viewport_height: viewport-height > 0px ? viewport-height : LayoutConstants.default-page-viewport-height;
 
-    ElevatedCard {
+    Rectangle {
         width: parent.width;
         min-height: page_viewport_height;
 

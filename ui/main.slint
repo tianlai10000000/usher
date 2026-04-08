@@ -1,6 +1,6 @@
 import { 
     FilledCard, AppBar, Horizontal, Vertical, MaterialText, IconButton, 
-    MaterialPalette, MaterialStyleMetrics, CircularProgressIndicator, Modal, TextButton, 
+    MaterialPalette, MaterialStyleMetrics, CircularProgressIndicator, Modal, TextButton,
     FilledButton, HorizontalDivider } from "@material";
 import { CustomNavDrawer, NavItem } from "./components/navigation/custom_nav_drawer.slint";
 import { ScrollView } from "../material-1.0-fixed/ui/components/scroll_view.slint";
@@ -55,6 +55,9 @@ export component MainWindow inherits Window {
     min-width: 800px;
     min-height: 600px;
     title: "Usher";
+    // Use one shared surface color for the native title bar and the main content area.
+    private property <color> window-surface-color: MaterialPalette.surface_container_lowest;
+    background: root.window-surface-color;
     out property <length> chat-layout-window-width: self.width;
     out property <length> chat-layout-window-height: self.height;
     // default-font-family: "Noto Sans SC";
@@ -73,7 +76,7 @@ export component MainWindow inherits Window {
     in-out property <bool> show-dialog-page: false;
     
     // 上一个路由，用于返回功能
-    private property <Route> previous-route: Route.Home;
+    in-out property <Route> previous-route: Route.Home;
     private property <bool> shell-drawer-docked-route: root.current-route == Route.Workflow || root.current-route == Route.Project;
     private property <length> page-scroll-offset: (root.current-route == Route.Workflow || root.current-route == Route.Project)
         ? max(0px, -page-scroll-view.viewport_y)
@@ -86,6 +89,9 @@ export component MainWindow inherits Window {
             ? root.workflow-terminal-fullscreen-height
             : min(root.shell-drawer-height > 0px ? root.shell-drawer-height : 280px, root.workflow-terminal-max-height))
         : 0px;
+    private property <bool> page-memory-diag-pending: false;
+    private property <string> sidebar-hovered-tooltip-text: "";
+    private property <int> sidebar-hovered-tooltip-index: -1;
 
     // 导航信号（方便 Rust 端调用）
     callback navigate(Route);
@@ -97,11 +103,8 @@ export component MainWindow inherits Window {
     callback check-update();
     callback cancel-download();
     
-    // 导航抽屉展开/收起状态
-    in-out property <bool> navigation-drawer-expanded: true;
-    
-    // 抽屉展开/收起状态变化回调（用于保存设置）
-    callback toggle-navigation-drawer-expanded(bool);
+    // 保留该属性仅用于兼容已有设置；侧栏固定为窄栏，不再提供展开/收起交互。
+    in-out property <bool> navigation-drawer-expanded: false;
 
     // Update Checker
     callback show-update-dialog(latest-version: string, current-version: string);
@@ -219,6 +222,8 @@ export component MainWindow inherits Window {
     callback shell-drawer-scrollback-requested(int);
     callback shell-drawer-copy-selection(int, int, int, int);
     callback shell-drawer-paste();
+    callback shell-drawer-selection-mode-changed(bool);
+    callback page-memory-diag(Route, int, int, bool);
     callback workflow-open-project(string, string, string, string, string, image, bool);
     callback project-add-project(string, string, string, string, string, string, bool);
     callback project-preview-logo(string);
@@ -231,6 +236,31 @@ export component MainWindow inherits Window {
     init => {
         // TODO: delete
         // update-dialog.show();
+    }
+
+    page-memory-diag-timer := Timer {
+        interval: 120ms;
+        running: root.page-memory-diag-pending;
+        triggered => {
+            root.page-memory-diag-pending = false;
+            root.page-memory-diag(root.current-route, root.width / 1px, root.height / 1px, root.shell-drawer-visible);
+        }
+    }
+
+    changed width => {
+        root.page-memory-diag-pending = true;
+    }
+
+    changed height => {
+        root.page-memory-diag-pending = true;
+    }
+
+    changed current-route => {
+        root.page-memory-diag-pending = true;
+    }
+
+    changed shell-drawer-visible => {
+        root.page-memory-diag-pending = true;
     }
     
     show-update-dialog(latest-version, current-version) => {
@@ -259,7 +289,7 @@ export component MainWindow inherits Window {
         padding: 0px;
         
         if root.show-navigation-drawer: Vertical {
-            width: root.navigation-drawer-expanded ? 120px : 56px;
+            width: 40px;
             height: parent.height;
             padding: 0px;
             
@@ -267,65 +297,35 @@ export component MainWindow inherits Window {
             drawer_container := Rectangle {
                 width: parent.width;
                 height: parent.height;
-                background: MaterialPalette.background;
+                background: MaterialPalette.surface_container_low;
+                clip: false;
+                z: 20;
                     
                     Vertical {
                         width: parent.width;
                         vertical-stretch: 1;
                         padding: 0px;
-                        
-                        // 滚动视图，用于支持上下滚动
-                        scroll_view := ScrollView {
-                            width: parent.width;
-                            vertical-stretch: 1;
-                            horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
-                            vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
-                            
-                            // 使用自定义导航组件（无标题，较小的菜单项高度）
-                            custom_nav := CustomNavDrawer {
-                                width: scroll_view.visible_width;
-                                
-                                // 当前菜单选中索引由路由策略统一计算
-                                current_index: root.navigation-current-index;
-                                
-                                items: [
-                                    //  { icon: @image-url("./assets/icons/home.svg"), text: root.navigation-drawer-expanded ? "Home" : "" },
-                                    // { icon: @image-url("./assets/icons/search.svg"), text: root.navigation-drawer-expanded ? "Search" : "" },
-                                    //  { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Notify" : "" },
-                                    //  { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Toast" : "" },
-                                    //  { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Dialog" : "" },
-                                    //  { icon: @image-url("./assets/icons/tools.svg"), text: root.navigation-drawer-expanded ? "Tools" : ""},
-                                    { icon: @image-url("./assets/icons/chat.svg"), text: root.navigation-drawer-expanded ? "Chat" : ""},
-                                    { icon: @image-url("./assets/icons/project.svg"), text: root.navigation-drawer-expanded ? "Project" : ""},
-                                    // { icon: @image-url("./assets/icons/commit.svg"), text: root.navigation-drawer-expanded ? "Workflow" : ""},
-                                    // { icon: @image-url("./assets/icons/list.svg"), text: root.navigation-drawer-expanded ? "List" : "" },
-                                    // { icon: @image-url("./assets/icons/detail.svg"), text: root.navigation-drawer-expanded ? "Detail" : ""},
-//                                    { icon: @image-url("./assets/icons/settings.svg"), text: root.navigation-drawer-expanded ? "Settings" : ""},
-//                                    { icon: @image-url("./assets/icons/about.svg"), text: root.navigation-drawer-expanded ? "About" : ""},
-                                ];
 
-                                selected(item_index) => {
-                                    if item_index >= 0 {
-                                        root.previous-route = root.current-route;
-                                        root.navigate-from-nav-index(item_index);
-                                    }
-                                }
-                            }
-                            
-                            // 设置 viewport_height 为内容的实际高度
-                            viewport_height: custom_nav.height;
-                        }
-                        
-                        // 切换按钮 - 放在底部
-                        toggle_button := IconButton {
+                        // 使用固定布局，避免滚动区域裁剪 tooltip 并保证图标以侧栏宽度居中。
+                        custom_nav := CustomNavDrawer {
                             width: parent.width;
-                            // height: 40px;
-                            icon: root.navigation-drawer-expanded ? @image-url("./assets/icons/arrow_left.svg") : @image-url("./assets/icons/arrow_right.svg");
-                            // tooltip: root.navigation-drawer-expanded ? "Collapse" : "Expand";
-                            
-                            clicked => {
-                                root.navigation-drawer-expanded = !root.navigation-drawer-expanded;
-                                root.toggle-navigation-drawer-expanded(root.navigation-drawer-expanded);
+                            hovered-tooltip-text <=> root.sidebar-hovered-tooltip-text;
+                            hovered-tooltip-index <=> root.sidebar-hovered-tooltip-index;
+
+                            // 当前菜单选中索引由路由策略统一计算
+                            current_index: root.navigation-current-index;
+
+                            items: [
+                                { icon: @image-url("./assets/icons/home.svg"), text: "Home" },
+                                { icon: @image-url("./assets/icons/chat.svg"), text: "Chat" },
+                                { icon: @image-url("./assets/icons/project.svg"), text: "Project" },
+                            ];
+
+                            selected(item_index) => {
+                                if item_index >= 0 {
+                                    root.previous-route = root.current-route;
+                                    root.navigate-from-nav-index(item_index);
+                                }
                             }
                         }
                     }
@@ -335,7 +335,7 @@ export component MainWindow inherits Window {
         main-content-host := Rectangle  {
             horizontal-stretch: 1;
             height: parent.height;
-            // background: MaterialPalette.background.with-alpha(0.15);
+            background: root.window-surface-color;
 
             content := Vertical {
                 width: parent.width;
@@ -352,6 +352,7 @@ export component MainWindow inherits Window {
                         width: parent.width;
                         height: parent.height;
                         current-route: root.current-route;
+                        previous-route: root.previous-route;
                         navigate(route) => {
                             root.previous-route = root.current-route;
                             root.navigate(route);
@@ -366,7 +367,7 @@ export component MainWindow inherits Window {
                             && root.shell-drawer-visible
                             && root.shell-drawer-fullscreen);
                     horizontal-stretch: 1;
-                    height: parent.height - breadcrumb-host.height - terminal-dock-host.height;
+                    height: parent.height - breadcrumb-host.height - terminal-dock-host.height - 4px;
                     horizontal_scrollbar_policy: ScrollBarPolicy.as_needed;
                     vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
 
@@ -556,6 +557,15 @@ export component MainWindow inherits Window {
                     height: root.workflow-terminal-docked-height;
                     background: transparent;
 
+                    if root.shell-drawer-docked-route && root.shell-drawer-visible: Rectangle {
+                        x: -MaterialStyleMetrics.padding_8;
+                        y: 0px;
+                        width: 1px;
+                        height: parent.height;
+                        background: MaterialPalette.outline_variant;
+                        z: 2;
+                    }
+
                     if root.shell-drawer-docked-route && root.shell-drawer-visible: TerminalDrawer {
                         x: MaterialStyleMetrics.padding_4;
                         width: max(320px, parent.width - MaterialStyleMetrics.padding_4 * 2);
@@ -605,6 +615,9 @@ export component MainWindow inherits Window {
                         }
                         paste-requested => {
                             root.shell-drawer-paste();
+                        }
+                        selection-mode-changed(enabled) => {
+                            root.shell-drawer-selection-mode-changed(enabled);
                         }
                     }
                 }
@@ -660,6 +673,23 @@ export component MainWindow inherits Window {
         }
     }
 
+    if show-navigation-drawer && root.sidebar-hovered-tooltip-text != "": Rectangle {
+        x: 50px;
+        y: 8px + root.sidebar-hovered-tooltip-index * 44px + 16px - self.height / 2;
+        width: tooltip-label.preferred-width + 12px;
+        height: tooltip-label.preferred-height + 6px;
+        background: MaterialPalette.inverse_surface;
+        border-radius: 3px;
+        z: 2000;
+
+        tooltip-label := MaterialText {
+            x: 6px;
+            y: 3px;
+            text: root.sidebar-hovered-tooltip-text;
+            font-size: 11px;
+            color: MaterialPalette.inverse_on_surface;
+        }
+    }
     // 底部状态栏 - 固定在窗口底部，高度 40px
     StatusBar {
         x: 0;

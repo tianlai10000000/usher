@@ -30,6 +30,9 @@ export global AppState {
     // tracing logger
     in-out property <bool> tracing-logger-active: true; // default enabled
 
+    // terminal verbose logging
+    in-out property <bool> terminal-verbose-logging: false;
+
     // git platform tokens
     in-out property <string> git-github-token: "";
     in-out property <string> git-gitlab-token: "";
@@ -47,6 +50,9 @@ export global AppState {
     
     // tracing logger
     callback toggle-tracing-logger-active(enabled: bool);
+
+    // terminal verbose logging
+    callback toggle-terminal-verbose-logging(enabled: bool);
 
     // git token settings
     callback save-git-tokens(github-token: string, gitlab-token: string, gitee-token: string);

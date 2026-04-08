@@ -18,7 +18,10 @@ name = "usher"
 # "backend-android-activity-06",
 # 注意：live-preview feature 已移除以减小 release 构建体积
 # 如需开发时使用 live-preview，可以临时添加 features = ["live-preview"]
-slint = { version = "1.15.1", default-features = false, features = ["live-preview", "std", "compat-1-2", "backend-winit", "renderer-femtovg", "raw-window-handle-06"] }
+# 可选渲染后端：默认仍为 FemtoVG。若需按社区建议验证「窗口变大时内存」是否为双缓冲/驱动统计问题，可启用 Skia 软件路径：
+#   SLINT_BACKEND=winit-skia-software cargo run
+# （需本行的 renderer-skia；首次编译 Skia 较慢、产物更大）
+slint = { version = "1.15.1", default-features = false, features = ["live-preview", "std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-skia", "raw-window-handle-06"] }
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
@@ -49,6 +52,7 @@ fs2 = "0.4.3"
 base64 = "0.22"
 portable-pty = "0.9.0"
 vt100 = "0.16.2"
+libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 raw-window-handle = "0.6"

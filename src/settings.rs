@@ -25,6 +25,10 @@ pub struct AppSettings {
     #[serde(default = "default_tracing_logger_active")]
     pub tracing_logger_active: bool,
 
+    /// Verbose terminal logging active
+    #[serde(default = "default_terminal_verbose_logging")]
+    pub terminal_verbose_logging: bool,
+
     /// Navigation drawer expanded state
     #[serde(default = "default_navigation_drawer_expanded")]
     pub navigation_drawer_expanded: bool,
@@ -75,6 +79,10 @@ fn default_tracing_logger_active() -> bool {
     true // Default to enabled
 }
 
+fn default_terminal_verbose_logging() -> bool {
+    false // Default to disabled
+}
+
 fn default_navigation_drawer_expanded() -> bool {
     true // Default to expanded
 }
@@ -85,6 +93,7 @@ impl Default for AppSettings {
             theme_mode: default_theme_mode(),
             auto_update: default_auto_update(),
             tracing_logger_active: default_tracing_logger_active(),
+            terminal_verbose_logging: default_terminal_verbose_logging(),
             navigation_drawer_expanded: default_navigation_drawer_expanded(),
             git: GitSettings::default(),
         }
@@ -217,10 +226,10 @@ impl SettingsManager {
         }
     }
 
-    /// Update drawer expanded setting
-    pub fn set_navigation_drawer_expanded(&self, expanded: bool) {
+    /// Update terminal verbose logging setting
+    pub fn set_terminal_verbose_logging(&self, enabled: bool) {
         if let Ok(mut settings) = self.settings.write() {
-            settings.navigation_drawer_expanded = expanded;
+            settings.terminal_verbose_logging = enabled;
         }
     }
 
@@ -274,9 +283,9 @@ pub fn save_tracing_logger_active(enabled: bool) {
     });
 }
 
-/// Save drawer expanded setting asynchronously
-pub fn save_navigation_drawer_expanded(expanded: bool) {
-    get_settings_manager().set_navigation_drawer_expanded(expanded);
+/// Save terminal verbose logging setting asynchronously
+pub fn save_terminal_verbose_logging(enabled: bool) {
+    get_settings_manager().set_terminal_verbose_logging(enabled);
     Timer::single_shot(std::time::Duration::from_millis(100), || {
         if let Err(e) = get_settings_manager().save() {
             log::error!("[Settings] Failed to save settings: {}", e);
@@ -319,6 +328,7 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app_state.set_theme_mode(settings.theme_mode);
     app_state.set_auto_update(settings.auto_update);
     app_state.set_tracing_logger_active(settings.tracing_logger_active);
+    app_state.set_terminal_verbose_logging(settings.terminal_verbose_logging);
     app_state.set_git_github_token(settings.git.platform.github.token.clone().into());
     app_state.set_git_gitlab_token(settings.git.platform.gitlab.token.clone().into());
     app_state.set_git_gitee_token(settings.git.platform.gitee.token.clone().into());
@@ -327,10 +337,11 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app.set_navigation_drawer_expanded(settings.navigation_drawer_expanded);
 
     log::info!(
-        "[Settings] Applied settings: theme_mode={}, auto_update={}, tracing_logger_active={}, navigation_drawer_expanded={}, git_tokens=({}/{}/{})",
+        "[Settings] Applied settings: theme_mode={}, auto_update={}, tracing_logger_active={}, terminal_verbose_logging={}, navigation_drawer_expanded={}, git_tokens=({}/{}/{})",
         settings.theme_mode,
         settings.auto_update,
         settings.tracing_logger_active,
+        settings.terminal_verbose_logging,
         settings.navigation_drawer_expanded,
         if settings.git.platform.github.token.is_empty() {
             "empty"

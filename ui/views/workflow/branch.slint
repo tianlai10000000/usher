@@ -1,45 +1,38 @@
 import { FilledButton, MaterialPalette, MaterialText, Switch } from "@material";
+import { CompactTextField } from "../../components/input/compact_text_field.slint";
 
-component BranchField {
+component BranchField inherits Rectangle {
     in property <string> label;
     in-out property <string> value;
     in property <string> placeholder;
+    private property <length> label-height: 16px;
+    private property <length> input-height: 42px;
+
+    background: transparent;
+    height: root.label-height + 6px + root.input-height;
 
     VerticalLayout {
+        width: root.width;
+        height: root.height;
         spacing: 6px;
 
         MaterialText {
             text: root.label;
+            height: root.label-height;
+            vertical_alignment: center;
             font_size: 12px;
             color: MaterialPalette.on_surface_variant;
         }
 
-        Rectangle {
-            min-width: 240px;
-            height: 42px;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            background: MaterialPalette.surface_container_highest;
-            clip: true;
-
-            TextInput {
-                x: 12px;
-                y: (parent.height - self.preferred-height) / 2;
-                width: parent.width - 24px;
-                text <=> root.value;
-                color: MaterialPalette.on_surface;
-                font-size: 14px;
-                single-line: true;
-            }
-
-            if root.value == "": MaterialText {
-                x: 12px;
-                y: (parent.height - self.preferred-height) / 2;
-                text: root.placeholder;
-                font_size: 14px;
-                color: MaterialPalette.on_surface_variant;
-            }
+        CompactTextField {
+            width: root.width;
+            text <=> root.value;
+            placeholder: root.placeholder;
+            field-height: root.input-height;
+            border-radius-size: 10px;
+            input-font-size: 14px;
+            input-font-family: "Hiragino Sans GB";
+            field-background: MaterialPalette.surface_container_highest;
         }
     }
 }
@@ -51,8 +44,11 @@ export component BranchFlow {
     private property <string> source-branch: "main";
     private property <string> target-branch: "release/candidate";
     private property <bool> recreate-remote: true;
+    private property <bool> stacked-fields: root.width < 720px;
+    private property <length> split-field-width: max(0px, (root.width - 12px) / 2);
 
     VerticalLayout {
+        width: root.width;
         spacing: 14px;
         alignment: start;
 
@@ -62,16 +58,39 @@ export component BranchFlow {
             color: MaterialPalette.on_surface_variant;
         }
 
-        HorizontalLayout {
+        if !root.stacked-fields: HorizontalLayout {
+            width: parent.width;
             spacing: 12px;
 
             BranchField {
+                width: root.split-field-width;
                 label: "Source branch";
                 value <=> root.source-branch;
                 placeholder: "main";
             }
 
             BranchField {
+                width: root.split-field-width;
+                label: "Target branch";
+                value <=> root.target-branch;
+                placeholder: "release/x.y";
+            }
+        }
+
+        if root.stacked-fields: VerticalLayout {
+            width: parent.width;
+            spacing: 12px;
+            alignment: start;
+
+            BranchField {
+                width: parent.width;
+                label: "Source branch";
+                value <=> root.source-branch;
+                placeholder: "main";
+            }
+
+            BranchField {
+                width: parent.width;
                 label: "Target branch";
                 value <=> root.target-branch;
                 placeholder: "release/x.y";

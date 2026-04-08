@@ -1,0 +1,70 @@
+import { MaterialPalette, MaterialText } from "@material";
+
+export component CompactTextField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "";
+    in property <bool> enabled: true;
+    in property <bool> read-only: false;
+    in property <InputType> input-type: InputType.text;
+    in property <length> field-height: 40px;
+    in property <length> border-radius-size: 10px;
+    in property <length> input-font-size: 14px;
+    in property <string> input-font-family: "Hiragino Sans GB";
+    in property <brush> field-background: MaterialPalette.surface_container_highest;
+    in property <color> field-border-color: MaterialPalette.outline_variant;
+    callback edited(string);
+    callback accepted(string);
+
+    private property <length> horizontal-padding: 12px;
+    private property <length> computed_x: 0px;
+
+    height: root.field-height;
+    border-radius: root.border-radius-size;
+    border-width: 1px;
+    border-color: root.field-border-color;
+    background: root.field-background;
+    clip: true;
+
+    input := TextInput {
+        x: root.horizontal-padding + min(0px,
+            max(parent.width - root.horizontal-padding * 2 - self.width - self.text-cursor-width, root.computed_x));
+        y: (parent.height - self.preferred-height) / 2;
+        width: max(parent.width - root.horizontal-padding * 2 - self.text-cursor-width, self.preferred-width);
+        text <=> root.text;
+        enabled: root.enabled;
+        read-only: root.read-only;
+        input-type: root.input-type;
+        color: MaterialPalette.on_surface;
+        font-size: root.input-font-size;
+        font-family: root.input-font-family;
+        text-cursor-width: 2px;
+        single-line: true;
+        selection-background-color: MaterialPalette.primary.with-alpha(0.35);
+        selection-foreground-color: self.color;
+
+        cursor_position_changed(cursor_position) => {
+            if cursor_position.x + root.computed_x < 0px {
+                root.computed_x = -cursor_position.x;
+            } else if cursor_position.x + root.computed_x > parent.width - root.horizontal-padding * 2 - self.text-cursor-width {
+                root.computed_x = parent.width - root.horizontal-padding * 2 - cursor_position.x - self.text-cursor-width;
+            }
+        }
+
+        edited => {
+            root.edited(self.text);
+        }
+
+        accepted => {
+            root.accepted(self.text);
+        }
+    }
+
+    if root.text == "": MaterialText {
+        x: root.horizontal-padding;
+        y: (parent.height - self.preferred-height) / 2;
+        text: root.placeholder;
+        font_size: root.input-font-size;
+        font-family: root.input-font-family;
+        color: MaterialPalette.on_surface_variant;
+    }
+}

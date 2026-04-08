@@ -32,8 +32,8 @@ export component TerminalFab inherits Rectangle {
     if terminal-fab-button.has-hover: Rectangle {
         width: 84px;
         height: 24px;
-        x: terminal-fab-button.x - 22px;
-        y: terminal-fab-button.y - 30px;
+        x: terminal-fab-button.x - self.width - 8px;
+        y: terminal-fab-button.y + self.height / 2 - 2px;
         border-radius: 8px;
         background: MaterialPalette.inverse_surface;
 

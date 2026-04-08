@@ -3,7 +3,7 @@ use slint::{ModelRc, VecModel, Weak};
 
 const BREADCRUMB_HIDDEN_ROUTES: &[Route] = &[Route::Chat, Route::Login];
 const NAVIGATION_ROUTES: &[Route] = &[
-    // Route::Home,
+    Route::Home,
     // Route::Search,
     // Route::Notification,
     // Route::Toast,
@@ -78,6 +78,9 @@ impl Router {
     pub fn navigate(&self, route: Route) -> Option<RouteUiState> {
         self.window.upgrade().map(|win| {
             let previous = win.get_current_route();
+            if previous != route {
+                win.set_previous_route(previous);
+            }
             win.set_current_route(route);
             let state = Self::apply_route_ui_state(&win, route);
 

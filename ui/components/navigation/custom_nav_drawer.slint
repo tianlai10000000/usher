@@ -2,8 +2,8 @@
 // 主要改进：去除顶部标题，减小菜单项高度和图标大小
 
 import {
-    MaterialPalette, MaterialStyleMetrics, MaterialAnimations, MaterialTypography,
-    StateLayerArea, Icon, MaterialText
+    MaterialPalette, MaterialStyleMetrics, MaterialAnimations,
+    Icon
 } from "@material";
 
 // 导航菜单项数据结构
@@ -20,109 +20,54 @@ component NavItemTemplate {
     in property <int> index;
     
     callback clicked();
+    callback hovered(string, int, bool);
     
     property <bool> has_icon: root.icon.width > 0 && root.icon.height > 0;
-    property <bool> is_collapsed: root.text == "";  // 是否收起状态（无文字）
-    property <color> item_color: selected ? MaterialPalette.on_secondary_container : MaterialPalette.on_surface_variant;
+    property <color> item_color: selected ? MaterialPalette.primary : MaterialPalette.on_surface_variant;
     
-    // 图标和背景尺寸
     property <length> icon_size: 20px;
-    property <length> item_height: 40px;
-    
-    // 自定义高度：40px（比默认的 56px 小）
+    property <length> item_height: 32px;
+
     height: item_height;
     
-    // 外层容器 - 用于居中显示圆形背景
-    HorizontalLayout {
-        alignment: root.is_collapsed ? center : start;
-        
-        background_layer := Rectangle {
-            // 收起时：正方形（圆形背景），展开时：填充宽度（胶囊形状）
-            width: root.is_collapsed ? root.item_height : parent.width;
-            height: root.item_height;
-            border_radius: root.is_collapsed ? self.height / 2 : 0px;
-            background: root.selected ? MaterialPalette.secondary_container : transparent;
-            
-            state_layer := StateLayerArea {
-                border_radius: root.is_collapsed ? parent.border_radius : 0px;
-                color: root.selected ? transparent : root.item_color;
-                
-                // 收起状态：使用居中布局
-                if root.is_collapsed : Rectangle {
-                    width: 100%;
-                    height: 100%;
-                    
-                    // 图标居中显示
-                    if root.has_icon : Icon {
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        width: root.icon_size;
-                        height: root.icon_size;
-                        source: root.icon;
-                        colorize: root.item_color;
-                    }
-                    
-                    if !root.has_icon : Rectangle {
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        width: root.icon_size;
-                        height: root.icon_size;
-                        
-                        Rectangle {
-                            width: 9px;
-                            height: self.width;
-                            // border_radius: self.width / 2;
-                            background: root.item_color;
-                        }
-                    }
-                }
-                
-                // 展开状态：使用水平布局
-                if !root.is_collapsed : HorizontalLayout {
-                    padding_left: MaterialStyleMetrics.padding_12;
-                    padding_right: MaterialStyleMetrics.padding_12;
-                    padding_top: MaterialStyleMetrics.padding_8;
-                    padding_bottom: self.padding_top;
-                    spacing: MaterialStyleMetrics.spacing_8;
-                    
-                    VerticalLayout {
-                        alignment: center;
-                        
-                        if !root.has_icon : Rectangle {
-                            width: root.icon_size;
-                            height: self.width;
-                            
-                            Rectangle {
-                                width: 10px;
-                                height: self.width;
-                                // border_radius: self.width / 2;
-                                background: root.item_color;
-                            }
-                        }
-                        
-                        if root.has_icon : Icon {
-                            width: root.icon_size;
-                            height: root.icon_size;
-                            source: root.icon;
-                            colorize: root.item_color;
-                        }
-                    }
-                    
-                    MaterialText {
-                        horizontal_stretch: 1;
-                        text: root.text;
-                        style: MaterialTypography.label_large;
-                        color: root.item_color;
-                        vertical_alignment: center;
-                    }
-                }
-                
-                clicked => {
-                    root.clicked();
-                }
-            }
-            
+    Rectangle {
+        width: root.width;
+        height: root.item_height;
+        background: transparent;
+
+        hover-bg := Rectangle {
+            width: 28px;
+            height: 28px;
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            border-radius: 6px;
+            background: hover-area.has-hover
+                ? MaterialPalette.surface_container_high
+                : transparent;
             animate background { duration: MaterialAnimations.opacity_duration; easing: MaterialAnimations.opacity_easing; }
+        }
+
+        if root.has_icon : Icon {
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            width: root.icon_size;
+            height: root.icon_size;
+            source: root.icon;
+            colorize: root.item_color;
+        }
+
+        hover-area := TouchArea {
+            width: 100%;
+            height: 100%;
+            mouse-cursor: pointer;
+
+            clicked => {
+                root.clicked();
+            }
+
+            changed has-hover => {
+                root.hovered(root.text, root.index, self.has-hover);
+            }
         }
     }
     
@@ -133,18 +78,23 @@ component NavItemTemplate {
 export component CustomNavDrawer {
     in property <[NavItem]> items;
     in property <int> current_index: -1;  // -1 表示无选中项
+    in-out property <string> hovered-tooltip-text: "";
+    in-out property <int> hovered-tooltip-index: -1;
     
     callback selected(item_index: int);
+    width: 100%;
     
     VerticalLayout {
+        width: parent.width;
         alignment: start;
-        spacing: 2px;
+        spacing: 12px;
         padding-left: 0;
         padding-right: 0;
         padding-top: MaterialStyleMetrics.padding_8;
         padding-bottom: MaterialStyleMetrics.padding_8;
         
         for item[index] in root.items : NavItemTemplate {
+            width: parent.width;
             icon: item.icon;
             text: item.text;
             selected: index == root.current_index;
@@ -152,6 +102,16 @@ export component CustomNavDrawer {
             
             clicked => {
                 root.selected(index);
+            }
+
+            hovered(text, item-index, visible) => {
+                if visible {
+                    root.hovered-tooltip-text = text;
+                    root.hovered-tooltip-index = item-index;
+                } else if root.hovered-tooltip-text == text {
+                    root.hovered-tooltip-text = "";
+                    root.hovered-tooltip-index = -1;
+                }
             }
         }
     }

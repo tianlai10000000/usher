@@ -59,7 +59,7 @@ mod workflow;
 use workflow::setup_workflow;
 mod project;
 use project::setup_project;
-use terminal::setup_terminal;
+use terminal::{set_dark_mode as set_terminal_dark_mode, setup_terminal};
 
 #[cfg(target_os = "macos")]
 static TITLEBAR_SETTINGS_UI_WEAK: std::sync::OnceLock<slint::Weak<MainWindow>> =
@@ -244,6 +244,13 @@ fn set_title_bar_color(window: &MainWindow, is_dark: bool) {
                     return;
                 }
 
+                // Make the native title bar visually merge with the window content.
+                let _: () = msg_send![ns_window, setTitlebarAppearsTransparent: true];
+                let _: () = msg_send![ns_window, setOpaque: false];
+                // Keep dragging restricted to the native title bar so interactive content
+                // such as the terminal resize handle does not start moving the whole window.
+                let _: () = msg_send![ns_window, setMovableByWindowBackground: false];
+
                 // Set window appearance (light/dark)
                 if let Some(ns_appearance_class) = Class::get("NSAppearance") {
                     if let Some(ns_string_class) = Class::get("NSString") {
@@ -263,6 +270,26 @@ fn set_title_bar_color(window: &MainWindow, is_dark: bool) {
                                 }
                             }
                         }
+                    }
+                }
+
+                if let Some(ns_color_class) = Class::get("NSColor") {
+                    let (red, green, blue) = if is_dark {
+                        // Matches MaterialPalette.surface_container_lowest in dark mode.
+                        (12.0 / 255.0, 14.0 / 255.0, 19.0 / 255.0)
+                    } else {
+                        // Matches MaterialPalette.surface_container_lowest in light mode.
+                        (1.0, 1.0, 1.0)
+                    };
+                    let background_color: *mut Object = msg_send![
+                        ns_color_class,
+                        colorWithSRGBRed: red
+                        green: green
+                        blue: blue
+                        alpha: 1.0
+                    ];
+                    if !background_color.is_null() {
+                        let _: () = msg_send![ns_window, setBackgroundColor: background_color];
                     }
                 }
 
@@ -677,6 +704,7 @@ fn ui() -> Result<MainWindow> {
     // ========= Settings ========= //
     // Apply loaded settings to AppState
     setup_settings(&app, &loaded_settings);
+    set_terminal_dark_mode(&app, is_dark);
     Router::apply_route_ui_state(&app, app.get_current_route());
 
     // ========= Debug: Simulate Crash ========= //
@@ -731,6 +759,16 @@ fn ui() -> Result<MainWindow> {
         log::info!("[Settings] Tracing logger active changed to: {}", enabled);
     });
 
+    // ========= Terminal Verbose Logs Active ========= //
+    AppState::get(&app).on_toggle_terminal_verbose_logging(move |enabled| {
+        settings::save_terminal_verbose_logging(enabled);
+        terminal::set_verbose_logging(enabled);
+        log::info!(
+            "[Settings] Terminal verbose logging changed to: {}",
+            enabled
+        );
+    });
+
     // ========= Git Tokens ========= //
     let app_weak_git_tokens = app.as_weak();
     AppState::get(&app).on_save_git_tokens(move |github_token, gitlab_token, gitee_token| {
@@ -765,16 +803,6 @@ fn ui() -> Result<MainWindow> {
             } else {
                 "set"
             }
-        );
-    });
-
-    // ========= Navigation Drawer Expanded ========= //
-    // Save navigation drawer expanded state when toggled
-    app.on_toggle_navigation_drawer_expanded(move |expanded| {
-        settings::save_navigation_drawer_expanded(expanded);
-        log::info!(
-            "[Settings] Navigation drawer expanded changed to: {}",
-            expanded
         );
     });
 
@@ -826,6 +854,7 @@ fn ui() -> Result<MainWindow> {
 
             // Set title bar color
             set_title_bar_color(&win, is_dark);
+            set_terminal_dark_mode(&win, is_dark);
 
             log::info!(
                 "[Theme] Changed to mode: {} (effective dark: {})",
@@ -874,6 +903,16 @@ fn ui() -> Result<MainWindow> {
     // ========= Terminal Drawer ========= //
     setup_terminal(&app);
 
+    AppState::get(&app); // keep nearby state init ordering explicit
+    let app_for_page_memory_diag = app.as_weak();
+    app.on_page_memory_diag(move |route, width_px, height_px, terminal_visible| {
+        let scale_factor = app_for_page_memory_diag
+            .upgrade()
+            .map(|ui| ui.window().scale_factor())
+            .unwrap_or(1.0);
+        terminal::log_page_memory_diag(route, width_px, height_px, terminal_visible, scale_factor);
+    });
+
     // ========= Workflow ========= //
     setup_workflow(&app);
 
@@ -914,7 +953,6 @@ fn ui() -> Result<MainWindow> {
 
     Ok(app)
 }
-
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 pub fn main() {
     match single_instance::acquire_instance_lock() {

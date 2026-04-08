@@ -1,17 +1,27 @@
 pub(crate) mod pr_stats;
 
 use crate::project::pr_stats::{PullRequestStateFilter, fetch_standard_environment_pr_counts};
+use crate::terminal::diag_logging_enabled;
 use crate::terminal::open_terminal_for_project;
 use crate::{MainWindow, ProjectItem, ToastManager, ToastOptions};
 use base64::Engine as _;
 use directories::ProjectDirs;
+use image::GenericImageView;
 use serde::{Deserialize, Serialize};
 use slint::{ComponentHandle, Global, ModelRc, VecModel};
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+thread_local! {
+    static PROJECT_LOGO_IMAGE_CACHE: RefCell<HashMap<String, slint::Image>> =
+        RefCell::new(HashMap::new());
+    static PROJECT_VIEW_DIAG_CACHE: RefCell<Option<ProjectViewDiagSnapshot>> =
+        const { RefCell::new(None) };
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ProjectConfig {
@@ -36,6 +46,21 @@ struct ProjectPrOverview {
     fat_display: String,
     uat_display: String,
     prod_display: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProjectViewDiagSnapshot {
+    query: String,
+    configured_items: usize,
+    visible_items: usize,
+    remote_logo_prefetch: usize,
+    pending_pr_tasks: usize,
+    local_logos: usize,
+    remote_logos: usize,
+    base64_logos: usize,
+    default_logos: usize,
+    logo_source_bytes: u64,
+    logo_decoded_rgba_bytes_estimate: u64,
 }
 
 pub fn setup_project(ui: &MainWindow) {
@@ -406,6 +431,7 @@ fn refresh_project_items(
     };
     let pr_tasks = collect_pr_overview_tasks(&mut guard, query);
     let (ui_items, remote_urls) = prepare_project_items(&guard, query);
+    log_project_view_diagnostics(&guard, query, &ui_items, &remote_urls, pr_tasks.len());
     drop(guard);
     ui.set_project_items(ModelRc::new(VecModel::from(ui_items)));
     prefetch_remote_logos(
@@ -422,6 +448,150 @@ fn refresh_project_items(
         pending_pr_overview.clone(),
         pr_tasks,
     );
+}
+
+fn log_project_view_diagnostics(
+    items: &[ProjectConfig],
+    query: &str,
+    ui_items: &[ProjectItem],
+    remote_urls: &[String],
+    pr_task_count: usize,
+) {
+    if !diag_logging_enabled() {
+        return;
+    }
+
+    let normalized_query = query.trim().to_lowercase();
+
+    let mut local_logo_count = 0usize;
+    let mut remote_logo_count = 0usize;
+    let mut base64_logo_count = 0usize;
+    let mut default_logo_count = 0usize;
+    let mut logo_source_bytes = 0u64;
+    let mut logo_decoded_rgba_bytes_estimate = 0u64;
+
+    for item in items
+        .iter()
+        .filter(|item| matches_query(item, normalized_query.as_str()))
+    {
+        let normalized = normalize_project_logo(item.logo.as_str());
+        if normalized.is_empty() || normalized == default_logo_value() {
+            default_logo_count += 1;
+            continue;
+        }
+
+        if is_valid_logo_path(&normalized) {
+            local_logo_count += 1;
+            logo_source_bytes += fs::metadata(&normalized).map(|m| m.len()).unwrap_or(0);
+            logo_decoded_rgba_bytes_estimate +=
+                estimate_logo_decoded_rgba_bytes_from_path(Path::new(&normalized));
+            continue;
+        }
+
+        if is_valid_logo_remote_url(&normalized) {
+            remote_logo_count += 1;
+            if let Some(path) = find_cached_remote_logo_path(&normalized) {
+                logo_source_bytes += fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                logo_decoded_rgba_bytes_estimate +=
+                    estimate_logo_decoded_rgba_bytes_from_path(path.as_path());
+            }
+            continue;
+        }
+
+        if is_valid_logo_base64(&normalized) {
+            base64_logo_count += 1;
+            let payload = normalized
+                .split_once(',')
+                .map(|(_, encoded)| encoded)
+                .unwrap_or(normalized.as_str());
+            let payload = sanitize_base64_payload(payload);
+            logo_source_bytes += ((payload.len() as u64) * 3) / 4;
+            logo_decoded_rgba_bytes_estimate +=
+                estimate_logo_decoded_rgba_bytes_from_base64(&normalized);
+            continue;
+        }
+
+        default_logo_count += 1;
+    }
+
+    let snapshot = ProjectViewDiagSnapshot {
+        query: query.to_string(),
+        configured_items: items.len(),
+        visible_items: ui_items.len(),
+        remote_logo_prefetch: remote_urls.len(),
+        pending_pr_tasks: pr_task_count,
+        local_logos: local_logo_count,
+        remote_logos: remote_logo_count,
+        base64_logos: base64_logo_count,
+        default_logos: default_logo_count,
+        logo_source_bytes,
+        logo_decoded_rgba_bytes_estimate,
+    };
+
+    let should_log = PROJECT_VIEW_DIAG_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.as_ref() == Some(&snapshot) {
+            false
+        } else {
+            *cache = Some(snapshot.clone());
+            true
+        }
+    });
+
+    if should_log {
+        log::info!(
+            "[Project][Diag] query='{}', configured_items={}, visible_items={}, remote_logo_prefetch={}, pending_pr_tasks={}, local_logos={}, remote_logos={}, base64_logos={}, default_logos={}, logo_source_bytes={}, logo_decoded_rgba_bytes_estimate={}",
+            snapshot.query,
+            snapshot.configured_items,
+            snapshot.visible_items,
+            snapshot.remote_logo_prefetch,
+            snapshot.pending_pr_tasks,
+            snapshot.local_logos,
+            snapshot.remote_logos,
+            snapshot.base64_logos,
+            snapshot.default_logos,
+            snapshot.logo_source_bytes,
+            snapshot.logo_decoded_rgba_bytes_estimate,
+        );
+    }
+}
+
+fn estimate_logo_decoded_rgba_bytes_from_path(path: &Path) -> u64 {
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext == "svg" {
+        return 0;
+    }
+    let Ok(bytes) = fs::read(path) else {
+        return 0;
+    };
+    estimate_logo_decoded_rgba_bytes_from_bytes(bytes.as_slice())
+}
+
+fn estimate_logo_decoded_rgba_bytes_from_base64(value: &str) -> u64 {
+    let payload = value
+        .split_once(',')
+        .map(|(_, encoded)| encoded)
+        .unwrap_or(value);
+    let payload = sanitize_base64_payload(payload);
+    let Ok(decoded) = base64::engine::general_purpose::STANDARD
+        .decode(payload.as_bytes())
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload.as_bytes()))
+    else {
+        return 0;
+    };
+    estimate_logo_decoded_rgba_bytes_from_bytes(decoded.as_slice())
+}
+
+fn estimate_logo_decoded_rgba_bytes_from_bytes(bytes: &[u8]) -> u64 {
+    let Ok(image) = image::load_from_memory(bytes) else {
+        return 0;
+    };
+    let (width, height) = image.dimensions();
+    width as u64 * height as u64 * 4
 }
 
 fn prepare_project_items(items: &[ProjectConfig], query: &str) -> (Vec<ProjectItem>, Vec<String>) {
@@ -645,34 +815,72 @@ fn default_logo_value() -> String {
 
 pub(crate) fn resolve_project_logo_image(value: &str) -> slint::Image {
     let normalized = normalize_project_logo(value);
-    if normalized.is_empty() {
-        return load_default_logo_image();
+    let cache_key = logo_image_cache_key(&normalized);
+
+    if let Some(image) = cached_logo_image(&cache_key) {
+        return image;
     }
 
-    if is_valid_logo_path(&normalized) {
-        return slint::Image::load_from_path(Path::new(&normalized))
-            .unwrap_or_else(|_| load_default_logo_image());
-    }
-
-    if is_valid_logo_remote_url(&normalized) {
+    let image = if normalized.is_empty() {
+        load_default_logo_image()
+    } else if is_valid_logo_path(&normalized) {
+        slint::Image::load_from_path(Path::new(&normalized))
+            .unwrap_or_else(|_| load_default_logo_image())
+    } else if is_valid_logo_remote_url(&normalized) {
         if let Some(image) = load_cached_remote_logo_image(&normalized) {
-            return image;
+            image
+        } else {
+            load_default_logo_image()
         }
-        return load_default_logo_image();
-    }
-
-    if is_valid_logo_base64(&normalized) {
+    } else if is_valid_logo_base64(&normalized) {
         if let Some(image) = load_base64_logo_image(&normalized) {
-            return image;
+            image
+        } else {
+            load_default_logo_image()
         }
-        return load_default_logo_image();
+    } else {
+        load_default_logo_image()
+    };
+
+    cache_logo_image(cache_key, image.clone());
+    image
+}
+
+fn cached_logo_image(key: &str) -> Option<slint::Image> {
+    PROJECT_LOGO_IMAGE_CACHE.with(|cache| cache.borrow().get(key).cloned())
+}
+
+fn cache_logo_image(key: String, image: slint::Image) {
+    PROJECT_LOGO_IMAGE_CACHE.with(|cache| {
+        cache.borrow_mut().insert(key, image);
+    });
+}
+
+fn logo_image_cache_key(normalized: &str) -> String {
+    if normalized.is_empty() || normalized == default_logo_value() {
+        return "default".to_string();
     }
 
-    load_default_logo_image()
+    if is_valid_logo_path(normalized) {
+        return format!("path:{normalized}");
+    }
+
+    if is_valid_logo_remote_url(normalized) {
+        return format!("remote:{normalized}");
+    }
+
+    if is_valid_logo_base64(normalized) {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        normalized.hash(&mut hasher);
+        return format!("base64:{:016x}", hasher.finish());
+    }
+
+    format!("fallback:{normalized}")
 }
 
 fn load_default_logo_image() -> slint::Image {
-    slint::Image::load_from_path(Path::new("logo.png")).unwrap_or_else(|_| slint::Image::default())
+    load_image_from_bytes(include_bytes!("../../logo.png"), "png")
+        .unwrap_or_else(slint::Image::default)
 }
 
 fn load_cached_remote_logo_image(url: &str) -> Option<slint::Image> {

@@ -2,6 +2,48 @@
 
 日期：2026-04-02
 
+## 回归检查清单
+
+每次改 terminal 后，建议先跑这组最小回归：
+
+1. 基础打开与输入
+   - 打开任意项目 terminal
+   - 确认 prompt 正常出现，不是只有闪烁光标
+   - 输入 `ls`、`ls -al`
+
+2. 同项目 reopen
+   - 打开 terminal
+   - 关闭 terminal
+   - 再打开同一个项目 terminal
+   - 确认没有旧 prompt 残留、没有黑色块残留、没有叠屏
+
+3. `fnm` / shell 启动输出
+   - 在启用 `fnm` 的项目里打开 terminal
+   - 关闭再打开
+   - 确认 `Using Node v...` 只出现一次，不叠到旧 prompt 行上
+
+4. `fish`
+   - 输入 `fish`
+   - 确认欢迎语正常
+   - 确认 prompt 路径、右侧 `(main)>` 和光标位置正常
+
+5. `clear` / 控制键
+   - 输入 `clear`
+   - 确认 buffer 被清空
+   - 执行一个长一点的命令后用 `Ctrl+C` 中断
+
+6. `Select` 模式
+   - 进入 `Select`
+   - 确认可复制
+   - 退出后 live terminal 仍能继续输入
+
+如果只改了 terminal 生命周期，优先至少覆盖：
+
+- 基础打开与输入
+- 同项目 reopen
+- `fnm` / shell 启动输出
+- `fish`
+
 ## 背景
 
 当前终端是基于 `vt100` parser + PTY + Slint 自绘 UI 的组合实现，不是现成的终端控件。
@@ -312,6 +354,96 @@
   - 长输出后 prompt 没有贴底
   - 底部留出明显空白
   - 或 visible screen 行数不符合预期
+
+## 已修复问题：关闭后重开导致 prompt / fnm 输出叠屏
+
+这个问题已经确认并修复，单独记录，避免后续 reopen 语义被误改回去。
+
+### 现象
+
+复现路径：
+
+1. 打开某个项目的 terminal
+2. 关闭 terminal
+3. 再次打开同一个项目 terminal
+
+典型表现：
+
+- prompt 行重复累加
+- 光标所在位置出现黑色区块残留/叠加
+- 如果 shell 启动时会输出 `Using Node v...`，这行也会重复堆叠
+- `Using Node` 甚至可能叠到旧 prompt 行或旧历史输出之上
+
+### 根因
+
+根因不是 `fnm` 本身，也不是 shell 重复打印，而是我们在 close 路径里：
+
+- 只终止了 PTY session
+- 没有同步清空本地 `render`
+- 没有清空 `lines`
+- 没有重置 `cursor` / `scrollback`
+- 没有清空 UI 侧复用的 `lines_model` / `span_models`
+
+同时，重新打开同一个项目时，旧逻辑还会因为“同项目”走 `preserve_state` 路径，导致：
+
+- 新 shell 的启动输出继续叠到旧 screen 上
+- UI 看起来像是 shell 自己重复输出，实际上是旧 renderer 状态没清干净
+
+### 修复后的正确语义
+
+现在关闭 terminal 后，再打开同一个项目，采用的是：
+
+- **总是启动一个全新的 terminal 会话**
+
+也就是说：
+
+- close 等价于放弃当前 terminal 历史
+- reopen 不恢复旧 buffer
+- reopen 不恢复旧 prompt
+- reopen 不恢复旧 `Using Node ...`
+
+只有在“terminal 当前还开着”的前提下，再次触发打开动作，才允许保持当前会话；一旦已经关闭，再打开就必须 reset。
+
+### 修复点
+
+修复内容包括：
+
+- close 时除了 `terminate_session_locked()`，还同步重置：
+  - `render`
+  - `lines`
+  - `scrollback_offset`
+  - `max_scrollback`
+  - `cursor`
+  - `selection_mode`
+  - `selection_output`
+  - `running / connected`
+- close 后立即把空状态回写 UI，避免旧模型残留到下一轮事件循环
+- reopen 同项目时，不再因为“project_key 一样”就复用已关闭会话
+
+### 后续不要再踩的坑
+
+后续如果再调整 terminal reopen 生命周期，不要回到下面这些做法：
+
+1. 不要把“同项目 reopen”默认当成 preserve session
+2. 不要只停 PTY，不清本地 renderer/UI 模型
+3. 不要把 close 语义做成“只是隐藏 drawer”，除非同时明确支持完整会话恢复
+
+### 这条问题的回归测试
+
+后续每次改 terminal 生命周期，至少手测下面两条：
+
+1. 同项目：
+   - 打开 terminal
+   - 输入 `ls` 或 `ls -al`
+   - 关闭 terminal
+   - 再打开同一个项目 terminal
+   - 确认只有一份 prompt，没有黑色块残留
+
+2. 启用 `fnm` 的项目：
+   - 打开 terminal
+   - 关闭
+   - 再打开
+   - 确认 `Using Node v...` 只出现一次，且不叠到旧 prompt 行上
 
 ## 不建议再走的方向
 

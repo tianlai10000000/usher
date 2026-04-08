@@ -3,6 +3,7 @@ import { AppState } from "../state/app_state.slint";
 import { UpdateLogic } from "../components/update/update.slint";
 import { LoadingIconOutlineButton } from "../components/button/loading_icon_outline_button.slint";
 import { PageView } from "../components/page/page_view.slint";
+import { CompactTextField } from "../components/input/compact_text_field.slint";
 
 component TokenField {
     in property <string> label;
@@ -21,34 +22,18 @@ component TokenField {
             color: MaterialPalette.on_surface_variant;
         }
 
-        Rectangle {
+        CompactTextField {
             width: parent.width;
-            height: 38px;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            background: MaterialPalette.surface_container_lowest;
-            clip: true;
+            text <=> root.value;
+            placeholder: root.placeholder;
+            input-type: root.reveal ? InputType.text : InputType.password;
+            field-height: 38px;
+            border-radius-size: 10px;
+            input-font-size: 13px;
+            input-font-family: "Hiragino Sans GB";
+            field-background: MaterialPalette.surface_container_lowest;
 
-            TextInput {
-                x: 12px;
-                y: (parent.height - self.preferred-height) / 2;
-                width: parent.width - 24px;
-                text <=> root.value;
-                color: MaterialPalette.on_surface;
-                single-line: true;
-                font-size: 13px;
-                input-type: root.reveal ? InputType.text : InputType.password;
-                edited => { root.edited(self.text); }
-            }
-
-            if root.value == "": MaterialText {
-                x: 12px;
-                y: (parent.height - self.preferred-height) / 2;
-                text: root.placeholder;
-                font-size: 12px;
-                color: MaterialPalette.on_surface_variant;
-            }
+            edited => { root.edited(self.text); }
         }
     }
 }
@@ -347,6 +332,23 @@ export component Settings inherits PageView {
                             checked_state_changed(checked) => {
                                 AppState.tracing-logger-active = checked;
                                 AppState.toggle-tracing-logger-active(checked);
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        spacing: 12px;
+                        alignment: center;
+                        MaterialText { text: "Terminal Verbose Logs"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        Switch {
+                            checked: AppState.terminal-verbose-logging;
+                            width: 48px;
+                            height: 28px;
+                            checked_state_changed(checked) => {
+                                AppState.terminal-verbose-logging = checked;
+                                AppState.toggle-terminal-verbose-logging(checked);
                             }
                         }
                     }

@@ -47,6 +47,7 @@ export component TerminalDrawer inherits Rectangle {
     callback viewport-resized(int, int);
     callback scrollback-requested(int);
     callback paste-requested();
+    callback selection-mode-changed(bool);
 
     private property <length> max-available-height: max(root.min-drawer-height, root.available-height - root.top-safe-margin - root.bottom-margin);
     private property <length> effective-drawer-height: root.drawer-height > 0px ? root.drawer-height : root.initial-height;
@@ -69,6 +70,8 @@ export component TerminalDrawer inherits Rectangle {
         && terminal-body.width > root.terminal-padding * 2
         && terminal-body.height > root.terminal-padding * 2;
     private property <bool> initial-viewport-synced: false;
+    private property <bool> resize-sync-pending: false;
+    private property <int> pending-scrollback-delta: 0;
     private property <bool> cursor-blink-on: true;
     private property <length> terminal-cursor-height: root.terminal-line-height * 0.72;
     private property <int> selection-anchor-row: 0;
@@ -133,19 +136,20 @@ export component TerminalDrawer inherits Rectangle {
             root.cursor-blink-on = true;
             terminal-focus.focus();
         }
+        root.selection-mode-changed(root.selection-mode);
     }
 
     changed terminal-cols => {
         root.initial-viewport-synced = false;
         if (root.viewport-ready) {
-            root.viewport-resized(root.terminal-cols, root.terminal-rows);
+            root.resize-sync-pending = true;
         }
     }
 
     changed terminal-rows => {
         root.initial-viewport-synced = false;
         if (root.viewport-ready) {
-            root.viewport-resized(root.terminal-cols, root.terminal-rows);
+            root.resize-sync-pending = true;
         }
     }
 
@@ -170,21 +174,40 @@ export component TerminalDrawer inherits Rectangle {
         }
     }
 
+    resize-sync := Timer {
+        interval: 80ms;
+        running: root.viewport-ready && root.drawer-open && root.resize-sync-pending;
+        triggered => {
+            root.resize-sync-pending = false;
+            root.viewport-resized(root.terminal-cols, root.terminal-rows);
+        }
+    }
+
+    scrollback-sync := Timer {
+        interval: 16ms;
+        running: root.pending-scrollback-delta != 0;
+        triggered => {
+            let delta = root.pending-scrollback-delta;
+            root.pending-scrollback-delta = 0;
+            root.scrollback-requested(delta);
+        }
+    }
+
     width: 100%;
     height: 100%;
     background: transparent;
 
     drawer := Rectangle {
-        x: root.docked ? 0px : max(root.side-margin, (parent.width - self.width) / 2);
+        // x: root.docked ? 0px : max(root.side-margin, (parent.width - self.width) / 2);
+        x: -12px;
         y: root.docked ? 0px : (root.drawer-open
             ? parent.height - self.height - root.bottom-margin
             : parent.height + 8px);
-        width: root.docked ? parent.width : root.resolved-drawer-width;
+        width: (root.docked ? parent.width : root.resolved-drawer-width) + 17px;
         height: root.docked ? parent.height : root.resolved-drawer-height;
-        border-radius: root.docked ? 12px : 18px;
         border-width: 1px;
         border-color: MaterialPalette.outline_variant;
-        background: MaterialPalette.background;
+        background: MaterialPalette.surface_container_high;
         opacity: root.docked ? 1 : (root.drawer-open ? 1 : 0);
         animate opacity { duration: 220ms; }
 
@@ -425,9 +448,9 @@ export component TerminalDrawer inherits Rectangle {
 
                                 scroll-event(event) => {
                                     if (event.delta-y > 0px) {
-                                        root.scrollback-requested(3);
+                                        root.pending-scrollback-delta += 3;
                                     } else if (event.delta-y < 0px) {
-                                        root.scrollback-requested(-3);
+                                        root.pending-scrollback-delta -= 3;
                                     }
                                     return accept;
                                 }
@@ -626,17 +649,46 @@ export component TerminalDrawer inherits Rectangle {
                                 border-radius: 2px;
                                 background: MaterialPalette.surface_container_highest;
 
+                                property <length> thumb-height: max(
+                                    24px,
+                                    parent.height * root.terminal-rows / (root.max-scrollback + root.terminal-rows)
+                                );
+                                property <length> thumb-travel: max(1px, parent.height - self.thumb-height);
+
+                                thumb-hit-area := TouchArea {
+                                    x: -6px;
+                                    y: 0px;
+                                    width: parent.width + 12px;
+                                    height: parent.height;
+                                    mouse-cursor: pointer;
+
+                                    moved => {
+                                        if (!self.pressed) {
+                                            return;
+                                        }
+                                        let pointer_ratio = max(0, min(1,
+                                            (self.mouse-y - parent.thumb-height / 2) / parent.thumb-travel
+                                        ));
+                                        let target = Math.round(root.max-scrollback * (1 - pointer_ratio));
+                                        root.scrollback-requested(target - root.scrollback-offset);
+                                    }
+
+                                    clicked => {
+                                        let pointer_ratio = max(0, min(1,
+                                            (self.mouse-y - parent.thumb-height / 2) / parent.thumb-travel
+                                        ));
+                                        let target = Math.round(root.max-scrollback * (1 - pointer_ratio));
+                                        root.scrollback-requested(target - root.scrollback-offset);
+                                    }
+                                }
+
                                 Rectangle {
-                                    property <length> thumb-height: max(
-                                        24px,
-                                        parent.height * root.terminal-rows / (root.max-scrollback + root.terminal-rows)
-                                    );
                                     x: 0px;
-                                    y: (parent.height - self.thumb-height)
+                                    y: (parent.height - parent.thumb-height)
                                         * (root.max-scrollback - root.scrollback-offset)
                                         / root.max-scrollback;
                                     width: parent.width;
-                                    height: self.thumb-height;
+                                    height: parent.thumb-height;
                                     border-radius: 2px;
                                     background: MaterialPalette.outline;
                                 }

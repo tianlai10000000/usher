@@ -21,6 +21,8 @@ export component CdFlow {
     private property <string> commit-hash: "HEAD";
     private property <string> rollback-commit: "";
     private property <int> expanded-step-index: -1;
+    private property <bool> stacked-deploy-row: root.width < 760px;
+    private property <bool> stacked-rollback-row: root.width < 720px;
     private property <bool> show-steps:
         root.running ||
         root.build-status != "pending" ||
@@ -80,6 +82,7 @@ export component CdFlow {
     ];
 
     VerticalLayout {
+        width: root.width;
         spacing: 14px;
         alignment: start;
 
@@ -89,7 +92,8 @@ export component CdFlow {
             color: MaterialPalette.on_surface_variant;
         }
 
-        HorizontalLayout {
+        if !root.stacked-deploy-row: HorizontalLayout {
+            width: parent.width;
             spacing: 12px;
 
             TagField {
@@ -114,7 +118,35 @@ export component CdFlow {
             }
         }
 
-        HorizontalLayout {
+        if root.stacked-deploy-row: VerticalLayout {
+            width: parent.width;
+            spacing: 12px;
+            alignment: start;
+
+            TagField {
+                width: parent.width;
+                label: "Environment";
+                value <=> root.environment-name;
+                placeholder: "production";
+            }
+
+            TagField {
+                width: parent.width;
+                label: "Release";
+                value <=> root.release-name;
+                placeholder: "2026.03.09";
+            }
+
+            TagField {
+                width: parent.width;
+                label: "Commit";
+                value <=> root.commit-hash;
+                placeholder: "abcdef1";
+            }
+        }
+
+        if !root.stacked-rollback-row: HorizontalLayout {
+            width: parent.width;
             spacing: 12px;
 
             FilledButton {
@@ -126,6 +158,33 @@ export component CdFlow {
 
             TagField {
                 width: 220px;
+                label: "Rollback commit";
+                value <=> root.rollback-commit;
+                placeholder: "previous stable hash";
+            }
+
+            FilledButton {
+                text: "Rollback";
+                clicked => {
+                    root.request-rollback(root.rollback-commit);
+                }
+            }
+        }
+
+        if root.stacked-rollback-row: VerticalLayout {
+            width: parent.width;
+            spacing: 12px;
+            alignment: start;
+
+            FilledButton {
+                text: root.running ? "Running..." : "Start deployment";
+                clicked => {
+                    root.start-deploy(root.environment-name, root.release-name, root.commit-hash);
+                }
+            }
+
+            TagField {
+                width: parent.width;
                 label: "Rollback commit";
                 value <=> root.rollback-commit;
                 placeholder: "previous stable hash";

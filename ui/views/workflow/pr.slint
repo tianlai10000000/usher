@@ -1,46 +1,40 @@
 import { FilledButton, MaterialPalette, MaterialText, Switch } from "@material";
+import { CompactTextField } from "../../components/input/compact_text_field.slint";
 
-component PrField {
+component PrField inherits Rectangle {
     in property <string> label;
     in-out property <string> value;
     in property <string> placeholder;
     in property <length> field-width: 280px;
+    private property <length> label-height: 16px;
+    private property <length> input-height: 42px;
+
+    background: transparent;
+    width: root.field-width;
+    height: root.label-height + 6px + root.input-height;
 
     VerticalLayout {
+        width: root.width;
+        height: root.height;
         spacing: 6px;
 
         MaterialText {
             text: root.label;
+            height: root.label-height;
+            vertical_alignment: center;
             font_size: 12px;
             color: MaterialPalette.on_surface_variant;
         }
 
-        Rectangle {
+        CompactTextField {
             width: root.field-width;
-            height: 42px;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            background: MaterialPalette.surface_container_highest;
-            clip: true;
-
-            TextInput {
-                x: 12px;
-                y: (parent.height - self.preferred-height) / 2;
-                width: parent.width - 24px;
-                text <=> root.value;
-                color: MaterialPalette.on_surface;
-                font-size: 14px;
-                single-line: true;
-            }
-
-            if root.value == "": MaterialText {
-                x: 12px;
-                y: (parent.height - self.preferred-height) / 2;
-                text: root.placeholder;
-                font_size: 14px;
-                color: MaterialPalette.on_surface_variant;
-            }
+            text <=> root.value;
+            placeholder: root.placeholder;
+            field-height: root.input-height;
+            border-radius-size: 10px;
+            input-font-size: 14px;
+            input-font-family: "Hiragino Sans GB";
+            field-background: MaterialPalette.surface_container_highest;
         }
     }
 }
@@ -57,8 +51,13 @@ export component PrFlow {
     private property <string> pr-summary: "";
     private property <bool> ci-green: true;
     private property <bool> reviewers-ready: false;
+    private property <bool> stacked-fields: root.width < 720px;
+    private property <bool> stacked-switches: root.width < 560px;
+    private property <bool> stacked-actions: root.width < 620px;
+    private property <length> dual-field-width: max(0px, (root.width - 12px) / 2);
 
     VerticalLayout {
+        width: root.width;
         spacing: 14px;
         alignment: start;
 
@@ -68,21 +67,44 @@ export component PrFlow {
             color: MaterialPalette.on_surface_variant;
         }
 
-        HorizontalLayout {
+        if !root.stacked-fields: HorizontalLayout {
+            width: parent.width;
             spacing: 12px;
 
             PrField {
                 label: "PR number";
                 value <=> root.pr-number;
                 placeholder: "1024";
-                field-width: 180px;
+                field-width: root.dual-field-width;
             }
 
             PrField {
                 label: "PR title";
                 value <=> root.pr-title;
                 placeholder: "Refactor workflow status panel";
-                field-width: 420px;
+                field-width: root.dual-field-width;
+            }
+        }
+
+        if root.stacked-fields: VerticalLayout {
+            width: parent.width;
+            spacing: 12px;
+            alignment: start;
+
+            PrField {
+                width: parent.width;
+                label: "PR number";
+                value <=> root.pr-number;
+                placeholder: "1024";
+                field-width: parent.width;
+            }
+
+            PrField {
+                width: parent.width;
+                label: "PR title";
+                value <=> root.pr-title;
+                placeholder: "Refactor workflow status panel";
+                field-width: parent.width;
             }
         }
 
@@ -126,7 +148,8 @@ export component PrFlow {
             }
         }
 
-        HorizontalLayout {
+        if !root.stacked-switches: HorizontalLayout {
+            width: parent.width;
             spacing: 18px;
 
             HorizontalLayout {
@@ -160,8 +183,78 @@ export component PrFlow {
             }
         }
 
-        HorizontalLayout {
+        if root.stacked-switches: VerticalLayout {
+            width: parent.width;
             spacing: 12px;
+            alignment: start;
+
+            HorizontalLayout {
+                spacing: 10px;
+                MaterialText {
+                    text: "CI green";
+                    font_size: 14px;
+                    color: MaterialPalette.on_surface;
+                    vertical_alignment: center;
+                }
+                Switch {
+                    checked <=> root.ci-green;
+                    width: 48px;
+                    height: 28px;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                MaterialText {
+                    text: "Reviewers ready";
+                    font_size: 14px;
+                    color: MaterialPalette.on_surface;
+                    vertical_alignment: center;
+                }
+                Switch {
+                    checked <=> root.reviewers-ready;
+                    width: 48px;
+                    height: 28px;
+                }
+            }
+        }
+
+        if !root.stacked-actions: HorizontalLayout {
+            width: parent.width;
+            spacing: 12px;
+
+            FilledButton {
+                text: "Analyze PR";
+                clicked => {
+                    root.analyze(
+                        root.pr-number,
+                        root.pr-title,
+                        root.pr-summary,
+                        root.ci-green,
+                        root.reviewers-ready,
+                    );
+                }
+            }
+
+            FilledButton {
+                text: "Approve";
+                clicked => {
+                    root.confirm(true);
+                }
+            }
+
+            FilledButton {
+                text: "Reject";
+                clicked => {
+                    root.confirm(false);
+                }
+            }
+        }
+
+        if root.stacked-actions: VerticalLayout {
+            width: parent.width;
+            spacing: 12px;
+            alignment: start;
 
             FilledButton {
                 text: "Analyze PR";

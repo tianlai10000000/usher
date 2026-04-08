@@ -5,6 +5,7 @@ import { ScrollView } from "../../material-1.0-fixed/ui/components/scroll_view.s
 import { Home } from "home.slint";
 import { StyleMetrics } from "std-widgets.slint";
 import { ProjectCardActions } from "../components/button/project_card_actions.slint";
+import { CompactTextField } from "../components/input/compact_text_field.slint";
 
 export struct ProjectItem {
     project_name: string,
@@ -38,35 +39,18 @@ component ProjectField {
             color: MaterialPalette.on_surface_variant;
         }
 
-        Rectangle {
-            height: 40px;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            background: MaterialPalette.surface_container_highest;
-            clip: true;
+        CompactTextField {
+            width: 100%;
+            text <=> root.value;
+            placeholder: root.placeholder;
+            field-height: 40px;
+            border-radius-size: 10px;
+            input-font-size: 14px;
+            input-font-family: "Hiragino Sans GB";
+            field-background: MaterialPalette.surface_container_highest;
 
-            TextInput {
-                x: 12px;
-                y: (parent.height - self.preferred-height) / 2;
-                width: parent.width - 24px;
-                text <=> root.value;
-                color: MaterialPalette.on_surface;
-                font-size: 14px;
-                single-line: true;
-                font-family: "Hiragino Sans GB";
-
-                edited => {
-                    root.edited(self.text);
-                }
-            }
-
-            if root.value == "": MaterialText {
-                x: 12px;
-                y: (parent.height - self.preferred-height) / 2;
-                text: root.placeholder;
-                font_size: 14px;
-                color: MaterialPalette.on_surface_variant;
+            edited => {
+                root.edited(self.text);
             }
         }
     }
@@ -77,36 +61,18 @@ component SearchField {
     in property <string> placeholder;
     callback accepted(string);
 
-    Rectangle {
+    CompactTextField {
         preferred-width: 240px;
-        height: 40px;
-        border-radius: 10px;
-        border-width: 1px;
-        border-color: MaterialPalette.outline_variant;
-        background: MaterialPalette.surface_container_low;
-        clip: true;
+        text <=> root.value;
+        placeholder: root.placeholder;
+        field-height: 40px;
+        border-radius-size: 10px;
+        input-font-size: 14px;
+        input-font-family: "Hiragino Sans GB";
+        field-background: MaterialPalette.surface_container_low;
 
-        TextInput {
-            x: 12px;
-            y: (parent.height - self.preferred-height) / 2;
-            width: parent.width - 24px;
-            text <=> root.value;
-            color: MaterialPalette.on_surface;
-            font-size: 14px;
-            font-family: "Hiragino Sans GB";
-            single-line: true;
-
-            accepted => {
-                root.accepted(self.text);
-            }
-        }
-
-        if root.value == "": MaterialText {
-            x: 12px;
-            y: (parent.height - self.preferred-height) / 2;
-            text: root.placeholder;
-            font_size: 14px;
-            color: MaterialPalette.on_surface_variant;
+        accepted => {
+            root.accepted(self.text);
         }
     }
 }
@@ -171,12 +137,14 @@ export component Project {
     property <int> rows: Math.ceil(item-count / columns);
 
     // Layout constants
+    property <length> content-horizontal-padding: MaterialStyleMetrics.padding_8;
     property <length> padding-size: MaterialStyleMetrics.padding_16;
     property <length> row-spacing: MaterialStyleMetrics.padding_8;
     property <length> col-spacing: MaterialStyleMetrics.padding_16;
 
     // Calculate available dimensions
-    property <length> available-width: root.width - (padding-size * 2);
+    property <length> content-width: max(0px, root.width - (content-horizontal-padding * 2));
+    property <length> available-width: max(0px, content-width - (padding-size * 2));
 
     // Calculate card dimensions
     property <length> card-width: (available-width - ((columns - 1) * col-spacing)) / columns;
@@ -187,15 +155,15 @@ export component Project {
 
         Vertical {
             width: parent.width;
-            padding-left: MaterialStyleMetrics.padding_8;
-            padding-right: MaterialStyleMetrics.padding_8;
+            padding-left: root.content-horizontal-padding;
+            padding-right: root.content-horizontal-padding;
             padding-top: 0;
             padding-bottom: 0;
             spacing: row-spacing;
             alignment: start;
 
             HorizontalLayout {
-                width: parent.width;
+                width: root.content-width;
                 height: 40px;
                 spacing: MaterialStyleMetrics.spacing_8;
                 alignment: center;
@@ -253,6 +221,7 @@ export component Project {
 
             // Create rows dynamically (same structure as Tools)
             for row_index in rows : Horizontal {
+                width: root.content-width;
                 spacing: col-spacing;
                 alignment: start;
 
@@ -343,11 +312,11 @@ export component Project {
                                                 font_weight: 500;
                                             }
 
-                                            Text {
+                                            MaterialText {
                                                 width: parent.width;
                                                 text: card_data.project_name;
                                                 font-size: 16px;
-                                                font-weight: 600;
+                                                font_weight: 500;
                                                 color: MaterialPalette.on_surface;
                                                 font-family: "Hiragino Sans GB";
                                                 overflow: elide;
@@ -374,7 +343,7 @@ export component Project {
                                                 font_weight: 500;
                                             }
 
-                                            Text {
+                                            MaterialText {
                                                 text: card_data.project_alias == "" ? "Not set" : card_data.project_alias;
                                                 font-size: 11px;
                                                 color: MaterialPalette.on_surface_variant;

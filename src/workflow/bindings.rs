@@ -1,5 +1,5 @@
 use crate::project::pr_stats::{PullRequestStateFilter, fetch_standard_environment_pr_counts};
-use crate::terminal::reset_terminal_for_project;
+use crate::terminal::{reset_terminal_for_project, terminal_title_for_project};
 use crate::workflow::state::{
     SharedWorkflowState, WorkflowProjectContext, initialize_ui, normalize_project_alias,
     normalize_project_id, normalize_project_name,
@@ -44,6 +44,7 @@ pub(crate) fn bind_project_context(ui: &MainWindow, shared_state: SharedWorkflow
                 guard.set_project(context.clone())
             };
             initialize_ui(&ui, &context, &snapshot);
+            ui.set_shell_drawer_title(terminal_title_for_project(&context.name).into());
             reset_terminal_for_project(
                 &ui,
                 &context.id,

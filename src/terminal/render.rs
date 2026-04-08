@@ -1,6 +1,9 @@
-use crate::{TerminalLine, TerminalSpan};
-use slint::{Color as SlintColor, ModelRc, VecModel};
+use crate::TerminalSpan;
+use slint::Color as SlintColor;
+use std::sync::atomic::{AtomicBool, Ordering};
 use vt100::{Color, Parser};
+
+static TERMINAL_DARK_MODE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Default)]
 pub struct TerminalCursorState {
@@ -9,7 +12,7 @@ pub struct TerminalCursorState {
     pub visible: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct RenderedTerminalSpan {
     pub start_col: i32,
     pub text: String,
@@ -21,7 +24,7 @@ pub struct RenderedTerminalSpan {
     pub underline: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default, PartialEq)]
 pub struct RenderedTerminalLine {
     pub spans: Vec<RenderedTerminalSpan>,
 }
@@ -107,12 +110,34 @@ impl TerminalRenderState {
 
     pub fn rendered_text(&self) -> String {
         let screen = self.parser.screen();
-        let (_, cols) = screen.size();
-        screen.rows(0, cols).collect::<Vec<_>>().join("\n")
+        let (rows, cols) = screen.size();
+        let mut rendered_rows = Vec::with_capacity(rows as usize);
+        for row in 0..rows {
+            let mut line = String::new();
+            for col in 0..cols {
+                if let Some(cell) = screen.cell(row, col) {
+                    if cell.is_wide_continuation() {
+                        continue;
+                    }
+                    let contents = cell.contents();
+                    if contents.is_empty() {
+                        line.push(' ');
+                    } else {
+                        line.push_str(contents);
+                    }
+                }
+            }
+            rendered_rows.push(line.trim_end_matches(' ').to_string());
+        }
+        rendered_rows.join("\n")
     }
 
     pub fn scrollback(&self) -> usize {
         self.parser.screen().scrollback()
+    }
+
+    pub fn scrollback_capacity(&self) -> usize {
+        self.scrollback
     }
 
     pub fn max_scrollback(&mut self) -> usize {
@@ -128,14 +153,16 @@ impl TerminalRenderState {
         self.parser.screen_mut().set_scrollback(rows);
     }
 
-    pub fn rendered_lines(&self) -> Vec<RenderedTerminalLine> {
+    pub fn rendered_lines_into(&self, rendered_lines: &mut Vec<RenderedTerminalLine>) {
         let screen = self.parser.screen();
         let (rows, cols) = screen.size();
 
-        let mut rendered_lines = Vec::with_capacity(rows as usize);
+        rendered_lines.resize_with(rows as usize, RenderedTerminalLine::default);
 
         for row in 0..rows {
-            let mut spans: Vec<RenderedTerminalSpan> = Vec::new();
+            let spans = &mut rendered_lines[row as usize].spans;
+            spans.clear();
+            let last_significant_col = last_significant_col(screen, row, cols);
             let mut current_text = String::new();
             let mut current_start_col = 0i32;
             let mut current_cells = 0i32;
@@ -146,7 +173,7 @@ impl TerminalRenderState {
             let mut current_underline = false;
             let mut has_current = false;
 
-            for col in 0..cols {
+            for col in 0..last_significant_col {
                 let Some(cell) = screen.cell(row, col) else {
                     continue;
                 };
@@ -225,13 +252,9 @@ impl TerminalRenderState {
                     underline: current_underline,
                 });
             }
-
-            rendered_lines.push(RenderedTerminalLine { spans });
         }
-
-        rendered_lines
+        rendered_lines.truncate(rows as usize);
     }
-
     pub fn cursor_state(&self) -> TerminalCursorState {
         let screen = self.parser.screen();
         let (row, col) = screen.cursor_position();
@@ -253,36 +276,72 @@ impl TerminalRenderState {
     }
 }
 
+fn last_significant_col(screen: &vt100::Screen, row: u16, cols: u16) -> u16 {
+    let mut last = 0u16;
+    for col in 0..cols {
+        let Some(cell) = screen.cell(row, col) else {
+            continue;
+        };
+        if cell.is_wide_continuation() {
+            continue;
+        }
+        if is_significant_cell(cell) {
+            let width = if cell.is_wide() { 2 } else { 1 };
+            last = col.saturating_add(width as u16);
+        }
+    }
+    last
+}
+
+fn is_significant_cell(cell: &vt100::Cell) -> bool {
+    let contents = cell.contents();
+    if !contents.is_empty() && contents != " " {
+        return true;
+    }
+
+    cell.bold()
+        || cell.italic()
+        || cell.underline()
+        || cell.inverse()
+        || !matches!(cell.fgcolor(), Color::Default)
+        || !matches!(cell.bgcolor(), Color::Default)
+}
+
 enum ReplyKind {
     CursorPosition,
     DeviceAttributes,
 }
 
-pub fn to_ui_lines(lines: &[RenderedTerminalLine]) -> Vec<TerminalLine> {
-    lines
+pub fn to_ui_spans(spans: &[RenderedTerminalSpan]) -> Vec<TerminalSpan> {
+    spans
         .iter()
-        .map(|line| TerminalLine {
-            spans: ModelRc::new(VecModel::from(
-                line.spans
-                    .iter()
-                    .map(|span| TerminalSpan {
-                        start_col: span.start_col,
-                        text: span.text.clone().into(),
-                        cells: span.cells,
-                        foreground: span.foreground,
-                        background: span.background,
-                        bold: span.bold,
-                        italic: span.italic,
-                        underline: span.underline,
-                    })
-                    .collect::<Vec<_>>(),
-            )),
+        .map(|span| TerminalSpan {
+            start_col: span.start_col,
+            text: span.text.clone().into(),
+            cells: span.cells,
+            foreground: span.foreground,
+            background: span.background,
+            bold: span.bold,
+            italic: span.italic,
+            underline: span.underline,
         })
         .collect()
 }
 
+pub fn set_dark_mode(is_dark: bool) {
+    TERMINAL_DARK_MODE.store(is_dark, Ordering::Relaxed);
+}
+
+fn is_dark_mode() -> bool {
+    TERMINAL_DARK_MODE.load(Ordering::Relaxed)
+}
+
 fn default_foreground() -> SlintColor {
-    SlintColor::from_rgb_u8(0x3c, 0x40, 0x43)
+    if is_dark_mode() {
+        SlintColor::from_rgb_u8(0xe6, 0xea, 0xef)
+    } else {
+        SlintColor::from_rgb_u8(0x3c, 0x40, 0x43)
+    }
 }
 
 fn transparent_background() -> SlintColor {
@@ -304,6 +363,17 @@ fn map_terminal_color(color: Color, foreground: bool) -> SlintColor {
 }
 
 fn map_ansi_index(index: u8) -> SlintColor {
+    if is_dark_mode() {
+        return match index {
+            0 => SlintColor::from_rgb_u8(0x7b, 0x84, 0x8f),
+            8 => SlintColor::from_rgb_u8(0x9a, 0xa3, 0xae),
+            _ => map_ansi_index_light(index),
+        };
+    }
+    map_ansi_index_light(index)
+}
+
+fn map_ansi_index_light(index: u8) -> SlintColor {
     match index {
         0 => SlintColor::from_rgb_u8(0x00, 0x00, 0x00),
         1 => SlintColor::from_rgb_u8(0xcd, 0x31, 0x31),

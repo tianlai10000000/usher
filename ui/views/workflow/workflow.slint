@@ -63,10 +63,11 @@ component WorkflowPrOverview inherits Rectangle {
     in property <string> uat-count: "-";
     in property <string> prod-count: "-";
     height: root.enabled ? 30px : 0px;
+    private property <length> row-height: 30px;
 
     if root.enabled: Rectangle {
         width: parent.width;
-        height: 30px;
+        height: root.row-height;
         border-radius: 12px;
         background: MaterialPalette.surface_container_high;
 
@@ -79,6 +80,7 @@ component WorkflowPrOverview inherits Rectangle {
             alignment: center;
 
             MaterialText {
+                height: root.row-height;
                 text: "PR";
                 font_size: 11px;
                 font_weight: 600;
@@ -86,44 +88,59 @@ component WorkflowPrOverview inherits Rectangle {
                 vertical_alignment: center;
             }
 
-            Image {
+            Rectangle {
                 width: 12px;
-                height: 12px;
-                source: root.loading
-                    ? @image-url("../../assets/icons/loading.svg")
-                    : (root.failed
-                        ? @image-url("../../assets/icons/warning.svg")
-                        : @image-url("../../assets/icons/done.svg"));
+                height: root.row-height;
+                background: transparent;
+
+                Image {
+                    width: 12px;
+                    height: 12px;
+                    x: 0px;
+                    y: (parent.height - self.height) / 2;
+                    source: root.loading
+                        ? @image-url("../../assets/icons/loading.svg")
+                        : (root.failed
+                            ? @image-url("../../assets/icons/warning.svg")
+                            : @image-url("../../assets/icons/done.svg"));
+                }
             }
 
-            Text {
+            MaterialText {
+                height: root.row-height;
                 text: root.loading ? "Loading" : (root.failed ? "Unknown" : "Ready");
                 font-size: 11px;
                 color: root.failed ? MaterialPalette.error : MaterialPalette.on_surface_variant;
-                vertical-alignment: center;
+                vertical_alignment: center;
             }
 
             Rectangle { horizontal-stretch: 1; }
 
-            Text {
+            MaterialText {
+                height: root.row-height;
                 text: "FAT " + root.fat-count;
                 font-size: 11px;
                 font-weight: 500;
                 color: MaterialPalette.on_surface_variant;
+                vertical_alignment: center;
             }
 
-            Text {
+            MaterialText {
+                height: root.row-height;
                 text: "UAT " + root.uat-count;
                 font-size: 11px;
                 font-weight: 500;
                 color: MaterialPalette.on_surface_variant;
+                vertical_alignment: center;
             }
 
-            Text {
+            MaterialText {
+                height: root.row-height;
                 text: "PROD " + root.prod-count;
                 font-size: 11px;
                 font-weight: 500;
                 color: MaterialPalette.on_surface_variant;
+                vertical_alignment: center;
             }
         }
     }
@@ -186,8 +203,8 @@ export component Workflow inherits PageView {
     private property <length> tabs-spacing: 12px;
     private property <length> workflow-content-width: root.width - 32px;
     private property <bool> workflow-header-stacked: root.workflow-content-width < 980px;
-    private property <bool> workflow-tabs-single-column: root.workflow-content-width < 760px;
-    private property <bool> workflow-tabs-two-columns: root.workflow-content-width >= 760px && root.workflow-content-width < 1160px;
+    private property <bool> workflow-tabs-single-column: root.workflow-content-width < 480px;
+    private property <bool> workflow-tabs-two-columns: root.workflow-content-width >= 480px && root.workflow-content-width < 1160px;
     private property <length> workflow-tabs-quad-width: (root.workflow-content-width - 3 * tabs-spacing) / 4;
     private property <length> workflow-tabs-dual-width: (root.workflow-content-width - tabs-spacing) / 2;
     private property <length> workflow-tabs-single-width: root.workflow-content-width;
@@ -565,6 +582,7 @@ export component Workflow inherits PageView {
     }
 
     if root.selected-flow == 0: BranchFlow {
+        width: root.workflow-content-width;
         result: root.branch-result;
         submit(source, target, recreate-remote) => {
             root.branch-submit(source, target, recreate-remote);
@@ -572,6 +590,7 @@ export component Workflow inherits PageView {
     }
 
     if root.selected-flow == 1: CdFlow {
+        width: root.workflow-content-width;
         running: root.cd-running;
         summary: root.cd-summary;
         build-status: root.cd-build-status;
@@ -591,6 +610,7 @@ export component Workflow inherits PageView {
     }
 
     if root.selected-flow == 2: PrFlow {
+        width: root.workflow-content-width;
         ai-decision: root.pr-ai-decision;
         ai-summary: root.pr-ai-summary;
         manual-status: root.pr-manual-status;
