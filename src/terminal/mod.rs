@@ -119,6 +119,18 @@ pub fn setup_terminal(ui: &MainWindow) {
     bind_terminal(ui, shared_state.clone());
 }
 
+pub fn shutdown_terminal() {
+    let Some(shared_state) = TERMINAL_SHARED_STATE.get() else {
+        return;
+    };
+    let Ok(mut guard) = shared_state.lock() else {
+        return;
+    };
+    log::info!("[Terminal] Shutdown requested, terminating active PTY session");
+    terminate_session_locked(&mut guard);
+    reset_terminal_view_state(&mut guard);
+}
+
 pub fn set_dark_mode(ui: &MainWindow, is_dark: bool) {
     render::set_dark_mode(is_dark);
 

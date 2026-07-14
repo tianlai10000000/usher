@@ -1,71 +1,136 @@
-# Usher: Material Components for Slint Rust Template
+# Usher
 
-A template for a Rust Application using Slint with [material components](https://github.com/slint-ui/slint/tree/master/ui-libraries/material).
+[简体中文](README.zh.md) · [Architecture](docs/architecture.md) · [Specifications](docs/specs/README.md)
 
-## About
+Usher is an alpha-stage desktop workspace for managing local Git projects and repetitive delivery workflows. It combines project metadata, pull-request summaries, guided Branch/Tag/PR/CD flows, an embedded terminal, chat assistance, update management, and desktop notifications in a Slint application.
 
-This template helps you get started developing a Rust application with Slint as a toolkit
-for the user interface and the material component set.
+## Highlights
 
-## Usage
+- Manage local repositories, aliases, tags, logos, and remote repository URLs.
+- Inspect open PR/MR counts for `fat`, `uat`, and `prod` across GitHub, GitLab, and Gitee-compatible servers.
+- Run guided Branch, Tag, PR, and CD workflows with per-project state.
+- Open a project-aware terminal drawer without leaving the current page.
+- Use the built-in chat view with persisted JSONL history and Markdown rendering.
+- Receive update, toast, notification, tray, and network-status feedback.
+- Switch between light, dark, and system theme modes.
+- Route all application HTTP traffic through a shared reqwest-based interception pipeline.
 
-We recommend using an IDE for development, along with our [LSP-based IDE integration for `.slint` files](https://github.com/slint-ui/slint/blob/master/tools/lsp/README.md). You can also load this project directly in [Visual Studio Code](https://code.visualstudio.com) and install our [Slint extension](https://marketplace.visualstudio.com/items?itemName=Slint.slint).
+> Usher is under active development. The chat endpoint is currently configured in source and several secondary routes are development surfaces rather than finished product features.
 
-1. Install Rust by following its [getting-started guide](https://www.rust-lang.org/learn/get-started).
-   Once this is done, you should have the `rustc` compiler and the `cargo` build system installed in your `PATH`.
-2. Download and extract the [ZIP archive of this repository](https://github.com/slint-ui/material-rust-template/archive/refs/heads/master.zip).
+## Supported targets
 
-   ```sh
-   mv material-rust-template-master my-project
-   cd my-project
-   ```
+The maintained desktop targets are:
 
-## Run your application on desktop
+- macOS, with native title-bar, tray, bundling, and DMG support.
+- Windows, with release packaging support.
 
-1. Build with `cargo`:
-    ```
-    cargo build
-    ```
+Linux may build with a suitable Slint backend, but it is not currently covered by the release workflow. WebAssembly and Android instructions from the original template have been removed because the current desktop dependencies and platform integrations are not maintained for those targets.
 
-2. Run the application binary:
+## Requirements
 
-    ```
-    cargo run
-    ```
+- A current stable Rust toolchain with the 2024 edition available.
+- Git in `PATH` for workflow and repository operations.
+- Platform build dependencies required by Slint/winit.
+- Optional: `cargo-bundle` and `create-dmg` for macOS packaging.
 
-## Run your application on a web browser
+The first build may download a prebuilt Skia package because the project enables both FemtoVG and Skia renderers.
 
-You can then use wasm-pack (which you may need to obtain with `cargo install wasm-pack`).
-This will generate the wasm in the `./pkg` directory, which the `index.html` file will open.
-Since wasm files cannot be served from `file://` URL, you need to open a wab server to serve
-the content
+## Quick start
 
 ```sh
-wasm-pack build --release --target web
-python3 -m http.server
+git clone https://github.com/tianlai10000000/usher.git
+cd usher
+cargo run
 ```
 
-## Run your application on Android
-
-First, [set up your Android environment](https://slint.dev/snapshots/master/docs/rust/slint/android/#building-and-deploying).
-Then, you can run the demo on an Android device with the following command:
+Useful development commands:
 
 ```sh
-cargo apk run --target aarch64-linux-android --lib
+cargo fmt --all
+cargo check --locked
+cargo test --lib --locked
 ```
 
-## Terminal Notes / Troubleshooting
+The full `cargo test --locked` command currently exposes a pre-existing failing doctest in `src/logger/debug_logger.rs`; the library unit tests pass.
 
-Terminal 相关的排障记录、已知坑和迭代说明统一维护在这里：
+To inspect the optional Skia software path:
 
-- [docs/terminal_viewport_iteration_notes.md](docs/terminal_viewport_iteration_notes.md)
+```sh
+SLINT_BACKEND=winit-skia-software cargo run
+```
 
-## Next Steps
+## Configuration and local data
 
-We hope that this template helps you get started, and that you enjoy exploring making user interfaces with Slint. To learn more
-about the Slint APIs and the `.slint` markup language, check out our [online documentation](https://slint.dev/docs). Check out
-also the [material components documentation](https://material.slint.dev/overview/)
+Usher uses `directories::ProjectDirs::from("com", "usher", "app")` to select platform-native locations.
 
-Don't forget to replace the contents of this readme with your own project details.
-(Containing a screenshot of your application if you want to.)
-As well as edit the `name =` field in `Cargo.toml` to match the name of your project.
+| Data | Relative location |
+| --- | --- |
+| Settings and Git platform tokens | config directory: `settings.toml` |
+| Project registry | local data directory: `project/projects.json` |
+| Chat history | local data directory: `im/chat_history.jsonl` |
+| Logs | local data directory: `logs/<date>/usher.log` |
+| Cached remote project logos | temporary directory: `usher-logo-cache/` |
+
+GitHub, GitLab, and Gitee tokens can be managed from Settings. Do not commit generated settings, logs, histories, or credentials.
+
+## Architecture at a glance
+
+```text
+src/main.rs
+  -> src/lib.rs                application composition and Slint bindings
+     -> src/app_runtime.rs     shared Tokio runtime
+     -> src/http/mod.rs        shared HTTP clients and interceptors
+     -> src/project/           project registry, logos, PR summaries
+     -> src/workflow/          Branch / Tag / PR / CD state and execution
+     -> src/terminal/          PTY session and terminal rendering
+     -> src/chat/              chat transport, history, Markdown, UI binding
+     -> src/update/            update checks, download, install
+     -> src/{toast,notification,dialog}.rs
+ui/main.slint
+  -> ui/views/                 page-level views
+  -> ui/components/            reusable application components
+material-1.7.1-fixed/            vendored Slint v1.17.1 Material library
+```
+
+Read [docs/architecture.md](docs/architecture.md) for ownership, lifecycle, data flows, and extension points. Coding agents must also follow [AGENTS.md](AGENTS.md).
+
+## HTTP interception
+
+All application-owned HTTP calls use `src/http/mod.rs`, which wraps reqwest instead of replacing it. The module provides:
+
+- one shared asynchronous client and one shared blocking client;
+- request, response, and error interceptor hooks;
+- normalized `HttpError` categories and status handling;
+- per-request error feedback: silent, toast, notification, or both;
+- retained access to reqwest request builders, JSON decoding, and streaming responses.
+
+Background polling must remain silent. User-initiated requests may opt into UI feedback. See [docs/specs/http.md](docs/specs/http.md).
+
+## Release packaging
+
+Build and validate local release artifacts with:
+
+```sh
+./scripts/verify-release.sh
+```
+
+Pass a target explicitly when it cannot be inferred:
+
+```sh
+./scripts/verify-release.sh x86_64-pc-windows-gnu
+```
+
+The GitHub release workflow produces macOS archives/DMGs and Windows ZIP bundles.
+
+## Documentation
+
+- [English architecture](docs/architecture.md)
+- [中文架构文档](docs/architecture.zh.md)
+- [Coding-agent instructions](AGENTS.md)
+- [Specification index](docs/specs/README.md)
+- [Terminal behavior specification](docs/specs/terminal.md)
+- [Historical terminal investigation notes](docs/terminal_viewport_iteration_notes.md)
+
+## License
+
+No root project license file is currently present. The vendored Material component library retains its own license in `material-1.7.1-fixed/LICENSE.md`.

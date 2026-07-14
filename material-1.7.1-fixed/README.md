@@ -1,4 +1,3 @@
-<!-- Copyright © SixtyFPS GmbH <info@slint.dev> ; SPDX-License-Identifier: MIT -->
 
 # Material Design 3 component set for Slint
 
@@ -27,4 +26,3 @@ Clone one of our Material Components for Slint templates and follow the instruct
  - C++: https://github.com/slint-ui/material-cpp-template
  - Node.js/Deno: https://github.com/slint-ui/material-nodejs-template
  - Python: https://github.com/slint-ui/material-python-template
-

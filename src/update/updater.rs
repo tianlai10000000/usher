@@ -4,8 +4,10 @@ use semver::Version;
 use slint::{ComponentHandle, Global, Timer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::runtime::Runtime;
 
+use crate::http::{self, RequestOptions};
 use crate::{
     CustomComponentType, MainWindow, NotificationManager, NotificationOptions, UpdateLogic,
     app_runtime::shared_runtime,
@@ -262,22 +264,17 @@ pub async fn perform_update_with_progress(
 
     progress_callback(0.15, 0, 0, &format!("Downloading v{}...", version));
 
-    // Use reqwest for streaming download to get real progress
-    let client = reqwest::Client::new();
-    let response = client
-        .get(&download_url)
-        .header("User-Agent", format!("usher/{}", cargo_crate_version!()))
-        .header("Accept", "application/octet-stream")
-        .send()
-        .await
-        .context("Failed to start download")?;
-
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "Download failed with status: {}",
-            response.status()
-        ));
-    }
+    // Use the shared HTTP pipeline while retaining reqwest streaming.
+    let response = http::send(
+        http::get(&download_url)
+            .header("User-Agent", format!("usher/{}", cargo_crate_version!()))
+            .header("Accept", "application/octet-stream")
+            .timeout(Duration::from_secs(10 * 60)),
+        // The updater already owns progress and notification UX.
+        RequestOptions::new("Download update"),
+    )
+    .await
+    .context("Failed to start download")?;
 
     let total_size = response.content_length().unwrap_or(0);
     log::debug!(" File size: {} bytes", total_size);

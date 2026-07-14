@@ -165,9 +165,6 @@ pub fn init_signal_handlers() {
         return;
     }
 
-    #[cfg(target_os = "macos")]
-    register_atexit_cleanup();
-
     log::info!("[Shutdown] Initializing signal handlers");
     #[cfg(unix)]
     std::thread::spawn(|| {
@@ -335,24 +332,12 @@ fn terminate_application() {
 /// naïve string matching.
 ///
 /// We use `NSWorkspace.runningApplications` which exposes the same
-/// Register an `atexit` handler so that `cleanup_associated_helpers` runs
-/// regardless of how the process exits (Dock quit, `[NSApplication terminate:]`,
-/// or any other `exit()` call that bypasses our shutdown pipeline).
-#[cfg(target_os = "macos")]
-fn register_atexit_cleanup() {
-    unsafe extern "C" {
-        fn atexit(func: extern "C" fn()) -> std::os::raw::c_int;
-    }
-    extern "C" fn on_exit() {
-        cleanup_associated_helpers();
-    }
-    unsafe {
-        atexit(on_exit);
-    }
-}
-
 /// `localizedName` as Activity Monitor, then dynamically derive our own
 /// process name from `NSProcessInfo` (no hard-coded strings).
+///
+/// Important: keep this inside the normal shutdown pipeline. Calling AppKit from
+/// `atexit` is unsafe because Cocoa may already be partially torn down, which can
+/// turn a normal Quit into a macOS "unexpectedly quit" crash report.
 #[cfg(target_os = "macos")]
 fn cleanup_associated_helpers() {
     use objc::msg_send;

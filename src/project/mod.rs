@@ -1,5 +1,6 @@
 pub(crate) mod pr_stats;
 
+use crate::http::{self, RequestOptions};
 use crate::project::pr_stats::{PullRequestStateFilter, fetch_standard_environment_pr_counts};
 use crate::terminal::diag_logging_enabled;
 use crate::terminal::open_terminal_for_project;
@@ -1098,7 +1099,11 @@ fn prefetch_project_pr_overview(
 }
 
 fn download_remote_logo_to_cache(url: &str) -> Option<PathBuf> {
-    let response = reqwest::blocking::get(url).ok()?;
+    let response = http::send_blocking(
+        http::blocking_get(url),
+        RequestOptions::new("Download project logo"),
+    )
+    .ok()?;
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)

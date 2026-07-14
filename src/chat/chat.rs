@@ -1,4 +1,5 @@
 use crate::constants::chat::RAG_API_URL;
+use crate::http::{self, HttpError, HttpErrorKind, RequestOptions};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -25,46 +26,40 @@ pub struct ChatResponse {
 ///
 /// # Returns
 /// * `Ok(String)` - 服务器返回的消息内容
-/// * `Err(String)` - 错误信息（用户友好的错误消息）
-pub async fn send_message_to_server(user_message: &str) -> Result<String, String> {
+/// * `Err(HttpError)` - 统一 HTTP 错误
+pub(crate) async fn send_message_to_server(user_message: &str) -> Result<String, HttpError> {
     log::debug!("[Chat] Sending message to server: {}", user_message);
 
-    let client = reqwest::Client::new();
-    let response = client
-        .post(RAG_API_URL)
-        .json(&json!({
+    let result = http::send_json::<ChatResponse>(
+        http::post(RAG_API_URL).json(&json!({
             "query": user_message,
             "mode": "hybrid",
             "include_references": true,
             "response_type": "Multiple Paragraphs",
             "top_k": 10
-        }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let result = response
-        .json::<ChatResponse>()
-        .await
-        .map_err(|e| e.to_string())?;
+        })),
+        // Chat already renders an inline assistant error, so suppress duplicate UI feedback.
+        RequestOptions::new("Send chat message"),
+    )
+    .await?;
 
     Ok(result.response)
 }
 
 /// 处理 API 错误并转换为用户友好的错误消息
-pub fn handle_api_error(error: &str) -> String {
+pub(crate) fn handle_api_error(error: &HttpError) -> String {
     log::error!("[Chat] API error: {}", error);
 
-    // 根据错误类型返回用户友好的消息
-    if error.contains("network") || error.contains("timeout") {
-        "网络连接失败，请检查网络设置后重试。".to_string()
-    } else if error.contains("rate limit") || error.contains("429") {
-        "请求过于频繁，请稍后再试。".to_string()
-    } else if error.contains("unauthorized") || error.contains("401") {
-        "认证失败，请检查 API 密钥。".to_string()
-    } else if error.contains("server error") || error.contains("500") {
-        "服务器错误，请稍后重试。".to_string()
-    } else {
-        format!("发送消息失败：{}", error)
+    match (error.kind, error.status.map(|status| status.as_u16())) {
+        (HttpErrorKind::Timeout | HttpErrorKind::Connect, _) => {
+            "网络连接失败，请检查网络设置后重试。".to_string()
+        }
+        (HttpErrorKind::Status, Some(429)) => "请求过于频繁，请稍后再试。".to_string(),
+        (HttpErrorKind::Status, Some(401 | 403)) => {
+            "认证失败，请检查 API 密钥或访问权限。".to_string()
+        }
+        (HttpErrorKind::Status, Some(500..=599)) => "服务器错误，请稍后重试。".to_string(),
+        (HttpErrorKind::Decode, _) => "服务返回了无法识别的数据。".to_string(),
+        _ => format!("发送消息失败：{}", error.user_message()),
     }
 }

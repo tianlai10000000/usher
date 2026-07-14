@@ -33,6 +33,9 @@ use update::{setup_updater, start_auto_update, stop_auto_update};
 mod network;
 use network::setup_network_monitor;
 
+mod http;
+use http::setup_http;
+
 mod settings;
 use settings::setup_settings;
 
@@ -59,7 +62,7 @@ mod workflow;
 use workflow::setup_workflow;
 mod project;
 use project::setup_project;
-use terminal::{set_dark_mode as set_terminal_dark_mode, setup_terminal};
+use terminal::{set_dark_mode as set_terminal_dark_mode, setup_terminal, shutdown_terminal};
 
 #[cfg(target_os = "macos")]
 static TITLEBAR_SETTINGS_UI_WEAK: std::sync::OnceLock<slint::Weak<MainWindow>> =
@@ -876,9 +879,6 @@ fn ui() -> Result<MainWindow> {
     // Set application version number
     AppState::get(&app).set_version(env!("CARGO_PKG_VERSION").into());
 
-    // ========= Network ========= //
-    setup_network_monitor(&app);
-
     // ========= Notification ========= //
     // Single window: don't pass shared queue (use None)
     setup_notifications(&app, None);
@@ -890,6 +890,13 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Toast ========= //
     setup_toast(&app);
+
+    // ========= HTTP ========= //
+    // Bind error feedback only after Notification and Toast callbacks are ready.
+    setup_http(&app);
+
+    // ========= Network ========= //
+    setup_network_monitor(&app);
 
     // ========= Dialog ========= //
     setup_dialog(&app);
@@ -946,6 +953,9 @@ fn ui() -> Result<MainWindow> {
     shutdown::init_signal_handlers();
     shutdown::register_pre_shutdown_task_with_priority("stop_auto_update", PRIORITY_HIGH, || {
         stop_auto_update();
+    });
+    shutdown::register_pre_shutdown_task_with_priority("shutdown_terminal", PRIORITY_HIGH, || {
+        shutdown_terminal();
     });
     shutdown::register_ui_shutdown_task_with_priority("remove_tray", PRIORITY_HIGH, || {
         tray::remove_tray();

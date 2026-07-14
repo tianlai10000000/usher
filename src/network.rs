@@ -1,21 +1,13 @@
 use std::time::Duration;
 
 use slint::{ComponentHandle, Global, Weak};
-use std::sync::OnceLock;
 
 use crate::app_runtime::shared_runtime;
+use crate::http::{self, RequestOptions};
 use crate::{AppState, MainWindow};
 
 /// Check network connectivity using HTTP request (more reliable than raw TCP)
 fn check_online() -> bool {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    let client = CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(3))
-            .no_proxy()
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    });
     let runtime = shared_runtime();
 
     runtime.block_on(async {
@@ -27,7 +19,13 @@ fn check_online() -> bool {
         ];
 
         for url in urls {
-            if let Ok(resp) = client.get(url).send().await {
+            let request = http::get(url).timeout(Duration::from_secs(3));
+            if let Ok(resp) = http::send(
+                request,
+                RequestOptions::new("Check network connectivity").allow_http_errors(),
+            )
+            .await
+            {
                 let status = resp.status().as_u16();
                 if status == 204 || status == 200 {
                     return true;

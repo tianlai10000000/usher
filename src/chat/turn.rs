@@ -107,10 +107,7 @@ pub fn serialize_server_response(response: String) -> Result<ChatMessage, String
 /// # Returns
 /// * `ChatMessage` - 用户友好的错误消息
 pub fn handle_error_response(error: String) -> ChatMessage {
-    use crate::chat::chat::handle_api_error;
-
-    let friendly_error = handle_api_error(&error);
-    create_error_message(friendly_error)
+    create_error_message(format!("发送消息失败：{}", error))
 }
 
 /// 获取当前时间戳（格式化）

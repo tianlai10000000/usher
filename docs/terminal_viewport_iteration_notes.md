@@ -1,5 +1,7 @@
 # Terminal 视口问题迭代记录
 
+> 文档状态：历史排障记录，不是当前行为规格。稳定契约和回归矩阵请以 [specs/terminal.md](specs/terminal.md) 为准；当前架构请参阅 [architecture.zh.md](architecture.zh.md)。下文中的“当前问题”“建议下一步”等表述保留当时语境，不代表代码仍处于该状态。
+
 日期：2026-04-02
 
 ## 回归检查清单

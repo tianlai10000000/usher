@@ -1,7 +1,7 @@
-use reqwest::blocking::{Client, Response};
+use crate::http::{self, RequestOptions};
+use reqwest::blocking::Response;
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde_json::Value;
-use std::time::Duration;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -39,12 +39,10 @@ pub(crate) fn fetch_pull_request_counts(
         return Ok(Vec::new());
     }
 
-    let client = build_http_client()?;
-
     queries
         .iter()
         .map(|query| {
-            fetch_pull_request_count(&client, query).map(|count| PullRequestCountResult {
+            fetch_pull_request_count(query).map(|count| PullRequestCountResult {
                 branch_name: query.branch_name.clone(),
                 count,
             })
@@ -95,7 +93,7 @@ struct RepoLocator {
     enterprise: Option<String>,
 }
 
-fn fetch_pull_request_count(client: &Client, query: &PullRequestCountQuery) -> Result<u32, String> {
+fn fetch_pull_request_count(query: &PullRequestCountQuery) -> Result<u32, String> {
     let locator = parse_repo_locator(&query.remote_repo)?;
     log::info!(
         "[PRStats] request provider={} host={} repo={}/{} branch={} state={} reviewer={} auth={}",
@@ -109,9 +107,9 @@ fn fetch_pull_request_count(client: &Client, query: &PullRequestCountQuery) -> R
         auth_source_for_provider(locator.provider)
     );
     match locator.provider {
-        RepoProvider::GitHub => fetch_github_pull_count(client, &locator, query),
-        RepoProvider::GitLab => fetch_gitlab_merge_request_count(client, &locator, query),
-        RepoProvider::GiteeEnterprise => fetch_gitee_enterprise_pull_count(client, &locator, query),
+        RepoProvider::GitHub => fetch_github_pull_count(&locator, query),
+        RepoProvider::GitLab => fetch_gitlab_merge_request_count(&locator, query),
+        RepoProvider::GiteeEnterprise => fetch_gitee_enterprise_pull_count(&locator, query),
     }
 }
 
@@ -231,15 +229,7 @@ fn parse_gitee_enterprise_from_path(provider: RepoProvider, path_parts: &[&str])
     None
 }
 
-fn build_http_client() -> Result<Client, String> {
-    Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|error| format!("Failed to initialize HTTP client: {}", error))
-}
-
 fn fetch_github_pull_count(
-    client: &Client,
     locator: &RepoLocator,
     query: &PullRequestCountQuery,
 ) -> Result<u32, String> {
@@ -250,8 +240,7 @@ fn fetch_github_pull_count(
             "https://api.github.com/repos/{}/{}/pulls",
             locator.owner, locator.repo
         );
-        let mut request = client
-            .get(endpoint)
+        let mut request = http::blocking_get(endpoint)
             .query(&[
                 ("state", map_state(query.state.clone())),
                 ("base", query.branch_name.as_str()),
@@ -265,9 +254,9 @@ fn fetch_github_pull_count(
             request = request.header(AUTHORIZATION, format!("Bearer {}", token));
         }
 
-        let response = request
-            .send()
-            .map_err(|error| format!("GitHub request failed: {}", error))?;
+        let response =
+            http::send_blocking(request, RequestOptions::new("Load GitHub pull requests"))
+                .map_err(|error| error.to_string())?;
         let payload = ensure_success(response, "GitHub")?;
         let list = payload
             .as_array()
@@ -289,7 +278,6 @@ fn fetch_github_pull_count(
 }
 
 fn fetch_gitlab_merge_request_count(
-    client: &Client,
     locator: &RepoLocator,
     query: &PullRequestCountQuery,
 ) -> Result<u32, String> {
@@ -301,8 +289,7 @@ fn fetch_gitlab_merge_request_count(
     let mut page = 1u32;
     let mut count = 0u32;
     loop {
-        let mut request = client
-            .get(endpoint.as_str())
+        let mut request = http::blocking_get(endpoint.as_str())
             .query(&[
                 ("state", map_state(query.state.clone())),
                 ("target_branch", query.branch_name.as_str()),
@@ -318,9 +305,9 @@ fn fetch_gitlab_merge_request_count(
             request = request.header("PRIVATE-TOKEN", token);
         }
 
-        let response = request
-            .send()
-            .map_err(|error| format!("GitLab request failed: {}", error))?;
+        let response =
+            http::send_blocking(request, RequestOptions::new("Load GitLab merge requests"))
+                .map_err(|error| error.to_string())?;
         let payload = ensure_success(response, "GitLab")?;
         let list = payload
             .as_array()
@@ -342,20 +329,19 @@ fn fetch_gitlab_merge_request_count(
 }
 
 fn fetch_gitee_enterprise_pull_count(
-    client: &Client,
     locator: &RepoLocator,
     query: &PullRequestCountQuery,
 ) -> Result<u32, String> {
     // 企业版优先使用 enterprise 级接口，失败后回退到仓库 pulls 接口。
     let mut first_error = None::<String>;
     if let Some(enterprise) = locator.enterprise.as_ref() {
-        match fetch_gitee_enterprise_level_pull_count(client, locator, enterprise, query) {
+        match fetch_gitee_enterprise_level_pull_count(locator, enterprise, query) {
             Ok(count) => return Ok(count),
             Err(error) => first_error = Some(error),
         }
     }
 
-    match fetch_gitee_repo_pull_count(client, locator, query) {
+    match fetch_gitee_repo_pull_count(locator, query) {
         Ok(count) => Ok(count),
         Err(error) => {
             let prefix = first_error
@@ -370,7 +356,6 @@ fn fetch_gitee_enterprise_pull_count(
 }
 
 fn fetch_gitee_enterprise_level_pull_count(
-    client: &Client,
     locator: &RepoLocator,
     enterprise: &str,
     query: &PullRequestCountQuery,
@@ -382,7 +367,7 @@ fn fetch_gitee_enterprise_level_pull_count(
     let mut page = 1u32;
     let mut count = 0u32;
     loop {
-        let mut request = client.get(endpoint.as_str()).query(&[
+        let mut request = http::blocking_get(endpoint.as_str()).query(&[
             ("state", map_state(query.state.clone())),
             ("base", query.branch_name.as_str()),
             (
@@ -393,9 +378,11 @@ fn fetch_gitee_enterprise_level_pull_count(
             ("page", page.to_string().as_str()),
         ]);
         request = attach_gitee_auth(request);
-        let response = request
-            .send()
-            .map_err(|error| format!("Gitee enterprise request failed: {}", error))?;
+        let response = http::send_blocking(
+            request,
+            RequestOptions::new("Load Gitee enterprise pull requests"),
+        )
+        .map_err(|error| error.to_string())?;
         let payload = ensure_success(response, "Gitee enterprise")?;
         let list = payload
             .as_array()
@@ -417,7 +404,6 @@ fn fetch_gitee_enterprise_level_pull_count(
 }
 
 fn fetch_gitee_repo_pull_count(
-    client: &Client,
     locator: &RepoLocator,
     query: &PullRequestCountQuery,
 ) -> Result<u32, String> {
@@ -428,16 +414,18 @@ fn fetch_gitee_repo_pull_count(
     let mut page = 1u32;
     let mut count = 0u32;
     loop {
-        let mut request = client.get(endpoint.as_str()).query(&[
+        let mut request = http::blocking_get(endpoint.as_str()).query(&[
             ("state", map_state(query.state.clone())),
             ("base", query.branch_name.as_str()),
             ("per_page", "100"),
             ("page", page.to_string().as_str()),
         ]);
         request = attach_gitee_auth(request);
-        let response = request
-            .send()
-            .map_err(|error| format!("Gitee repository request failed: {}", error))?;
+        let response = http::send_blocking(
+            request,
+            RequestOptions::new("Load Gitee repository pull requests"),
+        )
+        .map_err(|error| error.to_string())?;
         let payload = ensure_success(response, "Gitee repository")?;
         let list = payload
             .as_array()
@@ -484,9 +472,10 @@ fn ensure_success(response: Response, provider: &str) -> Result<Value, String> {
         ));
     }
     serde_json::from_str(&body).map_err(|error| {
+        let body_excerpt = body.chars().take(500).collect::<String>();
         format!(
             "{} response parse failed: {}. body={}",
-            provider, error, body
+            provider, error, body_excerpt
         )
     })
 }
