@@ -5,7 +5,7 @@ import { PageView } from "../../components/page/page_view.slint";
 import { Route } from "../../route/routeMap.slint";
 import { BranchFlow } from "./branch.slint";
 import { CdFlow } from "./cd.slint";
-import { PrFlow } from "./pr.slint";
+import { PrFlow, WorkflowPullRequestItem } from "./pr.slint";
 import { TagFlow } from "./tag.slint";
 import { StepItem } from "../../components/workflow/steps.slint";
 
@@ -146,6 +146,31 @@ component WorkflowPrOverview inherits Rectangle {
     }
 }
 
+component ProjectRepositoryMetadataRow inherits Rectangle {
+    in property <string> repo-type: "";
+    in property <string> repo-project-id: "";
+
+    height: 28px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: MaterialPalette.outline_variant;
+    background: MaterialPalette.surface_container_lowest;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        alignment: center;
+
+        MaterialText { text: "Provider"; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+        MaterialText { text: root.repo-type == "" ? "—" : root.repo-type; font-size: 12px; font-weight: 600; color: MaterialPalette.primary; vertical_alignment: center; }
+        Rectangle { width: 1px; height: 16px; background: MaterialPalette.outline_variant; }
+        MaterialText { text: "Repository ID"; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+        MaterialText { text: root.repo-project-id == "" ? "—" : root.repo-project-id; font-size: 12px; font-weight: 600; color: MaterialPalette.on_surface; vertical_alignment: center; }
+        Rectangle { horizontal-stretch: 1; }
+    }
+}
+
 export component Workflow inherits PageView {
     callback branch-submit(string, string, bool);
     callback tag-change-mode(string);
@@ -157,6 +182,8 @@ export component Workflow inherits PageView {
     callback tag-stop();
     callback pr-analyze(string, string, string, bool, bool);
     callback pr-confirm(bool);
+    callback pr-list-state-change(string);
+    callback pr-list-page-change(int);
     callback cd-start(string, string, string);
     callback cd-rollback(string);
 
@@ -182,6 +209,16 @@ export component Workflow inherits PageView {
     in property <string> pr-ai-decision: "Awaiting analysis";
     in property <string> pr-ai-summary: "Run AI analysis to get a recommendation.";
     in property <string> pr-manual-status: "Waiting for human confirmation.";
+    in property <string> pr-repo-project-id: "";
+    in property <string> pr-repo-type: "";
+    in property <[WorkflowPullRequestItem]> pr-list-items: [];
+    in property <int> pr-list-total: 0;
+    in property <bool> pr-list-total-exact: false;
+    in property <int> pr-list-page: 1;
+    in property <int> pr-list-page-count: 1;
+    in property <string> pr-list-state: "open";
+    in property <bool> pr-list-loading: false;
+    in property <string> pr-list-error: "";
     in property <bool> pr-count-auto-update: false;
     in property <bool> pr-count-loading: false;
     in property <bool> pr-count-failed: false;
@@ -296,6 +333,12 @@ export component Workflow inherits PageView {
                 }
             }
 
+            ProjectRepositoryMetadataRow {
+                width: parent.width;
+                repo-type: root.pr-repo-type;
+                repo-project-id: root.pr-repo-project-id;
+            }
+
             WorkflowPrOverview {
                 width: parent.width;
                 enabled: root.pr-count-auto-update;
@@ -398,6 +441,12 @@ export component Workflow inherits PageView {
                     vertical_alignment: center;
                 }
             }
+        }
+
+        ProjectRepositoryMetadataRow {
+            width: parent.width;
+            repo-type: root.pr-repo-type;
+            repo-project-id: root.pr-repo-project-id;
         }
 
         WorkflowPrOverview {
@@ -611,6 +660,16 @@ export component Workflow inherits PageView {
 
     if root.selected-flow == 2: PrFlow {
         width: root.workflow-content-width;
+        repo-project-id: root.pr-repo-project-id;
+        repo-type: root.pr-repo-type;
+        pr-items: root.pr-list-items;
+        pr-total: root.pr-list-total;
+        pr-total-exact: root.pr-list-total-exact;
+        pr-page: root.pr-list-page;
+        pr-page-count: root.pr-list-page-count;
+        pr-state: root.pr-list-state;
+        pr-loading: root.pr-list-loading;
+        pr-error: root.pr-list-error;
         ai-decision: root.pr-ai-decision;
         ai-summary: root.pr-ai-summary;
         manual-status: root.pr-manual-status;
@@ -619,6 +678,12 @@ export component Workflow inherits PageView {
         }
         confirm(approved) => {
             root.pr-confirm(approved);
+        }
+        change-state(state) => {
+            root.pr-list-state-change(state);
+        }
+        change-page(page) => {
+            root.pr-list-page-change(page);
         }
     }
 

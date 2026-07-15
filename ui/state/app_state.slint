@@ -38,6 +38,21 @@ export global AppState {
     in-out property <string> git-gitlab-token: "";
     in-out property <string> git-gitee-token: "";
 
+    // Enterprise/self-hosted code-hosting API roots and identifiers.
+    in-out property <string> git-github-api-base-url: "";
+    in-out property <string> git-github-enterprise: "";
+    in-out property <string> git-gitlab-api-base-url: "";
+    in-out property <string> git-gitlab-enterprise: "";
+    in-out property <string> git-gitee-api-base-url: "";
+    in-out property <string> git-gitee-enterprise: "";
+
+    // OpenAI-compatible AI Agent connection
+    in-out property <string> ai-agent-base-url: "";
+    in-out property <string> ai-agent-api-key: "";
+    in-out property <string> ai-agent-model: "";
+    // Persisted provider preset selection.
+    in-out property <string> ai-agent-provider: "custom";
+
     /**
      * methods
     */
@@ -56,6 +71,18 @@ export global AppState {
 
     // git token settings
     callback save-git-tokens(github-token: string, gitlab-token: string, gitee-token: string);
+    callback save-git-hosting-config(
+        github-api-base-url: string,
+        github-enterprise: string,
+        gitlab-api-base-url: string,
+        gitlab-enterprise: string,
+        gitee-api-base-url: string,
+        gitee-enterprise: string
+    );
+
+    // AI Agent settings and connection test
+    callback save-ai-agent-settings(provider: string, base-url: string, api-key: string, model: string);
+    callback test-ai-agent-connection(base-url: string, api-key: string, model: string);
     
     // Update Palette.color-scheme when theme-mode changes
     changed theme-mode => {

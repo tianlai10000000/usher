@@ -10,6 +10,7 @@ import { Search as SearchPage } from "./views/search.slint";
 import { Settings as SettingsPage } from "./views/settings.slint";
 import { About as AboutPage } from "./views/about.slint";
 import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
+import { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
 import { StepItem } from "./components/workflow/steps.slint";
 
 import { List as ListPage } from "./views/list.slint";
@@ -48,6 +49,7 @@ export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager
 export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole } from "./views/chat.slint";
 export { StepItem } from "./components/workflow/steps.slint";
+export { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
 
 // import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
 
@@ -165,10 +167,24 @@ export component MainWindow inherits Window {
     in-out property <string> project-modal-original-alias: "";
     in-out property <string> project-search-query: "";
     in-out property <bool> settings-git-tokens-saved: false;
+    in-out property <bool> settings-git-hosting-config-saved: false;
+    in-out property <bool> settings-ai-agent-saved: false;
+    in-out property <bool> settings-ai-agent-testing: false;
+    in-out property <int> settings-ai-agent-provider-index: -1;
     in property <bool> platform-is-macos: false;
     in property <string> workflow-pr-ai-decision: "Awaiting analysis";
     in property <string> workflow-pr-ai-summary: "Run AI analysis to get a recommendation.";
     in property <string> workflow-pr-manual-status: "Waiting for human confirmation.";
+    in property <string> workflow-pr-repo-project-id: "";
+    in property <string> workflow-pr-repo-type: "";
+    in property <[WorkflowPullRequestItem]> workflow-pr-list-items: [];
+    in property <int> workflow-pr-list-total: 0;
+    in property <bool> workflow-pr-list-total-exact: false;
+    in property <int> workflow-pr-list-page: 1;
+    in property <int> workflow-pr-list-page-count: 1;
+    in property <string> workflow-pr-list-state: "open";
+    in property <bool> workflow-pr-list-loading: false;
+    in property <string> workflow-pr-list-error: "";
     in property <bool> workflow-pr-count-auto-update: false;
     in property <bool> workflow-pr-count-loading: false;
     in property <bool> workflow-pr-count-failed: false;
@@ -212,6 +228,8 @@ export component MainWindow inherits Window {
     callback workflow-tag-stop();
     callback workflow-pr-analyze(string, string, string, bool, bool);
     callback workflow-pr-confirm(bool);
+    callback workflow-pr-list-state-change(string);
+    callback workflow-pr-list-page-change(int);
     callback workflow-cd-start(string, string, string);
     callback workflow-cd-rollback(string);
     callback shell-drawer-toggle();
@@ -398,6 +416,10 @@ export component MainWindow inherits Window {
                             viewport-height: page-scroll-view.visible-height - 2px;
                             // viewport-width: page-scroll-view.visible_width;
                             git-tokens-saved <=> root.settings-git-tokens-saved;
+                            git-hosting-config-saved <=> root.settings-git-hosting-config-saved;
+                            ai-agent-saved <=> root.settings-ai-agent-saved;
+                            ai-agent-testing <=> root.settings-ai-agent-testing;
+                            ai-agent-provider-index <=> root.settings-ai-agent-provider-index;
                             check-update => {
                                 root.check-update();
                             }
@@ -447,6 +469,16 @@ export component MainWindow inherits Window {
                             pr-ai-decision: root.workflow-pr-ai-decision;
                             pr-ai-summary: root.workflow-pr-ai-summary;
                             pr-manual-status: root.workflow-pr-manual-status;
+                            pr-repo-project-id: root.workflow-pr-repo-project-id;
+                            pr-repo-type: root.workflow-pr-repo-type;
+                            pr-list-items: root.workflow-pr-list-items;
+                            pr-list-total: root.workflow-pr-list-total;
+                            pr-list-total-exact: root.workflow-pr-list-total-exact;
+                            pr-list-page: root.workflow-pr-list-page;
+                            pr-list-page-count: root.workflow-pr-list-page-count;
+                            pr-list-state: root.workflow-pr-list-state;
+                            pr-list-loading: root.workflow-pr-list-loading;
+                            pr-list-error: root.workflow-pr-list-error;
                             pr-count-auto-update: root.workflow-pr-count-auto-update;
                             pr-count-loading: root.workflow-pr-count-loading;
                             pr-count-failed: root.workflow-pr-count-failed;
@@ -492,6 +524,12 @@ export component MainWindow inherits Window {
                             }
                             pr-confirm(approved) => {
                                 root.workflow-pr-confirm(approved);
+                            }
+                            pr-list-state-change(state) => {
+                                root.workflow-pr-list-state-change(state);
+                            }
+                            pr-list-page-change(page) => {
+                                root.workflow-pr-list-page-change(page);
                             }
                             cd-start(environment-name, release-name, commit-hash) => {
                                 root.workflow-cd-start(environment-name, release-name, commit-hash);

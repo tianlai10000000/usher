@@ -10,12 +10,12 @@ Usher 是一个处于 Alpha 阶段的桌面 Git 项目工作台，用于管理�
 - 统计 GitHub、GitLab 和 Gitee 兼容服务上 `fat`、`uat`、`prod` 分支的 PR/MR 数量。
 - 按项目隔离并执行 Branch、Tag、PR、CD 引导流程。
 - 在当前页面打开项目感知的终端抽屉。
-- 使用内置聊天页面、JSONL 历史记录和 Markdown 渲染。
+- 配置独立的 OpenAI-compatible AI Agent Provider（如 DeepSeek）；既有 RAG Chat 页面保持独立。
 - 提供更新、Toast、通知、托盘和网络状态反馈。
 - 支持亮色、暗色和跟随系统主题。
 - 通过统一的 reqwest HTTP 拦截管线发送应用网络请求。
 
-> Usher 正在持续开发。聊天服务地址目前仍在源码中配置，部分次要路由属于开发和演示界面，并非完整的产品功能。
+> Usher 正在持续开发；部分次要路由属于开发和演示界面，并非完整的产品功能。
 
 ## 支持平台
 
@@ -65,13 +65,13 @@ Usher 使用 `directories::ProjectDirs::from("com", "usher", "app")` 选择各�
 
 | 数据 | 相对位置 |
 | --- | --- |
-| 设置和 Git 平台 Token | 配置目录：`settings.toml` |
+| 设置、Git 平台 Token/API 根地址和 AI Agent 凭据 | 配置目录：`settings.toml` |
 | 项目列表 | 本地数据目录：`project/projects.json` |
 | 聊天历史 | 本地数据目录：`im/chat_history.jsonl` |
 | 日志 | 本地数据目录：`logs/<date>/usher.log` |
 | 远程项目 Logo 缓存 | 临时目录：`usher-logo-cache/` |
 
-GitHub、GitLab 和 Gitee Token 可在设置页面管理。不要提交生成的设置、日志、聊天记录或凭据。
+GitHub、GitLab 和 Gitee Token 可在设置页面管理。**代码托管 API 配置**区块以 `[git.platform.<provider>]` 保存各平台企业版 API 地址和企业名称；可填写服务主机或完整 REST API 根地址（例如 `https://git.example.com` 或 `https://git.example.com/api/v4`），缺少版本路径时由对应 Provider 自动补齐。这些值只保存在本地，且仅在配置的 API 主机与项目 remote 主机匹配时使用。**AI Agent** 区块支持 OpenAI-compatible 的 Base URL、API Key 和模型名称，提供可扩展的 Provider 选择器、可编辑模型名和不产生生成费用的连通性测试。设置保存至 `[ai.agent]`。不要提交生成的设置、日志、聊天记录或凭据。详见 [AI Agent 配置规格](docs/specs/ai-agent.md)。
 
 ## 架构概览
 

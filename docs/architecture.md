@@ -21,7 +21,7 @@ User
         -> UI updates scheduled on the Slint event loop
 ```
 
-External integrations currently include Git executables, GitHub/GitLab/Gitee-compatible APIs, the configured RAG chat endpoint, GitHub Releases through `self_update`, platform tray/window APIs, and OS-native application directories.
+External integrations currently include Git executables, GitHub/GitLab/Gitee-compatible APIs, a user-configured OpenAI-compatible AI Agent provider, GitHub Releases through `self_update`, platform tray/window APIs, and OS-native application directories.
 
 ## Source layout and ownership
 
@@ -43,12 +43,14 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | Path | Responsibility |
 | --- | --- |
 | `src/project/` | Project registry, persistence, filtering, logos, PR/MR summaries, and project-to-workflow/terminal entry points. |
+| `src/codereview/api/` | Remote repository provider parsing and Gitee/GitLab/GitHub project-detail APIs. It resolves immutable provider project IDs before project persistence. |
 | `src/workflow/` | Per-project Branch, Tag, PR, and CD view state and command execution. |
 | `src/terminal/` | PTY lifecycle, viewport synchronization, rendering, input, selection, and project switching. |
 | `src/chat/` | Chat transport, sessions, JSONL persistence, Markdown conversion, rendering cache, pagination, and interaction binding. |
 | `src/update/` | Release checks, streamed downloads, progress, cancellation, installation, and restart. |
 | `src/router/` | Route-to-navigation mapping and route-specific visibility state. |
-| `src/settings.rs` | TOML settings model and persistence. |
+| `src/settings.rs` | TOML settings model and persistence, including AI Agent credentials. |
+| `src/ai/` | Standalone OpenAI-compatible AI Agent integration; `agent.rs` owns the connection test. It does not own RAG Chat. |
 | `src/network.rs` | Background connectivity probe and `AppState.network-online`. |
 | `src/http/mod.rs` | Shared asynchronous/blocking reqwest clients, interceptors, error normalization, and optional UI feedback. |
 | `src/logger/` | Debug logging, tracing, and panic/error support. |
@@ -101,15 +103,17 @@ Do not move modules earlier if they depend on generated Slint globals or on call
 
 ### Settings
 
-`AppSettings` is persisted as TOML in the platform config directory. It contains theme mode, auto-update, logger flags, terminal diagnostics, navigation drawer state, and Git platform tokens. `AppState` mirrors values required by Slint.
+`AppSettings` is persisted as TOML in the platform config directory. It contains theme mode, auto-update, logger flags, terminal diagnostics, navigation drawer state, Git platform tokens, plus per-provider enterprise API URLs and names under `[git.platform.<provider>]`, and OpenAI-compatible AI Agent connection values under `[ai.agent]`. `AppState` mirrors values required by Slint. API keys, enterprise names, and configured URLs are local configuration and must not be logged. Provider API code uses an enterprise API URL only when its host matches the repository remote; users may supply the host or the complete API root, with the provider version path added if omitted. Public-provider defaults remain remote-derived.
 
 ### Projects
 
-`project/projects.json` stores project records in the platform local-data directory. Rust converts records to Slint models, resolves local/base64/remote logos, and schedules PR overview work. Remote logo bytes are cached under the process temporary directory; UI rendering should read cached data rather than perform network work.
+`project/projects.json` stores project records in the platform local-data directory. On an add or edit save, Rust derives the provider from `remote_repo`, fetches its project details through `src/codereview/api/`, and stores the resulting `repo_project_id` and lower-case `repo_type` (`gitee`, `gitlab`, or `github`) together with the project record. A failed lookup leaves the previous configuration untouched. Rust converts records to Slint models, resolves local/base64/remote logos, and schedules PR overview work. Remote logo bytes are cached under the process temporary directory; UI rendering should read cached data rather than perform network work.
 
 ### Workflow
 
 `WorkflowStore` keeps a current project plus per-project `WorkflowViewState`. Switching projects must rebind UI state and prevent logs, steps, or running flags from leaking between projects. Heavy workflow state is explicitly cleared when leaving the workflow route.
+
+The existing Workflow PR tab owns the repository pull-request list; there is no separate project-detail PR page. `workflow/pr_list.rs` reads the selected project's persisted `repo_project_id` and `repo_type` off the event loop, then lazily requests exactly one 10-record remote page through `src/codereview/api/` when the user opens or changes a page. The documented internal response wraps list data with `meta.total_count` and `meta.total_pages`; the controller uses those exact values for the total and paginator. The tab defaults to open requests and explicitly supplies the selected open/closed/merged/all filter. Request sequencing prevents a late response from a previous project, state, or page from replacing the current view.
 
 ### Chat
 
@@ -128,6 +132,15 @@ Terminal state is project-aware and persists while reopening the same project. S
 3. `WorkflowStore` selects the project-scoped state.
 4. Workflow modules initialize their Slint properties.
 5. PR counts are loaded on a worker thread and applied through the event loop.
+6. The PR-list controller reads persisted repository metadata and lazily loads the selected remote open page through the shared runtime; every page change requests that page only.
+
+### Project save and provider lookup
+
+1. The Project page submits the local/remote repository fields to its Rust callback.
+2. `src/project/mod.rs` validates local fields and starts one shared-runtime lookup per project save.
+3. `src/codereview/api/` parses `remote_repo` and calls the matching Gitee, GitLab, or GitHub detail API through `src/http/mod.rs`.
+4. Only a successful response updates `projects.json` with `repo_project_id` and `repo_type`; the UI refresh runs on the Slint event loop.
+5. Lookup or persistence failures show one project-owned error toast and do not write a partial record.
 
 ### Project-aware terminal
 
@@ -140,10 +153,17 @@ Terminal state is project-aware and persists while reopening the same project. S
 ### Chat request
 
 1. `chat/interactive.rs` appends and persists the user message.
-2. The shared runtime calls `chat/chat.rs`.
-3. `src/http/mod.rs` runs request interceptors, executes reqwest, validates status, runs response/error interceptors, and decodes JSON.
+2. The shared runtime calls `chat/chat.rs` with the existing RAG endpoint and request format.
+3. `src/http/mod.rs` runs request interceptors, executes reqwest, validates status, runs response/error interceptors, and decodes the RAG response.
 4. The result is persisted and transformed for Slint on the event loop.
 5. Failures remain an inline assistant message; the request is silent to prevent duplicate toast feedback.
+
+### AI Agent connection test
+
+1. Settings saves an independent OpenAI-compatible Base URL, API Key, and model name.
+2. A user-triggered test runs `ai/agent.rs` on the shared runtime.
+3. The shared HTTP module requests the provider's `/models` endpoint and reports the result through Toast feedback.
+4. This flow must not change the RAG Chat endpoint, payload, or history behavior.
 
 ### Update download
 
@@ -188,7 +208,6 @@ Run targeted manual checks for terminal viewport/session changes, update cancell
 
 ## Known technical debt
 
-- The RAG endpoint is compiled into `src/constants/chat.rs` and should become configuration before general distribution.
 - `src/git/{github,gitlab,gitee}.rs` are not yet the provider abstraction their names suggest.
 - `src/logger/debug_logger.rs` contains a doctest that does not compile.
 - Some routes in `Route` are development/demo surfaces and are not in primary navigation.

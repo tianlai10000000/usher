@@ -2,6 +2,7 @@ mod bindings;
 pub mod branch;
 pub mod cd;
 pub mod pr;
+mod pr_list;
 pub mod state;
 pub mod tag;
 
@@ -12,7 +13,8 @@ pub fn setup_workflow(ui: &MainWindow) {
     let shared_state = state::new_shared_state();
     state::register_shared_state(&shared_state);
     state::initialize_current_ui(ui, &shared_state);
-    bindings::bind_project_context(ui, shared_state.clone());
+    let pr_list_controller = pr_list::bind_pr_list(ui);
+    bindings::bind_project_context(ui, shared_state.clone(), pr_list_controller);
     branch::bind_branch(ui, shared_state.clone());
     tag::bind_tag(ui, shared_state.clone());
     tag::refresh_tag_context(ui, &shared_state, false);

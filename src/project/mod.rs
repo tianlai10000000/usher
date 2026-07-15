@@ -30,6 +30,12 @@ struct ProjectConfig {
     project_alias: String,
     local_repo: String,
     remote_repo: String,
+    /// Immutable id returned by the remote code-review provider.
+    #[serde(default)]
+    repo_project_id: String,
+    /// Provider selected from `remote_repo`: gitee, gitlab, or github.
+    #[serde(default)]
+    repo_type: String,
     #[serde(default)]
     logo: String,
     #[serde(default)]
@@ -40,6 +46,35 @@ struct ProjectConfig {
     pr_overview: ProjectPrOverview,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ProjectRepositoryMetadata {
+    pub(crate) repo_project_id: String,
+    pub(crate) repo_type: String,
+    pub(crate) remote_repo: String,
+}
+
+pub(crate) fn load_repository_metadata(
+    project_alias: &str,
+) -> Result<ProjectRepositoryMetadata, String> {
+    let alias = project_alias.trim();
+    let project = load_projects()
+        .into_iter()
+        .find(|project| project.project_alias == alias)
+        .ok_or_else(|| format!("Project configuration for '{alias}' was not found."))?;
+
+    if project.repo_project_id.trim().is_empty() || project.repo_type.trim().is_empty() {
+        return Err(
+            "Repository metadata is missing. Save the project again to synchronize it.".to_string(),
+        );
+    }
+
+    Ok(ProjectRepositoryMetadata {
+        repo_project_id: project.repo_project_id,
+        repo_type: project.repo_type,
+        remote_repo: project.remote_repo,
+    })
+}
+
 #[derive(Debug, Clone, Default)]
 struct ProjectPrOverview {
     loading: bool,
@@ -47,6 +82,32 @@ struct ProjectPrOverview {
     fat_display: String,
     uat_display: String,
     prod_display: String,
+}
+
+#[derive(Debug, Clone)]
+struct ProjectDraft {
+    project_name: String,
+    project_alias: String,
+    local_repo: String,
+    remote_repo: String,
+    logo: String,
+    project_tags: Vec<String>,
+    is_pr_auto_update: bool,
+}
+
+#[derive(Debug, Clone)]
+enum ProjectSaveAction {
+    Add,
+    Update { original_alias: String },
+}
+
+impl ProjectSaveAction {
+    fn pending_key(&self, alias: &str) -> String {
+        match self {
+            Self::Add => format!("add:{alias}"),
+            Self::Update { original_alias } => format!("update:{original_alias}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +130,7 @@ pub fn setup_project(ui: &MainWindow) {
     let state = Arc::new(Mutex::new(projects));
     let pending_remote_logos = Arc::new(Mutex::new(HashSet::<String>::new()));
     let pending_pr_overview = Arc::new(Mutex::new(HashSet::<String>::new()));
+    let pending_project_saves = Arc::new(Mutex::new(HashSet::<String>::new()));
 
     refresh_project_items(
         ui,
@@ -93,6 +155,7 @@ pub fn setup_project(ui: &MainWindow) {
     let state_add = state.clone();
     let pending_remote_logos_add = pending_remote_logos.clone();
     let pending_pr_overview_add = pending_pr_overview.clone();
+    let pending_project_saves_add = pending_project_saves.clone();
     ui.on_project_add_project(
         move |name, alias, local_repo, remote_repo, logo, project_tags, is_pr_auto_update| {
             let Some(ui) = ui_weak.upgrade() else {
@@ -121,7 +184,7 @@ pub fn setup_project(ui: &MainWindow) {
                 return;
             }
 
-            let mut guard = match state_add.lock() {
+            let guard = match state_add.lock() {
                 Ok(guard) => guard,
                 Err(_) => {
                     show_error(&ui, "Failed to update project list.");
@@ -134,33 +197,24 @@ pub fn setup_project(ui: &MainWindow) {
                 return;
             }
 
-            guard.push(ProjectConfig {
-                project_name: name.to_string(),
-                project_alias: alias.to_string(),
-                local_repo: local_repo.to_string(),
-                remote_repo: remote_repo.to_string(),
-                logo,
-                project_tags,
-                is_pr_auto_update,
-                pr_overview: ProjectPrOverview::default(),
-            });
-
-            if let Err(err) = write_projects(&guard) {
-                show_error(&ui, &format!("Failed to save project: {err}"));
-                guard.pop();
-                return;
-            }
-
             drop(guard);
-            let query = ui.get_project_search_query();
-            refresh_project_items(
-                &ui,
-                &state_add,
-                &pending_remote_logos_add,
-                &pending_pr_overview_add,
-                &query,
+            start_project_save(
+                ProjectSaveAction::Add,
+                ProjectDraft {
+                    project_name: name.to_string(),
+                    project_alias: alias.to_string(),
+                    local_repo: local_repo.to_string(),
+                    remote_repo: remote_repo.to_string(),
+                    logo,
+                    project_tags,
+                    is_pr_auto_update,
+                },
+                ui.as_weak(),
+                state_add.clone(),
+                pending_remote_logos_add.clone(),
+                pending_pr_overview_add.clone(),
+                pending_project_saves_add.clone(),
             );
-            show_success(&ui, "Project added.");
         },
     );
 
@@ -168,6 +222,7 @@ pub fn setup_project(ui: &MainWindow) {
     let state_update = state.clone();
     let pending_remote_logos_update = pending_remote_logos.clone();
     let pending_pr_overview_update = pending_pr_overview.clone();
+    let pending_project_saves_update = pending_project_saves.clone();
     ui.on_project_update_project(
         move |original_alias,
               name,
@@ -208,7 +263,7 @@ pub fn setup_project(ui: &MainWindow) {
                 return;
             }
 
-            let mut guard = match state_update.lock() {
+            let guard = match state_update.lock() {
                 Ok(guard) => guard,
                 Err(_) => {
                     show_error(&ui, "Failed to update project list.");
@@ -216,45 +271,39 @@ pub fn setup_project(ui: &MainWindow) {
                 }
             };
 
-            let Some(index) = guard
+            if !guard
                 .iter()
-                .position(|item| item.project_alias == original_alias)
-            else {
+                .any(|item| item.project_alias == original_alias)
+            {
                 show_error(&ui, "Project not found.");
                 return;
-            };
+            }
 
             if alias != original_alias && guard.iter().any(|item| item.project_alias == alias) {
                 show_error(&ui, "Project alias already exists.");
                 return;
             }
 
-            guard[index] = ProjectConfig {
-                project_name: name.to_string(),
-                project_alias: alias.to_string(),
-                local_repo: local_repo.to_string(),
-                remote_repo: remote_repo.to_string(),
-                logo,
-                project_tags,
-                is_pr_auto_update,
-                pr_overview: ProjectPrOverview::default(),
-            };
-
-            if let Err(err) = write_projects(&guard) {
-                show_error(&ui, &format!("Failed to save project: {err}"));
-                return;
-            }
-
             drop(guard);
-            let query = ui.get_project_search_query();
-            refresh_project_items(
-                &ui,
-                &state_update,
-                &pending_remote_logos_update,
-                &pending_pr_overview_update,
-                &query,
+            start_project_save(
+                ProjectSaveAction::Update {
+                    original_alias: original_alias.to_string(),
+                },
+                ProjectDraft {
+                    project_name: name.to_string(),
+                    project_alias: alias.to_string(),
+                    local_repo: local_repo.to_string(),
+                    remote_repo: remote_repo.to_string(),
+                    logo,
+                    project_tags,
+                    is_pr_auto_update,
+                },
+                ui.as_weak(),
+                state_update.clone(),
+                pending_remote_logos_update.clone(),
+                pending_pr_overview_update.clone(),
+                pending_project_saves_update.clone(),
             );
-            show_success(&ui, "Project updated.");
         },
     );
 
@@ -369,6 +418,138 @@ pub fn setup_project(ui: &MainWindow) {
             project_alias.trim(),
             local_repo.trim(),
         );
+    });
+}
+
+fn start_project_save(
+    action: ProjectSaveAction,
+    draft: ProjectDraft,
+    ui_weak: slint::Weak<MainWindow>,
+    state: Arc<Mutex<Vec<ProjectConfig>>>,
+    pending_remote_logos: Arc<Mutex<HashSet<String>>>,
+    pending_pr_overview: Arc<Mutex<HashSet<String>>>,
+    pending_project_saves: Arc<Mutex<HashSet<String>>>,
+) {
+    let pending_key = action.pending_key(draft.project_alias.as_str());
+    let inserted = pending_project_saves
+        .lock()
+        .map(|mut saves| saves.insert(pending_key.clone()))
+        .unwrap_or(false);
+    if !inserted {
+        if let Some(ui) = ui_weak.upgrade() {
+            show_error(&ui, "A save for this project is already in progress.");
+        }
+        return;
+    }
+
+    crate::app_runtime::shared_runtime().spawn(async move {
+        let details = crate::codereview::api::get_repo_detail(draft.remote_repo.as_str()).await;
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Ok(mut saves) = pending_project_saves.lock() {
+                saves.remove(pending_key.as_str());
+            }
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+
+            let details = match details {
+                Ok(details) => details,
+                Err(error) => {
+                    log::warn!(
+                        "[Project] Remote detail lookup failed for '{}': {}",
+                        draft.remote_repo,
+                        error
+                    );
+                    show_error(
+                        &ui,
+                        "Unable to load remote project details. Check the remote URL and provider token.",
+                    );
+                    return;
+                }
+            };
+
+            let mut projects = match state.lock() {
+                Ok(projects) => projects,
+                Err(_) => {
+                    show_error(&ui, "Failed to update project list.");
+                    return;
+                }
+            };
+
+            let config = ProjectConfig {
+                project_name: draft.project_name,
+                project_alias: draft.project_alias,
+                local_repo: draft.local_repo,
+                remote_repo: draft.remote_repo,
+                repo_project_id: details.repo_project_id,
+                repo_type: details.repo_type.as_str().to_string(),
+                logo: draft.logo,
+                project_tags: draft.project_tags,
+                is_pr_auto_update: draft.is_pr_auto_update,
+                pr_overview: ProjectPrOverview::default(),
+            };
+
+            let outcome = match action {
+                ProjectSaveAction::Add => {
+                    if projects
+                        .iter()
+                        .any(|item| item.project_alias == config.project_alias)
+                    {
+                        Err("Project alias already exists.".to_string())
+                    } else {
+                        projects.push(config);
+                        if let Err(error) = write_projects(&projects) {
+                            projects.pop();
+                            Err(format!("Failed to save project: {error}"))
+                        } else {
+                            Ok("Project added.")
+                        }
+                    }
+                }
+                ProjectSaveAction::Update { original_alias } => {
+                    let Some(index) = projects
+                        .iter()
+                        .position(|item| item.project_alias == original_alias)
+                    else {
+                        show_error(&ui, "Project not found.");
+                        return;
+                    };
+                    if config.project_alias != original_alias
+                        && projects
+                            .iter()
+                            .any(|item| item.project_alias == config.project_alias)
+                    {
+                        Err("Project alias already exists.".to_string())
+                    } else {
+                        let previous = std::mem::replace(&mut projects[index], config);
+                        if let Err(error) = write_projects(&projects) {
+                            projects[index] = previous;
+                            Err(format!("Failed to save project: {error}"))
+                        } else {
+                            Ok("Project updated.")
+                        }
+                    }
+                }
+            };
+
+            let message = match outcome {
+                Ok(message) => message,
+                Err(message) => {
+                    show_error(&ui, message.as_str());
+                    return;
+                }
+            };
+            drop(projects);
+            let query = ui.get_project_search_query();
+            refresh_project_items(
+                &ui,
+                &state,
+                &pending_remote_logos,
+                &pending_pr_overview,
+                query.as_str(),
+            );
+            show_success(&ui, message);
+        });
     });
 }
 

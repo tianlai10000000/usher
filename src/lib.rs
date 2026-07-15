@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 #[macro_use]
 extern crate objc;
 
-use slint::{CloseRequestResponse, ComponentHandle, Timer};
+use slint::{CloseRequestResponse, ComponentHandle, Global, Timer};
 
 // Must be called before module declarations so generated types are available in all modules
 slint::include_modules!();
@@ -45,6 +45,8 @@ use constants::shutdown_priority::PRIORITY_HIGH;
 mod chat;
 use chat::setup_chat;
 
+mod ai;
+
 mod app_runtime;
 mod terminal;
 
@@ -60,6 +62,7 @@ mod shutdown;
 mod single_instance;
 mod workflow;
 use workflow::setup_workflow;
+mod codereview;
 mod project;
 use project::setup_project;
 use terminal::{set_dark_mode as set_terminal_dark_mode, setup_terminal, shutdown_terminal};
@@ -809,6 +812,138 @@ fn ui() -> Result<MainWindow> {
         );
     });
 
+    // ========= Code Hosting API Configuration ========= //
+    let app_weak_git_hosting_config = app.as_weak();
+    AppState::get(&app).on_save_git_hosting_config(
+        move |github_api_base_url,
+              github_enterprise,
+              gitlab_api_base_url,
+              gitlab_enterprise,
+              gitee_api_base_url,
+              gitee_enterprise| {
+            settings::save_git_hosted_repository_configs(
+                github_api_base_url.as_str(),
+                github_enterprise.as_str(),
+                gitlab_api_base_url.as_str(),
+                gitlab_enterprise.as_str(),
+                gitee_api_base_url.as_str(),
+                gitee_enterprise.as_str(),
+            );
+            if let Some(win) = app_weak_git_hosting_config.upgrade() {
+                win.set_settings_git_hosting_config_saved(true);
+                let win_weak = win.as_weak();
+                Timer::single_shot(std::time::Duration::from_secs(2), move || {
+                    if let Some(win) = win_weak.upgrade() {
+                        win.set_settings_git_hosting_config_saved(false);
+                    }
+                });
+            }
+            log::info!(
+                "[Settings] Code hosting API configuration updated: github={}, gitlab={}, gitee={}",
+                if github_api_base_url.is_empty() {
+                    "empty"
+                } else {
+                    "set"
+                },
+                if gitlab_api_base_url.is_empty() {
+                    "empty"
+                } else {
+                    "set"
+                },
+                if gitee_api_base_url.is_empty() {
+                    "empty"
+                } else {
+                    "set"
+                },
+            );
+        },
+    );
+
+    // ========= AI Agent Settings ========= //
+    let app_weak_ai_agent_save = app.as_weak();
+    AppState::get(&app).on_save_ai_agent_settings(move |provider, base_url, api_key, model| {
+        settings::save_ai_agent_settings(
+            provider.as_str(),
+            base_url.as_str(),
+            api_key.as_str(),
+            model.as_str(),
+        );
+        if let Some(win) = app_weak_ai_agent_save.upgrade() {
+            win.set_settings_ai_agent_saved(true);
+            let win_weak = win.as_weak();
+            Timer::single_shot(std::time::Duration::from_secs(2), move || {
+                if let Some(win) = win_weak.upgrade() {
+                    win.set_settings_ai_agent_saved(false);
+                }
+            });
+        }
+        log::info!(
+            "[Settings] AI Agent settings updated: provider={}, base_url={}, api_key={}, model={}",
+            provider,
+            if base_url.is_empty() { "empty" } else { "set" },
+            if api_key.is_empty() { "empty" } else { "set" },
+            if model.is_empty() { "empty" } else { "set" },
+        );
+    });
+
+    let app_weak_ai_agent_test = app.as_weak();
+    AppState::get(&app).on_test_ai_agent_connection(move |base_url, api_key, model| {
+        let settings = settings::AiAgentSettings {
+            provider: "custom".to_string(),
+            base_url: base_url.to_string(),
+            api_key: api_key.to_string(),
+            model: model.to_string(),
+        };
+        let ui_weak = app_weak_ai_agent_test.clone();
+        app_runtime::shared_runtime().spawn(async move {
+            let result = ai::agent::test_connection(&settings).await;
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_settings_ai_agent_testing(false);
+                match result {
+                    Ok(result) => {
+                        let message = if result.model_listed {
+                            "AI Agent connected; the selected model is available."
+                        } else {
+                            "AI Agent connected. The provider did not list the selected model."
+                        };
+                        ToastManager::get(&ui).invoke_success(ToastOptions {
+                            message: message.into(),
+                            duration: 3_500,
+                            position: "top".into(),
+                            icon: "".into(),
+                            overlay: false,
+                            close_on_click: true,
+                            loading_type: "".into(),
+                            width: "auto".into(),
+                        });
+                    }
+                    Err(error) => {
+                        // HTTP failures already use the centralized Toast feedback configured
+                        // by the shared HTTP module. Local validation failures need a UI message.
+                        if matches!(
+                            error.kind,
+                            http::HttpErrorKind::Request | http::HttpErrorKind::Build
+                        ) {
+                            ToastManager::get(&ui).invoke_error(ToastOptions {
+                                message: error.message.into(),
+                                duration: 3_500,
+                                position: "top".into(),
+                                icon: "".into(),
+                                overlay: false,
+                                close_on_click: true,
+                                loading_type: "".into(),
+                                width: "auto".into(),
+                            });
+                        }
+                    }
+                }
+            });
+        });
+    });
+
     // ========= Router ========= //
     let router = Router::new(app.as_weak());
 
@@ -827,10 +962,30 @@ fn ui() -> Result<MainWindow> {
     // Connect navigate callback in slint
     let router_clone = router.clone();
     let app_for_chat_route = app.as_weak();
+    let app_for_ai_agent_provider = app.as_weak();
     app.on_navigate(move |route| {
         if let Some(state) = router_clone.navigate(route) {
             if let Some(ui) = app_for_chat_route.upgrade() {
                 ui.invoke_chat_route_visible_changed(state.chat_route_visible);
+            }
+        }
+
+        if route == Route::Settings {
+            if let Some(ui) = app_for_ai_agent_provider.upgrade() {
+                let index = match AppState::get(&ui).get_ai_agent_provider().as_str() {
+                    "deepseek" => 1,
+                    "openai" => 2,
+                    _ => 0,
+                };
+                // SettingsPage is conditionally created by the route. Force a
+                // transition after it exists so the native dropdown populates.
+                ui.set_settings_ai_agent_provider_index(-1);
+                let ui_weak = ui.as_weak();
+                Timer::single_shot(std::time::Duration::from_millis(1), move || {
+                    if let Some(ui) = ui_weak.upgrade() {
+                        ui.set_settings_ai_agent_provider_index(index);
+                    }
+                });
             }
         }
     });

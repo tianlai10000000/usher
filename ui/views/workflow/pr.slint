@@ -1,330 +1,269 @@
 import { FilledButton, MaterialPalette, MaterialText, Switch } from "@material";
 import { CompactTextField } from "../../components/input/compact_text_field.slint";
 
+export struct WorkflowPullRequestItem {
+    number: string,
+    title: string,
+    author: string,
+    source-branch: string,
+    target-branch: string,
+    updated-at: string,
+    web-url: string,
+}
+
+component StatusFilter inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <string> selected-value;
+    callback selected(string);
+
+    width: root.label == "All" ? 54px : 76px;
+    height: 32px;
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: root.selected-value == root.value ? MaterialPalette.primary : MaterialPalette.outline_variant;
+    background: root.selected-value == root.value ? MaterialPalette.secondary_container : MaterialPalette.surface_container_lowest;
+
+    MaterialText {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        horizontal_alignment: center;
+        vertical_alignment: center;
+        font_size: 12px;
+        font_weight: root.selected-value == root.value ? 600 : 400;
+        color: root.selected-value == root.value ? MaterialPalette.on_secondary_container : MaterialPalette.on_surface_variant;
+    }
+
+    TouchArea { clicked => { root.selected(root.value); } }
+}
+
+component PageButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> button-enabled: true;
+    callback clicked();
+
+    width: 76px;
+    height: 32px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: MaterialPalette.outline_variant;
+    background: MaterialPalette.surface_container_lowest;
+    opacity: root.button-enabled ? 1 : 0.45;
+
+    MaterialText {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        horizontal_alignment: center;
+        vertical_alignment: center;
+        font_size: 12px;
+        color: MaterialPalette.on_surface;
+    }
+    TouchArea { enabled: root.button-enabled; clicked => { root.clicked(); } }
+}
+
 component PrField inherits Rectangle {
     in property <string> label;
     in-out property <string> value;
     in property <string> placeholder;
     in property <length> field-width: 280px;
-    private property <length> label-height: 16px;
-    private property <length> input-height: 42px;
-
-    background: transparent;
     width: root.field-width;
-    height: root.label-height + 6px + root.input-height;
+    height: 64px;
+    background: transparent;
 
     VerticalLayout {
-        width: root.width;
-        height: root.height;
         spacing: 6px;
-
-        MaterialText {
-            text: root.label;
-            height: root.label-height;
-            vertical_alignment: center;
-            font_size: 12px;
-            color: MaterialPalette.on_surface_variant;
-        }
-
+        MaterialText { text: root.label; height: 16px; font_size: 12px; color: MaterialPalette.on_surface_variant; }
         CompactTextField {
             width: root.field-width;
             text <=> root.value;
             placeholder: root.placeholder;
-            field-height: root.input-height;
+            field-height: 42px;
             border-radius-size: 10px;
             input-font-size: 14px;
-            input-font-family: "Hiragino Sans GB";
             field-background: MaterialPalette.surface_container_highest;
         }
     }
 }
 
 export component PrFlow {
+    in property <string> repo-project-id;
+    in property <string> repo-type;
+    in property <[WorkflowPullRequestItem]> pr-items: [];
+    in property <int> pr-total: 0;
+    in property <bool> pr-total-exact: false;
+    in property <int> pr-page: 1;
+    in property <int> pr-page-count: 1;
+    in property <string> pr-state: "open";
+    in property <bool> pr-loading: false;
+    in property <string> pr-error: "";
     in property <string> ai-decision;
     in property <string> ai-summary;
     in property <string> manual-status;
+    callback change-state(string);
+    callback change-page(int);
     callback analyze(string, string, string, bool, bool);
     callback confirm(bool);
 
-    private property <string> pr-number: "1024";
+    private property <string> pr-number: "";
     private property <string> pr-title: "";
     private property <string> pr-summary: "";
     private property <bool> ci-green: true;
     private property <bool> reviewers-ready: false;
-    private property <bool> stacked-fields: root.width < 720px;
-    private property <bool> stacked-switches: root.width < 560px;
-    private property <bool> stacked-actions: root.width < 620px;
+    private property <bool> compact-table: root.width < 820px;
     private property <length> dual-field-width: max(0px, (root.width - 12px) / 2);
 
     VerticalLayout {
         width: root.width;
-        spacing: 14px;
+        spacing: 16px;
         alignment: start;
 
-        MaterialText {
-            text: "AI gives a recommendation, but the final approve or reject decision must still be made by a person.";
-            font_size: 14px;
-            color: MaterialPalette.on_surface_variant;
-        }
-
-        if !root.stacked-fields: HorizontalLayout {
+        Rectangle {
             width: parent.width;
-            spacing: 12px;
-
-            PrField {
-                label: "PR number";
-                value <=> root.pr-number;
-                placeholder: "1024";
-                field-width: root.dual-field-width;
-            }
-
-            PrField {
-                label: "PR title";
-                value <=> root.pr-title;
-                placeholder: "Refactor workflow status panel";
-                field-width: root.dual-field-width;
-            }
-        }
-
-        if root.stacked-fields: VerticalLayout {
-            width: parent.width;
-            spacing: 12px;
-            alignment: start;
-
-            PrField {
-                width: parent.width;
-                label: "PR number";
-                value <=> root.pr-number;
-                placeholder: "1024";
-                field-width: parent.width;
-            }
-
-            PrField {
-                width: parent.width;
-                label: "PR title";
-                value <=> root.pr-title;
-                placeholder: "Refactor workflow status panel";
-                field-width: parent.width;
-            }
-        }
-
-        VerticalLayout {
-            spacing: 6px;
-
-            MaterialText {
-                text: "PR summary";
-                font_size: 12px;
-                color: MaterialPalette.on_surface_variant;
-            }
-
-            Rectangle {
-                width: 100%;
-                height: 108px;
-                border-radius: 10px;
-                border-width: 1px;
-                border-color: MaterialPalette.outline_variant;
-                background: MaterialPalette.surface_container_highest;
-                clip: true;
-
-                pr-summary-input := TextInput {
-                    x: 12px;
-                    y: 10px;
-                    width: parent.width - 24px;
-                    height: parent.height - 20px;
-                    text <=> root.pr-summary;
-                    color: MaterialPalette.on_surface;
-                    font-size: 14px;
-                    single-line: false;
-                    wrap: word-wrap;
-                }
-
-                if root.pr-summary == "": MaterialText {
-                    x: 12px;
-                    y: 12px;
-                    text: "Describe changes, affected modules, rollout notes, and known risks.";
-                    font_size: 14px;
-                    color: MaterialPalette.on_surface_variant;
-                }
-            }
-        }
-
-        if !root.stacked-switches: HorizontalLayout {
-            width: parent.width;
-            spacing: 18px;
+            height: 48px;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_low;
 
             HorizontalLayout {
-                spacing: 10px;
-                MaterialText {
-                    text: "CI green";
-                    font_size: 14px;
-                    color: MaterialPalette.on_surface;
-                    vertical_alignment: center;
-                }
-                Switch {
-                    checked <=> root.ci-green;
-                    width: 48px;
-                    height: 28px;
-                }
-            }
-
-            HorizontalLayout {
-                spacing: 10px;
-                MaterialText {
-                    text: "Reviewers ready";
-                    font_size: 14px;
-                    color: MaterialPalette.on_surface;
-                    vertical_alignment: center;
-                }
-                Switch {
-                    checked <=> root.reviewers-ready;
-                    width: 48px;
-                    height: 28px;
-                }
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 8px;
+                alignment: center;
+                MaterialText { text: "Pull requests"; font_size: 17px; font_weight: 600; color: MaterialPalette.on_surface; vertical_alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                MaterialText { text: root.pr-state == "all" ? "All states" : root.pr-state; font_size: 12px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
             }
         }
 
-        if root.stacked-switches: VerticalLayout {
+        HorizontalLayout {
             width: parent.width;
-            spacing: 12px;
-            alignment: start;
-
-            HorizontalLayout {
-                spacing: 10px;
-                MaterialText {
-                    text: "CI green";
-                    font_size: 14px;
-                    color: MaterialPalette.on_surface;
-                    vertical_alignment: center;
-                }
-                Switch {
-                    checked <=> root.ci-green;
-                    width: 48px;
-                    height: 28px;
-                }
-            }
-
-            HorizontalLayout {
-                spacing: 10px;
-                MaterialText {
-                    text: "Reviewers ready";
-                    font_size: 14px;
-                    color: MaterialPalette.on_surface;
-                    vertical_alignment: center;
-                }
-                Switch {
-                    checked <=> root.reviewers-ready;
-                    width: 48px;
-                    height: 28px;
-                }
-            }
-        }
-
-        if !root.stacked-actions: HorizontalLayout {
-            width: parent.width;
-            spacing: 12px;
-
-            FilledButton {
-                text: "Analyze PR";
-                clicked => {
-                    root.analyze(
-                        root.pr-number,
-                        root.pr-title,
-                        root.pr-summary,
-                        root.ci-green,
-                        root.reviewers-ready,
-                    );
-                }
-            }
-
-            FilledButton {
-                text: "Approve";
-                clicked => {
-                    root.confirm(true);
-                }
-            }
-
-            FilledButton {
-                text: "Reject";
-                clicked => {
-                    root.confirm(false);
-                }
-            }
-        }
-
-        if root.stacked-actions: VerticalLayout {
-            width: parent.width;
-            spacing: 12px;
-            alignment: start;
-
-            FilledButton {
-                text: "Analyze PR";
-                clicked => {
-                    root.analyze(
-                        root.pr-number,
-                        root.pr-title,
-                        root.pr-summary,
-                        root.ci-green,
-                        root.reviewers-ready,
-                    );
-                }
-            }
-
-            FilledButton {
-                text: "Approve";
-                clicked => {
-                    root.confirm(true);
-                }
-            }
-
-            FilledButton {
-                text: "Reject";
-                clicked => {
-                    root.confirm(false);
-                }
-            }
+            height: 32px;
+            spacing: 8px;
+            StatusFilter { label: "Open"; value: "open"; selected-value: root.pr-state; selected(value) => { root.change-state(value); } }
+            StatusFilter { label: "Closed"; value: "closed"; selected-value: root.pr-state; selected(value) => { root.change-state(value); } }
+            StatusFilter { label: "Merged"; value: "merged"; selected-value: root.pr-state; selected(value) => { root.change-state(value); } }
+            StatusFilter { label: "All"; value: "all"; selected-value: root.pr-state; selected(value) => { root.change-state(value); } }
+            Rectangle { horizontal-stretch: 1; }
+            MaterialText { text: root.pr-total + (root.pr-total-exact ? " total" : "+ total"); font_size: 12px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
         }
 
         Rectangle {
-            width: 100%;
-            min-height: 146px;
-            border-radius: 14px;
-            background: MaterialPalette.surface_container_high;
+            width: parent.width;
+            // One page always reserves space for its header plus ten 58px rows.
+            // The enclosing Workflow page scrolls instead of shrinking this table.
+            min-height: 618px;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: MaterialPalette.outline_variant;
+            background: MaterialPalette.surface_container_lowest;
+            clip: true;
 
             VerticalLayout {
-                padding: 14px;
-                spacing: 8px;
-
-                MaterialText {
-                    text: "AI recommendation";
-                    font_size: 13px;
-                    color: MaterialPalette.on_surface_variant;
-                }
-
-                MaterialText {
-                    text: root.ai-decision;
-                    font_size: 18px;
-                    font_weight: 600;
-                    color: MaterialPalette.primary;
-                }
-
-                Text {
-                    text: root.ai-summary;
-                    wrap: word-wrap;
-                    color: MaterialPalette.on_surface;
-                    font-size: 14px;
-                }
+                width: parent.width;
+                spacing: 0px;
 
                 Rectangle {
-                    height: 1px;
-                    background: MaterialPalette.outline_variant;
+                    height: 38px;
+                    background: MaterialPalette.surface_container_low;
+                    HorizontalLayout {
+                        padding-left: 14px; padding-right: 14px; spacing: 12px;
+                        MaterialText { width: 62px; text: "PR"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        MaterialText { horizontal-stretch: 3; text: "Title"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        if !root.compact-table: MaterialText { horizontal-stretch: 2; text: "Branch"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        if !root.compact-table: MaterialText { width: 110px; text: "Author"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        MaterialText { width: 142px; text: "Updated"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                    }
                 }
 
-                Text {
-                    text: "Manual confirmation: " + root.manual-status;
-                    wrap: word-wrap;
-                    color: MaterialPalette.on_surface_variant;
-                    font-size: 13px;
+                if root.pr-loading: Rectangle {
+                    height: 112px;
+                    MaterialText { width: parent.width; height: parent.height; text: "Loading pull requests…"; horizontal_alignment: center; vertical_alignment: center; font_size: 13px; color: MaterialPalette.on_surface_variant; }
                 }
+
+                if !root.pr-loading && root.pr-error != "": Rectangle {
+                    height: 112px;
+                    Text { x: 20px; y: 20px; width: parent.width - 40px; height: parent.height - 40px; text: root.pr-error; wrap: word-wrap; horizontal_alignment: center; vertical_alignment: center; font-size: 13px; color: MaterialPalette.error; }
+                }
+
+                if !root.pr-loading && root.pr-error == "" && root.pr-items.length == 0: Rectangle {
+                    height: 112px;
+                    MaterialText { width: parent.width; height: parent.height; text: "No " + root.pr-state + " pull requests."; horizontal_alignment: center; vertical_alignment: center; font_size: 13px; color: MaterialPalette.on_surface_variant; }
+                }
+
+                if !root.pr-loading && root.pr-error == "": VerticalLayout {
+                    spacing: 0px;
+                    for item[index] in root.pr-items: Rectangle {
+                        height: 58px;
+                        background: row-hover.has-hover
+                            ? MaterialPalette.surface_container_high
+                            : (Math.mod(index, 2) == 0 ? MaterialPalette.surface_container_lowest : MaterialPalette.surface_container_low);
+                        border-width: 0px;
+                        HorizontalLayout {
+                            padding-left: 14px; padding-right: 14px; spacing: 12px;
+                            MaterialText { width: 62px; text: "#" + item.number; font_size: 12px; font_weight: 600; color: MaterialPalette.primary; vertical_alignment: center; overflow: elide; }
+                            MaterialText { horizontal-stretch: 3; text: item.title; font_size: 13px; color: MaterialPalette.on_surface; vertical_alignment: center; overflow: elide; }
+                            if !root.compact-table: MaterialText { horizontal-stretch: 2; text: item.source-branch + " → " + item.target-branch; font_size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
+                            if !root.compact-table: MaterialText { width: 110px; text: item.author; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
+                            MaterialText { width: 142px; text: item.updated-at; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
+                        }
+                        // Keep the hover target mounted so row feedback remains stable.
+                        row-hover := TouchArea { }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            width: parent.width;
+            height: 32px;
+            alignment: center;
+            spacing: 12px;
+            Rectangle { horizontal-stretch: 1; }
+            PageButton { label: "Previous"; button-enabled: root.pr-page > 1 && !root.pr-loading; clicked => { root.change-page(root.pr-page - 1); } }
+            MaterialText { width: 92px; text: "Page " + root.pr-page + " / " + root.pr-page-count; horizontal_alignment: center; vertical_alignment: center; font_size: 12px; color: MaterialPalette.on_surface_variant; }
+            PageButton { label: "Next"; button-enabled: root.pr-page < root.pr-page-count && !root.pr-loading; clicked => { root.change-page(root.pr-page + 1); } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        Rectangle { width: parent.width; height: 1px; background: MaterialPalette.outline_variant; }
+        MaterialText { text: "AI review"; font_size: 17px; font_weight: 600; color: MaterialPalette.on_surface; }
+        MaterialText { text: "Select a pull request above, or enter its details for an AI-assisted review. Human confirmation remains required."; font_size: 13px; color: MaterialPalette.on_surface_variant; }
+
+        HorizontalLayout {
+            width: parent.width; spacing: 12px;
+            PrField { label: "PR number"; value <=> root.pr-number; placeholder: "1024"; field-width: root.dual-field-width; }
+            PrField { label: "PR title"; value <=> root.pr-title; placeholder: "Pull request title"; field-width: root.dual-field-width; }
+        }
+
+        Rectangle {
+            width: parent.width; height: 96px; border-radius: 10px; border-width: 1px;
+            border-color: MaterialPalette.outline_variant; background: MaterialPalette.surface_container_highest;
+            TextInput { x: 12px; y: 10px; width: parent.width - 24px; height: parent.height - 20px; text <=> root.pr-summary; color: MaterialPalette.on_surface; font-size: 14px; single-line: false; wrap: word-wrap; }
+        }
+
+        HorizontalLayout {
+            width: parent.width; spacing: 16px;
+            MaterialText { text: "CI green"; font-size: 13px; vertical_alignment: center; }
+            Switch { checked <=> root.ci-green; width: 48px; height: 28px; }
+            MaterialText { text: "Reviewers ready"; font-size: 13px; vertical_alignment: center; }
+            Switch { checked <=> root.reviewers-ready; width: 48px; height: 28px; }
+            Rectangle { horizontal-stretch: 1; }
+            FilledButton { text: "Analyze PR"; clicked => { root.analyze(root.pr-number, root.pr-title, root.pr-summary, root.ci-green, root.reviewers-ready); } }
+            FilledButton { text: "Approve"; clicked => { root.confirm(true); } }
+            FilledButton { text: "Reject"; clicked => { root.confirm(false); } }
+        }
+
+        Rectangle {
+            width: parent.width; min-height: 118px; border-radius: 12px; background: MaterialPalette.surface_container_high;
+            VerticalLayout {
+                padding: 14px; spacing: 7px;
+                MaterialText { text: "AI recommendation"; font_size: 12px; color: MaterialPalette.on_surface_variant; }
+                MaterialText { text: root.ai-decision; font_size: 17px; font_weight: 600; color: MaterialPalette.primary; }
+                Text { text: root.ai-summary; wrap: word-wrap; color: MaterialPalette.on_surface; font-size: 13px; }
+                Text { text: "Manual confirmation: " + root.manual-status; wrap: word-wrap; color: MaterialPalette.on_surface_variant; font-size: 12px; }
             }
         }
     }

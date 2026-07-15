@@ -36,6 +36,36 @@ pub struct AppSettings {
     /// Git platform credentials
     #[serde(default)]
     pub git: GitSettings,
+
+    /// OpenAI-compatible AI Agent settings, serialized as `[ai.agent]`.
+    #[serde(default)]
+    pub ai: AiSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiSettings {
+    #[serde(default)]
+    pub agent: AiAgentSettings,
+}
+
+/// Connection settings shared by OpenAI-compatible providers such as DeepSeek.
+/// The API key is persisted alongside the existing Git tokens in the local
+/// settings file and must never be written to application logs.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiAgentSettings {
+    /// Selected provider preset: custom, deepseek, or openai.
+    #[serde(default = "default_ai_agent_provider")]
+    pub provider: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub model: String,
+}
+
+fn default_ai_agent_provider() -> String {
+    "custom".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -58,6 +88,13 @@ pub struct GitPlatformSettings {
 pub struct GitTokenSettings {
     #[serde(default)]
     pub token: String,
+    /// Optional API root for an enterprise/self-hosted provider. This is a
+    /// complete API base, for example `https://git.example.com/api/v4`.
+    #[serde(default)]
+    pub api_base_url: String,
+    /// Optional enterprise/organization identifier required by a provider.
+    #[serde(default)]
+    pub enterprise: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -65,6 +102,12 @@ pub struct GitPlatformTokens {
     pub github: String,
     pub gitlab: String,
     pub gitee: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct GitHostedRepositoryConfig {
+    pub api_base_url: String,
+    pub enterprise: String,
 }
 
 fn default_theme_mode() -> i32 {
@@ -96,6 +139,7 @@ impl Default for AppSettings {
             terminal_verbose_logging: default_terminal_verbose_logging(),
             navigation_drawer_expanded: default_navigation_drawer_expanded(),
             git: GitSettings::default(),
+            ai: AiSettings::default(),
         }
     }
 }
@@ -241,6 +285,44 @@ impl SettingsManager {
             settings.git.platform.gitee.token = gitee.trim().to_string();
         }
     }
+
+    pub fn set_git_hosted_repository_configs(
+        &self,
+        github_api_base_url: &str,
+        github_enterprise: &str,
+        gitlab_api_base_url: &str,
+        gitlab_enterprise: &str,
+        gitee_api_base_url: &str,
+        gitee_enterprise: &str,
+    ) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.git.platform.github.api_base_url = normalize_api_base_url(github_api_base_url);
+            settings.git.platform.github.enterprise = github_enterprise.trim().to_string();
+            settings.git.platform.gitlab.api_base_url = normalize_api_base_url(gitlab_api_base_url);
+            settings.git.platform.gitlab.enterprise = gitlab_enterprise.trim().to_string();
+            settings.git.platform.gitee.api_base_url = normalize_api_base_url(gitee_api_base_url);
+            settings.git.platform.gitee.enterprise = gitee_enterprise.trim().to_string();
+        }
+    }
+
+    /// Update the OpenAI-compatible AI Agent connection settings.
+    pub fn set_ai_agent_settings(
+        &self,
+        provider: &str,
+        base_url: &str,
+        api_key: &str,
+        model: &str,
+    ) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.ai.agent.provider = match provider {
+                "deepseek" | "openai" => provider.to_string(),
+                _ => default_ai_agent_provider(),
+            };
+            settings.ai.agent.base_url = base_url.trim().trim_end_matches('/').to_string();
+            settings.ai.agent.api_key = api_key.trim().to_string();
+            settings.ai.agent.model = model.trim().to_string();
+        }
+    }
 }
 
 // Global settings manager instance
@@ -303,6 +385,39 @@ pub fn save_git_platform_tokens(github: &str, gitlab: &str, gitee: &str) {
     });
 }
 
+pub fn save_git_hosted_repository_configs(
+    github_api_base_url: &str,
+    github_enterprise: &str,
+    gitlab_api_base_url: &str,
+    gitlab_enterprise: &str,
+    gitee_api_base_url: &str,
+    gitee_enterprise: &str,
+) {
+    get_settings_manager().set_git_hosted_repository_configs(
+        github_api_base_url,
+        github_enterprise,
+        gitlab_api_base_url,
+        gitlab_enterprise,
+        gitee_api_base_url,
+        gitee_enterprise,
+    );
+    Timer::single_shot(std::time::Duration::from_millis(100), || {
+        if let Err(error) = get_settings_manager().save() {
+            log::error!("[Settings] Failed to save hosted repository configuration: {error}");
+        }
+    });
+}
+
+/// Save OpenAI-compatible AI Agent settings asynchronously.
+pub fn save_ai_agent_settings(provider: &str, base_url: &str, api_key: &str, model: &str) {
+    get_settings_manager().set_ai_agent_settings(provider, base_url, api_key, model);
+    Timer::single_shot(std::time::Duration::from_millis(100), || {
+        if let Err(e) = get_settings_manager().save() {
+            log::error!("[Settings] Failed to save AI Agent settings: {}", e);
+        }
+    });
+}
+
 /// Load settings from file (can be called before MainWindow is created)
 /// This is useful for setting app appearance before showing the window
 pub fn load_settings() -> AppSettings {
@@ -315,6 +430,20 @@ pub fn load_git_platform_tokens() -> GitPlatformTokens {
         github: settings.git.platform.github.token.trim().to_string(),
         gitlab: settings.git.platform.gitlab.token.trim().to_string(),
         gitee: settings.git.platform.gitee.token.trim().to_string(),
+    }
+}
+
+pub fn load_git_hosted_repository_config(provider: &str) -> GitHostedRepositoryConfig {
+    let settings = get_settings_manager().get();
+    let platform = match provider {
+        "github" => &settings.git.platform.github,
+        "gitlab" => &settings.git.platform.gitlab,
+        "gitee" => &settings.git.platform.gitee,
+        _ => return GitHostedRepositoryConfig::default(),
+    };
+    GitHostedRepositoryConfig {
+        api_base_url: normalize_api_base_url(platform.api_base_url.as_str()),
+        enterprise: platform.enterprise.trim().to_string(),
     }
 }
 
@@ -332,12 +461,23 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app_state.set_git_github_token(settings.git.platform.github.token.clone().into());
     app_state.set_git_gitlab_token(settings.git.platform.gitlab.token.clone().into());
     app_state.set_git_gitee_token(settings.git.platform.gitee.token.clone().into());
+    app_state.set_git_github_api_base_url(settings.git.platform.github.api_base_url.clone().into());
+    app_state.set_git_github_enterprise(settings.git.platform.github.enterprise.clone().into());
+    app_state.set_git_gitlab_api_base_url(settings.git.platform.gitlab.api_base_url.clone().into());
+    app_state.set_git_gitlab_enterprise(settings.git.platform.gitlab.enterprise.clone().into());
+    app_state.set_git_gitee_api_base_url(settings.git.platform.gitee.api_base_url.clone().into());
+    app_state.set_git_gitee_enterprise(settings.git.platform.gitee.enterprise.clone().into());
+    app_state.set_ai_agent_base_url(settings.ai.agent.base_url.clone().into());
+    app_state.set_ai_agent_api_key(settings.ai.agent.api_key.clone().into());
+    app_state.set_ai_agent_model(settings.ai.agent.model.clone().into());
+    app_state.set_ai_agent_provider(settings.ai.agent.provider.clone().into());
+    app.set_settings_ai_agent_provider_index(provider_index(&settings.ai.agent));
 
     // Apply drawer expanded state to MainWindow
     app.set_navigation_drawer_expanded(settings.navigation_drawer_expanded);
 
     log::info!(
-        "[Settings] Applied settings: theme_mode={}, auto_update={}, tracing_logger_active={}, terminal_verbose_logging={}, navigation_drawer_expanded={}, git_tokens=({}/{}/{})",
+        "[Settings] Applied settings: theme_mode={}, auto_update={}, tracing_logger_active={}, terminal_verbose_logging={}, navigation_drawer_expanded={}, git_tokens=({}/{}/{}), ai.agent=({}/{}/{})",
         settings.theme_mode,
         settings.auto_update,
         settings.tracing_logger_active,
@@ -358,5 +498,68 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
         } else {
             "set"
         },
+        if settings.ai.agent.base_url.is_empty() {
+            "empty"
+        } else {
+            "set"
+        },
+        if settings.ai.agent.api_key.is_empty() {
+            "empty"
+        } else {
+            "set"
+        },
+        if settings.ai.agent.model.is_empty() {
+            "empty"
+        } else {
+            "set"
+        },
     );
+}
+
+fn normalize_api_base_url(value: &str) -> String {
+    value.trim().trim_end_matches('/').to_string()
+}
+
+fn provider_index(settings: &AiAgentSettings) -> i32 {
+    match settings.provider.as_str() {
+        "deepseek" => 1,
+        "openai" => 2,
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writes_ai_agent_as_nested_toml_table() {
+        let settings = AppSettings {
+            ai: AiSettings {
+                agent: AiAgentSettings {
+                    provider: "deepseek".into(),
+                    base_url: "https://api.example.com/v1".into(),
+                    api_key: "secret".into(),
+                    model: "example-model".into(),
+                },
+            },
+            ..Default::default()
+        };
+        let serialized = toml::to_string(&settings).unwrap();
+        assert!(serialized.contains("[ai.agent]"));
+        assert!(!serialized.contains("[ai_agent]"));
+    }
+
+    #[test]
+    fn writes_hosting_configuration_with_each_platform() {
+        let mut settings = AppSettings::default();
+        settings.git.platform.gitee.api_base_url =
+            normalize_api_base_url(" https://gitee.example.com/api/v8/ ");
+        settings.git.platform.gitee.enterprise = "example-enterprise".into();
+
+        let serialized = toml::to_string(&settings).unwrap();
+        assert!(serialized.contains("[git.platform.gitee]"));
+        assert!(serialized.contains("api_base_url = \"https://gitee.example.com/api/v8\""));
+        assert!(serialized.contains("enterprise = \"example-enterprise\""));
+    }
 }

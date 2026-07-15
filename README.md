@@ -10,12 +10,12 @@ Usher is an alpha-stage desktop workspace for managing local Git projects and re
 - Inspect open PR/MR counts for `fat`, `uat`, and `prod` across GitHub, GitLab, and Gitee-compatible servers.
 - Run guided Branch, Tag, PR, and CD workflows with per-project state.
 - Open a project-aware terminal drawer without leaving the current page.
-- Use the built-in chat view with persisted JSONL history and Markdown rendering.
+- Configure an independent OpenAI-compatible AI Agent provider (such as DeepSeek); the existing RAG chat view remains separate.
 - Receive update, toast, notification, tray, and network-status feedback.
 - Switch between light, dark, and system theme modes.
 - Route all application HTTP traffic through a shared reqwest-based interception pipeline.
 
-> Usher is under active development. The chat endpoint is currently configured in source and several secondary routes are development surfaces rather than finished product features.
+> Usher is under active development; several secondary routes are development surfaces rather than finished product features.
 
 ## Supported targets
 
@@ -65,13 +65,13 @@ Usher uses `directories::ProjectDirs::from("com", "usher", "app")` to select pla
 
 | Data | Relative location |
 | --- | --- |
-| Settings and Git platform tokens | config directory: `settings.toml` |
+| Settings, Git platform tokens/API roots, and AI Agent credentials | config directory: `settings.toml` |
 | Project registry | local data directory: `project/projects.json` |
 | Chat history | local data directory: `im/chat_history.jsonl` |
 | Logs | local data directory: `logs/<date>/usher.log` |
 | Cached remote project logos | temporary directory: `usher-logo-cache/` |
 
-GitHub, GitLab, and Gitee tokens can be managed from Settings. Do not commit generated settings, logs, histories, or credentials.
+GitHub, GitLab, and Gitee tokens can be managed from Settings. The **Code Hosting API Configuration** section stores a per-provider enterprise API URL and enterprise name under `[git.platform.<provider>]`; enter either the service host or the complete REST API root (for example, `https://git.example.com` or `https://git.example.com/api/v4`). The provider version path is added when omitted. These values are local-only and used only when the configured API host matches a repository remote. The **AI Agent** section accepts an OpenAI-compatible Base URL, API Key, and Model Name; it provides an extensible provider selector, editable model name, and a non-billable connection test. Settings are saved under `[ai.agent]`. Do not commit generated settings, logs, histories, or credentials. See [AI Agent configuration](docs/specs/ai-agent.md).
 
 ## Architecture at a glance
 

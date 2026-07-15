@@ -7,6 +7,8 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | Spec | Status | Code owners |
 | --- | --- | --- |
 | [HTTP pipeline](http.md) | Current / 当前 | `src/http/mod.rs`, all HTTP callers |
+| [AI Agent configuration](ai-agent.md) | Current / 当前 | `src/settings.rs`, `src/ai/agent.rs`, `ui/views/settings.slint` |
+| [Project repository metadata](project-repository.md) | Current / 当前 | `src/project/mod.rs`, `src/codereview/api/` |
 | [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 
 Documents that are not specs:

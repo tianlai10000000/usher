@@ -1,15 +1,21 @@
-import { MaterialText } from "@material";
-export component Detail {
+import { MaterialPalette, MaterialText } from "@material";
+import { PageView } from "../components/page/page_view.slint";
+
+export component Detail inherits PageView {
     Rectangle {
         width: parent.width;
-        height: parent.height;
-        background: transparent;
+        height: 160px;
+        border-radius: 16px;
+        background: MaterialPalette.surface_container_low;
 
         MaterialText {
+            width: parent.width;
+            height: parent.height;
             text: "Detail";
-            color: #c31010;
-            font_size: 26px;
-            font_weight: 600;
+            horizontal_alignment: center;
+            vertical_alignment: center;
+            font_size: 24px;
+            color: MaterialPalette.on_surface;
         }
     }
 }

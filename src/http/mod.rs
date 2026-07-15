@@ -217,8 +217,17 @@ pub(crate) trait HttpInterceptor: Send + Sync {
 
 struct LoggingInterceptor;
 
+/// Connectivity probing runs every few seconds and is expected to be silent.
+/// Keep its traffic out of the terminal while retaining normal HTTP logging.
+fn is_silent_log_operation(operation: &str) -> bool {
+    operation == "Check network connectivity"
+}
+
 impl HttpInterceptor for LoggingInterceptor {
     fn on_request(&self, request: &mut RequestContext<'_>) -> HttpResult<()> {
+        if is_silent_log_operation(request.operation) {
+            return Ok(());
+        }
         log::debug!(
             "[HTTP] -> {} {} headers={} operation={}",
             request.method,
@@ -230,6 +239,9 @@ impl HttpInterceptor for LoggingInterceptor {
     }
 
     fn on_response(&self, response: &ResponseContext<'_>) {
+        if is_silent_log_operation(response.operation) {
+            return;
+        }
         log::debug!(
             "[HTTP] <- {} {} status={} headers={} elapsed_ms={} operation={}",
             response.method,
@@ -242,6 +254,9 @@ impl HttpInterceptor for LoggingInterceptor {
     }
 
     fn on_error(&self, error: &HttpError) {
+        if is_silent_log_operation(&error.operation) {
+            return;
+        }
         let response_body_chars = error
             .response_body
             .as_deref()
@@ -574,5 +589,11 @@ mod tests {
         let redacted = redacted_url(&url);
         assert!(redacted.contains("page=1"));
         assert!(!redacted.contains("secret"));
+    }
+
+    #[test]
+    fn connectivity_probe_logs_are_suppressed() {
+        assert!(is_silent_log_operation("Check network connectivity"));
+        assert!(!is_silent_log_operation("Load projects"));
     }
 }

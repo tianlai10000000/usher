@@ -1,4 +1,4 @@
-import { MaterialText, Vertical, Horizontal, RadioButtonTile, TonalButton, Switch, MaterialPalette } from "@material";
+import { MaterialText, Vertical, Horizontal, RadioButtonTile, TonalButton, Switch, DropDownMenu, MenuItem, MaterialPalette } from "@material";
 import { AppState } from "../state/app_state.slint";
 import { UpdateLogic } from "../components/update/update.slint";
 import { LoadingIconOutlineButton } from "../components/button/loading_icon_outline_button.slint";
@@ -38,6 +38,63 @@ component TokenField {
     }
 }
 
+component SettingsTextField {
+    in property <string> label;
+    in-out property <string> value;
+    in property <string> placeholder;
+    callback edited(string);
+
+    VerticalLayout {
+        width: parent.width;
+        spacing: 6px;
+
+        MaterialText {
+            text: root.label;
+            font-size: 12px;
+            color: MaterialPalette.on_surface_variant;
+        }
+
+        CompactTextField {
+            width: parent.width;
+            text <=> root.value;
+            placeholder: root.placeholder;
+            input-type: InputType.text;
+            field-height: 38px;
+            border-radius-size: 10px;
+            input-font-size: 13px;
+            input-font-family: "Hiragino Sans GB";
+            field-background: MaterialPalette.surface_container_lowest;
+
+            edited => { root.edited(self.text); }
+        }
+    }
+}
+
+component HostingProviderTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked();
+
+    width: 86px;
+    height: 32px;
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: root.selected ? MaterialPalette.primary : MaterialPalette.outline_variant;
+    background: root.selected ? MaterialPalette.secondary_container : MaterialPalette.surface_container_lowest;
+
+    MaterialText {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        horizontal_alignment: center;
+        vertical_alignment: center;
+        font-size: 12px;
+        font-weight: root.selected ? 600 : 400;
+        color: root.selected ? MaterialPalette.on_secondary_container : MaterialPalette.on_surface_variant;
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
 export component Settings inherits PageView {
     callback check-update();
     callback simulate-crash();
@@ -45,6 +102,14 @@ export component Settings inherits PageView {
     in-out property <bool> simulate-crash-active: false;
     in-out property <bool> reveal-git-tokens: false;
     in-out property <bool> git-tokens-saved: false;
+    in-out property <bool> git-hosting-config-saved: false;
+    in-out property <bool> reveal-ai-agent-api-key: false;
+    in-out property <bool> ai-agent-saved: false;
+    in-out property <bool> ai-agent-testing: false;
+    // Driven by the root window after SettingsPage is instantiated so the
+    // native DropDownMenu receives an actual current-index transition.
+    in-out property <int> ai-agent-provider-index: -1;
+    private property <int> hosting-config-tab: 0;
     in property <length> viewport-width: 0px;
     private property <length> host-width: root.viewport-width > 0px ? root.viewport-width : root.width;
     private property <length> content-width: max(320px, min(920px, root.host-width - 24px));
@@ -291,6 +356,283 @@ export component Settings inherits PageView {
                                     AppState.git-gitee-token
                                 );
                                 root.git-tokens-saved = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            hosting-config-card := Rectangle {
+                width: root.content-width;
+                height: hosting-config-content.preferred-height + 32px;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                background: MaterialPalette.surface_container_low;
+
+                hosting-config-content := VerticalLayout {
+                    x: 16px;
+                    y: 16px;
+                    width: parent.width - 32px;
+                    spacing: 10px;
+                    alignment: start;
+
+                    MaterialText {
+                        text: "Code Hosting API Configuration";
+                        font-size: 16px;
+                        font-weight: 600;
+                        color: MaterialPalette.on_surface;
+                    }
+                    Text {
+                        width: parent.width;
+                        text: "Optional enterprise API URLs. Enter the service host or complete REST API root; the provider version path is added when omitted.";
+                        font-size: 12px;
+                        color: MaterialPalette.on_surface_variant;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: 32px;
+                        spacing: 8px;
+                        HostingProviderTab { label: "Gitee"; selected: root.hosting-config-tab == 0; clicked => { root.hosting-config-tab = 0; } }
+                        HostingProviderTab { label: "GitHub"; selected: root.hosting-config-tab == 1; clicked => { root.hosting-config-tab = 1; } }
+                        HostingProviderTab { label: "GitLab"; selected: root.hosting-config-tab == 2; clicked => { root.hosting-config-tab = 2; } }
+                    }
+
+                    if root.hosting-config-tab == 0: VerticalLayout {
+                        width: parent.width;
+                        spacing: 10px;
+                        SettingsTextField {
+                            label: "Gitee API Base URL";
+                            value <=> AppState.git-gitee-api-base-url;
+                            placeholder: "https://code.example.com or https://code.example.com/api/v8";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
+                        SettingsTextField {
+                            label: "Gitee Enterprise";
+                            value <=> AppState.git-gitee-enterprise;
+                            placeholder: "enterprise-name";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
+                    }
+                    if root.hosting-config-tab == 1: VerticalLayout {
+                        width: parent.width;
+                        spacing: 10px;
+                        SettingsTextField {
+                            label: "GitHub API Base URL";
+                            value <=> AppState.git-github-api-base-url;
+                            placeholder: "https://github.example.com/api/v3";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
+                        SettingsTextField {
+                            label: "GitHub Enterprise";
+                            value <=> AppState.git-github-enterprise;
+                            placeholder: "enterprise-name";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
+                    }
+                    if root.hosting-config-tab == 2: VerticalLayout {
+                        width: parent.width;
+                        spacing: 10px;
+                        SettingsTextField {
+                            label: "GitLab API Base URL";
+                            value <=> AppState.git-gitlab-api-base-url;
+                            placeholder: "https://gitlab.example.com/api/v4";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
+                        SettingsTextField {
+                            label: "GitLab Enterprise";
+                            value <=> AppState.git-gitlab-enterprise;
+                            placeholder: "enterprise-name";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: 36px;
+                        alignment: end;
+                        TonalButton {
+                            height: parent.height;
+                            text: root.git-hosting-config-saved ? "Saved" : "Save API Configuration";
+                            clicked => {
+                                AppState.save-git-hosting-config(
+                                    AppState.git-github-api-base-url,
+                                    AppState.git-github-enterprise,
+                                    AppState.git-gitlab-api-base-url,
+                                    AppState.git-gitlab-enterprise,
+                                    AppState.git-gitee-api-base-url,
+                                    AppState.git-gitee-enterprise
+                                );
+                                root.git-hosting-config-saved = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            ai-agent-card := Rectangle {
+                width: root.content-width;
+                height: ai-agent-content.preferred-height + 32px;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: MaterialPalette.outline_variant;
+                background: MaterialPalette.surface_container_low;
+
+                ai-agent-content := VerticalLayout {
+                    x: 16px;
+                    y: 16px;
+                    width: parent.width - 32px;
+                    spacing: 10px;
+                    alignment: start;
+
+                    MaterialText {
+                        text: "AI Agent";
+                        font_size: 16px;
+                        font_weight: 600;
+                        color: MaterialPalette.on_surface;
+                    }
+                    Text {
+                        width: parent.width;
+                        text: "Connect an OpenAI-compatible provider such as DeepSeek. Set the provider URL, API key, and model name.";
+                        font-size: 12px;
+                        color: MaterialPalette.on_surface_variant;
+                        wrap: word-wrap;
+                    }
+
+                    provider-select := Rectangle {
+                        width: parent.width;
+                        // Material's supported compact minimum. Do not use its
+                        // preferred height here: it can expand to two rows.
+                        height: 56px;
+                        background: transparent;
+
+                        provider-dropdown := DropDownMenu {
+                            width: parent.width;
+                            height: parent.height;
+                            label: "";
+                            items: [
+                                { text: "Custom", enabled: true },
+                                { text: "DeepSeek", enabled: true },
+                                { text: "OpenAI", enabled: true },
+                            ];
+                            current-index <=> root.ai-agent-provider-index;
+                            selected(index) => {
+                                root.ai-agent-provider-index = index;
+                                if (index == 0) {
+                                    AppState.ai-agent-provider = "custom";
+                                } else if (index == 1) {
+                                    AppState.ai-agent-provider = "deepseek";
+                                    AppState.ai-agent-base-url = "https://api.deepseek.com";
+                                    AppState.ai-agent-model = "deepseek-v4-flash";
+                                    root.ai-agent-saved = false;
+                                } else if (index == 2) {
+                                    AppState.ai-agent-provider = "openai";
+                                    AppState.ai-agent-base-url = "https://api.openai.com/v1";
+                                    AppState.ai-agent-model = "gpt-4o-mini";
+                                    root.ai-agent-saved = false;
+                                }
+                            }
+                        }
+
+                        // Cover DropDownMenu's uninitialized internal text while
+                        // retaining its native touch target and popup behavior.
+                        Rectangle {
+                            x: 1px;
+                            y: 1px;
+                            width: parent.width - 48px;
+                            height: parent.height - 2px;
+                            background: MaterialPalette.surface_container_highest;
+                        }
+                        MaterialText {
+                            x: 16px;
+                            y: (parent.height - self.preferred-height) / 2 + 8px;
+                            width: parent.width - 68px;
+                            text: AppState.ai-agent-provider == "deepseek" ? "DeepSeek" :
+                                AppState.ai-agent-provider == "openai" ? "OpenAI" : "Custom";
+                            font-size: 16px;
+                            color: MaterialPalette.on_surface;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    SettingsTextField {
+                        label: "OpenAI Base URL";
+                        value <=> AppState.ai-agent-base-url;
+                        placeholder: "https://api.deepseek.com or https://api.openai.com/v1";
+                        edited(_) => { AppState.ai-agent-provider = "custom"; root.ai-agent-saved = false; }
+                    }
+                    TokenField {
+                        label: "OpenAI API Key";
+                        value <=> AppState.ai-agent-api-key;
+                        placeholder: "sk-...";
+                        reveal: root.reveal-ai-agent-api-key;
+                        edited(_) => { root.ai-agent-saved = false; }
+                    }
+                    SettingsTextField {
+                        label: "Model Name (for example: deepseek-v4-flash or deepseek-v4-pro)";
+                        value <=> AppState.ai-agent-model;
+                        placeholder: "deepseek-v4-flash";
+                        edited(_) => { AppState.ai-agent-provider = "custom"; root.ai-agent-saved = false; }
+                    }
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: 36px;
+                        alignment: space-between;
+
+                        Rectangle {
+                            width: 145px;
+                            height: parent.height;
+                            background: transparent;
+                            Text {
+                                x: 0;
+                                y: (parent.height - self.preferred-height) / 2;
+                                text: root.reveal-ai-agent-api-key ? "Hide API Key" : "Show API Key";
+                                font-size: 12px;
+                                color: MaterialPalette.on_surface_variant;
+                            }
+                            Switch {
+                                x: 88px;
+                                y: (parent.height - self.height) / 2;
+                                checked <=> root.reveal-ai-agent-api-key;
+                                width: 48px;
+                                height: 28px;
+                            }
+                        }
+                        right-actions := HorizontalLayout {
+                            height: parent.height;
+                            spacing: 10px;
+                            alignment: end;
+
+                            LoadingIconOutlineButton {
+                                loading: root.ai-agent-testing;
+                                text: "Test Connection";
+                                min-height: parent.height;
+                                clicked => {
+                                    if (!root.ai-agent-testing) {
+                                        root.ai-agent-testing = true;
+                                        AppState.test-ai-agent-connection(
+                                            AppState.ai-agent-base-url,
+                                            AppState.ai-agent-api-key,
+                                            AppState.ai-agent-model
+                                        );
+                                    }
+                                }
+                            }
+                            TonalButton {
+                                height: parent.height;
+                                text: root.ai-agent-saved ? "Saved" : "Save AI Agent";
+                                clicked => {
+                                    AppState.save-ai-agent-settings(
+                                        AppState.ai-agent-provider,
+                                        AppState.ai-agent-base-url,
+                                        AppState.ai-agent-api-key,
+                                        AppState.ai-agent-model
+                                    );
+                                    root.ai-agent-saved = true;
+                                }
                             }
                         }
                     }

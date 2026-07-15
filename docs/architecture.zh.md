@@ -21,7 +21,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
         -> 通过 Slint event loop 回写 UI
 ```
 
-当前外部集成包括 Git 命令、GitHub/GitLab/Gitee 兼容 API、配置的 RAG 聊天服务、基于 `self_update` 的 GitHub Release、系统托盘/窗口 API，以及平台原生应用目录。
+当前外部集成包括 Git 命令、GitHub/GitLab/Gitee 兼容 API、用户配置的 OpenAI-compatible AI Agent Provider、基于 `self_update` 的 GitHub Release、系统托盘/窗口 API，以及平台原生应用目录。
 
 ## 目录和职责
 
@@ -43,12 +43,14 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | 路径 | 职责 |
 | --- | --- |
 | `src/project/` | 项目列表、持久化、过滤、Logo、PR/MR 概览以及进入 Workflow/Terminal 的入口。 |
+| `src/codereview/api/` | 远程仓库 Provider 解析，以及 Gitee/GitLab/GitHub 项目详情 API；在项目持久化前解析不可变的 Provider 项目 ID。 |
 | `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行。 |
 | `src/terminal/` | PTY 生命周期、viewport 同步、渲染、输入、选择和项目切换。 |
 | `src/chat/` | 聊天请求、会话、JSONL 持久化、Markdown、渲染缓存、分页和 UI 绑定。 |
 | `src/update/` | Release 检查、流式下载、进度、取消、安装和重启。 |
 | `src/router/` | 路由到导航项的映射，以及各路由的可见性状态。 |
-| `src/settings.rs` | TOML 设置模型和持久化。 |
+| `src/settings.rs` | TOML 设置模型和持久化，包含 AI Agent 凭据。 |
+| `src/ai/` | 独立的 OpenAI-compatible AI Agent 集成；`agent.rs` 负责连通性测试，不负责 RAG Chat。 |
 | `src/network.rs` | 后台网络探测和 `AppState.network-online`。 |
 | `src/http/mod.rs` | 共享异步/阻塞 reqwest 客户端、拦截器、统一错误和可选 UI 反馈。 |
 | `src/logger/` | Debug 日志、tracing 和 panic/error 支持。 |
@@ -101,15 +103,17 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 
 ### 设置
 
-`AppSettings` 以 TOML 保存到平台配置目录，包括主题、自动更新、日志开关、Terminal 诊断、导航抽屉状态和 Git 平台 Token。Slint 需要的数据同步到 `AppState`。
+`AppSettings` 以 TOML 保存到平台配置目录，包括主题、自动更新、日志开关、Terminal 诊断、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称，以及位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。
 
 ### 项目
 
-`project/projects.json` 保存于平台 local-data 目录。Rust 将记录转换为 Slint model，解析本地/Base64/远程 Logo，并调度 PR 概览任务。远程 Logo 缓存位于进程临时目录，UI 渲染路径不应直接进行网络 IO。
+`project/projects.json` 保存于平台 local-data 目录。新增或编辑项目保存时，Rust 根据 `remote_repo` 推导 Provider，通过 `src/codereview/api/` 查询项目详情，并把返回的 `repo_project_id` 与小写 `repo_type`（`gitee`、`gitlab`、`github`）一并保存。查询失败不会改写已有配置。Rust 将记录转换为 Slint model，解析本地/Base64/远程 Logo，并调度 PR 概览任务。远程 Logo 缓存位于进程临时目录，UI 渲染路径不应直接进行网络 IO。
 
 ### Workflow
 
 `WorkflowStore` 保存当前项目和各项目的 `WorkflowViewState`。切换项目必须重新绑定 UI，避免日志、步骤和 running 标记串到其他项目。离开 Workflow 路由时会主动清理重型状态。
+
+仓库 PR 列表归现有 Workflow 的 PR Tab 所有，不新增独立项目详情 PR 页面。`workflow/pr_list.rs` 在 event loop 之外读取当前项目持久化的 `repo_project_id`、`repo_type`，并且只在进入或用户切换页码时，通过 `src/codereview/api/` 懒加载对应的 10 条远端数据。接口响应使用 `meta.total_count`、`meta.total_pages` 返回准确总条数和总页数，控制器直接用其驱动顶部总数和底部分页。页面默认显式查询 open 状态，用户可切换 open/closed/merged/all；请求序号保证旧项目、旧筛选或旧页码的延迟响应不会覆盖当前视图。
 
 ### Chat
 
@@ -128,6 +132,15 @@ Terminal 状态感知项目；同一项目重新打开时复用，切换项目�
 3. `WorkflowStore` 选择项目级状态。
 4. 各 Workflow 模块初始化对应 Slint property。
 5. PR 数量在线程中加载，再通过 event loop 回写。
+6. PR 列表控制器读取持久化仓库元数据，经共享 runtime 懒加载当前选中的 open 远端分页；每次翻页只请求对应页。
+
+### 项目保存与 Provider 查询
+
+1. Project 页面把本地仓库和远程仓库字段提交给 Rust callback。
+2. `src/project/mod.rs` 校验本地字段，并为每次项目保存启动一个共享 runtime 查询任务。
+3. `src/codereview/api/` 解析 `remote_repo`，并通过 `src/http/mod.rs` 调用对应的 Gitee、GitLab 或 GitHub 详情接口。
+4. 只有查询成功才会将 `repo_project_id`、`repo_type` 写入 `projects.json`；UI 刷新回到 Slint event loop 执行。
+5. 查询或持久化失败时只显示一次项目模块错误 Toast，不写入不完整记录。
 
 ### 项目终端
 
@@ -140,10 +153,17 @@ Terminal 状态感知项目；同一项目重新打开时复用，切换项目�
 ### Chat 请求
 
 1. `chat/interactive.rs` 追加并持久化用户消息。
-2. 共享 runtime 调用 `chat/chat.rs`。
-3. `src/http/mod.rs` 依次执行请求拦截、reqwest 请求、状态校验、响应/错误拦截和 JSON 解码。
+2. 共享 runtime 使用既有 RAG endpoint 和请求格式调用 `chat/chat.rs`。
+3. `src/http/mod.rs` 依次执行请求拦截、reqwest 请求、状态校验、响应/错误拦截和 RAG JSON 解码。
 4. 结果持久化，并在 event loop 中转换为 Slint model。
 5. 失败会作为 assistant 消息显示，因此该请求保持静默，避免重复 Toast。
+
+### AI Agent 连通性测试
+
+1. 设置页独立保存 OpenAI-compatible Base URL、API Key 和模型名称。
+2. 用户触发测试后，共享 runtime 执行 `ai/agent.rs`。
+3. 统一 HTTP 模块请求 Provider 的 `/models` endpoint，并通过 Toast 反馈结果。
+4. 此流程不得改变 RAG Chat 的 endpoint、payload 或历史行为。
 
 ### 更新下载
 
@@ -188,7 +208,6 @@ Terminal viewport/session、更新取消、托盘关闭和路由布局需要做�
 
 ## 已知技术债
 
-- RAG 地址硬编码在 `src/constants/chat.rs`，正式分发前应配置化。
 - `src/git/{github,gitlab,gitee}.rs` 尚未形成文件名所暗示的 Provider 抽象。
 - `src/logger/debug_logger.rs` 有一个无法编译的 doctest。
 - `Route` 中部分页面是开发/演示界面，没有进入主导航。
