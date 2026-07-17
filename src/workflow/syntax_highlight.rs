@@ -1,26 +1,38 @@
-use std::sync::LazyLock;
-
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Style, Theme, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 use crate::git::PullRequestDiffLine;
 
-static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
-static GITHUB_THEME: LazyLock<Theme> = LazyLock::new(|| {
-    ThemeSet::load_defaults()
-        .themes
-        .remove("InspiredGitHub")
-        .expect("syntect must bundle the InspiredGitHub theme")
-});
+pub(super) struct HighlightResources {
+    syntax_set: SyntaxSet,
+    github_theme: Theme,
+}
+
+impl HighlightResources {
+    pub(super) fn load() -> Self {
+        let started = std::time::Instant::now();
+        let syntax_set = SyntaxSet::load_defaults_newlines();
+        let github_theme = ThemeSet::load_defaults()
+            .themes
+            .remove("InspiredGitHub")
+            .expect("syntect must bundle the InspiredGitHub theme");
+        log::info!(
+            "[Workflow][PR Review] Loaded session syntax resources in {} ms",
+            started.elapsed().as_millis()
+        );
+        Self {
+            syntax_set,
+            github_theme,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct HighlightedToken {
     pub(super) text: String,
     pub(super) color: [u8; 4],
     pub(super) dark_color: [u8; 4],
-    pub(super) columns: u32,
-    pub(super) indentation: bool,
     pub(super) bold: bool,
     pub(super) italic: bool,
 }
@@ -32,47 +44,50 @@ pub(super) struct HighlightedLine {
 }
 
 pub(super) fn highlight_diff_lines(
+    resources: &HighlightResources,
     path: &str,
     lines: &[PullRequestDiffLine],
 ) -> Vec<HighlightedLine> {
+    let syntax_set = &resources.syntax_set;
+    let github_theme = &resources.github_theme;
     let extension = path_extension(path);
-    let default_syntax = syntax_for_path(path);
+    let default_syntax = syntax_for_path(syntax_set, path);
     let mut syntax = default_syntax;
-    let mut highlighter = HighlightLines::new(syntax, &GITHUB_THEME);
+    let mut highlighter = HighlightLines::new(syntax, github_theme);
     let mut highlighted = Vec::with_capacity(lines.len());
     for (index, line) in lines.iter().enumerate() {
         let expanded = expand_tabs(line.content.as_str(), 4);
         if matches!(line.kind.as_str(), "hunk" | "meta") {
             syntax = if extension == "vue" {
-                syntax_for_vue_hunk(lines, index + 1)
+                syntax_for_vue_hunk(syntax_set, lines, index + 1)
             } else {
                 default_syntax
             };
-            highlighter = HighlightLines::new(syntax, &GITHUB_THEME);
+            highlighter = HighlightLines::new(syntax, github_theme);
             highlighted.push(plain_line(expanded, [0xff, 0x57, 0x60, 0x6a]));
             continue;
         }
 
         if extension == "vue" {
-            if let Some(next_syntax) = vue_tag_next_syntax(expanded.trim()) {
+            if let Some(next_syntax) = vue_tag_next_syntax(syntax_set, expanded.trim()) {
                 let mut tag_highlighter =
-                    HighlightLines::new(syntax_by_name("HTML"), &GITHUB_THEME);
+                    HighlightLines::new(syntax_by_name(syntax_set, "HTML"), github_theme);
                 let highlighted_input = format!("{expanded}\n");
                 highlighted.push(
                     tag_highlighter
-                        .highlight_line(highlighted_input.as_str(), &SYNTAX_SET)
+                        .highlight_line(highlighted_input.as_str(), syntax_set)
                         .map(styled_line)
                         .unwrap_or_else(|_| plain_line(expanded, [0xff, 0x24, 0x29, 0x2f])),
                 );
                 syntax = next_syntax;
-                highlighter = HighlightLines::new(syntax, &GITHUB_THEME);
+                highlighter = HighlightLines::new(syntax, github_theme);
                 continue;
             }
         }
 
         let highlighted_input = format!("{expanded}\n");
         highlighted.push(
-            match highlighter.highlight_line(highlighted_input.as_str(), &SYNTAX_SET) {
+            match highlighter.highlight_line(highlighted_input.as_str(), syntax_set) {
                 Ok(ranges) => styled_line(ranges),
                 Err(error) => {
                     log::debug!(
@@ -88,31 +103,35 @@ pub(super) fn highlight_diff_lines(
     highlighted
 }
 
-fn syntax_for_path(path: &str) -> &'static SyntaxReference {
+fn syntax_for_path<'a>(syntax_set: &'a SyntaxSet, path: &str) -> &'a SyntaxReference {
     let extension = path_extension(path);
     if matches!(extension.as_str(), "ts" | "tsx" | "vue" | "svelte") {
-        return syntax_by_name("JavaScript");
+        return syntax_by_name(syntax_set, "JavaScript");
     }
     if matches!(extension.as_str(), "scss" | "sass") {
-        return syntax_by_name("CSS");
+        return syntax_by_name(syntax_set, "CSS");
     }
     if extension == "slint" {
-        return syntax_by_name("Rust");
+        return syntax_by_name(syntax_set, "Rust");
     }
-    if let Ok(Some(syntax)) = SYNTAX_SET.find_syntax_for_file(path) {
+    if let Ok(Some(syntax)) = syntax_set.find_syntax_for_file(path) {
         return syntax;
     }
-    SYNTAX_SET.find_syntax_plain_text()
+    syntax_set.find_syntax_plain_text()
 }
 
-fn syntax_for_vue_hunk(lines: &[PullRequestDiffLine], start: usize) -> &'static SyntaxReference {
+fn syntax_for_vue_hunk<'a>(
+    syntax_set: &'a SyntaxSet,
+    lines: &[PullRequestDiffLine],
+    start: usize,
+) -> &'a SyntaxReference {
     let hunk = lines[start..]
         .iter()
         .take_while(|line| line.kind != "hunk")
         .map(|line| line.content.trim())
         .collect::<Vec<_>>();
     if hunk.first().is_some_and(|line| line.starts_with('<')) {
-        return syntax_by_name("HTML");
+        return syntax_by_name(syntax_set, "HTML");
     }
     let css_declaration_count = hunk
         .iter()
@@ -132,29 +151,29 @@ fn syntax_for_vue_hunk(lines: &[PullRequestDiffLine], start: usize) -> &'static 
                 || (line.contains(':') && line.ends_with(';'))
         })
     {
-        return syntax_by_name("CSS");
+        return syntax_by_name(syntax_set, "CSS");
     }
-    syntax_by_name("JavaScript")
+    syntax_by_name(syntax_set, "JavaScript")
 }
 
-fn vue_tag_next_syntax(line: &str) -> Option<&'static SyntaxReference> {
+fn vue_tag_next_syntax<'a>(syntax_set: &'a SyntaxSet, line: &str) -> Option<&'a SyntaxReference> {
     if line.starts_with("<script") {
-        return Some(syntax_by_name("JavaScript"));
+        return Some(syntax_by_name(syntax_set, "JavaScript"));
     }
     if line.starts_with("<style") {
-        return Some(syntax_by_name("CSS"));
+        return Some(syntax_by_name(syntax_set, "CSS"));
     }
     if line.starts_with("<template") || line.starts_with("</script") || line.starts_with("</style")
     {
-        return Some(syntax_by_name("HTML"));
+        return Some(syntax_by_name(syntax_set, "HTML"));
     }
     None
 }
 
-fn syntax_by_name(name: &str) -> &'static SyntaxReference {
-    SYNTAX_SET
+fn syntax_by_name<'a>(syntax_set: &'a SyntaxSet, name: &str) -> &'a SyntaxReference {
+    syntax_set
         .find_syntax_by_name(name)
-        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text())
+        .unwrap_or_else(|| syntax_set.find_syntax_plain_text())
 }
 
 fn path_extension(path: &str) -> String {
@@ -165,8 +184,10 @@ fn path_extension(path: &str) -> String {
 }
 
 fn styled_line(ranges: Vec<(Style, &str)>) -> HighlightedLine {
-    let mut tokens = Vec::with_capacity(ranges.len() * 2);
+    let mut tokens = Vec::<HighlightedToken>::with_capacity(ranges.len());
     let mut columns = 0;
+    let mut leading_whitespace = String::new();
+    let mut whitespace_style = None;
     for (style, value) in ranges {
         let value = value.strip_suffix('\n').unwrap_or(value);
         if value.is_empty() {
@@ -179,21 +200,68 @@ fn styled_line(ranges: Vec<(Style, &str)>) -> HighlightedLine {
             style.foreground.b,
         ];
         let dark_color = github_dark_color(color);
+        let bold = style.font_style.contains(FontStyle::BOLD);
+        let italic = style.font_style.contains(FontStyle::ITALIC);
         for (is_whitespace, segment) in split_whitespace_runs(value) {
-            let token_columns = display_columns(segment);
-            columns += token_columns;
-            tokens.push(HighlightedToken {
-                text: segment.to_string(),
-                color,
-                dark_color,
-                columns: token_columns,
-                indentation: is_whitespace,
-                bold: !is_whitespace && style.font_style.contains(FontStyle::BOLD),
-                italic: !is_whitespace && style.font_style.contains(FontStyle::ITALIC),
-            });
+            columns += display_columns(segment);
+            if is_whitespace {
+                if let Some(previous) = tokens.last_mut() {
+                    previous.text.push_str(segment);
+                } else {
+                    leading_whitespace.push_str(segment);
+                    whitespace_style = Some((color, dark_color, bold, italic));
+                }
+                continue;
+            }
+
+            let mut text = std::mem::take(&mut leading_whitespace);
+            text.push_str(segment);
+            append_compacted_token(&mut tokens, text, color, dark_color, bold, italic);
         }
     }
+    if !leading_whitespace.is_empty() {
+        let (color, dark_color, bold, italic) = whitespace_style.unwrap_or((
+            [0xff, 0x24, 0x29, 0x2f],
+            [0xff, 0xe6, 0xed, 0xf3],
+            false,
+            false,
+        ));
+        append_compacted_token(
+            &mut tokens,
+            leading_whitespace,
+            color,
+            dark_color,
+            bold,
+            italic,
+        );
+    }
     HighlightedLine { tokens, columns }
+}
+
+fn append_compacted_token(
+    tokens: &mut Vec<HighlightedToken>,
+    text: String,
+    color: [u8; 4],
+    dark_color: [u8; 4],
+    bold: bool,
+    italic: bool,
+) {
+    if let Some(previous) = tokens.last_mut()
+        && previous.color == color
+        && previous.dark_color == dark_color
+        && previous.bold == bold
+        && previous.italic == italic
+    {
+        previous.text.push_str(text.as_str());
+        return;
+    }
+    tokens.push(HighlightedToken {
+        text,
+        color,
+        dark_color,
+        bold,
+        italic,
+    });
 }
 
 fn split_whitespace_runs(value: &str) -> Vec<(bool, &str)> {
@@ -216,15 +284,12 @@ fn split_whitespace_runs(value: &str) -> Vec<(bool, &str)> {
 
 fn plain_line(value: String, color: [u8; 4]) -> HighlightedLine {
     let columns = display_columns(value.as_str());
-    let indentation = value.chars().all(char::is_whitespace);
     HighlightedLine {
         tokens: (!value.is_empty())
             .then(|| HighlightedToken {
                 text: value,
                 color,
                 dark_color: github_dark_color(color),
-                columns,
-                indentation,
                 bold: false,
                 italic: false,
             })
@@ -305,15 +370,18 @@ fn character_columns(character: char) -> u32 {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use std::sync::LazyLock;
 
     use super::{
-        expand_tabs, github_dark_color, highlight_diff_lines, split_whitespace_runs,
-        vue_tag_next_syntax,
+        HighlightResources, expand_tabs, github_dark_color, highlight_diff_lines,
+        split_whitespace_runs, vue_tag_next_syntax,
     };
     use crate::git::PullRequestDiffLine;
 
+    static TEST_RESOURCES: LazyLock<HighlightResources> = LazyLock::new(HighlightResources::load);
+
     #[test]
-    fn preserves_indent_and_highlights_rust_tokens() {
+    fn preserves_indent_and_compacts_rust_tokens() {
         let lines = vec![PullRequestDiffLine {
             old_line: 1,
             new_line: 1,
@@ -321,12 +389,24 @@ mod tests {
             content: "\tlet answer: u32 = 42; // value".to_string(),
         }];
 
-        let highlighted = highlight_diff_lines("src/lib.rs", &lines);
+        let highlighted = highlight_diff_lines(&TEST_RESOURCES, "src/lib.rs", &lines);
         assert_eq!(expand_tabs("\tx", 4), "    x");
         assert!(highlighted[0].tokens.len() > 2);
-        assert_eq!(highlighted[0].tokens[0].text, "    ");
-        assert_eq!(highlighted[0].tokens[0].columns, 4);
-        assert!(highlighted[0].tokens[0].indentation);
+        assert!(highlighted[0].tokens[0].text.starts_with("    let"));
+        assert!(
+            highlighted[0]
+                .tokens
+                .iter()
+                .all(|token| !token.text.chars().all(char::is_whitespace))
+        );
+        assert_eq!(
+            highlighted[0]
+                .tokens
+                .iter()
+                .map(|token| token.text.as_str())
+                .collect::<String>(),
+            "    let answer: u32 = 42; // value"
+        );
         assert!(highlighted[0].columns >= 34);
     }
 
@@ -339,7 +419,7 @@ mod tests {
             content: "import value from 'package'; const count: number = 42;".to_string(),
         }];
 
-        let highlighted = highlight_diff_lines("src/module.ts", &lines);
+        let highlighted = highlight_diff_lines(&TEST_RESOURCES, "src/module.ts", &lines);
         let colors = highlighted[0]
             .tokens
             .iter()
@@ -385,26 +465,26 @@ mod tests {
             },
         ];
 
-        let highlighted = highlight_diff_lines("src/Dialog.vue", &lines);
+        let highlighted = highlight_diff_lines(&TEST_RESOURCES, "src/Dialog.vue", &lines);
         assert!(highlighted[1].tokens.len() >= 4);
     }
 
     #[test]
     fn switches_vue_regions_and_uses_github_dark_contrast() {
         assert_eq!(
-            vue_tag_next_syntax("<script setup lang=\"ts\">")
+            vue_tag_next_syntax(&TEST_RESOURCES.syntax_set, "<script setup lang=\"ts\">")
                 .expect("script tag should select JavaScript")
                 .name,
             "JavaScript"
         );
         assert_eq!(
-            vue_tag_next_syntax("<style scoped>")
+            vue_tag_next_syntax(&TEST_RESOURCES.syntax_set, "<style scoped>")
                 .expect("style tag should select CSS")
                 .name,
             "CSS"
         );
         assert_eq!(
-            vue_tag_next_syntax("</style>")
+            vue_tag_next_syntax(&TEST_RESOURCES.syntax_set, "</style>")
                 .expect("closing style tag should select HTML")
                 .name,
             "HTML"

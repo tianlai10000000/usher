@@ -33,7 +33,7 @@ Linux may build with a suitable Slint backend, but it is not currently covered b
 - Platform build dependencies required by Slint/winit.
 - Optional: `cargo-bundle` and `create-dmg` for macOS packaging.
 
-The first build may download a prebuilt Skia package because the project enables both FemtoVG and Skia renderers.
+Production builds enable only FemtoVG, which keeps renderer selection deterministic and avoids linking Skia into the normal application. Skia remains available as an opt-in diagnostic build.
 
 ## Quick start
 
@@ -53,10 +53,16 @@ cargo test --lib --locked
 
 The full `cargo test --locked` command currently exposes a pre-existing failing doctest in `src/logger/debug_logger.rs`; the library unit tests pass.
 
-To inspect the optional Skia software path:
+To inspect the optional Skia path:
 
 ```sh
-SLINT_BACKEND=winit-skia-software cargo run
+SLINT_BACKEND=winit-skia cargo run --no-default-features --features renderer-skia
+```
+
+To compare the experimental FemtoVG/WGPU path (not the production default):
+
+```sh
+SLINT_BACKEND=winit-femtovg-wgpu cargo run --no-default-features --features renderer-femtovg-wgpu
 ```
 
 Debug builds write five-second process-memory samples and lifecycle checkpoints to the normal Usher log. To enable the same diagnostics in a release build:

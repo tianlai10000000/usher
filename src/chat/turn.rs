@@ -1,5 +1,5 @@
 use crate::chat::markdown::{build_assistant_render_payload, plain_text_to_display};
-use crate::{ChatMessage, MessageRole};
+use crate::{ChatMessage, MessageRole, MessageStatus};
 use slint::ModelRc;
 use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -19,6 +19,7 @@ pub fn create_user_message(content: String) -> ChatMessage {
     ChatMessage {
         id,
         role: MessageRole::User,
+        status: MessageStatus::Normal,
         rendered_content: content.clone().into(),
         is_markdown: false,
         markdown_blocks: ModelRc::default(),
@@ -36,6 +37,7 @@ pub fn create_assistant_message(content: String) -> ChatMessage {
     ChatMessage {
         id,
         role: MessageRole::Assistant,
+        status: MessageStatus::Normal,
         rendered_content: payload.rendered_text.into(),
         is_markdown: payload.is_markdown,
         markdown_blocks: payload.blocks.as_slice().into(),
@@ -52,6 +54,7 @@ pub fn create_loading_message() -> ChatMessage {
     ChatMessage {
         id,
         role: MessageRole::Assistant,
+        status: MessageStatus::Normal,
         rendered_content: "".into(),
         is_markdown: false,
         markdown_blocks: ModelRc::default(),
@@ -69,14 +72,14 @@ pub fn create_error_message(error: String) -> ChatMessage {
         error
     );
 
-    let error_content = format!("❌ {}", error);
     ChatMessage {
         id,
         role: MessageRole::Assistant,
-        rendered_content: plain_text_to_display(&error_content).into(),
+        status: MessageStatus::Error,
+        rendered_content: plain_text_to_display(&error).into(),
         is_markdown: false,
         markdown_blocks: ModelRc::default(),
-        content: error_content.into(),
+        content: error.into(),
         timestamp: get_current_timestamp(),
     }
 }

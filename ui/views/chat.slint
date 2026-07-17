@@ -14,6 +14,12 @@ export enum MessageRole {
     Assistant,
 }
 
+export enum MessageStatus {
+    Normal,
+    Error,
+    Success,
+}
+
 export enum MarkdownBlockKind {
     Paragraph,
     Heading1,
@@ -52,6 +58,7 @@ export struct MarkdownBlock {
 export struct ChatMessage {
     id: int,
     role: MessageRole,
+    status: MessageStatus,
     content: string,
     rendered_content: string,
     is_markdown: bool,
@@ -62,6 +69,7 @@ export struct ChatMessage {
 // 统一的消息气泡组件 - 根据角色自动切换样式
 component MessageBubble inherits Rectangle {
     in property <MessageRole> role;
+    in property <MessageStatus> status: MessageStatus.Normal;
     in property <string> content;
     in property <string> rendered-content;
     in property <bool> is-markdown: false;
@@ -336,15 +344,32 @@ component MessageBubble inherits Rectangle {
                     }
                 }
 
-                // 纯文本/降级渲染
-                Text {
+                // 纯文本/降级渲染。状态使用矢量图标，避免加载彩色 Emoji 字体。
+                HorizontalLayout {
                     visible: !root.is-loading && (!root.is-markdown || root.markdown-blocks.length == 0);
                     height: (!root.is-loading && (!root.is-markdown || root.markdown-blocks.length == 0)) ? self.preferred-height : 0px;
-                    text: root.rendered-content;
-                    color: MaterialPalette.on_surface;
-                    wrap: word-wrap;
-                    font-size: 14px;
-                    font-family: "Hiragino Sans GB";
+                    spacing: root.status == MessageStatus.Normal ? 0px : 6px;
+                    alignment: start;
+
+                    if root.status != MessageStatus.Normal: Image {
+                        width: 16px;
+                        height: 16px;
+                        source: root.status == MessageStatus.Error
+                            ? @image-url("../assets/icons/error.svg")
+                            : @image-url("../assets/icons/success.svg");
+                        colorize: root.status == MessageStatus.Error
+                            ? ColorsTheme.error
+                            : ColorsTheme.success;
+                    }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.rendered-content;
+                        color: MaterialPalette.on_surface;
+                        wrap: word-wrap;
+                        font-size: 14px;
+                        font-family: "Hiragino Sans GB";
+                    }
                 }
                 
                 // 时间戳
@@ -613,6 +638,7 @@ export component Chat inherits Rectangle {
                             // 消息列表：使用统一的 MessageBubble 组件
                             for message[index] in root.messages: MessageBubble {
                                 role: message.role;
+                                status: message.status;
                                 max-bubble-width: root.message-bubble-max-width;
                                 loading-phase: root.loading-phase;
                                 content: message.content;
@@ -640,6 +666,7 @@ export component Chat inherits Rectangle {
                                 visible: root.is-sending && root.messages.length == 0;
                                 height: root.is-sending && root.messages.length == 0 ? self.preferred-height : 0px;
                                 role: MessageRole.Assistant;
+                                status: MessageStatus.Normal;
                                 max-bubble-width: root.message-bubble-max-width;
                                 loading-phase: root.loading-phase;
                                 content: "";

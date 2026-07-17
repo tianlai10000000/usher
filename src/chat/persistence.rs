@@ -15,10 +15,21 @@ pub enum StoredMessageRole {
     Assistant,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoredMessageStatus {
+    #[default]
+    Normal,
+    Error,
+    Success,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredChatMessage {
     pub id: i64,
     pub role: StoredMessageRole,
+    #[serde(default)]
+    pub status: StoredMessageStatus,
     pub content: String,
     pub timestamp: String,
 }
@@ -27,6 +38,21 @@ pub struct StoredChatMessage {
 pub struct HistoryPage {
     pub messages: Vec<StoredChatMessage>,
     pub has_more_before: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StoredChatMessage, StoredMessageStatus};
+
+    #[test]
+    fn old_history_without_status_defaults_to_normal() {
+        let message: StoredChatMessage = serde_json::from_str(
+            r#"{"id":1,"role":"assistant","content":"legacy","timestamp":"12:00"}"#,
+        )
+        .expect("legacy history should remain readable");
+
+        assert_eq!(message.status, StoredMessageStatus::Normal);
+    }
 }
 
 #[derive(Debug, Clone)]

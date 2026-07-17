@@ -105,10 +105,10 @@ project selected
   -> fetch the selected list page through one provider adapter
   -> normalize records and apply only if list sequence is current
   -> user opens a row
-  -> fetch normalized diff, cache it by project + request + whitespace mode
+  -> fetch normalized diff, cache one shared immutable base by project + request + whitespace mode
   -> build a local file tree and select/highlight the first file
-  -> optional hunk expansion fetches immutable source once, then mutates only cached local lines
-  -> collapse restores the provider-normalized original file diff without another request
+  -> optional hunk expansion fetches immutable source once, then creates or mutates only that file's copy-on-write override
+  -> collapse drops that override and exposes the provider-normalized base file without another request
 ```
 
 Every asynchronous boundary needs a monotonically increasing request sequence (separate sequences for list, diff, syntax highlighting, and hunk expansion are recommended). A result may update the visible state only if its sequence, selected project, selected PR, and selected file still match. Closing the review or switching projects invalidates all in-flight work and clears review caches. Never let a stale result reopen an overlay or replace a newer page.
@@ -120,10 +120,10 @@ Every asynchronous boundary needs a monotonically increasing request sequence (s
   -> 通过一个 Provider adapter 获取当前选中的列表页
   -> 归一化记录，且仅在列表序列仍为最新时回写
   -> 用户打开某一行
-  -> 获取归一化 diff，并按项目 + 请求 + 空白模式缓存
+  -> 获取归一化 diff，并按项目 + 请求 + 空白模式缓存一份共享且不可变的基础数据
   -> 构建本地文件树，选择并高亮第一个文件
-  -> 可选的 hunk 展开只获取一次固定源码，再只修改本地缓存行
-  -> 收起操作直接恢复 Provider 归一化后的原始文件 diff，不发起新请求
+  -> 可选的 hunk 展开只获取一次固定源码，再只创建或修改该文件的写时复制 override
+  -> 收起操作删除该 override 并重新使用 Provider 归一化后的基础文件，不发起新请求
 ```
 
 每个异步边界都需要单调递增的请求序列（建议列表、diff、语法高亮和 hunk 展开各自独立）。只有当序列、当前项目、当前 PR 和当前文件仍匹配时，结果才可更新可见状态。关闭审核或切换项目会使所有在途任务失效并清理审核缓存；旧结果绝不能重新打开 overlay 或覆盖新页。
@@ -152,8 +152,8 @@ Every asynchronous boundary needs a monotonically increasing request sequence (s
 20. The current Analyze/Approve/Reject controls update only project-scoped local workflow state. They must never claim that a remote provider accepted a review decision.
 21. Tokens, authorization headers, and unbounded provider response bodies are not logged. Background list, diff, branch-enrichment, and source requests use silent feedback; the view owns its inline loading and error state.
 22. File switching and hunk expansion keep the currently rendered code model mounted while syntax highlighting runs, then replace the model atomically. File switching resets the code viewport after the replacement; hunk expansion preserves the current viewport and must not flash an empty surface.
-23. The file toolbar follows GitHub's ordering: file icon, path, copy-path, the two-state `Expand all lines`/`Collapse non-diff lines` context toggle, statistics, previous/next navigation, and overflow. Every icon action is vertically aligned and has a hover tooltip. Expansion uses the `unfold` icon; once any hidden context is inserted, the action switches to the `fold` icon and restores the retained original diff when clicked. The overflow popup closes when the user clicks elsewhere; its action toggles `View file`/`View diff` inside the application and always reads source at the diff's immutable head SHA, or base SHA for a deleted file. It never opens a browser or reads a mutable branch tip.
-24. Review caches are memory-bounded. Highlighted diff models retain at most four recently used files and immutable source text retains at most three. The complete-file highlighted model lives only in the active UI model and is not added to the highlighted-diff cache.
+23. The file toolbar follows GitHub's ordering: file icon, path, copy-path, the two-state `Expand all lines`/`Collapse non-diff lines` context toggle, statistics, previous/next navigation, and overflow. Every icon action is vertically aligned and has a hover tooltip. Expansion uses the `unfold` icon; once any hidden context is inserted, the action switches to the `fold` icon and restores the retained original diff when clicked. The overflow popup uses GitHub's eye Octicon. Its action toggles `View file`/`View diff` inside the application and always reads source at the diff's immutable head SHA, or base SHA for a deleted file. It never opens a browser or reads a mutable branch tip.
+24. Review caches are memory-bounded. The normalized diff has one shared immutable base; expanded context is retained only as per-file copy-on-write overrides, and collapsing a file removes its override. Highlighted diff models retain at most four recently used files and immutable source text retains at most three. The complete-file highlighted model lives only in the active UI model and is not added to the highlighted-diff cache.
 25. A successful zero-item list uses a GitHub-style filter-specific headline and exact `0 total` inside the same large-image Vuetify-style layout as the error state. In both states, the illustration, title, description, and optional action are horizontally centered as one visual column. Empty data uses the bundled teamwork illustration. Request, authentication, and schema failures use the bundled connection illustration and a `Retry Request` action; technical adapter errors are logged but are not presented as empty data or exposed verbatim in the UI.
 
 1. 点击 PR 列表行后打开审核工作区，并保留下层 Workflow PR 列表状态。
@@ -178,8 +178,8 @@ Every asynchronous boundary needs a monotonically increasing request sequence (s
 20. 当前 Analyze/Approve/Reject 控件只更新项目级本地 Workflow 状态，绝不能声称远端 Provider 已接受审核决定。
 21. 不得记录 token、鉴权 header 或无边界的 Provider 响应正文。后台列表、diff、分支补全和源码请求必须静默；视图自身拥有行内 loading 和 error 状态。
 22. 切换文件和展开 hunk 时，语法高亮期间必须保留当前已渲染代码 model，完成后再原子替换。切换文件在替换完成后重置代码 viewport；展开 hunk 保持当前 viewport，且不得闪现空白区域。
-23. 文件工具栏按 GitHub 顺序排列：文件图标、路径、复制路径、双状态 `Expand all lines`/`Collapse non-diff lines`、增删统计、上一/下一文件和更多操作。所有图标必须垂直对齐并提供 Hover Tooltip。展开状态使用 `unfold` 图标；插入任意隐藏上下文后切换为 `fold` 图标，点击后恢复保留的原始 diff。点击其他区域时更多菜单必须关闭；其操作在应用内切换 `View file`/`View diff`，并始终按 diff 的固定 head SHA 读取源码，删除文件使用 base SHA。不得打开浏览器或读取可变分支 tip。
-24. 审核缓存必须有内存上限：Diff 高亮最多保留最近使用的 4 个文件，固定源码文本最多保留 3 个文件；完整文件的高亮 model 只存在于当前 UI model，不进入 Diff 高亮缓存。
+23. 文件工具栏按 GitHub 顺序排列：文件图标、路径、复制路径、双状态 `Expand all lines`/`Collapse non-diff lines`、增删统计、上一/下一文件和更多操作。所有图标必须垂直对齐并提供 Hover Tooltip。展开状态使用 `unfold` 图标；插入任意隐藏上下文后切换为 `fold` 图标，点击后恢复保留的原始 diff。更多菜单使用 GitHub 的眼睛 Octicon；其操作在应用内切换 `View file`/`View diff`，并始终按 diff 的固定 head SHA 读取源码，删除文件使用 base SHA。不得打开浏览器或读取可变分支 tip。
+24. 审核缓存必须有内存上限：归一化 diff 只保留一份共享且不可变的基础数据；展开上下文只按文件保存写时复制 override，收起文件时必须删除该 override。Diff 高亮最多保留最近使用的 4 个文件，固定源码文本最多保留 3 个文件；完整文件的高亮 model 只存在于当前 UI model，不进入 Diff 高亮缓存。
 25. 请求成功且列表为零条时，在与错误状态一致的 Vuetify 风格大图布局中显示 GitHub 风格、随筛选变化的标题和准确的 `0 total`；两种状态下的插画、标题、说明和可选操作必须作为同一视觉列水平居中。空数据使用内置 teamwork 插画；请求、鉴权和响应结构失败使用内置 connection 插画和 `Retry Request` 操作。Provider adapter 的技术错误写入日志，但不得伪装成空数据或原样暴露在 UI 中。
 
 ## Rewrite checklist / 重写清单

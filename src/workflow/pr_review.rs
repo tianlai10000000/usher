@@ -15,7 +15,9 @@ use crate::{
 };
 
 use super::bindings::{show_error, show_success};
-use super::syntax_highlight::{HighlightedLine, HighlightedToken, highlight_diff_lines};
+use super::syntax_highlight::{
+    HighlightResources, HighlightedLine, HighlightedToken, highlight_diff_lines,
+};
 
 const HIGHLIGHT_CACHE_CAPACITY: usize = 4;
 const SOURCE_CACHE_CAPACITY: usize = 3;
@@ -86,13 +88,34 @@ struct ReviewRequest {
     ignore_whitespace: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ReviewCache {
     project_alias: String,
     request: ReviewRequest,
     metadata: ProjectRepositoryMetadata,
-    detail: PullRequestDiffDetail,
-    original_files: Vec<PullRequestDiffFile>,
+    base_detail: Arc<PullRequestDiffDetail>,
+    expanded_files: HashMap<usize, PullRequestDiffFile>,
+}
+
+impl ReviewCache {
+    fn file(&self, index: usize) -> Option<&PullRequestDiffFile> {
+        self.expanded_files
+            .get(&index)
+            .or_else(|| self.base_detail.files.get(index))
+    }
+
+    fn file_mut_cow(&mut self, index: usize) -> Option<&mut PullRequestDiffFile> {
+        if !self.expanded_files.contains_key(&index) {
+            let original = self.base_detail.files.get(index)?.clone();
+            self.expanded_files.insert(index, original);
+        }
+        self.expanded_files.get_mut(&index)
+    }
+
+    fn collapse_file(&mut self, index: usize) -> Option<PullRequestDiffFile> {
+        self.expanded_files.remove(&index)?;
+        self.base_detail.files.get(index).cloned()
+    }
 }
 
 #[derive(Clone)]
@@ -105,11 +128,23 @@ pub(crate) struct WorkflowPrReviewController {
     only_manifest_files: Arc<Mutex<bool>>,
     show_viewed_files: Arc<Mutex<bool>>,
     collapsed_folders: Arc<Mutex<HashSet<String>>>,
+    highlight_resources: Arc<Mutex<Option<Arc<HighlightResources>>>>,
     highlighted_files: Arc<Mutex<BoundedCache<Vec<HighlightedLine>>>>,
     source_files: Arc<Mutex<BoundedCache<String>>>,
     request_sequence: Arc<AtomicU64>,
     highlight_sequence: Arc<AtomicU64>,
     expand_sequence: Arc<AtomicU64>,
+}
+
+fn session_highlight_resources(
+    resources: &Mutex<Option<Arc<HighlightResources>>>,
+) -> Arc<HighlightResources> {
+    let mut resources = resources
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    resources
+        .get_or_insert_with(|| Arc::new(HighlightResources::load()))
+        .clone()
 }
 
 pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
@@ -122,6 +157,7 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         only_manifest_files: Arc::new(Mutex::new(false)),
         show_viewed_files: Arc::new(Mutex::new(true)),
         collapsed_folders: Arc::new(Mutex::new(HashSet::new())),
+        highlight_resources: Arc::new(Mutex::new(None)),
         highlighted_files: Arc::new(Mutex::new(BoundedCache::new(HIGHLIGHT_CACHE_CAPACITY))),
         source_files: Arc::new(Mutex::new(BoundedCache::new(SOURCE_CACHE_CAPACITY))),
         request_sequence: Arc::new(AtomicU64::new(0)),
@@ -154,20 +190,8 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
     let close_controller = controller.clone();
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_review_close(move || {
-        close_controller.log_memory_diagnostics("review_close.before_hide");
-        close_controller
-            .request_sequence
-            .fetch_add(1, Ordering::SeqCst);
-        close_controller
-            .highlight_sequence
-            .fetch_add(1, Ordering::SeqCst);
-        close_controller
-            .expand_sequence
-            .fetch_add(1, Ordering::SeqCst);
         if let Some(ui) = ui_weak.upgrade() {
-            ui.set_workflow_pr_review_visible(false);
-            ui.set_workflow_pr_review_loading(false);
-            ui.set_workflow_pr_review_code_loading(false);
+            close_controller.close(&ui);
         }
     });
 
@@ -319,6 +343,45 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
 }
 
 impl WorkflowPrReviewController {
+    fn close(&self, ui: &MainWindow) {
+        self.log_memory_diagnostics("review_close.before_clear");
+        self.request_sequence.fetch_add(1, Ordering::SeqCst);
+        self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
+        self.expand_sequence.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut request) = self.active_request.lock() {
+            *request = None;
+        }
+        if let Ok(mut cache) = self.cache.lock() {
+            *cache = None;
+        }
+        if let Ok(mut filter) = self.file_filter.lock() {
+            filter.clear();
+        }
+        if let Ok(mut extensions) = self.selected_extensions.lock() {
+            extensions.clear();
+        }
+        if let Ok(mut enabled) = self.only_manifest_files.lock() {
+            *enabled = false;
+        }
+        if let Ok(mut enabled) = self.show_viewed_files.lock() {
+            *enabled = true;
+        }
+        if let Ok(mut folders) = self.collapsed_folders.lock() {
+            folders.clear();
+        }
+        if let Ok(mut resources) = self.highlight_resources.lock() {
+            *resources = None;
+        }
+        if let Ok(mut highlighted) = self.highlighted_files.lock() {
+            highlighted.clear();
+        }
+        if let Ok(mut sources) = self.source_files.lock() {
+            sources.clear();
+        }
+        reset_review_ui(ui);
+        self.log_memory_diagnostics("review_close.after_clear");
+    }
+
     pub(crate) fn select_project(&self, ui: &MainWindow, project_alias: String) {
         self.log_memory_diagnostics("project_switch.before_clear");
         self.request_sequence.fetch_add(1, Ordering::SeqCst);
@@ -347,6 +410,9 @@ impl WorkflowPrReviewController {
         }
         if let Ok(mut folders) = self.collapsed_folders.lock() {
             folders.clear();
+        }
+        if let Ok(mut resources) = self.highlight_resources.lock() {
+            *resources = None;
         }
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.clear();
@@ -390,6 +456,9 @@ impl WorkflowPrReviewController {
             if let Ok(mut folders) = self.collapsed_folders.lock() {
                 folders.clear();
             }
+            if let Ok(mut resources) = self.highlight_resources.lock() {
+                *resources = None;
+            }
             if let Ok(mut highlighted) = self.highlighted_files.lock() {
                 highlighted.clear();
             }
@@ -407,12 +476,15 @@ impl WorkflowPrReviewController {
             *active_request = Some(request.clone());
         }
 
-        let cached = self.cache.lock().ok().and_then(|guard| guard.clone());
-        if let Some(cache) =
-            cached.filter(|cache| cache.project_alias == project_alias && cache.request == request)
-        {
+        let cached = self.cache.lock().ok().and_then(|guard| {
+            guard
+                .as_ref()
+                .filter(|cache| cache.project_alias == project_alias && cache.request == request)
+                .map(|cache| cache.base_detail.clone())
+        });
+        if let Some(detail) = cached {
             ui.set_workflow_pr_review_loading(false);
-            self.apply_detail(ui, &cache.detail);
+            self.apply_detail(ui, &detail);
             self.log_memory_diagnostics("review_open.cache_hit_applied");
             return;
         }
@@ -487,13 +559,14 @@ impl WorkflowPrReviewController {
                             detail.removed_lines,
                             request.ignore_whitespace,
                         );
+                        let detail = Arc::new(detail);
                         if let Ok(mut cache) = controller.cache.lock() {
                             *cache = Some(ReviewCache {
                                 project_alias,
                                 request,
                                 metadata,
-                                detail: detail.clone(),
-                                original_files: detail.files.clone(),
+                                base_detail: detail.clone(),
+                                expanded_files: HashMap::new(),
                             });
                         }
                         controller.apply_detail(&ui, &detail);
@@ -511,25 +584,22 @@ impl WorkflowPrReviewController {
     }
 
     fn select_file(&self, ui: &MainWindow, index: i32) {
-        let cache = self.cache.lock().ok().and_then(|guard| guard.clone());
-        let Some(cache) = cache else {
-            return;
-        };
         let index = index.max(0) as usize;
-        let Some(file) = cache.detail.files.get(index) else {
+        let selected = self.cache.lock().ok().and_then(|guard| {
+            let cache = guard.as_ref()?;
+            Some((
+                cache.file(index)?.clone(),
+                cache.expanded_files.contains_key(&index),
+            ))
+        });
+        let Some((file, context_expanded)) = selected else {
             return;
         };
         ui.set_workflow_pr_review_viewing_file(false);
         ui.set_workflow_pr_review_has_expandable_hunks(false);
-        ui.set_workflow_pr_review_context_expanded(
-            cache
-                .original_files
-                .get(index)
-                .map(|original| original.lines != file.lines)
-                .unwrap_or(false),
-        );
+        ui.set_workflow_pr_review_context_expanded(context_expanded);
         let reset_scroll = ui.get_workflow_pr_review_selected_file_path().as_str() != file.path;
-        apply_file_header(ui, index, file);
+        apply_file_header(ui, index, &file);
         let sequence = self.highlight_sequence.fetch_add(1, Ordering::SeqCst) + 1;
         let cached = self
             .highlighted_files
@@ -537,7 +607,7 @@ impl WorkflowPrReviewController {
             .ok()
             .and_then(|mut highlighted| highlighted.get_cloned(file.path.as_str()));
         if let Some(highlighted) = cached {
-            apply_highlighted_file(ui, file, highlighted.as_slice(), reset_scroll);
+            apply_highlighted_file(ui, &file, highlighted.as_slice(), reset_scroll);
             ui.set_workflow_pr_review_code_loading(false);
             self.log_memory_diagnostics("file_highlight.cache_hit_applied");
             return;
@@ -548,12 +618,14 @@ impl WorkflowPrReviewController {
         // expansion. The completed model is applied atomically on the UI loop.
         ui.set_workflow_pr_review_code_loading(true);
         let controller = self.clone();
+        let highlight_resources = self.highlight_resources.clone();
         let ui_weak = ui.as_weak();
-        let file = file.clone();
         crate::app_runtime::shared_runtime().spawn(async move {
             let file_for_highlight = file.clone();
             let highlighted = tokio::task::spawn_blocking(move || {
+                let resources = session_highlight_resources(&highlight_resources);
                 highlight_diff_lines(
+                    &resources,
                     file_for_highlight.path.as_str(),
                     file_for_highlight.lines.as_slice(),
                 )
@@ -621,12 +693,16 @@ impl WorkflowPrReviewController {
             selected_index,
             line_index
         );
-        let cached = self.cache.lock().ok().and_then(|cache| cache.clone());
-        let Some(cache) = cached else {
-            log::warn!("[Workflow][PR Review] Ignored hunk expansion without review cache");
-            return;
-        };
-        let Some(file) = cache.detail.files.get(selected_index) else {
+        let selected = self.cache.lock().ok().and_then(|cache| {
+            let cache = cache.as_ref()?;
+            Some((
+                cache.file(selected_index)?.clone(),
+                cache.base_detail.head_sha.clone(),
+                cache.base_detail.base_sha.clone(),
+                cache.metadata.clone(),
+            ))
+        });
+        let Some((file, head_sha, base_sha, metadata)) = selected else {
             log::warn!(
                 "[Workflow][PR Review] Ignored hunk expansion for invalid file index: {}",
                 selected_index
@@ -634,7 +710,7 @@ impl WorkflowPrReviewController {
             return;
         };
         let line_index = line_index.max(0) as usize;
-        if !hunk_is_expandable(file, line_index) {
+        if !hunk_is_expandable(&file, line_index) {
             log::debug!(
                 "[Workflow][PR Review] Hunk no longer has hidden context: file={} line_index={}",
                 file.path,
@@ -649,11 +725,7 @@ impl WorkflowPrReviewController {
         } else {
             file.old_path.clone()
         };
-        let reference = if use_new_side {
-            cache.detail.head_sha.clone()
-        } else {
-            cache.detail.base_sha.clone()
-        };
+        let reference = if use_new_side { head_sha } else { base_sha };
         if path.is_empty() || reference.is_empty() {
             ui.set_workflow_pr_review_error(
                 "This diff has no immutable source reference for expanding context.".into(),
@@ -674,7 +746,6 @@ impl WorkflowPrReviewController {
         let sequence = self.expand_sequence.fetch_add(1, Ordering::SeqCst) + 1;
         let controller = self.clone();
         let ui_weak = ui.as_weak();
-        let metadata = cache.metadata;
         crate::app_runtime::shared_runtime().spawn(async move {
             let result = get_repository_file_text(
                 metadata.repo_type.as_str(),
@@ -716,18 +787,23 @@ impl WorkflowPrReviewController {
 
     fn expand_all_hunks(&self, ui: &MainWindow) {
         let selected_index = ui.get_workflow_pr_review_selected_file_index().max(0) as usize;
-        let cached = self.cache.lock().ok().and_then(|cache| cache.clone());
-        let Some(cache) = cached else {
-            return;
-        };
-        let Some(file) = cache.detail.files.get(selected_index) else {
+        let selected = self.cache.lock().ok().and_then(|cache| {
+            let cache = cache.as_ref()?;
+            Some((
+                cache.file(selected_index)?.clone(),
+                cache.base_detail.head_sha.clone(),
+                cache.base_detail.base_sha.clone(),
+                cache.metadata.clone(),
+            ))
+        });
+        let Some((file, head_sha, base_sha, metadata)) = selected else {
             return;
         };
         if !file
             .lines
             .iter()
             .enumerate()
-            .any(|(index, _)| hunk_is_expandable(file, index))
+            .any(|(index, _)| hunk_is_expandable(&file, index))
         {
             return;
         }
@@ -738,11 +814,7 @@ impl WorkflowPrReviewController {
         } else {
             file.old_path.clone()
         };
-        let reference = if use_new_side {
-            cache.detail.head_sha.clone()
-        } else {
-            cache.detail.base_sha.clone()
-        };
+        let reference = if use_new_side { head_sha } else { base_sha };
         if path.is_empty() || reference.is_empty() {
             ui.set_workflow_pr_review_error(
                 "This diff has no immutable source reference for expanding context.".into(),
@@ -764,7 +836,6 @@ impl WorkflowPrReviewController {
         let sequence = self.expand_sequence.fetch_add(1, Ordering::SeqCst) + 1;
         let controller = self.clone();
         let ui_weak = ui.as_weak();
-        let metadata = cache.metadata;
         crate::app_runtime::shared_runtime().spawn(async move {
             let result = get_repository_file_text(
                 metadata.repo_type.as_str(),
@@ -803,7 +874,7 @@ impl WorkflowPrReviewController {
     fn apply_all_hunk_expansion(&self, ui: &MainWindow, file_index: usize, source: &str) {
         let updated = self.cache.lock().ok().and_then(|mut cache| {
             let cache = cache.as_mut()?;
-            let file = cache.detail.files.get_mut(file_index)?;
+            let file = cache.file_mut_cow(file_index)?;
             (expand_all_hunk_context(file, source) > 0).then(|| file.clone())
         });
         let Some(file) = updated else {
@@ -821,12 +892,7 @@ impl WorkflowPrReviewController {
         self.expand_sequence.fetch_add(1, Ordering::SeqCst);
         let restored = self.cache.lock().ok().and_then(|mut cache| {
             let cache = cache.as_mut()?;
-            let original = cache.original_files.get(selected_index)?.clone();
-            let file = cache.detail.files.get_mut(selected_index)?;
-            if !restore_original_diff(file, &original) {
-                return None;
-            }
-            Some(original)
+            cache.collapse_file(selected_index)
         });
         let Some(file) = restored else {
             return;
@@ -850,11 +916,16 @@ impl WorkflowPrReviewController {
             return;
         }
 
-        let cached = self.cache.lock().ok().and_then(|cache| cache.clone());
-        let Some(cache) = cached else {
-            return;
-        };
-        let Some(file) = cache.detail.files.get(selected_index).cloned() else {
+        let selected = self.cache.lock().ok().and_then(|cache| {
+            let cache = cache.as_ref()?;
+            Some((
+                cache.file(selected_index)?.clone(),
+                cache.base_detail.head_sha.clone(),
+                cache.base_detail.base_sha.clone(),
+                cache.metadata.clone(),
+            ))
+        });
+        let Some((file, head_sha, base_sha, metadata)) = selected else {
             return;
         };
         let use_new_side = file.change_type != "deleted_file";
@@ -863,11 +934,7 @@ impl WorkflowPrReviewController {
         } else {
             file.old_path.clone()
         };
-        let reference = if use_new_side {
-            cache.detail.head_sha.clone()
-        } else {
-            cache.detail.base_sha.clone()
-        };
+        let reference = if use_new_side { head_sha } else { base_sha };
         if path.is_empty() || reference.is_empty() {
             show_error(ui, "This file has no immutable source reference.");
             return;
@@ -887,7 +954,6 @@ impl WorkflowPrReviewController {
         let sequence = self.expand_sequence.fetch_add(1, Ordering::SeqCst) + 1;
         let controller = self.clone();
         let ui_weak = ui.as_weak();
-        let metadata = cache.metadata;
         crate::app_runtime::shared_runtime().spawn(async move {
             let result = get_repository_file_text(
                 metadata.repo_type.as_str(),
@@ -938,11 +1004,14 @@ impl WorkflowPrReviewController {
         ui.set_workflow_pr_review_code_loading(true);
         let sequence = self.highlight_sequence.fetch_add(1, Ordering::SeqCst) + 1;
         let controller = self.clone();
+        let highlight_resources = self.highlight_resources.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
             let highlight_file = full_file.clone();
             let highlighted = tokio::task::spawn_blocking(move || {
+                let resources = session_highlight_resources(&highlight_resources);
                 highlight_diff_lines(
+                    &resources,
                     highlight_file.path.as_str(),
                     highlight_file.lines.as_slice(),
                 )
@@ -984,7 +1053,7 @@ impl WorkflowPrReviewController {
     ) {
         let updated_file = self.cache.lock().ok().and_then(|mut cache| {
             let cache = cache.as_mut()?;
-            let file = cache.detail.files.get_mut(file_index)?;
+            let file = cache.file_mut_cow(file_index)?;
             expand_hunk_context(file, line_index, source, 20).then(|| file.clone())
         });
         let Some(file) = updated_file else {
@@ -1033,7 +1102,7 @@ impl WorkflowPrReviewController {
             .cache
             .lock()
             .ok()
-            .and_then(|guard| guard.as_ref().map(|cache| cache.detail.clone()));
+            .and_then(|guard| guard.as_ref().map(|cache| cache.base_detail.clone()));
         let Some(detail) = detail else {
             ui.set_workflow_pr_review_tree_items(empty_tree_model());
             return;
@@ -1094,15 +1163,15 @@ impl WorkflowPrReviewController {
         if !crate::memory_diagnostics::diagnostics_enabled() {
             return;
         }
-        let (detail_stats, original_stats) = self
+        let (base_stats, override_stats) = self
             .cache
             .lock()
             .ok()
             .and_then(|cache| {
                 cache.as_ref().map(|cache| {
                     (
-                        diff_storage_stats(&cache.detail.files),
-                        diff_storage_stats(&cache.original_files),
+                        diff_storage_stats(&cache.base_detail.files),
+                        diff_override_storage_stats(&cache.expanded_files),
                     )
                 })
             })
@@ -1117,17 +1186,23 @@ impl WorkflowPrReviewController {
             .lock()
             .map(|cache| (cache.entries.len(), source_cache_stats(&cache)))
             .unwrap_or_default();
+        let highlight_resources_loaded = self
+            .highlight_resources
+            .lock()
+            .map(|resources| resources.is_some())
+            .unwrap_or(false);
         log::info!(
-            "[Workflow][PR Review][Memory] reason={} detail_files={} detail_lines={} detail_text_bytes={} detail_heap_estimate_bytes={} original_files={} original_lines={} original_text_bytes={} original_heap_estimate_bytes={} highlight_cache_entries={} highlight_lines={} highlight_tokens={} highlight_text_bytes={} highlight_heap_estimate_bytes={} source_cache_entries={} source_text_bytes={} source_heap_estimate_bytes={}",
+            "[Workflow][PR Review][Memory] reason={} base_files={} base_lines={} base_text_bytes={} base_heap_estimate_bytes={} override_files={} override_lines={} override_text_bytes={} override_heap_estimate_bytes={} highlight_resources_loaded={} highlight_cache_entries={} highlight_lines={} highlight_tokens={} highlight_text_bytes={} highlight_heap_estimate_bytes={} source_cache_entries={} source_text_bytes={} source_heap_estimate_bytes={}",
             reason,
-            detail_stats.items,
-            detail_stats.children,
-            detail_stats.text_bytes,
-            detail_stats.estimated_heap_bytes,
-            original_stats.items,
-            original_stats.children,
-            original_stats.text_bytes,
-            original_stats.estimated_heap_bytes,
+            base_stats.items,
+            base_stats.children,
+            base_stats.text_bytes,
+            base_stats.estimated_heap_bytes,
+            override_stats.items,
+            override_stats.children,
+            override_stats.text_bytes,
+            override_stats.estimated_heap_bytes,
+            highlight_resources_loaded,
             highlight_entries,
             highlight_stats.items,
             highlight_stats.children,
@@ -1174,6 +1249,25 @@ fn diff_storage_stats(files: &[PullRequestDiffFile]) -> OwnedMemoryStats {
                 .saturating_add(line.kind.capacity())
                 .saturating_add(line.content.capacity());
         }
+    }
+    stats
+}
+
+fn diff_override_storage_stats(files: &HashMap<usize, PullRequestDiffFile>) -> OwnedMemoryStats {
+    let mut stats = OwnedMemoryStats {
+        estimated_heap_bytes: files.capacity().saturating_mul(
+            std::mem::size_of::<usize>() + std::mem::size_of::<PullRequestDiffFile>(),
+        ),
+        ..OwnedMemoryStats::default()
+    };
+    for file in files.values() {
+        let file_stats = diff_storage_stats(std::slice::from_ref(file));
+        stats.items = stats.items.saturating_add(file_stats.items);
+        stats.children = stats.children.saturating_add(file_stats.children);
+        stats.text_bytes = stats.text_bytes.saturating_add(file_stats.text_bytes);
+        stats.estimated_heap_bytes = stats
+            .estimated_heap_bytes
+            .saturating_add(file_stats.estimated_heap_bytes);
     }
     stats
 }
@@ -1331,8 +1425,6 @@ fn to_slint_line(
                 token.dark_color[2],
                 token.dark_color[3],
             ),
-            columns: token.columns as i32,
-            indentation: token.indentation,
             bold: token.bold,
             italic: token.italic,
         })
@@ -1341,9 +1433,12 @@ fn to_slint_line(
         old_line: line.old_line,
         new_line: line.new_line,
         kind: line.kind.clone().into(),
-        content: line.content.clone().into(),
+        content: if line.kind == "hunk" {
+            line.content.clone().into()
+        } else {
+            "".into()
+        },
         tokens: ModelRc::new(VecModel::from(tokens)),
-        display_columns: highlighted.columns as i32,
         expandable: hunk_is_expandable(file, index),
     }
 }
@@ -1453,6 +1548,7 @@ fn expand_all_hunk_context(file: &mut PullRequestDiffFile, source: &str) -> usiz
     file.lines.len().saturating_sub(initial_len)
 }
 
+#[cfg(test)]
 fn restore_original_diff(file: &mut PullRequestDiffFile, original: &PullRequestDiffFile) -> bool {
     if file.lines == original.lines {
         return false;
@@ -1723,13 +1819,15 @@ fn reset_review_ui(ui: &MainWindow) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
 
     use super::{
-        BoundedCache, build_tree_items, expand_all_hunk_context, expand_hunk_context,
-        full_source_file, hunk_is_expandable, restore_original_diff,
+        BoundedCache, ReviewCache, ReviewRequest, build_tree_items, expand_all_hunk_context,
+        expand_hunk_context, full_source_file, hunk_is_expandable, restore_original_diff,
     };
-    use crate::git::{PullRequestDiffFile, PullRequestDiffLine};
+    use crate::git::{PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine};
+    use crate::project::ProjectRepositoryMetadata;
 
     fn file(path: &str) -> PullRequestDiffFile {
         PullRequestDiffFile {
@@ -1741,6 +1839,56 @@ mod tests {
             viewed: false,
             lines: Vec::new(),
         }
+    }
+
+    #[test]
+    fn clones_only_the_file_that_receives_expanded_context() {
+        let original = file("src/lib.rs");
+        let base_detail = Arc::new(PullRequestDiffDetail {
+            files: vec![original.clone(), file("src/main.rs")],
+            added_lines: 2,
+            removed_lines: 0,
+            base_sha: "base".to_string(),
+            head_sha: "head".to_string(),
+            start_sha: "start".to_string(),
+            too_many_commits: false,
+        });
+        let mut cache = ReviewCache {
+            project_alias: "usher".to_string(),
+            request: ReviewRequest {
+                number: "1".to_string(),
+                title: String::new(),
+                author: String::new(),
+                source_branch: String::new(),
+                target_branch: String::new(),
+                updated_at: String::new(),
+                ignore_whitespace: false,
+            },
+            metadata: ProjectRepositoryMetadata {
+                repo_project_id: "1".to_string(),
+                repo_type: "github".to_string(),
+                remote_repo: "https://github.com/example/usher".to_string(),
+            },
+            base_detail: base_detail.clone(),
+            expanded_files: HashMap::new(),
+        };
+
+        cache
+            .file_mut_cow(0)
+            .expect("first file")
+            .lines
+            .push(PullRequestDiffLine {
+                old_line: 1,
+                new_line: 1,
+                kind: "context".to_string(),
+                content: "expanded".to_string(),
+            });
+
+        assert_eq!(cache.expanded_files.len(), 1);
+        assert!(base_detail.files[0].lines.is_empty());
+        assert_eq!(cache.file(1), base_detail.files.get(1));
+        assert_eq!(cache.collapse_file(0), Some(original));
+        assert!(cache.expanded_files.is_empty());
     }
 
     #[test]

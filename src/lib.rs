@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 #[macro_use]
 extern crate objc;
 
-use slint::{CloseRequestResponse, ComponentHandle, Global, Timer};
+use slint::{CloseRequestResponse, ComponentHandle, Global, Model, Timer};
 
 // Must be called before module declarations so generated types are available in all modules
 slint::include_modules!();
@@ -68,6 +68,137 @@ mod git;
 mod project;
 use project::setup_project;
 use terminal::{set_dark_mode as set_terminal_dark_mode, setup_terminal, shutdown_terminal};
+
+fn log_ui_model_memory(ui: &MainWindow, route: Route) {
+    if !memory_diagnostics::diagnostics_enabled() {
+        return;
+    }
+
+    let chat = ui.get_chat_messages();
+    let mut chat_text_bytes = 0usize;
+    let mut chat_blocks = 0usize;
+    let mut chat_inline_lines = 0usize;
+    let mut chat_spans = 0usize;
+    for index in 0..chat.row_count() {
+        let Some(message) = chat.row_data(index) else {
+            continue;
+        };
+        chat_text_bytes = chat_text_bytes
+            .saturating_add(message.content.len())
+            .saturating_add(message.rendered_content.len())
+            .saturating_add(message.timestamp.len());
+        chat_blocks = chat_blocks.saturating_add(message.markdown_blocks.row_count());
+        for block_index in 0..message.markdown_blocks.row_count() {
+            let Some(block) = message.markdown_blocks.row_data(block_index) else {
+                continue;
+            };
+            chat_text_bytes = chat_text_bytes.saturating_add(block.text.len());
+            chat_inline_lines = chat_inline_lines.saturating_add(block.inline_lines.row_count());
+            for line_index in 0..block.inline_lines.row_count() {
+                let Some(line) = block.inline_lines.row_data(line_index) else {
+                    continue;
+                };
+                chat_spans = chat_spans.saturating_add(line.spans.row_count());
+                for span_index in 0..line.spans.row_count() {
+                    if let Some(span) = line.spans.row_data(span_index) {
+                        chat_text_bytes = chat_text_bytes
+                            .saturating_add(span.text.len())
+                            .saturating_add(span.href.len());
+                    }
+                }
+            }
+        }
+    }
+
+    let projects = ui.get_project_items();
+    let mut project_text_bytes = 0usize;
+    let mut project_tags = 0usize;
+    for index in 0..projects.row_count() {
+        let Some(project) = projects.row_data(index) else {
+            continue;
+        };
+        project_text_bytes = project_text_bytes
+            .saturating_add(project.project_name.len())
+            .saturating_add(project.project_alias.len())
+            .saturating_add(project.local_repo.len())
+            .saturating_add(project.remote_repo.len())
+            .saturating_add(project.logo.len())
+            .saturating_add(project.project_tags_text.len());
+        project_tags = project_tags.saturating_add(project.project_tags.row_count());
+        for tag_index in 0..project.project_tags.row_count() {
+            if let Some(tag) = project.project_tags.row_data(tag_index) {
+                project_text_bytes = project_text_bytes.saturating_add(tag.len());
+            }
+        }
+    }
+
+    let pull_requests = ui.get_workflow_pr_list_items();
+    let mut pull_request_text_bytes = 0usize;
+    for index in 0..pull_requests.row_count() {
+        if let Some(item) = pull_requests.row_data(index) {
+            pull_request_text_bytes = pull_request_text_bytes
+                .saturating_add(item.number.len())
+                .saturating_add(item.title.len())
+                .saturating_add(item.author.len())
+                .saturating_add(item.source_branch.len())
+                .saturating_add(item.target_branch.len())
+                .saturating_add(item.updated_at.len())
+                .saturating_add(item.web_url.len());
+        }
+    }
+
+    let tag_steps = ui.get_workflow_tag_steps();
+    let mut tag_step_text_bytes = 0usize;
+    for index in 0..tag_steps.row_count() {
+        if let Some(step) = tag_steps.row_data(index) {
+            tag_step_text_bytes = tag_step_text_bytes
+                .saturating_add(step.name.len())
+                .saturating_add(step.status.len())
+                .saturating_add(step.detail.len())
+                .saturating_add(step.log.len());
+        }
+    }
+
+    let terminal_lines = ui.get_shell_drawer_lines();
+    let mut terminal_spans = 0usize;
+    let mut terminal_text_bytes = 0usize;
+    for line_index in 0..terminal_lines.row_count() {
+        let Some(line) = terminal_lines.row_data(line_index) else {
+            continue;
+        };
+        terminal_spans = terminal_spans.saturating_add(line.spans.row_count());
+        for span_index in 0..line.spans.row_count() {
+            if let Some(span) = line.spans.row_data(span_index) {
+                terminal_text_bytes = terminal_text_bytes.saturating_add(span.text.len());
+            }
+        }
+    }
+
+    log::info!(
+        "[Memory][UI Models] route={:?} chat_rows={} chat_blocks={} chat_inline_lines={} chat_spans={} chat_text_bytes={} project_rows={} project_tags={} project_text_bytes={} pr_list_rows={} pr_list_text_bytes={} pr_review_files={} pr_review_tree_items={} pr_review_extension_filters={} pr_review_lines={} tag_steps={} tag_step_text_bytes={} terminal_lines={} terminal_spans={} terminal_text_bytes={} terminal_output_bytes={}",
+        route,
+        chat.row_count(),
+        chat_blocks,
+        chat_inline_lines,
+        chat_spans,
+        chat_text_bytes,
+        projects.row_count(),
+        project_tags,
+        project_text_bytes,
+        pull_requests.row_count(),
+        pull_request_text_bytes,
+        ui.get_workflow_pr_review_files().row_count(),
+        ui.get_workflow_pr_review_tree_items().row_count(),
+        ui.get_workflow_pr_review_extension_filters().row_count(),
+        ui.get_workflow_pr_review_lines().row_count(),
+        tag_steps.row_count(),
+        tag_step_text_bytes,
+        terminal_lines.row_count(),
+        terminal_spans,
+        terminal_text_bytes,
+        ui.get_shell_drawer_output().len(),
+    );
+}
 
 #[cfg(target_os = "macos")]
 static TITLEBAR_SETTINGS_UI_WEAK: std::sync::OnceLock<slint::Weak<MainWindow>> =
@@ -693,11 +824,6 @@ fn setup_pr_review_fonts(app: &MainWindow) {
         "/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts/SF-Mono-RegularItalic.otf",
         "/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts/SF-Mono-Semibold.otf",
     ];
-    const SF_UI_FONTS: &[&str] = &[
-        "/System/Library/Fonts/SFNS.ttf",
-        "/System/Library/Fonts/SFNSItalic.ttf",
-    ];
-
     let mut collection = slint::fontique_010::shared_collection();
     let mut regular_registered = false;
 
@@ -725,21 +851,13 @@ fn setup_pr_review_fonts(app: &MainWindow) {
         log::warn!("[PR Review] SFMono-Regular unavailable; falling back to Menlo");
     }
 
-    let mut ui_regular_registered = false;
-    for (index, path) in SF_UI_FONTS.iter().enumerate() {
-        let Ok(bytes) = std::fs::read(path) else {
-            log::debug!("[PR Review] SF system UI face is unavailable: {path}");
-            continue;
-        };
-        let blob = fontique::Blob::new(std::sync::Arc::new(bytes));
-        let registered = collection.register_fonts(blob, None);
-        if !registered.is_empty() && index == 0 {
-            ui_regular_registered = true;
-        }
-    }
-    if ui_regular_registered {
+    // Fontique's CoreText backend explicitly discovers Apple's hidden SFNS
+    // files and exposes `.SF NS` as the system-ui family. Registering the same
+    // files here retained another 8.5 MiB of font blobs for the full process
+    // lifetime and also bypassed the backend's normal on-demand source cache.
+    if collection.family_id(".SF NS").is_some() {
         app.set_workflow_pr_review_tree_font_family(".SF NS".into());
-        log::info!("[PR Review] Using GitHub-compatible macOS system UI font");
+        log::info!("[PR Review] Using Fontique's GitHub-compatible macOS system UI font");
     } else {
         app.set_workflow_pr_review_tree_font_family("Helvetica Neue".into());
         log::warn!("[PR Review] macOS system UI font unavailable; falling back to Helvetica Neue");
@@ -1162,8 +1280,9 @@ fn ui() -> Result<MainWindow> {
     ));
     let last_page_memory_diag_for_callback = last_page_memory_diag.clone();
     app.on_page_memory_diag(move |route, width_px, height_px, terminal_visible| {
-        let scale_factor = app_for_page_memory_diag
-            .upgrade()
+        let ui = app_for_page_memory_diag.upgrade();
+        let scale_factor = ui
+            .as_ref()
             .map(|ui| ui.window().scale_factor())
             .unwrap_or(1.0);
         terminal::log_page_memory_diag(route, width_px, height_px, terminal_visible, scale_factor);
@@ -1190,6 +1309,9 @@ fn ui() -> Result<MainWindow> {
                 })
                 .unwrap_or(true);
             if should_log {
+                if let Some(ui) = ui.as_ref() {
+                    log_ui_model_memory(ui, route);
+                }
                 log::info!(
                     "[Memory][UI] route={:?} logical_width={} logical_height={} scale_factor={:.2} physical_width={:.0} physical_height={:.0} terminal_visible={}",
                     route,

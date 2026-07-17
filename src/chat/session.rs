@@ -1,4 +1,6 @@
-use super::persistence::{HistoryPage, JsonlHistoryStore, StoredChatMessage, StoredMessageRole};
+use super::persistence::{
+    HistoryPage, JsonlHistoryStore, StoredChatMessage, StoredMessageRole, StoredMessageStatus,
+};
 use chrono::Local;
 use std::io;
 
@@ -77,11 +79,27 @@ impl ChatSessionService {
     }
 
     pub fn append_user_message(&mut self, content: String) -> io::Result<StoredChatMessage> {
-        self.append_message(StoredMessageRole::User, content)
+        self.append_message(
+            StoredMessageRole::User,
+            StoredMessageStatus::Normal,
+            content,
+        )
     }
 
     pub fn append_assistant_message(&mut self, content: String) -> io::Result<StoredChatMessage> {
-        self.append_message(StoredMessageRole::Assistant, content)
+        self.append_message(
+            StoredMessageRole::Assistant,
+            StoredMessageStatus::Normal,
+            content,
+        )
+    }
+
+    pub fn append_assistant_error(&mut self, content: String) -> io::Result<StoredChatMessage> {
+        self.append_message(
+            StoredMessageRole::Assistant,
+            StoredMessageStatus::Error,
+            content,
+        )
     }
 
     pub fn log_storage_path(&self) {
@@ -94,11 +112,13 @@ impl ChatSessionService {
     fn append_message(
         &mut self,
         role: StoredMessageRole,
+        status: StoredMessageStatus,
         content: String,
     ) -> io::Result<StoredChatMessage> {
         let message = StoredChatMessage {
             id: self.next_id,
             role,
+            status,
             content,
             timestamp: current_timestamp(),
         };

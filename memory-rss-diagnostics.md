@@ -418,3 +418,304 @@ Slint Skia renderer 在 component destroyed 时存在释放 component graphics r
 6. **最后评估 FemtoVG-WGPU。** 它是解决 OpenGL/resize 高水位的候选，不是未经测试的默认答案。
 
 这套顺序把“本次已确认的 400 MiB 级问题”放在前面，把“高 DPI renderer/driver 高水位”作为独立问题处理，避免用一个 renderer 切换掩盖字体、列表生命周期和离屏层三个不同层面的成本。
+
+## 11. 分批优化 A/B 记录
+
+### 11.1 第 1 批：生产渲染器确定化
+
+日期：2026-07-17。
+
+改动：默认 Cargo feature 只启用 `renderer-femtovg`；`renderer-skia` 改为显式诊断 feature。常规 `cargo run` 不再链接 Skia，诊断命令为：
+
+```sh
+SLINT_BACKEND=winit-skia cargo run --no-default-features --features renderer-skia
+```
+
+测试条件：同一台 macOS 2× backing scale 显示器、相同 20 条 Chat 历史、800×600 logical 初始窗口；每个动作后等待 8 秒。A 组是改动前默认选择的 Skia，B 组是改动后的默认 FemtoVG。
+
+| 场景 | A：Skia footprint / RSS | B：FemtoVG-only footprint / RSS | 结果 |
+| --- | ---: | ---: | ---: |
+| Home 稳定 | 约 75 MiB / 约 166 MiB | 93 MiB / 160.3 MiB | RSS 约 -3%；footprint 口径存在 renderer 差异 |
+| 首次进入 Chat | 350 MiB / 588.3 MiB | 128 MiB / 164.5 MiB | footprint -63.4%；RSS -72.0% |
+| Chat 返回 Home | 350 MiB / 360.4 MiB | 128 MiB / 164.3 MiB | footprint -63.4%；RSS -54.4% |
+| Home 放大到 1400×900 logical | 376 MiB / 360.8 MiB | 194 MiB / 164.4 MiB | footprint -48.4%；RSS -54.4% |
+| 恢复 800×600 logical | 364 MiB / 360.9 MiB | 142 MiB / 164.4 MiB | footprint -61.0%；RSS -54.4% |
+
+结论：本批通过。收益来自避免生产路径选中 Skia 以及其 Chat 字体/缓存高水位，不是业务模型释放。默认依赖树已确认不存在 `i-slint-renderer-skia`；FemtoVG 和显式 Skia 两种 feature 均通过 `cargo check --locked`。高 DPI 放大仍产生约 66 MiB 的 footprint 增量，后续必须作为独立的 backing surface/renderer 问题继续测试。
+
+### 11.2 第 2 批：状态 Emoji 改为结构化状态 + SVG
+
+日期：2026-07-17。
+
+改动：Chat 持久化模型新增向后兼容的 `status` 字段；新错误消息保存纯文本和 `error` 状态，UI 使用 `error.svg` / `success.svg`。旧 JSONL 中以 `❌` / `✅` 开头的 assistant 消息在渲染层识别状态并剥离前缀，不改写用户历史文件。
+
+测试条件：显式 Skia 诊断构建、相同 20 条历史、800×600 logical、2× backing scale。选择 Skia 作为本批测试后端，是为了直接隔离并观察 Apple Color Emoji 字体映射；生产默认仍是第 1 批确定的 FemtoVG。
+
+| 指标 | A：Emoji 前缀 | B：结构化状态 + SVG | 改善 |
+| --- | ---: | ---: | ---: |
+| Chat footprint | 350 MiB | 159 MiB | -54.6% |
+| Chat RSS | 588.3 MiB | 217.0 MiB | -63.1% |
+| Apple Color Emoji mapped file | 183.2 MiB | 未映射 | -100% |
+| Hiragino Sans GB mapped file | 22.4 MiB | 22.4 MiB | 无变化，留给第 3 批 |
+
+结论：本批通过。`vmmap` 已确认候选构建中没有 Apple Color Emoji 映射，证明收益来自去除应用生成的 Emoji 字形路径，而不是随机压缩波动。旧历史兼容和状态前缀剥离均有单元测试；`cargo test --lib --locked` 为 40 passed、0 failed。
+
+### 11.3 第 3 批：系统默认 CJK 字体策略（已回滚）
+
+日期：2026-07-17。
+
+实验改动：Chat 普通文本取消显式 `Hiragino Sans GB`，交给 macOS 系统默认字体回退；代码文本使用 Menlo。测试条件与 11.2 相同。
+
+| 指标 | A：显式 Hiragino | B：系统默认回退 | 变化 |
+| --- | ---: | ---: | ---: |
+| Chat footprint | 159 MiB | 198 MiB | +24.5% |
+| Chat RSS | 217.0 MiB | 346.3 MiB | +59.6% |
+| 主要 CJK mapped file | Hiragino 22.4 MiB | PingFang 74.6 MiB | +233% 映射体积 |
+
+结论：本批失败并已回滚。macOS 默认回退在当前 Slint 1.17.1 + Fontique + Skia 组合中选择了完整 PingFang TTC，物理成本明显高于显式 Hiragino。不能仅凭平台字体规范推断内存更优；在引入经过子集化、授权明确的应用字体之前，继续保留 Hiragino 是本机实测更低成本的方案。
+
+### 11.4 第 4 批：Chat 路由卸载实验（已回滚）
+
+日期：2026-07-17。
+
+现状核对：Chat 已实现虚拟窗口渲染，包含 overscan、增量高度前缀缓存、滚动稳定后精确重算和最多 56 条消息的窗口上限；本批不重复替换为另一套列表组件。
+
+实验分两步：
+
+1. 条件创建/销毁整个 Chat 组件。该版本虽然得到 96 MiB 的低 footprint，但截图确认消息未显示，是滚动锚点在 ScrollView viewport 创建前生效导致的假阳性，立即回滚。
+2. 保持组件常驻，只在离开 Chat 时清空渲染模型。页面显示正常，但相同 20 条历史下无可测收益。
+
+| 场景 | A：现状 | B：离开时清空模型 | 变化 |
+| --- | ---: | ---: | ---: |
+| Chat footprint | 153 MiB | 152 MiB | -0.7%，在测量噪声内 |
+| Chat RSS | 246.8 MiB | 246.5 MiB | -0.1%，在测量噪声内 |
+| 返回 Home footprint | 153 MiB | 152 MiB | -0.7%，字体/renderer 高水位未释放 |
+| 返回 Home RSS | 246.8 MiB | 246.6 MiB | -0.1% |
+
+结论：本批无收益并已回滚。当前 20 条消息低于 56 条虚拟窗口上限，模型本身不是本次 RSS 大头；保留模型还能避免重入 Chat 时重复 markdown 解析。只有将来用数千条历史做独立压力测试并观察到模型高水位时，才值得重新评估路由卸载，同时必须先把滚动锚点改成基于实际 viewport 生命周期的显式恢复。
+
+### 11.5 第 5 批：FemtoVG/WGPU（保留为诊断 feature，不设为默认）
+
+日期：2026-07-17。
+
+改动：新增显式 `renderer-femtovg-wgpu` Cargo feature，并将 wasm-bindgen/js-sys 依赖组更新到 WGPU 29 可解析的版本。生产默认 feature 不变，仍是 FemtoVG/OpenGL。
+
+测试条件：相同 800×600 logical 初始窗口、2× backing scale、20 条 Chat 历史；A 为默认 FemtoVG/OpenGL，B 为 FemtoVG/WGPU 29 + Metal。
+
+| 场景 | A：OpenGL footprint / RSS | B：WGPU/Metal footprint / RSS | 结论 |
+| --- | ---: | ---: | --- |
+| Home | 93 / 160.3 MiB | 70 / 174.0 MiB | footprint -24.7%，RSS +8.6% |
+| Chat | 128 / 164.5 MiB | 119 / 186.7 MiB | footprint -7.0%，RSS +13.5% |
+| Chat 返回 Home | 128 / 164.3 MiB | 119 / 183.5 MiB | footprint -7.0%，RSS +11.7% |
+| Home 放大到 1400×900 | 194 / 164.4 MiB | 151 / 183.1 MiB | footprint -22.2%，RSS +11.4% |
+| 恢复 800×600 | 142 / 164.4 MiB | 135 / 182.9 MiB | footprint -4.9%，RSS +11.3% |
+
+结论：不切换生产默认。WGPU/Metal 对高 DPI backing surface 的 footprint 明显更好，但当前稳定 RSS 全场景更差，而本次优化目标是 RSS。保留显式 feature 是为了后续升级 Slint/WGPU 后使用同一矩阵复测。另一个工程风险是项目 Debug logger 会接收 `naga`/`wgpu` 的大量 debug 事件；诊断运行产生了大量 shader 日志，若未来考虑生产启用 WGPU，必须先增加按 target 的日志过滤并独立测量其开销。
+
+### 11.6 第 6 批：PR 详情关闭生命周期
+
+日期：2026-07-17。
+
+触发路径：先进入 Chat，再打开包含 200 个文件、24,843 行 diff 的 PR 详情，随后返回 Home。Activity Monitor 一度显示约 281 MiB。
+
+基线日志揭示两个不同问题：
+
+1. `workflow_pr_review_close` 只隐藏工作区并使异步序列失效，没有调用已经存在的 `reset_review_ui()`，controller 仍保留归一化 diff、原始 diff、高亮和源码缓存。这与 `docs/specs/pr-review.md` 中“关闭审核时清理审核缓存”的契约不一致。
+2. Activity Monitor 的“内存”不能等同于即时 resident RSS。返回 Home 后，日志中的 RSS 从约 268.5 MiB 经 macOS 压缩在约 90 秒后降至约 174.9 MiB，而原窗口尺寸下的 physical footprint 仍约 281 MiB。原窗口为 1228×947 logical、2× backing scale，即 2456×1894 physical。随后同一 PID 的一次 `footprint` 采样为 208 MiB（峰值 421 MiB），但采样前用户已经缩小窗口，因此该数值只能证明 IOSurface/backing store 对窗口物理像素尺寸敏感，不能作为“同尺寸下 footprint 自动回落”的 A/B 证据；该次分类中约 81 MiB 为 IOAccelerator、IOSurface 和 graphics-owned footprint，约 110 MiB 为 malloc 区域。
+
+本批改动：关闭 PR 详情时立即取消所有在途请求，清空 active request、单项 diff/原始 diff、筛选状态、折叠状态、4 项高亮 LRU 和 3 项固定源码 LRU，并把所有 Slint PR model/string/state 重置为空。新增 `review_close.before_clear` / `review_close.after_clear` 两个业务内存检查点；候选构建中 after 日志必须显示 detail、original、highlight 和 source 四组持有量均为 0。
+
+本批的验收口径分层处理：
+
+- **确定性 A/B：** A 组关闭后业务缓存仍约 5.2 MiB（两份 diff 各约 2.6 MiB，另有高亮/源码缓存）；B 组关闭后这些 controller 持有量和根 UI models 均归零。
+- **进程级 A/B：** 不能承诺 Activity Monitor 立即下降同等数值。malloc arena、字体/glyph cache、当前 Home 窗口 backing surfaces 和驱动资源的生命周期长于页面；以关闭后 10、30、90 秒的 RSS 与 physical footprint 分别比较，并以多轮稳定中位数判断。
+
+候选构建实测：用户重复了 Chat → 同一个 PR → Home。候选窗口日志实际记录为 1169×878 logical、2× backing scale（2338×1756 physical），比旧组的 1228×947 略小，因此下面只作为候选组内部的释放曲线，不能伪装成严格同尺寸百分比 A/B。
+
+| 时间点 | physical footprint | RSS | 说明 |
+| --- | ---: | ---: | --- |
+| PR 关闭前 | 411.45 MiB | 257.44 MiB | 200 文件、24,843 行；两份 diff 各约 2.62 MiB，高亮约 0.48 MiB |
+| 清理后立即 | 411.45 MiB | 257.44 MiB | 四组业务持有量全部为 0，allocator/renderer 尚未变化 |
+| Home 约 5 秒 | 288.69 MiB | 256.98 MiB | footprint -122.76 MiB，主要是页面图形资源销毁 |
+| Home 约 30 秒 | 288.56 MiB | 256.95 MiB | 基本稳定 |
+| Home 约 60 秒 | 288.56 MiB | 253.56 MiB | RSS 仅缓慢下降 |
+| Home 约 90 秒 | 288.56 MiB | 253.56 MiB | 未进一步回落 |
+
+90 秒后系统 `footprint` 分类为 289 MiB：IOSurface 79 MiB、IOAccelerator graphics 53 MiB、graphics-owned 40 MiB，图形侧合计约 172 MiB；`MALLOC_SMALL` 90 MiB、`MALLOC_LARGE` 7.5 MiB。说明剩余成本主要是当前高 DPI 大窗口的多缓冲图形表面，以及大量小对象释放后仍由 malloc zone 保留的页，而不是仍有强引用的 PR controller cache。
+
+结论分开判定：
+
+- **生命周期正确性：通过并保留。** 关闭后的业务日志确定性归零，修复了规范与实现不一致，也阻止跨多次 PR 打开继续持有旧数据。
+- **进程 RSS 优化：本批未通过。** 业务侧约 5.7 MiB 的明确持有已释放，但 90 秒 RSS 没有出现超出噪声的对应下降；不得把页面本来就会发生的约 123 MiB 图形资源回落归功于 controller cache 清理。
+
+下一批应围绕“降低峰值分配，从而避免 malloc/renderer 建立高水位”设计，而不是在关闭后尝试非可移植的强制 allocator trim。优先审计 PR 行 model 的临时 clone/小字符串分配和全窗口离屏层；图形侧必须继续用固定物理窗口尺寸单独测量 IOSurface 数量与大小。
+
+### 11.7 Home 稳定态的剩余常驻所有者归因
+
+日期：2026-07-17。
+
+复现路径：启用 `MallocStackLogging=1` 启动诊断构建，按 Chat → 同一个 PR → Home 操作；窗口保持 800×600 logical、2× backing scale。该运行只用于分配调用栈归因，不能把 RSS 绝对值与未启用 MallocStackLogging 的生产运行直接比较。
+
+业务所有权日志确认 Home 状态下：
+
+- PR review 的 files、tree items、extension filters 和 lines 均为 0；controller 的 detail、original、highlight、source 四类缓存也均为 0。
+- 根 UI 中 Chat、Project、PR list 和 Terminal 的文本量合计仅约 19 KiB；这些 model 不是 200 MiB 级物理占用的解释。
+- `leaks` 只报告 288 个节点、18,560 bytes，调用栈属于 macOS AppIntents/NSXPC 循环；没有发现应用规模的不可达泄漏。
+
+该诊断进程稳定后的 `footprint` 为 268 MiB，分类如下：
+
+| 类别 | 大小 | 解释 |
+| --- | ---: | --- |
+| MALLOC_SMALL | 98 MiB | 应用、Slint、Fontique、Syntect、ColorSync 等大量小对象和 allocator 高水位 |
+| MallocStackLogging performance tool data | 63 MiB | 仅诊断运行存在，不属于生产进程 |
+| IOSurface | 37 MiB | 2× backing scale 下的窗口/离屏像素表面 |
+| IOAccelerator graphics | 28 MiB | 图形驱动资源 |
+| graphics-owned physical footprint | 20 MiB | renderer/驱动拥有的未映射物理页 |
+| MALLOC_LARGE | 7.5 MiB | 一个长期保留的大分配 |
+
+`heap` 显示 186,402 个 live nodes、约 84.45 MiB 可归因堆对象。已定位的主要应用侧常驻源头如下：
+
+1. **重复注册系统 UI 字体：约 9.32 MiB。** `setup_pr_review_fonts()` 在进程启动时读取并向 Fontique 注册 `/System/Library/Fonts/SFNS.ttf`（7.5 MiB）和 `SFNSItalic.ttf`（1.0 MiB）。分配调用栈为 `std::fs::read -> setup_pr_review_fonts -> fontique::Collection::register_fonts`。Fontique 为后续字形解析长期持有这些 blob，因此与 PR 页面关闭无关。SF Mono 的三张 OTF 合计仅约 316 KiB，不是这一项的大头。
+2. **项目 Logo 按原始分辨率解码并永久缓存。** Home 卡片实际绘制 32×32 px，但五张远程 Logo 分辨率分别为 360×360、658×658、474×474、450×340 和 500×500。`load_image_from_bytes()` 直接 `to_rgba8()`，再把原尺寸 `SharedPixelBuffer` 放入线程本地 `PROJECT_LOGO_IMAGE_CACHE`。已观察到至少约 4.3 MiB 的活跃 RGBA buffer。
+3. **Logo 解码连带的 ColorSync 常驻：约 13.04 MiB。** 堆中有 60 个 `CMMParaCurveTag::MakeInvertedTRC` 节点合计 10.87 MiB，以及 12 个 `MakeTRC` 节点合计 2.17 MiB。调用时序和远程 Logo 解码一致；这是带色彩配置图片批量解码的进程级缓存成本。归因强度为“高度相关”，不能声称每一字节都由某一张 Logo 单独拥有。
+4. **Syntect 默认语法集与正则编译缓存。** 首次进入 PR 后，`SYNTAX_SET: LazyLock<SyntaxSet>` 使用 `SyntaxSet::load_defaults_newlines()` 加载完整默认语法集合；首次高亮还会在 `fancy_regex/regex_automata` 中编译并缓存正则。调用栈中存在 656 KiB 单块及多组 64/48 KiB 分配。由于静态 `LazyLock` 生命周期等于进程，关闭 PR 不会释放。
+5. **FemtoVG renderer 命令/字形缓冲。** 约 592 KiB 的可增长 buffer 可直接归因到 `femtovg::Canvas::render_triangles -> append_cmd -> Vec::grow`，其设计是复用峰值容量；图形侧另外保留当前窗口所需的 IOSurface 和驱动资源。它们不是 Slint route model。
+
+因此，“回到 Home 后还有东西占用”这个判断成立，但应准确表述为：PR 业务对象已经释放，剩余的是启动级字体 blob、Home 自身的原尺寸 Logo/ColorSync 资源、首次 PR 激活的进程级 Syntect 正则缓存，以及 renderer/高 DPI 图形高水位。Activity Monitor 不下降不能再归因于 PR route 强引用泄漏。
+
+后续按独立 A/B 批次执行，避免多项同时修改后无法判断收益：
+
+1. **批次 A：Logo 缩略图管线。** 在进入 Slint model 前把 raster Logo 限制到满足 32×32 绘制和 2×/3×显示的合理上限，建议 128×128；保持纵横比，不放大原图。验收同时比较 Logo RGBA live bytes、ColorSync live bytes、Home footprint/RSS 和视觉清晰度。
+2. **批次 B：字体注册去重。** 先验证 Fontique/CoreText 能直接解析 `.SF NS`，若成立则删除 8.5 MiB 的 SFNS 手工 blob 注册，仅保留约 316 KiB 的 SF Mono faces。验收必须包含 PR 文件树字体截图对比和 heap 中 `std::fs::read` live bytes。
+3. **批次 C：语法高亮生命周期。** 将完整 `SyntaxSet`/主题从进程静态单例改成 PR review session 所有，或构建经过支持扩展白名单裁剪的 syntax dump；关闭最后一个 PR session 后可释放。该批改动面较大，必须以高亮正确性测试、首次打开耗时、重复打开耗时和关闭后 live heap 四项共同验收。
+4. **批次 D：renderer 峰值。** 固定 logical size、backing scale 和显示器，对 PR 行渲染临时 clone、离屏层、FemtoVG command capacity 与 IOSurface 数量逐项剖析。不要使用强制 allocator trim 伪造释放效果。
+
+批次 A 和 B 是目前证据最强、风险最低的前两项；批次 C、D 不应在没有独立基线的情况下混入同一提交。
+
+### 11.8 第 7 批：项目 Logo 缩略图管线
+
+日期：2026-07-17。
+
+改动：所有 raster 项目 Logo（远程缓存、本地路径、Base64 和默认图）在进入 Slint `Image` cache 前按比例限制到最大 128×128；小图不放大，SVG 保持矢量。项目卡片实际绘制为 32×32 logical，128 px 覆盖 2×/3× backing scale 并保留 4×余量。
+
+A/B 使用相同的 macOS `MallocStackLogging` + `heap` 工具。A 组为原尺寸解码；B 组为 128 px 候选。由于 A 组完成过 PR 路由、B 组只在 Home，本批不使用二者的总 footprint 差值证明收益，只比较调用栈明确归属于 Logo 的 live pixel buffers；ColorSync 作为辅助观察项。
+
+| 指标 | A：原尺寸 | B：最大 128 px | 结果 |
+| --- | ---: | ---: | --- |
+| 五张远程 Logo 尺寸 | 360²、658²、474²、450×340、500² | 等比缩至最长边 128 | 符合绘制上限 |
+| 可识别 live RGBA buffers | 至少约 4.3 MiB | 约 0.32–0.40 MiB | 约 -91% |
+| 最大单张 Logo buffer | 约 1.70 MiB | 约 64–80 KiB | 约 -95% |
+| ColorSync 大块 live heap | 约 13.04 MiB | 约 9.78 MiB | 约 -25%，但测量路由不完全相同，只作辅助证据 |
+
+候选堆中原来的约 1.70、1.02、0.90 和 0.62 MiB Logo 大块均消失，替换为五个约 64–80 KiB 的缓冲；这是确定性的应用所有权下降，不依赖 macOS 是否立即归还 malloc page。2× 副屏截图中 128 px 默认 Logo 显示清晰，未观察到缩放锯齿。
+
+结论：本批通过并保留。它不会解决 PR 首次高亮或高 DPI IOSurface 的主要成本，但消除了 Home 页面与项目配置预览中不必要的原图常驻，且没有改变缓存命中和网络下载行为。
+
+### 11.9 第 8 批：macOS 系统 UI 字体注册去重
+
+日期：2026-07-17。
+
+改动：PR 文件树继续指定 `.SF NS`，但不再由应用读取并向 Fontique 重复注册 `SFNS.ttf` 和 `SFNSItalic.ttf`。Fontique 0.10 的 CoreText backend 已明确扫描 Apple 隐藏的 SFNS 文件，并把 `System Font` / `.SF NS` 配置为 `system-ui`；应用先通过 `family_id(".SF NS")` 使用该系统集合，仅在不可用时回退到 `Helvetica Neue`。SF Mono 三张 OTF 保持原实现，避免改变代码区字体。
+
+启动阶段 A/B 使用相同 800×600 logical、2× backing scale、Logo 128 px 候选和 `MallocStackLogging` 环境：
+
+| Home 稳定指标 | A：手工重复注册 | B：系统 Fontique family | 结果 |
+| --- | ---: | ---: | --- |
+| physical footprint | 107 MiB | 97 MiB | -9.3% |
+| live heap | 34.53 MiB | 28.60 MiB | -17.2% |
+| `std::fs::read` 字体 blobs | 5 个、9.32 MiB | 不再出现在大分配列表 | 重复 SFNS blobs 消失 |
+| `MALLOC_LARGE` | 7.5 MiB | 0 | SFNS 正体大块消失 |
+
+两组 ColorSync 节点数量存在波动，因此不能用总 heap 差值冒充全部字体收益；确定性证据是 SFNS 的 7.5 MiB/1.0 MiB 分配和对应 `setup_pr_review_fonts` 调用栈消失。
+
+PR 页面阶段验收使用同一个 200 文件、24,843 行 PR；首次文件高亮后关闭审核并返回 Home：
+
+- 用户确认 PR 文件树字体显示正常，未观察到 family、字号或字重退化。
+- PR controller 的 detail/original/highlight/source 持有量和根 PR models 再次全部归零。
+- live heap 为 51.92 MiB；大分配列表中没有 7.5 MiB `MALLOC_LARGE`。
+- `std::fs::read` 只剩 3 个 112 KiB 分配、合计 344 KiB，对应保留的三张 SF Mono OTF；SFNS 正体/斜体没有回到应用私有堆。
+- `vmmap` 能看到系统按需映射 `SFNS.ttf`：两个 7.55 MiB 虚拟映射的实际 resident 分别约 688 KiB 和 1,568 KiB，合计约 2.2 MiB，属性为共享 alias / copy-on-write，可由系统回收。这不是原实现中不可回收的 8.5 MiB私有 font blob。
+- 返回 Home 后诊断进程 physical footprint 为 202 MiB，其中 62 MiB 是 MallocStackLogging performance data；不能把该绝对值当成生产运行内存。
+
+旧 A 组执行过 Chat → PR → Home，新 B 组执行 PR → Home，renderer/highlighter 路径不完全相同，因此不使用旧 268 MiB 与新 202 MiB 的总 footprint 差值宣称字体收益。字体收益以调用栈和所有权严格判定：约 8.5 MiB 应用私有 blob 消失，换成当前约 2.2 MiB 的系统可共享 resident 映射，净物理成本至少降低约 6 MiB，且 Home 启动 footprint 的同条件 A/B 为 -10 MiB。
+
+结论：本批通过并保留。它既不是把成本延迟到首次进入 PR，也没有牺牲 GitHub 风格文件树字体；生产路径继续使用 `.SF NS`，但所有权回归 Fontique/CoreText 系统字体机制。
+
+### 11.10 第 9 批：PR session 级语法高亮资源生命周期
+
+日期：2026-07-17。
+
+改动：删除进程级 `LazyLock<SyntaxSet>` / `LazyLock<Theme>`，改为 `WorkflowPrReviewController` 持有的 `Option<Arc<HighlightResources>>`。首次文件高亮仍在 `spawn_blocking` 中构建，避免阻塞 Slint event loop；同一 PR session 的所有文件共享；打开新 PR、切换项目或关闭审核时清空 owner。正在运行的旧任务可持有临时 `Arc` 到任务结束，但序列号会阻止旧结果回写，任务结束后资源自然释放。
+
+A 组为第 8 批完成后的进程静态 Syntect 资源，执行同一个 PR → Home，关闭后 live heap 51.92 MiB、physical footprint 202.2 MiB。B 组使用 session owner，打开同一 200 文件、24,843 行 PR，连续高亮 4 个文件后关闭并返回 Home：
+
+| 指标 | A：进程静态 | B：PR session owner | 结果 |
+| --- | ---: | ---: | --- |
+| SyntaxSet/Theme 构建次数 | 首次后进程永久 1 次 | 同一 session 1 次 | 文件切换正常复用 |
+| 首次资源构建耗时 | 未单独记录 | 21 ms | 后台执行，可接受 |
+| 关闭前资源 owner | 静态、不可清空 | `highlight_resources_loaded=true` | 符合预期 |
+| 关闭后资源 owner | 仍常驻 | `highlight_resources_loaded=false` | 确定性释放 |
+| 关闭动作即时 allocator 变化 | 无明显变化 | 约 29 MiB 转为 reusable | 资源页可回收 |
+| Home live heap | 51.92 MiB | 27.99 MiB | -23.93 MiB，约 -46.1% |
+| Home physical footprint | 202.2 MiB | 183.5 MiB | -18.7 MiB，约 -9.2% |
+
+B 组实际高亮了 4 个文件、缓存峰值为 579 行/12,166 tokens/约 0.56 MiB，A 组只高亮 1 个文件；B 组工作量更大但关闭后仍显著更低。首次文件从资源加载日志到高亮应用约 1.32 秒，旧组从 diff 应用到首文件高亮约 1.41 秒；网络、调度和行数会造成波动，因此这里只能判定“没有观察到性能退化”，不能声称固定百分比提速。后续三个文件没有再次输出资源加载日志，证明 session 内没有重复构建 SyntaxSet。
+
+关闭后诊断 RSS 数字没有同步下降，因为释放的约 29 MiB malloc pages 先变为 allocator reusable；physical footprint 和 live heap 已下降。这正是本批目标：释放所有权并使页面高水位可由系统回收，而不是调用非可移植的 allocator trim。
+
+结论：本批通过并保留。现有 Rust/TypeScript/Vue/HTML/CSS/Slint 高亮单元测试全部通过；用户按步骤完成多文件切换和返回 Home，未反馈显示异常。
+
+### 11.11 第 10 批：PR diff 单份基础数据与按文件写时复制
+
+日期：2026-07-17。
+
+问题：旧 `ReviewCache` 同时持有完整 `detail` 和 `original_files`，并且文件选择、hunk 展开和刷新树等路径会临时 clone 整个 cache。即使用户从未展开上下文，同一个 200 文件 diff 也会长期保留两份完整行数据。该设计的成本随 PR 总文件数和总行数增长，而不是随用户实际展开的文件数增长。
+
+改动：缓存改为一份 `Arc<PullRequestDiffDetail>` 不可变基础数据，加一个按原始文件索引存储的 `HashMap<usize, PullRequestDiffFile>` override。普通浏览、筛选、文件切换和高亮只读取基础文件；首次展开某文件时只 clone 该文件，后续继续修改同一 override；`Collapse non-diff lines` 删除该 override 并直接重新使用基础文件。网络结果、cache hit、文件选择、刷新树和完整文件查看均不再 clone 整个 diff。关闭审核、切换项目或打开新 PR 仍会清空基础数据与全部 override。
+
+A/B 条件保持一致：800×600 logical、2.00 scale（1600×1200 physical）、同一 200 文件/24,843 行 PR、连续高亮 4 个文件，均使用 `MallocStackLogging=1`。A 为第 9 批完成后的旧双份缓存，B 为本批写时复制候选版。
+
+| 指标 | A：完整 diff + original files | B：Arc base + per-file override | 结果 |
+| --- | ---: | ---: | --- |
+| 未展开时完整 diff owner | 2 份 | 1 份 | 结构上减少 50% 的规范化 diff 长期持有量 |
+| B 组加载后 owner 日志 | 不适用 | base 200 文件/24,843 行/约 3.05 MiB；override 0 | 未展开不再复制完整数据 |
+| 第 4 个文件高亮应用时 footprint | 约 332.1 MiB | 328.25 MiB | -3.85 MiB，约 -1.2%；与移除一份 diff 的量级一致 |
+| PR 页面稳定 footprint | 未作为旧批验收指标单独记录 | 210.91 MiB | 仅作 B 组稳定态记录，不虚构百分比 |
+| 返回 Home live heap | 27.99 MiB | 27.37 MiB | -0.62 MiB，约 -2.2% |
+| 返回 Home physical footprint | 183.5 MiB | 176.24 MiB | -7.26 MiB，约 -4.0% |
+
+B 组第 4 个文件高亮完成时，日志为 `base_files=200`、`base_lines=24843`、`base_heap_estimate_bytes=3195344`、`override_files=0`；高亮缓存为 4 个文件、322 行、3,217 tokens、约 0.15 MiB。关闭前仍只有这一份基础 diff，关闭后 base、override、highlight、source 和 SyntaxSet/Theme owner 全部为 0。返回 Home 后约 32.27 MiB malloc pages 变为 reusable；RSS 不立即下降仍是 allocator 高水位行为，不代表业务对象仍被持有。
+
+自动交互同时验证了两态按钮：点击 `Expand all lines` 后图标和 tooltip 切换为 `Collapse non-diff lines`，完整上下文可见；再次点击恢复原折叠 diff 和 `Expand all lines`。单元测试另外确认只有实际展开的文件进入 override，其他文件继续引用基础数据。
+
+曾有一轮为方便定位控件把窗口切到全屏，导致 IOSurface 增至约 203 MiB 且退出全屏后仍被 renderer 保留；该轮 RSS/footprint 已判定为无效样本，没有混入上表。最终 B 组重新启动进程并全程保持固定小窗口。
+
+结论：本批通过并保留。收益不像语法资源生命周期优化那样大，但它移除了一个随大型 PR 线性翻倍的确定性所有权问题，且展开能力、折叠恢复、文件切换和缓存上限均保持不变。
+
+### 11.12 第 11 批：高亮 token 与 Slint 行模型压缩
+
+日期：2026-07-17。
+
+约束：PR 的语言不可预知，因此本批没有采用扩展名白名单，也没有裁剪 Syntect 的默认语法集合。运行时仍完整调用 `SyntaxSet::load_defaults_newlines()`，语言覆盖与第 10 批一致；优化对象只是高亮结果和 Slint 传输模型。
+
+问题：旧实现把每段空白单独转换成一个 `HighlightedToken` 和一个 Slint `Text` delegate，并在每个 token 上保留 UI 未读取的 `columns` / `indentation`，每行还重复传输未被 UI 读取的 `display-columns`。非 hunk 行同时在 `content` 和 token 文本中保存同一份代码。大型文件因此产生大量小对象、delegate 和重复字符串。
+
+改动：空白并入相邻的可见 token，相邻且颜色、粗体和斜体完全相同的 token 合并；只保留行级最大列数供横向布局使用。删除 Rust/Slint token 中未使用的 `columns`、`indentation` 和行模型中的 `display-columns`；普通代码行不再向 Slint 重复传输 `content`，hunk 行仍保留原文。单元测试逐字符重建原始行，确认缩进、内部空格和尾部空格不丢失。
+
+由于远端 PR 在旧批次后更新过，本批没有复用旧的 3,217-token 数字。严格 A/B 在当前同一远端快照上重新执行：800×600 logical、2.00 scale（1600×1200 physical）、同一 200 文件/24,843 行 PR、相同的前 4 个文件和点击顺序，均启用 `MallocStackLogging=1`。A 仅临时撤销本批压缩，B 为候选实现；两组均保留完整 Syntect 语言资源和前 10 批改动。
+
+| 指标 | A：独立空白 token | B：压缩 token/model | 结果 |
+| --- | ---: | ---: | --- |
+| 4 文件高亮行数 | 2,808 | 2,808 | 输入完全一致 |
+| 高亮文本 bytes | 78,244 | 78,244 | 文本无丢失 |
+| 高亮 token | 11,980 | 3,194 | -8,786，约 -73.3% |
+| 高亮缓存 heap estimate | 647,338 B | 295,898 B | -351,440 B，约 -54.3% |
+| 稳定 live heap | 63,884,056 B | 62,110,824 B | -1,773,232 B，约 -2.8% |
+| live heap nodes | 240,525 | 215,698 | -24,827，约 -10.3% |
+| 第 4 文件应用瞬时 footprint | 318.72 MiB | 314.50 MiB | -4.22 MiB，约 -1.3% |
+| PR 稳定 physical footprint | 约 202 MiB | 约 198 MiB | -4 MiB，约 -2.0% |
+| 首文件加载到高亮应用 | 约 1.35 s | 约 1.33 s | 未观察到性能退化 |
+
+候选截图确认 Markdown 标题、链接、列表、中文、缩进和空白位置正常；Rust/TypeScript/Vue/HTML/CSS/Slint 高亮测试继续通过。B 组减少的 live heap 大于 Rust 高亮缓存自身的 0.34 MiB 差值，符合减少 Slint model 字段、字符串复制和约 8,786 个文本 delegate/小对象带来的连带收益。
+
+结论：本批通过并保留。它没有通过减少语言支持换内存，而是在完整语言覆盖不变的前提下，显著降低每个已高亮文件的 token 数和 UI 小对象数量。

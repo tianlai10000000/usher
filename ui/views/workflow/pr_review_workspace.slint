@@ -16,8 +16,6 @@ export struct WorkflowPrDiffToken {
     text: string,
     color: color,
     dark-color: color,
-    columns: int,
-    indentation: bool,
     bold: bool,
     italic: bool,
 }
@@ -28,7 +26,6 @@ export struct WorkflowPrDiffLine {
     kind: string,
     content: string,
     tokens: [WorkflowPrDiffToken],
-    display-columns: int,
     expandable: bool,
 }
 
@@ -209,37 +206,48 @@ component FileMenuButton inherits Rectangle {
     menu-popup := PopupWindow {
         x: root.width - self.width;
         y: root.height - 4px;
-        width: 142px;
-        height: 42px;
+        width: 192px;
+        height: 52px;
         close-policy: close-on-click-outside;
 
         Rectangle {
             width: parent.width;
             height: parent.height;
-            border-radius: 7px;
+            border-radius: 12px;
             border-width: 1px;
             border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
             background: AppState.effective-dark-mode ? #151b23 : #ffffff;
-            drop-shadow-blur: 10px;
-            drop-shadow-color: #0000002b;
-            drop-shadow-offset-y: 3px;
+            drop-shadow-blur: 18px;
+            drop-shadow-color: #00000030;
+            drop-shadow-offset-y: 6px;
 
             Rectangle {
-                x: 5px;
-                y: 5px;
-                width: parent.width - 10px;
-                height: parent.height - 10px;
-                border-radius: 5px;
-                background: view-file-touch.has-hover ? MaterialPalette.surface_container_high : transparent;
+                x: 8px;
+                y: 8px;
+                width: parent.width - 16px;
+                height: 36px;
+                border-radius: 8px;
+                background: view-file-touch.has-hover
+                    ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
+                    : transparent;
+                Image {
+                    x: 16px;
+                    y: 10px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/octicon-eye-16.svg");
+                    image-fit: contain;
+                    colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                }
                 MaterialText {
-                    x: 12px;
-                    width: parent.width - 24px;
+                    x: 48px;
+                    width: parent.width - 64px;
                     height: parent.height;
                     text: root.viewing-file ? "View diff" : "View file";
                     vertical_alignment: center;
-                    font-size: 11px;
-                    font-weight: 500;
-                    color: MaterialPalette.on_surface;
+                    font-size: 14px;
+                    font-weight: 400;
+                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
                 }
                 view-file-touch := TouchArea {
                     mouse-cursor: pointer;
@@ -249,6 +257,7 @@ component FileMenuButton inherits Rectangle {
                     }
                 }
             }
+
         }
     }
 }

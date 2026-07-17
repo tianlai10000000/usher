@@ -14,6 +14,8 @@ by Slint with GitHub Primer semantic foreground tokens rather than embedded fill
 `octicon-kebab-horizontal-16.svg` is the Primer Octicons `kebab-horizontal-16` icon.
 `octicon-sidebar-collapse-16.svg` and `octicon-sidebar-expand-16.svg` are the
 matching Primer Octicons used by the PR file-tree visibility toggle.
+`octicon-eye-16.svg` is the matching Primer Octicon used by the PR file
+overflow menu.
 
 ## GitHub diffstat blocks
 

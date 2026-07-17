@@ -17,6 +17,11 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+// Project cards render their logo at 32x32 logical pixels. Keeping a 128px
+// raster covers high-density displays without retaining multi-megabyte source
+// images in the Slint model and renderer caches.
+const PROJECT_LOGO_RASTER_MAX_SIDE: u32 = 128;
+
 thread_local! {
     static PROJECT_LOGO_IMAGE_CACHE: RefCell<HashMap<String, slint::Image>> =
         RefCell::new(HashMap::new());
@@ -1006,8 +1011,7 @@ pub(crate) fn resolve_project_logo_image(value: &str) -> slint::Image {
     let image = if normalized.is_empty() {
         load_default_logo_image()
     } else if is_valid_logo_path(&normalized) {
-        slint::Image::load_from_path(Path::new(&normalized))
-            .unwrap_or_else(|_| load_default_logo_image())
+        load_project_logo_path(Path::new(&normalized)).unwrap_or_else(load_default_logo_image)
     } else if is_valid_logo_remote_url(&normalized) {
         if let Some(image) = load_cached_remote_logo_image(&normalized) {
             image
@@ -1065,6 +1069,15 @@ fn load_default_logo_image() -> slint::Image {
         .unwrap_or_else(slint::Image::default)
 }
 
+fn load_project_logo_path(path: &Path) -> Option<slint::Image> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    if ext == "svg" {
+        return slint::Image::load_from_path(path).ok();
+    }
+    let bytes = fs::read(path).ok()?;
+    load_image_from_bytes(bytes.as_slice(), ext.as_str())
+}
+
 fn load_cached_remote_logo_image(url: &str) -> Option<slint::Image> {
     let path = find_cached_remote_logo_path(url)?;
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
@@ -1097,7 +1110,15 @@ fn load_image_from_bytes(bytes: &[u8], ext: &str) -> Option<slint::Image> {
         return load_svg_image_from_bytes(bytes, ext);
     }
 
-    let decoded = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let decoded = image::load_from_memory(bytes).ok()?;
+    let decoded = if decoded.width() > PROJECT_LOGO_RASTER_MAX_SIDE
+        || decoded.height() > PROJECT_LOGO_RASTER_MAX_SIDE
+    {
+        decoded.thumbnail(PROJECT_LOGO_RASTER_MAX_SIDE, PROJECT_LOGO_RASTER_MAX_SIDE)
+    } else {
+        decoded
+    }
+    .to_rgba8();
     let (width, height) = decoded.dimensions();
     let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
         decoded.as_raw().as_slice(),

@@ -990,8 +990,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                     }
                     Err(err) => {
                         let friendly = handle_api_error(&err);
-                        let content = format!("❌ {}", friendly);
-                        if let Err(e) = guard.append_assistant_message(content) {
+                        if let Err(e) = guard.append_assistant_error(friendly) {
                             log::error!("[Chat::Storage] Failed to persist error message: {}", e);
                         }
                     }

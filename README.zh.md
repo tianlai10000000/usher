@@ -33,7 +33,7 @@ Linux 在具备合适 Slint 后端的环境中可能可以构建，但目前不�
 - Slint/winit 所需的平台构建依赖。
 - 可选：macOS 打包需要 `cargo-bundle` 和 `create-dmg`。
 
-项目同时启用了 FemtoVG 和 Skia 渲染器，因此首次构建可能需要下载 Skia 预编译包。
+生产构建只启用 FemtoVG，以固定渲染器选择并避免在常规应用中链接 Skia。Skia 仍保留为显式启用的诊断构建。
 
 ## 快速开始
 
@@ -53,10 +53,16 @@ cargo test --lib --locked
 
 完整的 `cargo test --locked` 当前会暴露 `src/logger/debug_logger.rs` 中已有的 doctest 问题；库单元测试本身可以通过。
 
-验证可选的 Skia 软件渲染路径：
+验证可选的 Skia 渲染路径：
 
 ```sh
-SLINT_BACKEND=winit-skia-software cargo run
+SLINT_BACKEND=winit-skia cargo run --no-default-features --features renderer-skia
+```
+
+对比实验性的 FemtoVG/WGPU 路径（不是生产默认配置）：
+
+```sh
+SLINT_BACKEND=winit-femtovg-wgpu cargo run --no-default-features --features renderer-femtovg-wgpu
 ```
 
 Debug 构建会通过现有 Usher 日志每 5 秒记录一次进程内存，并记录生命周期检查点。Release 构建可通过以下方式启用同样的诊断：

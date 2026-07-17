@@ -10,6 +10,14 @@ crate-type = ["lib", "cdylib"]
 path = "src/lib.rs"
 name = "usher_lib"
 
+[features]
+# Production builds use one deterministic renderer. Skia remains available for
+# diagnostics and renderer comparisons without being linked into normal builds.
+default = ["renderer-femtovg"]
+renderer-femtovg = ["slint/renderer-femtovg"]
+renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu"]
+renderer-skia = ["slint/renderer-skia"]
+
 [[bin]]
 path = "src/main.rs"
 name = "usher"
@@ -18,10 +26,10 @@ name = "usher"
 # "backend-android-activity-06",
 # 注意：live-preview feature 已移除以减小 release 构建体积
 # 如需开发时使用 live-preview，可以临时添加 features = ["live-preview"]
-# 可选渲染后端：默认仍为 FemtoVG。若需按社区建议验证「窗口变大时内存」是否为双缓冲/驱动统计问题，可启用 Skia 软件路径：
-#   SLINT_BACKEND=winit-skia-software cargo run
-# （需本行的 renderer-skia；首次编译 Skia 较慢、产物更大）
-slint = { version = "1.17.1", default-features = false, features = ["live-preview", "std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-skia", "raw-window-handle-06", "unstable-fontique-010"] }
+# 生产构建只启用 FemtoVG/OpenGL。Skia 与 FemtoVG/WGPU 仅用于显式诊断构建：
+#   SLINT_BACKEND=winit-skia cargo run --no-default-features --features renderer-skia
+#   SLINT_BACKEND=winit-femtovg-wgpu cargo run --no-default-features --features renderer-femtovg-wgpu
+slint = { version = "1.17.1", default-features = false, features = ["live-preview", "std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
