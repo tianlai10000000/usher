@@ -1,6 +1,7 @@
 use crate::project::pr_stats::{PullRequestStateFilter, fetch_standard_environment_pr_counts};
 use crate::terminal::{reset_terminal_for_project, terminal_title_for_project};
 use crate::workflow::pr_list::WorkflowPrListController;
+use crate::workflow::pr_review::WorkflowPrReviewController;
 use crate::workflow::state::{
     SharedWorkflowState, WorkflowProjectContext, initialize_ui, normalize_project_alias,
     normalize_project_id, normalize_project_name,
@@ -13,6 +14,7 @@ pub(crate) fn bind_project_context(
     ui: &MainWindow,
     shared_state: SharedWorkflowState,
     pr_list_controller: WorkflowPrListController,
+    pr_review_controller: WorkflowPrReviewController,
 ) {
     let ui_weak = ui.as_weak();
     ui.on_workflow_open_project(
@@ -77,6 +79,7 @@ pub(crate) fn bind_project_context(
             });
             refresh_tag_context(&ui, &shared_state, false);
             pr_list_controller.select_project(&ui, context.alias.clone());
+            pr_review_controller.select_project(&ui, context.alias.clone());
             if is_pr_auto_update {
                 let ui_weak_task = ui.as_weak();
                 let project_id = context.id.clone();

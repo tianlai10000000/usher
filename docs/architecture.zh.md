@@ -32,6 +32,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `src/main.rs` | 最小二进制入口，转发到库入口。 |
 | `src/lib.rs` | 创建 `MainWindow`、初始化模块、绑定跨模块 callback、管理窗口和关闭流程。 |
 | `src/app_runtime.rs` | 进程级多线程 Tokio runtime，并为 runtime 线程安装 tracing dispatch。 |
+| `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、UI 尺寸关联，以及可取消的周期内存采样。 |
 | `src/shutdown.rs` | 按优先级协调关闭。 |
 | `src/single_instance.rs` | 单实例进程行为。 |
 | `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。 |
@@ -43,7 +44,8 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | 路径 | 职责 |
 | --- | --- |
 | `src/project/` | 项目列表、持久化、过滤、Logo、PR/MR 概览以及进入 Workflow/Terminal 的入口。 |
-| `src/codereview/api/` | 远程仓库 Provider 解析，以及 Gitee/GitLab/GitHub 项目详情 API；在项目持久化前解析不可变的 Provider 项目 ID。 |
+| `src/codereview/api/` | Gitee、GitLab、GitHub 仓库接口的 URL 与路径模板；不包含请求执行、鉴权或响应解析。 |
+| `src/git/` | Provider 识别、仓库实际操作、鉴权 header，以及将各 Provider 响应归一化为应用模型。 |
 | `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行。 |
 | `src/terminal/` | PTY 生命周期、viewport 同步、渲染、输入、选择和项目切换。 |
 | `src/chat/` | 聊天请求、会话、JSONL 持久化、Markdown、渲染缓存、分页和 UI 绑定。 |
@@ -58,7 +60,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `src/notification.rs` | 通知队列、计时器、Hover 暂停、操作按钮和图标。 |
 | `src/dialog.rs` | 全局 Modal Dialog 绑定。 |
 
-`src/git/` 当前主要是占位目录，实际 Provider HTTP 行为仍在 `src/project/pr_stats.rs`。不要误以为这些空文件已经形成可用抽象。
+仓库接口地址与可执行行为必须保持分离：`src/git/` 可以引用 `src/codereview/api/` 中的常量，但 `src/codereview/api/` 不得依赖 `src/git/`、`src/http/`、reqwest 或 serde。
 
 ### Slint UI
 
@@ -91,6 +93,8 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 
 如果模块依赖生成的 Slint global 或前一个模块安装的 callback，不要随意提前初始化。
 
+Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_DIAGNOSTICS=1` 启用。`[Memory][Diag]` 记录当前/峰值 RSS、物理 footprint、VM 分类、region、Mach port、线程、fault、page-in，以及相对上次和启动基线的增量；`[Memory][UI]` 将稳定后的路由/窗口变化与逻辑、物理尺寸关联。`[Workflow][PR Review][Memory]` 等功能归属日志只记录有界 model/cache 的数量和容量，不得输出源码内容或凭据。采样任务复用共享 runtime，并由正常的 pre-shutdown 流程停止。
+
 ## 并发模型
 
 - Slint 对象和 global 归 event loop 所有。后台任务必须通过 `slint::invoke_from_event_loop` 更新 UI。
@@ -107,13 +111,40 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 
 ### 项目
 
-`project/projects.json` 保存于平台 local-data 目录。新增或编辑项目保存时，Rust 根据 `remote_repo` 推导 Provider，通过 `src/codereview/api/` 查询项目详情，并把返回的 `repo_project_id` 与小写 `repo_type`（`gitee`、`gitlab`、`github`）一并保存。查询失败不会改写已有配置。Rust 将记录转换为 Slint model，解析本地/Base64/远程 Logo，并调度 PR 概览任务。远程 Logo 缓存位于进程临时目录，UI 渲染路径不应直接进行网络 IO。
+`project/projects.json` 保存于平台 local-data 目录。新增或编辑项目保存时，Rust 根据 `remote_repo` 推导 Provider，由 `src/git/` 使用 `src/codereview/api/` 中的 URL 模板查询项目详情，并把返回的 `repo_project_id` 与小写 `repo_type`（`gitee`、`gitlab`、`github`）一并保存。查询失败不会改写已有配置。Rust 将记录转换为 Slint model，解析本地/Base64/远程 Logo，并调度 PR 概览任务。远程 Logo 缓存位于进程临时目录，UI 渲染路径不应直接进行网络 IO。
 
 ### Workflow
 
 `WorkflowStore` 保存当前项目和各项目的 `WorkflowViewState`。切换项目必须重新绑定 UI，避免日志、步骤和 running 标记串到其他项目。离开 Workflow 路由时会主动清理重型状态。
 
-仓库 PR 列表归现有 Workflow 的 PR Tab 所有，不新增独立项目详情 PR 页面。`workflow/pr_list.rs` 在 event loop 之外读取当前项目持久化的 `repo_project_id`、`repo_type`，并且只在进入或用户切换页码时，通过 `src/codereview/api/` 懒加载对应的 10 条远端数据。接口响应使用 `meta.total_count`、`meta.total_pages` 返回准确总条数和总页数，控制器直接用其驱动顶部总数和底部分页。页面默认显式查询 open 状态，用户可切换 open/closed/merged/all；请求序号保证旧项目、旧筛选或旧页码的延迟响应不会覆盖当前视图。
+Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。所有列表、详情/diff 和仓库文件请求都根据当前项目持久化的 `repo_type` 选择实现，并在执行前校验其与 `remote_repo` 一致。审核控制器缓存一份归一化 diff，同时保留每个文件的原始行以支持可逆的上下文展开；hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。所有异步回写都使用序列号防止迟到响应污染当前项目或 PR。
+
+仓库 PR 列表归现有 Workflow 的 PR Tab 所有，不新增独立项目详情 PR 页面。`workflow/pr_list.rs` 在 event loop 之外读取当前项目持久化的 `repo_project_id`、`repo_type`，并且只在进入或用户切换页码时，通过 `src/git/` 懒加载对应的 10 条远端数据。GitHub 保留搜索接口提供的总数，并发请求当前页每个 PR 的详情，从而补齐源分支和目标分支名称。控制器在将列表值传给 Slint 前，把可解析的 Provider 更新时间统一格式化为东八区（UTC+08:00），并在 Provider 提供时使用准确总数驱动顶部总数和底部分页。页面默认显式查询 open 状态，用户可切换 open/closed/merged/all；请求序号保证旧项目、旧筛选或旧页码的延迟响应不会覆盖当前视图。请求成功且零条数据时显示随筛选状态变化的插画空状态；网络、鉴权或响应结构异常仍使用独立且可重试的错误状态。点击列表行会在根层打开审核工作区；其控制器加载并归一化所选 PR diff，同时保留下层列表状态。审核控制器根据归一化后的文件路径构建可折叠目录树；路径筛选、目录展开以及上一项/下一项文件导航只操作本地 model，不增加 HTTP 请求。`workflow/syntax_highlight.rs` 在 UI 层之外使用 `syntect` 把当前文件转换为适配主题的 token model，同时保留 Tab 和显示列宽。切换文件或展开 hunk 时，旧行 model 会保留到新高亮 model 完成，再由 event loop 原子替换；只有真正切换文件时才重置 viewport。
+
+审核文件树使用 GitHub 的平台 UI 字体栈（macOS 使用 SF 系统 UI 字体，Windows 使用 Segoe UI），代码区使用平台等宽字体栈。变更文件树和 Diff 行都使用虚拟化 `ListView` delegate，只实例化当前可见行。分隔线实时调整面板宽度；移动手柄以当前宽度叠加剩余的局部指针位移，使分隔线贴合指针，同时避免重建完整文件树或 Diff。会话宽度限制为 220–520 px 且不超过审核区宽度的 45%，确保 Diff 仍是主要区域。
+
+### Pull Request 子系统边界
+
+PR 功能由五个可替换层组成。这是后续迁移到其他技术栈时应保持的边界：
+
+```text
+展示层
+  PR 列表/表格 + 审核遮罩层 + 本地建议控件
+        ↕ 归一化 view model 与 loading/error 状态
+Workflow controllers
+  项目选择、页码/状态切换、旧结果防护、审核缓存
+        ↕ Provider-neutral use cases
+仓库服务层
+  校验持久化 Provider 类型与 remote URL；列表、diff、源码
+        ↕ Provider-neutral domain records
+Provider adapters
+  GitHub、GitLab、Gitee 公有服务、Gitee 兼容企业 API 映射
+        ↕ 统一 HTTP/auth/persistence
+基础设施层
+  项目注册表、本地 token/配置、HTTP client/interceptors、runtime
+```
+
+展示层不接收 Provider JSON 或凭据；Provider adapter 不拥有 UI 状态。仓库服务层是唯一可在校验 remote URL 后选择 adapter 的层，并以布尔能力值暴露空白字符过滤等 Provider 能力，而不是让 UI 自行推断。当前应用通过 Slint、Tokio 和 Rust mutex 实现这些层，但长期契约是归一化的 page/item/diff/source 数据，以及 [PR 工作流规格](specs/pr-review.md)定义的“最新请求优先”生命周期。本地 Analyze/Approve/Reject 控件刻意止步于项目级应用状态，不属于 Provider 写操作架构。
 
 ### Chat
 
@@ -134,11 +165,21 @@ Terminal 状态感知项目；同一项目重新打开时复用，切换项目�
 5. PR 数量在线程中加载，再通过 event loop 回写。
 6. PR 列表控制器读取持久化仓库元数据，经共享 runtime 懒加载当前选中的 open 远端分页；每次翻页只请求对应页。
 
+### PR 列表到审核
+
+1. 列表控制器在 UI 线程外读取仓库元数据；项目或列表状态变化时清空页缓存。
+2. 仓库服务拒绝与 `remote_repo` 不匹配的已持久化 `repo_type`，然后把请求路由到对应的 Provider adapter。
+3. Adapter 将 Provider 响应归一化为最多 10 条的页面。GitHub 保留搜索接口的准确总数，并发读取当前可见行详情以补充分支 ref。
+4. 控制器只在请求序列仍为最新时应用页面；在生成 view model 前将可解析的更新时间格式化为东八区（UTC+08:00）。
+5. 打开某一行后，列表保留在根层 overlay 下方。审核控制器重新读取元数据、请求一份归一化 diff，按项目/请求/空白模式缓存并渲染本地文件树。
+6. 文件选择、筛选、目录展开、复制路径、比例条渲染、语法高亮和收起已展开上下文均在本地完成。只有 hunk 展开和应用内 View file 会产生后续 Provider 读取；两者共享有界的固定源码缓存。单次展开最多展示 20 行，展开全部补齐当前文件全部隐藏区间，收起则恢复保留的原始 diff。
+7. 关闭 overlay 或切换项目会使列表/审核/高亮/源码请求序列失效，迟到任务不得影响新上下文。
+
 ### 项目保存与 Provider 查询
 
 1. Project 页面把本地仓库和远程仓库字段提交给 Rust callback。
 2. `src/project/mod.rs` 校验本地字段，并为每次项目保存启动一个共享 runtime 查询任务。
-3. `src/codereview/api/` 解析 `remote_repo`，并通过 `src/http/mod.rs` 调用对应的 Gitee、GitLab 或 GitHub 详情接口。
+3. `src/git/` 解析 `remote_repo`，使用 `src/codereview/api/` 的常量构建 Provider 请求，再通过 `src/http/mod.rs` 执行。
 4. 只有查询成功才会将 `repo_project_id`、`repo_type` 写入 `projects.json`；UI 刷新回到 Slint event loop 执行。
 5. 查询或持久化失败时只显示一次项目模块错误 Toast，不写入不完整记录。
 
@@ -208,7 +249,6 @@ Terminal viewport/session、更新取消、托盘关闭和路由布局需要做�
 
 ## 已知技术债
 
-- `src/git/{github,gitlab,gitee}.rs` 尚未形成文件名所暗示的 Provider 抽象。
 - `src/logger/debug_logger.rs` 有一个无法编译的 doctest。
 - `Route` 中部分页面是开发/演示界面，没有进入主导航。
 - 根项目许可证仍需明确。

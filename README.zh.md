@@ -59,6 +59,14 @@ cargo test --lib --locked
 SLINT_BACKEND=winit-skia-software cargo run
 ```
 
+Debug 构建会通过现有 Usher 日志每 5 秒记录一次进程内存，并记录生命周期检查点。Release 构建可通过以下方式启用同样的诊断：
+
+```sh
+USHER_MEMORY_DIAGNOSTICS=1 ./usher
+```
+
+筛选 `[Memory][Diag]`、`[Memory][UI]` 和 `[Workflow][PR Review][Memory]`，可以把 RSS/物理 footprint 变化与窗口尺寸、PR model/cache 归属对应起来。
+
 ## 配置和本地数据
 
 Usher 使用 `directories::ProjectDirs::from("com", "usher", "app")` 选择各平台的原生目录。
@@ -128,6 +136,7 @@ GitHub Release 工作流会生成 macOS 压缩包/DMG 和 Windows ZIP Bundle。
 - [English architecture](docs/architecture.md)
 - [Coding agent 指令](AGENTS.md)
 - [规格索引](docs/specs/README.md)
+- [Pull Request 工作流规格](docs/specs/pr-review.md)
 - [终端行为规格](docs/specs/terminal.md)
 - [终端历史排障记录](docs/terminal_viewport_iteration_notes.md)
 

@@ -443,7 +443,7 @@ fn start_project_save(
     }
 
     crate::app_runtime::shared_runtime().spawn(async move {
-        let details = crate::codereview::api::get_repo_detail(draft.remote_repo.as_str()).await;
+        let details = crate::git::get_repo_detail(draft.remote_repo.as_str()).await;
         let _ = slint::invoke_from_event_loop(move || {
             if let Ok(mut saves) = pending_project_saves.lock() {
                 saves.remove(pending_key.as_str());

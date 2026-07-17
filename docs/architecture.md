@@ -32,6 +32,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/main.rs` | Minimal binary entry point. Delegates to the library entry point. |
 | `src/lib.rs` | Creates `MainWindow`, initializes modules, wires cross-cutting callbacks, manages window lifecycle and shutdown. |
 | `src/app_runtime.rs` | Process-wide multi-thread Tokio runtime. Runtime threads install the tracing dispatch. |
+| `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots, startup checkpoints, UI-size correlation, and the cancellable periodic memory sampler. |
 | `src/shutdown.rs` | Ordered shutdown coordination. |
 | `src/single_instance.rs` | Single-instance process behavior. |
 | `src/tray.rs` | Desktop tray integration and tray-driven lifecycle actions. |
@@ -43,7 +44,8 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | Path | Responsibility |
 | --- | --- |
 | `src/project/` | Project registry, persistence, filtering, logos, PR/MR summaries, and project-to-workflow/terminal entry points. |
-| `src/codereview/api/` | Remote repository provider parsing and Gitee/GitLab/GitHub project-detail APIs. It resolves immutable provider project IDs before project persistence. |
+| `src/codereview/api/` | URL and path templates for Gitee, GitLab, and GitHub repository APIs. It contains no request execution, authentication, or response decoding. |
+| `src/git/` | Provider detection, repository operations, authentication headers, and normalization of provider responses into application models. |
 | `src/workflow/` | Per-project Branch, Tag, PR, and CD view state and command execution. |
 | `src/terminal/` | PTY lifecycle, viewport synchronization, rendering, input, selection, and project switching. |
 | `src/chat/` | Chat transport, sessions, JSONL persistence, Markdown conversion, rendering cache, pagination, and interaction binding. |
@@ -58,7 +60,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/notification.rs` | Queued notifications, timers, hover pause, actions, and icons. |
 | `src/dialog.rs` | Global modal dialog binding. |
 
-`src/git/` currently contains placeholders; provider HTTP behavior is implemented in `src/project/pr_stats.rs`. Do not assume the placeholder files are active abstractions.
+Repository endpoint definitions and executable behavior are intentionally separated: `src/git/` may reference constants from `src/codereview/api/`, while `src/codereview/api/` must not depend on `src/git/`, `src/http/`, reqwest, or serde.
 
 ### Slint UI
 
@@ -91,6 +93,8 @@ The effective startup sequence in `src/lib.rs` is intentionally ordered:
 
 Do not move modules earlier if they depend on generated Slint globals or on callbacks installed by a preceding module.
 
+Debug builds enable process memory diagnostics automatically; release builds enable them with `USHER_MEMORY_DIAGNOSTICS=1`. `[Memory][Diag]` records current/peak RSS, physical footprint, VM categories, regions, Mach ports, threads, faults, page-ins, and deltas from the previous/startup samples. `[Memory][UI]` correlates settled route/window changes with logical and physical dimensions. Feature-owned logs, such as `[Workflow][PR Review][Memory]`, must report bounded model/cache ownership without exposing source content or credentials. The sampler uses the shared runtime and is stopped by the normal pre-shutdown pipeline.
+
 ## Concurrency model
 
 - Slint objects and globals are event-loop-owned. Background tasks must use `slint::invoke_from_event_loop` before updating them.
@@ -107,13 +111,40 @@ Do not move modules earlier if they depend on generated Slint globals or on call
 
 ### Projects
 
-`project/projects.json` stores project records in the platform local-data directory. On an add or edit save, Rust derives the provider from `remote_repo`, fetches its project details through `src/codereview/api/`, and stores the resulting `repo_project_id` and lower-case `repo_type` (`gitee`, `gitlab`, or `github`) together with the project record. A failed lookup leaves the previous configuration untouched. Rust converts records to Slint models, resolves local/base64/remote logos, and schedules PR overview work. Remote logo bytes are cached under the process temporary directory; UI rendering should read cached data rather than perform network work.
+`project/projects.json` stores project records in the platform local-data directory. On an add or edit save, Rust derives the provider from `remote_repo`, fetches its project details through `src/git/` using URL templates from `src/codereview/api/`, and stores the resulting `repo_project_id` and lower-case `repo_type` (`gitee`, `gitlab`, or `github`) together with the project record. A failed lookup leaves the previous configuration untouched. Rust converts records to Slint models, resolves local/base64/remote logos, and schedules PR overview work. Remote logo bytes are cached under the process temporary directory; UI rendering should read cached data rather than perform network work.
 
 ### Workflow
 
 `WorkflowStore` keeps a current project plus per-project `WorkflowViewState`. Switching projects must rebind UI state and prevent logs, steps, or running flags from leaking between projects. Heavy workflow state is explicitly cleared when leaving the workflow route.
 
-The existing Workflow PR tab owns the repository pull-request list; there is no separate project-detail PR page. `workflow/pr_list.rs` reads the selected project's persisted `repo_project_id` and `repo_type` off the event loop, then lazily requests exactly one 10-record remote page through `src/codereview/api/` when the user opens or changes a page. The documented internal response wraps list data with `meta.total_count` and `meta.total_pages`; the controller uses those exact values for the total and paginator. The tab defaults to open requests and explicitly supplies the selected open/closed/merged/all filter. Request sequencing prevents a late response from a previous project, state, or page from replacing the current view.
+The Workflow PR list and full-window review workspace use a single provider-neutral façade in `src/git/`. Every list, detail/diff, and repository-file request is selected from the current project's persisted `repo_type`, then checked against `remote_repo` before the provider implementation runs. The review controller caches one normalized diff, retains its original per-file lines for reversible context expansion, and lazily fetches immutable head/base file content for hunk expansion or in-app full-file viewing. Per-file highlighted diffs use a four-entry LRU and immutable source text uses a three-entry LRU; the full-file highlighted model is transient UI state. All late async responses are sequence-guarded.
+
+The existing Workflow PR tab owns the repository pull-request list; there is no separate project-detail PR page. `workflow/pr_list.rs` reads the selected project's persisted `repo_project_id` and `repo_type` off the event loop, then lazily requests one 10-record remote page through `src/git/` when the user opens or changes a page. GitHub preserves search-result totals and concurrently enriches only that page's rows with per-PR detail requests so source and target branch names are available. The controller formats parseable provider update timestamps for UTC+08:00 before passing list values to Slint, and uses exact totals where the provider supplies them. The tab defaults to open requests and explicitly supplies the selected open/closed/merged/all filter. Request sequencing prevents a late response from a previous project, state, or page from replacing the current view. A successful zero-item page renders a filter-specific illustrated empty state, while transport, authentication, and schema failures remain a distinct retryable error state. Clicking a row opens a root-layer review workspace; its controller loads and normalizes the selected PR diff without discarding the list state. The review controller derives a collapsible directory tree from normalized file paths; path filtering, folder expansion, and previous/next file navigation are local model operations and do not issue more HTTP requests. `workflow/syntax_highlight.rs` uses `syntect` off the UI layer to convert the selected file into theme-aware token models while preserving tabs and display-column widths. During file switches or hunk expansion, the previous line model stays mounted until the new highlighted model is ready; the event loop swaps it atomically, and only a real file switch resets the viewport.
+
+The review file tree uses GitHub's platform UI font stack (SF system UI on macOS and Segoe UI on Windows), while source code uses the platform monospace stack. Both the changed-file tree and diff rows use virtualized `ListView` delegates so only visible rows are instantiated. The divider resizes the pane live; its moving-handle calculation applies the remaining local pointer delta to the current width, keeping the divider attached to the pointer without rebuilding the complete tree or diff. The session preference is clamped to 220–520 px and no more than 45% of the review width so the diff remains the primary surface.
+
+### Pull request subsystem boundary
+
+The PR feature has five replaceable layers. This is the intended boundary for a rewrite in another technology stack:
+
+```text
+Presentation
+  PR list/table + review overlay + local recommendation controls
+        ↕ normalized view models and loading/error state
+Workflow controllers
+  project selection, page/state changes, stale-result guards, review cache
+        ↕ provider-neutral use cases
+Repository service
+  validate persisted provider type against remote URL; list, diff, source
+        ↕ provider-neutral domain records
+Provider adapters
+  GitHub, GitLab, public Gitee, Gitee-compatible enterprise API mappings
+        ↕ shared HTTP/auth/persistence
+Infrastructure
+  project registry, local tokens/configuration, HTTP client/interceptors, runtime
+```
+
+Presentation does not receive provider JSON or credentials. Provider adapters do not own UI state. The repository service is the only layer allowed to select an adapter after validating the remote URL, and it exposes provider capabilities such as whitespace filtering as booleans rather than making the UI infer them. The current application uses Slint, Tokio, and Rust mutexes to realize those layers, but the durable contract is the normalized page/item/diff/source data and the “latest request wins” lifecycle described in [the PR workflow specification](specs/pr-review.md). The local Analyze/Approve/Reject controls intentionally stop at project-scoped app state; no provider mutation is part of this architecture.
 
 ### Chat
 
@@ -134,11 +165,21 @@ Terminal state is project-aware and persists while reopening the same project. S
 5. PR counts are loaded on a worker thread and applied through the event loop.
 6. The PR-list controller reads persisted repository metadata and lazily loads the selected remote open page through the shared runtime; every page change requests that page only.
 
+### Pull request list to review
+
+1. The list controller loads repository metadata off the UI thread and resets its page cache whenever the selected project or list state changes.
+2. The repository service rejects a persisted `repo_type` that does not match `remote_repo`, then routes the request to the matching provider adapter.
+3. The adapter normalizes provider responses into a 10-item page. GitHub retains its exact search total and enriches visible rows with concurrent detail requests for branch refs.
+4. The controller applies a page only if its request sequence is current; it formats parseable update times as UTC+08:00 before producing view models.
+5. Opening a row keeps the list visible underneath a root-layer overlay. The review controller reads fresh metadata, requests one normalized diff, caches it by project/request/whitespace mode, and renders its local file tree.
+6. File selection, filtering, folder expansion, copy-path, ratio rendering, syntax highlighting, and collapsing expanded context are local. Hunk expansion and in-app View file are the only follow-up provider reads; both share the bounded immutable-source cache. Individual expansion reveals at most 20 lines, expand-all fills every hidden range for the selected file, and collapse restores the retained original diff.
+7. Closing the overlay or switching project invalidates list/review/highlight/source sequences so late work cannot affect the new context.
+
 ### Project save and provider lookup
 
 1. The Project page submits the local/remote repository fields to its Rust callback.
 2. `src/project/mod.rs` validates local fields and starts one shared-runtime lookup per project save.
-3. `src/codereview/api/` parses `remote_repo` and calls the matching Gitee, GitLab, or GitHub detail API through `src/http/mod.rs`.
+3. `src/git/` parses `remote_repo`, builds the matching provider request from constants in `src/codereview/api/`, and executes it through `src/http/mod.rs`.
 4. Only a successful response updates `projects.json` with `repo_project_id` and `repo_type`; the UI refresh runs on the Slint event loop.
 5. Lookup or persistence failures show one project-owned error toast and do not write a partial record.
 
@@ -208,7 +249,6 @@ Run targeted manual checks for terminal viewport/session changes, update cancell
 
 ## Known technical debt
 
-- `src/git/{github,gitlab,gitee}.rs` are not yet the provider abstraction their names suggest.
 - `src/logger/debug_logger.rs` contains a doctest that does not compile.
 - Some routes in `Route` are development/demo surfaces and are not in primary navigation.
 - Root project licensing still needs an explicit decision.

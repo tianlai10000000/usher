@@ -184,6 +184,7 @@ export component Workflow inherits PageView {
     callback pr-confirm(bool);
     callback pr-list-state-change(string);
     callback pr-list-page-change(int);
+    callback pr-open-detail(string, string, string, string, string, string);
     callback cd-start(string, string, string);
     callback cd-rollback(string);
 
@@ -684,6 +685,9 @@ export component Workflow inherits PageView {
         }
         change-page(page) => {
             root.pr-list-page-change(page);
+        }
+        open-detail(number, title, author, source-branch, target-branch, updated-at) => {
+            root.pr-open-detail(number, title, author, source-branch, target-branch, updated-at);
         }
     }
 

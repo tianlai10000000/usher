@@ -63,6 +63,98 @@ component PageButton inherits Rectangle {
     TouchArea { enabled: root.button-enabled; clicked => { root.clicked(); } }
 }
 
+// Keep empty and error feedback in the same Vuetify-style visual hierarchy.
+// Both illustrations are bundled resources, so state changes perform no I/O.
+component PrListStatePanel inherits Rectangle {
+    in property <bool> error-state: false;
+    in property <string> title;
+    in property <string> description;
+    in property <bool> show-action: false;
+    callback action();
+
+    height: 500px;
+    background: transparent;
+
+    VerticalLayout {
+        x: 32px;
+        y: 28px;
+        width: parent.width - 64px;
+        height: parent.height - 56px;
+        spacing: 12px;
+        alignment: center;
+
+        HorizontalLayout {
+            width: parent.width;
+            height: 220px;
+            spacing: 0px;
+
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                width: min(320px, parent.width);
+                height: parent.height;
+                background: transparent;
+
+                if root.error-state: Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: @image-url("../../assets/illustrations/vuetify-empty-state-connection.svg");
+                    image-fit: contain;
+                }
+                if !root.error-state: Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: @image-url("../../assets/illustrations/vuetify-empty-state-teamwork.png");
+                    image-fit: contain;
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        MaterialText {
+            width: parent.width;
+            height: 36px;
+            text: root.title;
+            horizontal_alignment: center;
+            vertical_alignment: center;
+            font_size: 22px;
+            font_weight: 600;
+            color: MaterialPalette.on_surface;
+        }
+        HorizontalLayout {
+            width: parent.width;
+            height: 58px;
+            spacing: 0px;
+
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                width: min(620px, parent.width);
+                height: parent.height;
+                text: root.description;
+                wrap: word-wrap;
+                horizontal_alignment: center;
+                vertical_alignment: center;
+                font-size: 14px;
+                color: MaterialPalette.on_surface_variant;
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        if root.show-action: HorizontalLayout {
+            width: parent.width;
+            height: 42px;
+            spacing: 0px;
+
+            Rectangle { horizontal-stretch: 1; }
+            FilledButton {
+                width: 148px;
+                height: parent.height;
+                text: "Retry Request";
+                clicked => { root.action(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+    }
+}
+
 component PrField inherits Rectangle {
     in property <string> label;
     in-out property <string> value;
@@ -103,6 +195,7 @@ export component PrFlow {
     in property <string> manual-status;
     callback change-state(string);
     callback change-page(int);
+    callback open-detail(string, string, string, string, string, string);
     callback analyze(string, string, string, bool, bool);
     callback confirm(bool);
 
@@ -112,6 +205,18 @@ export component PrFlow {
     private property <bool> ci-green: true;
     private property <bool> reviewers-ready: false;
     private property <bool> compact-table: root.width < 820px;
+    private property <string> empty-title: root.pr-state == "open"
+        ? "There aren’t any open pull requests."
+        : (root.pr-state == "closed"
+            ? "There aren’t any closed pull requests."
+            : (root.pr-state == "merged"
+                ? "There aren’t any merged pull requests."
+                : "There aren’t any pull requests."));
+    private property <string> empty-description: root.pr-state == "all"
+        ? "New pull requests will appear here when they’re created."
+        : "Try another status filter.";
+    // Keep the header and row cells on the same branch-column boundary.
+    private property <length> branch-column-width: min(320px, max(240px, root.width * 0.2));
     private property <length> dual-field-width: max(0px, (root.width - 12px) / 2);
 
     VerticalLayout {
@@ -147,7 +252,16 @@ export component PrFlow {
             StatusFilter { label: "Merged"; value: "merged"; selected-value: root.pr-state; selected(value) => { root.change-state(value); } }
             StatusFilter { label: "All"; value: "all"; selected-value: root.pr-state; selected(value) => { root.change-state(value); } }
             Rectangle { horizontal-stretch: 1; }
-            MaterialText { text: root.pr-total + (root.pr-total-exact ? " total" : "+ total"); font_size: 12px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+            MaterialText {
+                text: root.pr-loading
+                    ? "Loading…"
+                    : (root.pr-error != ""
+                        ? "Total unavailable"
+                        : root.pr-total + (root.pr-total-exact ? " total" : "+ total"));
+                font_size: 12px;
+                color: MaterialPalette.on_surface_variant;
+                vertical_alignment: center;
+            }
         }
 
         Rectangle {
@@ -172,7 +286,7 @@ export component PrFlow {
                         padding-left: 14px; padding-right: 14px; spacing: 12px;
                         MaterialText { width: 62px; text: "PR"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
                         MaterialText { horizontal-stretch: 3; text: "Title"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        if !root.compact-table: MaterialText { horizontal-stretch: 2; text: "Branch"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        if !root.compact-table: MaterialText { width: root.branch-column-width; text: "Branch"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
                         if !root.compact-table: MaterialText { width: 110px; text: "Author"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
                         MaterialText { width: 142px; text: "Updated"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
                     }
@@ -183,14 +297,17 @@ export component PrFlow {
                     MaterialText { width: parent.width; height: parent.height; text: "Loading pull requests…"; horizontal_alignment: center; vertical_alignment: center; font_size: 13px; color: MaterialPalette.on_surface_variant; }
                 }
 
-                if !root.pr-loading && root.pr-error != "": Rectangle {
-                    height: 112px;
-                    Text { x: 20px; y: 20px; width: parent.width - 40px; height: parent.height - 40px; text: root.pr-error; wrap: word-wrap; horizontal_alignment: center; vertical_alignment: center; font-size: 13px; color: MaterialPalette.error; }
+                if !root.pr-loading && root.pr-error != "": PrListStatePanel {
+                    error-state: true;
+                    title: "Unable to load pull requests";
+                    description: "Check your code hosting configuration or connection, then try again.";
+                    show-action: true;
+                    action => { root.change-page(root.pr-page); }
                 }
 
-                if !root.pr-loading && root.pr-error == "" && root.pr-items.length == 0: Rectangle {
-                    height: 112px;
-                    MaterialText { width: parent.width; height: parent.height; text: "No " + root.pr-state + " pull requests."; horizontal_alignment: center; vertical_alignment: center; font_size: 13px; color: MaterialPalette.on_surface_variant; }
+                if !root.pr-loading && root.pr-error == "" && root.pr-items.length == 0: PrListStatePanel {
+                    title: root.empty-title;
+                    description: root.empty-description;
                 }
 
                 if !root.pr-loading && root.pr-error == "": VerticalLayout {
@@ -205,18 +322,30 @@ export component PrFlow {
                             padding-left: 14px; padding-right: 14px; spacing: 12px;
                             MaterialText { width: 62px; text: "#" + item.number; font_size: 12px; font_weight: 600; color: MaterialPalette.primary; vertical_alignment: center; overflow: elide; }
                             MaterialText { horizontal-stretch: 3; text: item.title; font_size: 13px; color: MaterialPalette.on_surface; vertical_alignment: center; overflow: elide; }
-                            if !root.compact-table: MaterialText { horizontal-stretch: 2; text: item.source-branch + " → " + item.target-branch; font_size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
+                            if !root.compact-table: MaterialText { width: root.branch-column-width; text: item.source-branch + " → " + item.target-branch; font_size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
                             if !root.compact-table: MaterialText { width: 110px; text: item.author; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
                             MaterialText { width: 142px; text: item.updated-at; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
                         }
                         // Keep the hover target mounted so row feedback remains stable.
-                        row-hover := TouchArea { }
+                        row-hover := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.open-detail(
+                                    item.number,
+                                    item.title,
+                                    item.author,
+                                    item.source-branch,
+                                    item.target-branch,
+                                    item.updated-at,
+                                );
+                            }
+                        }
                     }
                 }
             }
         }
 
-        HorizontalLayout {
+        if !root.pr-loading && root.pr-error == "" && root.pr-items.length > 0: HorizontalLayout {
             width: parent.width;
             height: 32px;
             alignment: center;

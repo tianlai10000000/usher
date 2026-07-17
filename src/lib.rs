@@ -48,6 +48,7 @@ use chat::setup_chat;
 mod ai;
 
 mod app_runtime;
+mod memory_diagnostics;
 mod terminal;
 
 mod logger;
@@ -63,6 +64,7 @@ mod single_instance;
 mod workflow;
 use workflow::setup_workflow;
 mod codereview;
+mod git;
 mod project;
 use project::setup_project;
 use terminal::{set_dark_mode as set_terminal_dark_mode, setup_terminal, shutdown_terminal};
@@ -679,7 +681,85 @@ fn install_titlebar_settings_button(window: &MainWindow) {
 #[cfg(not(target_os = "macos"))]
 fn install_titlebar_settings_button(_window: &MainWindow) {}
 
+/// Register GitHub's macOS UI and monospace faces without bundling Apple's
+/// fonts in the application. Slint 1.17 accepts one family name per text item,
+/// so Rust resolves the platform-specific families for the review workspace.
+#[cfg(target_os = "macos")]
+fn setup_pr_review_fonts(app: &MainWindow) {
+    use slint::fontique_010::fontique;
+
+    const SF_MONO_FONTS: &[&str] = &[
+        "/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts/SF-Mono-Regular.otf",
+        "/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts/SF-Mono-RegularItalic.otf",
+        "/System/Applications/Utilities/Terminal.app/Contents/Resources/Fonts/SF-Mono-Semibold.otf",
+    ];
+    const SF_UI_FONTS: &[&str] = &[
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/SFNSItalic.ttf",
+    ];
+
+    let mut collection = slint::fontique_010::shared_collection();
+    let mut regular_registered = false;
+
+    for (index, path) in SF_MONO_FONTS.iter().enumerate() {
+        let Ok(bytes) = std::fs::read(path) else {
+            log::debug!("[PR Review] SF Mono face is unavailable: {path}");
+            continue;
+        };
+        let blob = fontique::Blob::new(std::sync::Arc::new(bytes));
+        let registered = collection.register_fonts(blob, None);
+        if !registered.is_empty() && index == 0 {
+            regular_registered = true;
+        }
+    }
+
+    if regular_registered {
+        // Apple's OTF records `SF Mono` as the family and
+        // `SFMono-Regular` as the PostScript face. GitHub puts that
+        // PostScript face first in its macOS code font stack, while Slint
+        // resolves the registered font by family name.
+        app.set_workflow_pr_review_code_font_family("SF Mono".into());
+        log::info!("[PR Review] Using GitHub-compatible SFMono-Regular code font");
+    } else {
+        app.set_workflow_pr_review_code_font_family("Menlo".into());
+        log::warn!("[PR Review] SFMono-Regular unavailable; falling back to Menlo");
+    }
+
+    let mut ui_regular_registered = false;
+    for (index, path) in SF_UI_FONTS.iter().enumerate() {
+        let Ok(bytes) = std::fs::read(path) else {
+            log::debug!("[PR Review] SF system UI face is unavailable: {path}");
+            continue;
+        };
+        let blob = fontique::Blob::new(std::sync::Arc::new(bytes));
+        let registered = collection.register_fonts(blob, None);
+        if !registered.is_empty() && index == 0 {
+            ui_regular_registered = true;
+        }
+    }
+    if ui_regular_registered {
+        app.set_workflow_pr_review_tree_font_family(".SF NS".into());
+        log::info!("[PR Review] Using GitHub-compatible macOS system UI font");
+    } else {
+        app.set_workflow_pr_review_tree_font_family("Helvetica Neue".into());
+        log::warn!("[PR Review] macOS system UI font unavailable; falling back to Helvetica Neue");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn setup_pr_review_fonts(app: &MainWindow) {
+    app.set_workflow_pr_review_code_font_family("Consolas".into());
+    app.set_workflow_pr_review_tree_font_family("Segoe UI".into());
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn setup_pr_review_fonts(app: &MainWindow) {
+    app.set_workflow_pr_review_code_font_family("Liberation Mono".into());
+    app.set_workflow_pr_review_tree_font_family("Noto Sans".into());
+}
+
 fn ui() -> Result<MainWindow> {
+    memory_diagnostics::initialize_baseline();
     log::info!("Usher v{} starting...", env!("CARGO_PKG_VERSION"));
 
     // ========= Pre-Window Settings ========= //
@@ -693,6 +773,7 @@ fn ui() -> Result<MainWindow> {
     // Now create the MainWindow (will inherit app appearance)
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
+    setup_pr_review_fonts(&app);
 
     // Intercept title-bar close button: hide window instead of terminating process.
     app.window().on_close_requested(|| {
@@ -702,16 +783,19 @@ fn ui() -> Result<MainWindow> {
 
     // Initialize debug logger after window is created (needs app for callbacks)
     setup_debug_logger(&app, true).unwrap_or_else(|e| eprintln!("Debug Logger init failed: {}", e)); // eprintln here since logger not yet initialized
+    memory_diagnostics::log_checkpoint("startup.debug_logger_ready");
 
     // ========= Trace Logger Initialization ========= //
     setup_tracing_logger(&app, loaded_settings.tracing_logger_active)
         .unwrap_or_else(|e| eprintln!("Tracing Logger init failed: {}", e));
+    memory_diagnostics::log_checkpoint("startup.tracing_logger_ready");
 
     // ========= Settings ========= //
     // Apply loaded settings to AppState
     setup_settings(&app, &loaded_settings);
     set_terminal_dark_mode(&app, is_dark);
     Router::apply_route_ui_state(&app, app.get_current_route());
+    memory_diagnostics::log_checkpoint("startup.settings_and_initial_route_ready");
 
     // ========= Debug: Simulate Crash ========= //
     app.on_simulate_crash(|| {
@@ -723,6 +807,7 @@ fn ui() -> Result<MainWindow> {
     // ========= Update ========= //
     // setup_updater must be called AFTER setup_settings so it reads the correct auto_update value
     let updater_ctx = setup_updater(&app)?;
+    memory_diagnostics::log_checkpoint("startup.updater_ready");
 
     // ========= Auto Update ========= //
     // Initialize auto-update based on loaded settings
@@ -1037,6 +1122,7 @@ fn ui() -> Result<MainWindow> {
     // ========= Notification ========= //
     // Single window: don't pass shared queue (use None)
     setup_notifications(&app, None);
+    memory_diagnostics::log_checkpoint("startup.notifications_ready");
 
     // If multi-window application, want to truly share queue:
     // let shared_queue = Arc::new(RwLock::new(SharedQueue::default()));
@@ -1055,28 +1141,73 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Dialog ========= //
     setup_dialog(&app);
+    memory_diagnostics::log_checkpoint("startup.toast_http_network_dialog_ready");
 
     // ========= Project ========= //
     setup_project(&app);
+    memory_diagnostics::log_checkpoint("startup.project_ready");
 
     // ========= Chat ========= //
     setup_chat(&app);
+    memory_diagnostics::log_checkpoint("startup.chat_ready");
 
     // ========= Terminal Drawer ========= //
     setup_terminal(&app);
+    memory_diagnostics::log_checkpoint("startup.terminal_ready");
 
     AppState::get(&app); // keep nearby state init ordering explicit
     let app_for_page_memory_diag = app.as_weak();
+    let last_page_memory_diag = std::sync::Arc::new(std::sync::Mutex::new(
+        None::<(std::time::Instant, Route, i32, i32, bool)>,
+    ));
+    let last_page_memory_diag_for_callback = last_page_memory_diag.clone();
     app.on_page_memory_diag(move |route, width_px, height_px, terminal_visible| {
         let scale_factor = app_for_page_memory_diag
             .upgrade()
             .map(|ui| ui.window().scale_factor())
             .unwrap_or(1.0);
         terminal::log_page_memory_diag(route, width_px, height_px, terminal_visible, scale_factor);
+        if memory_diagnostics::diagnostics_enabled() {
+            let now = std::time::Instant::now();
+            let should_log = last_page_memory_diag_for_callback
+                .lock()
+                .map(|mut previous| {
+                    let changed_context = previous.as_ref().is_none_or(
+                        |(_, previous_route, _, _, previous_terminal_visible)| {
+                            *previous_route != route
+                                || *previous_terminal_visible != terminal_visible
+                        },
+                    );
+                    let interval_elapsed = previous.as_ref().is_none_or(|(at, _, _, _, _)| {
+                        now.duration_since(*at) >= std::time::Duration::from_secs(1)
+                    });
+                    if changed_context || interval_elapsed {
+                        *previous = Some((now, route, width_px, height_px, terminal_visible));
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(true);
+            if should_log {
+                log::info!(
+                    "[Memory][UI] route={:?} logical_width={} logical_height={} scale_factor={:.2} physical_width={:.0} physical_height={:.0} terminal_visible={}",
+                    route,
+                    width_px,
+                    height_px,
+                    scale_factor,
+                    width_px as f32 * scale_factor,
+                    height_px as f32 * scale_factor,
+                    terminal_visible,
+                );
+                memory_diagnostics::log_checkpoint("ui.layout_or_route_changed");
+            }
+        }
     });
 
     // ========= Workflow ========= //
     setup_workflow(&app);
+    memory_diagnostics::log_checkpoint("startup.workflow_ready");
 
     // ========= System Tray ========= //
     // Setup system tray icon with context menu
@@ -1109,12 +1240,20 @@ fn ui() -> Result<MainWindow> {
     shutdown::register_pre_shutdown_task_with_priority("stop_auto_update", PRIORITY_HIGH, || {
         stop_auto_update();
     });
+    shutdown::register_pre_shutdown_task_with_priority(
+        "stop_memory_diagnostics",
+        PRIORITY_HIGH,
+        || {
+            memory_diagnostics::stop_periodic_logging();
+        },
+    );
     shutdown::register_pre_shutdown_task_with_priority("shutdown_terminal", PRIORITY_HIGH, || {
         shutdown_terminal();
     });
     shutdown::register_ui_shutdown_task_with_priority("remove_tray", PRIORITY_HIGH, || {
         tray::remove_tray();
     });
+    memory_diagnostics::log_checkpoint("startup.ui_bindings_complete");
 
     Ok(app)
 }
@@ -1136,6 +1275,8 @@ pub fn main() {
 
     let ui: MainWindow = ui().unwrap();
     ui.show().unwrap();
+    memory_diagnostics::log_checkpoint("startup.window_shown");
+    memory_diagnostics::start_periodic_logging();
     install_titlebar_settings_button(&ui);
     let ui_weak_titlebar_retry_1 = ui.as_weak();
     Timer::single_shot(std::time::Duration::from_millis(300), move || {

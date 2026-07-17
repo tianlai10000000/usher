@@ -1,0 +1,1339 @@
+import { MaterialPalette, MaterialText, Switch, ToolTip } from "@material";
+import { ListView } from "../../../material-1.7.1-fixed/ui/components/list_view.slint";
+import { AppState } from "../../state/app_state.slint";
+
+export struct WorkflowPrDiffFile {
+    path: string,
+    old-path: string,
+    change-type: string,
+    added-lines: int,
+    removed-lines: int,
+    viewed: bool,
+    line-count: int,
+}
+
+export struct WorkflowPrDiffToken {
+    text: string,
+    color: color,
+    dark-color: color,
+    columns: int,
+    indentation: bool,
+    bold: bool,
+    italic: bool,
+}
+
+export struct WorkflowPrDiffLine {
+    old-line: int,
+    new-line: int,
+    kind: string,
+    content: string,
+    tokens: [WorkflowPrDiffToken],
+    display-columns: int,
+    expandable: bool,
+}
+
+export struct WorkflowPrTreeItem {
+    kind: string,
+    name: string,
+    path: string,
+    depth: int,
+    file-index: int,
+    expanded: bool,
+    added-lines: int,
+    removed-lines: int,
+    change-type: string,
+    file-count: int,
+}
+
+export struct WorkflowPrFileExtensionFilter {
+    extension: string,
+    count: int,
+    selected: bool,
+}
+
+component ReviewActionButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    callback clicked();
+
+    width: 96px;
+    height: 36px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: root.primary ? MaterialPalette.primary : MaterialPalette.outline;
+    background: root.primary
+        ? (action-touch.has-hover ? MaterialPalette.primary.darker(8%) : MaterialPalette.primary)
+        : (action-touch.has-hover ? MaterialPalette.surface_container_high : MaterialPalette.surface_container_lowest);
+
+    MaterialText {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        horizontal_alignment: center;
+        vertical_alignment: center;
+        font_size: 12px;
+        font_weight: 600;
+        color: root.primary ? MaterialPalette.on_primary : MaterialPalette.on_surface;
+    }
+
+    action-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component TreeIndentGuides inherits Rectangle {
+    in property <int> depth: 0;
+    background: transparent;
+    border-width: 0px;
+    if root.depth > 0: Rectangle { x: 15px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
+    if root.depth > 1: Rectangle { x: 33px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
+    if root.depth > 2: Rectangle { x: 51px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
+    if root.depth > 3: Rectangle { x: 69px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
+    if root.depth > 4: Rectangle { x: 87px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
+    if root.depth > 5: Rectangle { x: 105px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
+}
+
+component FileToolbarButton inherits Rectangle {
+    in property <image> icon-source;
+    in property <bool> button-enabled: true;
+    in property <bool> selected: false;
+    in property <string> tooltip-text;
+    in property <bool> tooltip-align-right: false;
+    callback clicked();
+
+    width: 30px;
+    height: 46px;
+    background: transparent;
+
+    button-surface := Rectangle {
+        y: (parent.height - self.height) / 2;
+        width: parent.width;
+        height: 28px;
+        border-radius: 6px;
+        border-width: root.selected ? 1px : 0px;
+        border-color: MaterialPalette.outline_variant;
+        background: root.selected
+            ? MaterialPalette.surface_container_high
+            : (button-touch.has-hover && root.button-enabled ? MaterialPalette.surface_container_high : transparent);
+        opacity: root.button-enabled ? 1 : 0.38;
+
+        Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 16px;
+            height: 16px;
+            source: root.icon-source;
+            image-fit: contain;
+        }
+    }
+    button-touch := TouchArea {
+        y: button-surface.y;
+        height: button-surface.height;
+        mouse-cursor: root.button-enabled ? pointer : default;
+        clicked => {
+            if root.button-enabled { root.clicked(); }
+        }
+    }
+    if button-touch.has-hover && root.tooltip-text != "": ToolTip {
+        x: root.tooltip-align-right ? root.width - self.width : 0px;
+        y: root.height + 4px;
+        text: root.tooltip-text;
+    }
+}
+
+component FileTreeToggleButton inherits Rectangle {
+    in property <bool> file-tree-visible: true;
+    callback clicked();
+
+    width: 32px;
+    height: 46px;
+    background: transparent;
+
+    button-surface := Rectangle {
+        y: 7px;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        background: root.file-tree-visible
+            ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
+            : (toggle-touch.has-hover
+                ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
+                : transparent);
+        Image {
+            x: 8px;
+            y: 8px;
+            width: 16px;
+            height: 16px;
+            source: root.file-tree-visible
+                ? @image-url("../../assets/icons/octicon-sidebar-collapse-16.svg")
+                : @image-url("../../assets/icons/octicon-sidebar-expand-16.svg");
+            image-fit: contain;
+            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        }
+    }
+
+    toggle-touch := TouchArea {
+        y: button-surface.y;
+        width: button-surface.width;
+        height: button-surface.height;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    if toggle-touch.has-hover: ToolTip {
+        x: 0px;
+        y: root.height + 4px;
+        text: root.file-tree-visible ? "Hide file tree" : "Show file tree";
+    }
+}
+
+component FileMenuButton inherits Rectangle {
+    in property <bool> button-enabled: true;
+    in property <bool> viewing-file: false;
+    callback action();
+
+    width: 30px;
+    height: 46px;
+
+    FileToolbarButton {
+        width: parent.width;
+        height: parent.height;
+        icon-source: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
+        button-enabled: root.button-enabled;
+        tooltip-text: "More file actions";
+        tooltip-align-right: true;
+        clicked => { menu-popup.show(); }
+    }
+
+    menu-popup := PopupWindow {
+        x: root.width - self.width;
+        y: root.height - 4px;
+        width: 142px;
+        height: 42px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-radius: 7px;
+            border-width: 1px;
+            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+            background: AppState.effective-dark-mode ? #151b23 : #ffffff;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #0000002b;
+            drop-shadow-offset-y: 3px;
+
+            Rectangle {
+                x: 5px;
+                y: 5px;
+                width: parent.width - 10px;
+                height: parent.height - 10px;
+                border-radius: 5px;
+                background: view-file-touch.has-hover ? MaterialPalette.surface_container_high : transparent;
+                MaterialText {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    height: parent.height;
+                    text: root.viewing-file ? "View diff" : "View file";
+                    vertical_alignment: center;
+                    font-size: 11px;
+                    font-weight: 500;
+                    color: MaterialPalette.on_surface;
+                }
+                view-file-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        menu-popup.close();
+                        root.action();
+                    }
+                }
+            }
+        }
+    }
+}
+
+component DiffStatSegment inherits Rectangle {
+    in property <string> kind: "neutral";
+    width: 8px;
+    height: 8px;
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        image-fit: contain;
+        source: root.kind == "added"
+            ? (AppState.effective-dark-mode
+                ? @image-url("../../assets/icons/github-diffstat-added-dark-8.svg")
+                : @image-url("../../assets/icons/github-diffstat-added-8.svg"))
+            : (root.kind == "deleted"
+                ? (AppState.effective-dark-mode
+                    ? @image-url("../../assets/icons/github-diffstat-deleted-dark-8.svg")
+                    : @image-url("../../assets/icons/github-diffstat-deleted-8.svg"))
+                : (AppState.effective-dark-mode
+                    ? @image-url("../../assets/icons/github-diffstat-neutral-dark-8.svg")
+                    : @image-url("../../assets/icons/github-diffstat-neutral-8.svg")));
+    }
+}
+
+component DiffStatBar inherits Rectangle {
+    in property <int> additions;
+    in property <int> deletions;
+    private property <int> total: root.additions + root.deletions;
+    // GitHub assigns whole fifths independently. Any fractional remainder is
+    // intentionally rendered as a neutral block rather than rounded up.
+    private property <int> added-blocks: root.total == 0 ? 0 : Math.floor(root.additions * 5 / root.total);
+    private property <int> deleted-blocks: root.total == 0 ? 0 : Math.floor(root.deletions * 5 / root.total);
+    width: 44px;
+    height: 46px;
+    background: transparent;
+    HorizontalLayout {
+        y: (parent.height - self.height) / 2;
+        width: parent.width;
+        height: 8px;
+        spacing: 1px;
+        DiffStatSegment { kind: root.added-blocks > 0 ? "added" : (root.deleted-blocks > 0 ? "deleted" : "neutral"); }
+        DiffStatSegment { kind: root.added-blocks > 1 ? "added" : (root.added-blocks + root.deleted-blocks > 1 ? "deleted" : "neutral"); }
+        DiffStatSegment { kind: root.added-blocks > 2 ? "added" : (root.added-blocks + root.deleted-blocks > 2 ? "deleted" : "neutral"); }
+        DiffStatSegment { kind: root.added-blocks > 3 ? "added" : (root.added-blocks + root.deleted-blocks > 3 ? "deleted" : "neutral"); }
+        DiffStatSegment { kind: root.added-blocks > 4 ? "added" : (root.added-blocks + root.deleted-blocks > 4 ? "deleted" : "neutral"); }
+    }
+}
+
+component FileDiffStat inherits Rectangle {
+    in property <int> additions;
+    in property <int> deletions;
+    in property <bool> has-selection: true;
+    in property <string> font-family: ".SF NS";
+
+    width: diffstat-bar.x + diffstat-bar.width;
+    height: 46px;
+    horizontal-stretch: 0;
+    background: transparent;
+    accessible-role: none;
+
+    added-stat := Text {
+        x: 0px;
+        width: self.preferred-width;
+        height: parent.height;
+        text: root.has-selection ? "+" + root.additions : "";
+        vertical-alignment: center;
+        font-family: root.font-family;
+        font-size: 12px;
+        font-weight: 600;
+        color: AppState.effective-dark-mode ? #3fb950 : #1f883d;
+    }
+
+    removed-stat := Text {
+        x: added-stat.x + added-stat.width + 4px;
+        width: self.preferred-width;
+        height: parent.height;
+        text: root.has-selection ? "−" + root.deletions : "";
+        vertical-alignment: center;
+        font-family: root.font-family;
+        font-size: 12px;
+        font-weight: 600;
+        color: AppState.effective-dark-mode ? #f85149 : #cf222e;
+    }
+
+    diffstat-bar := DiffStatBar {
+        x: removed-stat.x + removed-stat.width + 4px;
+        additions: root.additions;
+        deletions: root.deletions;
+    }
+}
+
+component CodeRenderingIndicator inherits Rectangle {
+    width: 166px;
+    height: 36px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: AppState.effective-dark-mode ? #151b23 : #ffffff;
+    drop-shadow-blur: 14px;
+    drop-shadow-color: AppState.effective-dark-mode ? #00000066 : #1f232826;
+    drop-shadow-offset-y: 4px;
+
+    HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding-left: 13px;
+        padding-right: 14px;
+        spacing: 9px;
+        alignment: center;
+
+        Rectangle {
+            width: 16px;
+            height: parent.height;
+            background: transparent;
+
+            private property <float> rotation-progress: mod(animation-tick(), 900ms) / 900ms;
+
+            Image {
+                y: (parent.height - self.height) / 2;
+                width: parent.width;
+                height: 16px;
+                source: @image-url("../../assets/icons/loading.svg");
+                image-fit: contain;
+                colorize: MaterialPalette.primary;
+                transform-rotation: parent.rotation-progress * 360deg;
+                transform-origin: { x: self.width / 2, y: self.height / 2 };
+            }
+        }
+
+        MaterialText {
+            text: "Rendering code";
+            vertical-alignment: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: MaterialPalette.on_surface;
+        }
+    }
+}
+
+component GitHubFileFilterField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> font-family: ".SF NS";
+
+    height: 32px;
+    border-radius: 6px;
+    border-width: filter-input.has-focus ? 2px : 1px;
+    border-color: filter-input.has-focus
+        ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
+        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
+    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    clip: true;
+
+    Image {
+        x: 8px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../../assets/icons/octicon-search-16.svg");
+        image-fit: contain;
+        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    }
+
+    filter-input := TextInput {
+        x: 32px;
+        y: 0px;
+        width: parent.width - 40px;
+        height: parent.height;
+        text <=> root.text;
+        single-line: true;
+        font-family: root.font-family;
+        font-size: 14px;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        selection-background-color: AppState.effective-dark-mode ? #388bfd66 : #0969da55;
+        selection-foreground-color: self.color;
+    }
+
+    if root.text == "": Text {
+        x: 32px;
+        width: parent.width - 40px;
+        height: parent.height;
+        text: "Filter files…";
+        vertical-alignment: center;
+        font-family: root.font-family;
+        font-size: 14px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    }
+}
+
+component GitHubFilterMenu inherits Rectangle {
+    in property <[WorkflowPrFileExtensionFilter]> extension-filters: [];
+    in property <bool> only-manifest-files: false;
+    in property <bool> show-viewed-files: true;
+    in property <string> font-family: ".SF NS";
+    callback toggle-extension(string);
+    callback toggle-manifest();
+    callback toggle-viewed();
+
+    width: 34px;
+    height: 34px;
+    background: transparent;
+
+    public function show() { filter-popup.show(); }
+
+    filter-popup := PopupWindow {
+        x: 0px;
+        y: root.height + 6px;
+        width: 224px;
+        height: 53px + min(root.extension-filters.length * 36px, 252px) + 1px + 72px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+            background: AppState.effective-dark-mode ? #151b23 : #ffffff;
+            drop-shadow-blur: 18px;
+            drop-shadow-color: #00000030;
+            drop-shadow-offset-y: 6px;
+            clip: true;
+
+            Text {
+                x: 16px;
+                y: 0px;
+                width: parent.width - 32px;
+                height: 53px;
+                text: "File extensions";
+                vertical-alignment: center;
+                font-family: root.font-family;
+                font-size: 14px;
+                font-weight: 600;
+                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+            }
+
+            extension-list := ListView {
+                x: 0px;
+                y: 53px;
+                width: parent.width;
+                height: min(root.extension-filters.length * 36px, 252px);
+                horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
+                vertical_scrollbar_policy: root.extension-filters.length > 7 ? ScrollBarPolicy.as_needed : ScrollBarPolicy.always_off;
+                for extension in root.extension-filters: Rectangle {
+                    width: extension-list.visible_width;
+                    height: 36px;
+                    background: extension-touch.has-hover
+                        ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
+                        : transparent;
+                    Image {
+                        x: 16px;
+                        y: 10px;
+                        width: 16px;
+                        height: 16px;
+                        source: @image-url("../../assets/icons/octicon-check-16.svg");
+                        image-fit: contain;
+                        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                        opacity: extension.selected ? 1 : 0;
+                    }
+                    Text {
+                        x: 48px;
+                        width: parent.width - 96px;
+                        height: parent.height;
+                        text: extension.extension;
+                        vertical-alignment: center;
+                        font-family: root.font-family;
+                        font-size: 14px;
+                        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                        overflow: elide;
+                    }
+                    Rectangle {
+                        x: parent.width - 48px;
+                        y: 8px;
+                        width: 32px;
+                        height: 20px;
+                        border-radius: 10px;
+                        background: AppState.effective-dark-mode ? #656c7633 : #818b981f;
+                        Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: extension.count;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            font-family: root.font-family;
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                        }
+                    }
+                    extension-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.toggle-extension(extension.extension); }
+                    }
+                }
+            }
+
+            Rectangle {
+                x: 0px;
+                y: 53px + extension-list.height;
+                width: parent.width;
+                height: 1px;
+                background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+            }
+
+            for option[index] in ["Only manifest files", "Viewed files"]: Rectangle {
+                x: 0px;
+                y: 54px + extension-list.height + index * 36px;
+                width: parent.width;
+                height: 36px;
+                background: option-touch.has-hover
+                    ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
+                    : transparent;
+                Image {
+                    x: 16px;
+                    y: 10px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/octicon-check-16.svg");
+                    image-fit: contain;
+                    colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    opacity: (index == 0 ? root.only-manifest-files : root.show-viewed-files) ? 1 : 0;
+                }
+                Text {
+                    x: 48px;
+                    width: parent.width - 64px;
+                    height: parent.height;
+                    text: option;
+                    vertical-alignment: center;
+                    font-family: root.font-family;
+                    font-size: 14px;
+                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                }
+                option-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        if index == 0 { root.toggle-manifest(); }
+                        else { root.toggle-viewed(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component PrReviewWorkspace inherits Rectangle {
+    in property <string> project-name;
+    in property <string> provider;
+    in property <string> pull-request-number;
+    in property <string> pull-request-title;
+    in property <string> author;
+    in property <string> source-branch;
+    in property <string> target-branch;
+    in property <string> updated-at;
+    in property <int> added-lines: 0;
+    in property <int> removed-lines: 0;
+    in property <string> base-sha;
+    in property <string> head-sha;
+    in property <bool> too-many-commits: false;
+    in property <[WorkflowPrDiffFile]> files: [];
+    in property <[WorkflowPrTreeItem]> tree-items: [];
+    in property <[WorkflowPrFileExtensionFilter]> extension-filters: [];
+    in property <bool> only-manifest-files: false;
+    in property <bool> show-viewed-files: true;
+    in property <bool> file-filters-active: false;
+    in property <[WorkflowPrDiffLine]> lines: [];
+    in property <int> max-code-columns: 0;
+    in property <int> line-model-revision: 0;
+    in property <int> selected-file-index: -1;
+    in property <string> selected-file-path;
+    in property <int> selected-file-added-lines: 0;
+    in property <int> selected-file-removed-lines: 0;
+    in property <bool> has-expandable-hunks: false;
+    in property <bool> context-expanded: false;
+    in property <bool> viewing-file: false;
+    in property <bool> loading: false;
+    in property <bool> code-loading: false;
+    in property <string> error-text;
+    in property <bool> ignore-whitespace-supported: false;
+    in-out property <bool> ignore-whitespace: false;
+    in-out property <string> file-filter: "";
+    in-out property <length> file-list-preferred-width: 286px;
+    in property <string> tree-font-family: ".SF NS";
+    private property <length> file-list-min-width: 220px;
+    private property <length> file-list-max-width: max(root.file-list-min-width, min(520px, root.width * 0.45));
+    // Preserve the session preference while clamping the rendered width when
+    // the window becomes narrower.
+    private property <length> file-list-width: max(root.file-list-min-width, min(root.file-list-max-width, root.file-list-preferred-width));
+    private property <bool> file-list-resizing: false;
+    private property <length> file-list-drag-start-width: root.file-list-width;
+    private property <bool> file-list-visible: true;
+    // Rust registers GitHub's preferred macOS monospace face (SFMono-Regular)
+    // at startup. Menlo remains the explicit fallback when that system font is
+    // unavailable; Slint 1.17 accepts one family name rather than a CSS stack.
+    in property <string> code-font-family: "Menlo";
+    private property <length> code-font-size: 13px;
+    private property <length> code-line-height: 22px;
+    private property <length> hunk-line-height: 26px;
+    private property <length> code-character-width: 7.8px;
+    // GitHub Primer color primitives and DiffBlob component tokens.
+    private property <color> github-bg-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    private property <color> github-bg-muted: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
+    private property <color> github-border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    private property <color> github-fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    private property <color> github-fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    private property <color> github-success-fg: AppState.effective-dark-mode ? #3fb950 : #1a7f37;
+    private property <color> github-danger-fg: AppState.effective-dark-mode ? #f85149 : #cf222e;
+    private property <color> github-attention-fg: AppState.effective-dark-mode ? #d29922 : #9a6700;
+    private property <color> github-accent-muted: AppState.effective-dark-mode ? #388bfd1a : #ddf4ff;
+    private property <color> diff-addition-background: AppState.effective-dark-mode ? #2ea04326 : #dafbe1;
+    private property <color> diff-addition-gutter-background: AppState.effective-dark-mode ? #3fb9504d : #aceebb;
+    private property <color> diff-deletion-background: AppState.effective-dark-mode ? #f851491a : #ffebe9;
+    private property <color> diff-deletion-gutter-background: AppState.effective-dark-mode ? #f851494d : #ffcecb;
+    private property <color> hunk-background: root.github-accent-muted;
+    private property <color> hunk-gutter-background: AppState.effective-dark-mode ? #0c2d6b : #b6e3ff;
+    private property <color> hunk-foreground: root.github-fg-muted;
+
+    callback close();
+    callback select-file(int);
+    callback select-relative-file(int);
+    callback reload(bool);
+    callback decide(bool);
+    callback filter-files(string);
+    callback toggle-extension-filter(string);
+    callback toggle-manifest-filter();
+    callback toggle-viewed-files();
+    callback toggle-folder(string);
+    callback expand-hunk(int);
+    callback expand-all-hunks();
+    callback collapse-non-diff-lines();
+    callback copy-file-path(string);
+    callback view-file();
+
+    changed file-filter => { root.filter-files(root.file-filter); }
+
+    background: root.github-bg-default;
+    border-width: 0px;
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 0px;
+
+        Rectangle {
+            width: parent.width;
+            height: 68px;
+            background: root.github-bg-default;
+            border-width: 0px;
+
+            HorizontalLayout {
+                width: parent.width;
+                height: parent.height;
+                padding-left: 24px;
+                padding-right: 24px;
+                spacing: 16px;
+                Rectangle {
+                    width: 150px;
+                    height: parent.height;
+                    Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        width: parent.width;
+                        height: 36px;
+                        border-radius: 10px;
+                        background: back-touch.has-hover ? MaterialPalette.surface_container_high : transparent;
+                        MaterialText {
+                            width: parent.width;
+                            height: parent.height;
+                            text: "←  Back to pull requests";
+                            horizontal_alignment: center;
+                            vertical_alignment: center;
+                            font_size: 12px;
+                            font_weight: 600;
+                            color: MaterialPalette.primary;
+                        }
+                        back-touch := TouchArea { mouse-cursor: pointer; clicked => { root.close(); } }
+                    }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    height: parent.height;
+                    Rectangle { y: (parent.height - self.height) / 2; width: 1px; height: 34px; background: root.github-border-default; }
+                }
+
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+                    alignment: center;
+                    MaterialText {
+                        text: root.pull-request-title;
+                        font_size: 16px;
+                        font_weight: 600;
+                        color: MaterialPalette.on_surface;
+                        overflow: elide;
+                    }
+                    MaterialText {
+                        text: "#" + root.pull-request-number + "  ·  " + root.source-branch + " → " + root.target-branch + "  ·  " + root.project-name;
+                        font_size: 11px;
+                        color: MaterialPalette.on_surface_variant;
+                        overflow: elide;
+                    }
+                }
+
+                Rectangle {
+                    width: 128px;
+                    height: parent.height;
+                    ReviewActionButton { y: (parent.height - self.height) / 2; width: parent.width; text: "Request changes"; clicked => { root.decide(false); } }
+                }
+                Rectangle {
+                    width: 96px;
+                    height: parent.height;
+                    ReviewActionButton { y: (parent.height - self.height) / 2; width: parent.width; text: "Approve"; primary: true; clicked => { root.decide(true); } }
+                }
+            }
+        }
+
+        Rectangle { width: parent.width; height: 1px; background: root.github-border-default; }
+
+        Rectangle {
+            width: parent.width;
+            height: 46px;
+            background: root.github-bg-muted;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 24px;
+                spacing: 12px;
+                FileTreeToggleButton {
+                    file-tree-visible: root.file-list-visible;
+                    clicked => {
+                        root.file-list-resizing = false;
+                        root.file-list-visible = !root.file-list-visible;
+                    }
+                }
+                MaterialText { height: parent.height; text: "Files changed"; font_size: 12px; font_weight: 600; color: MaterialPalette.on_surface; vertical_alignment: center; }
+                Rectangle {
+                    width: 24px;
+                    height: parent.height;
+                    Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        width: parent.width;
+                        height: 20px;
+                        border-radius: 10px;
+                        background: AppState.effective-dark-mode ? #656c7633 : #818b981f;
+                        MaterialText { width: parent.width; height: parent.height; text: root.files.length; horizontal_alignment: center; vertical_alignment: center; font-size: 10px; font-weight: 600; color: MaterialPalette.on_surface_variant; }
+                    }
+                }
+                MaterialText { height: parent.height; text: "+" + root.added-lines; font_size: 12px; font_weight: 600; color: #1a7f37; vertical_alignment: center; }
+                MaterialText { height: parent.height; text: "−" + root.removed-lines; font_size: 12px; font_weight: 600; color: MaterialPalette.error; vertical_alignment: center; }
+                Rectangle { width: 1px; height: parent.height; Rectangle { y: (parent.height - self.height) / 2; width: 1px; height: 20px; background: root.github-border-default; } }
+                MaterialText { height: parent.height; text: "Author " + root.author; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                MaterialText { height: parent.height; text: "Updated " + root.updated-at; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                if root.ignore-whitespace-supported: MaterialText { height: parent.height; text: "Ignore whitespace"; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                if root.ignore-whitespace-supported: Rectangle {
+                    width: 44px;
+                    height: parent.height;
+                    Switch {
+                        y: (parent.height - self.height) / 2;
+                        width: 44px;
+                        height: 26px;
+                        checked: root.ignore-whitespace;
+                        checked_state_changed(checked) => {
+                            root.ignore-whitespace = checked;
+                            root.reload(checked);
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.too-many-commits: Rectangle {
+            width: parent.width;
+            height: 32px;
+            background: MaterialPalette.tertiary_container;
+            MaterialText {
+                x: 18px;
+                width: parent.width - 36px;
+                height: parent.height;
+                text: "This pull request exceeds the server commit limit; the displayed diff may be partial.";
+                vertical_alignment: center;
+                font-size: 11px;
+                color: MaterialPalette.on_tertiary_container;
+            }
+        }
+
+        Rectangle {
+            width: parent.width;
+            vertical-stretch: 1;
+            background: root.github-bg-default;
+
+            if root.loading: MaterialText {
+                width: parent.width;
+                height: parent.height;
+                text: "Loading changed files…";
+                horizontal_alignment: center;
+                vertical_alignment: center;
+                font_size: 14px;
+                color: MaterialPalette.on_surface_variant;
+            }
+
+            if !root.loading && root.error-text != "": VerticalLayout {
+                x: 32px;
+                y: 32px;
+                width: parent.width - 64px;
+                spacing: 12px;
+                alignment: center;
+                MaterialText { text: "Unable to load this pull request diff"; font_size: 18px; font_weight: 600; color: MaterialPalette.error; horizontal_alignment: center; }
+                Text { width: parent.width; text: root.error-text; wrap: word-wrap; font-size: 13px; color: MaterialPalette.on_surface_variant; horizontal_alignment: center; }
+            }
+
+            if !root.loading && root.error-text == "": Rectangle {
+                width: parent.width;
+                height: parent.height;
+                background: transparent;
+                private property <int> observed-line-model-revision: root.line-model-revision;
+
+                changed observed-line-model-revision => {
+                    diff-scroll.viewport-x = 0px;
+                    diff-scroll.viewport-y = 0px;
+                }
+
+                if root.file-list-visible: Rectangle {
+                    x: 0px;
+                    width: root.file-list-width;
+                    height: parent.height;
+                    background: root.github-bg-default;
+                    border-width: 0px;
+
+                    VerticalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 0px;
+                        Rectangle {
+                            width: parent.width;
+                            height: 52px;
+                            background: root.github-bg-default;
+                            GitHubFileFilterField {
+                                x: 12px;
+                                y: 10px;
+                                width: parent.width - 66px;
+                                text <=> root.file-filter;
+                                font-family: root.tree-font-family;
+                            }
+                            filter-menu := GitHubFilterMenu {
+                                x: parent.width - 46px;
+                                y: 9px;
+                                extension-filters: root.extension-filters;
+                                only-manifest-files: root.only-manifest-files;
+                                show-viewed-files: root.show-viewed-files;
+                                font-family: root.tree-font-family;
+                                toggle-extension(extension) => { root.toggle-extension-filter(extension); }
+                                toggle-manifest => { root.toggle-manifest-filter(); }
+                                toggle-viewed => { root.toggle-viewed-files(); }
+                            }
+                            Rectangle {
+                                x: parent.width - 46px;
+                                y: 9px;
+                                width: 34px;
+                                height: 34px;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: root.file-filters-active
+                                    ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
+                                    : root.github-border-default;
+                                background: filter-button-touch.has-hover
+                                    ? root.github-bg-muted
+                                    : root.github-bg-default;
+                                Image {
+                                    x: 9px;
+                                    y: 9px;
+                                    width: 16px;
+                                    height: 16px;
+                                    source: @image-url("../../assets/icons/octicon-filter-16.svg");
+                                    image-fit: contain;
+                                    colorize: root.file-filters-active
+                                        ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
+                                        : root.github-fg-muted;
+                                }
+                                filter-button-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { filter-menu.show(); }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: parent.width;
+                            vertical-stretch: 1;
+
+                            file-scroll := ListView {
+                                width: parent.width;
+                                height: parent.height;
+                                horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
+                                vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
+                                for item in root.tree-items: Rectangle {
+                                    width: file-scroll.visible_width;
+                                    height: 28px;
+                                    background: item.kind == "file" && root.selected-file-index == item.file-index
+                                        ? root.github-accent-muted
+                                        : (tree-touch.has-hover ? root.github-bg-muted : transparent);
+                                    border-width: 0px;
+                                    TreeIndentGuides { width: parent.width; height: parent.height; depth: item.depth; }
+                                    HorizontalLayout {
+                                        padding-left: 10px + item.depth * 18px;
+                                        padding-right: 10px;
+                                        spacing: 7px;
+                                        Rectangle {
+                                            width: 32px;
+                                            height: parent.height;
+                                            if item.kind == "folder": Image {
+                                                x: 0px;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 12px;
+                                                height: 12px;
+                                                source: item.expanded
+                                                    ? @image-url("../../assets/icons/octicon-chevron-down-16.svg")
+                                                    : @image-url("../../assets/icons/octicon-chevron-right-16.svg");
+                                                image-fit: contain;
+                                            }
+                                            if item.kind == "folder": Image {
+                                                x: 18px;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 14px;
+                                                height: 14px;
+                                                source: item.expanded
+                                                    ? @image-url("../../assets/icons/octicon-file-directory-open-fill-16.svg")
+                                                    : @image-url("../../assets/icons/octicon-file-directory-fill-16.svg");
+                                                image-fit: contain;
+                                            }
+                                            if item.kind == "file": Image {
+                                                x: 18px;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 14px;
+                                                height: 14px;
+                                                source: item.change-type == "new_file"
+                                                    ? @image-url("../../assets/icons/octicon-file-added-16.svg")
+                                                    : (item.change-type == "deleted_file"
+                                                        ? @image-url("../../assets/icons/octicon-file-removed-16.svg")
+                                                        : (item.change-type == "renamed_file"
+                                                            ? @image-url("../../assets/icons/octicon-file-moved-16.svg")
+                                                            : @image-url("../../assets/icons/octicon-file-diff-16.svg")));
+                                                image-fit: contain;
+                                                colorize: item.change-type == "new_file"
+                                                    ? root.github-success-fg
+                                                    : (item.change-type == "deleted_file"
+                                                        ? root.github-danger-fg
+                                                        : (item.change-type == "renamed_file"
+                                                            ? root.github-attention-fg
+                                                            : root.github-fg-muted));
+                                            }
+                                        }
+                                        if item.kind == "folder": Text {
+                                            horizontal-stretch: 1;
+                                            height: parent.height;
+                                            text: item.name;
+                                            horizontal_alignment: left;
+                                            vertical_alignment: center;
+                                            font-family: root.tree-font-family;
+                                            font-size: 14px;
+                                            font-weight: 600;
+                                            color: root.github-fg-default;
+                                            overflow: elide;
+                                        }
+                                        if item.kind == "folder": Text {
+                                            width: 24px;
+                                            height: parent.height;
+                                            text: item.file-count;
+                                            horizontal_alignment: right;
+                                            vertical_alignment: center;
+                                            font-family: root.tree-font-family;
+                                            font-size: 12px;
+                                            color: root.github-fg-muted;
+                                        }
+                                        if item.kind == "file": Rectangle {
+                                            horizontal-stretch: 1;
+                                            height: parent.height;
+                                            filename := Text {
+                                                x: 0px;
+                                                width: min(self.preferred-width, max(0px, parent.width - 60px));
+                                                height: parent.height;
+                                                text: item.name;
+                                                horizontal_alignment: left;
+                                                vertical_alignment: center;
+                                                font-family: root.tree-font-family;
+                                                font-size: 14px;
+                                                font-weight: root.selected-file-index == item.file-index ? 600 : 400;
+                                                color: root.github-fg-default;
+                                                overflow: elide;
+                                            }
+                                            added-count := Text {
+                                                x: filename.width + 7px;
+                                                width: self.preferred-width;
+                                                height: parent.height;
+                                                text: "+" + item.added-lines;
+                                                horizontal_alignment: left;
+                                                vertical_alignment: center;
+                                                font-family: root.tree-font-family;
+                                                font-size: 12px;
+                                                font-weight: 500;
+                                                color: root.github-success-fg;
+                                            }
+                                            Text {
+                                                x: added-count.x + added-count.preferred-width + 7px;
+                                                width: self.preferred-width;
+                                                height: parent.height;
+                                                text: "−" + item.removed-lines;
+                                                horizontal_alignment: left;
+                                                vertical_alignment: center;
+                                                font-family: root.tree-font-family;
+                                                font-size: 12px;
+                                                font-weight: 500;
+                                                color: root.github-danger-fg;
+                                            }
+                                        }
+                                    }
+                                    tree-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            if item.kind == "folder" { root.toggle-folder(item.path); }
+                                            else { root.select-file(item.file-index); }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.tree-items.length == 0: MaterialText {
+                                width: parent.width;
+                                height: 72px;
+                                text: root.file-filter == "" ? "No changed files" : "No matching files";
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                                font-family: root.tree-font-family;
+                                font-size: 14px;
+                                color: MaterialPalette.on_surface_variant;
+                            }
+                        }
+                    }
+                }
+
+                if root.file-list-visible: Rectangle { x: root.file-list-width; width: 1px; height: parent.height; background: root.github-border-default; }
+
+                Rectangle {
+                    x: root.file-list-visible ? root.file-list-width + 1px : 0px;
+                    width: root.file-list-visible ? parent.width - root.file-list-width - 1px : parent.width;
+                    height: parent.height;
+                    background: root.github-bg-default;
+
+                    VerticalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 0px;
+
+                        Rectangle {
+                            width: parent.width;
+                            height: 46px;
+                            z: 20;
+                            background: root.github-bg-default;
+                            border-width: 0px;
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 16px;
+                                spacing: 8px;
+                                Rectangle {
+                                    width: 16px;
+                                    height: parent.height;
+                                    Image { y: (parent.height - self.height) / 2; width: 16px; height: 16px; source: @image-url("../../assets/icons/octicon-file-diff-16.svg"); image-fit: contain; colorize: root.github-fg-muted; }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: parent.height;
+
+                                    HorizontalLayout {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        spacing: 2px;
+
+                                        MaterialText {
+                                            horizontal-stretch: 1;
+                                            height: parent.height;
+                                            text: root.selected-file-path == "" ? "Select a changed file" : root.selected-file-path;
+                                            font-size: 12px;
+                                            font-weight: 600;
+                                            color: MaterialPalette.on_surface;
+                                            overflow: elide;
+                                            vertical_alignment: center;
+                                        }
+                                        FileToolbarButton {
+                                            icon-source: @image-url("../../assets/icons/octicon-copy-16.svg");
+                                            button-enabled: root.selected-file-path != "";
+                                            tooltip-text: "Copy file path";
+                                            clicked => { root.copy-file-path(root.selected-file-path); }
+                                        }
+                                        FileToolbarButton {
+                                            icon-source: root.context-expanded
+                                                ? @image-url("../../assets/icons/octicon-fold-16.svg")
+                                                : @image-url("../../assets/icons/octicon-unfold-16.svg");
+                                            button-enabled: (root.has-expandable-hunks || root.context-expanded) && !root.viewing-file && !root.code-loading;
+                                            tooltip-text: root.context-expanded ? "Collapse non-diff lines" : "Expand all lines";
+                                            clicked => {
+                                                if root.context-expanded { root.collapse-non-diff-lines(); }
+                                                else { root.expand-all-hunks(); }
+                                            }
+                                        }
+                                    }
+                                }
+                                FileDiffStat {
+                                    additions: root.selected-file-added-lines;
+                                    deletions: root.selected-file-removed-lines;
+                                    has-selection: root.selected-file-index >= 0;
+                                    font-family: root.tree-font-family;
+                                }
+                                MaterialText { width: 48px; height: parent.height; text: root.selected-file-index < 0 ? "" : (root.selected-file-index + 1) + " / " + root.files.length; horizontal_alignment: center; font-size: 10px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                                FileToolbarButton {
+                                    icon-source: @image-url("../../assets/icons/octicon-chevron-left-16.svg");
+                                    button-enabled: root.selected-file-index > 0 && !root.code-loading;
+                                    tooltip-text: "Previous file";
+                                    clicked => { root.select-relative-file(-1); }
+                                }
+                                FileToolbarButton {
+                                    icon-source: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
+                                    button-enabled: root.selected-file-index >= 0 && root.selected-file-index + 1 < root.files.length && !root.code-loading;
+                                    tooltip-text: "Next file";
+                                    tooltip-align-right: true;
+                                    clicked => { root.select-relative-file(1); }
+                                }
+                                FileMenuButton {
+                                    button-enabled: root.selected-file-index >= 0 && !root.code-loading;
+                                    viewing-file: root.viewing-file;
+                                    action => { root.view-file(); }
+                                }
+                            }
+                            Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: root.github-border-default; }
+                        }
+
+                        diff-scroll := ListView {
+                            width: parent.width;
+                            vertical-stretch: 1;
+                            horizontal_scrollbar_policy: ScrollBarPolicy.as_needed;
+                            vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
+
+                            for line[line-index] in root.lines: Rectangle {
+                                width: max(diff-scroll.visible_width, 108px + root.max-code-columns * root.code-character-width);
+                                height: line.kind == "hunk" ? root.hunk-line-height : root.code-line-height;
+                                background: line.kind == "addition"
+                                    ? root.diff-addition-background
+                                    : (line.kind == "deletion"
+                                        ? root.diff-deletion-background
+                                        : (line.kind == "hunk" ? root.hunk-background : root.github-bg-default));
+                                HorizontalLayout {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        spacing: 0px;
+                                        Rectangle {
+                                            width: 44px;
+                                            height: parent.height;
+                                            background: line.kind == "addition" ? root.diff-addition-gutter-background : (line.kind == "deletion" ? root.diff-deletion-gutter-background : (line.kind == "hunk" ? root.hunk-gutter-background : root.github-bg-default));
+                                            MaterialText { width: parent.width - 7px; height: parent.height; text: line.old-line == 0 ? "" : line.old-line; horizontal_alignment: right; vertical_alignment: center; font-family: root.code-font-family; font-size: root.code-font-size; color: root.github-fg-muted; }
+                                        }
+                                        Rectangle {
+                                            width: 44px;
+                                            height: parent.height;
+                                            background: line.kind == "addition" ? root.diff-addition-gutter-background : (line.kind == "deletion" ? root.diff-deletion-gutter-background : (line.kind == "hunk" ? root.hunk-gutter-background : root.github-bg-default));
+                                            MaterialText { width: parent.width - 7px; height: parent.height; text: line.new-line == 0 ? "" : line.new-line; horizontal_alignment: right; vertical_alignment: center; font-family: root.code-font-family; font-size: root.code-font-size; color: root.github-fg-muted; }
+                                        }
+                                        Rectangle {
+                                            width: 20px;
+                                            height: parent.height;
+                                            background: line.kind == "hunk" ? root.hunk-background : transparent;
+                                            MaterialText { width: parent.width; height: parent.height; text: line.kind == "addition" ? "+" : (line.kind == "deletion" ? "−" : ""); horizontal_alignment: center; vertical_alignment: center; font-family: root.code-font-family; font-size: root.code-font-size; color: root.github-fg-default; }
+                                        }
+                                        if line.kind == "hunk": Rectangle {
+                                            horizontal-stretch: 1;
+                                            height: parent.height;
+                                            Text {
+                                                x: 0px;
+                                                y: 0px;
+                                                width: parent.width;
+                                                height: parent.height;
+                                                text: line.content;
+                                                horizontal_alignment: left;
+                                                vertical_alignment: center;
+                                                overflow: clip;
+                                                font-family: root.code-font-family;
+                                                font-size: root.code-font-size;
+                                                color: root.hunk-foreground;
+                                            }
+                                        }
+                                        if line.kind != "hunk": HorizontalLayout {
+                                            horizontal-stretch: 1;
+                                            height: parent.height;
+                                            spacing: 0px;
+                                            for token in line.tokens: Text {
+                                                width: self.preferred-width;
+                                                height: parent.height;
+                                                text: token.text;
+                                                vertical_alignment: center;
+                                                overflow: clip;
+                                                font-family: root.code-font-family;
+                                                font-size: root.code-font-size;
+                                                font-weight: token.bold ? 600 : 400;
+                                                font-italic: token.italic;
+                                                color: line.kind == "hunk"
+                                                    ? MaterialPalette.on_secondary_container
+                                                    : (AppState.effective-dark-mode ? token.dark-color : token.color);
+                                            }
+                                        }
+                                }
+                                if line.kind == "hunk" && line.expandable: Rectangle {
+                                    x: 0px;
+                                    y: 0px;
+                                    width: 88px;
+                                    height: parent.height;
+                                    background: hunk-expand-touch.has-hover ? MaterialPalette.primary_container : transparent;
+                                    Image {
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        width: 16px;
+                                        height: 16px;
+                                        source: @image-url("../../assets/icons/octicon-unfold-16.svg");
+                                        image-fit: contain;
+                                    }
+                                    hunk-expand-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.expand-hunk(line-index); }
+                                    }
+                                }
+                            }
+                        }
+
+                    }
+
+                    if root.code-loading: CodeRenderingIndicator {
+                        x: (parent.width - self.width) / 2;
+                        y: 56px;
+                    }
+
+                }
+
+                file-list-resize-handle := TouchArea {
+                    x: root.file-list-visible ? root.file-list-width - 4px : -10px;
+                    y: 0px;
+                    width: root.file-list-visible ? 9px : 0px;
+                    height: parent.height;
+                    z: 100;
+                    mouse-cursor: col-resize;
+                    moved => {
+                        if root.file-list-resizing {
+                            // The handle moves with the divider, so its local
+                            // pointer delta is the distance still left to
+                            // follow, not the distance from the original
+                            // press. Applying it to the current width keeps
+                            // the divider locked to the pointer.
+                            root.file-list-preferred-width = max(
+                                root.file-list-min-width,
+                                min(
+                                    root.file-list-max-width,
+                                    root.file-list-width + (self.mouse-x - self.pressed-x)
+                                )
+                            );
+                        }
+                    }
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down {
+                            root.file-list-resizing = true;
+                            root.file-list-drag-start-width = root.file-list-width;
+                        } else if event.kind == PointerEventKind.up {
+                            root.file-list-resizing = false;
+                        } else if event.kind == PointerEventKind.cancel {
+                            root.file-list-preferred-width = root.file-list-drag-start-width;
+                            root.file-list-resizing = false;
+                        }
+                    }
+                }
+                Rectangle {
+                    x: root.file-list-width - 1px;
+                    y: 0px;
+                    width: 3px;
+                    height: parent.height;
+                    z: 101;
+                    background: MaterialPalette.primary;
+                    opacity: root.file-list-visible && (root.file-list-resizing || file-list-resize-handle.has-hover) ? 0.8 : 0;
+                }
+            }
+        }
+    }
+}

@@ -21,7 +21,7 @@ name = "usher"
 # 可选渲染后端：默认仍为 FemtoVG。若需按社区建议验证「窗口变大时内存」是否为双缓冲/驱动统计问题，可启用 Skia 软件路径：
 #   SLINT_BACKEND=winit-skia-software cargo run
 # （需本行的 renderer-skia；首次编译 Skia 较慢、产物更大）
-slint = { version = "1.17.1", default-features = false, features = ["live-preview", "std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-skia", "raw-window-handle-06"] }
+slint = { version = "1.17.1", default-features = false, features = ["live-preview", "std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-skia", "raw-window-handle-06", "unstable-fontique-010"] }
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
@@ -41,6 +41,7 @@ directories = "5.0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 pulldown-cmark = "0.13"
+syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 webbrowser = "1.0"
 toml = "0.8"  # 用于 TOML 序列化
 arboard = "3.6.1"

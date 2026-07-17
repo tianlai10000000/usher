@@ -1,4 +1,6 @@
-use crate::codereview::api::{PullRequestItem, PullRequestState, get_pull_requests};
+use chrono::{DateTime, FixedOffset};
+
+use crate::git::{PullRequestItem, PullRequestState, get_pull_requests};
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{MainWindow, WorkflowPullRequestItem};
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -255,9 +257,22 @@ fn to_slint_item(item: &PullRequestItem) -> WorkflowPullRequestItem {
         author: item.author.clone().into(),
         source_branch: item.source_branch.clone().into(),
         target_branch: item.target_branch.clone().into(),
-        updated_at: item.updated_at.clone().into(),
+        updated_at: format_updated_at_in_utc_plus_eight(item.updated_at.as_str()).into(),
         web_url: item.web_url.clone().into(),
     }
+}
+
+fn format_updated_at_in_utc_plus_eight(value: &str) -> String {
+    let utc_plus_eight =
+        FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
+    DateTime::parse_from_rfc3339(value)
+        .map(|timestamp| {
+            timestamp
+                .with_timezone(&utc_plus_eight)
+                .format("%Y-%m-%d %H:%M:%S %:z")
+                .to_string()
+        })
+        .unwrap_or_else(|_| value.to_string())
 }
 
 fn clear_pages(visited_pages: &Arc<Mutex<HashMap<u32, Vec<PullRequestItem>>>>) {
@@ -278,4 +293,25 @@ fn reset_ui(ui: &MainWindow) {
     ui.set_workflow_pr_list_page_count(1);
     ui.set_workflow_pr_list_state("open".into());
     ui.set_workflow_pr_list_error("".into());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_updated_at_in_utc_plus_eight;
+
+    #[test]
+    fn formats_provider_timestamps_in_utc_plus_eight() {
+        assert_eq!(
+            format_updated_at_in_utc_plus_eight("2026-07-15T05:26:44Z"),
+            "2026-07-15 13:26:44 +08:00"
+        );
+    }
+
+    #[test]
+    fn preserves_an_unparseable_timestamp() {
+        assert_eq!(
+            format_updated_at_in_utc_plus_eight("unavailable"),
+            "unavailable"
+        );
+    }
 }

@@ -11,6 +11,7 @@ import { Settings as SettingsPage } from "./views/settings.slint";
 import { About as AboutPage } from "./views/about.slint";
 import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
 import { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
+import { PrReviewWorkspace, WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter } from "./views/workflow/pr_review_workspace.slint";
 import { StepItem } from "./components/workflow/steps.slint";
 
 import { List as ListPage } from "./views/list.slint";
@@ -50,6 +51,7 @@ export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole } from "./views/chat.slint";
 export { StepItem } from "./components/workflow/steps.slint";
 export { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
+export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrTreeItem } from "./views/workflow/pr_review_workspace.slint";
 
 // import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
 
@@ -185,6 +187,43 @@ export component MainWindow inherits Window {
     in property <string> workflow-pr-list-state: "open";
     in property <bool> workflow-pr-list-loading: false;
     in property <string> workflow-pr-list-error: "";
+    in-out property <bool> workflow-pr-review-visible: false;
+    in property <bool> workflow-pr-review-loading: false;
+    in property <bool> workflow-pr-review-code-loading: false;
+    in property <string> workflow-pr-review-error: "";
+    in property <string> workflow-pr-review-number: "";
+    in property <string> workflow-pr-review-title: "";
+    in property <string> workflow-pr-review-author: "";
+    in property <string> workflow-pr-review-source-branch: "";
+    in property <string> workflow-pr-review-target-branch: "";
+    in property <string> workflow-pr-review-updated-at: "";
+    in property <int> workflow-pr-review-added-lines: 0;
+    in property <int> workflow-pr-review-removed-lines: 0;
+    in property <string> workflow-pr-review-base-sha: "";
+    in property <string> workflow-pr-review-head-sha: "";
+    in property <bool> workflow-pr-review-too-many-commits: false;
+    in property <[WorkflowPrDiffFile]> workflow-pr-review-files: [];
+    in property <[WorkflowPrTreeItem]> workflow-pr-review-tree-items: [];
+    in property <[WorkflowPrFileExtensionFilter]> workflow-pr-review-extension-filters: [];
+    in property <bool> workflow-pr-review-only-manifest-files: false;
+    in property <bool> workflow-pr-review-show-viewed-files: true;
+    in property <bool> workflow-pr-review-file-filters-active: false;
+    in property <[WorkflowPrDiffLine]> workflow-pr-review-lines: [];
+    in property <int> workflow-pr-review-max-code-columns: 0;
+    in property <int> workflow-pr-review-line-model-revision: 0;
+    in property <string> workflow-pr-review-code-font-family: "Menlo";
+    in property <string> workflow-pr-review-tree-font-family: ".SF NS";
+    in-out property <length> workflow-pr-review-file-list-width: 286px;
+    in property <int> workflow-pr-review-selected-file-index: -1;
+    in property <string> workflow-pr-review-selected-file-path: "";
+    in property <int> workflow-pr-review-selected-file-added-lines: 0;
+    in property <int> workflow-pr-review-selected-file-removed-lines: 0;
+    in property <bool> workflow-pr-review-has-expandable-hunks: false;
+    in property <bool> workflow-pr-review-context-expanded: false;
+    in property <bool> workflow-pr-review-viewing-file: false;
+    in property <bool> workflow-pr-review-ignore-whitespace-supported: false;
+    in-out property <bool> workflow-pr-review-ignore-whitespace: false;
+    in-out property <string> workflow-pr-review-file-filter: "";
     in property <bool> workflow-pr-count-auto-update: false;
     in property <bool> workflow-pr-count-loading: false;
     in property <bool> workflow-pr-count-failed: false;
@@ -230,6 +269,21 @@ export component MainWindow inherits Window {
     callback workflow-pr-confirm(bool);
     callback workflow-pr-list-state-change(string);
     callback workflow-pr-list-page-change(int);
+    callback workflow-pr-review-open(string, string, string, string, string, string);
+    callback workflow-pr-review-close();
+    callback workflow-pr-review-select-file(int);
+    callback workflow-pr-review-select-relative-file(int);
+    callback workflow-pr-review-reload(bool);
+    callback workflow-pr-review-filter-files(string);
+    callback workflow-pr-review-toggle-extension-filter(string);
+    callback workflow-pr-review-toggle-manifest-filter();
+    callback workflow-pr-review-toggle-viewed-files();
+    callback workflow-pr-review-toggle-folder(string);
+    callback workflow-pr-review-expand-hunk(int);
+    callback workflow-pr-review-expand-all-hunks();
+    callback workflow-pr-review-collapse-non-diff-lines();
+    callback workflow-pr-review-copy-file-path(string);
+    callback workflow-pr-review-view-file();
     callback workflow-cd-start(string, string, string);
     callback workflow-cd-rollback(string);
     callback shell-drawer-toggle();
@@ -275,6 +329,9 @@ export component MainWindow inherits Window {
 
     changed current-route => {
         root.page-memory-diag-pending = true;
+        if root.current-route != Route.Workflow && root.workflow-pr-review-visible {
+            root.workflow-pr-review-close();
+        }
     }
 
     changed shell-drawer-visible => {
@@ -530,6 +587,9 @@ export component MainWindow inherits Window {
                             }
                             pr-list-page-change(page) => {
                                 root.workflow-pr-list-page-change(page);
+                            }
+                            pr-open-detail(number, title, author, source-branch, target-branch, updated-at) => {
+                                root.workflow-pr-review-open(number, title, author, source-branch, target-branch, updated-at);
                             }
                             cd-start(environment-name, release-name, commit-hash) => {
                                 root.workflow-cd-start(environment-name, release-name, commit-hash);
@@ -819,6 +879,67 @@ export component MainWindow inherits Window {
             root.project-modal-mode = "add";
             root.project-modal-original-alias = "";
         }
+    }
+
+    if root.workflow-pr-review-visible: PrReviewWorkspace {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        z: 800;
+        project-name: root.workflow-project-name;
+        provider: root.workflow-pr-repo-type;
+        pull-request-number: root.workflow-pr-review-number;
+        pull-request-title: root.workflow-pr-review-title;
+        author: root.workflow-pr-review-author;
+        source-branch: root.workflow-pr-review-source-branch;
+        target-branch: root.workflow-pr-review-target-branch;
+        updated-at: root.workflow-pr-review-updated-at;
+        added-lines: root.workflow-pr-review-added-lines;
+        removed-lines: root.workflow-pr-review-removed-lines;
+        base-sha: root.workflow-pr-review-base-sha;
+        head-sha: root.workflow-pr-review-head-sha;
+        too-many-commits: root.workflow-pr-review-too-many-commits;
+        files: root.workflow-pr-review-files;
+        tree-items: root.workflow-pr-review-tree-items;
+        extension-filters: root.workflow-pr-review-extension-filters;
+        only-manifest-files: root.workflow-pr-review-only-manifest-files;
+        show-viewed-files: root.workflow-pr-review-show-viewed-files;
+        file-filters-active: root.workflow-pr-review-file-filters-active;
+        lines: root.workflow-pr-review-lines;
+        max-code-columns: root.workflow-pr-review-max-code-columns;
+        line-model-revision: root.workflow-pr-review-line-model-revision;
+        code-font-family: root.workflow-pr-review-code-font-family;
+        tree-font-family: root.workflow-pr-review-tree-font-family;
+        file-list-preferred-width <=> root.workflow-pr-review-file-list-width;
+        selected-file-index: root.workflow-pr-review-selected-file-index;
+        selected-file-path: root.workflow-pr-review-selected-file-path;
+        selected-file-added-lines: root.workflow-pr-review-selected-file-added-lines;
+        selected-file-removed-lines: root.workflow-pr-review-selected-file-removed-lines;
+        has-expandable-hunks: root.workflow-pr-review-has-expandable-hunks;
+        context-expanded: root.workflow-pr-review-context-expanded;
+        viewing-file: root.workflow-pr-review-viewing-file;
+        loading: root.workflow-pr-review-loading;
+        code-loading: root.workflow-pr-review-code-loading;
+        error-text: root.workflow-pr-review-error;
+        ignore-whitespace-supported: root.workflow-pr-review-ignore-whitespace-supported;
+        ignore-whitespace <=> root.workflow-pr-review-ignore-whitespace;
+        file-filter <=> root.workflow-pr-review-file-filter;
+        close => { root.workflow-pr-review-close(); }
+        select-file(index) => { root.workflow-pr-review-select-file(index); }
+        select-relative-file(offset) => { root.workflow-pr-review-select-relative-file(offset); }
+        reload(ignore-whitespace) => { root.workflow-pr-review-reload(ignore-whitespace); }
+        filter-files(query) => { root.workflow-pr-review-filter-files(query); }
+        toggle-extension-filter(extension) => { root.workflow-pr-review-toggle-extension-filter(extension); }
+        toggle-manifest-filter => { root.workflow-pr-review-toggle-manifest-filter(); }
+        toggle-viewed-files => { root.workflow-pr-review-toggle-viewed-files(); }
+        toggle-folder(path) => { root.workflow-pr-review-toggle-folder(path); }
+        expand-hunk(line-index) => { root.workflow-pr-review-expand-hunk(line-index); }
+        expand-all-hunks => { root.workflow-pr-review-expand-all-hunks(); }
+        collapse-non-diff-lines => { root.workflow-pr-review-collapse-non-diff-lines(); }
+        copy-file-path(path) => { root.workflow-pr-review-copy-file-path(path); }
+        view-file => { root.workflow-pr-review-view-file(); }
+        decide(approved) => { root.workflow-pr-confirm(approved); }
     }
     
     // 通知显示区域 - 固定在右上角，距离右边界 16px

@@ -59,6 +59,14 @@ To inspect the optional Skia software path:
 SLINT_BACKEND=winit-skia-software cargo run
 ```
 
+Debug builds write five-second process-memory samples and lifecycle checkpoints to the normal Usher log. To enable the same diagnostics in a release build:
+
+```sh
+USHER_MEMORY_DIAGNOSTICS=1 ./usher
+```
+
+Filter for `[Memory][Diag]`, `[Memory][UI]`, and `[Workflow][PR Review][Memory]` to correlate RSS/physical-footprint changes with window size and PR model/cache ownership.
+
 ## Configuration and local data
 
 Usher uses `directories::ProjectDirs::from("com", "usher", "app")` to select platform-native locations.
@@ -128,6 +136,7 @@ The GitHub release workflow produces macOS archives/DMGs and Windows ZIP bundles
 - [中文架构文档](docs/architecture.zh.md)
 - [Coding-agent instructions](AGENTS.md)
 - [Specification index](docs/specs/README.md)
+- [Pull request workflow specification](docs/specs/pr-review.md)
 - [Terminal behavior specification](docs/specs/terminal.md)
 - [Historical terminal investigation notes](docs/terminal_viewport_iteration_notes.md)
 

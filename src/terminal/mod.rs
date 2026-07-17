@@ -1,6 +1,7 @@
 mod render;
 mod session;
 
+use crate::memory_diagnostics::process_memory_snapshot;
 use crate::{MainWindow, Route, TerminalLine, TerminalSpan};
 use arboard::Clipboard;
 use render::{RenderedTerminalLine, TerminalCursorState, TerminalRenderState};
@@ -1019,85 +1020,6 @@ fn terminal_line_stats(lines: &[RenderedTerminalLine]) -> (usize, usize) {
     }
 
     (span_count, span_text_bytes)
-}
-
-#[derive(Default, Clone, Copy)]
-struct ProcessMemorySnapshot {
-    rss_current_bytes: u64,
-}
-
-fn process_memory_snapshot() -> ProcessMemorySnapshot {
-    #[cfg(target_os = "macos")]
-    {
-        #[repr(C)]
-        struct TaskVmInfo {
-            virtual_size: u64,
-            region_count: i32,
-            page_size: i32,
-            resident_size: u64,
-            resident_size_peak: u64,
-            device: u64,
-            device_peak: u64,
-            internal: u64,
-            internal_peak: u64,
-            external: u64,
-            external_peak: u64,
-            reusable: u64,
-            reusable_peak: u64,
-            purgeable_volatile_pmap: u64,
-            purgeable_volatile_resident: u64,
-            purgeable_volatile_virtual: u64,
-            compressed: u64,
-            compressed_peak: u64,
-            compressed_lifetime: u64,
-            phys_footprint: u64,
-        }
-
-        unsafe extern "C" {
-            fn mach_task_self() -> u32;
-            fn task_info(
-                target_task: u32,
-                flavor: i32,
-                task_info_out: *mut i32,
-                task_info_out_cnt: *mut u32,
-            ) -> i32;
-        }
-
-        const TASK_VM_INFO: i32 = 22;
-        const KERN_SUCCESS: i32 = 0;
-
-        let mut info = std::mem::MaybeUninit::<TaskVmInfo>::uninit();
-        let mut count = (std::mem::size_of::<TaskVmInfo>() / std::mem::size_of::<i32>()) as u32;
-        let rc = unsafe {
-            task_info(
-                mach_task_self(),
-                TASK_VM_INFO,
-                info.as_mut_ptr() as *mut i32,
-                &mut count,
-            )
-        };
-        if rc == KERN_SUCCESS {
-            let info = unsafe { info.assume_init() };
-            return ProcessMemorySnapshot {
-                rss_current_bytes: info.resident_size,
-            };
-        }
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
-        let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
-        if rc == 0 {
-            let usage = unsafe { usage.assume_init() };
-            return ProcessMemorySnapshot {
-                rss_current_bytes: (usage.ru_maxrss as u64) * 1024,
-                ..Default::default()
-            };
-        }
-    }
-
-    ProcessMemorySnapshot::default()
 }
 
 fn clear_selection_output(guard: &mut TerminalDrawerState) {
