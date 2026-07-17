@@ -331,13 +331,22 @@ fn expand_tabs(value: &str, tab_width: u32) -> String {
     let mut expanded = String::with_capacity(value.len());
     let mut column = 0;
     for character in value.chars() {
-        if character == '\t' {
-            let spaces = tab_width - column % tab_width;
-            expanded.extend(std::iter::repeat_n(' ', spaces as usize));
-            column += spaces;
-        } else {
-            expanded.push(character);
-            column += character_columns(character);
+        match character {
+            '\r' | '\n' => {
+                // Provider-normalized diff records represent exactly one
+                // source line. Ignore defensive line-ending controls so a
+                // malformed adapter response cannot create a multi-line Text
+                // inside the fixed-height Slint row.
+            }
+            '\t' => {
+                let spaces = tab_width - column % tab_width;
+                expanded.extend(std::iter::repeat_n(' ', spaces as usize));
+                column += spaces;
+            }
+            _ => {
+                expanded.push(character);
+                column += character_columns(character);
+            }
         }
     }
     expanded
@@ -426,6 +435,25 @@ mod tests {
             .map(|token| token.color)
             .collect::<HashSet<_>>();
         assert!(colors.len() >= 3);
+    }
+
+    #[test]
+    fn strips_provider_line_endings_before_highlighting() {
+        let lines = vec![PullRequestDiffLine {
+            old_line: 1,
+            new_line: 1,
+            kind: "context".to_string(),
+            content: "const value =\r\n'中文';\n".to_string(),
+        }];
+
+        let highlighted = highlight_diff_lines(&TEST_RESOURCES, "src/module.ts", &lines);
+        let rendered = highlighted[0]
+            .tokens
+            .iter()
+            .map(|token| token.text.as_str())
+            .collect::<String>();
+        assert_eq!(rendered, "const value ='中文';");
+        assert!(!rendered.contains(['\r', '\n']));
     }
 
     #[test]

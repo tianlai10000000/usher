@@ -1,8 +1,9 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use slint::{Color, ComponentHandle, ModelRc, VecModel};
+use slint::{Color, ComponentHandle, Model, ModelRc, ModelTracker, VecModel};
 
 use crate::git::{
     PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine, get_pull_request_diff,
@@ -21,6 +22,7 @@ use super::syntax_highlight::{
 
 const HIGHLIGHT_CACHE_CAPACITY: usize = 4;
 const SOURCE_CACHE_CAPACITY: usize = 3;
+const VISIBLE_LINE_CACHE_CAPACITY: usize = 64;
 
 #[derive(Debug)]
 struct BoundedCache<T> {
@@ -66,6 +68,94 @@ struct OwnedMemoryStats {
     children: usize,
     text_bytes: usize,
     estimated_heap_bytes: usize,
+}
+
+struct LazyPrDiffLineModel {
+    file: Arc<PullRequestDiffFile>,
+    highlighted: Arc<Vec<HighlightedLine>>,
+    rows: RefCell<LazyLineCache>,
+}
+
+impl LazyPrDiffLineModel {
+    fn new(file: Arc<PullRequestDiffFile>, highlighted: Arc<Vec<HighlightedLine>>) -> Self {
+        Self {
+            file,
+            highlighted,
+            rows: RefCell::new(LazyLineCache::new(VISIBLE_LINE_CACHE_CAPACITY)),
+        }
+    }
+
+    #[cfg(test)]
+    fn cached_row_count(&self) -> usize {
+        self.rows.borrow().entries.len()
+    }
+}
+
+impl Model for LazyPrDiffLineModel {
+    type Data = WorkflowPrDiffLine;
+
+    fn row_count(&self) -> usize {
+        self.file.lines.len().min(self.highlighted.len())
+    }
+
+    fn row_data(&self, row: usize) -> Option<Self::Data> {
+        if row >= self.row_count() {
+            return None;
+        }
+        if let Some(data) = self.rows.borrow_mut().get(row) {
+            return Some(data);
+        }
+        let data = to_slint_line(
+            &self.file,
+            row,
+            self.file.lines.get(row)?,
+            self.highlighted.get(row)?,
+        );
+        self.rows.borrow_mut().insert(row, data.clone());
+        Some(data)
+    }
+
+    fn model_tracker(&self) -> &dyn ModelTracker {
+        &()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+struct LazyLineCache {
+    capacity: usize,
+    entries: HashMap<usize, WorkflowPrDiffLine>,
+    order: VecDeque<usize>,
+}
+
+impl LazyLineCache {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    fn get(&mut self, index: usize) -> Option<WorkflowPrDiffLine> {
+        let data = self.entries.get(&index)?.clone();
+        self.order.retain(|candidate| *candidate != index);
+        self.order.push_back(index);
+        Some(data)
+    }
+
+    fn insert(&mut self, index: usize, data: WorkflowPrDiffLine) {
+        self.entries.insert(index, data);
+        self.order.retain(|candidate| *candidate != index);
+        self.order.push_back(index);
+        while self.entries.len() > self.capacity {
+            if let Some(evicted) = self.order.pop_front() {
+                self.entries.remove(&evicted);
+            }
+        }
+    }
 }
 
 impl<T: Clone> BoundedCache<T> {
@@ -129,7 +219,7 @@ pub(crate) struct WorkflowPrReviewController {
     show_viewed_files: Arc<Mutex<bool>>,
     collapsed_folders: Arc<Mutex<HashSet<String>>>,
     highlight_resources: Arc<Mutex<Option<Arc<HighlightResources>>>>,
-    highlighted_files: Arc<Mutex<BoundedCache<Vec<HighlightedLine>>>>,
+    highlighted_files: Arc<Mutex<BoundedCache<Arc<Vec<HighlightedLine>>>>>,
     source_files: Arc<Mutex<BoundedCache<String>>>,
     request_sequence: Arc<AtomicU64>,
     highlight_sequence: Arc<AtomicU64>,
@@ -588,7 +678,7 @@ impl WorkflowPrReviewController {
         let selected = self.cache.lock().ok().and_then(|guard| {
             let cache = guard.as_ref()?;
             Some((
-                cache.file(index)?.clone(),
+                Arc::new(cache.file(index)?.clone()),
                 cache.expanded_files.contains_key(&index),
             ))
         });
@@ -607,7 +697,7 @@ impl WorkflowPrReviewController {
             .ok()
             .and_then(|mut highlighted| highlighted.get_cloned(file.path.as_str()));
         if let Some(highlighted) = cached {
-            apply_highlighted_file(ui, &file, highlighted.as_slice(), reset_scroll);
+            apply_highlighted_file(ui, file, highlighted, reset_scroll);
             ui.set_workflow_pr_review_code_loading(false);
             self.log_memory_diagnostics("file_highlight.cache_hit_applied");
             return;
@@ -648,10 +738,11 @@ impl WorkflowPrReviewController {
                     );
                     return;
                 };
+                let highlighted = Arc::new(highlighted);
                 if let Ok(mut cached) = controller.highlighted_files.lock() {
                     cached.insert(file.path.clone(), highlighted.clone());
                 }
-                apply_highlighted_file(&ui, &file, highlighted.as_slice(), reset_scroll);
+                apply_highlighted_file(&ui, file, highlighted, reset_scroll);
                 ui.set_workflow_pr_review_code_loading(false);
                 controller.log_memory_diagnostics("file_highlight.generated_and_applied");
             });
@@ -997,7 +1088,7 @@ impl WorkflowPrReviewController {
         file: PullRequestDiffFile,
         source: String,
     ) {
-        let full_file = full_source_file(&file, source.as_str());
+        let full_file = Arc::new(full_source_file(&file, source.as_str()));
         ui.set_workflow_pr_review_viewing_file(true);
         ui.set_workflow_pr_review_has_expandable_hunks(false);
         ui.set_workflow_pr_review_context_expanded(false);
@@ -1031,7 +1122,7 @@ impl WorkflowPrReviewController {
                 }
                 match highlighted {
                     Ok(highlighted) => {
-                        apply_highlighted_file(&ui, &full_file, highlighted.as_slice(), true);
+                        apply_highlighted_file(&ui, full_file, Arc::new(highlighted), true);
                         ui.set_workflow_pr_review_code_loading(false);
                         controller.log_memory_diagnostics("full_file.highlighted_and_applied");
                     }
@@ -1272,7 +1363,7 @@ fn diff_override_storage_stats(files: &HashMap<usize, PullRequestDiffFile>) -> O
     stats
 }
 
-fn highlighted_cache_stats(cache: &BoundedCache<Vec<HighlightedLine>>) -> OwnedMemoryStats {
+fn highlighted_cache_stats(cache: &BoundedCache<Arc<Vec<HighlightedLine>>>) -> OwnedMemoryStats {
     let mut stats = OwnedMemoryStats::default();
     for (key, lines) in &cache.entries {
         stats.estimated_heap_bytes = stats
@@ -1284,7 +1375,7 @@ fn highlighted_cache_stats(cache: &BoundedCache<Vec<HighlightedLine>>) -> OwnedM
                     .saturating_mul(std::mem::size_of::<HighlightedLine>()),
             );
         stats.items = stats.items.saturating_add(lines.len());
-        for line in lines {
+        for line in lines.iter() {
             stats.children = stats.children.saturating_add(line.tokens.len());
             stats.estimated_heap_bytes = stats.estimated_heap_bytes.saturating_add(
                 line.tokens
@@ -1356,8 +1447,8 @@ fn apply_file_header(ui: &MainWindow, index: usize, file: &PullRequestDiffFile) 
 
 fn apply_highlighted_file(
     ui: &MainWindow,
-    file: &PullRequestDiffFile,
-    highlighted: &[HighlightedLine],
+    file: Arc<PullRequestDiffFile>,
+    highlighted: Arc<Vec<HighlightedLine>>,
     reset_scroll: bool,
 ) {
     let max_columns = highlighted
@@ -1365,22 +1456,18 @@ fn apply_highlighted_file(
         .map(|line| line.columns)
         .max()
         .unwrap_or(0);
-    let lines = file
-        .lines
-        .iter()
-        .enumerate()
-        .zip(highlighted.iter())
-        .map(|((index, line), highlighted)| to_slint_line(file, index, line, highlighted))
-        .collect::<Vec<_>>();
     ui.set_workflow_pr_review_max_code_columns(max_columns as i32);
-    ui.set_workflow_pr_review_lines(ModelRc::new(VecModel::from(lines)));
+    ui.set_workflow_pr_review_lines(ModelRc::new(LazyPrDiffLineModel::new(
+        file.clone(),
+        highlighted,
+    )));
     ui.set_workflow_pr_review_has_expandable_hunks(
         !ui.get_workflow_pr_review_viewing_file()
             && file
                 .lines
                 .iter()
                 .enumerate()
-                .any(|(index, _)| hunk_is_expandable(file, index)),
+                .any(|(index, _)| hunk_is_expandable(&file, index)),
     );
     if reset_scroll {
         ui.set_workflow_pr_review_line_model_revision(
@@ -1434,7 +1521,11 @@ fn to_slint_line(
         new_line: line.new_line,
         kind: line.kind.clone().into(),
         content: if line.kind == "hunk" {
-            line.content.clone().into()
+            line.content
+                .chars()
+                .filter(|character| !matches!(character, '\r' | '\n'))
+                .collect::<String>()
+                .into()
         } else {
             "".into()
         },
@@ -1822,12 +1913,16 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
+    use slint::Model;
+
     use super::{
-        BoundedCache, ReviewCache, ReviewRequest, build_tree_items, expand_all_hunk_context,
-        expand_hunk_context, full_source_file, hunk_is_expandable, restore_original_diff,
+        BoundedCache, LazyPrDiffLineModel, ReviewCache, ReviewRequest, VISIBLE_LINE_CACHE_CAPACITY,
+        build_tree_items, expand_all_hunk_context, expand_hunk_context, full_source_file,
+        hunk_is_expandable, restore_original_diff,
     };
     use crate::git::{PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine};
     use crate::project::ProjectRepositoryMetadata;
+    use crate::workflow::syntax_highlight::{HighlightedLine, HighlightedToken};
 
     fn file(path: &str) -> PullRequestDiffFile {
         PullRequestDiffFile {
@@ -2058,5 +2153,42 @@ mod tests {
         assert_eq!(cache.get_cloned("second"), None);
         assert_eq!(cache.get_cloned("first"), Some(1));
         assert_eq!(cache.get_cloned("third"), Some(3));
+    }
+
+    #[test]
+    fn lazy_diff_model_materializes_only_a_bounded_row_window() {
+        let mut file = file("src/lib.rs");
+        file.lines = (0..128)
+            .map(|index| PullRequestDiffLine {
+                old_line: index + 1,
+                new_line: index + 1,
+                kind: "context".to_string(),
+                content: format!("line {index}"),
+            })
+            .collect();
+        let highlighted = (0..128)
+            .map(|index| HighlightedLine {
+                tokens: vec![HighlightedToken {
+                    text: format!("line {index}"),
+                    color: [0xff, 0x24, 0x29, 0x2f],
+                    dark_color: [0xff, 0xe6, 0xed, 0xf3],
+                    bold: false,
+                    italic: false,
+                }],
+                columns: 8,
+            })
+            .collect::<Vec<_>>();
+        let model = LazyPrDiffLineModel::new(Arc::new(file), Arc::new(highlighted));
+
+        assert_eq!(model.row_count(), 128);
+        assert_eq!(model.cached_row_count(), 0);
+        assert_eq!(model.row_data(5).expect("row 5").new_line, 6);
+        assert_eq!(model.cached_row_count(), 1);
+        assert!(model.row_data(128).is_none());
+
+        for index in 0..128 {
+            assert!(model.row_data(index).is_some());
+        }
+        assert_eq!(model.cached_row_count(), VISIBLE_LINE_CACHE_CAPACITY);
     }
 }

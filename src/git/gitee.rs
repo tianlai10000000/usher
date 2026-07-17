@@ -499,7 +499,7 @@ fn decode_diff_line(value: &Value) -> PullRequestDiffLine {
             _ => "context",
         }
         .to_string(),
-        content: html_line_to_text(
+        content: html_diff_line_to_text(
             string_field(value, "line_content")
                 .unwrap_or_default()
                 .as_str(),
@@ -532,6 +532,18 @@ fn html_line_to_text(value: &str) -> String {
         }
     }
     decode_html_entities(text.as_str())
+}
+
+fn html_diff_line_to_text(value: &str) -> String {
+    // The enterprise diff endpoint sometimes pretty-prints its syntax HTML
+    // with literal CR/LF characters between spans. A PullRequestDiffLine is
+    // one source line, so retaining those separators makes Slint lay out one
+    // fixed-height diff row as multiple text lines. Remove only line-ending
+    // controls after decoding; ordinary spaces and tabs remain source data.
+    html_line_to_text(value)
+        .chars()
+        .filter(|character| !matches!(character, '\r' | '\n'))
+        .collect()
 }
 
 fn decode_html_entities(value: &str) -> String {
@@ -900,5 +912,15 @@ mod tests {
             ),
             "<div class=\"card\" data-label='A&B'>"
         );
+    }
+
+    #[test]
+    fn normalizes_pretty_printed_diff_html_to_one_visual_line() {
+        let line = super::html_diff_line_to_text(
+            "<span>const value = </span>\r\n<span>&#34;中文&#34;;</span>\n",
+        );
+
+        assert_eq!(line, "const value = \"中文\";");
+        assert!(!line.contains(['\r', '\n']));
     }
 }

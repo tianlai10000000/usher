@@ -59,7 +59,7 @@ An implementation in another stack should preserve these provider-neutral record
 | `PullRequestItem` | number, title, author, source branch, target branch, updated time, web URL | A missing branch is shown as `—`; parseable timestamps are rendered as `YYYY-MM-DD HH:MM:SS +08:00`. |
 | `PullRequestDiffDetail` | files, added/removed totals, base SHA, head SHA, start SHA, too-many-commits flag | The SHA values are immutable source references for later context expansion. |
 | `PullRequestDiffFile` | path, old path, change type, added/removed counts, lines | Change types are `new_file`, `deleted_file`, `renamed_file`, or `edit_file`. |
-| `PullRequestDiffLine` | old line, new line, kind, content | Kinds are normalized to hunk/context/addition/deletion before rendering. |
+| `PullRequestDiffLine` | old line, new line, kind, content | Kinds are normalized to hunk/context/addition/deletion before rendering. Content is one visual source line and contains no CR/LF controls. |
 
 其他技术栈应保留这些 Provider-neutral 记录，而不是向 UI 暴露 Provider JSON：
 
@@ -70,7 +70,7 @@ An implementation in another stack should preserve these provider-neutral record
 | `PullRequestItem` | 编号、标题、作者、源分支、目标分支、更新时间、网页 URL | 缺失分支显示 `—`；可解析时间显示为 `YYYY-MM-DD HH:MM:SS +08:00`。 |
 | `PullRequestDiffDetail` | 文件、增删总数、base SHA、head SHA、start SHA、过多提交标记 | SHA 是后续展开上下文所用的固定源码引用。 |
 | `PullRequestDiffFile` | 路径、旧路径、变更类型、增删统计、行 | 变更类型归一为 `new_file`、`deleted_file`、`renamed_file`、`edit_file`。 |
-| `PullRequestDiffLine` | 旧行号、新行号、类型、内容 | 在渲染前归一为 hunk/context/addition/deletion。 |
+| `PullRequestDiffLine` | 旧行号、新行号、类型、内容 | 在渲染前归一为 hunk/context/addition/deletion；内容必须是一个不含 CR/LF 控制符的视觉源码行。 |
 
 ## Provider adapter contract / Provider 适配契约
 
@@ -153,7 +153,7 @@ Every asynchronous boundary needs a monotonically increasing request sequence (s
 21. Tokens, authorization headers, and unbounded provider response bodies are not logged. Background list, diff, branch-enrichment, and source requests use silent feedback; the view owns its inline loading and error state.
 22. File switching and hunk expansion keep the currently rendered code model mounted while syntax highlighting runs, then replace the model atomically. File switching resets the code viewport after the replacement; hunk expansion preserves the current viewport and must not flash an empty surface.
 23. The file toolbar follows GitHub's ordering: file icon, path, copy-path, the two-state `Expand all lines`/`Collapse non-diff lines` context toggle, statistics, previous/next navigation, and overflow. Every icon action is vertically aligned and has a hover tooltip. Expansion uses the `unfold` icon; once any hidden context is inserted, the action switches to the `fold` icon and restores the retained original diff when clicked. The overflow popup uses GitHub's eye Octicon. Its action toggles `View file`/`View diff` inside the application and always reads source at the diff's immutable head SHA, or base SHA for a deleted file. It never opens a browser or reads a mutable branch tip.
-24. Review caches are memory-bounded. The normalized diff has one shared immutable base; expanded context is retained only as per-file copy-on-write overrides, and collapsing a file removes its override. Highlighted diff models retain at most four recently used files and immutable source text retains at most three. The complete-file highlighted model lives only in the active UI model and is not added to the highlighted-diff cache.
+24. Review caches are memory-bounded. The normalized diff has one shared immutable base; expanded context is retained only as per-file copy-on-write overrides, and collapsing a file removes its override. Highlighted diff models retain at most four recently used files and immutable source text retains at most three. The active Slint diff model is read-only and lazy: it may materialize at most 64 converted UI rows while retaining the complete Rust-owned highlighted result. The complete-file highlighted model lives only in the active UI model and is not added to the highlighted-diff cache.
 25. A successful zero-item list uses a GitHub-style filter-specific headline and exact `0 total` inside the same large-image Vuetify-style layout as the error state. In both states, the illustration, title, description, and optional action are horizontally centered as one visual column. Empty data uses the bundled teamwork illustration. Request, authentication, and schema failures use the bundled connection illustration and a `Retry Request` action; technical adapter errors are logged but are not presented as empty data or exposed verbatim in the UI.
 
 1. 点击 PR 列表行后打开审核工作区，并保留下层 Workflow PR 列表状态。

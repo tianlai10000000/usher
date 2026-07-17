@@ -719,3 +719,91 @@ B 组第 4 个文件高亮完成时，日志为 `base_files=200`、`base_lines=2
 候选截图确认 Markdown 标题、链接、列表、中文、缩进和空白位置正常；Rust/TypeScript/Vue/HTML/CSS/Slint 高亮测试继续通过。B 组减少的 live heap 大于 Rust 高亮缓存自身的 0.34 MiB 差值，符合减少 Slint model 字段、字符串复制和约 8,786 个文本 delegate/小对象带来的连带收益。
 
 结论：本批通过并保留。它没有通过减少语言支持换内存，而是在完整语言覆盖不变的前提下，显著降低每个已高亮文件的 token 数和 UI 小对象数量。
+
+### 11.13 第 12 批：PR diff 惰性 Slint 行模型
+
+日期：2026-07-17。
+
+约束：继续完整加载 `SyntaxSet::load_defaults_newlines()`，不按扩展名裁剪语言，也不改变第 11 批的 token 合并规则。本批只优化 Rust 高亮结果到 Slint 行 model 的所有权和物化时机。
+
+问题：旧实现完成高亮后立即把文件的每一行转换成 `WorkflowPrDiffLine`，再放入 `VecModel`。`ListView` 虽然只实例化可见 delegate，但数千行文件仍会一次性复制全部行字符串和 token 子 model；大型文件切换的内存增量随总行数线性增长。
+
+改动：新增只读 `LazyPrDiffLineModel`。完整 `PullRequestDiffFile` 与高亮结果由共享 `Arc` 保持，Slint 请求某行时才调用现有 `to_slint_line`；转换后的行进入 64 项 LRU，快速回滚时复用，超出窗口后立即淘汰。文件切换、hunk 展开和完整文件查看仍通过 event loop 原子替换 model，旧 model 在新高亮完成前保持挂载。单元测试覆盖 128 行顺序访问并确认缓存始终不超过 64 行。
+
+远端 PR 在上一批之后更新，因此本批重新建立同快照 A/B，未复用旧样本。两组均为 800×600 logical、2.00 scale（1600×1200 physical）、同一 206 文件/27,369 行 PR、相同前 4 个文件和点击顺序，并启用 `MallocStackLogging=1`。A 临时切回 eager `VecModel`，B 为惰性候选；四个文件共 3,348 行、3,687 tokens、90,325 文本 bytes，输入完全一致，其中第二个文件约 2,932 行。
+
+| 指标 | A：eager 全行 `VecModel` | B：64 行惰性 LRU | 结果 |
+| --- | ---: | ---: | --- |
+| 2,932 行文件切换前稳定 RSS | 263.23 MiB | 264.19 MiB | 两进程启动基线有约 0.96 MiB 偏差 |
+| 该文件应用瞬时 RSS | 267.19 MiB | 266.61 MiB | 应看组内增量，不直接比较绝对值 |
+| 该文件组内 RSS 增量 | +3.96 MiB | +2.42 MiB | -1.54 MiB，约 -38.9% |
+| 前 4 文件后稳定 RSS | 272.62 MiB | 270.91 MiB | -1.71 MiB，约 -0.6% |
+| 前 4 文件后稳定 physical footprint | 200.19 MiB | 198.33 MiB | -1.86 MiB，约 -0.9% |
+| 单文件已转换 Slint 行上限 | 文件全部行 | 64 行 | 大文件 UI 行持有量由线性变为有界 |
+
+`MallocStackLogging` 的 performance-tool pages 仍包含在两组 footprint 中，但两组使用相同诊断配置，因此组内差值可比较；这些页面不属于生产构建成本。候选截图确认 Markdown 标题、链接、列表、中文和 diff 背景正常；在 2,932 行 `Cargo.lock` 上连续发送 25 次、每次 12 行的快速滚动事件后，视口从约第 80 行直接到 2,708 行附近，行号、hunk、增删背景和代码文本均连续，没有空白、错行或卡死。完整语言高亮测试、惰性缓存上限测试和所有 lib 单测均通过。
+
+结论：本批通过并保留。总进程 footprint 改善不大但稳定可重复，而 2,932 行文件切换的新增 RSS 降低约 39%；更重要的是，未来超大文件不再为不可见行预先构造整份 Slint 字符串/token model。
+
+## 12. 剩余值得执行的优化批次
+
+下面只保留有明确 owner、可独立 A/B、且不牺牲任意语言 PR 高亮能力的项目。它们不是已经确认的收益，必须逐批实现、逐批验收；未达到门槛即回滚，不把多项改动混入一个候选版本。
+
+### 12.1 后续 A/B 的统一前提
+
+1. 把当前大型 PR 响应保存为脱敏本地 fixture，固定 206 文件、27,369 行和前 4 个文件顺序。远端 PR 会变化，后续不得再用两个不同远端快照比较。
+2. A/B 使用相同构建 profile、renderer、窗口 logical size、backing scale、显示器和操作脚本。每组至少冷启动 3 次，报告中位数和离散范围，不只挑一次最优值。
+3. `MallocStackLogging=1` 只用于 owner、live heap 和节点数归因；生产成本另用不带 MSL 的相同场景测 RSS、physical footprint、IOSurface 和 graphics region。两种数据不得交叉比较绝对值。
+4. 固定执行 Home → PR → 2,932 行文件 → 快速滚动 → 前 4 文件 → Home，并额外执行 PR 打开/关闭 5 轮。记录首次增量、稳定值和 warm-up 后每轮增长斜率。
+5. 除非目标 owner 至少下降 20%，或生产稳定 RSS/footprint 至少改善 1 MiB 且三次方向一致，否则不以噪声为由保留复杂实现。任何文本错误、滚动回退、明显 CPU 增长或功能缺失均直接判失败。
+
+### 12.2 第 13 批候选：选中文件零拷贝与 Diff 元数据紧凑化（优先级 P1）
+
+当前惰性 model 为获得独立生命周期，仍会把 `cache.file(index)` 完整 clone 后放入新的 `Arc`。因此选中 2,932 行文件时，基础 diff 与当前 model 会短暂或长期各持有一份该文件的行字符串。每行的 `kind` 还是重复 `String`，对 `context`/`addition`/`deletion`/`hunk` 这类有限状态产生不必要的小分配。
+
+建议分成两个可单独回滚的子步骤：
+
+- 13A：基础文件表改为逐文件 `Arc<PullRequestDiffFile>`，惰性 model、文件树、完整文件查看和未展开状态共享同一文件；只有 hunk 展开继续创建该文件的 copy-on-write override。
+- 13B：在 Provider 归一化边界之后，把行类型转换为紧凑 enum，避免为每行分配状态字符串；不要让 Slint 或 Provider adapter 重新承担字符串解析。
+
+A/B 重点看 2,932 行文件选中前后 live heap、malloc nodes、组内 RSS 增量，以及 hunk 展开/收起后的 owner 数量。必须验证基础文件、active model 和 override 的引用关系，确保关闭 PR 后全部归零。若 13A/13B 各自没有可测收益，应分别回滚，不因“结构更优雅”强行保留。
+
+### 12.3 第 14 批候选：高亮 token 改为源码区间（优先级 P1）
+
+第 11 批已经减少 token 数，但 `HighlightedToken` 仍为每个 token 保存一份 `String`，与 diff 行内容重复。第 12 批只限制 Slint 行物化，没有消除 Rust 侧 4 文件高亮 LRU 中的文本复制。
+
+候选表示为“一份规范化显示行文本 + 若干样式区间”：token 只保存 UTF-8 byte range、颜色和字体样式；Slint 请求可见行时才按合法字符边界生成当前 64 行所需的字符串。Tab 展开应在建立区间前完成，CJK、组合字符、Emoji 和 CRLF 必须有边界测试。Syntect 仍使用完整 `SyntaxSet::load_defaults_newlines()`，不得通过删语言或扩展名白名单获得收益。
+
+A/B 使用高 token 密度的 Rust、TypeScript、Vue、HTML、CSS、Slint 和 Markdown fixture，比较高亮缓存 live bytes、malloc nodes、首次高亮耗时和快速滚动 CPU。通过条件是高亮缓存目标 owner 至少下降 20%，文本逐字符重建完全一致，首次高亮和滚动没有明显退化；否则保留当前字符串 token 方案。
+
+### 12.4 第 15 批候选：Logo 解码期缩略图与 ColorSync 峰值（优先级 P1，先归因后实现）
+
+第 7 批把进入 Slint cache 的 raster Logo 限制为 128×128，已经解决长期 RGBA cache 过大；但当前管线仍可能先完整解码原图，再缩放并丢弃大 buffer，ColorSync 的进程级缓存也可能在这一步建立高水位。该项只在新的 allocation trace 仍能把明显峰值关联到 Logo 解码时继续。
+
+候选方案是在解码器支持时直接请求缩略图尺寸，或在 macOS 使用 ImageIO thumbnail path；磁盘缓存保存尺寸受控的处理结果，SVG 继续保持矢量，不放大小图，也不通过删除 ICC profile 破坏颜色正确性。远程、本地、Base64 和默认 raster 路径必须共用同一入口。
+
+A/B 使用固定的五张原始 Logo，记录解码峰值 RSS、最终 RGBA live bytes、ColorSync live bytes、Home 首次加载耗时和 2×/3×截图清晰度。若 decoder 仍必须完整解码，或 ColorSync/峰值没有下降，则不增加平台专用复杂度。
+
+### 12.5 第 16 批候选：PR 工作区离屏层与高 DPI 图形成本（优先级 P1）
+
+完成业务 model 优化后，剩余大头主要在 IOSurface、IOAccelerator 和 renderer 高水位。`pr_review_workspace.slint` 中存在多个 14–18 px 阴影、clip、opacity overlay 和弹出层；它们不一定都有问题，但需要逐个确认是否形成与窗口尺寸相关的离屏 surface。
+
+按单组件 A/B 审计文件过滤 popup、overflow popup、顶部/浮动卡片和全窗口遮罩：先确认隐藏状态是否仍挂载或分配 layer，再分别测试移除阴影、缩小阴影边界、改用边框、仅在打开时挂载。禁止一次删掉全部视觉效果，也禁止盲目添加 `cache-rendering-hint`；后者可能减少 draw call，却增加 GPU memory。
+
+验收固定 800×600 和 1400×900 logical、2× backing scale，分别记录 PR 打开、popup 开关、窗口放大/缩小 10 轮后的 IOSurface 数量、graphics footprint、稳定 RSS 和截图差异。只有能定位到具体组件、同尺寸 physical footprint 至少下降 5 MiB、并且交互与 GitHub 风格无可见回退时才保留。
+
+### 12.6 第 17 批候选：Slint/renderer 升级矩阵复测（优先级 P2）
+
+当前 FemtoVG/OpenGL 是本项目已测得的较低 RSS 默认；现有 WGPU/Metal feature 虽降低部分高 DPI footprint，但稳定 RSS 更高，因此不能直接切换。后续只有在 Slint、FemtoVG/WGPU 或 macOS 图形栈升级后，才使用同一 fixture 重新跑 OpenGL、WGPU/Metal 和可选 Skia 三方矩阵。
+
+升级批必须先增加 `naga`/`wgpu` target 日志过滤，避免诊断日志自身污染 CPU、磁盘和内存结果。切换生产 renderer 的通过条件不是单看 footprint：Home、Chat、PR、小窗口、大窗口和 10 轮 resize 的稳定 RSS 都不能回退，IOSurface/graphics footprint 要有明确改善，字体、阴影、代码滚动和文件树拖拽必须通过视觉与交互回归。条件不满足时只更新可安全更新的依赖，保持当前 renderer 默认。
+
+### 12.7 暂不重复或仅条件触发的项目
+
+- **Chat 路由卸载：** 当前已有 overscan、增量高度前缀缓存和最多 56 条消息的虚拟窗口；第 4 批清空 model 无可测收益。只有使用数千条历史、反复向上分页后观察到 warm-up 后线性增长，才重新设计 viewport 生命周期和滚动锚点。
+- **系统默认 CJK fallback：** 第 3 批已证明当前组合会从 22.4 MiB Hiragino 映射切到约 74.6 MiB PingFang，不能重复尝试同一方案。
+- **裁剪 Syntect 语言：** PR 语言不可预知，明确不做；第 14 批只能改变结果表示，不能减少语言覆盖。
+- **强制 allocator trim/purge：** 不解决 owner 和峰值，只会制造暂时好看的 RSS；不进入生产方案。
+- **立即启用 WGPU/Metal：** 第 5 批稳定 RSS 已回退 8.6%–13.5%，等待依赖或驱动变化后再按第 17 批复测。
+
+推荐顺序为 **13A → 13B → 14 → 15（有调用栈证据才做）→ 16 → 17**。第 13、14 批继续收敛随大型 PR 线性增长的应用侧成本；第 16、17 批处理当前更大的高 DPI 图形成本，但风险更高，必须在业务内存结构稳定后单独测量。
