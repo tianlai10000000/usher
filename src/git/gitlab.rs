@@ -8,9 +8,10 @@ use crate::codereview::api::gitlab as endpoints;
 use crate::http::{self, RequestOptions};
 
 use super::{
-    PullRequestDiffDetail, PullRequestDiffFile, PullRequestItem, PullRequestPage, PullRequestState,
-    RepoLocator, RepoType, configured_api_base_url, configured_token,
-    is_configured_enterprise_host, parse_unified_diff, percent_encode_path, unavailable_diff_file,
+    PullRequestActionState, PullRequestDiffDetail, PullRequestDiffFile, PullRequestItem,
+    PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestState, RepoLocator,
+    RepoType, configured_api_base_url, configured_token, is_configured_enterprise_host,
+    parse_unified_diff, percent_encode_path, unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -185,6 +186,156 @@ pub(super) async fn get_pull_request_diff(
     })
 }
 
+pub(super) async fn get_pull_request_action_state(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Result<PullRequestActionState, String> {
+    let endpoint = endpoints::MERGE_REQUEST_URL
+        .replace("{api_base_url}", api_base_url(locator).as_str())
+        .replace(
+            "{project_id}",
+            percent_encode_path(repo_project_id.trim()).as_str(),
+        )
+        .replace(
+            "{merge_request_iid}",
+            percent_encode_path(pull_request_iid.trim()).as_str(),
+        );
+    let mut request = http::get(endpoint)
+        .header(ACCEPT, "application/json")
+        .query(&[("with_merge_status_recheck", "true")]);
+    if let Some(token) = configured_token(RepoType::GitLab) {
+        request = request.header("PRIVATE-TOKEN", token);
+    }
+    let detail: Value = http::send_json(
+        request,
+        RequestOptions::new("Load GitLab merge request readiness"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let readiness = gitlab_merge_readiness(&detail);
+    let review_state = match string_field(&detail, "detailed_merge_status").as_deref() {
+        Some("requested_changes") => "rejected",
+        Some("not_approved") | Some("approvals_syncing") => "pending",
+        _ => "",
+    }
+    .to_string();
+    let merge_block_reason = if readiness.kind == PullRequestReadinessKind::Ready {
+        "GitLab reports this merge request as ready, but remote review and merge actions are not implemented in Usher yet."
+            .to_string()
+    } else {
+        readiness.detail.clone()
+    };
+    Ok(PullRequestActionState {
+        can_comment: false,
+        can_approve: false,
+        can_request_changes: false,
+        can_merge: false,
+        review_state,
+        readiness,
+        merge_block_reason,
+        allowed_merge_methods: Vec::new(),
+    })
+}
+
+fn gitlab_merge_readiness(detail: &Value) -> PullRequestReadiness {
+    let state = string_field(detail, "state")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if state == "merged" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Merged,
+            "GitLab reports that this merge request has been merged.",
+        );
+    }
+    if state == "closed" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Closed,
+            "GitLab reports that this merge request is closed.",
+        );
+    }
+    if detail.get("draft").and_then(Value::as_bool) == Some(true)
+        || detail.get("work_in_progress").and_then(Value::as_bool) == Some(true)
+    {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Draft,
+            "Mark the GitLab merge request as ready before merging.",
+        );
+    }
+    if detail.get("has_conflicts").and_then(Value::as_bool) == Some(true) {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Conflicts,
+            "GitLab reports merge conflicts between the source and target branches.",
+        );
+    }
+
+    let status = string_field(detail, "detailed_merge_status")
+        .unwrap_or_else(|| string_field(detail, "merge_status").unwrap_or_default());
+    match status.as_str() {
+        "mergeable" | "can_be_merged" => PullRequestReadiness::new(
+            PullRequestReadinessKind::Ready,
+            "GitLab reports that all current merge requirements are satisfied.",
+        ),
+        "unchecked" | "checking" | "preparing" | "approvals_syncing" => PullRequestReadiness::new(
+            PullRequestReadinessKind::Checking,
+            "GitLab is calculating the mergeability of this merge request.",
+        ),
+        "conflict" | "cannot_be_merged" => PullRequestReadiness::new(
+            PullRequestReadinessKind::Conflicts,
+            "GitLab reports merge conflicts between the source and target branches.",
+        ),
+        "not_approved" => PullRequestReadiness::new(
+            PullRequestReadinessKind::ReviewRequired,
+            "Required GitLab approvals have not been completed.",
+        ),
+        "requested_changes" => PullRequestReadiness::new(
+            PullRequestReadinessKind::ChangesRequested,
+            "A GitLab reviewer requested changes.",
+        ),
+        "discussions_not_resolved" => PullRequestReadiness::new(
+            PullRequestReadinessKind::DiscussionsUnresolved,
+            "Resolve all required GitLab discussions before merging.",
+        ),
+        "draft_status" => PullRequestReadiness::new(
+            PullRequestReadinessKind::Draft,
+            "Mark the GitLab merge request as ready before merging.",
+        ),
+        "need_rebase" => PullRequestReadiness::new(
+            PullRequestReadinessKind::BranchOutOfDate,
+            "GitLab requires the source branch to be rebased before merging.",
+        ),
+        "ci_still_running" => PullRequestReadiness::new(
+            PullRequestReadinessKind::ChecksPending,
+            "The required GitLab CI pipeline is still running.",
+        ),
+        "ci_must_pass"
+        | "commits_status"
+        | "security_policy_pipeline_check"
+        | "security_policy_violations"
+        | "status_checks_must_pass" => PullRequestReadiness::new(
+            PullRequestReadinessKind::ChecksFailed,
+            "A required GitLab pipeline, status check, or security policy has not passed.",
+        ),
+        "not_open" => PullRequestReadiness::new(
+            PullRequestReadinessKind::Closed,
+            "GitLab reports that this merge request is not open.",
+        ),
+        "merge_request_blocked"
+        | "merge_time"
+        | "jira_association_missing"
+        | "locked_paths"
+        | "locked_lfs_files"
+        | "title_regex" => PullRequestReadiness::new(
+            PullRequestReadinessKind::Blocked,
+            "A GitLab repository rule or merge condition is blocking this merge request.",
+        ),
+        _ => PullRequestReadiness::new(
+            PullRequestReadinessKind::Unavailable,
+            "GitLab did not return enough information to determine merge readiness.",
+        ),
+    }
+}
+
 fn decode_diff_file(value: &Value) -> PullRequestDiffFile {
     let path = string_field(value, "new_path").unwrap_or_else(|| "Unknown file".to_string());
     let old_path = string_field(value, "old_path").unwrap_or_else(|| path.clone());
@@ -332,4 +483,54 @@ fn fallback_total(page: u32, per_page: u32, item_count: usize) -> u32 {
     page.saturating_sub(1)
         .saturating_mul(per_page)
         .saturating_add(item_count as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::gitlab_merge_readiness;
+    use crate::git::PullRequestReadinessKind;
+
+    #[test]
+    fn maps_gitlab_mergeable_status_to_ready() {
+        let readiness = gitlab_merge_readiness(&json!({
+            "state": "opened",
+            "detailed_merge_status": "mergeable",
+            "has_conflicts": false
+        }));
+
+        assert_eq!(readiness.kind, PullRequestReadinessKind::Ready);
+    }
+
+    #[test]
+    fn maps_gitlab_async_calculation_to_checking() {
+        let readiness = gitlab_merge_readiness(&json!({
+            "state": "opened",
+            "detailed_merge_status": "checking"
+        }));
+
+        assert_eq!(readiness.kind, PullRequestReadinessKind::Checking);
+    }
+
+    #[test]
+    fn maps_gitlab_conflict_independently_of_other_providers() {
+        let readiness = gitlab_merge_readiness(&json!({
+            "state": "opened",
+            "detailed_merge_status": "conflict",
+            "has_conflicts": true
+        }));
+
+        assert_eq!(readiness.kind, PullRequestReadinessKind::Conflicts);
+    }
+
+    #[test]
+    fn maps_gitlab_missing_approval_to_review_required() {
+        let readiness = gitlab_merge_readiness(&json!({
+            "state": "opened",
+            "detailed_merge_status": "not_approved"
+        }));
+
+        assert_eq!(readiness.kind, PullRequestReadinessKind::ReviewRequired);
+    }
 }

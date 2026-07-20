@@ -88,6 +88,10 @@ pub struct GitPlatformSettings {
 pub struct GitTokenSettings {
     #[serde(default)]
     pub token: String,
+    /// Separate credential for Gitee Enterprise. Other providers currently
+    /// leave this field empty and continue to use `token`.
+    #[serde(default)]
+    pub enterprise_token: String,
     /// Optional API root for an enterprise/self-hosted provider. This is a
     /// complete API base, for example `https://git.example.com/api/v4`.
     #[serde(default)]
@@ -102,6 +106,7 @@ pub struct GitPlatformTokens {
     pub github: String,
     pub gitlab: String,
     pub gitee: String,
+    pub gitee_enterprise: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -201,7 +206,8 @@ impl SettingsManager {
             .build()
         {
             Ok(config) => match config.try_deserialize::<AppSettings>() {
-                Ok(settings) => {
+                Ok(mut settings) => {
+                    migrate_legacy_gitee_token(&mut settings);
                     log::debug!("[Settings] Loaded settings from {:?}", config_path);
                     settings
                 }
@@ -278,11 +284,18 @@ impl SettingsManager {
     }
 
     /// Update git platform tokens
-    pub fn set_git_platform_tokens(&self, github: &str, gitlab: &str, gitee: &str) {
+    pub fn set_git_platform_tokens(
+        &self,
+        github: &str,
+        gitlab: &str,
+        gitee: &str,
+        gitee_enterprise: &str,
+    ) {
         if let Ok(mut settings) = self.settings.write() {
             settings.git.platform.github.token = github.trim().to_string();
             settings.git.platform.gitlab.token = gitlab.trim().to_string();
             settings.git.platform.gitee.token = gitee.trim().to_string();
+            settings.git.platform.gitee.enterprise_token = gitee_enterprise.trim().to_string();
         }
     }
 
@@ -376,8 +389,8 @@ pub fn save_terminal_verbose_logging(enabled: bool) {
 }
 
 /// Save git platform tokens asynchronously
-pub fn save_git_platform_tokens(github: &str, gitlab: &str, gitee: &str) {
-    get_settings_manager().set_git_platform_tokens(github, gitlab, gitee);
+pub fn save_git_platform_tokens(github: &str, gitlab: &str, gitee: &str, gitee_enterprise: &str) {
+    get_settings_manager().set_git_platform_tokens(github, gitlab, gitee, gitee_enterprise);
     Timer::single_shot(std::time::Duration::from_millis(100), || {
         if let Err(e) = get_settings_manager().save() {
             log::error!("[Settings] Failed to save settings: {}", e);
@@ -430,6 +443,13 @@ pub fn load_git_platform_tokens() -> GitPlatformTokens {
         github: settings.git.platform.github.token.trim().to_string(),
         gitlab: settings.git.platform.gitlab.token.trim().to_string(),
         gitee: settings.git.platform.gitee.token.trim().to_string(),
+        gitee_enterprise: settings
+            .git
+            .platform
+            .gitee
+            .enterprise_token
+            .trim()
+            .to_string(),
     }
 }
 
@@ -461,6 +481,9 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app_state.set_git_github_token(settings.git.platform.github.token.clone().into());
     app_state.set_git_gitlab_token(settings.git.platform.gitlab.token.clone().into());
     app_state.set_git_gitee_token(settings.git.platform.gitee.token.clone().into());
+    app_state.set_git_gitee_enterprise_token(
+        settings.git.platform.gitee.enterprise_token.clone().into(),
+    );
     app_state.set_git_github_api_base_url(settings.git.platform.github.api_base_url.clone().into());
     app_state.set_git_github_enterprise(settings.git.platform.github.enterprise.clone().into());
     app_state.set_git_gitlab_api_base_url(settings.git.platform.gitlab.api_base_url.clone().into());
@@ -516,6 +539,19 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     );
 }
 
+/// Before Gitee public and enterprise credentials were split, the settings UI
+/// labelled the single token as an enterprise token. Move that value only when
+/// an enterprise API root proves that this was an enterprise configuration.
+fn migrate_legacy_gitee_token(settings: &mut AppSettings) {
+    let gitee = &mut settings.git.platform.gitee;
+    if gitee.enterprise_token.trim().is_empty()
+        && !gitee.api_base_url.trim().is_empty()
+        && !gitee.token.trim().is_empty()
+    {
+        gitee.enterprise_token = std::mem::take(&mut gitee.token);
+    }
+}
+
 fn normalize_api_base_url(value: &str) -> String {
     value.trim().trim_end_matches('/').to_string()
 }
@@ -561,5 +597,31 @@ mod tests {
         assert!(serialized.contains("[git.platform.gitee]"));
         assert!(serialized.contains("api_base_url = \"https://gitee.example.com/api/v8\""));
         assert!(serialized.contains("enterprise = \"example-enterprise\""));
+    }
+
+    #[test]
+    fn migrates_legacy_gitee_enterprise_token_without_reusing_it_for_public_api() {
+        let mut settings = AppSettings::default();
+        settings.git.platform.gitee.api_base_url = "https://gitee.example.com/api/v8".into();
+        settings.git.platform.gitee.token = "legacy-enterprise-token".into();
+
+        migrate_legacy_gitee_token(&mut settings);
+
+        assert!(settings.git.platform.gitee.token.is_empty());
+        assert_eq!(
+            settings.git.platform.gitee.enterprise_token,
+            "legacy-enterprise-token"
+        );
+    }
+
+    #[test]
+    fn keeps_legacy_public_gitee_token_when_no_enterprise_api_is_configured() {
+        let mut settings = AppSettings::default();
+        settings.git.platform.gitee.token = "public-token".into();
+
+        migrate_legacy_gitee_token(&mut settings);
+
+        assert_eq!(settings.git.platform.gitee.token, "public-token");
+        assert!(settings.git.platform.gitee.enterprise_token.is_empty());
     }
 }

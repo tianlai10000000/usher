@@ -11,14 +11,16 @@ use crate::codereview::api::gitee as endpoints;
 use crate::http::{self, RequestOptions};
 
 use super::{
-    PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine, PullRequestItem,
-    PullRequestPage, PullRequestState, RepoLocator, RepoType, configured_api_base_url,
-    configured_enterprise, configured_token, is_configured_enterprise_host, percent_encode_path,
+    GiteeApiProfile, PullRequestActionState, PullRequestDiffDetail, PullRequestDiffFile,
+    PullRequestDiffLine, PullRequestItem, PullRequestMergeMethod, PullRequestPage,
+    PullRequestReadiness, PullRequestReadinessKind, PullRequestReviewAction, PullRequestState,
+    RepoLocator, RepoType, configured_api_base_url, configured_enterprise, configured_gitee_token,
+    gitee_api_profile, percent_encode_path,
 };
 
 /// Fetch the stable provider project id for a remote repository.
 pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, String> {
-    if is_configured_enterprise_host(RepoType::Gitee, locator.host.as_str()) {
+    if gitee_api_profile(locator) == GiteeApiProfile::EnterpriseV8 {
         return get_enterprise_repo_detail(locator).await;
     }
     get_public_gitee_repo_detail(locator).await
@@ -35,7 +37,7 @@ async fn get_enterprise_repo_detail(locator: &RepoLocator) -> Result<String, Str
     if let Some(enterprise) = configured_enterprise(RepoType::Gitee) {
         request = request.header("enterprise", enterprise);
     }
-    if let Some(token) = configured_token(RepoType::Gitee) {
+    if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
         request = request.header("PRIVATE-TOKEN", token);
     }
 
@@ -59,7 +61,7 @@ async fn get_public_gitee_repo_detail(locator: &RepoLocator) -> Result<String, S
             percent_encode_path(locator.repo.as_str()).as_str(),
         );
     let mut request = http::get(endpoint).header(ACCEPT, "application/json");
-    if let Some(token) = configured_token(RepoType::Gitee) {
+    if let Some(token) = configured_gitee_token(GiteeApiProfile::PublicV5) {
         request = request.header("Authorization", format!("token {token}"));
     }
 
@@ -98,12 +100,12 @@ pub(super) async fn get_pull_requests(
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
-    if is_configured_enterprise_host(RepoType::Gitee, locator.host.as_str()) {
+    if gitee_api_profile(locator) == GiteeApiProfile::EnterpriseV8 {
         log::debug!(
             "[CodeReview][Gitee] Load merge requests: source=enterprise remote_host={} api_base_configured=true enterprise_configured={} token_configured={} state={} page={} per_page={}",
             locator.host,
             configured_enterprise(RepoType::Gitee).is_some(),
-            configured_token(RepoType::Gitee).is_some(),
+            configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_some(),
             state
                 .map(PullRequestState::as_str)
                 .unwrap_or("provider-default"),
@@ -156,7 +158,7 @@ async fn get_enterprise_pull_requests(
     if let Some(state) = state {
         request = request.query(&[("state", state.gitee_query())]);
     }
-    if let Some(token) = configured_token(RepoType::Gitee) {
+    if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
         request = request.header("PRIVATE-TOKEN", token);
     }
     decode_pull_request_page(request, page, per_page).await
@@ -189,7 +191,7 @@ pub(super) async fn get_pull_request_diff(
     pull_request_iid: &str,
     ignore_whitespace_change: bool,
 ) -> Result<PullRequestDiffDetail, String> {
-    if !is_configured_enterprise_host(RepoType::Gitee, locator.host.as_str()) {
+    if gitee_api_profile(locator) == GiteeApiProfile::PublicV5 {
         return get_public_pull_request_diff(locator, pull_request_iid).await;
     }
 
@@ -214,7 +216,7 @@ pub(super) async fn get_pull_request_diff(
     if let Some(enterprise) = configured_enterprise(RepoType::Gitee) {
         request = request.header("enterprise", enterprise);
     }
-    if let Some(token) = configured_token(RepoType::Gitee) {
+    if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
         request = request.header("PRIVATE-TOKEN", token);
     }
 
@@ -224,7 +226,7 @@ pub(super) async fn get_pull_request_diff(
         pull_request_iid,
         ignore_whitespace_change,
         configured_enterprise(RepoType::Gitee).is_some(),
-        configured_token(RepoType::Gitee).is_some(),
+        configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_some(),
     );
     let payload: Value =
         http::send_json(request, RequestOptions::new("Load Gitee pull request diff"))
@@ -321,7 +323,7 @@ pub(super) async fn get_repository_file_text(
     path: &str,
     reference: &str,
 ) -> Result<String, String> {
-    let request = if is_configured_enterprise_host(RepoType::Gitee, locator.host.as_str()) {
+    let request = if gitee_api_profile(locator) == GiteeApiProfile::EnterpriseV8 {
         let endpoint = endpoints::ENTERPRISE_REPOSITORY_FILE_URL
             .replace("{api_base_url}", enterprise_api_base_url()?.as_str())
             .replace(
@@ -336,7 +338,7 @@ pub(super) async fn get_repository_file_text(
         if let Some(enterprise) = configured_enterprise(RepoType::Gitee) {
             request = request.header("enterprise", enterprise);
         }
-        if let Some(token) = configured_token(RepoType::Gitee) {
+        if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
             request = request.header("PRIVATE-TOKEN", token);
         }
         request
@@ -356,12 +358,489 @@ pub(super) async fn get_repository_file_text(
     decode_base64_content(&payload)
 }
 
-fn public_authenticated_request(endpoint: String) -> reqwest::RequestBuilder {
-    let mut request = http::get(endpoint).header(ACCEPT, "application/json");
-    if let Some(token) = configured_token(RepoType::Gitee) {
+pub(super) async fn get_pull_request_action_state(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Result<PullRequestActionState, String> {
+    match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => {
+            get_enterprise_pull_request_action_state(repo_project_id, pull_request_iid).await
+        }
+        GiteeApiProfile::PublicV5 => {
+            get_public_pull_request_action_state(locator, pull_request_iid).await
+        }
+    }
+}
+
+async fn get_enterprise_pull_request_action_state(
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Result<PullRequestActionState, String> {
+    if configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_none() {
+        return Ok(PullRequestActionState {
+            can_comment: false,
+            can_approve: false,
+            can_request_changes: false,
+            can_merge: false,
+            review_state: String::new(),
+            readiness: PullRequestReadiness::new(
+                PullRequestReadinessKind::Unavailable,
+                "Configure a Gitee Enterprise Token to load the enterprise merge conditions.",
+            ),
+            merge_block_reason:
+                "Configure a Gitee Enterprise Token in Settings to review or merge this pull request."
+                    .to_string(),
+            allowed_merge_methods: Vec::new(),
+        });
+    }
+    let current_endpoint = enterprise_pull_request_endpoint(
+        endpoints::ENTERPRISE_MERGE_REQUEST_CURRENT_STATE_URL,
+        repo_project_id,
+        pull_request_iid,
+    )?;
+    let current: Value = http::send_json(
+        enterprise_authenticated_builder(http::get(current_endpoint)),
+        RequestOptions::new("Load Gitee enterprise merge state"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let detail_endpoint = enterprise_pull_request_endpoint(
+        endpoints::ENTERPRISE_MERGE_REQUEST_URL,
+        repo_project_id,
+        pull_request_iid,
+    )?;
+    let detail: Value = http::send_json(
+        enterprise_authenticated_builder(http::get(detail_endpoint)),
+        RequestOptions::new("Load Gitee enterprise pull request details"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let has_token = configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_some();
+    let server_can_merge = current
+        .get("can_merge")
+        .and_then(Value::as_bool)
+        .or_else(|| current.get("can_be_merge").and_then(Value::as_bool))
+        .unwrap_or(false);
+    let review_state = string_field(&detail, "review_state")
+        .or_else(|| string_field(&current, "review_state"))
+        .unwrap_or_default();
+    let readiness = gitee_enterprise_merge_readiness(&current, &detail, review_state.as_str());
+    let can_merge =
+        has_token && server_can_merge && readiness.kind == PullRequestReadinessKind::Ready;
+    let mut allowed_merge_methods = detail
+        .get("restrict_merge_type")
+        .and_then(Value::as_array)
+        .map(|methods| {
+            methods
+                .iter()
+                .filter_map(Value::as_str)
+                .filter_map(parse_gitee_merge_method)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if allowed_merge_methods.is_empty() {
+        allowed_merge_methods = vec![
+            PullRequestMergeMethod::Merge,
+            PullRequestMergeMethod::Squash,
+            PullRequestMergeMethod::Rebase,
+            PullRequestMergeMethod::FastForward,
+        ];
+    }
+    let merge_block_reason = if !has_token {
+        "Configure a Gitee Enterprise Token in Settings to review or merge this pull request."
+            .to_string()
+    } else if can_merge {
+        String::new()
+    } else {
+        readiness.detail.clone()
+    };
+
+    Ok(PullRequestActionState {
+        can_comment: has_token,
+        can_approve: has_token,
+        can_request_changes: has_token,
+        can_merge,
+        review_state,
+        readiness,
+        merge_block_reason,
+        allowed_merge_methods,
+    })
+}
+
+async fn get_public_pull_request_action_state(
+    locator: &RepoLocator,
+    pull_request_iid: &str,
+) -> Result<PullRequestActionState, String> {
+    let endpoint = public_repo_endpoint(
+        endpoints::PUBLIC_PULL_REQUEST_URL,
+        locator,
+        Some(pull_request_iid),
+        None,
+    );
+    let detail: Value = http::send_json(
+        public_authenticated_request(endpoint),
+        RequestOptions::new("Load Gitee public pull request merge state"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let has_token = configured_gitee_token(GiteeApiProfile::PublicV5).is_some();
+    let readiness = gitee_public_merge_readiness(&detail);
+    let can_merge = has_token && readiness.kind == PullRequestReadinessKind::Ready;
+    let merge_block_reason = if !has_token {
+        "Configure a Gitee Public Token in Settings to comment or merge this pull request."
+            .to_string()
+    } else {
+        readiness.detail.clone()
+    };
+    Ok(PullRequestActionState {
+        can_comment: has_token,
+        // Gitee public v5 exposes PR comments but has no approve/request-change review endpoint.
+        can_approve: false,
+        can_request_changes: false,
+        can_merge,
+        review_state: String::new(),
+        readiness,
+        merge_block_reason,
+        allowed_merge_methods: vec![
+            PullRequestMergeMethod::Merge,
+            PullRequestMergeMethod::Squash,
+        ],
+    })
+}
+
+fn gitee_enterprise_merge_readiness(
+    current: &Value,
+    detail: &Value,
+    review_state: &str,
+) -> PullRequestReadiness {
+    let state = string_field(current, "state")
+        .or_else(|| string_field(detail, "state"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if state == "merged" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Merged,
+            "Gitee Enterprise reports that this pull request has been merged.",
+        );
+    }
+    if state == "closed" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Closed,
+            "Gitee Enterprise reports that this pull request is closed.",
+        );
+    }
+    if state == "drafted"
+        || detail.get("draft").and_then(Value::as_bool) == Some(true)
+        || detail.get("is_draft").and_then(Value::as_bool) == Some(true)
+    {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Draft,
+            "Mark the Gitee Enterprise pull request as ready before merging.",
+        );
+    }
+
+    // The enterprise v8 document defines conflict_result=true as “no
+    // conflict”; false is the conflicting state.
+    if current.get("conflict_result").and_then(Value::as_bool) == Some(false) {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Conflicts,
+            "Gitee Enterprise reports merge conflicts between the source and target branches.",
+        );
+    }
+    if review_state == "review_rejected" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::ChangesRequested,
+            "A Gitee Enterprise reviewer requested changes.",
+        );
+    }
+    if current.get("scan_quality_state").and_then(Value::as_bool) == Some(false) {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::ChecksFailed,
+            "The Gitee Enterprise quality gate has not passed.",
+        );
+    }
+    let note = current.get("note").unwrap_or(&Value::Null);
+    let unresolved_notes = note
+        .get("resolve_note_enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && note.get("resolve").and_then(Value::as_u64).unwrap_or(0)
+            < note.get("total").and_then(Value::as_u64).unwrap_or(0);
+    if unresolved_notes {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::DiscussionsUnresolved,
+            "Resolve all required Gitee Enterprise review comments before merging.",
+        );
+    }
+    let review_requirement_unmet = ["primary_review", "general_review"].iter().any(|key| {
+        current
+            .get(key)
+            .and_then(|review| review.get("meet_merger_conditions"))
+            .and_then(Value::as_bool)
+            == Some(false)
+    });
+    if review_state == "review_pending" || review_requirement_unmet {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::ReviewRequired,
+            "Required Gitee Enterprise reviews have not been completed.",
+        );
+    }
+    if current.get("strategy_result").and_then(Value::as_bool) == Some(false) {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Blocked,
+            "A Gitee Enterprise merge strategy or repository rule is blocking this merge.",
+        );
+    }
+    if current
+        .get("can_merge")
+        .and_then(Value::as_bool)
+        .or_else(|| current.get("can_be_merge").and_then(Value::as_bool))
+        == Some(true)
+    {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Ready,
+            "All merge conditions reported by Gitee Enterprise are satisfied.",
+        );
+    }
+    PullRequestReadiness::new(
+        PullRequestReadinessKind::Blocked,
+        "Gitee Enterprise reports that this pull request does not currently meet the merge conditions.",
+    )
+}
+
+fn gitee_public_merge_readiness(detail: &Value) -> PullRequestReadiness {
+    let state = string_field(detail, "state")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if state == "merged" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Merged,
+            "Gitee public v5 reports that this pull request has been merged.",
+        );
+    }
+    if state == "closed" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Closed,
+            "Gitee public v5 reports that this pull request is closed.",
+        );
+    }
+    if detail.get("draft").and_then(Value::as_bool) == Some(true)
+        || detail.get("is_draft").and_then(Value::as_bool) == Some(true)
+    {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Draft,
+            "Mark the Gitee pull request as ready before merging.",
+        );
+    }
+    match detail
+        .get("mergeable")
+        .and_then(Value::as_bool)
+        .or_else(|| detail.get("can_merge").and_then(Value::as_bool))
+    {
+        Some(true) if state == "open" || state == "opened" => PullRequestReadiness::new(
+            PullRequestReadinessKind::Ready,
+            "Gitee public v5 reports that this pull request can be merged.",
+        ),
+        Some(false) => PullRequestReadiness::new(
+            PullRequestReadinessKind::Blocked,
+            "Gitee public v5 reports that this pull request cannot currently be merged.",
+        ),
+        _ => PullRequestReadiness::new(
+            PullRequestReadinessKind::Unavailable,
+            "Gitee public v5 did not return a mergeable state for this pull request.",
+        ),
+    }
+}
+
+pub(super) async fn submit_pull_request_review(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+    action: PullRequestReviewAction,
+    body: &str,
+) -> Result<(), String> {
+    match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => {
+            if configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_none() {
+                return Err(
+                    "Configure a Gitee Enterprise Token in Settings before submitting a review."
+                        .to_string(),
+                );
+            }
+            let endpoint = enterprise_pull_request_endpoint(
+                endpoints::ENTERPRISE_MERGE_REQUEST_REVIEWS_URL,
+                repo_project_id,
+                pull_request_iid,
+            )?;
+            let state = match action {
+                PullRequestReviewAction::Comment => "commented",
+                PullRequestReviewAction::Approve => "approved",
+                PullRequestReviewAction::RequestChanges => "rejected",
+            };
+            if action != PullRequestReviewAction::Approve && body.trim().is_empty() {
+                return Err("A review comment is required for this action.".into());
+            }
+            let request = enterprise_authenticated_builder(http::post(endpoint))
+                .json(&serde_json::json!({ "comment": body.trim(), "state": state }));
+            http::send(
+                request,
+                RequestOptions::new("Submit Gitee enterprise review"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            Ok(())
+        }
+        GiteeApiProfile::PublicV5 => {
+            if configured_gitee_token(GiteeApiProfile::PublicV5).is_none() {
+                return Err(
+                    "Configure a Gitee Public Token in Settings before submitting a comment."
+                        .to_string(),
+                );
+            }
+            if action != PullRequestReviewAction::Comment {
+                return Err(
+                    "Gitee public v5 supports pull request comments, but not approve or request-changes reviews."
+                        .to_string(),
+                );
+            }
+            if body.trim().is_empty() {
+                return Err("A comment is required.".into());
+            }
+            let endpoint = public_repo_endpoint(
+                endpoints::PUBLIC_PULL_REQUEST_COMMENTS_URL,
+                locator,
+                Some(pull_request_iid),
+                None,
+            );
+            let request = public_authenticated_builder(http::post(endpoint))
+                .json(&serde_json::json!({ "body": body.trim() }));
+            http::send(
+                request,
+                RequestOptions::new("Submit Gitee public pull request comment"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            Ok(())
+        }
+    }
+}
+
+pub(super) async fn merge_pull_request(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+    method: PullRequestMergeMethod,
+    remove_source_branch: bool,
+) -> Result<(), String> {
+    match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => {
+            if configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_none() {
+                return Err(
+                    "Configure a Gitee Enterprise Token in Settings before merging.".to_string(),
+                );
+            }
+            let endpoint = enterprise_pull_request_endpoint(
+                endpoints::ENTERPRISE_MERGE_REQUEST_MERGE_URL,
+                repo_project_id,
+                pull_request_iid,
+            )?;
+            let request =
+                enterprise_authenticated_builder(http::put(endpoint)).json(&serde_json::json!({
+                    "merge_type": method.as_str(),
+                    "should_remove_source_branch": remove_source_branch,
+                }));
+            http::send(
+                request,
+                RequestOptions::new("Merge Gitee enterprise pull request"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            Ok(())
+        }
+        GiteeApiProfile::PublicV5 => {
+            if configured_gitee_token(GiteeApiProfile::PublicV5).is_none() {
+                return Err(
+                    "Configure a Gitee Public Token in Settings before merging.".to_string()
+                );
+            }
+            if !matches!(
+                method,
+                PullRequestMergeMethod::Merge | PullRequestMergeMethod::Squash
+            ) {
+                return Err("Gitee public v5 supports merge and squash methods only.".to_string());
+            }
+            let endpoint = public_repo_endpoint(
+                endpoints::PUBLIC_PULL_REQUEST_MERGE_URL,
+                locator,
+                Some(pull_request_iid),
+                None,
+            );
+            let request =
+                public_authenticated_builder(http::put(endpoint)).json(&serde_json::json!({
+                    "merge_method": method.as_str(),
+                    "prune_source_branch": remove_source_branch,
+                }));
+            http::send(
+                request,
+                RequestOptions::new("Merge Gitee public pull request"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            Ok(())
+        }
+    }
+}
+
+fn enterprise_pull_request_endpoint(
+    template: &str,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Result<String, String> {
+    if repo_project_id.trim().is_empty() || pull_request_iid.trim().is_empty() {
+        return Err("Gitee project id or pull request number is empty.".to_string());
+    }
+    Ok(template
+        .replace("{api_base_url}", enterprise_api_base_url()?.as_str())
+        .replace(
+            "{project_id}",
+            percent_encode_path(repo_project_id.trim()).as_str(),
+        )
+        .replace(
+            "{merge_request_iid}",
+            percent_encode_path(pull_request_iid.trim()).as_str(),
+        ))
+}
+
+fn enterprise_authenticated_builder(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    let mut request = request
+        .header("OAUTH", "enabled")
+        .header(ACCEPT, "application/json");
+    if let Some(enterprise) = configured_enterprise(RepoType::Gitee) {
+        request = request.header("enterprise", enterprise);
+    }
+    if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
+        request = request.header("PRIVATE-TOKEN", token);
+    }
+    request
+}
+
+fn public_authenticated_builder(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    let mut request = request.header(ACCEPT, "application/json");
+    if let Some(token) = configured_gitee_token(GiteeApiProfile::PublicV5) {
         request = request.header("Authorization", format!("token {token}"));
     }
     request
+}
+
+fn parse_gitee_merge_method(value: &str) -> Option<PullRequestMergeMethod> {
+    PullRequestMergeMethod::parse(value)
+}
+
+fn public_authenticated_request(endpoint: String) -> reqwest::RequestBuilder {
+    public_authenticated_builder(http::get(endpoint))
 }
 
 fn public_repo_endpoint(
@@ -613,7 +1092,7 @@ async fn get_public_pull_requests(
     if let Some(state) = state {
         request = request.query(&[("state", state.gitee_public_query())]);
     }
-    if let Some(token) = configured_token(RepoType::Gitee) {
+    if let Some(token) = configured_gitee_token(GiteeApiProfile::PublicV5) {
         request = request.header("Authorization", format!("token {token}"));
     }
     decode_pull_request_page(request, page, per_page).await
@@ -833,8 +1312,11 @@ fn value_to_id(value: Option<&Value>, provider: &str) -> Result<String, String> 
 mod tests {
     use serde_json::json;
 
-    use super::{decode_pull_request_diff, pull_request_values, select_enterprise_project_id};
-    use crate::git::parse_repo_locator;
+    use super::{
+        decode_pull_request_diff, gitee_enterprise_merge_readiness, gitee_public_merge_readiness,
+        pull_request_values, select_enterprise_project_id,
+    };
+    use crate::git::{PullRequestReadinessKind, parse_repo_locator};
 
     #[test]
     fn chooses_the_exact_remote_match_from_a_search_result() {
@@ -922,5 +1404,61 @@ mod tests {
 
         assert_eq!(line, "const value = \"中文\";");
         assert!(!line.contains(['\r', '\n']));
+    }
+
+    #[test]
+    fn enterprise_true_conflict_result_means_no_conflict() {
+        let current = json!({
+            "state": "opened",
+            "conflict_result": true,
+            "scan_quality_state": true,
+            "strategy_result": true,
+            "can_merge": true
+        });
+        let readiness = gitee_enterprise_merge_readiness(&current, &json!({}), "review_approved");
+
+        assert_eq!(readiness.kind, PullRequestReadinessKind::Ready);
+    }
+
+    #[test]
+    fn enterprise_false_conflict_result_means_conflicting() {
+        let current = json!({
+            "state": "opened",
+            "conflict_result": false,
+            "can_merge": false
+        });
+        let readiness = gitee_enterprise_merge_readiness(&current, &json!({}), "review_approved");
+
+        assert_eq!(readiness.kind, PullRequestReadinessKind::Conflicts);
+    }
+
+    #[test]
+    fn enterprise_unresolved_required_notes_block_merge() {
+        let current = json!({
+            "state": "opened",
+            "conflict_result": true,
+            "note": {
+                "resolve_note_enabled": true,
+                "resolve": 1,
+                "total": 2
+            },
+            "can_merge": false
+        });
+        let readiness = gitee_enterprise_merge_readiness(&current, &json!({}), "review_approved");
+
+        assert_eq!(
+            readiness.kind,
+            PullRequestReadinessKind::DiscussionsUnresolved
+        );
+    }
+
+    #[test]
+    fn public_non_mergeable_state_is_blocked_not_conflicting() {
+        let readiness = gitee_public_merge_readiness(&json!({
+            "state": "open",
+            "mergeable": false
+        }));
+
+        assert_eq!(readiness.kind, PullRequestReadinessKind::Blocked);
     }
 }

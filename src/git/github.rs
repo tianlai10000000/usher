@@ -10,9 +10,11 @@ use crate::codereview::api::github as endpoints;
 use crate::http::{self, RequestOptions};
 
 use super::{
-    PullRequestDiffDetail, PullRequestDiffFile, PullRequestItem, PullRequestPage, PullRequestState,
-    RepoLocator, RepoType, configured_api_base_url, configured_token,
-    is_configured_enterprise_host, parse_unified_diff, percent_encode_path, unavailable_diff_file,
+    PullRequestActionState, PullRequestDiffDetail, PullRequestDiffFile, PullRequestItem,
+    PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
+    PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, configured_api_base_url,
+    configured_token, is_configured_enterprise_host, parse_unified_diff, percent_encode_path,
+    unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -263,11 +265,176 @@ pub(super) async fn get_repository_file_text(
     decode_base64_content(&payload, "GitHub")
 }
 
+pub(super) async fn get_pull_request_action_state(
+    locator: &RepoLocator,
+    pull_request_number: &str,
+) -> Result<PullRequestActionState, String> {
+    let detail_endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let detail: Value = http::send_json(
+        authenticated_request(locator, detail_endpoint),
+        RequestOptions::new("Load GitHub pull request merge state"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let repository_url = repository_endpoint(endpoints::REPOSITORY_URL, locator, None, None);
+    let repository: Value = http::send_json(
+        authenticated_request(locator, repository_url),
+        RequestOptions::new("Load GitHub repository merge settings"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let reviews_endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_REVIEWS_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let reviews = http::send_json::<Vec<Value>>(
+        authenticated_request(locator, reviews_endpoint).query(&[("per_page", "100")]),
+        RequestOptions::new("Load GitHub pull request reviews"),
+    )
+    .await
+    .unwrap_or_default();
+
+    let has_token = configured_token(RepoType::GitHub).is_some();
+    let review_state = aggregate_review_state(reviews.as_slice());
+    let readiness = github_merge_readiness(&detail, review_state.as_str());
+    let can_merge = has_token && readiness.kind == PullRequestReadinessKind::Ready;
+    let merge_block_reason = if !has_token {
+        "Configure a GitHub Token in Settings to review or merge this pull request.".to_string()
+    } else if readiness.kind != PullRequestReadinessKind::Ready {
+        readiness.detail.clone()
+    } else {
+        String::new()
+    };
+
+    let mut allowed_merge_methods = Vec::new();
+    if repository
+        .get("allow_merge_commit")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+    {
+        allowed_merge_methods.push(PullRequestMergeMethod::Merge);
+    }
+    if repository
+        .get("allow_squash_merge")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+    {
+        allowed_merge_methods.push(PullRequestMergeMethod::Squash);
+    }
+    if repository
+        .get("allow_rebase_merge")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+    {
+        allowed_merge_methods.push(PullRequestMergeMethod::Rebase);
+    }
+
+    Ok(PullRequestActionState {
+        can_comment: has_token,
+        can_approve: has_token,
+        can_request_changes: has_token,
+        can_merge,
+        review_state,
+        readiness,
+        merge_block_reason,
+        allowed_merge_methods,
+    })
+}
+
+pub(super) async fn submit_pull_request_review(
+    locator: &RepoLocator,
+    pull_request_number: &str,
+    action: PullRequestReviewAction,
+    body: &str,
+) -> Result<(), String> {
+    if configured_token(RepoType::GitHub).is_none() {
+        return Err("Configure a GitHub Token in Settings before submitting a review.".into());
+    }
+    if action != PullRequestReviewAction::Approve && body.trim().is_empty() {
+        return Err("A review comment is required for this action.".into());
+    }
+    let endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_REVIEWS_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let event = match action {
+        PullRequestReviewAction::Comment => "COMMENT",
+        PullRequestReviewAction::Approve => "APPROVE",
+        PullRequestReviewAction::RequestChanges => "REQUEST_CHANGES",
+    };
+    let request = authenticated_builder(
+        http::post(endpoint),
+        configured_token(RepoType::GitHub).as_deref(),
+    )
+    .json(&serde_json::json!({ "body": body.trim(), "event": event }));
+    let _: Value = http::send_json(
+        request,
+        RequestOptions::new("Submit GitHub pull request review"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(super) async fn merge_pull_request(
+    locator: &RepoLocator,
+    pull_request_number: &str,
+    method: PullRequestMergeMethod,
+) -> Result<(), String> {
+    if configured_token(RepoType::GitHub).is_none() {
+        return Err("Configure a GitHub Token in Settings before merging.".into());
+    }
+    if method == PullRequestMergeMethod::FastForward {
+        return Err("GitHub does not expose fast-forward as a pull request merge method.".into());
+    }
+    let endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_MERGE_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let request = authenticated_builder(
+        http::put(endpoint),
+        configured_token(RepoType::GitHub).as_deref(),
+    )
+    .json(&serde_json::json!({ "merge_method": method.as_str() }));
+    let payload: Value = http::send_json(request, RequestOptions::new("Merge GitHub pull request"))
+        .await
+        .map_err(|error| error.to_string())?;
+    if payload.get("merged").and_then(Value::as_bool) == Some(false) {
+        return Err(string_field(&payload, "message")
+            .unwrap_or_else(|| "GitHub did not merge this pull request.".to_string()));
+    }
+    Ok(())
+}
+
 fn authenticated_request(_locator: &RepoLocator, endpoint: String) -> reqwest::RequestBuilder {
-    let mut request = http::get(endpoint)
+    authenticated_builder(
+        http::get(endpoint),
+        configured_token(RepoType::GitHub).as_deref(),
+    )
+}
+
+fn authenticated_builder(
+    request: reqwest::RequestBuilder,
+    token: Option<&str>,
+) -> reqwest::RequestBuilder {
+    let mut request = request
         .header(ACCEPT, "application/vnd.github+json")
-        .header(USER_AGENT, "usher-code-review");
-    if let Some(token) = configured_token(RepoType::GitHub) {
+        .header(USER_AGENT, "usher-code-review")
+        .header("X-GitHub-Api-Version", "2022-11-28");
+    if let Some(token) = token {
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
     request
@@ -376,11 +543,139 @@ fn pull_request_branches(value: &Value) -> Option<(String, String)> {
         .then_some((source_branch, target_branch))
 }
 
+fn aggregate_review_state(reviews: &[Value]) -> String {
+    let mut latest_by_user = std::collections::BTreeMap::new();
+    for review in reviews {
+        let Some(user) = nested_string(review, "user", "login") else {
+            continue;
+        };
+        let state = string_field(review, "state")
+            .unwrap_or_default()
+            .to_ascii_uppercase();
+        if matches!(
+            state.as_str(),
+            "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED"
+        ) {
+            latest_by_user.insert(user, state);
+        }
+    }
+    if latest_by_user
+        .values()
+        .any(|state| state == "CHANGES_REQUESTED")
+    {
+        "rejected".to_string()
+    } else if latest_by_user.values().any(|state| state == "APPROVED") {
+        "approved".to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// GitHub owns this mapping. Do not reuse it for Gitee or GitLab: GitHub's
+/// `mergeable` and `mergeable_state` are provider-specific and `null` means
+/// that GitHub is still computing a synthetic test merge.
+fn github_merge_readiness(detail: &Value, review_state: &str) -> PullRequestReadiness {
+    let state = string_field(detail, "state").unwrap_or_default();
+    let merged = detail
+        .get("merged")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || detail
+            .get("merged_at")
+            .is_some_and(|value| !value.is_null());
+    if merged {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Merged,
+            "GitHub reports that this pull request has been merged.",
+        );
+    }
+    if state == "closed" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Closed,
+            "GitHub reports that this pull request was closed without merging.",
+        );
+    }
+    if state != "open" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Unavailable,
+            "GitHub did not return a recognized open, closed, or merged state.",
+        );
+    }
+    if detail
+        .get("draft")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Draft,
+            "GitHub draft pull requests cannot be merged until they are marked ready for review.",
+        );
+    }
+
+    let mergeable = detail.get("mergeable").and_then(Value::as_bool);
+    let mergeable_state = string_field(detail, "mergeable_state")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if mergeable.is_none() || mergeable_state == "unknown" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Checking,
+            "GitHub is calculating a test merge for this pull request.",
+        );
+    }
+    if mergeable == Some(false) || mergeable_state == "dirty" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::Conflicts,
+            "GitHub found conflicts between the head and base branches.",
+        );
+    }
+    if review_state == "rejected" {
+        return PullRequestReadiness::new(
+            PullRequestReadinessKind::ChangesRequested,
+            "A GitHub review is requesting changes before this pull request can be merged.",
+        );
+    }
+
+    match mergeable_state.as_str() {
+        "blocked" => PullRequestReadiness::new(
+            PullRequestReadinessKind::Blocked,
+            "GitHub branch protection, required reviews, checks, or another repository rule is blocking this merge.",
+        ),
+        "behind" => PullRequestReadiness::new(
+            PullRequestReadinessKind::BranchOutOfDate,
+            "GitHub requires the head branch to be updated with the base branch before merging.",
+        ),
+        "unstable" => PullRequestReadiness::new(
+            PullRequestReadinessKind::ChecksPending,
+            "GitHub reports non-passing commit status checks. They may still be pending or non-required.",
+        ),
+        "clean" | "has_hooks" | "" if mergeable == Some(true) => PullRequestReadiness::new(
+            PullRequestReadinessKind::Ready,
+            "GitHub reports a clean merge with no unmet merge requirement in the pull request state.",
+        ),
+        _ if mergeable == Some(true) => PullRequestReadiness::new(
+            PullRequestReadinessKind::Ready,
+            format!(
+                "GitHub reports this pull request as mergeable (provider state: {}).",
+                if mergeable_state.is_empty() {
+                    "mergeable"
+                } else {
+                    mergeable_state.as_str()
+                }
+            ),
+        ),
+        _ => PullRequestReadiness::new(
+            PullRequestReadinessKind::Unavailable,
+            "GitHub did not return enough information to determine merge readiness.",
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::pull_request_branches;
+    use super::{aggregate_review_state, github_merge_readiness, pull_request_branches};
+    use crate::git::PullRequestReadinessKind;
 
     #[test]
     fn reads_head_and_base_refs_from_a_pull_request_detail() {
@@ -408,5 +703,57 @@ mod tests {
             })),
             None
         );
+    }
+
+    #[test]
+    fn aggregates_latest_github_review_state_per_user() {
+        let reviews = vec![
+            json!({ "user": { "login": "alice" }, "state": "APPROVED" }),
+            json!({ "user": { "login": "bob" }, "state": "CHANGES_REQUESTED" }),
+            json!({ "user": { "login": "bob" }, "state": "DISMISSED" }),
+        ];
+        assert_eq!(aggregate_review_state(&reviews), "approved");
+    }
+
+    #[test]
+    fn github_null_mergeable_is_checking_not_conflicting() {
+        let readiness = github_merge_readiness(
+            &json!({
+                "state": "open",
+                "draft": false,
+                "mergeable": null,
+                "mergeable_state": "unknown"
+            }),
+            "",
+        );
+        assert_eq!(readiness.kind, PullRequestReadinessKind::Checking);
+    }
+
+    #[test]
+    fn github_dirty_state_is_conflicting() {
+        let readiness = github_merge_readiness(
+            &json!({
+                "state": "open",
+                "draft": false,
+                "mergeable": false,
+                "mergeable_state": "dirty"
+            }),
+            "",
+        );
+        assert_eq!(readiness.kind, PullRequestReadinessKind::Conflicts);
+    }
+
+    #[test]
+    fn github_clean_state_is_ready() {
+        let readiness = github_merge_readiness(
+            &json!({
+                "state": "open",
+                "draft": false,
+                "mergeable": true,
+                "mergeable_state": "clean"
+            }),
+            "approved",
+        );
+        assert_eq!(readiness.kind, PullRequestReadinessKind::Ready);
     }
 }

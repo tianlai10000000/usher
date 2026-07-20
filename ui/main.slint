@@ -224,6 +224,22 @@ export component MainWindow inherits Window {
     in property <bool> workflow-pr-review-ignore-whitespace-supported: false;
     in-out property <bool> workflow-pr-review-ignore-whitespace: false;
     in-out property <string> workflow-pr-review-file-filter: "";
+    in-out property <bool> workflow-pr-review-dialog-open: false;
+    in-out property <bool> workflow-pr-merge-dialog-open: false;
+    in property <bool> workflow-pr-action-loading: false;
+    in property <bool> workflow-pr-can-comment: false;
+    in property <bool> workflow-pr-can-approve: false;
+    in property <bool> workflow-pr-can-request-changes: false;
+    in property <string> workflow-pr-remote-review-state: "";
+    in property <bool> workflow-pr-can-merge: false;
+    in property <string> workflow-pr-merge-readiness-kind: "";
+    in property <string> workflow-pr-merge-readiness-label: "";
+    in property <string> workflow-pr-merge-readiness-detail: "";
+    in property <string> workflow-pr-merge-block-reason: "";
+    in property <bool> workflow-pr-merge-method-merge: false;
+    in property <bool> workflow-pr-merge-method-squash: false;
+    in property <bool> workflow-pr-merge-method-rebase: false;
+    in property <bool> workflow-pr-merge-method-fast-forward: false;
     in property <bool> workflow-pr-count-auto-update: false;
     in property <bool> workflow-pr-count-loading: false;
     in property <bool> workflow-pr-count-failed: false;
@@ -284,6 +300,8 @@ export component MainWindow inherits Window {
     callback workflow-pr-review-collapse-non-diff-lines();
     callback workflow-pr-review-copy-file-path(string);
     callback workflow-pr-review-view-file();
+    callback workflow-pr-submit-review(string, string);
+    callback workflow-pr-merge(string, bool);
     callback workflow-cd-start(string, string, string);
     callback workflow-cd-rollback(string);
     callback shell-drawer-toggle();
@@ -925,6 +943,22 @@ export component MainWindow inherits Window {
         ignore-whitespace-supported: root.workflow-pr-review-ignore-whitespace-supported;
         ignore-whitespace <=> root.workflow-pr-review-ignore-whitespace;
         file-filter <=> root.workflow-pr-review-file-filter;
+        review-dialog-open <=> root.workflow-pr-review-dialog-open;
+        merge-dialog-open <=> root.workflow-pr-merge-dialog-open;
+        action-loading: root.workflow-pr-action-loading;
+        can-comment: root.workflow-pr-can-comment;
+        can-approve: root.workflow-pr-can-approve;
+        can-request-changes: root.workflow-pr-can-request-changes;
+        remote-review-state: root.workflow-pr-remote-review-state;
+        can-merge: root.workflow-pr-can-merge;
+        merge-readiness-kind: root.workflow-pr-merge-readiness-kind;
+        merge-readiness-label: root.workflow-pr-merge-readiness-label;
+        merge-readiness-detail: root.workflow-pr-merge-readiness-detail;
+        merge-block-reason: root.workflow-pr-merge-block-reason;
+        merge-method-merge: root.workflow-pr-merge-method-merge;
+        merge-method-squash: root.workflow-pr-merge-method-squash;
+        merge-method-rebase: root.workflow-pr-merge-method-rebase;
+        merge-method-fast-forward: root.workflow-pr-merge-method-fast-forward;
         close => { root.workflow-pr-review-close(); }
         select-file(index) => { root.workflow-pr-review-select-file(index); }
         select-relative-file(offset) => { root.workflow-pr-review-select-relative-file(offset); }
@@ -939,7 +973,8 @@ export component MainWindow inherits Window {
         collapse-non-diff-lines => { root.workflow-pr-review-collapse-non-diff-lines(); }
         copy-file-path(path) => { root.workflow-pr-review-copy-file-path(path); }
         view-file => { root.workflow-pr-review-view-file(); }
-        decide(approved) => { root.workflow-pr-confirm(approved); }
+        submit-review(action, body) => { root.workflow-pr-submit-review(action, body); }
+        merge(method, remove-source-branch) => { root.workflow-pr-merge(method, remove-source-branch); }
     }
     
     // 通知显示区域 - 固定在右上角，距离右边界 16px

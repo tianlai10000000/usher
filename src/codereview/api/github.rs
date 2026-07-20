@@ -8,5 +8,9 @@ pub(crate) const PULL_REQUEST_URL: &str =
     "{api_base_url}/repos/{namespace}/{repository}/pulls/{pull_request_number}";
 pub(crate) const PULL_REQUEST_FILES_URL: &str =
     "{api_base_url}/repos/{namespace}/{repository}/pulls/{pull_request_number}/files";
+pub(crate) const PULL_REQUEST_REVIEWS_URL: &str =
+    "{api_base_url}/repos/{namespace}/{repository}/pulls/{pull_request_number}/reviews";
+pub(crate) const PULL_REQUEST_MERGE_URL: &str =
+    "{api_base_url}/repos/{namespace}/{repository}/pulls/{pull_request_number}/merge";
 pub(crate) const REPOSITORY_CONTENT_URL: &str =
     "{api_base_url}/repos/{namespace}/{repository}/contents/{file_path}";

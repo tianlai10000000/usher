@@ -311,9 +311,16 @@ export component Settings inherits PageView {
                         edited(_) => { root.git-tokens-saved = false; }
                     }
                     TokenField {
-                        label: "Gitee Enterprise Token";
+                        label: "Gitee Public Token";
                         value <=> AppState.git-gitee-token;
                         placeholder: "token";
+                        reveal: root.reveal-git-tokens;
+                        edited(_) => { root.git-tokens-saved = false; }
+                    }
+                    TokenField {
+                        label: "Gitee Enterprise Token";
+                        value <=> AppState.git-gitee-enterprise-token;
+                        placeholder: "private-token";
                         reveal: root.reveal-git-tokens;
                         edited(_) => { root.git-tokens-saved = false; }
                     }
@@ -353,7 +360,8 @@ export component Settings inherits PageView {
                                 AppState.save-git-tokens(
                                     AppState.git-github-token,
                                     AppState.git-gitlab-token,
-                                    AppState.git-gitee-token
+                                    AppState.git-gitee-token,
+                                    AppState.git-gitee-enterprise-token
                                 );
                                 root.git-tokens-saved = true;
                             }
@@ -665,7 +673,7 @@ export component Settings inherits PageView {
                         width: parent.width;
                         spacing: 12px;
                         alignment: center;
-                        MaterialText { text: "Logs Active"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
+                        MaterialText { text: "Tracing File Logs"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                         Switch {
                             checked: AppState.tracing-logger-active;

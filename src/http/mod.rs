@@ -342,6 +342,10 @@ pub(crate) fn post(url: impl reqwest::IntoUrl) -> reqwest::RequestBuilder {
     HTTP.asynchronous.post(url)
 }
 
+pub(crate) fn put(url: impl reqwest::IntoUrl) -> reqwest::RequestBuilder {
+    HTTP.asynchronous.put(url)
+}
+
 pub(crate) fn blocking_get(url: impl reqwest::IntoUrl) -> reqwest::blocking::RequestBuilder {
     HTTP.blocking.get(url)
 }

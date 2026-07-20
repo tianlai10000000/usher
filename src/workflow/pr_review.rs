@@ -6,8 +6,10 @@ use std::sync::{Arc, Mutex};
 use slint::{Color, ComponentHandle, Model, ModelRc, ModelTracker, VecModel};
 
 use crate::git::{
-    PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine, get_pull_request_diff,
-    get_repository_file_text, supports_ignore_whitespace,
+    PullRequestActionState, PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine,
+    PullRequestMergeMethod, PullRequestReviewAction, get_pull_request_action_state,
+    get_pull_request_diff, get_repository_file_text, merge_pull_request,
+    submit_pull_request_review, supports_ignore_whitespace,
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{
@@ -224,6 +226,7 @@ pub(crate) struct WorkflowPrReviewController {
     request_sequence: Arc<AtomicU64>,
     highlight_sequence: Arc<AtomicU64>,
     expand_sequence: Arc<AtomicU64>,
+    action_sequence: Arc<AtomicU64>,
 }
 
 fn session_highlight_resources(
@@ -253,6 +256,7 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         request_sequence: Arc::new(AtomicU64::new(0)),
         highlight_sequence: Arc::new(AtomicU64::new(0)),
         expand_sequence: Arc::new(AtomicU64::new(0)),
+        action_sequence: Arc::new(AtomicU64::new(0)),
     };
 
     let open_controller = controller.clone();
@@ -429,6 +433,24 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         }
     });
 
+    let submit_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_submit_review(move |action, body| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        submit_controller.submit_review(&ui, action.as_str(), body.as_str());
+    });
+
+    let merge_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_merge(move |method, remove_source_branch| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        merge_controller.merge(&ui, method.as_str(), remove_source_branch);
+    });
+
     controller
 }
 
@@ -438,6 +460,7 @@ impl WorkflowPrReviewController {
         self.request_sequence.fetch_add(1, Ordering::SeqCst);
         self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
         self.expand_sequence.fetch_add(1, Ordering::SeqCst);
+        self.action_sequence.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut request) = self.active_request.lock() {
             *request = None;
         }
@@ -477,6 +500,7 @@ impl WorkflowPrReviewController {
         self.request_sequence.fetch_add(1, Ordering::SeqCst);
         self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
         self.expand_sequence.fetch_add(1, Ordering::SeqCst);
+        self.action_sequence.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut alias) = self.project_alias.lock() {
             *alias = project_alias;
         }
@@ -556,6 +580,7 @@ impl WorkflowPrReviewController {
                 sources.clear();
             }
             ui.set_workflow_pr_review_file_filter("".into());
+            reset_action_ui(ui);
             self.log_memory_diagnostics("new_review.after_cache_clear");
         }
 
@@ -575,6 +600,7 @@ impl WorkflowPrReviewController {
         if let Some(detail) = cached {
             ui.set_workflow_pr_review_loading(false);
             self.apply_detail(ui, &detail);
+            self.refresh_action_state(ui);
             self.log_memory_diagnostics("review_open.cache_hit_applied");
             return;
         }
@@ -660,6 +686,7 @@ impl WorkflowPrReviewController {
                             });
                         }
                         controller.apply_detail(&ui, &detail);
+                        controller.refresh_action_state(&ui);
                         controller.log_memory_diagnostics("review_diff.loaded_and_applied");
                     }
                     Err(error) => {
@@ -667,6 +694,212 @@ impl WorkflowPrReviewController {
                         ui.set_workflow_pr_review_ignore_whitespace(false);
                         log::warn!("[Workflow][PR Review] Failed to load diff: {error}");
                         ui.set_workflow_pr_review_error(error.into());
+                    }
+                }
+            });
+        });
+    }
+
+    fn action_context(&self) -> Option<(ProjectRepositoryMetadata, String)> {
+        self.cache.lock().ok().and_then(|guard| {
+            let cache = guard.as_ref()?;
+            Some((cache.metadata.clone(), cache.request.number.clone()))
+        })
+    }
+
+    fn refresh_action_state(&self, ui: &MainWindow) {
+        let Some((metadata, pull_request_iid)) = self.action_context() else {
+            return;
+        };
+        let sequence = self.action_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        ui.set_workflow_pr_action_loading(true);
+        if ui.get_workflow_pr_merge_readiness_label().trim().is_empty() {
+            ui.set_workflow_pr_merge_readiness_kind("checking".into());
+            ui.set_workflow_pr_merge_readiness_label("Checking mergeability…".into());
+            ui.set_workflow_pr_merge_readiness_detail(
+                "Waiting for the repository provider to calculate merge readiness.".into(),
+            );
+        }
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let result = get_pull_request_action_state(
+                metadata.repo_type.as_str(),
+                metadata.repo_project_id.as_str(),
+                metadata.remote_repo.as_str(),
+                pull_request_iid.as_str(),
+            )
+            .await;
+            let _ = slint::invoke_from_event_loop(move || {
+                if controller.action_sequence.load(Ordering::SeqCst) != sequence {
+                    return;
+                }
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_action_loading(false);
+                match result {
+                    Ok(state) => apply_action_state(&ui, &state),
+                    Err(error) => {
+                        log::warn!(
+                            "[Workflow][PR Review] Failed to load remote action state: {error}"
+                        );
+                        reset_action_capabilities(&ui);
+                        ui.set_workflow_pr_merge_readiness_kind("unavailable".into());
+                        ui.set_workflow_pr_merge_readiness_label("Merge status unavailable".into());
+                        ui.set_workflow_pr_merge_readiness_detail(
+                            "The repository provider could not return merge readiness.".into(),
+                        );
+                        ui.set_workflow_pr_merge_block_reason(error.into());
+                    }
+                }
+            });
+        });
+    }
+
+    fn submit_review(&self, ui: &MainWindow, action: &str, body: &str) {
+        let Some(action) = PullRequestReviewAction::parse(action) else {
+            show_error(ui, "Choose a valid review action.");
+            return;
+        };
+        let allowed = match action {
+            PullRequestReviewAction::Comment => ui.get_workflow_pr_can_comment(),
+            PullRequestReviewAction::Approve => ui.get_workflow_pr_can_approve(),
+            PullRequestReviewAction::RequestChanges => ui.get_workflow_pr_can_request_changes(),
+        };
+        if !allowed {
+            show_error(
+                ui,
+                "This repository provider does not support that review action.",
+            );
+            return;
+        }
+        if action != PullRequestReviewAction::Approve && body.trim().is_empty() {
+            show_error(ui, "Enter a review comment before submitting.");
+            return;
+        }
+        let Some((metadata, pull_request_iid)) = self.action_context() else {
+            show_error(ui, "The pull request repository context is unavailable.");
+            return;
+        };
+        let body = body.to_string();
+        let sequence = self.action_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        ui.set_workflow_pr_action_loading(true);
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let result = submit_pull_request_review(
+                metadata.repo_type.as_str(),
+                metadata.repo_project_id.as_str(),
+                metadata.remote_repo.as_str(),
+                pull_request_iid.as_str(),
+                action,
+                body.as_str(),
+            )
+            .await;
+            let _ = slint::invoke_from_event_loop(move || {
+                if controller.action_sequence.load(Ordering::SeqCst) != sequence {
+                    return;
+                }
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_action_loading(false);
+                match result {
+                    Ok(()) => {
+                        ui.set_workflow_pr_review_dialog_open(false);
+                        ui.set_workflow_pr_remote_review_state(
+                            match action {
+                                PullRequestReviewAction::Comment => "commented",
+                                PullRequestReviewAction::Approve => "approved",
+                                PullRequestReviewAction::RequestChanges => "rejected",
+                            }
+                            .into(),
+                        );
+                        show_success(&ui, "Review submitted to the remote repository.");
+                        controller.refresh_action_state(&ui);
+                    }
+                    Err(error) => {
+                        log::warn!("[Workflow][PR Review] Failed to submit review: {error}");
+                        show_error(&ui, error.as_str());
+                    }
+                }
+            });
+        });
+    }
+
+    fn merge(&self, ui: &MainWindow, method: &str, remove_source_branch: bool) {
+        if !ui.get_workflow_pr_can_merge() {
+            let reason = ui.get_workflow_pr_merge_block_reason();
+            show_error(
+                ui,
+                if reason.trim().is_empty() {
+                    "This pull request is not currently mergeable."
+                } else {
+                    reason.as_str()
+                },
+            );
+            return;
+        }
+        let Some(method) = PullRequestMergeMethod::parse(method) else {
+            show_error(ui, "Choose a valid merge method.");
+            return;
+        };
+        let method_allowed = match method {
+            PullRequestMergeMethod::Merge => ui.get_workflow_pr_merge_method_merge(),
+            PullRequestMergeMethod::Squash => ui.get_workflow_pr_merge_method_squash(),
+            PullRequestMergeMethod::Rebase => ui.get_workflow_pr_merge_method_rebase(),
+            PullRequestMergeMethod::FastForward => ui.get_workflow_pr_merge_method_fast_forward(),
+        };
+        if !method_allowed {
+            show_error(ui, "That merge method is disabled for this repository.");
+            return;
+        }
+        let Some((metadata, pull_request_iid)) = self.action_context() else {
+            show_error(ui, "The pull request repository context is unavailable.");
+            return;
+        };
+        let sequence = self.action_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        ui.set_workflow_pr_action_loading(true);
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let result = merge_pull_request(
+                metadata.repo_type.as_str(),
+                metadata.repo_project_id.as_str(),
+                metadata.remote_repo.as_str(),
+                pull_request_iid.as_str(),
+                method,
+                remove_source_branch,
+            )
+            .await;
+            let _ = slint::invoke_from_event_loop(move || {
+                if controller.action_sequence.load(Ordering::SeqCst) != sequence {
+                    return;
+                }
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_action_loading(false);
+                match result {
+                    Ok(()) => {
+                        ui.set_workflow_pr_merge_dialog_open(false);
+                        ui.set_workflow_pr_can_merge(false);
+                        ui.set_workflow_pr_merge_readiness_kind("merged".into());
+                        ui.set_workflow_pr_merge_readiness_label("Merged".into());
+                        ui.set_workflow_pr_merge_readiness_detail(
+                            "This pull request has been merged successfully.".into(),
+                        );
+                        ui.set_workflow_pr_merge_block_reason(
+                            "This pull request has been merged.".into(),
+                        );
+                        show_success(&ui, "Pull request merged successfully.");
+                        controller.refresh_action_state(&ui);
+                    }
+                    Err(error) => {
+                        log::warn!("[Workflow][PR Review] Failed to merge pull request: {error}");
+                        show_error(&ui, error.as_str());
+                        controller.refresh_action_state(&ui);
                     }
                 }
             });
@@ -1878,6 +2111,63 @@ fn empty_extension_filter_model() -> ModelRc<WorkflowPrFileExtensionFilter> {
     ModelRc::new(VecModel::from(Vec::<WorkflowPrFileExtensionFilter>::new()))
 }
 
+fn apply_action_state(ui: &MainWindow, state: &PullRequestActionState) {
+    ui.set_workflow_pr_can_comment(state.can_comment);
+    ui.set_workflow_pr_can_approve(state.can_approve);
+    ui.set_workflow_pr_can_request_changes(state.can_request_changes);
+    ui.set_workflow_pr_can_merge(state.can_merge);
+    if !state.review_state.trim().is_empty() {
+        ui.set_workflow_pr_remote_review_state(state.review_state.clone().into());
+    }
+    ui.set_workflow_pr_merge_readiness_kind(state.readiness.kind.as_str().into());
+    ui.set_workflow_pr_merge_readiness_label(state.readiness.kind.label().into());
+    ui.set_workflow_pr_merge_readiness_detail(state.readiness.detail.clone().into());
+    ui.set_workflow_pr_merge_block_reason(state.merge_block_reason.clone().into());
+    ui.set_workflow_pr_merge_method_merge(
+        state
+            .allowed_merge_methods
+            .contains(&PullRequestMergeMethod::Merge),
+    );
+    ui.set_workflow_pr_merge_method_squash(
+        state
+            .allowed_merge_methods
+            .contains(&PullRequestMergeMethod::Squash),
+    );
+    ui.set_workflow_pr_merge_method_rebase(
+        state
+            .allowed_merge_methods
+            .contains(&PullRequestMergeMethod::Rebase),
+    );
+    ui.set_workflow_pr_merge_method_fast_forward(
+        state
+            .allowed_merge_methods
+            .contains(&PullRequestMergeMethod::FastForward),
+    );
+}
+
+fn reset_action_capabilities(ui: &MainWindow) {
+    ui.set_workflow_pr_can_comment(false);
+    ui.set_workflow_pr_can_approve(false);
+    ui.set_workflow_pr_can_request_changes(false);
+    ui.set_workflow_pr_can_merge(false);
+    ui.set_workflow_pr_merge_method_merge(false);
+    ui.set_workflow_pr_merge_method_squash(false);
+    ui.set_workflow_pr_merge_method_rebase(false);
+    ui.set_workflow_pr_merge_method_fast_forward(false);
+}
+
+fn reset_action_ui(ui: &MainWindow) {
+    ui.set_workflow_pr_review_dialog_open(false);
+    ui.set_workflow_pr_merge_dialog_open(false);
+    ui.set_workflow_pr_action_loading(false);
+    ui.set_workflow_pr_remote_review_state("".into());
+    ui.set_workflow_pr_merge_readiness_kind("".into());
+    ui.set_workflow_pr_merge_readiness_label("".into());
+    ui.set_workflow_pr_merge_readiness_detail("".into());
+    ui.set_workflow_pr_merge_block_reason("".into());
+    reset_action_capabilities(ui);
+}
+
 fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_visible(false);
     ui.set_workflow_pr_review_loading(false);
@@ -1906,6 +2196,7 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_ignore_whitespace_supported(false);
     ui.set_workflow_pr_review_ignore_whitespace(false);
     ui.set_workflow_pr_review_file_filter("".into());
+    reset_action_ui(ui);
 }
 
 #[cfg(test)]

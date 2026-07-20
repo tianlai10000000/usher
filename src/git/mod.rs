@@ -13,6 +13,12 @@ pub(crate) enum RepoType {
     GitHub,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GiteeApiProfile {
+    PublicV5,
+    EnterpriseV8,
+}
+
 impl RepoType {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
@@ -84,6 +90,138 @@ pub(crate) struct PullRequestDiffDetail {
     pub(crate) head_sha: String,
     pub(crate) start_sha: String,
     pub(crate) too_many_commits: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PullRequestReviewAction {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+impl PullRequestReviewAction {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "comment" => Some(Self::Comment),
+            "approve" => Some(Self::Approve),
+            "request_changes" | "request-changes" => Some(Self::RequestChanges),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PullRequestMergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+    FastForward,
+}
+
+impl PullRequestMergeMethod {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "merge" => Some(Self::Merge),
+            "squash" => Some(Self::Squash),
+            "rebase" => Some(Self::Rebase),
+            "fast_forward" | "fast-forward" => Some(Self::FastForward),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::Squash => "squash",
+            Self::Rebase => "rebase",
+            Self::FastForward => "fast_forward",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PullRequestReadinessKind {
+    Checking,
+    Ready,
+    Conflicts,
+    Draft,
+    ReviewRequired,
+    ChangesRequested,
+    ChecksPending,
+    ChecksFailed,
+    BranchOutOfDate,
+    DiscussionsUnresolved,
+    Blocked,
+    Merged,
+    Closed,
+    Unavailable,
+}
+
+impl PullRequestReadinessKind {
+    pub(crate) const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Checking => "checking",
+            Self::Ready => "ready",
+            Self::Conflicts => "conflicts",
+            Self::Draft => "draft",
+            Self::ReviewRequired => "review_required",
+            Self::ChangesRequested => "changes_requested",
+            Self::ChecksPending => "checks_pending",
+            Self::ChecksFailed => "checks_failed",
+            Self::BranchOutOfDate => "branch_out_of_date",
+            Self::DiscussionsUnresolved => "discussions_unresolved",
+            Self::Blocked => "blocked",
+            Self::Merged => "merged",
+            Self::Closed => "closed",
+            Self::Unavailable => "unavailable",
+        }
+    }
+
+    pub(crate) const fn label(&self) -> &'static str {
+        match self {
+            Self::Checking => "Checking mergeability…",
+            Self::Ready => "Ready to merge",
+            Self::Conflicts => "Conflicts",
+            Self::Draft => "Draft",
+            Self::ReviewRequired => "Review required",
+            Self::ChangesRequested => "Changes requested",
+            Self::ChecksPending => "Checks pending",
+            Self::ChecksFailed => "Checks failed",
+            Self::BranchOutOfDate => "Branch out of date",
+            Self::DiscussionsUnresolved => "Resolve conversations",
+            Self::Blocked => "Merge blocked",
+            Self::Merged => "Merged",
+            Self::Closed => "Closed",
+            Self::Unavailable => "Merge status unavailable",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PullRequestReadiness {
+    pub(crate) kind: PullRequestReadinessKind,
+    pub(crate) detail: String,
+}
+
+impl PullRequestReadiness {
+    pub(crate) fn new(kind: PullRequestReadinessKind, detail: impl Into<String>) -> Self {
+        Self {
+            kind,
+            detail: detail.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PullRequestActionState {
+    pub(crate) can_comment: bool,
+    pub(crate) can_approve: bool,
+    pub(crate) can_request_changes: bool,
+    pub(crate) can_merge: bool,
+    pub(crate) review_state: String,
+    pub(crate) readiness: PullRequestReadiness,
+    pub(crate) merge_block_reason: String,
+    pub(crate) allowed_merge_methods: Vec<PullRequestMergeMethod>,
 }
 
 /// Provider-neutral status filter. `None` means the caller intentionally
@@ -274,7 +412,7 @@ pub(crate) fn supports_ignore_whitespace(repo_type: &str, remote_repo: &str) -> 
         .trim()
         .eq_ignore_ascii_case(locator.repo_type.as_str())
         && locator.repo_type == RepoType::Gitee
-        && is_configured_enterprise_host(RepoType::Gitee, locator.host.as_str())
+        && gitee_api_profile(&locator) == GiteeApiProfile::EnterpriseV8
 }
 
 /// Load repository source for a single diff file at an immutable commit ref.
@@ -300,6 +438,96 @@ pub(crate) async fn get_repository_file_text(
             gitlab::get_repository_file_text(&locator, repo_project_id, path, reference).await
         }
         RepoType::GitHub => github::get_repository_file_text(&locator, path, reference).await,
+    }
+}
+
+pub(crate) async fn get_pull_request_action_state(
+    repo_type: &str,
+    repo_project_id: &str,
+    remote_repo: &str,
+    pull_request_iid: &str,
+) -> Result<PullRequestActionState, String> {
+    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    if pull_request_iid.trim().is_empty() {
+        return Err("Pull request number is empty.".to_string());
+    }
+    match locator.repo_type {
+        RepoType::Gitee => {
+            gitee::get_pull_request_action_state(&locator, repo_project_id, pull_request_iid).await
+        }
+        RepoType::GitHub => github::get_pull_request_action_state(&locator, pull_request_iid).await,
+        RepoType::GitLab => {
+            gitlab::get_pull_request_action_state(&locator, repo_project_id, pull_request_iid).await
+        }
+    }
+}
+
+pub(crate) async fn submit_pull_request_review(
+    repo_type: &str,
+    repo_project_id: &str,
+    remote_repo: &str,
+    pull_request_iid: &str,
+    action: PullRequestReviewAction,
+    body: &str,
+) -> Result<(), String> {
+    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    if pull_request_iid.trim().is_empty() {
+        return Err("Pull request number is empty.".to_string());
+    }
+    match locator.repo_type {
+        RepoType::Gitee => {
+            gitee::submit_pull_request_review(
+                &locator,
+                repo_project_id,
+                pull_request_iid,
+                action,
+                body,
+            )
+            .await
+        }
+        RepoType::GitHub => {
+            github::submit_pull_request_review(&locator, pull_request_iid, action, body).await
+        }
+        RepoType::GitLab => {
+            Err("Remote review actions are not implemented for GitLab yet.".to_string())
+        }
+    }
+}
+
+pub(crate) async fn merge_pull_request(
+    repo_type: &str,
+    repo_project_id: &str,
+    remote_repo: &str,
+    pull_request_iid: &str,
+    method: PullRequestMergeMethod,
+    remove_source_branch: bool,
+) -> Result<(), String> {
+    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    if pull_request_iid.trim().is_empty() {
+        return Err("Pull request number is empty.".to_string());
+    }
+    match locator.repo_type {
+        RepoType::Gitee => {
+            gitee::merge_pull_request(
+                &locator,
+                repo_project_id,
+                pull_request_iid,
+                method,
+                remove_source_branch,
+            )
+            .await
+        }
+        RepoType::GitHub => {
+            if remove_source_branch {
+                log::debug!(
+                    "[CodeReview][GitHub] Source-branch deletion is not part of the merge endpoint"
+                );
+            }
+            github::merge_pull_request(&locator, pull_request_iid, method).await
+        }
+        RepoType::GitLab => {
+            Err("Remote merge actions are not implemented for GitLab yet.".to_string())
+        }
     }
 }
 
@@ -573,6 +801,23 @@ pub(super) fn configured_token(repo_type: RepoType) -> Option<String> {
         RepoType::Gitee => tokens.gitee,
         RepoType::GitLab => tokens.gitlab,
         RepoType::GitHub => tokens.github,
+    };
+    (!token.trim().is_empty()).then(|| token.trim().to_string())
+}
+
+pub(super) fn gitee_api_profile(locator: &RepoLocator) -> GiteeApiProfile {
+    if is_configured_enterprise_host(RepoType::Gitee, locator.host.as_str()) {
+        GiteeApiProfile::EnterpriseV8
+    } else {
+        GiteeApiProfile::PublicV5
+    }
+}
+
+pub(super) fn configured_gitee_token(profile: GiteeApiProfile) -> Option<String> {
+    let tokens = crate::settings::load_git_platform_tokens();
+    let token = match profile {
+        GiteeApiProfile::PublicV5 => tokens.gitee,
+        GiteeApiProfile::EnterpriseV8 => tokens.gitee_enterprise,
     };
     (!token.trim().is_empty()).then(|| token.trim().to_string())
 }

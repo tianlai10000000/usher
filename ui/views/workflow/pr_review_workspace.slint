@@ -51,16 +51,23 @@ export struct WorkflowPrFileExtensionFilter {
 component ReviewActionButton inherits Rectangle {
     in property <string> text;
     in property <bool> primary: false;
+    in property <bool> success: false;
+    in property <bool> button-enabled: true;
+    in property <bool> show-chevron: false;
+    in property <string> tooltip-text: "";
     callback clicked();
 
     width: 96px;
     height: 36px;
     border-radius: 10px;
     border-width: 1px;
-    border-color: root.primary ? MaterialPalette.primary : MaterialPalette.outline;
-    background: root.primary
+    border-color: root.success ? (AppState.effective-dark-mode ? #238636 : #1f883d) : (root.primary ? MaterialPalette.primary : MaterialPalette.outline);
+    background: root.success
+        ? (action-touch.has-hover && root.button-enabled ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37) : (AppState.effective-dark-mode ? #238636 : #1f883d))
+        : root.primary
         ? (action-touch.has-hover ? MaterialPalette.primary.darker(8%) : MaterialPalette.primary)
         : (action-touch.has-hover ? MaterialPalette.surface_container_high : MaterialPalette.surface_container_lowest);
+    opacity: root.button-enabled ? 1 : 0.5;
 
     MaterialText {
         width: parent.width;
@@ -70,12 +77,226 @@ component ReviewActionButton inherits Rectangle {
         vertical_alignment: center;
         font_size: 12px;
         font_weight: 600;
-        color: root.primary ? MaterialPalette.on_primary : MaterialPalette.on_surface;
+        color: root.primary || root.success ? #ffffff : MaterialPalette.on_surface;
+    }
+
+    if root.show-chevron: Image {
+        x: parent.width - 25px;
+        y: (parent.height - self.height) / 2;
+        width: 14px;
+        height: 14px;
+        source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
+        image-fit: contain;
+        colorize: #ffffff;
     }
 
     action-touch := TouchArea {
+        mouse-cursor: root.button-enabled ? pointer : default;
+        clicked => { if (root.button-enabled) { root.clicked(); } }
+    }
+    if action-touch.has-hover && root.tooltip-text != "": ToolTip {
+        x: root.width - self.width;
+        y: root.height + 4px;
+        text: root.tooltip-text;
+    }
+}
+
+component MergeReadinessBadge inherits Rectangle {
+    in property <string> kind;
+    in property <string> label;
+    in property <string> detail;
+    in property <color> background-color;
+    in property <color> badge-border-color;
+    in property <color> foreground-color;
+    in property <color> muted-color;
+    in property <color> success-color;
+    in property <color> attention-color;
+    in property <color> danger-color;
+    in property <color> done-color;
+    private property <color> state-color: root.kind == "ready"
+        ? root.success-color
+        : (root.kind == "merged"
+            ? root.done-color
+            : ((root.kind == "conflicts" || root.kind == "changes_requested" || root.kind == "checks_failed" || root.kind == "closed")
+                ? root.danger-color
+                : ((root.kind == "review_required" || root.kind == "checks_pending" || root.kind == "branch_out_of_date" || root.kind == "discussions_unresolved" || root.kind == "blocked")
+                    ? root.attention-color
+                    : root.muted-color)));
+    private property <string> state-symbol: root.kind == "ready" || root.kind == "merged"
+        ? "✓"
+        : ((root.kind == "conflicts" || root.kind == "changes_requested" || root.kind == "checks_failed" || root.kind == "closed")
+            ? "×"
+            : ((root.kind == "checking" || root.kind == "unavailable") ? "…" : "!"));
+
+    // The status copy is provider-derived and can be localized, so size the
+    // control to its rendered label instead of reserving a fixed empty tail.
+    // Keep a practical cap so an unusually long provider message cannot push
+    // the review and merge controls out of the header.
+    width: min(236px, max(118px, label-text.preferred-width + 48px));
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.badge-border-color;
+    background: badge-touch.has-hover ? (AppState.effective-dark-mode ? #656c7633 : #818b981f) : root.background-color;
+
+    Rectangle {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: root.state-color;
+        MaterialText {
+            width: parent.width;
+            height: parent.height;
+            text: root.state-symbol;
+            horizontal_alignment: center;
+            vertical_alignment: center;
+            font_size: 12px;
+            font_weight: 700;
+            color: #ffffff;
+        }
+    }
+    // SF/Segoe's rendered glyph box sits slightly above its nominal line box.
+    // Apply this once here so every readiness label (ready, conflicts, merged,
+    // checks, and review states) shares the same visual centerline.
+    label-text := Text {
+        x: 36px;
+        y: (parent.height - self.height) / 2 + 1px;
+        width: min(self.preferred-width, parent.width - self.x - 10px);
+        height: 20px;
+        text: root.label;
+        vertical-alignment: center;
+        font-size: 13px;
+        font-weight: 600;
+        color: root.foreground-color;
+        overflow: elide;
+    }
+    badge-touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => { readiness-popup.show(); }
+    }
+
+    readiness-popup := PopupWindow {
+        x: 0px;
+        y: root.height + 6px;
+        width: 320px;
+        height: 112px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: root.badge-border-color;
+            background: root.background-color;
+            drop-shadow-blur: 18px;
+            drop-shadow-color: #00000030;
+            drop-shadow-offset-y: 6px;
+
+            Rectangle {
+                x: 16px;
+                y: 17px;
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                background: root.state-color;
+                MaterialText {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.state-symbol;
+                    horizontal_alignment: center;
+                    vertical_alignment: center;
+                    font_size: 13px;
+                    font_weight: 700;
+                    color: #ffffff;
+                }
+            }
+            MaterialText {
+                x: 44px;
+                y: 12px;
+                width: parent.width - 60px;
+                height: 28px;
+                text: root.label;
+                vertical_alignment: center;
+                font_size: 14px;
+                font_weight: 600;
+                color: root.foreground-color;
+            }
+            MaterialText {
+                x: 16px;
+                y: 46px;
+                width: parent.width - 32px;
+                height: 54px;
+                text: root.detail;
+                vertical_alignment: top;
+                wrap: word-wrap;
+                font_size: 12px;
+                color: root.muted-color;
+            }
+        }
+    }
+}
+
+component ReviewChoice inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in property <bool> selected: false;
+    in property <bool> choice-enabled: true;
+    callback chosen();
+
+    height: 58px;
+    border-radius: 6px;
+    background: choice-touch.has-hover && root.choice-enabled
+        ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
+        : transparent;
+    opacity: root.choice-enabled ? 1 : 0.48;
+
+    Rectangle {
+        x: 12px;
+        y: 14px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.selected ? #0969da : (AppState.effective-dark-mode ? #6e7681 : #8c959f);
+        background: root.selected ? #0969da : transparent;
+        if root.selected: Rectangle {
+            x: 5px;
+            y: 5px;
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: #ffffff;
+        }
+    }
+    MaterialText {
+        x: 40px;
+        y: 8px;
+        width: parent.width - 52px;
+        height: 22px;
+        text: root.title;
+        font_size: 13px;
+        font_weight: 600;
+        color: MaterialPalette.on_surface;
+        vertical_alignment: center;
+    }
+    MaterialText {
+        x: 40px;
+        y: 30px;
+        width: parent.width - 52px;
+        height: 20px;
+        text: root.description;
+        font_size: 11px;
+        color: MaterialPalette.on_surface_variant;
+        vertical_alignment: center;
+        overflow: elide;
+    }
+    choice-touch := TouchArea {
+        enabled: root.choice-enabled;
+        mouse-cursor: pointer;
+        clicked => { root.chosen(); }
     }
 }
 
@@ -108,10 +329,12 @@ component FileToolbarButton inherits Rectangle {
         width: parent.width;
         height: 28px;
         border-radius: 6px;
-        border-width: root.selected ? 1px : 0px;
+        border-width: 0px;
         border-color: MaterialPalette.outline_variant;
         background: root.selected
-            ? MaterialPalette.surface_container_high
+            ? (button-touch.has-hover
+                ? (AppState.effective-dark-mode ? #656c7626 : #eff2f5)
+                : (AppState.effective-dark-mode ? #656c7633 : #e6eaef))
             : (button-touch.has-hover && root.button-enabled ? MaterialPalette.surface_container_high : transparent);
         opacity: root.button-enabled ? 1 : 0.38;
 
@@ -198,6 +421,7 @@ component FileMenuButton inherits Rectangle {
         height: parent.height;
         icon-source: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
         button-enabled: root.button-enabled;
+        selected: menu-popup.is-open;
         tooltip-text: "More file actions";
         tooltip-align-right: true;
         clicked => { menu-popup.show(); }
@@ -294,7 +518,7 @@ component DiffStatBar inherits Rectangle {
     private property <int> added-blocks: root.total == 0 ? 0 : Math.floor(root.additions * 5 / root.total);
     private property <int> deleted-blocks: root.total == 0 ? 0 : Math.floor(root.deletions * 5 / root.total);
     width: 44px;
-    height: 46px;
+    height: 16px;
     background: transparent;
     HorizontalLayout {
         y: (parent.height - self.height) / 2;
@@ -323,8 +547,10 @@ component FileDiffStat inherits Rectangle {
 
     added-stat := Text {
         x: 0px;
+        // Align the rendered glyph bounds with the centered 8px diff-stat blocks.
+        y: (parent.height - self.height) / 2 - 1px;
         width: self.preferred-width;
-        height: parent.height;
+        height: 16px;
         text: root.has-selection ? "+" + root.additions : "";
         vertical-alignment: center;
         font-family: root.font-family;
@@ -335,8 +561,9 @@ component FileDiffStat inherits Rectangle {
 
     removed-stat := Text {
         x: added-stat.x + added-stat.width + 4px;
+        y: (parent.height - self.height) / 2 - 1px;
         width: self.preferred-width;
-        height: parent.height;
+        height: 16px;
         text: root.has-selection ? "−" + root.deletions : "";
         vertical-alignment: center;
         font-family: root.font-family;
@@ -347,6 +574,7 @@ component FileDiffStat inherits Rectangle {
 
     diffstat-bar := DiffStatBar {
         x: removed-stat.x + removed-stat.width + 4px;
+        y: (parent.height - self.height) / 2;
         additions: root.additions;
         deletions: root.deletions;
     }
@@ -430,6 +658,7 @@ component GitHubFileFilterField inherits Rectangle {
         height: parent.height;
         text <=> root.text;
         single-line: true;
+        vertical-alignment: center;
         font-family: root.font-family;
         font-size: 14px;
         color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
@@ -454,6 +683,7 @@ component GitHubFilterMenu inherits Rectangle {
     in property <bool> only-manifest-files: false;
     in property <bool> show-viewed-files: true;
     in property <string> font-family: ".SF NS";
+    out property <bool> open: filter-popup.is-open;
     callback toggle-extension(string);
     callback toggle-manifest();
     callback toggle-viewed();
@@ -640,6 +870,22 @@ export component PrReviewWorkspace inherits Rectangle {
     in property <bool> ignore-whitespace-supported: false;
     in-out property <bool> ignore-whitespace: false;
     in-out property <string> file-filter: "";
+    in-out property <bool> review-dialog-open: false;
+    in-out property <bool> merge-dialog-open: false;
+    in property <bool> action-loading: false;
+    in property <bool> can-comment: false;
+    in property <bool> can-approve: false;
+    in property <bool> can-request-changes: false;
+    in property <string> remote-review-state: "";
+    in property <bool> can-merge: false;
+    in property <string> merge-readiness-kind: "";
+    in property <string> merge-readiness-label: "";
+    in property <string> merge-readiness-detail: "";
+    in property <string> merge-block-reason: "";
+    in property <bool> merge-method-merge: false;
+    in property <bool> merge-method-squash: false;
+    in property <bool> merge-method-rebase: false;
+    in property <bool> merge-method-fast-forward: false;
     in-out property <length> file-list-preferred-width: 286px;
     in property <string> tree-font-family: ".SF NS";
     private property <length> file-list-min-width: 220px;
@@ -658,15 +904,17 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <length> code-line-height: 22px;
     private property <length> hunk-line-height: 26px;
     private property <length> code-character-width: 7.8px;
-    // GitHub Primer color primitives and DiffBlob component tokens.
+    // GitHub Primer functional tokens (primer/primitives:
+    // src/tokens/functional/color/fgColor.json5) and DiffBlob tokens.
     private property <color> github-bg-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
     private property <color> github-bg-muted: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
     private property <color> github-border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
     private property <color> github-fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
     private property <color> github-fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
     private property <color> github-success-fg: AppState.effective-dark-mode ? #3fb950 : #1a7f37;
-    private property <color> github-danger-fg: AppState.effective-dark-mode ? #f85149 : #cf222e;
+    private property <color> github-danger-fg: AppState.effective-dark-mode ? #f85149 : #d1242f;
     private property <color> github-attention-fg: AppState.effective-dark-mode ? #d29922 : #9a6700;
+    private property <color> github-done-fg: AppState.effective-dark-mode ? #ab7df8 : #8250df;
     private property <color> github-accent-muted: AppState.effective-dark-mode ? #388bfd1a : #ddf4ff;
     private property <color> diff-addition-background: AppState.effective-dark-mode ? #2ea04326 : #dafbe1;
     private property <color> diff-addition-gutter-background: AppState.effective-dark-mode ? #3fb9504d : #aceebb;
@@ -675,12 +923,17 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <color> hunk-background: root.github-accent-muted;
     private property <color> hunk-gutter-background: AppState.effective-dark-mode ? #0c2d6b : #b6e3ff;
     private property <color> hunk-foreground: root.github-fg-muted;
+    private property <string> selected-review-action: "comment";
+    private property <string> review-body: "";
+    private property <string> selected-merge-method: "merge";
+    private property <bool> remove-source-branch: false;
 
     callback close();
     callback select-file(int);
     callback select-relative-file(int);
     callback reload(bool);
-    callback decide(bool);
+    callback submit-review(string, string);
+    callback merge(string, bool);
     callback filter-files(string);
     callback toggle-extension-filter(string);
     callback toggle-manifest-filter();
@@ -693,9 +946,26 @@ export component PrReviewWorkspace inherits Rectangle {
     callback view-file();
 
     changed file-filter => { root.filter-files(root.file-filter); }
+    changed review-dialog-open => {
+        if (root.review-dialog-open) {
+            root.selected-review-action = root.can-comment ? "comment" : (root.can-approve ? "approve" : "request_changes");
+        }
+    }
+    changed merge-dialog-open => {
+        if (root.merge-dialog-open) {
+            root.selected-merge-method = root.merge-method-merge ? "merge" : (root.merge-method-squash ? "squash" : (root.merge-method-rebase ? "rebase" : "fast_forward"));
+        }
+    }
 
     background: root.github-bg-default;
     border-width: 0px;
+
+    // Consume clicks on non-interactive workspace areas so they cannot reach
+    // the pull-request list retained underneath this full-window overlay.
+    TouchArea {
+        width: root.width;
+        height: root.height;
+    }
 
     VerticalLayout {
         width: parent.width;
@@ -705,6 +975,8 @@ export component PrReviewWorkspace inherits Rectangle {
         Rectangle {
             width: parent.width;
             height: 68px;
+            // Keep action-button tooltips above the following files toolbar.
+            z: 1;
             background: root.github-bg-default;
             border-width: 0px;
 
@@ -762,15 +1034,65 @@ export component PrReviewWorkspace inherits Rectangle {
                     }
                 }
 
-                Rectangle {
-                    width: 128px;
+                if root.merge-readiness-label != "": Rectangle {
+                    width: readiness-badge.width;
                     height: parent.height;
-                    ReviewActionButton { y: (parent.height - self.height) / 2; width: parent.width; text: "Request changes"; clicked => { root.decide(false); } }
+                    readiness-badge := MergeReadinessBadge {
+                        y: (parent.height - self.height) / 2;
+                        kind: root.merge-readiness-kind;
+                        label: root.merge-readiness-label;
+                        detail: root.merge-readiness-detail;
+                        background-color: root.github-bg-default;
+                        badge-border-color: root.github-border-default;
+                        foreground-color: root.github-fg-default;
+                        muted-color: root.github-fg-muted;
+                        success-color: root.github-success-fg;
+                        attention-color: root.github-attention-fg;
+                        danger-color: root.github-danger-fg;
+                        done-color: root.github-done-fg;
+                    }
+                }
+                if root.remote-review-state == "review_approved" || root.remote-review-state == "approved": Rectangle {
+                    width: 88px;
+                    height: parent.height;
+                    MaterialText {
+                        width: parent.width;
+                        height: parent.height;
+                        text: "✓  Approved";
+                        horizontal_alignment: center;
+                        vertical_alignment: center;
+                        font_size: 12px;
+                        font_weight: 600;
+                        color: root.github-success-fg;
+                    }
                 }
                 Rectangle {
-                    width: 96px;
+                    width: 120px;
                     height: parent.height;
-                    ReviewActionButton { y: (parent.height - self.height) / 2; width: parent.width; text: "Approve"; primary: true; clicked => { root.decide(true); } }
+                    ReviewActionButton {
+                        y: (parent.height - self.height) / 2;
+                        width: parent.width;
+                        text: "Review changes";
+                        button-enabled: !root.action-loading && (root.can-comment || root.can-approve || root.can-request-changes);
+                        tooltip-text: root.can-comment || root.can-approve || root.can-request-changes
+                            ? "Comment, approve, or request changes"
+                            : "Configure provider credentials to submit a review";
+                        clicked => { root.review-dialog-open = true; }
+                    }
+                }
+                Rectangle {
+                    width: 172px;
+                    height: parent.height;
+                    ReviewActionButton {
+                        y: (parent.height - self.height) / 2;
+                        width: parent.width;
+                        text: root.action-loading ? "Working…" : "Merge pull request";
+                        success: true;
+                        show-chevron: true;
+                        button-enabled: !root.action-loading && root.can-merge;
+                        tooltip-text: root.can-merge ? "Choose a merge method" : root.merge-block-reason;
+                        clicked => { root.merge-dialog-open = true; }
+                    }
                 }
             }
         }
@@ -925,8 +1247,12 @@ export component PrReviewWorkspace inherits Rectangle {
                                     ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
                                     : root.github-border-default;
                                 background: filter-button-touch.has-hover
-                                    ? root.github-bg-muted
-                                    : root.github-bg-default;
+                                    ? (filter-menu.open
+                                        ? (AppState.effective-dark-mode ? #656c7626 : #eff2f5)
+                                        : root.github-bg-muted)
+                                    : (filter-menu.open
+                                        ? (AppState.effective-dark-mode ? #656c7633 : #e6eaef)
+                                        : root.github-bg-default);
                                 Image {
                                     x: 9px;
                                     y: 9px;
@@ -1341,6 +1667,325 @@ export component PrReviewWorkspace inherits Rectangle {
                     z: 101;
                     background: MaterialPalette.primary;
                     opacity: root.file-list-visible && (root.file-list-resizing || file-list-resize-handle.has-hover) ? 0.8 : 0;
+                }
+            }
+        }
+    }
+
+    if root.review-dialog-open: Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        z: 1000;
+        background: #00000066;
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(520px, parent.width - 48px);
+            height: min(500px, parent.height - 48px);
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: root.github-border-default;
+            background: root.github-bg-default;
+
+            MaterialText {
+                x: 20px;
+                y: 16px;
+                width: parent.width - 64px;
+                height: 28px;
+                text: "Review changes";
+                font_size: 16px;
+                font_weight: 600;
+                color: root.github-fg-default;
+                vertical_alignment: center;
+            }
+            Rectangle {
+                x: parent.width - 44px;
+                y: 12px;
+                width: 32px;
+                height: 32px;
+                border-radius: 6px;
+                background: review-close-touch.has-hover ? root.github-bg-muted : transparent;
+                Image {
+                    x: 8px;
+                    y: 8px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/close.svg");
+                    colorize: root.github-fg-muted;
+                }
+                review-close-touch := TouchArea {
+                    enabled: !root.action-loading;
+                    mouse-cursor: pointer;
+                    clicked => { root.review-dialog-open = false; }
+                }
+            }
+            Rectangle { x: 0px; y: 56px; width: parent.width; height: 1px; background: root.github-border-default; }
+
+            MaterialText {
+                x: 20px;
+                y: 72px;
+                width: parent.width - 40px;
+                height: 20px;
+                text: "Review summary";
+                font_size: 12px;
+                font_weight: 600;
+                color: root.github-fg-default;
+            }
+            Rectangle {
+                x: 20px;
+                y: 98px;
+                width: parent.width - 40px;
+                height: 112px;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: review-editor.has-focus ? #0969da : root.github-border-default;
+                background: root.github-bg-default;
+                review-editor := TextInput {
+                    x: 10px;
+                    y: 8px;
+                    width: parent.width - 20px;
+                    height: parent.height - 16px;
+                    text <=> root.review-body;
+                    single-line: false;
+                    wrap: word-wrap;
+                    color: root.github-fg-default;
+                    font-size: 12px;
+                    enabled: !root.action-loading;
+                }
+            }
+
+            VerticalLayout {
+                x: 12px;
+                y: 220px;
+                width: parent.width - 24px;
+                spacing: 0px;
+                ReviewChoice {
+                    width: parent.width;
+                    title: "Comment";
+                    description: "Submit general feedback without explicit approval.";
+                    selected: root.selected-review-action == "comment";
+                    choice-enabled: root.can-comment && !root.action-loading;
+                    chosen => { root.selected-review-action = "comment"; }
+                }
+                ReviewChoice {
+                    width: parent.width;
+                    title: "Approve";
+                    description: "Submit feedback and approve merging these changes.";
+                    selected: root.selected-review-action == "approve";
+                    choice-enabled: root.can-approve && !root.action-loading;
+                    chosen => { root.selected-review-action = "approve"; }
+                }
+                ReviewChoice {
+                    width: parent.width;
+                    title: "Request changes";
+                    description: root.provider == "gitee" && !root.can-request-changes
+                        ? "Gitee public v5 does not provide this review action."
+                        : "Submit feedback that must be addressed before merging.";
+                    selected: root.selected-review-action == "request_changes";
+                    choice-enabled: root.can-request-changes && !root.action-loading;
+                    chosen => { root.selected-review-action = "request_changes"; }
+                }
+            }
+
+            Rectangle { x: 0px; y: parent.height - 62px; width: parent.width; height: 1px; background: root.github-border-default; }
+            Rectangle {
+                x: parent.width - 238px;
+                y: parent.height - 49px;
+                width: 94px;
+                height: 36px;
+                ReviewActionButton {
+                    width: parent.width;
+                    text: "Cancel";
+                    button-enabled: !root.action-loading;
+                    clicked => { root.review-dialog-open = false; }
+                }
+            }
+            Rectangle {
+                x: parent.width - 132px;
+                y: parent.height - 49px;
+                width: 112px;
+                height: 36px;
+                ReviewActionButton {
+                    width: parent.width;
+                    text: root.action-loading ? "Submitting…" : "Submit review";
+                    success: true;
+                    button-enabled: !root.action-loading;
+                    clicked => { root.submit-review(root.selected-review-action, root.review-body); }
+                }
+            }
+        }
+    }
+
+    if root.merge-dialog-open: Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        z: 1000;
+        background: #00000066;
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(500px, parent.width - 48px);
+            height: min(470px, parent.height - 48px);
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: root.github-border-default;
+            background: root.github-bg-default;
+
+            MaterialText {
+                x: 20px;
+                y: 16px;
+                width: parent.width - 64px;
+                height: 28px;
+                text: "Merge pull request #" + root.pull-request-number;
+                font_size: 16px;
+                font_weight: 600;
+                color: root.github-fg-default;
+                vertical_alignment: center;
+            }
+            Rectangle {
+                x: parent.width - 44px;
+                y: 12px;
+                width: 32px;
+                height: 32px;
+                border-radius: 6px;
+                background: merge-close-touch.has-hover ? root.github-bg-muted : transparent;
+                Image {
+                    x: 8px;
+                    y: 8px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/close.svg");
+                    colorize: root.github-fg-muted;
+                }
+                merge-close-touch := TouchArea {
+                    enabled: !root.action-loading;
+                    mouse-cursor: pointer;
+                    clicked => { root.merge-dialog-open = false; }
+                }
+            }
+            Rectangle { x: 0px; y: 56px; width: parent.width; height: 1px; background: root.github-border-default; }
+            MaterialText {
+                x: 20px;
+                y: 70px;
+                width: parent.width - 40px;
+                height: 36px;
+                text: "Choose how the commits from " + root.source-branch + " are added to " + root.target-branch + ".";
+                font_size: 12px;
+                color: root.github-fg-muted;
+                wrap: word-wrap;
+            }
+
+            VerticalLayout {
+                x: 12px;
+                y: 112px;
+                width: parent.width - 24px;
+                spacing: 0px;
+                if root.merge-method-merge: ReviewChoice {
+                    width: parent.width;
+                    title: "Create a merge commit";
+                    description: "All commits will be added with a merge commit.";
+                    selected: root.selected-merge-method == "merge";
+                    choice-enabled: !root.action-loading;
+                    chosen => { root.selected-merge-method = "merge"; }
+                }
+                if root.merge-method-squash: ReviewChoice {
+                    width: parent.width;
+                    title: "Squash and merge";
+                    description: "The commits will be combined into one commit.";
+                    selected: root.selected-merge-method == "squash";
+                    choice-enabled: !root.action-loading;
+                    chosen => { root.selected-merge-method = "squash"; }
+                }
+                if root.merge-method-rebase: ReviewChoice {
+                    width: parent.width;
+                    title: "Rebase and merge";
+                    description: "The commits will be rebased onto the base branch.";
+                    selected: root.selected-merge-method == "rebase";
+                    choice-enabled: !root.action-loading;
+                    chosen => { root.selected-merge-method = "rebase"; }
+                }
+                if root.merge-method-fast-forward: ReviewChoice {
+                    width: parent.width;
+                    title: "Fast-forward and merge";
+                    description: "Move the base branch directly to the pull request head.";
+                    selected: root.selected-merge-method == "fast_forward";
+                    choice-enabled: !root.action-loading;
+                    chosen => { root.selected-merge-method = "fast_forward"; }
+                }
+            }
+
+            Rectangle {
+                x: 20px;
+                y: parent.height - 104px;
+                width: parent.width - 40px;
+                height: 34px;
+                background: source-branch-touch.has-hover ? root.github-bg-muted : transparent;
+                Rectangle {
+                    x: 0px;
+                    y: 8px;
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 3px;
+                    border-width: 1px;
+                    border-color: root.remove-source-branch ? #0969da : root.github-border-default;
+                    background: root.remove-source-branch ? #0969da : transparent;
+                    if root.remove-source-branch: MaterialText {
+                        width: parent.width;
+                        height: parent.height;
+                        text: "✓";
+                        font_size: 11px;
+                        font_weight: 700;
+                        color: #ffffff;
+                        horizontal_alignment: center;
+                        vertical_alignment: center;
+                    }
+                }
+                MaterialText {
+                    x: 26px;
+                    width: parent.width - 26px;
+                    height: parent.height;
+                    text: "Delete the source branch after merging";
+                    font_size: 12px;
+                    color: root.github-fg-default;
+                    vertical_alignment: center;
+                }
+                source-branch-touch := TouchArea {
+                    enabled: !root.action-loading;
+                    mouse-cursor: pointer;
+                    clicked => { root.remove-source-branch = !root.remove-source-branch; }
+                }
+            }
+
+            Rectangle { x: 0px; y: parent.height - 62px; width: parent.width; height: 1px; background: root.github-border-default; }
+            Rectangle {
+                x: parent.width - 250px;
+                y: parent.height - 49px;
+                width: 94px;
+                height: 36px;
+                ReviewActionButton {
+                    width: parent.width;
+                    text: "Cancel";
+                    button-enabled: !root.action-loading;
+                    clicked => { root.merge-dialog-open = false; }
+                }
+            }
+            Rectangle {
+                x: parent.width - 144px;
+                y: parent.height - 49px;
+                width: 124px;
+                height: 36px;
+                ReviewActionButton {
+                    width: parent.width;
+                    text: root.action-loading ? "Merging…" : "Confirm merge";
+                    success: true;
+                    button-enabled: !root.action-loading && root.can-merge;
+                    clicked => { root.merge(root.selected-merge-method, root.remove-source-branch); }
                 }
             }
         }

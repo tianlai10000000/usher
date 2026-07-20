@@ -959,7 +959,7 @@ fn ui() -> Result<MainWindow> {
         log::info!("[Settings] Auto update changed to: {}", enabled);
     });
 
-    // ========= Tracing Logs Active ========= //
+    // ========= Tracing File Logs ========= //
     AppState::get(&app).on_toggle_tracing_logger_active(move |enabled| {
         settings::save_tracing_logger_active(enabled);
         if let Err(e) = tracing_logger::set_tracing_active(enabled) {
@@ -980,40 +980,36 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Git Tokens ========= //
     let app_weak_git_tokens = app.as_weak();
-    AppState::get(&app).on_save_git_tokens(move |github_token, gitlab_token, gitee_token| {
-        settings::save_git_platform_tokens(
-            github_token.as_str(),
-            gitlab_token.as_str(),
-            gitee_token.as_str(),
-        );
-        if let Some(win) = app_weak_git_tokens.upgrade() {
-            win.set_settings_git_tokens_saved(true);
-            let win_weak = win.as_weak();
-            Timer::single_shot(std::time::Duration::from_secs(2), move || {
-                if let Some(win) = win_weak.upgrade() {
-                    win.set_settings_git_tokens_saved(false);
-                }
-            });
-        }
-        log::info!(
-            "[Settings] Git tokens updated: github={}, gitlab={}, gitee={}",
-            if github_token.is_empty() {
-                "empty"
-            } else {
-                "set"
-            },
-            if gitlab_token.is_empty() {
-                "empty"
-            } else {
-                "set"
-            },
-            if gitee_token.is_empty() {
-                "empty"
-            } else {
-                "set"
+    AppState::get(&app).on_save_git_tokens(
+        move |github_token, gitlab_token, gitee_token, gitee_enterprise_token| {
+            settings::save_git_platform_tokens(
+                github_token.as_str(),
+                gitlab_token.as_str(),
+                gitee_token.as_str(),
+                gitee_enterprise_token.as_str(),
+            );
+            if let Some(win) = app_weak_git_tokens.upgrade() {
+                win.set_settings_git_tokens_saved(true);
+                let win_weak = win.as_weak();
+                Timer::single_shot(std::time::Duration::from_secs(2), move || {
+                    if let Some(win) = win_weak.upgrade() {
+                        win.set_settings_git_tokens_saved(false);
+                    }
+                });
             }
-        );
-    });
+            log::info!(
+                "[Settings] Git tokens updated: github={}, gitlab={}, gitee_public={}, gitee_enterprise={}",
+                if github_token.is_empty() { "empty" } else { "set" },
+                if gitlab_token.is_empty() { "empty" } else { "set" },
+                if gitee_token.is_empty() { "empty" } else { "set" },
+                if gitee_enterprise_token.is_empty() {
+                    "empty"
+                } else {
+                    "set"
+                }
+            );
+        },
+    );
 
     // ========= Code Hosting API Configuration ========= //
     let app_weak_git_hosting_config = app.as_weak();

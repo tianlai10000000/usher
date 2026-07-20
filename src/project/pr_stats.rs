@@ -104,7 +104,7 @@ fn fetch_pull_request_count(query: &PullRequestCountQuery) -> Result<u32, String
         query.branch_name,
         map_state(query.state.clone()),
         query.reviewer.as_deref().unwrap_or("-"),
-        auth_source_for_provider(locator.provider)
+        auth_source_for_provider(&locator)
     );
     match locator.provider {
         RepoProvider::GitHub => fetch_github_pull_count(&locator, query),
@@ -377,7 +377,7 @@ fn fetch_gitee_enterprise_level_pull_count(
             ("per_page", "100"),
             ("page", page.to_string().as_str()),
         ]);
-        request = attach_gitee_auth(request);
+        request = attach_gitee_auth(request, locator.host.as_str());
         let response = http::send_blocking(
             request,
             RequestOptions::new("Load Gitee enterprise pull requests"),
@@ -420,7 +420,7 @@ fn fetch_gitee_repo_pull_count(
             ("per_page", "100"),
             ("page", page.to_string().as_str()),
         ]);
-        request = attach_gitee_auth(request);
+        request = attach_gitee_auth(request, locator.host.as_str());
         let response = http::send_blocking(
             request,
             RequestOptions::new("Load Gitee repository pull requests"),
@@ -448,8 +448,9 @@ fn fetch_gitee_repo_pull_count(
 
 fn attach_gitee_auth(
     request: reqwest::blocking::RequestBuilder,
+    host: &str,
 ) -> reqwest::blocking::RequestBuilder {
-    if let Some(token) = read_gitee_token() {
+    if let Some(token) = read_gitee_token(host) {
         // 兼容两种方式：Bearer 头 + access_token query
         return request
             .header(AUTHORIZATION, format!("token {}", token))
@@ -578,8 +579,8 @@ fn provider_name(provider: RepoProvider) -> &'static str {
     }
 }
 
-fn auth_source_for_provider(provider: RepoProvider) -> &'static str {
-    match provider {
+fn auth_source_for_provider(locator: &RepoLocator) -> &'static str {
+    match locator.provider {
         RepoProvider::GitHub => {
             if read_non_empty_settings_token("github").is_some() {
                 "settings:git.platform.github.token"
@@ -599,10 +600,16 @@ fn auth_source_for_provider(provider: RepoProvider) -> &'static str {
             }
         }
         RepoProvider::GiteeEnterprise => {
-            if read_non_empty_settings_token("gitee").is_some() {
+            if gitee_uses_enterprise_profile(locator.host.as_str()) {
+                if read_non_empty_settings_token("gitee-enterprise").is_some() {
+                    "settings:git.platform.gitee.enterprise_token"
+                } else if read_non_empty_env("GITEE_ENTERPRISE_TOKEN").is_some() {
+                    "env:GITEE_ENTERPRISE_TOKEN"
+                } else {
+                    "none"
+                }
+            } else if read_non_empty_settings_token("gitee").is_some() {
                 "settings:git.platform.gitee.token"
-            } else if read_non_empty_env("GITEE_ENTERPRISE_TOKEN").is_some() {
-                "env:GITEE_ENTERPRISE_TOKEN"
             } else if read_non_empty_env("GITEE_TOKEN").is_some() {
                 "env:GITEE_TOKEN"
             } else {
@@ -620,10 +627,13 @@ fn read_gitlab_token() -> Option<String> {
     read_non_empty_settings_token("gitlab").or_else(|| read_non_empty_env("GITLAB_TOKEN"))
 }
 
-fn read_gitee_token() -> Option<String> {
-    read_non_empty_settings_token("gitee")
-        .or_else(|| read_non_empty_env("GITEE_ENTERPRISE_TOKEN"))
-        .or_else(|| read_non_empty_env("GITEE_TOKEN"))
+fn read_gitee_token(host: &str) -> Option<String> {
+    if gitee_uses_enterprise_profile(host) {
+        read_non_empty_settings_token("gitee-enterprise")
+            .or_else(|| read_non_empty_env("GITEE_ENTERPRISE_TOKEN"))
+    } else {
+        read_non_empty_settings_token("gitee").or_else(|| read_non_empty_env("GITEE_TOKEN"))
+    }
 }
 
 fn read_non_empty_settings_token(platform: &str) -> Option<String> {
@@ -632,6 +642,7 @@ fn read_non_empty_settings_token(platform: &str) -> Option<String> {
         "github" => tokens.github,
         "gitlab" => tokens.gitlab,
         "gitee" => tokens.gitee,
+        "gitee-enterprise" => tokens.gitee_enterprise,
         _ => String::new(),
     };
     let trimmed = value.trim().to_string();
@@ -640,4 +651,14 @@ fn read_non_empty_settings_token(platform: &str) -> Option<String> {
     } else {
         Some(trimmed)
     }
+}
+
+fn gitee_uses_enterprise_profile(host: &str) -> bool {
+    let config = crate::settings::load_git_hosted_repository_config("gitee");
+    let Ok(url) = reqwest::Url::parse(config.api_base_url.as_str()) else {
+        return false;
+    };
+    url.host_str()
+        .map(|configured| configured.eq_ignore_ascii_case(host))
+        .unwrap_or(false)
 }
