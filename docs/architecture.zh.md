@@ -152,7 +152,7 @@ Provider adapters
 
 ### Chat
 
-聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。启动时只读最近一段，向上滚动时分页读取旧数据。渲染和滚动锚点计算分离，以减少滚动/缩放期间的工作量。
+聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。启动时最近一段只加载到 Rust session；Chat 组件及有界 Slint 消息 model 仅在 Chat 路由挂载。离开 Chat 会销毁 UI 树并清空 Slint model/Markdown 缓存，重新进入时从 session 重建可见窗口。迟到的历史分页或 assistant 响应继续更新持久化/session，但不得填充隐藏 UI。渲染和滚动锚点计算分离，以减少滚动/缩放期间的工作量。
 
 ### Terminal
 

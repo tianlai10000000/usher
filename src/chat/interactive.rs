@@ -162,6 +162,50 @@ fn apply_chat_state_to_ui(
     ui.set_chat_virtual_bottom_spacer(bottom_spacer_px);
 }
 
+fn clear_chat_ui_state(ui: &MainWindow) {
+    ui.set_chat_messages([].as_slice().into());
+    ui.set_chat_can_load_more_history(false);
+    ui.set_chat_loading_history(false);
+    ui.set_chat_virtual_top_spacer(0.0);
+    ui.set_chat_virtual_bottom_spacer(0.0);
+    ui.set_chat_copied_message_index(-1);
+    ui.set_chat_loading_phase(0);
+}
+
+fn schedule_chat_ui_mount(
+    ui_weak: slint::Weak<MainWindow>,
+    session: Arc<Mutex<ChatSessionService>>,
+    scroll_to_latest: bool,
+) {
+    slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if ui.get_current_route() != Route::Chat {
+            return;
+        }
+
+        // The conditional Chat component is instantiated during the first layout
+        // pass after the route property changes. Re-applying the model on the next
+        // event-loop tick ensures its repeaters and ScrollView already exist.
+        LAST_RENDER_SIGNATURE.with(|last| {
+            *last.borrow_mut() = None;
+        });
+        if scroll_to_latest {
+            ui.set_chat_scroll_position(-99999.0);
+        }
+        apply_chat_state_to_ui(
+            &ui,
+            &session,
+            ui.get_chat_is_sending(),
+            Some(compute_wrap_width_px(&ui)),
+        );
+        if scroll_to_latest {
+            scroll_chat_to_bottom(&ui);
+        }
+    });
+}
+
 fn compute_virtual_window_with_estimates(
     messages: &[StoredChatMessage],
     scroll_offset_px: f32,
@@ -824,16 +868,14 @@ pub fn setup_interactive(ui: &MainWindow) {
     let resize_activity_ticks = Rc::new(Cell::new(0u8));
     let resize_activity_ticks_send = resize_activity_ticks.clone();
 
-    // 初始化首屏消息：若当前就在 Chat，首次进入直接定位到最新；否则仅做轻量初始化
+    // Chat's Slint tree and model are route-scoped. The Rust session remains the
+    // source of truth and reconstructs the bounded UI model when Chat is entered.
     if ui.get_current_route() == Route::Chat {
         has_entered_chat_once.set(true);
-        ui.set_chat_scroll_position(-99999.0);
-        apply_chat_state_to_ui(ui, &session, false, Some(compute_wrap_width_px(ui)));
-        scroll_chat_to_bottom(ui);
+        schedule_chat_ui_mount(ui.as_weak(), session.clone(), true);
     } else {
-        apply_chat_state_to_ui(ui, &session, false, None);
+        clear_chat_ui_state(ui);
     }
-    ui.set_chat_loading_history(false);
 
     // 处理加载更多历史回调
     let ui_weak_load_more = ui_weak.clone();
@@ -874,23 +916,25 @@ pub fn setup_interactive(ui: &MainWindow) {
 
                     match io_result {
                         Ok(Ok(loaded_count)) => {
-                            let wrap_width_px = compute_wrap_width_px(&ui);
-                            let prepended_height_px = estimate_prepended_batch_height_px(
-                                &session_for_ui,
-                                loaded_count,
-                                wrap_width_px,
-                            );
-                            // 触发加载后把视图锚定到“新增这批消息的底部”，避免立即连续触发下一批。
-                            if prepended_height_px > 0.0 {
-                                let target_offset = (prepended_height_px - 12.0).max(0.0);
-                                ui.set_chat_scroll_position(-target_offset);
+                            if ui.get_current_route() == Route::Chat {
+                                let wrap_width_px = compute_wrap_width_px(&ui);
+                                let prepended_height_px = estimate_prepended_batch_height_px(
+                                    &session_for_ui,
+                                    loaded_count,
+                                    wrap_width_px,
+                                );
+                                // 触发加载后把视图锚定到“新增这批消息的底部”，避免立即连续触发下一批。
+                                if prepended_height_px > 0.0 {
+                                    let target_offset = (prepended_height_px - 12.0).max(0.0);
+                                    ui.set_chat_scroll_position(-target_offset);
+                                }
+                                apply_chat_state_to_ui(
+                                    &ui,
+                                    &session_for_ui,
+                                    ui.get_chat_is_sending(),
+                                    Some(wrap_width_px),
+                                );
                             }
-                            apply_chat_state_to_ui(
-                                &ui,
-                                &session_for_ui,
-                                ui.get_chat_is_sending(),
-                                Some(wrap_width_px),
-                            );
                             log::debug!("[Chat::History] Older messages loaded and rendered");
                         }
                         Ok(Err(e)) => {
@@ -999,13 +1043,15 @@ pub fn setup_interactive(ui: &MainWindow) {
 
                 ui.set_chat_is_sending(false);
                 ui.set_chat_loading_phase(0);
-                apply_chat_state_to_ui(
-                    &ui,
-                    &session_response,
-                    false,
-                    Some(compute_wrap_width_px(&ui)),
-                );
-                scroll_chat_to_bottom(&ui);
+                if ui.get_current_route() == Route::Chat {
+                    apply_chat_state_to_ui(
+                        &ui,
+                        &session_response,
+                        false,
+                        Some(compute_wrap_width_px(&ui)),
+                    );
+                    scroll_chat_to_bottom(&ui);
+                }
             });
         });
     });
@@ -1109,28 +1155,8 @@ pub fn setup_interactive(ui: &MainWindow) {
 
     ui.on_chat_route_visible_changed(move |visible| {
         if visible {
-            if let Some(ui) = ui_weak_route.upgrade() {
-                if !has_entered_chat_once_route.get() {
-                    // 首次进入 Chat：优先显示最新消息并定位到底部
-                    has_entered_chat_once_route.set(true);
-                    ui.set_chat_scroll_position(-99999.0);
-                    apply_chat_state_to_ui(
-                        &ui,
-                        &session_route,
-                        ui.get_chat_is_sending(),
-                        Some(compute_wrap_width_px(&ui)),
-                    );
-                    scroll_chat_to_bottom(&ui);
-                } else {
-                    // 非首次进入：保持并恢复上次滚动位置
-                    apply_chat_state_to_ui(
-                        &ui,
-                        &session_route,
-                        ui.get_chat_is_sending(),
-                        Some(compute_wrap_width_px(&ui)),
-                    );
-                }
-            }
+            let first_entry = !has_entered_chat_once_route.replace(true);
+            schedule_chat_ui_mount(ui_weak_route.clone(), session_route.clone(), first_entry);
             start_markdown_reflow_poll_if_needed(
                 ui_weak_route.clone(),
                 session_route.clone(),
@@ -1159,6 +1185,9 @@ pub fn setup_interactive(ui: &MainWindow) {
                 *last.borrow_mut() = None;
             });
             clear_render_cache();
+            if let Some(ui) = ui_weak_route.upgrade() {
+                clear_chat_ui_state(&ui);
+            }
         }
     });
 

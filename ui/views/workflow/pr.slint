@@ -28,6 +28,7 @@ component StatusFilter inherits Rectangle {
         width: parent.width;
         height: parent.height;
         text: root.label;
+        font-family: "Hiragino Sans GB";
         horizontal_alignment: center;
         vertical_alignment: center;
         font_size: 12px;
@@ -55,6 +56,7 @@ component PageButton inherits Rectangle {
         width: parent.width;
         height: parent.height;
         text: root.label;
+        font-family: "Hiragino Sans GB";
         horizontal_alignment: center;
         vertical_alignment: center;
         font_size: 12px;
@@ -223,7 +225,6 @@ export component PrFlow {
         width: root.width;
         spacing: 16px;
         alignment: start;
-
         Rectangle {
             width: parent.width;
             height: 48px;
@@ -237,9 +238,9 @@ export component PrFlow {
                 padding-right: 16px;
                 spacing: 8px;
                 alignment: center;
-                MaterialText { text: "Pull requests"; font_size: 17px; font_weight: 600; color: MaterialPalette.on_surface; vertical_alignment: center; }
+                MaterialText { text: "Pull requests"; font-family: "Hiragino Sans GB"; font_size: 17px; font_weight: 600; color: MaterialPalette.on_surface; vertical_alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
-                MaterialText { text: root.pr-state == "all" ? "All states" : root.pr-state; font_size: 12px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                MaterialText { text: root.pr-state == "all" ? "All states" : root.pr-state; font-family: "Hiragino Sans GB"; font_size: 12px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
             }
         }
 
@@ -259,6 +260,7 @@ export component PrFlow {
                         ? "Total unavailable"
                         : root.pr-total + (root.pr-total-exact ? " total" : "+ total"));
                 font_size: 12px;
+                font-family: "Hiragino Sans GB";
                 color: MaterialPalette.on_surface_variant;
                 vertical_alignment: center;
             }
@@ -284,11 +286,11 @@ export component PrFlow {
                     background: MaterialPalette.surface_container_low;
                     HorizontalLayout {
                         padding-left: 14px; padding-right: 14px; spacing: 12px;
-                        MaterialText { width: 62px; text: "PR"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        MaterialText { horizontal-stretch: 3; text: "Title"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        if !root.compact-table: MaterialText { width: root.branch-column-width; text: "Branch"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        if !root.compact-table: MaterialText { width: 110px; text: "Author"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        MaterialText { width: 142px; text: "Updated"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        MaterialText { width: 62px; text: "PR"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        MaterialText { horizontal-stretch: 3; text: "Title"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        if !root.compact-table: MaterialText { width: root.branch-column-width; text: "Branch"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        if !root.compact-table: MaterialText { width: 110px; text: "Author"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        MaterialText { width: 142px; text: "Updated"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
                     }
                 }
 
@@ -320,11 +322,11 @@ export component PrFlow {
                         border-width: 0px;
                         HorizontalLayout {
                             padding-left: 14px; padding-right: 14px; spacing: 12px;
-                            MaterialText { width: 62px; text: "#" + item.number; font_size: 12px; font_weight: 600; color: MaterialPalette.primary; vertical_alignment: center; overflow: elide; }
-                            MaterialText { horizontal-stretch: 3; text: item.title; font_size: 13px; color: MaterialPalette.on_surface; vertical_alignment: center; overflow: elide; }
-                            if !root.compact-table: MaterialText { width: root.branch-column-width; text: item.source-branch + " → " + item.target-branch; font_size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
-                            if !root.compact-table: MaterialText { width: 110px; text: item.author; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
-                            MaterialText { width: 142px; text: item.updated-at; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
+                            MaterialText { width: 62px; text: "#" + item.number; font-family: "Hiragino Sans GB"; font_size: 12px; font_weight: 600; color: MaterialPalette.primary; vertical_alignment: center; overflow: elide; }
+                            MaterialText { horizontal-stretch: 3; text: item.title; font-family: "Hiragino Sans GB"; font_size: 13px; color: MaterialPalette.on_surface; vertical_alignment: center; overflow: elide; }
+                            if !root.compact-table: MaterialText { width: root.branch-column-width; text: item.source-branch + " → " + item.target-branch; font-family: "Hiragino Sans GB"; font_size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
+                            if !root.compact-table: MaterialText { width: 110px; text: item.author; font-family: "Hiragino Sans GB"; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
+                            MaterialText { width: 142px; text: item.updated-at; font-family: "Hiragino Sans GB"; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
                         }
                         // Keep the hover target mounted so row feedback remains stable.
                         row-hover := TouchArea {
@@ -352,7 +354,7 @@ export component PrFlow {
             spacing: 12px;
             Rectangle { horizontal-stretch: 1; }
             PageButton { label: "Previous"; button-enabled: root.pr-page > 1 && !root.pr-loading; clicked => { root.change-page(root.pr-page - 1); } }
-            MaterialText { width: 92px; text: "Page " + root.pr-page + " / " + root.pr-page-count; horizontal_alignment: center; vertical_alignment: center; font_size: 12px; color: MaterialPalette.on_surface_variant; }
+            MaterialText { width: 92px; text: "Page " + root.pr-page + " / " + root.pr-page-count; font-family: "Hiragino Sans GB"; horizontal_alignment: center; vertical_alignment: center; font_size: 12px; color: MaterialPalette.on_surface_variant; }
             PageButton { label: "Next"; button-enabled: root.pr-page < root.pr-page-count && !root.pr-loading; clicked => { root.change-page(root.pr-page + 1); } }
             Rectangle { horizontal-stretch: 1; }
         }

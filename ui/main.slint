@@ -740,9 +740,9 @@ export component MainWindow inherits Window {
 
             }
 
-            // Chat 页面 - 放在 ScrollView 外面，因为它有自己的滚动和固定底部输入框
-            chat-page := ChatPage {
-                visible: root.show-chat-page;
+            // Chat owns a heavy text tree. Mount it only on the Chat route so hidden
+            // pages do not participate in window-resize layout or retain delegates.
+            if root.show-chat-page: ChatPage {
                 x: 0px;
                 y: 0px;
                 width: parent.width;

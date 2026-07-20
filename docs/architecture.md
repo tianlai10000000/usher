@@ -152,7 +152,7 @@ Presentation does not receive provider JSON or credentials. Provider adapters do
 
 ### Chat
 
-Chat history is append-only JSONL at `im/chat_history.jsonl`. Startup loads a recent tail; upward pagination loads older batches. Rendering and scroll-anchor calculations are deliberately separated to limit work during scrolling/resizing.
+Chat history is append-only JSONL at `im/chat_history.jsonl`. Startup loads a recent tail into the Rust session, but the Chat component and bounded Slint message model are mounted only on the Chat route. Leaving Chat destroys its UI tree and clears the Slint model/Markdown cache; re-entry reconstructs the visible window from the session. Late history or assistant responses continue updating persistence/session without repopulating a hidden UI. Rendering and scroll-anchor calculations are deliberately separated to limit work during scrolling/resizing.
 
 ### Terminal
 

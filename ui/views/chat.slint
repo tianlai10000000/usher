@@ -610,7 +610,7 @@ export component Chat inherits Rectangle {
                     }
                     
                     // 消息列表（有消息时显示）
-                    ScrollView {
+                    message-scroll-view := ScrollView {
                         visible: root.messages.length > 0 || root.is-sending;
                         width: 100%;
                         height: 100%;
@@ -683,6 +683,24 @@ export component Chat inherits Rectangle {
                                 height: root.virtual-bottom-spacer;
                                 background: transparent;
                             }
+                        }
+                    }
+
+                    // Rust uses a sentinel to request "scroll to latest". Resolve it
+                    // only after this route-scoped component has completed a layout
+                    // pass; otherwise a newly mounted Flickable keeps the sentinel as
+                    // its literal viewport offset and renders the message tree outside
+                    // the visible area.
+                    bottom-scroll-timer := Timer {
+                        interval: 16ms;
+                        running: root.scroll-position < -90000px;
+
+                        triggered => {
+                            root.scroll-position = -max(
+                                0px,
+                                message-scroll-view.viewport-height
+                                    - message-scroll-view.visible-height
+                            );
                         }
                     }
 
