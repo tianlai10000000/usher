@@ -86,10 +86,31 @@ pub(crate) struct PullRequestDiffDetail {
     pub(crate) files: Vec<PullRequestDiffFile>,
     pub(crate) added_lines: u32,
     pub(crate) removed_lines: u32,
+    pub(crate) commit_count: u32,
     pub(crate) base_sha: String,
     pub(crate) head_sha: String,
     pub(crate) start_sha: String,
     pub(crate) too_many_commits: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PullRequestConversationItem {
+    pub(crate) id: String,
+    pub(crate) kind: String,
+    pub(crate) author: String,
+    pub(crate) body: String,
+    pub(crate) created_at: String,
+    pub(crate) state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PullRequestCommit {
+    pub(crate) sha: String,
+    pub(crate) title: String,
+    pub(crate) message: String,
+    pub(crate) author: String,
+    pub(crate) authored_at: String,
+    pub(crate) verified: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -401,6 +422,60 @@ pub(crate) async fn get_pull_request_diff(
     }
 }
 
+/// Load a diff for one contiguous commit range within a pull request.
+pub(crate) async fn get_pull_request_commit_range_diff(
+    repo_type: &str,
+    repo_project_id: &str,
+    remote_repo: &str,
+    base_sha: &str,
+    head_sha: &str,
+    commit_count: u32,
+    ignore_whitespace_change: bool,
+) -> Result<PullRequestDiffDetail, String> {
+    let locator = parse_repo_locator(remote_repo)?;
+    if !repo_type
+        .trim()
+        .eq_ignore_ascii_case(locator.repo_type.as_str())
+    {
+        return Err(
+            "Saved repository provider does not match the remote repository URL.".to_string(),
+        );
+    }
+    if repo_project_id.trim().is_empty() {
+        return Err("This project has no remote project id.".to_string());
+    }
+    if base_sha.trim().is_empty() || head_sha.trim().is_empty() {
+        return Err("Commit range is incomplete.".to_string());
+    }
+
+    match locator.repo_type {
+        RepoType::Gitee => {
+            gitee::get_commit_range_diff(
+                &locator,
+                repo_project_id,
+                base_sha,
+                head_sha,
+                commit_count,
+                ignore_whitespace_change,
+            )
+            .await
+        }
+        RepoType::GitLab => {
+            gitlab::get_commit_range_diff(
+                &locator,
+                repo_project_id,
+                base_sha,
+                head_sha,
+                commit_count,
+            )
+            .await
+        }
+        RepoType::GitHub => {
+            github::get_commit_range_diff(&locator, base_sha, head_sha, commit_count).await
+        }
+    }
+}
+
 /// Whether the configured provider endpoint can filter whitespace-only diff
 /// changes. Currently this is part of the Gitee-compatible enterprise diff
 /// contract only; public Gitee, GitHub, and GitLab adapters do not support it.
@@ -458,6 +533,48 @@ pub(crate) async fn get_pull_request_action_state(
         RepoType::GitHub => github::get_pull_request_action_state(&locator, pull_request_iid).await,
         RepoType::GitLab => {
             gitlab::get_pull_request_action_state(&locator, repo_project_id, pull_request_iid).await
+        }
+    }
+}
+
+pub(crate) async fn get_pull_request_conversation(
+    repo_type: &str,
+    repo_project_id: &str,
+    remote_repo: &str,
+    pull_request_iid: &str,
+) -> Result<Vec<PullRequestConversationItem>, String> {
+    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    if pull_request_iid.trim().is_empty() {
+        return Err("Pull request number is empty.".to_string());
+    }
+    match locator.repo_type {
+        RepoType::Gitee => {
+            gitee::get_pull_request_conversation(&locator, repo_project_id, pull_request_iid).await
+        }
+        RepoType::GitHub => github::get_pull_request_conversation(&locator, pull_request_iid).await,
+        RepoType::GitLab => {
+            gitlab::get_pull_request_conversation(&locator, repo_project_id, pull_request_iid).await
+        }
+    }
+}
+
+pub(crate) async fn get_pull_request_commits(
+    repo_type: &str,
+    repo_project_id: &str,
+    remote_repo: &str,
+    pull_request_iid: &str,
+) -> Result<Vec<PullRequestCommit>, String> {
+    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    if pull_request_iid.trim().is_empty() {
+        return Err("Pull request number is empty.".to_string());
+    }
+    match locator.repo_type {
+        RepoType::Gitee => {
+            gitee::get_pull_request_commits(&locator, repo_project_id, pull_request_iid).await
+        }
+        RepoType::GitHub => github::get_pull_request_commits(&locator, pull_request_iid).await,
+        RepoType::GitLab => {
+            gitlab::get_pull_request_commits(&locator, repo_project_id, pull_request_iid).await
         }
     }
 }

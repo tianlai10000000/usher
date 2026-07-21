@@ -117,11 +117,11 @@ Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_
 
 ### Workflow
 
-`WorkflowStore` 保存当前项目和各项目的 `WorkflowViewState`。切换项目必须重新绑定 UI，避免日志、步骤和 running 标记串到其他项目。离开 Workflow 路由时会主动清理重型状态。
+`WorkflowStore` 保存当前项目和各项目的 `WorkflowViewState`。切换项目必须重新绑定 UI，避免日志、步骤和 running 标记串到其他项目。`Route.Workflow` 与 `Route.PrReview` 构成同一生命周期域：两者之间切换保留 Workflow 列表/model 状态，离开这两个路由后才主动清理重型状态。
 
 Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。所有列表、详情/diff、仓库文件、review state、review submit 和 merge 请求都根据当前项目持久化的 `repo_type` 选择实现，并在执行前校验其与 `remote_repo` 一致。审核控制器只持有一份共享且不可变的归一化 diff，并用独立 action 序列防止迟到的 review/merge 响应更新其他项目或 PR。Provider HTML 在 adapter 边界解码，每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。上下文展开采用按文件写时复制 override，未展开时不会保留第二份完整 diff，收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性 model 暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写都使用序列号防止迟到响应污染当前项目或 PR。
 
-仓库 PR 列表归现有 Workflow 的 PR Tab 所有，不新增独立项目详情 PR 页面。`workflow/pr_list.rs` 在 event loop 之外读取当前项目持久化的 `repo_project_id`、`repo_type`，并且只在进入或用户切换页码时，通过 `src/git/` 懒加载对应的 10 条远端数据。GitHub 保留搜索接口提供的总数，并发请求当前页每个 PR 的详情，从而补齐源分支和目标分支名称。控制器在将列表值传给 Slint 前，把可解析的 Provider 更新时间统一格式化为东八区（UTC+08:00），并在 Provider 提供时使用准确总数驱动顶部总数和底部分页。页面默认显式查询 open 状态，用户可切换 open/closed/merged/all；请求序号保证旧项目、旧筛选或旧页码的延迟响应不会覆盖当前视图。请求成功且零条数据时显示随筛选状态变化的插画空状态；网络、鉴权或响应结构异常仍使用独立且可重试的错误状态。点击列表行会在根层打开审核工作区；其控制器加载并归一化所选 PR diff，同时保留下层列表状态。审核控制器根据归一化后的文件路径构建可折叠目录树；路径筛选、目录展开以及上一项/下一项文件导航只操作本地 model，不增加 HTTP 请求。`workflow/syntax_highlight.rs` 在 UI 层之外使用 `syntect` 把当前文件转换为适配主题的 token model，同时保留 Tab 和显示列宽。切换文件或展开 hunk 时，旧行 model 会保留到新高亮 model 完成，再由 event loop 原子替换；只有真正切换文件时才重置 viewport。
+仓库 PR 列表归现有 Workflow 的 PR Tab 所有。`workflow/pr_list.rs` 在 event loop 之外读取当前项目持久化的 `repo_project_id`、`repo_type`，并且只在进入或用户切换页码时，通过 `src/git/` 懒加载对应的 10 条远端数据。GitHub 保留搜索接口提供的总数，并发请求当前页每个 PR 的详情，从而补齐源分支和目标分支名称。控制器在将列表值传给 Slint 前，把可解析的 Provider 更新时间统一格式化为东八区（UTC+08:00），并在 Provider 提供时使用准确总数驱动顶部总数和底部分页。页面默认显式查询 open 状态，用户可切换 open/closed/merged/all；请求序号保证旧项目、旧筛选或旧页码的延迟响应不会覆盖当前视图。请求成功且零条数据时显示随筛选状态变化的插画空状态；网络、鉴权或响应结构异常仍使用独立且可重试的错误状态。点击列表行后导航到全窗口 `Route.PrReview`；Workflow 组件实例会被销毁，但列表/root model 状态继续保留，因此 Back 可在不重载列表的情况下重建 PR Tab。审核路由拥有 GitHub 风格的 Conversation、Commits、Files changed 三个 Tab。Conversation 与 Commits 只在第一次选中时通过 Provider-neutral model 加载：GitHub 组合 PR detail、issue comments、reviews 并读取 PR commits；Gitee 公版 v5 使用 PR detail/comments/commits；Gitee 企业版 v8 与 GitLab 使用 MR detail/notes/commits。远端 review 成功后会使已加载的 Conversation 失效并刷新。Files changed 控制器加载并归一化所选 PR diff，根据文件路径构建可折叠目录树，并让路径筛选、目录展开和上一项/下一项文件导航保持本地操作。其 commit 选择器复用懒加载提交列表，把连续范围分发到各 Provider 的仓库 compare endpoint；原始 PR detail 和已加载范围在当前审核期间保持缓存。`workflow/syntax_highlight.rs` 在 UI 层之外使用 `syntect` 把当前文件转换为适配主题的 token model，同时保留 Tab 和显示列宽。切换文件或展开 hunk 时，旧行 model 会保留到新高亮 model 完成，再由 event loop 原子替换；只有真正切换文件时才重置 viewport。在 macOS 上，原生 live-resize 通知会冻结审核工作区的内部几何尺寸，并把每条可见行的 token repeater 临时替换为一个纯等宽文本节点；live resize 结束时恢复最终几何尺寸和完整的 token 着色组件树。
 
 审核页头采用 GitHub 的两步命令模型。标题旁的 GitHub 风格就绪徽标使用 Primer 语义色渲染归一化类型/详情，但合并语义由各 adapter 独立负责：GitHub 映射 REST mergeability，Gitee 企业版映射 v8 `current_state` 条件，Gitee 公有版只映射 v5 字段，GitLab 映射 `detailed_merge_status` 并请求异步重算。共享 enum 只是展示边界，绝不能把一个 Provider 的判定条件套到另一个 Provider。`Review changes` 提交显式的 Provider-neutral Comment、Approve 或 Request changes；不受支持的选项保持可见但禁用。Provider 成功后刷新远端状态，绝不自动开始合并。`Merge pull request` 只由最新的归一化 `PullRequestActionState` 启用，并且只展示 adapter 返回的策略。GitHub 支持仓库启用的 merge、squash、rebase；Gitee 企业 v8 映射评审状态，并按 `restrict_merge_type` 支持 merge、squash、rebase、fast-forward；Gitee 公有 v5 支持评论和 merge/squash，但没有 approve/request-changes endpoint。GitLab 就绪状态只读，远端写操作继续作为显式不支持的能力。
 
@@ -133,7 +133,7 @@ PR 功能由五个可替换层组成。这是后续迁移到其他技术栈时�
 
 ```text
 展示层
-  PR 列表/表格 + 审核遮罩层 + 本地建议控件
+  PR 列表/表格 + 独立审核路由 + 本地建议控件
         ↕ 归一化 view model 与 loading/error 状态
 Workflow controllers
   项目选择、页码/状态切换、旧结果防护、审核缓存
@@ -175,9 +175,9 @@ Terminal 状态感知项目；同一项目重新打开时复用，切换项目�
 2. 仓库服务拒绝与 `remote_repo` 不匹配的已持久化 `repo_type`，然后把请求路由到对应的 Provider adapter。
 3. Adapter 将 Provider 响应归一化为最多 10 条的页面。GitHub 保留搜索接口的准确总数，并发读取当前可见行详情以补充分支 ref。
 4. 控制器只在请求序列仍为最新时应用页面；在生成 view model 前将可解析的更新时间格式化为东八区（UTC+08:00）。
-5. 打开某一行后，列表保留在根层 overlay 下方。审核控制器重新读取元数据、请求一份归一化 diff，按项目/请求/空白模式缓存并渲染本地文件树。
+5. 打开某一行后，在共享 Workflow 生命周期域内从 `Workflow` 导航到 `PrReview`。Workflow 组件被卸载但列表/root model 保留；审核控制器重新读取元数据、请求一份归一化 diff，按项目/请求/空白模式缓存并渲染本地文件树。
 6. 文件选择、筛选、目录展开、复制路径、比例条渲染、语法高亮和收起已展开上下文均在本地完成。只有 hunk 展开和应用内 View file 会产生后续 Provider 读取；两者共享有界的固定源码缓存。单次展开最多展示 20 行，展开全部补齐当前文件全部隐藏区间，收起则恢复保留的原始 diff。
-7. 关闭 overlay 或切换项目会使列表/审核/高亮/源码请求序列失效，迟到任务不得影响新上下文。
+7. 返回 Workflow 或切换项目会使审核/Conversation/Commit/高亮/源码请求序列失效，迟到任务不得影响新上下文。
 
 ### 项目保存与 Provider 查询
 

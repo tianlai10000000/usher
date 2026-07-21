@@ -237,7 +237,9 @@ export component Workflow inherits PageView {
     in property <string> cd-verify-status: "pending";
     in property <string> cd-verify-detail: "Waiting to start.";
 
-    private property <int> selected-flow: 0;
+    // MainWindow retains this navigation state while the full-window PR review
+    // workspace temporarily unmounts the Workflow component tree.
+    in-out property <int> selected-flow: 0;
     private property <length> tabs-spacing: 12px;
     private property <length> workflow-content-width: root.width - 32px;
     private property <bool> workflow-header-stacked: root.workflow-content-width < 980px;

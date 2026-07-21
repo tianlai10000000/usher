@@ -1,7 +1,7 @@
 use crate::{MainWindow, Route};
 use slint::{ModelRc, VecModel, Weak};
 
-const BREADCRUMB_HIDDEN_ROUTES: &[Route] = &[Route::Chat, Route::Login];
+const BREADCRUMB_HIDDEN_ROUTES: &[Route] = &[Route::Chat, Route::Login, Route::PrReview];
 const NAVIGATION_ROUTES: &[Route] = &[
     Route::Home,
     // Route::Search,
@@ -33,11 +33,13 @@ pub fn route_ui_state(route: Route) -> RouteUiState {
     let dialog_route_visible = route == Route::Dialog;
     RouteUiState {
         show_breadcrumb: !BREADCRUMB_HIDDEN_ROUTES.contains(&route),
-        show_navigation_drawer: route != Route::Login,
+        show_navigation_drawer: route != Route::Login && route != Route::PrReview,
         navigation_current_index: navigation_index_for_route(route),
         chat_route_visible,
         dialog_route_visible,
-        show_page_scroll_view: !chat_route_visible && !dialog_route_visible,
+        show_page_scroll_view: !chat_route_visible
+            && !dialog_route_visible
+            && route != Route::PrReview,
     }
 }
 
@@ -86,7 +88,7 @@ impl Router {
 
             // Proactively drop large workflow logs/details when leaving the workflow page.
             // This reduces resident memory after visiting Tag/CD tabs (git command logs can be large).
-            if previous == Route::Workflow && route != Route::Workflow {
+            if is_workflow_route(previous) && !is_workflow_route(route) {
                 crate::workflow::state::clear_current_project_heavy_state();
                 win.set_workflow_project_logo("".into());
                 win.set_workflow_project_logo_image(crate::project::resolve_project_logo_image(""));
@@ -111,5 +113,26 @@ impl Router {
             log::debug!("→ Navigate to: {:?}", route);
             state
         })
+    }
+}
+
+fn is_workflow_route(route: Route) -> bool {
+    matches!(route, Route::Workflow | Route::PrReview)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_workflow_route, route_ui_state};
+    use crate::Route;
+
+    #[test]
+    fn pr_review_is_a_full_window_member_of_the_workflow_domain() {
+        let state = route_ui_state(Route::PrReview);
+        assert!(!state.show_breadcrumb);
+        assert!(!state.show_navigation_drawer);
+        assert!(!state.show_page_scroll_view);
+        assert!(is_workflow_route(Route::Workflow));
+        assert!(is_workflow_route(Route::PrReview));
+        assert!(!is_workflow_route(Route::Home));
     }
 }

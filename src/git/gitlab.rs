@@ -8,10 +8,11 @@ use crate::codereview::api::gitlab as endpoints;
 use crate::http::{self, RequestOptions};
 
 use super::{
-    PullRequestActionState, PullRequestDiffDetail, PullRequestDiffFile, PullRequestItem,
-    PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestState, RepoLocator,
-    RepoType, configured_api_base_url, configured_token, is_configured_enterprise_host,
-    parse_unified_diff, percent_encode_path, unavailable_diff_file,
+    PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
+    PullRequestDiffFile, PullRequestItem, PullRequestPage, PullRequestReadiness,
+    PullRequestReadinessKind, PullRequestState, RepoLocator, RepoType, configured_api_base_url,
+    configured_token, is_configured_enterprise_host, parse_unified_diff, percent_encode_path,
+    unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -169,6 +170,14 @@ pub(super) async fn get_pull_request_diff(
     Ok(PullRequestDiffDetail {
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
+        commit_count: detail
+            .get("commits_count")
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .or_else(|| {
+                string_field(&detail, "commits_count").and_then(|value| value.parse::<u32>().ok())
+            })
+            .unwrap_or(0),
         base_sha: string_field(refs, "base_sha").unwrap_or_default(),
         head_sha: string_field(refs, "head_sha").unwrap_or_default(),
         start_sha: string_field(refs, "start_sha").unwrap_or_default(),
@@ -182,6 +191,50 @@ pub(super) async fn get_pull_request_diff(
                     .and_then(Value::as_bool)
                     .unwrap_or(false)
         }),
+        files,
+    })
+}
+
+pub(super) async fn get_commit_range_diff(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    base_sha: &str,
+    head_sha: &str,
+    commit_count: u32,
+) -> Result<PullRequestDiffDetail, String> {
+    let endpoint = endpoints::REPOSITORY_COMPARE_URL
+        .replace("{api_base_url}", api_base_url(locator).as_str())
+        .replace(
+            "{project_id}",
+            percent_encode_path(repo_project_id.trim()).as_str(),
+        );
+    let payload: Value = http::send_json(
+        gitlab_request(endpoint).query(&[
+            ("from", base_sha.trim()),
+            ("to", head_sha.trim()),
+            ("straight", "true"),
+            ("unidiff", "true"),
+        ]),
+        RequestOptions::new("Compare GitLab merge request commits"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let values = payload
+        .get("diffs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "GitLab commit comparison response has no diff list.".to_string())?;
+    let files = values.iter().map(decode_diff_file).collect::<Vec<_>>();
+    Ok(PullRequestDiffDetail {
+        added_lines: files.iter().map(|file| file.added_lines).sum(),
+        removed_lines: files.iter().map(|file| file.removed_lines).sum(),
+        commit_count,
+        base_sha: base_sha.to_string(),
+        head_sha: head_sha.to_string(),
+        start_sha: base_sha.to_string(),
+        too_many_commits: payload
+            .get("compare_timeout")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         files,
     })
 }
@@ -236,6 +289,136 @@ pub(super) async fn get_pull_request_action_state(
         merge_block_reason,
         allowed_merge_methods: Vec::new(),
     })
+}
+
+pub(super) async fn get_pull_request_conversation(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Result<Vec<PullRequestConversationItem>, String> {
+    let detail_endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    let notes_endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_NOTES_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    let detail: Value = http::send_json(
+        gitlab_request(detail_endpoint),
+        RequestOptions::new("Load GitLab merge request conversation header"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let notes: Vec<Value> = http::send_json(
+        gitlab_request(notes_endpoint).query(&[("per_page", "100")]),
+        RequestOptions::new("Load GitLab merge request notes"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let mut items = vec![PullRequestConversationItem {
+        id: format!("description-{pull_request_iid}"),
+        kind: "description".to_string(),
+        author: nested_string(&detail, "author", "name")
+            .or_else(|| nested_string(&detail, "author", "username"))
+            .unwrap_or_else(|| "Unknown author".to_string()),
+        body: string_field(&detail, "description").unwrap_or_default(),
+        created_at: string_field(&detail, "created_at").unwrap_or_default(),
+        state: string_field(&detail, "state").unwrap_or_default(),
+    }];
+    items.extend(notes.into_iter().map(|value| {
+        PullRequestConversationItem {
+            id: string_field(&value, "id").unwrap_or_default(),
+            kind: if value
+                .get("system")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                "event".to_string()
+            } else {
+                "comment".to_string()
+            },
+            author: nested_string(&value, "author", "name")
+                .or_else(|| nested_string(&value, "author", "username"))
+                .unwrap_or_else(|| "Unknown author".to_string()),
+            body: string_field(&value, "body").unwrap_or_default(),
+            created_at: string_field(&value, "created_at").unwrap_or_default(),
+            state: String::new(),
+        }
+    }));
+    let description = items.remove(0);
+    items.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+    items.insert(0, description);
+    Ok(items)
+}
+
+pub(super) async fn get_pull_request_commits(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Result<Vec<PullRequestCommit>, String> {
+    let endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_COMMITS_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    let values: Vec<Value> = http::send_json(
+        gitlab_request(endpoint).query(&[("per_page", "100")]),
+        RequestOptions::new("Load GitLab merge request commits"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(values
+        .into_iter()
+        .map(|value| {
+            let message = string_field(&value, "message").unwrap_or_default();
+            PullRequestCommit {
+                sha: string_field(&value, "id")
+                    .or_else(|| string_field(&value, "sha"))
+                    .unwrap_or_default(),
+                title: string_field(&value, "title")
+                    .unwrap_or_else(|| message.lines().next().unwrap_or_default().to_string()),
+                message,
+                author: string_field(&value, "author_name")
+                    .unwrap_or_else(|| "Unknown author".to_string()),
+                authored_at: string_field(&value, "authored_date")
+                    .or_else(|| string_field(&value, "created_at"))
+                    .unwrap_or_default(),
+                verified: false,
+            }
+        })
+        .collect())
+}
+
+fn merge_request_endpoint(
+    template: &str,
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> String {
+    template
+        .replace("{api_base_url}", api_base_url(locator).as_str())
+        .replace(
+            "{project_id}",
+            percent_encode_path(repo_project_id.trim()).as_str(),
+        )
+        .replace(
+            "{merge_request_iid}",
+            percent_encode_path(pull_request_iid.trim()).as_str(),
+        )
+}
+
+fn gitlab_request(endpoint: String) -> reqwest::RequestBuilder {
+    let mut request = http::get(endpoint).header(ACCEPT, "application/json");
+    if let Some(token) = configured_token(RepoType::GitLab) {
+        request = request.header("PRIVATE-TOKEN", token);
+    }
+    request
 }
 
 fn gitlab_merge_readiness(detail: &Value) -> PullRequestReadiness {

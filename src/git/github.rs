@@ -10,11 +10,11 @@ use crate::codereview::api::github as endpoints;
 use crate::http::{self, RequestOptions};
 
 use super::{
-    PullRequestActionState, PullRequestDiffDetail, PullRequestDiffFile, PullRequestItem,
-    PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
-    PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, configured_api_base_url,
-    configured_token, is_configured_enterprise_host, parse_unified_diff, percent_encode_path,
-    unavailable_diff_file,
+    PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
+    PullRequestDiffFile, PullRequestItem, PullRequestMergeMethod, PullRequestPage,
+    PullRequestReadiness, PullRequestReadinessKind, PullRequestReviewAction, PullRequestState,
+    RepoLocator, RepoType, configured_api_base_url, configured_token,
+    is_configured_enterprise_host, parse_unified_diff, percent_encode_path, unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -205,10 +205,43 @@ pub(super) async fn get_pull_request_diff(
     Ok(PullRequestDiffDetail {
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
+        commit_count: value_u32(&detail, "commits").unwrap_or(0),
         base_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
         head_sha: nested_string(&detail, "head", "sha").unwrap_or_default(),
         start_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
         too_many_commits: values.len() >= 3000,
+        files,
+    })
+}
+
+pub(super) async fn get_commit_range_diff(
+    locator: &RepoLocator,
+    base_sha: &str,
+    head_sha: &str,
+    commit_count: u32,
+) -> Result<PullRequestDiffDetail, String> {
+    let endpoint = repository_endpoint(endpoints::REPOSITORY_COMPARE_URL, locator, None, None)
+        .replace("{base}", percent_encode_path(base_sha.trim()).as_str())
+        .replace("{head}", percent_encode_path(head_sha.trim()).as_str());
+    let payload: Value = http::send_json(
+        authenticated_request(locator, endpoint),
+        RequestOptions::new("Compare GitHub pull request commits"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let values = payload
+        .get("files")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "GitHub commit comparison response has no file list.".to_string())?;
+    let files = values.iter().map(decode_diff_file).collect::<Vec<_>>();
+    Ok(PullRequestDiffDetail {
+        added_lines: files.iter().map(|file| file.added_lines).sum(),
+        removed_lines: files.iter().map(|file| file.removed_lines).sum(),
+        commit_count,
+        base_sha: base_sha.to_string(),
+        head_sha: head_sha.to_string(),
+        start_sha: base_sha.to_string(),
+        too_many_commits: values.len() >= 300,
         files,
     })
 }
@@ -348,6 +381,160 @@ pub(super) async fn get_pull_request_action_state(
         merge_block_reason,
         allowed_merge_methods,
     })
+}
+
+pub(super) async fn get_pull_request_conversation(
+    locator: &RepoLocator,
+    pull_request_number: &str,
+) -> Result<Vec<PullRequestConversationItem>, String> {
+    let detail_endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let detail: Value = http::send_json(
+        authenticated_request(locator, detail_endpoint),
+        RequestOptions::new("Load GitHub pull request conversation header"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let comments_endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_ISSUE_COMMENTS_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let comments = load_github_pages(
+        locator,
+        comments_endpoint,
+        "Load GitHub pull request comments",
+    )
+    .await?;
+
+    let reviews_endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_REVIEWS_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let reviews = load_github_pages(
+        locator,
+        reviews_endpoint,
+        "Load GitHub pull request reviews",
+    )
+    .await?;
+
+    let mut items = Vec::new();
+    items.push(PullRequestConversationItem {
+        id: format!("description-{pull_request_number}"),
+        kind: "description".to_string(),
+        author: nested_string(&detail, "user", "login")
+            .unwrap_or_else(|| "Unknown author".to_string()),
+        body: string_field(&detail, "body").unwrap_or_default(),
+        created_at: string_field(&detail, "created_at").unwrap_or_default(),
+        state: string_field(&detail, "state").unwrap_or_default(),
+    });
+    items.extend(
+        comments
+            .into_iter()
+            .map(|value| PullRequestConversationItem {
+                id: string_field(&value, "id").unwrap_or_default(),
+                kind: "comment".to_string(),
+                author: nested_string(&value, "user", "login")
+                    .unwrap_or_else(|| "Unknown author".to_string()),
+                body: string_field(&value, "body").unwrap_or_default(),
+                created_at: string_field(&value, "created_at").unwrap_or_default(),
+                state: String::new(),
+            }),
+    );
+    items.extend(reviews.into_iter().filter_map(|value| {
+        let body = string_field(&value, "body").unwrap_or_default();
+        let state = string_field(&value, "state").unwrap_or_default();
+        if body.trim().is_empty() && state.trim().is_empty() {
+            return None;
+        }
+        Some(PullRequestConversationItem {
+            id: string_field(&value, "id").unwrap_or_default(),
+            kind: "review".to_string(),
+            author: nested_string(&value, "user", "login")
+                .unwrap_or_else(|| "Unknown reviewer".to_string()),
+            body,
+            created_at: string_field(&value, "submitted_at").unwrap_or_default(),
+            state,
+        })
+    }));
+    let description = items.remove(0);
+    items.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+    items.insert(0, description);
+    Ok(items)
+}
+
+pub(super) async fn get_pull_request_commits(
+    locator: &RepoLocator,
+    pull_request_number: &str,
+) -> Result<Vec<PullRequestCommit>, String> {
+    let endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_COMMITS_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let values = load_github_pages(locator, endpoint, "Load GitHub pull request commits").await?;
+    Ok(values.iter().map(decode_commit).collect())
+}
+
+fn decode_commit(value: &Value) -> PullRequestCommit {
+    let message = value
+        .get("commit")
+        .and_then(|commit| string_field(commit, "message"))
+        .unwrap_or_default();
+    PullRequestCommit {
+        sha: string_field(value, "sha").unwrap_or_default(),
+        title: message.lines().next().unwrap_or_default().to_string(),
+        message,
+        author: nested_string(value, "author", "login")
+            .or_else(|| {
+                value
+                    .get("commit")
+                    .and_then(|commit| nested_string(commit, "author", "name"))
+            })
+            .unwrap_or_else(|| "Unknown author".to_string()),
+        authored_at: value
+            .get("commit")
+            .and_then(|commit| nested_string(commit, "author", "date"))
+            .unwrap_or_default(),
+        verified: value
+            .get("commit")
+            .and_then(|commit| commit.get("verification"))
+            .and_then(|verification| verification.get("verified"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
+}
+
+async fn load_github_pages(
+    locator: &RepoLocator,
+    endpoint: String,
+    operation: &'static str,
+) -> Result<Vec<Value>, String> {
+    let mut values = Vec::new();
+    for page in 1..=30u32 {
+        let batch: Vec<Value> = http::send_json(
+            authenticated_request(locator, endpoint.clone())
+                .query(&[("page", page.to_string()), ("per_page", "100".to_string())]),
+            RequestOptions::new(operation),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        let complete = batch.len() < 100;
+        values.extend(batch);
+        if complete {
+            break;
+        }
+    }
+    Ok(values)
 }
 
 pub(super) async fn submit_pull_request_review(
@@ -674,7 +861,9 @@ fn github_merge_readiness(detail: &Value, review_state: &str) -> PullRequestRead
 mod tests {
     use serde_json::json;
 
-    use super::{aggregate_review_state, github_merge_readiness, pull_request_branches};
+    use super::{
+        aggregate_review_state, decode_commit, github_merge_readiness, pull_request_branches,
+    };
     use crate::git::PullRequestReadinessKind;
 
     #[test]
@@ -688,6 +877,23 @@ mod tests {
             pull_request_branches(&payload),
             Some(("feature/pr-branches".to_string(), "main".to_string()))
         );
+    }
+
+    #[test]
+    fn decodes_github_pull_request_commit() {
+        let commit = decode_commit(&json!({
+            "sha": "1234567890abcdef",
+            "author": { "login": "octocat" },
+            "commit": {
+                "message": "Improve PR navigation\n\nKeep list state.",
+                "author": { "name": "Octo Cat", "date": "2026-07-20T10:00:00Z" },
+                "verification": { "verified": true }
+            }
+        }));
+        assert_eq!(commit.sha, "1234567890abcdef");
+        assert_eq!(commit.title, "Improve PR navigation");
+        assert_eq!(commit.author, "octocat");
+        assert!(commit.verified);
     }
 
     #[test]

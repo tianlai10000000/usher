@@ -11,11 +11,11 @@ use crate::codereview::api::gitee as endpoints;
 use crate::http::{self, RequestOptions};
 
 use super::{
-    GiteeApiProfile, PullRequestActionState, PullRequestDiffDetail, PullRequestDiffFile,
-    PullRequestDiffLine, PullRequestItem, PullRequestMergeMethod, PullRequestPage,
-    PullRequestReadiness, PullRequestReadinessKind, PullRequestReviewAction, PullRequestState,
-    RepoLocator, RepoType, configured_api_base_url, configured_enterprise, configured_gitee_token,
-    gitee_api_profile, percent_encode_path,
+    GiteeApiProfile, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
+    PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine, PullRequestItem,
+    PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
+    PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, configured_api_base_url,
+    configured_enterprise, configured_gitee_token, gitee_api_profile, percent_encode_path,
 };
 
 /// Fetch the stable provider project id for a remote repository.
@@ -309,12 +309,163 @@ async fn get_public_pull_request_diff(
     Ok(PullRequestDiffDetail {
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
+        commit_count: value_u32(&detail, "commits")
+            .or_else(|| value_u32(&detail, "commits_count"))
+            .unwrap_or(0),
         base_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
         head_sha: nested_string(&detail, "head", "sha").unwrap_or_default(),
         start_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
         too_many_commits: false,
         files,
     })
+}
+
+pub(super) async fn get_commit_range_diff(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    base_sha: &str,
+    head_sha: &str,
+    commit_count: u32,
+    ignore_whitespace_change: bool,
+) -> Result<PullRequestDiffDetail, String> {
+    let payload: Value = match gitee_api_profile(locator) {
+        GiteeApiProfile::PublicV5 => {
+            let endpoint = public_repo_endpoint(
+                endpoints::PUBLIC_REPOSITORY_COMPARE_URL,
+                locator,
+                None,
+                None,
+            )
+            .replace("{base}", percent_encode_path(base_sha.trim()).as_str())
+            .replace("{head}", percent_encode_path(head_sha.trim()).as_str());
+            http::send_json(
+                public_authenticated_request(endpoint),
+                RequestOptions::new("Compare Gitee pull request commits"),
+            )
+            .await
+            .map_err(|error| error.to_string())?
+        }
+        GiteeApiProfile::EnterpriseV8 => {
+            let endpoint = endpoints::ENTERPRISE_REPOSITORY_COMPARE_URL
+                .replace("{api_base_url}", enterprise_api_base_url()?.as_str())
+                .replace(
+                    "{project_id}",
+                    percent_encode_path(repo_project_id.trim()).as_str(),
+                );
+            let mut request = enterprise_authenticated_builder(http::get(endpoint)).query(&[
+                ("from", base_sha.trim()),
+                ("to", head_sha.trim()),
+                ("straight", "true"),
+                (
+                    "ignore_whitespace_change",
+                    if ignore_whitespace_change {
+                        "true"
+                    } else {
+                        "false"
+                    },
+                ),
+            ]);
+            if let Some(enterprise) = configured_enterprise(RepoType::Gitee) {
+                request = request.header("enterprise", enterprise);
+            }
+            http::send_json(
+                request,
+                RequestOptions::new("Compare Gitee Enterprise pull request commits"),
+            )
+            .await
+            .map_err(|error| error.to_string())?
+        }
+    };
+
+    let values = payload
+        .get("files")
+        .or_else(|| payload.get("diffs"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Gitee commit comparison response has no diff list.".to_string())?;
+    let files = values
+        .iter()
+        .map(decode_compare_diff_file)
+        .collect::<Vec<_>>();
+    Ok(PullRequestDiffDetail {
+        added_lines: files.iter().map(|file| file.added_lines).sum(),
+        removed_lines: files.iter().map(|file| file.removed_lines).sum(),
+        commit_count,
+        base_sha: base_sha.to_string(),
+        head_sha: head_sha.to_string(),
+        start_sha: base_sha.to_string(),
+        too_many_commits: payload
+            .get("compare_timeout")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        files,
+    })
+}
+
+fn decode_compare_diff_file(value: &Value) -> PullRequestDiffFile {
+    if value.get("statistic").is_some() {
+        return decode_diff_file(value);
+    }
+    let path = string_field(value, "filename")
+        .or_else(|| string_field(value, "new_path"))
+        .unwrap_or_else(|| "Unknown file".to_string());
+    let old_path = string_field(value, "previous_filename")
+        .or_else(|| string_field(value, "old_path"))
+        .unwrap_or_else(|| path.clone());
+    let change_type = match string_field(value, "status").as_deref() {
+        Some("added") => "new_file",
+        Some("removed") => "deleted_file",
+        Some("renamed") => "renamed_file",
+        _ if value
+            .get("new_file")
+            .and_then(Value::as_bool)
+            .unwrap_or(false) =>
+        {
+            "new_file"
+        }
+        _ if value
+            .get("deleted_file")
+            .and_then(Value::as_bool)
+            .unwrap_or(false) =>
+        {
+            "deleted_file"
+        }
+        _ if value
+            .get("renamed_file")
+            .and_then(Value::as_bool)
+            .unwrap_or(false) =>
+        {
+            "renamed_file"
+        }
+        _ => "edit_file",
+    }
+    .to_string();
+    let lines = string_field(value, "patch")
+        .or_else(|| string_field(value, "diff"))
+        .map(|diff| super::parse_unified_diff(diff.as_str()))
+        .unwrap_or_default();
+    let added_lines = value_u32(value, "additions")
+        .unwrap_or_else(|| lines.iter().filter(|line| line.kind == "addition").count() as u32);
+    let removed_lines = value_u32(value, "deletions")
+        .unwrap_or_else(|| lines.iter().filter(|line| line.kind == "deletion").count() as u32);
+    if lines.is_empty() {
+        return super::unavailable_diff_file(
+            path,
+            old_path,
+            change_type,
+            added_lines,
+            removed_lines,
+            "Gitee omitted this binary, collapsed, or oversized comparison.",
+        );
+    }
+    PullRequestDiffFile {
+        path,
+        old_path,
+        change_type,
+        added_lines,
+        removed_lines,
+        viewed: false,
+        lines,
+    }
 }
 
 pub(super) async fn get_repository_file_text(
@@ -655,6 +806,191 @@ fn gitee_public_merge_readiness(detail: &Value) -> PullRequestReadiness {
     }
 }
 
+pub(super) async fn get_pull_request_conversation(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Result<Vec<PullRequestConversationItem>, String> {
+    let (detail, notes) = match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => {
+            let detail_endpoint = enterprise_pull_request_endpoint(
+                endpoints::ENTERPRISE_MERGE_REQUEST_URL,
+                repo_project_id,
+                pull_request_iid,
+            )?;
+            let notes_endpoint = enterprise_pull_request_endpoint(
+                endpoints::ENTERPRISE_MERGE_REQUEST_NOTES_URL,
+                repo_project_id,
+                pull_request_iid,
+            )?;
+            let detail = http::send_json(
+                enterprise_authenticated_builder(http::get(detail_endpoint)),
+                RequestOptions::new("Load Gitee enterprise merge request conversation header"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            let notes = http::send_json(
+                enterprise_authenticated_builder(http::get(notes_endpoint))
+                    .query(&[("per_page", "100")]),
+                RequestOptions::new("Load Gitee enterprise merge request notes"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            (detail, notes)
+        }
+        GiteeApiProfile::PublicV5 => {
+            let detail_endpoint = public_repo_endpoint(
+                endpoints::PUBLIC_PULL_REQUEST_URL,
+                locator,
+                Some(pull_request_iid),
+                None,
+            );
+            let comments_endpoint = public_repo_endpoint(
+                endpoints::PUBLIC_PULL_REQUEST_COMMENTS_URL,
+                locator,
+                Some(pull_request_iid),
+                None,
+            );
+            let detail = http::send_json(
+                public_authenticated_request(detail_endpoint),
+                RequestOptions::new("Load Gitee public pull request conversation header"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            let notes = http::send_json(
+                public_authenticated_request(comments_endpoint)
+                    .query(&[("page", "1"), ("per_page", "100")]),
+                RequestOptions::new("Load Gitee public pull request comments"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            (detail, notes)
+        }
+    };
+
+    let mut items = vec![PullRequestConversationItem {
+        id: format!("description-{pull_request_iid}"),
+        kind: "description".to_string(),
+        author: nested_string(&detail, "author", "name")
+            .or_else(|| nested_string(&detail, "author", "username"))
+            .or_else(|| nested_string(&detail, "user", "login"))
+            .or_else(|| nested_string(&detail, "user", "name"))
+            .unwrap_or_else(|| "Unknown author".to_string()),
+        body: string_field(&detail, "description")
+            .or_else(|| string_field(&detail, "body"))
+            .unwrap_or_default(),
+        created_at: string_field(&detail, "created_at").unwrap_or_default(),
+        state: string_field(&detail, "state").unwrap_or_default(),
+    }];
+    if let Some(values) = pull_request_values(&notes) {
+        items.extend(values.iter().map(|value| {
+            PullRequestConversationItem {
+                id: string_field(value, "id").unwrap_or_default(),
+                kind: if value
+                    .get("system")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    "event".to_string()
+                } else {
+                    "comment".to_string()
+                },
+                author: nested_string(value, "author", "name")
+                    .or_else(|| nested_string(value, "author", "username"))
+                    .or_else(|| nested_string(value, "user", "name"))
+                    .or_else(|| nested_string(value, "user", "login"))
+                    .unwrap_or_else(|| "Unknown author".to_string()),
+                body: string_field(value, "body")
+                    .or_else(|| string_field(value, "note"))
+                    .unwrap_or_default(),
+                created_at: string_field(value, "created_at").unwrap_or_default(),
+                state: string_field(value, "state").unwrap_or_default(),
+            }
+        }));
+    }
+    let description = items.remove(0);
+    items.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+    items.insert(0, description);
+    Ok(items)
+}
+
+pub(super) async fn get_pull_request_commits(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Result<Vec<PullRequestCommit>, String> {
+    let endpoint = match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => enterprise_pull_request_endpoint(
+            endpoints::ENTERPRISE_MERGE_REQUEST_COMMITS_URL,
+            repo_project_id,
+            pull_request_iid,
+        )?,
+        GiteeApiProfile::PublicV5 => public_repo_endpoint(
+            endpoints::PUBLIC_PULL_REQUEST_COMMITS_URL,
+            locator,
+            Some(pull_request_iid),
+            None,
+        ),
+    };
+    let request = match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => {
+            enterprise_authenticated_builder(http::get(endpoint)).query(&[("per_page", "100")])
+        }
+        GiteeApiProfile::PublicV5 => {
+            public_authenticated_request(endpoint).query(&[("page", "1"), ("per_page", "100")])
+        }
+    };
+    let payload: Value = http::send_json(
+        request,
+        RequestOptions::new("Load Gitee pull request commits"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let values = pull_request_values(&payload)
+        .ok_or_else(|| "Gitee pull request commit response is not a list.".to_string())?;
+    Ok(values.iter().map(decode_commit).collect())
+}
+
+fn decode_commit(value: &Value) -> PullRequestCommit {
+    let message = string_field(value, "message")
+        .or_else(|| {
+            value
+                .get("commit")
+                .and_then(|commit| string_field(commit, "message"))
+        })
+        .unwrap_or_default();
+    PullRequestCommit {
+        sha: string_field(value, "sha")
+            .or_else(|| string_field(value, "id"))
+            .unwrap_or_default(),
+        title: string_field(value, "title")
+            .unwrap_or_else(|| message.lines().next().unwrap_or_default().to_string()),
+        message,
+        author: string_field(value, "author_name")
+            .or_else(|| nested_string(value, "author", "name"))
+            .or_else(|| nested_string(value, "author", "login"))
+            .or_else(|| {
+                value
+                    .get("commit")
+                    .and_then(|commit| nested_string(commit, "author", "name"))
+            })
+            .unwrap_or_else(|| "Unknown author".to_string()),
+        authored_at: string_field(value, "authored_date")
+            .or_else(|| string_field(value, "committed_date"))
+            .or_else(|| {
+                value
+                    .get("commit")
+                    .and_then(|commit| nested_string(commit, "author", "date"))
+            })
+            .unwrap_or_default(),
+        verified: value
+            .get("verification")
+            .and_then(|verification| verification.get("verified"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
+}
+
 pub(super) async fn submit_pull_request_review(
     locator: &RepoLocator,
     repo_project_id: &str,
@@ -899,6 +1235,10 @@ fn decode_pull_request_diff(payload: &Value) -> Result<PullRequestDiffDetail, St
             .unwrap_or_else(|| files.iter().map(|file| file.added_lines).sum()),
         removed_lines: value_u32(payload, "removed_lines")
             .unwrap_or_else(|| files.iter().map(|file| file.removed_lines).sum()),
+        commit_count: value_u32(payload, "commits_count")
+            .or_else(|| value_u32(payload, "commit_count"))
+            .or_else(|| value_u32(payload, "commits"))
+            .unwrap_or(0),
         base_sha: string_field(refs, "base_sha").unwrap_or_default(),
         head_sha: string_field(refs, "head_sha").unwrap_or_default(),
         start_sha: string_field(refs, "start_sha").unwrap_or_default(),
@@ -1313,8 +1653,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        decode_pull_request_diff, gitee_enterprise_merge_readiness, gitee_public_merge_readiness,
-        pull_request_values, select_enterprise_project_id,
+        decode_commit, decode_pull_request_diff, gitee_enterprise_merge_readiness,
+        gitee_public_merge_readiness, pull_request_values, select_enterprise_project_id,
     };
     use crate::git::{PullRequestReadinessKind, parse_repo_locator};
 
@@ -1344,6 +1684,28 @@ mod tests {
         assert_eq!(pull_request_values(&nested).unwrap().len(), 1);
         assert!(pull_request_values(&records).unwrap().is_empty());
         assert!(pull_request_values(&json!({ "message": "forbidden" })).is_none());
+    }
+
+    #[test]
+    fn decodes_public_and_enterprise_commit_shapes() {
+        let public = decode_commit(&json!({
+            "sha": "public-sha",
+            "commit": {
+                "message": "Public title\nbody",
+                "author": { "name": "Public Author", "date": "2026-07-20T01:00:00Z" }
+            }
+        }));
+        let enterprise = decode_commit(&json!({
+            "id": "enterprise-sha",
+            "title": "Enterprise title",
+            "message": "Enterprise title\nbody",
+            "author_name": "Enterprise Author",
+            "authored_date": "2026-07-20T02:00:00Z"
+        }));
+        assert_eq!(public.title, "Public title");
+        assert_eq!(public.author, "Public Author");
+        assert_eq!(enterprise.sha, "enterprise-sha");
+        assert_eq!(enterprise.author, "Enterprise Author");
     }
 
     #[test]

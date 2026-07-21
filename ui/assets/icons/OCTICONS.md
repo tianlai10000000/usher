@@ -16,6 +16,15 @@ by Slint with GitHub Primer semantic foreground tokens rather than embedded fill
 matching Primer Octicons used by the PR file-tree visibility toggle.
 `octicon-eye-16.svg` is the matching Primer Octicon used by the PR file
 overflow menu.
+`octicon-comment-discussion-16.svg`, `octicon-git-commit-16.svg`, and
+`octicon-file-diff-16.svg` are the upstream 16 px icons used by the PR review
+navigation tabs.
+`octicon-git-pull-request-16.svg` is the upstream-style 16 px pull-request
+status icon used by the PR review summary badge.
+`octicon-stack-16.svg` and `octicon-x-16.svg` are the upstream controls used
+by the PR commit-range selector.
+`octicon-alert-16.svg` is the upstream warning mark used by GitHub-style
+embedded loading errors.
 
 ## GitHub diffstat blocks
 

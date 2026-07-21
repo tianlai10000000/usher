@@ -6,15 +6,16 @@ use std::sync::{Arc, Mutex};
 use slint::{Color, ComponentHandle, Model, ModelRc, ModelTracker, VecModel};
 
 use crate::git::{
-    PullRequestActionState, PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine,
-    PullRequestMergeMethod, PullRequestReviewAction, get_pull_request_action_state,
-    get_pull_request_diff, get_repository_file_text, merge_pull_request,
-    submit_pull_request_review, supports_ignore_whitespace,
+    PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
+    PullRequestDiffFile, PullRequestDiffLine, PullRequestMergeMethod, PullRequestReviewAction,
+    get_pull_request_action_state, get_pull_request_commit_range_diff, get_pull_request_commits,
+    get_pull_request_conversation, get_pull_request_diff, get_repository_file_text,
+    merge_pull_request, submit_pull_request_review, supports_ignore_whitespace,
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{
-    MainWindow, WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken,
-    WorkflowPrFileExtensionFilter, WorkflowPrTreeItem,
+    MainWindow, Route, WorkflowPrCommit, WorkflowPrConversationItem, WorkflowPrDiffFile,
+    WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrFileExtensionFilter, WorkflowPrTreeItem,
 };
 
 use super::bindings::{show_error, show_success};
@@ -24,6 +25,7 @@ use super::syntax_highlight::{
 
 const HIGHLIGHT_CACHE_CAPACITY: usize = 4;
 const SOURCE_CACHE_CAPACITY: usize = 3;
+const RANGE_DIFF_CACHE_CAPACITY: usize = 4;
 const VISIBLE_LINE_CACHE_CAPACITY: usize = 64;
 
 #[derive(Debug)]
@@ -185,7 +187,9 @@ struct ReviewCache {
     project_alias: String,
     request: ReviewRequest,
     metadata: ProjectRepositoryMetadata,
+    all_detail: Arc<PullRequestDiffDetail>,
     base_detail: Arc<PullRequestDiffDetail>,
+    range_diffs: BoundedCache<Arc<PullRequestDiffDetail>>,
     expanded_files: HashMap<usize, PullRequestDiffFile>,
 }
 
@@ -227,6 +231,11 @@ pub(crate) struct WorkflowPrReviewController {
     highlight_sequence: Arc<AtomicU64>,
     expand_sequence: Arc<AtomicU64>,
     action_sequence: Arc<AtomicU64>,
+    conversation_sequence: Arc<AtomicU64>,
+    commits_sequence: Arc<AtomicU64>,
+    conversation_loaded: Arc<Mutex<bool>>,
+    commits_loaded: Arc<Mutex<bool>>,
+    commits: Arc<Mutex<Vec<PullRequestCommit>>>,
 }
 
 fn session_highlight_resources(
@@ -257,6 +266,11 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         highlight_sequence: Arc::new(AtomicU64::new(0)),
         expand_sequence: Arc::new(AtomicU64::new(0)),
         action_sequence: Arc::new(AtomicU64::new(0)),
+        conversation_sequence: Arc::new(AtomicU64::new(0)),
+        commits_sequence: Arc::new(AtomicU64::new(0)),
+        conversation_loaded: Arc::new(Mutex::new(false)),
+        commits_loaded: Arc::new(Mutex::new(false)),
+        commits: Arc::new(Mutex::new(Vec::new())),
     };
 
     let open_controller = controller.clone();
@@ -286,6 +300,32 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
     ui.on_workflow_pr_review_close(move || {
         if let Some(ui) = ui_weak.upgrade() {
             close_controller.close(&ui);
+        }
+    });
+
+    let tab_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_select_tab(move |tab| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        ui.set_workflow_pr_review_tab(tab.clamp(0, 2));
+        tab_controller.load_tab(&ui, tab);
+    });
+
+    let commits_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_ensure_commits(move || {
+        if let Some(ui) = ui_weak.upgrade() {
+            commits_controller.load_commits(&ui);
+        }
+    });
+
+    let range_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_apply_commit_range(move |start, end| {
+        if let Some(ui) = ui_weak.upgrade() {
+            range_controller.apply_commit_range(&ui, start, end);
         }
     });
 
@@ -321,6 +361,9 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
             .and_then(|guard| guard.clone());
         if let Some(mut request) = request {
             request.ignore_whitespace = ignore_whitespace;
+            ui.set_workflow_pr_review_commit_range_start(-1);
+            ui.set_workflow_pr_review_commit_range_end(-1);
+            ui.set_workflow_pr_review_commit_range_label("All commits".into());
             reload_controller.open(&ui, request);
         }
     });
@@ -433,6 +476,48 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         }
     });
 
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_copy_commit_sha(move |sha| {
+        let sha = sha.trim();
+        if sha.is_empty() {
+            return;
+        }
+        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(sha)) {
+            Ok(()) => {
+                if let Some(ui) = ui_weak.upgrade() {
+                    show_success(&ui, "Copied commit SHA.");
+                }
+            }
+            Err(error) => {
+                log::warn!("[Workflow][PR Review] Failed to copy commit SHA: {error}");
+                if let Some(ui) = ui_weak.upgrade() {
+                    show_error(&ui, "Failed to copy the commit SHA.");
+                }
+            }
+        }
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_copy_source_branch(move |branch| {
+        let branch = branch.trim();
+        if branch.is_empty() {
+            return;
+        }
+        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(branch)) {
+            Ok(()) => {
+                if let Some(ui) = ui_weak.upgrade() {
+                    show_success(&ui, "Copied source branch.");
+                }
+            }
+            Err(error) => {
+                log::warn!("[Workflow][PR Review] Failed to copy source branch: {error}");
+                if let Some(ui) = ui_weak.upgrade() {
+                    show_error(&ui, "Failed to copy the source branch.");
+                }
+            }
+        }
+    });
+
     let submit_controller = controller.clone();
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_submit_review(move |action, body| {
@@ -461,6 +546,8 @@ impl WorkflowPrReviewController {
         self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
         self.expand_sequence.fetch_add(1, Ordering::SeqCst);
         self.action_sequence.fetch_add(1, Ordering::SeqCst);
+        self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
+        self.commits_sequence.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut request) = self.active_request.lock() {
             *request = None;
         }
@@ -491,7 +578,19 @@ impl WorkflowPrReviewController {
         if let Ok(mut sources) = self.source_files.lock() {
             sources.clear();
         }
+        if let Ok(mut loaded) = self.conversation_loaded.lock() {
+            *loaded = false;
+        }
+        if let Ok(mut loaded) = self.commits_loaded.lock() {
+            *loaded = false;
+        }
+        if let Ok(mut commits) = self.commits.lock() {
+            commits.clear();
+        }
         reset_review_ui(ui);
+        if ui.get_current_route() == Route::PrReview {
+            ui.invoke_navigate(Route::Workflow);
+        }
         self.log_memory_diagnostics("review_close.after_clear");
     }
 
@@ -501,6 +600,8 @@ impl WorkflowPrReviewController {
         self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
         self.expand_sequence.fetch_add(1, Ordering::SeqCst);
         self.action_sequence.fetch_add(1, Ordering::SeqCst);
+        self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
+        self.commits_sequence.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut alias) = self.project_alias.lock() {
             *alias = project_alias;
         }
@@ -533,6 +634,15 @@ impl WorkflowPrReviewController {
         }
         if let Ok(mut sources) = self.source_files.lock() {
             sources.clear();
+        }
+        if let Ok(mut loaded) = self.conversation_loaded.lock() {
+            *loaded = false;
+        }
+        if let Ok(mut loaded) = self.commits_loaded.lock() {
+            *loaded = false;
+        }
+        if let Ok(mut commits) = self.commits.lock() {
+            commits.clear();
         }
         reset_review_ui(ui);
         self.log_memory_diagnostics("project_switch.after_clear");
@@ -579,6 +689,25 @@ impl WorkflowPrReviewController {
             if let Ok(mut sources) = self.source_files.lock() {
                 sources.clear();
             }
+            self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
+            self.commits_sequence.fetch_add(1, Ordering::SeqCst);
+            if let Ok(mut loaded) = self.conversation_loaded.lock() {
+                *loaded = false;
+            }
+            if let Ok(mut loaded) = self.commits_loaded.lock() {
+                *loaded = false;
+            }
+            if let Ok(mut commits) = self.commits.lock() {
+                commits.clear();
+            }
+            ui.set_workflow_pr_review_tab(2);
+            ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
+            ui.set_workflow_pr_review_commits(empty_commit_model());
+            ui.set_workflow_pr_review_conversation_error("".into());
+            ui.set_workflow_pr_review_commits_error("".into());
+            ui.set_workflow_pr_review_commit_range_start(-1);
+            ui.set_workflow_pr_review_commit_range_end(-1);
+            ui.set_workflow_pr_review_commit_range_label("All commits".into());
             ui.set_workflow_pr_review_file_filter("".into());
             reset_action_ui(ui);
             self.log_memory_diagnostics("new_review.after_cache_clear");
@@ -586,6 +715,7 @@ impl WorkflowPrReviewController {
 
         apply_review_header(ui, &request);
         ui.set_workflow_pr_review_visible(true);
+        ui.invoke_navigate(Route::PrReview);
         ui.set_workflow_pr_review_error("".into());
         if let Ok(mut active_request) = self.active_request.lock() {
             *active_request = Some(request.clone());
@@ -681,7 +811,9 @@ impl WorkflowPrReviewController {
                                 project_alias,
                                 request,
                                 metadata,
+                                all_detail: detail.clone(),
                                 base_detail: detail.clone(),
+                                range_diffs: BoundedCache::new(RANGE_DIFF_CACHE_CAPACITY),
                                 expanded_files: HashMap::new(),
                             });
                         }
@@ -698,6 +830,332 @@ impl WorkflowPrReviewController {
                 }
             });
         });
+    }
+
+    fn load_tab(&self, ui: &MainWindow, tab: i32) {
+        match tab {
+            0 => self.load_conversation(ui),
+            1 => self.load_commits(ui),
+            _ => {}
+        }
+    }
+
+    fn load_conversation(&self, ui: &MainWindow) {
+        if self
+            .conversation_loaded
+            .lock()
+            .map(|loaded| *loaded)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let Some(request) = self
+            .active_request
+            .lock()
+            .ok()
+            .and_then(|request| request.clone())
+        else {
+            return;
+        };
+        let project_alias = self
+            .project_alias
+            .lock()
+            .map(|alias| alias.clone())
+            .unwrap_or_default();
+        let sequence = self.conversation_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        ui.set_workflow_pr_review_conversation_loading(true);
+        ui.set_workflow_pr_review_conversation_error("".into());
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let metadata = tokio::task::spawn_blocking(move || {
+                load_repository_metadata(project_alias.as_str())
+            })
+            .await
+            .map_err(|error| format!("Failed to read project configuration: {error}"))
+            .and_then(|result| result);
+            let result = match metadata {
+                Ok(metadata) => {
+                    get_pull_request_conversation(
+                        metadata.repo_type.as_str(),
+                        metadata.repo_project_id.as_str(),
+                        metadata.remote_repo.as_str(),
+                        request.number.as_str(),
+                    )
+                    .await
+                }
+                Err(error) => Err(error),
+            };
+            let _ = slint::invoke_from_event_loop(move || {
+                if controller.conversation_sequence.load(Ordering::SeqCst) != sequence {
+                    return;
+                }
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_review_conversation_loading(false);
+                match result {
+                    Ok(items) => {
+                        ui.set_workflow_pr_review_conversation_items(conversation_model(&items));
+                        if let Ok(mut loaded) = controller.conversation_loaded.lock() {
+                            *loaded = true;
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!("[Workflow][PR Review] Failed to load conversation: {error}");
+                        ui.set_workflow_pr_review_conversation_error(
+                            "The provider could not load this pull request conversation.".into(),
+                        );
+                    }
+                }
+            });
+        });
+    }
+
+    fn load_commits(&self, ui: &MainWindow) {
+        if self
+            .commits_loaded
+            .lock()
+            .map(|loaded| *loaded)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let Some(request) = self
+            .active_request
+            .lock()
+            .ok()
+            .and_then(|request| request.clone())
+        else {
+            return;
+        };
+        let project_alias = self
+            .project_alias
+            .lock()
+            .map(|alias| alias.clone())
+            .unwrap_or_default();
+        let sequence = self.commits_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        ui.set_workflow_pr_review_commits_loading(true);
+        ui.set_workflow_pr_review_commits_error("".into());
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let metadata = tokio::task::spawn_blocking(move || {
+                load_repository_metadata(project_alias.as_str())
+            })
+            .await
+            .map_err(|error| format!("Failed to read project configuration: {error}"))
+            .and_then(|result| result);
+            let result = match metadata {
+                Ok(metadata) => {
+                    get_pull_request_commits(
+                        metadata.repo_type.as_str(),
+                        metadata.repo_project_id.as_str(),
+                        metadata.remote_repo.as_str(),
+                        request.number.as_str(),
+                    )
+                    .await
+                }
+                Err(error) => Err(error),
+            };
+            let _ = slint::invoke_from_event_loop(move || {
+                if controller.commits_sequence.load(Ordering::SeqCst) != sequence {
+                    return;
+                }
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_review_commits_loading(false);
+                match result {
+                    Ok(commits) => {
+                        ui.set_workflow_pr_review_commits(commit_model(&commits));
+                        if let Ok(mut stored) = controller.commits.lock() {
+                            *stored = commits;
+                        }
+                        if let Ok(mut loaded) = controller.commits_loaded.lock() {
+                            *loaded = true;
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!("[Workflow][PR Review] Failed to load commits: {error}");
+                        ui.set_workflow_pr_review_commits_error(
+                            "The provider could not load this pull request's commits.".into(),
+                        );
+                    }
+                }
+            });
+        });
+    }
+
+    fn apply_commit_range(&self, ui: &MainWindow, start: i32, end: i32) {
+        if start < 0 || end < 0 {
+            self.request_sequence.fetch_add(1, Ordering::SeqCst);
+            let detail = self
+                .cache
+                .lock()
+                .ok()
+                .and_then(|cache| cache.as_ref().map(|cache| cache.all_detail.clone()));
+            if let Some(detail) = detail {
+                self.activate_commit_range(ui, detail);
+                ui.set_workflow_pr_review_commit_range_start(-1);
+                ui.set_workflow_pr_review_commit_range_end(-1);
+                ui.set_workflow_pr_review_commit_range_label("All commits".into());
+                ui.set_workflow_pr_review_error("".into());
+            }
+            return;
+        }
+
+        let (start, end) = if start <= end {
+            (start as usize, end as usize)
+        } else {
+            (end as usize, start as usize)
+        };
+        let commits = self
+            .commits
+            .lock()
+            .map(|commits| commits.clone())
+            .unwrap_or_default();
+        if commits.is_empty() || end >= commits.len() {
+            show_error(
+                ui,
+                "Load the pull request commits before selecting a range.",
+            );
+            return;
+        }
+        let label = commit_range_label(&commits, start, end);
+        if range_covers_all_commits(commits.len(), start, end) {
+            let detail = self
+                .cache
+                .lock()
+                .ok()
+                .and_then(|cache| cache.as_ref().map(|cache| cache.all_detail.clone()));
+            if let Some(detail) = detail {
+                self.request_sequence.fetch_add(1, Ordering::SeqCst);
+                self.activate_commit_range(ui, detail);
+                ui.set_workflow_pr_review_commit_range_start(start as i32);
+                ui.set_workflow_pr_review_commit_range_end(end as i32);
+                ui.set_workflow_pr_review_commit_range_label(label.into());
+                ui.set_workflow_pr_review_error("".into());
+                return;
+            }
+        }
+        let (metadata, all_base_sha, ignore_whitespace) = match self.cache.lock() {
+            Ok(cache) => {
+                let Some(cache) = cache.as_ref() else {
+                    return;
+                };
+                (
+                    cache.metadata.clone(),
+                    cache.all_detail.base_sha.clone(),
+                    cache.request.ignore_whitespace,
+                )
+            }
+            Err(_) => return,
+        };
+        let base_sha = if start == 0 {
+            all_base_sha
+        } else {
+            commits[start - 1].sha.clone()
+        };
+        let head_sha = commits[end].sha.clone();
+        if base_sha.is_empty() || head_sha.is_empty() {
+            show_error(
+                ui,
+                "The provider did not return enough commit data for this range.",
+            );
+            return;
+        }
+        let cache_key = format!("{base_sha}:{head_sha}");
+        let cached = self.cache.lock().ok().and_then(|mut cache| {
+            cache
+                .as_mut()
+                .and_then(|cache| cache.range_diffs.get_cloned(cache_key.as_str()))
+        });
+        if let Some(detail) = cached {
+            self.request_sequence.fetch_add(1, Ordering::SeqCst);
+            self.activate_commit_range(ui, detail);
+            ui.set_workflow_pr_review_commit_range_start(start as i32);
+            ui.set_workflow_pr_review_commit_range_end(end as i32);
+            ui.set_workflow_pr_review_commit_range_label(label.into());
+            ui.set_workflow_pr_review_error("".into());
+            return;
+        }
+
+        let sequence = self.request_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        ui.set_workflow_pr_review_loading(true);
+        ui.set_workflow_pr_review_error("".into());
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let result = get_pull_request_commit_range_diff(
+                metadata.repo_type.as_str(),
+                metadata.repo_project_id.as_str(),
+                metadata.remote_repo.as_str(),
+                base_sha.as_str(),
+                head_sha.as_str(),
+                commits.len() as u32,
+                ignore_whitespace,
+            )
+            .await;
+            let _ = slint::invoke_from_event_loop(move || {
+                if controller.request_sequence.load(Ordering::SeqCst) != sequence {
+                    return;
+                }
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_review_loading(false);
+                match result {
+                    Ok(detail) => {
+                        let detail = Arc::new(detail);
+                        if let Ok(mut cache) = controller.cache.lock()
+                            && let Some(cache) = cache.as_mut()
+                        {
+                            cache
+                                .range_diffs
+                                .insert(cache_key, detail.clone());
+                        }
+                        controller.activate_commit_range(&ui, detail);
+                        ui.set_workflow_pr_review_commit_range_start(start as i32);
+                        ui.set_workflow_pr_review_commit_range_end(end as i32);
+                        ui.set_workflow_pr_review_commit_range_label(label.into());
+                        log::info!(
+                            "[Workflow][PR Review] Applied commit range: start={} end={} base={} head={}",
+                            start,
+                            end,
+                            base_sha,
+                            head_sha
+                        );
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "[Workflow][PR Review] Failed to load commit range diff: {error}"
+                        );
+                        ui.set_workflow_pr_review_error(
+                            "The provider could not load the selected commit range.".into(),
+                        );
+                    }
+                }
+            });
+        });
+    }
+
+    fn activate_commit_range(&self, ui: &MainWindow, detail: Arc<PullRequestDiffDetail>) {
+        self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
+        self.expand_sequence.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut highlighted) = self.highlighted_files.lock() {
+            highlighted.clear();
+        }
+        if let Ok(mut sources) = self.source_files.lock() {
+            sources.clear();
+        }
+        if let Ok(mut cache) = self.cache.lock()
+            && let Some(cache) = cache.as_mut()
+        {
+            cache.base_detail = detail.clone();
+            cache.expanded_files.clear();
+        }
+        self.apply_detail(ui, &detail);
     }
 
     fn action_context(&self) -> Option<(ProjectRepositoryMetadata, String)> {
@@ -818,6 +1276,15 @@ impl WorkflowPrReviewController {
                         );
                         show_success(&ui, "Review submitted to the remote repository.");
                         controller.refresh_action_state(&ui);
+                        controller
+                            .conversation_sequence
+                            .fetch_add(1, Ordering::SeqCst);
+                        if let Ok(mut loaded) = controller.conversation_loaded.lock() {
+                            *loaded = false;
+                        }
+                        if ui.get_workflow_pr_review_tab() == 0 {
+                            controller.load_conversation(&ui);
+                        }
                     }
                     Err(error) => {
                         log::warn!("[Workflow][PR Review] Failed to submit review: {error}");
@@ -1654,6 +2121,7 @@ fn apply_detail_summary(ui: &MainWindow, detail: &PullRequestDiffDetail) {
     ui.set_workflow_pr_review_files(ModelRc::new(VecModel::from(files)));
     ui.set_workflow_pr_review_added_lines(detail.added_lines as i32);
     ui.set_workflow_pr_review_removed_lines(detail.removed_lines as i32);
+    ui.set_workflow_pr_review_commit_count(detail.commit_count as i32);
     ui.set_workflow_pr_review_base_sha(detail.base_sha.clone().into());
     ui.set_workflow_pr_review_head_sha(detail.head_sha.clone().into());
     ui.set_workflow_pr_review_too_many_commits(detail.too_many_commits);
@@ -1753,15 +2221,14 @@ fn to_slint_line(
         old_line: line.old_line,
         new_line: line.new_line,
         kind: line.kind.clone().into(),
-        content: if line.kind == "hunk" {
-            line.content
-                .chars()
-                .filter(|character| !matches!(character, '\r' | '\n'))
-                .collect::<String>()
-                .into()
-        } else {
-            "".into()
-        },
+        // Keep one sanitized plain-text copy for the live-resize fast path.
+        // Normal rendering still uses the token model for syntax colors.
+        content: line
+            .content
+            .chars()
+            .filter(|character| !matches!(character, '\r' | '\n'))
+            .collect::<String>()
+            .into(),
         tokens: ModelRc::new(VecModel::from(tokens)),
         expandable: hunk_is_expandable(file, index),
     }
@@ -2111,6 +2578,122 @@ fn empty_extension_filter_model() -> ModelRc<WorkflowPrFileExtensionFilter> {
     ModelRc::new(VecModel::from(Vec::<WorkflowPrFileExtensionFilter>::new()))
 }
 
+fn empty_conversation_model() -> ModelRc<WorkflowPrConversationItem> {
+    ModelRc::new(VecModel::from(Vec::<WorkflowPrConversationItem>::new()))
+}
+
+fn empty_commit_model() -> ModelRc<WorkflowPrCommit> {
+    ModelRc::new(VecModel::from(Vec::<WorkflowPrCommit>::new()))
+}
+
+fn conversation_model(
+    items: &[PullRequestConversationItem],
+) -> ModelRc<WorkflowPrConversationItem> {
+    ModelRc::new(VecModel::from(
+        items
+            .iter()
+            .map(|item| WorkflowPrConversationItem {
+                id: item.id.clone().into(),
+                kind: item.kind.clone().into(),
+                author: item.author.clone().into(),
+                body: item.body.clone().into(),
+                created_at: super::pr_list::format_updated_at_in_utc_plus_eight(
+                    item.created_at.as_str(),
+                )
+                .into(),
+                state: item.state.clone().into(),
+            })
+            .collect::<Vec<_>>(),
+    ))
+}
+
+fn commit_model(commits: &[PullRequestCommit]) -> ModelRc<WorkflowPrCommit> {
+    let date_labels = commits
+        .iter()
+        .map(|commit| format_commit_date(commit.authored_at.as_str()))
+        .collect::<Vec<_>>();
+    ModelRc::new(VecModel::from(
+        commits
+            .iter()
+            .enumerate()
+            .map(|(index, commit)| {
+                let date_label = &date_labels[index];
+                let group_start = index == 0 || date_labels[index - 1] != *date_label;
+                let group_end =
+                    index + 1 == date_labels.len() || date_labels[index + 1] != *date_label;
+                let group_size = if group_start {
+                    date_labels[index..]
+                        .iter()
+                        .take_while(|candidate| *candidate == date_label)
+                        .count()
+                } else {
+                    0
+                };
+                WorkflowPrCommit {
+                    sha: commit.sha.clone().into(),
+                    short_sha: commit.sha.chars().take(7).collect::<String>().into(),
+                    title: commit.title.clone().into(),
+                    message: commit.message.clone().into(),
+                    author: commit.author.clone().into(),
+                    authored_at: super::pr_list::format_updated_at_in_utc_plus_eight(
+                        commit.authored_at.as_str(),
+                    )
+                    .into(),
+                    date_label: date_label.clone().into(),
+                    short_date_label: format_commit_short_date(commit.authored_at.as_str()).into(),
+                    group_start,
+                    group_end,
+                    group_size: group_size as i32,
+                    verified: commit.verified,
+                }
+            })
+            .collect::<Vec<_>>(),
+    ))
+}
+
+fn commit_range_label(commits: &[PullRequestCommit], start: usize, end: usize) -> String {
+    let short = |sha: &str| sha.chars().take(7).collect::<String>();
+    if start == end {
+        format!("Commit {}", short(commits[start].sha.as_str()))
+    } else {
+        format!(
+            "{} … {}",
+            short(commits[start].sha.as_str()),
+            short(commits[end].sha.as_str())
+        )
+    }
+}
+
+fn range_covers_all_commits(commit_count: usize, start: usize, end: usize) -> bool {
+    commit_count > 0 && start == 0 && end == commit_count - 1
+}
+
+fn format_commit_date(value: &str) -> String {
+    let utc_plus_eight =
+        chrono::FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|timestamp| {
+            timestamp
+                .with_timezone(&utc_plus_eight)
+                .format("%b %-d, %Y")
+                .to_string()
+        })
+        .unwrap_or_else(|_| value.split('T').next().unwrap_or(value).to_string())
+}
+
+fn format_commit_short_date(value: &str) -> String {
+    let utc_plus_eight =
+        chrono::FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|timestamp| {
+            timestamp
+                .with_timezone(&utc_plus_eight)
+                .format("%b %-d")
+                .to_string()
+        })
+        .unwrap_or_else(|_| value.split('T').next().unwrap_or(value).to_string())
+}
+
 fn apply_action_state(ui: &MainWindow, state: &PullRequestActionState) {
     ui.set_workflow_pr_can_comment(state.can_comment);
     ui.set_workflow_pr_can_approve(state.can_approve);
@@ -2187,9 +2770,20 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_max_code_columns(0);
     ui.set_workflow_pr_review_added_lines(0);
     ui.set_workflow_pr_review_removed_lines(0);
+    ui.set_workflow_pr_review_commit_count(0);
     ui.set_workflow_pr_review_base_sha("".into());
     ui.set_workflow_pr_review_head_sha("".into());
     ui.set_workflow_pr_review_too_many_commits(false);
+    ui.set_workflow_pr_review_tab(2);
+    ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
+    ui.set_workflow_pr_review_commits(empty_commit_model());
+    ui.set_workflow_pr_review_conversation_loading(false);
+    ui.set_workflow_pr_review_commits_loading(false);
+    ui.set_workflow_pr_review_conversation_error("".into());
+    ui.set_workflow_pr_review_commits_error("".into());
+    ui.set_workflow_pr_review_commit_range_start(-1);
+    ui.set_workflow_pr_review_commit_range_end(-1);
+    ui.set_workflow_pr_review_commit_range_label("All commits".into());
     ui.set_workflow_pr_review_has_expandable_hunks(false);
     ui.set_workflow_pr_review_context_expanded(false);
     ui.set_workflow_pr_review_viewing_file(false);
@@ -2207,11 +2801,14 @@ mod tests {
     use slint::Model;
 
     use super::{
-        BoundedCache, LazyPrDiffLineModel, ReviewCache, ReviewRequest, VISIBLE_LINE_CACHE_CAPACITY,
-        build_tree_items, expand_all_hunk_context, expand_hunk_context, full_source_file,
-        hunk_is_expandable, restore_original_diff,
+        BoundedCache, LazyPrDiffLineModel, RANGE_DIFF_CACHE_CAPACITY, ReviewCache, ReviewRequest,
+        VISIBLE_LINE_CACHE_CAPACITY, build_tree_items, commit_range_label, expand_all_hunk_context,
+        expand_hunk_context, format_commit_short_date, full_source_file, hunk_is_expandable,
+        range_covers_all_commits, restore_original_diff,
     };
-    use crate::git::{PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine};
+    use crate::git::{
+        PullRequestCommit, PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine,
+    };
     use crate::project::ProjectRepositoryMetadata;
     use crate::workflow::syntax_highlight::{HighlightedLine, HighlightedToken};
 
@@ -2228,12 +2825,41 @@ mod tests {
     }
 
     #[test]
+    fn labels_single_and_multi_commit_ranges() {
+        let commit = |sha: &str| PullRequestCommit {
+            sha: sha.to_string(),
+            title: String::new(),
+            message: String::new(),
+            author: String::new(),
+            authored_at: String::new(),
+            verified: false,
+        };
+        let commits = vec![
+            commit("1111111aaaaaaaa"),
+            commit("2222222bbbbbbbb"),
+            commit("3333333cccccccc"),
+        ];
+        assert_eq!(commit_range_label(&commits, 1, 1), "Commit 2222222");
+        assert_eq!(commit_range_label(&commits, 0, 2), "1111111 … 3333333");
+    }
+
+    #[test]
+    fn reuses_the_full_diff_when_the_selected_range_covers_every_commit() {
+        assert!(range_covers_all_commits(1, 0, 0));
+        assert!(range_covers_all_commits(3, 0, 2));
+        assert!(!range_covers_all_commits(3, 0, 1));
+        assert!(!range_covers_all_commits(3, 1, 2));
+        assert!(!range_covers_all_commits(0, 0, 0));
+    }
+
+    #[test]
     fn clones_only_the_file_that_receives_expanded_context() {
         let original = file("src/lib.rs");
         let base_detail = Arc::new(PullRequestDiffDetail {
             files: vec![original.clone(), file("src/main.rs")],
             added_lines: 2,
             removed_lines: 0,
+            commit_count: 2,
             base_sha: "base".to_string(),
             head_sha: "head".to_string(),
             start_sha: "start".to_string(),
@@ -2255,7 +2881,9 @@ mod tests {
                 repo_type: "github".to_string(),
                 remote_repo: "https://github.com/example/usher".to_string(),
             },
+            all_detail: base_detail.clone(),
             base_detail: base_detail.clone(),
+            range_diffs: BoundedCache::new(RANGE_DIFF_CACHE_CAPACITY),
             expanded_files: HashMap::new(),
         };
 
@@ -2473,7 +3101,9 @@ mod tests {
 
         assert_eq!(model.row_count(), 128);
         assert_eq!(model.cached_row_count(), 0);
-        assert_eq!(model.row_data(5).expect("row 5").new_line, 6);
+        let row = model.row_data(5).expect("row 5");
+        assert_eq!(row.new_line, 6);
+        assert_eq!(row.content.as_str(), "line 5");
         assert_eq!(model.cached_row_count(), 1);
         assert!(model.row_data(128).is_none());
 
@@ -2481,5 +3111,10 @@ mod tests {
             assert!(model.row_data(index).is_some());
         }
         assert_eq!(model.cached_row_count(), VISIBLE_LINE_CACHE_CAPACITY);
+    }
+
+    #[test]
+    fn formats_commit_row_dates_without_the_year() {
+        assert_eq!(format_commit_short_date("2026-03-19T02:00:00Z"), "Mar 19");
     }
 }

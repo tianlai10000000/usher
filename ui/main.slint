@@ -11,7 +11,7 @@ import { Settings as SettingsPage } from "./views/settings.slint";
 import { About as AboutPage } from "./views/about.slint";
 import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
 import { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
-import { PrReviewWorkspace, WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter } from "./views/workflow/pr_review_workspace.slint";
+import { PrReviewWorkspace, WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./views/workflow/pr_review_workspace.slint";
 import { StepItem } from "./components/workflow/steps.slint";
 
 import { List as ListPage } from "./views/list.slint";
@@ -51,7 +51,7 @@ export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
 export { StepItem } from "./components/workflow/steps.slint";
 export { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
-export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrTreeItem } from "./views/workflow/pr_review_workspace.slint";
+export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./views/workflow/pr_review_workspace.slint";
 
 // import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
 
@@ -62,6 +62,7 @@ export component MainWindow inherits Window {
     // Use one shared surface color for the native title bar and the main content area.
     private property <color> window-surface-color: MaterialPalette.surface_container_lowest;
     background: root.window-surface-color;
+    in-out property <bool> window-live-resizing: false;
     out property <length> chat-layout-window-width: self.width;
     out property <length> chat-layout-window-height: self.height;
     // default-font-family: "Noto Sans SC";
@@ -136,6 +137,7 @@ export component MainWindow inherits Window {
     // Workflow state and callbacks
     in property <string> workflow-branch-result: "Ready to recreate branches.";
     in property <string> workflow-tag-result: "Ready to add or remove a tag.";
+    in-out property <int> workflow-selected-flow: 0;
     in-out property <string> workflow-tag-mode: "local";
     in-out property <string> workflow-tag-version-mode: "patch";
     in property <string> workflow-tag-current-version: "v0.0.0";
@@ -199,9 +201,20 @@ export component MainWindow inherits Window {
     in property <string> workflow-pr-review-updated-at: "";
     in property <int> workflow-pr-review-added-lines: 0;
     in property <int> workflow-pr-review-removed-lines: 0;
+    in property <int> workflow-pr-review-commit-count: 0;
     in property <string> workflow-pr-review-base-sha: "";
     in property <string> workflow-pr-review-head-sha: "";
     in property <bool> workflow-pr-review-too-many-commits: false;
+    in-out property <int> workflow-pr-review-tab: 2;
+    in property <[WorkflowPrConversationItem]> workflow-pr-review-conversation-items: [];
+    in property <[WorkflowPrCommit]> workflow-pr-review-commits: [];
+    in property <bool> workflow-pr-review-conversation-loading: false;
+    in property <bool> workflow-pr-review-commits-loading: false;
+    in property <string> workflow-pr-review-conversation-error: "";
+    in property <string> workflow-pr-review-commits-error: "";
+    in-out property <int> workflow-pr-review-commit-range-start: -1;
+    in-out property <int> workflow-pr-review-commit-range-end: -1;
+    in property <string> workflow-pr-review-commit-range-label: "All commits";
     in property <[WorkflowPrDiffFile]> workflow-pr-review-files: [];
     in property <[WorkflowPrTreeItem]> workflow-pr-review-tree-items: [];
     in property <[WorkflowPrFileExtensionFilter]> workflow-pr-review-extension-filters: [];
@@ -287,6 +300,9 @@ export component MainWindow inherits Window {
     callback workflow-pr-list-page-change(int);
     callback workflow-pr-review-open(string, string, string, string, string, string);
     callback workflow-pr-review-close();
+    callback workflow-pr-review-select-tab(int);
+    callback workflow-pr-review-ensure-commits();
+    callback workflow-pr-review-apply-commit-range(int, int);
     callback workflow-pr-review-select-file(int);
     callback workflow-pr-review-select-relative-file(int);
     callback workflow-pr-review-reload(bool);
@@ -299,6 +315,8 @@ export component MainWindow inherits Window {
     callback workflow-pr-review-expand-all-hunks();
     callback workflow-pr-review-collapse-non-diff-lines();
     callback workflow-pr-review-copy-file-path(string);
+    callback workflow-pr-review-copy-commit-sha(string);
+    callback workflow-pr-review-copy-source-branch(string);
     callback workflow-pr-review-view-file();
     callback workflow-pr-submit-review(string, string);
     callback workflow-pr-merge(string, bool);
@@ -347,7 +365,7 @@ export component MainWindow inherits Window {
 
     changed current-route => {
         root.page-memory-diag-pending = true;
-        if root.current-route != Route.Workflow && root.workflow-pr-review-visible {
+        if root.current-route != Route.Workflow && root.current-route != Route.PrReview && root.workflow-pr-review-visible {
             root.workflow-pr-review-close();
         }
     }
@@ -516,8 +534,13 @@ export component MainWindow inherits Window {
                                 root.navigate(route);
                             }
                         }
-                        if root.current-route == Route.Workflow: WorkflowPage {
+                        // The review workspace owns the whole window. Keep workflow
+                        // state on MainWindow, but destroy its component tree while
+                        // the opaque review surface is mounted so hidden delegates do
+                        // not participate in live-resize layout and rendering.
+                        if root.current-route == Route.Workflow && !root.workflow-pr-review-visible: WorkflowPage {
                             viewport-height: page-scroll-view.visible-height - 2px;
+                            selected-flow <=> root.workflow-selected-flow;
                             navigate(route) => {
                                 root.previous-route = root.current-route;
                                 root.navigate(route);
@@ -899,12 +922,13 @@ export component MainWindow inherits Window {
         }
     }
 
-    if root.workflow-pr-review-visible: PrReviewWorkspace {
+    if root.current-route == Route.PrReview: PrReviewWorkspace {
         x: 0;
         y: 0;
         width: root.width;
         height: root.height;
         z: 800;
+        live-resizing: root.window-live-resizing;
         project-name: root.workflow-project-name;
         provider: root.workflow-pr-repo-type;
         pull-request-number: root.workflow-pr-review-number;
@@ -915,9 +939,20 @@ export component MainWindow inherits Window {
         updated-at: root.workflow-pr-review-updated-at;
         added-lines: root.workflow-pr-review-added-lines;
         removed-lines: root.workflow-pr-review-removed-lines;
+        commit-count: root.workflow-pr-review-commit-count;
         base-sha: root.workflow-pr-review-base-sha;
         head-sha: root.workflow-pr-review-head-sha;
         too-many-commits: root.workflow-pr-review-too-many-commits;
+        selected-tab <=> root.workflow-pr-review-tab;
+        conversation-items: root.workflow-pr-review-conversation-items;
+        commits: root.workflow-pr-review-commits;
+        conversation-loading: root.workflow-pr-review-conversation-loading;
+        commits-loading: root.workflow-pr-review-commits-loading;
+        conversation-error: root.workflow-pr-review-conversation-error;
+        commits-error: root.workflow-pr-review-commits-error;
+        commit-range-start: root.workflow-pr-review-commit-range-start;
+        commit-range-end: root.workflow-pr-review-commit-range-end;
+        commit-range-label: root.workflow-pr-review-commit-range-label;
         files: root.workflow-pr-review-files;
         tree-items: root.workflow-pr-review-tree-items;
         extension-filters: root.workflow-pr-review-extension-filters;
@@ -960,6 +995,9 @@ export component MainWindow inherits Window {
         merge-method-rebase: root.workflow-pr-merge-method-rebase;
         merge-method-fast-forward: root.workflow-pr-merge-method-fast-forward;
         close => { root.workflow-pr-review-close(); }
+        select-tab(tab) => { root.workflow-pr-review-select-tab(tab); }
+        ensure-commits => { root.workflow-pr-review-ensure-commits(); }
+        apply-commit-range(start, end) => { root.workflow-pr-review-apply-commit-range(start, end); }
         select-file(index) => { root.workflow-pr-review-select-file(index); }
         select-relative-file(offset) => { root.workflow-pr-review-select-relative-file(offset); }
         reload(ignore-whitespace) => { root.workflow-pr-review-reload(ignore-whitespace); }
@@ -972,6 +1010,8 @@ export component MainWindow inherits Window {
         expand-all-hunks => { root.workflow-pr-review-expand-all-hunks(); }
         collapse-non-diff-lines => { root.workflow-pr-review-collapse-non-diff-lines(); }
         copy-file-path(path) => { root.workflow-pr-review-copy-file-path(path); }
+        copy-commit-sha(sha) => { root.workflow-pr-review-copy-commit-sha(sha); }
+        copy-source-branch(branch) => { root.workflow-pr-review-copy-source-branch(branch); }
         view-file => { root.workflow-pr-review-view-file(); }
         submit-review(action, body) => { root.workflow-pr-submit-review(action, body); }
         merge(method, remove-source-branch) => { root.workflow-pr-merge(method, remove-source-branch); }

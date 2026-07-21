@@ -262,7 +262,7 @@ fn to_slint_item(item: &PullRequestItem) -> WorkflowPullRequestItem {
     }
 }
 
-fn format_updated_at_in_utc_plus_eight(value: &str) -> String {
+pub(super) fn format_updated_at_in_utc_plus_eight(value: &str) -> String {
     let utc_plus_eight =
         FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
     DateTime::parse_from_rfc3339(value)

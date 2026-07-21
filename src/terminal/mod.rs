@@ -1171,6 +1171,7 @@ fn route_label(route: Route) -> &'static str {
         Route::List => "List",
         Route::Detail => "Detail",
         Route::Workflow => "Workflow",
+        Route::PrReview => "PrReview",
     }
 }
 

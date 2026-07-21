@@ -219,6 +219,19 @@ static WINDOW_IS_INTERACTING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
+fn set_window_live_resizing(active: bool) {
+    if let Some(ui_weak) = TITLEBAR_SETTINGS_UI_WEAK.get() {
+        // NSWindow live-resize notifications are delivered by AppKit on the
+        // same main thread that owns the Slint event loop. Update immediately:
+        // queueing this through invoke_from_event_loop can defer it until the
+        // nested native resize loop has already ended.
+        if let Some(ui) = ui_weak.upgrade() {
+            ui.set_window_live_resizing(active);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
 pub fn is_window_interacting() -> bool {
     use std::sync::atomic::Ordering;
     WINDOW_IS_INTERACTING.load(Ordering::SeqCst)
@@ -511,6 +524,26 @@ fn register_titlebar_settings_delegate_class() -> &'static objc::runtime::Class 
             WINDOW_IS_INTERACTING.store(false, Ordering::SeqCst);
         }
 
+        extern "C" fn window_live_resize_begin(
+            _this: &Object,
+            _cmd: Sel,
+            _notification: *mut Object,
+        ) {
+            use std::sync::atomic::Ordering;
+            WINDOW_IS_INTERACTING.store(true, Ordering::SeqCst);
+            set_window_live_resizing(true);
+        }
+
+        extern "C" fn window_live_resize_end(
+            _this: &Object,
+            _cmd: Sel,
+            _notification: *mut Object,
+        ) {
+            use std::sync::atomic::Ordering;
+            WINDOW_IS_INTERACTING.store(false, Ordering::SeqCst);
+            set_window_live_resizing(false);
+        }
+
         unsafe {
             decl.add_method(
                 sel!(usherOpenSettings:),
@@ -531,6 +564,14 @@ fn register_titlebar_settings_delegate_class() -> &'static objc::runtime::Class 
             decl.add_method(
                 sel!(usherWindowInteractionEnd:),
                 window_interaction_end as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            decl.add_method(
+                sel!(usherWindowLiveResizeBegin:),
+                window_live_resize_begin as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            decl.add_method(
+                sel!(usherWindowLiveResizeEnd:),
+                window_live_resize_end as extern "C" fn(&Object, Sel, *mut Object),
             );
             DELEGATE_CLASS = decl.register();
         }
@@ -631,7 +672,7 @@ fn install_titlebar_settings_button(window: &MainWindow) {
                     let _: () = msg_send![
                         center,
                         addObserver: TITLEBAR_SETTINGS_DELEGATE
-                        selector: sel!(usherWindowInteractionBegin:)
+                        selector: sel!(usherWindowLiveResizeBegin:)
                         name: name
                         object: ns_window
                     ];
@@ -640,7 +681,7 @@ fn install_titlebar_settings_button(window: &MainWindow) {
                     let _: () = msg_send![
                         center,
                         addObserver: TITLEBAR_SETTINGS_DELEGATE
-                        selector: sel!(usherWindowInteractionEnd:)
+                        selector: sel!(usherWindowLiveResizeEnd:)
                         name: name
                         object: ns_window
                     ];
