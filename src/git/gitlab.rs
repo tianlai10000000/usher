@@ -10,9 +10,11 @@ use crate::http::{self, RequestOptions};
 use super::{
     PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
     PullRequestDiffFile, PullRequestItem, PullRequestPage, PullRequestReadiness,
-    PullRequestReadinessKind, PullRequestState, RepoLocator, RepoType, configured_api_base_url,
-    configured_token, is_configured_enterprise_host, parse_unified_diff, percent_encode_path,
-    unavailable_diff_file,
+    PullRequestReadinessKind, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
+    configured_api_base_url, configured_token, conversation_commit_batch_items,
+    conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
+    is_configured_enterprise_host, is_redundant_commit_system_note, is_redundant_merge_system_note,
+    parse_unified_diff, percent_encode_path, unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -167,17 +169,21 @@ pub(super) async fn get_pull_request_diff(
 
     let files = values.iter().map(decode_diff_file).collect::<Vec<_>>();
     let refs = detail.get("diff_refs").unwrap_or(&Value::Null);
+    let commit_count = match commit_count_from_detail(&detail) {
+        Some(count) => count,
+        None => {
+            // Stock GitLab often omits commits_count on MR detail; one lightweight
+            // page with X-Total is enough for the Commits tab badge.
+            count_merge_request_commits(locator, repo_project_id, pull_request_iid)
+                .await
+                .unwrap_or(0)
+        }
+    };
     Ok(PullRequestDiffDetail {
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
-        commit_count: detail
-            .get("commits_count")
-            .and_then(Value::as_u64)
-            .and_then(|value| u32::try_from(value).ok())
-            .or_else(|| {
-                string_field(&detail, "commits_count").and_then(|value| value.parse::<u32>().ok())
-            })
-            .unwrap_or(0),
+        commit_count,
+        conversation_count: Some(conversation_count_from_detail(&detail).unwrap_or(0)),
         base_sha: string_field(refs, "base_sha").unwrap_or_default(),
         head_sha: string_field(refs, "head_sha").unwrap_or_default(),
         start_sha: string_field(refs, "start_sha").unwrap_or_default(),
@@ -228,6 +234,7 @@ pub(super) async fn get_commit_range_diff(
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
         commit_count,
+        conversation_count: None,
         base_sha: base_sha.to_string(),
         head_sha: head_sha.to_string(),
         start_sha: base_sha.to_string(),
@@ -308,52 +315,140 @@ pub(super) async fn get_pull_request_conversation(
         repo_project_id,
         pull_request_iid,
     );
-    let detail: Value = http::send_json(
-        gitlab_request(detail_endpoint),
-        RequestOptions::new("Load GitLab merge request conversation header"),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    let notes: Vec<Value> = http::send_json(
-        gitlab_request(notes_endpoint).query(&[("per_page", "100")]),
-        RequestOptions::new("Load GitLab merge request notes"),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    let mut items = vec![PullRequestConversationItem {
+    let commits_endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_COMMITS_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    let detail_future = async {
+        http::send_json(
+            gitlab_request(detail_endpoint),
+            RequestOptions::new("Load GitLab merge request conversation header"),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    };
+    let notes_future = async {
+        http::send_json(
+            gitlab_request(notes_endpoint).query(&[("per_page", "100")]),
+            RequestOptions::new("Load GitLab merge request notes"),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    };
+    let commits_future = async {
+        http::send_json(
+            gitlab_request(commits_endpoint).query(&[("per_page", "100")]),
+            RequestOptions::new("Load GitLab merge request conversation commits"),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    };
+    let (detail, notes, commit_values): (Value, Vec<Value>, Vec<Value>) =
+        tokio::try_join!(detail_future, notes_future, commits_future)?;
+
+    let description = PullRequestConversationItem {
         id: format!("description-{pull_request_iid}"),
         kind: "description".to_string(),
         author: nested_string(&detail, "author", "name")
             .or_else(|| nested_string(&detail, "author", "username"))
             .unwrap_or_else(|| "Unknown author".to_string()),
+        avatar_url: nested_string(&detail, "author", "avatar_url").unwrap_or_default(),
+        author_association: String::new(),
         body: string_field(&detail, "description").unwrap_or_default(),
         created_at: string_field(&detail, "created_at").unwrap_or_default(),
         state: string_field(&detail, "state").unwrap_or_default(),
-    }];
-    items.extend(notes.into_iter().map(|value| {
-        PullRequestConversationItem {
-            id: string_field(&value, "id").unwrap_or_default(),
-            kind: if value
+    };
+
+    let mut activity = notes
+        .into_iter()
+        .filter_map(|value| {
+            let body = string_field(&value, "body").unwrap_or_default();
+            let is_system = value
                 .get("system")
                 .and_then(Value::as_bool)
-                .unwrap_or(false)
+                .unwrap_or(false);
+            if is_system
+                && (is_redundant_commit_system_note(body.as_str())
+                    || is_redundant_merge_system_note(body.as_str()))
             {
-                "event".to_string()
-            } else {
-                "comment".to_string()
-            },
-            author: nested_string(&value, "author", "name")
-                .or_else(|| nested_string(&value, "author", "username"))
-                .unwrap_or_else(|| "Unknown author".to_string()),
-            body: string_field(&value, "body").unwrap_or_default(),
-            created_at: string_field(&value, "created_at").unwrap_or_default(),
-            state: String::new(),
+                return None;
+            }
+            Some(PullRequestConversationItem {
+                id: string_field(&value, "id").unwrap_or_default(),
+                kind: if is_system {
+                    "event".to_string()
+                } else {
+                    "comment".to_string()
+                },
+                author: nested_string(&value, "author", "name")
+                    .or_else(|| nested_string(&value, "author", "username"))
+                    .unwrap_or_else(|| "Unknown author".to_string()),
+                avatar_url: nested_string(&value, "author", "avatar_url").unwrap_or_default(),
+                author_association: String::new(),
+                body,
+                created_at: string_field(&value, "created_at").unwrap_or_default(),
+                state: String::new(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let commits = commit_values
+        .into_iter()
+        .map(|value| {
+            let message = string_field(&value, "message").unwrap_or_default();
+            PullRequestCommit {
+                sha: string_field(&value, "id")
+                    .or_else(|| string_field(&value, "sha"))
+                    .unwrap_or_default(),
+                title: string_field(&value, "title")
+                    .unwrap_or_else(|| message.lines().next().unwrap_or_default().to_string()),
+                message,
+                author: string_field(&value, "author_name")
+                    .unwrap_or_else(|| "Unknown author".to_string()),
+                avatar_url: string_field(&value, "author_avatar_url")
+                    .or_else(|| nested_string(&value, "author", "avatar_url"))
+                    .unwrap_or_default(),
+                authored_at: string_field(&value, "authored_date")
+                    .or_else(|| string_field(&value, "created_at"))
+                    .unwrap_or_default(),
+                verified: false,
+            }
+        })
+        .collect::<Vec<_>>();
+    // GitLab returns newest-first; Conversation/GitHub-style batches are oldest-first.
+    let commits = {
+        let mut commits = commits;
+        commits.reverse();
+        commits
+    };
+    activity.extend(conversation_commit_batch_items(&commits));
+
+    if let Some(merged_at) =
+        string_field(&detail, "merged_at").filter(|value| !value.trim().is_empty())
+    {
+        let merge_sha = string_field(&detail, "merge_commit_sha").unwrap_or_default();
+        let target_branch = string_field(&detail, "target_branch").unwrap_or_default();
+        let author = nested_string(&detail, "merged_by", "name")
+            .or_else(|| nested_string(&detail, "merged_by", "username"))
+            .or_else(|| nested_string(&detail, "author", "name"))
+            .unwrap_or_else(|| "Unknown author".to_string());
+        if !merge_sha.trim().is_empty() {
+            activity.push(conversation_merged_item(
+                author.as_str(),
+                merge_sha.as_str(),
+                if target_branch.trim().is_empty() {
+                    "main"
+                } else {
+                    target_branch.as_str()
+                },
+                merged_at.as_str(),
+            ));
         }
-    }));
-    let description = items.remove(0);
-    items.sort_by(|left, right| left.created_at.cmp(&right.created_at));
-    items.insert(0, description);
-    Ok(items)
+    }
+
+    Ok(finalize_conversation_timeline(description, activity))
 }
 
 pub(super) async fn get_pull_request_commits(
@@ -386,6 +481,9 @@ pub(super) async fn get_pull_request_commits(
                 message,
                 author: string_field(&value, "author_name")
                     .unwrap_or_else(|| "Unknown author".to_string()),
+                avatar_url: string_field(&value, "author_avatar_url")
+                    .or_else(|| nested_string(&value, "author", "avatar_url"))
+                    .unwrap_or_default(),
                 authored_at: string_field(&value, "authored_date")
                     .or_else(|| string_field(&value, "created_at"))
                     .unwrap_or_default(),
@@ -393,6 +491,27 @@ pub(super) async fn get_pull_request_commits(
             }
         })
         .collect())
+}
+
+async fn count_merge_request_commits(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Option<u32> {
+    let endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_COMMITS_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    let response = http::send(
+        gitlab_request(endpoint).query(&[("page", "1"), ("per_page", "1")]),
+        RequestOptions::new("Count GitLab merge request commits"),
+    )
+    .await
+    .ok()?;
+    let headers = response.headers().clone();
+    pagination_total(&headers)
 }
 
 fn merge_request_endpoint(

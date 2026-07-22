@@ -8,7 +8,7 @@
 
 Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态；Rust 负责持久化、进程执行、网络请求和应用装配。
 
-生产构建在编译期固定选择 Winit + FemtoVG/OpenGL。Skia 和 FemtoVG/WGPU 作为显式启用的 Cargo feature，仅用于渲染器诊断和 A/B 对比，避免常规构建因同时链接多个实现而静默切换渲染器。当前 macOS 测试中 WGPU 虽降低 physical footprint，但会增加 RSS，因此不作为生产默认配置。
+生产构建在编译期固定选择 Winit + FemtoVG/OpenGL。Skia 和 FemtoVG/WGPU 作为显式启用的 Cargo feature，仅用于渲染器诊断和 A/B 对比，避免常规构建因同时链接多个实现而静默切换渲染器。Slint 应用内实时预览同样是显式启用的 `live-preview` 开发 feature，默认构建和生产构建不会编译它。当前 macOS 测试中 WGPU 虽降低 physical footprint，但会增加 RSS，因此不作为生产默认配置。
 
 ## 系统上下文
 
@@ -76,8 +76,9 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/components/` | 应用复用组件。 |
 | `ui/theme/` | 应用主题色映射。 |
 | `material-1.7.1-fixed/` | 与 Slint v1.17.1 对齐的 Material 源码。 |
+| `vendor/i-slint-live-preview/` | 仅由显式 `live-preview` feature 选择的临时 Slint 1.17.1 override；其中有文档记录的 `mtime` 保护避免 macOS 文件监听误报引发无限重编译。 |
 
-应用 UI 原则上通过 `@material` 导入 Material。只有确实需要访问未导出组件时才允许直接引用内置路径。修改内置库前必须与上游对比并记录原因。
+应用 UI 原则上通过 `@material` 导入 Material。只有确实需要访问未导出组件时才允许直接引用内置路径。修改任一 vendored dependency 前必须与上游对比并记录原因；上游提供等价文件监听保护后，应删除 live-preview override。
 
 ## 启动生命周期
 
@@ -121,11 +122,21 @@ Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_
 
 Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。所有列表、详情/diff、仓库文件、review state、review submit 和 merge 请求都根据当前项目持久化的 `repo_type` 选择实现，并在执行前校验其与 `remote_repo` 一致。审核控制器只持有一份共享且不可变的归一化 diff，并用独立 action 序列防止迟到的 review/merge 响应更新其他项目或 PR。Provider HTML 在 adapter 边界解码，每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。上下文展开采用按文件写时复制 override，未展开时不会保留第二份完整 diff，收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性 model 暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写都使用序列号防止迟到响应污染当前项目或 PR。
 
-仓库 PR 列表归现有 Workflow 的 PR Tab 所有。`workflow/pr_list.rs` 在 event loop 之外读取当前项目持久化的 `repo_project_id`、`repo_type`，并且只在进入或用户切换页码时，通过 `src/git/` 懒加载对应的 10 条远端数据。GitHub 保留搜索接口提供的总数，并发请求当前页每个 PR 的详情，从而补齐源分支和目标分支名称。控制器在将列表值传给 Slint 前，把可解析的 Provider 更新时间统一格式化为东八区（UTC+08:00），并在 Provider 提供时使用准确总数驱动顶部总数和底部分页。页面默认显式查询 open 状态，用户可切换 open/closed/merged/all；请求序号保证旧项目、旧筛选或旧页码的延迟响应不会覆盖当前视图。请求成功且零条数据时显示随筛选状态变化的插画空状态；网络、鉴权或响应结构异常仍使用独立且可重试的错误状态。点击列表行后导航到全窗口 `Route.PrReview`；Workflow 组件实例会被销毁，但列表/root model 状态继续保留，因此 Back 可在不重载列表的情况下重建 PR Tab。审核路由拥有 GitHub 风格的 Conversation、Commits、Files changed 三个 Tab。Conversation 与 Commits 只在第一次选中时通过 Provider-neutral model 加载：GitHub 组合 PR detail、issue comments、reviews 并读取 PR commits；Gitee 公版 v5 使用 PR detail/comments/commits；Gitee 企业版 v8 与 GitLab 使用 MR detail/notes/commits。远端 review 成功后会使已加载的 Conversation 失效并刷新。Files changed 控制器加载并归一化所选 PR diff，根据文件路径构建可折叠目录树，并让路径筛选、目录展开和上一项/下一项文件导航保持本地操作。其 commit 选择器复用懒加载提交列表，把连续范围分发到各 Provider 的仓库 compare endpoint；原始 PR detail 和已加载范围在当前审核期间保持缓存。`workflow/syntax_highlight.rs` 在 UI 层之外使用 `syntect` 把当前文件转换为适配主题的 token model，同时保留 Tab 和显示列宽。切换文件或展开 hunk 时，旧行 model 会保留到新高亮 model 完成，再由 event loop 原子替换；只有真正切换文件时才重置 viewport。在 macOS 上，原生 live-resize 通知会冻结审核工作区的内部几何尺寸，并把每条可见行的 token repeater 临时替换为一个纯等宽文本节点；live resize 结束时恢复最终几何尺寸和完整的 token 着色组件树。
+Gitee 企业版 Commit 角标只把 MR detail/diff 中的正数摘要视为可信总数。部分部署在读取 commits 集合前会报告零，因此零值或缺失时必须在激活 Commits Tab 前执行轻量计数探测；完整 Commits 内容 model 仍保持懒加载。
 
-审核页头采用 GitHub 的两步命令模型。标题旁的 GitHub 风格就绪徽标使用 Primer 语义色渲染归一化类型/详情，但合并语义由各 adapter 独立负责：GitHub 映射 REST mergeability，Gitee 企业版映射 v8 `current_state` 条件，Gitee 公有版只映射 v5 字段，GitLab 映射 `detailed_merge_status` 并请求异步重算。共享 enum 只是展示边界，绝不能把一个 Provider 的判定条件套到另一个 Provider。`Review changes` 提交显式的 Provider-neutral Comment、Approve 或 Request changes；不受支持的选项保持可见但禁用。Provider 成功后刷新远端状态，绝不自动开始合并。`Merge pull request` 只由最新的归一化 `PullRequestActionState` 启用，并且只展示 adapter 返回的策略。GitHub 支持仓库启用的 merge、squash、rebase；Gitee 企业 v8 映射评审状态，并按 `restrict_merge_type` 支持 merge、squash、rebase、fast-forward；Gitee 公有 v5 支持评论和 merge/squash，但没有 approve/request-changes endpoint。GitLab 就绪状态只读，远端写操作继续作为显式不支持的能力。
+仓库 PR 列表归现有 Workflow 的 PR Tab 所有。`workflow/pr_list.rs` 在 event loop 之外读取当前项目持久化的 `repo_project_id`、`repo_type`，并且只在进入或用户切换页码时，通过 `src/git/` 懒加载对应的 10 条远端数据。GitHub 保留搜索接口提供的总数，并发请求当前页每个 PR 的详情，从而补齐源分支和目标分支名称。控制器在将列表值传给 Slint 前，把可解析的 Provider 更新时间统一格式化为东八区（UTC+08:00），并在 Provider 提供时使用准确总数驱动顶部总数和底部分页。页面默认显式查询 open 状态，用户可切换 open/closed/merged/all；请求序号保证旧项目、旧筛选或旧页码的延迟响应不会覆盖当前视图。请求成功且零条数据时显示随筛选状态变化的插画空状态；网络、鉴权或响应结构异常仍使用独立且可重试的错误状态。点击列表行后导航到全窗口 `Route.PrReview`；Workflow 组件实例会被销毁，但列表/root model 状态继续保留，因此 Back 可在不重载列表的情况下重建 PR Tab。审核路由拥有 GitHub 风格的 Conversation、Commits、Files changed 三个 Tab。Conversation 与 Commits 的 *内容* 只在第一次选中时通过 Provider-neutral model 加载：GitHub 组合 PR detail、issue comments、reviews，以及 issue timeline 活动（`committed` 批量、`merged` 与部分系统事件）；Gitee 公版 v5 使用 PR detail/comments/commits，并从 commits 与合并元数据合成提交/合并活动；Gitee 企业版 v8 使用 MR detail/notes/commits（并尽力加载 `/reviews`），在展开嵌套 `notes[].note` 后同样合成活动，普通评论正文从 `note` / 嵌套 `note.note` / `comment` / 字符串 `content` 读取（忽略对象形态的 `content`），MR commit 时间取 `created_at`；GitLab 使用 MR detail/notes/commits，合成同一套可移植的 `commits`/`commit`/`merged` 行并过滤重复系统 note。Tab 角标数字不等待 Conversation/Commits Tab 激活：它们来自随 diff 加载携带的轻量 PR/MR 摘要字段（`commit_count`、`conversation_count`、`files.length`）。若 Provider 省略总数，adapter 可发起一次有界计数探测（GitHub/GitLab 的 Link/`X-Total` + `per_page=1`；Gitee 公有版短页 `per_page=100`；Gitee 企业版 diffs `commits_size`、MR `user_notes_count`/`notes_count`，或 `with_page=true&per_page=1` + `meta.total_count`）。完整 Conversation 时间线与 commits 列表仍只在打开对应 Tab（或 commit 选择器）时懒加载。Provider-neutral 终结器把每个 `commits` 头与其后连续的 `commit` 行作为一个不可拆分的块排序，因此即使各提交 authored time 不同，三家 Provider 的 GitHub 风格 `added N commits` 记录也不会与提交列表分离。远端 review 成功后会使已加载的 Conversation 失效并刷新。Files changed 控制器加载并归一化所选 PR diff，根据文件路径构建可折叠目录树，并让路径筛选、目录展开和上一项/下一项文件导航保持本地操作。其 commit 选择器复用懒加载提交列表，把连续范围分发到各 Provider 的仓库 compare endpoint；原始 PR detail 和已加载范围在当前审核期间保持缓存。`workflow/syntax_highlight.rs` 在 UI 层之外使用 `syntect` 把当前文件转换为适配主题的 token model，同时保留 Tab 和显示列宽。切换文件或展开 hunk 时，旧行 model 会保留到新高亮 model 完成，再由 event loop 原子替换；只有真正切换文件时才重置 viewport。在 macOS 上，原生 live-resize 通知会冻结审核工作区的内部几何尺寸，并把每条可见行的 token repeater 临时替换为一个纯等宽文本节点；live resize 结束时恢复最终几何尺寸和完整的 token 着色组件树。
+
+审核页头采用 GitHub 的两步命令模型。标题旁的 GitHub 风格就绪徽标使用 Primer 语义色渲染归一化类型/详情，但合并语义由各 adapter 独立负责：GitHub 映射 REST mergeability，Gitee 企业版映射 v8 `current_state` 条件，Gitee 公有版只映射 v5 字段，GitLab 映射 `detailed_merge_status` 并请求异步重算。共享 enum 只是展示边界，绝不能把一个 Provider 的判定条件套到另一个 Provider。`Review changes` 提交显式的 Provider-neutral Comment、Approve 或 Request changes；不受支持的选项保持可见但禁用。Conversation Tab 底部另有 GitHub 风格纯文本评论框（`Write` + 绿色 `Comment`），提交同一 Comment 动作。Provider 成功后刷新远端状态，绝不自动开始合并。`Merge pull request` 只由最新的归一化 `PullRequestActionState` 启用，并且只展示 adapter 返回的策略。GitHub 支持仓库启用的 merge、squash、rebase；Gitee 企业 v8 映射评审状态，Approve 未填写 summary 时省略可选的 `comment` 字段，并按 `restrict_merge_type` 支持 merge、squash、rebase、fast-forward；Gitee 公有 v5 支持评论和 merge/squash，但没有 approve/request-changes endpoint。GitLab 就绪状态只读，远端写操作继续作为显式不支持的能力。
 
 审核文件树使用 GitHub 的平台 UI 字体栈（macOS 使用 SF 系统 UI 字体，Windows 使用 Segoe UI），代码区使用平台等宽字体栈。变更文件树和 Diff 行都使用虚拟化 `ListView` delegate，只实例化当前可见行。分隔线实时调整面板宽度；移动手柄以当前宽度叠加剩余的局部指针位移，使分隔线贴合指针，同时避免重建完整文件树或 Diff。会话宽度限制为 220–520 px 且不超过审核区宽度的 45%，确保 Diff 仍是主要区域。
+
+审核页头使用紧凑的 32 px Primer 风格返回 IconButton 和官方 `arrow-left` Octicon。移除宽文字控件及分隔线后，换行标题获得更多空间；紧凑布局的操作区紧跟该图标开始。
+
+Conversation adapter 归一化 GitHub、GitLab、Gitee 公有 v5 与 Gitee 企业 v8 的可选作者和 commit 作者头像 URL。控制器通过共享 HTTP pipeline 并发获取去重头像，整体超时 3 秒、单图上限 2 MiB，并限制解码尺寸；只有可跨线程发送的 RGBA 字节进入 event loop，再创建 Slint Image。头像缺失或加载失败时回退为作者首字母。时间线卡片和评论框共用 52 px 头像/内容网格。GitHub 风格活动使用一条贯穿头像中心的 Primer 时间线轨道（首尾按 clipSidebar 裁剪）。评论/描述卡片为 1px 边框盒子并随短正文收紧高度；commit 图标与紧凑作者头像落在同一轨道；所有活动行与卡片右边缘对齐。Rust 提供准确的行高总和。Conversation Tab 把时间线与评论框放在同一文档滚动里，Write 区域跟在最后一条事件之后，而不是钉在视口底部。
+
+Conversation 提交批次使用 Primer 官方 `repo-push` Octicon；相对时间紧跟 `added N commits`，共享的绝对时间 Tooltip 保留 Provider 的准确时间。GitHub Review 会展开为不可拆分的活动摘要与可选正文卡片；review state 决定话术，相对时间采用 GitHub 自动单位，merged 活动抑制冗余 closed 事件。连接线按事件语义边界分段，但连续 Review 对之间必须从前一张卡片到下一条 summary 标记保持连续轨道。Gitee 企业版普通评论使用 MR `/notes`，并固定发送 `noteable_type: PullRequest`；`/reviews` 只用于 Review 决策。commit 计数探测若没有 total 且响应恰好填满请求页，即使是裸数组也视为不确定，随后统计并丢弃文档约定的完整非分页集合，不挂载懒加载 Commits model。
+
+Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度，从而避免最右侧露出未绘制区域。
 
 ### Pull Request 子系统边界
 

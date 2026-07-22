@@ -33,7 +33,7 @@ Linux 在具备合适 Slint 后端的环境中可能可以构建，但目前不�
 - Slint/winit 所需的平台构建依赖。
 - 可选：macOS 打包需要 `cargo-bundle` 和 `create-dmg`。
 
-生产构建只启用 FemtoVG，以固定渲染器选择并避免在常规应用中链接 Skia。Skia 仍保留为显式启用的诊断构建。
+生产构建只启用 FemtoVG，以固定渲染器选择并避免在常规应用中链接 Skia 或 Slint 实时预览支持。Skia 和实时预览均保留为显式开发选项。
 
 ## 快速开始
 
@@ -50,6 +50,14 @@ cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
 ```
+
+应用内 Slint 实时预览仅用于开发，常规构建和 Release 构建默认不包含它。需要时显式启用：
+
+```sh
+SLINT_LIVE_PREVIEW=1 cargo run --features live-preview
+```
+
+在 macOS 上，该显式开发路径使用 `vendor/i-slint-live-preview` 中有文档记录的 Slint 文件监听补丁；默认构建和 Release 构建不会选择它。
 
 完整的 `cargo test --locked` 当前会暴露 `src/logger/debug_logger.rs` 中已有的 doctest 问题；库单元测试本身可以通过。
 

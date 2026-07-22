@@ -87,20 +87,260 @@ pub(crate) struct PullRequestDiffDetail {
     pub(crate) added_lines: u32,
     pub(crate) removed_lines: u32,
     pub(crate) commit_count: u32,
+    /// Provider summary for the Conversation tab badge. `None` on commit-range
+    /// compares so applying a range cannot wipe the PR-level badge.
+    pub(crate) conversation_count: Option<u32>,
     pub(crate) base_sha: String,
     pub(crate) head_sha: String,
     pub(crate) start_sha: String,
     pub(crate) too_many_commits: bool,
 }
 
+/// Read the Conversation-tab badge summary from a provider PR/MR detail payload.
+/// Returns `None` when the provider omitted every known count field so callers can
+/// fall back to a lightweight probe without treating "missing" as zero.
+pub(crate) fn conversation_count_from_detail(detail: &serde_json::Value) -> Option<u32> {
+    let root = detail;
+    let detail = unwrap_detail_object(root);
+    let direct = [
+        "comments",
+        "comments_count",
+        "commentsCount",
+        "user_notes_count",
+        "userNotesCount",
+        "notes_count",
+        "notesCount",
+        "comment_count",
+        "commentCount",
+    ]
+    .into_iter()
+    .find_map(|key| detail.get(key).and_then(json_u32));
+
+    direct.or_else(|| {
+        // Gitee Enterprise notes responses carry the exact total beside the
+        // paged list rather than on each MR detail object.
+        root.get("note_statistics")
+            .or_else(|| {
+                root.get("data")
+                    .and_then(|data| data.get("note_statistics"))
+            })
+            .and_then(|statistics| {
+                ["all_note_count", "allNoteCount", "note_count", "noteCount"]
+                    .into_iter()
+                    .find_map(|key| statistics.get(key).and_then(json_u32))
+            })
+    })
+}
+
+/// Read the Commits-tab badge summary from a provider PR/MR detail payload.
+/// Returns `None` when the provider omitted every known count field.
+pub(crate) fn commit_count_from_detail(detail: &serde_json::Value) -> Option<u32> {
+    let detail = unwrap_detail_object(detail);
+    [
+        "commits",
+        "commits_count",
+        "commitsCount",
+        "commit_count",
+        "commitCount",
+    ]
+    .into_iter()
+    .find_map(|key| detail.get(key).and_then(json_u32))
+}
+
+fn unwrap_detail_object(detail: &serde_json::Value) -> &serde_json::Value {
+    detail
+        .get("data")
+        .filter(|value| value.is_object())
+        .unwrap_or(detail)
+}
+
+fn json_u32(value: &serde_json::Value) -> Option<u32> {
+    value
+        .as_u64()
+        .and_then(|value| u32::try_from(value).ok())
+        .or_else(|| value.as_i64().and_then(|value| u32::try_from(value).ok()))
+        .or_else(|| {
+            value
+                .as_str()
+                .and_then(|text| text.trim().parse::<u32>().ok())
+        })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PullRequestConversationItem {
     pub(crate) id: String,
+    /// Portable timeline kinds: `description`, `comment`, `review`, `event`,
+    /// `commits` (batch header), `commit` (row under a batch), `merged`.
     pub(crate) kind: String,
     pub(crate) author: String,
+    pub(crate) avatar_url: String,
+    /// Provider author association (for example GitHub `AUTHOR`).
+    pub(crate) author_association: String,
     pub(crate) body: String,
     pub(crate) created_at: String,
+    /// Extra display payload: review state, short SHA, target branch, or commit count.
     pub(crate) state: String,
+}
+
+pub(crate) fn short_sha(sha: &str) -> String {
+    sha.chars().take(7).collect()
+}
+
+/// Build a GitHub-style "added N commits" batch plus one row per commit.
+pub(crate) fn conversation_commit_batch_items(
+    commits: &[PullRequestCommit],
+) -> Vec<PullRequestConversationItem> {
+    if commits.is_empty() {
+        return Vec::new();
+    }
+    let count = commits.len();
+    let author = commits
+        .first()
+        .map(|commit| commit.author.clone())
+        .unwrap_or_else(|| "Unknown author".to_string());
+    let avatar_url = commits
+        .first()
+        .map(|commit| commit.avatar_url.clone())
+        .unwrap_or_default();
+    let created_at = commits
+        .iter()
+        .rev()
+        .map(|commit| commit.authored_at.as_str())
+        .find(|value| !value.trim().is_empty())
+        .unwrap_or("")
+        .to_string();
+    let mut items = Vec::with_capacity(count + 1);
+    items.push(PullRequestConversationItem {
+        id: format!(
+            "commits-{}",
+            commits
+                .first()
+                .map(|commit| commit.sha.as_str())
+                .unwrap_or("batch")
+        ),
+        kind: "commits".to_string(),
+        author,
+        avatar_url,
+        author_association: String::new(),
+        body: if count == 1 {
+            "added 1 commit".to_string()
+        } else {
+            format!("added {count} commits")
+        },
+        created_at,
+        state: count.to_string(),
+    });
+    for commit in commits {
+        items.push(PullRequestConversationItem {
+            id: commit.sha.clone(),
+            kind: "commit".to_string(),
+            author: commit.author.clone(),
+            avatar_url: commit.avatar_url.clone(),
+            author_association: String::new(),
+            body: commit.title.clone(),
+            created_at: commit.authored_at.clone(),
+            state: short_sha(commit.sha.as_str()),
+        });
+    }
+    items
+}
+
+pub(crate) fn conversation_merged_item(
+    author: &str,
+    merge_sha: &str,
+    target_branch: &str,
+    created_at: &str,
+) -> PullRequestConversationItem {
+    PullRequestConversationItem {
+        id: format!("merged-{}", short_sha(merge_sha)),
+        kind: "merged".to_string(),
+        author: if author.trim().is_empty() {
+            "Unknown author".to_string()
+        } else {
+            author.to_string()
+        },
+        avatar_url: String::new(),
+        author_association: String::new(),
+        body: short_sha(merge_sha),
+        created_at: created_at.to_string(),
+        state: target_branch.to_string(),
+    }
+}
+
+pub(crate) fn conversation_system_event_item(
+    id: impl Into<String>,
+    author: &str,
+    body: impl Into<String>,
+    created_at: &str,
+) -> PullRequestConversationItem {
+    PullRequestConversationItem {
+        id: id.into(),
+        kind: "event".to_string(),
+        author: if author.trim().is_empty() {
+            "Unknown author".to_string()
+        } else {
+            author.to_string()
+        },
+        avatar_url: String::new(),
+        author_association: String::new(),
+        body: body.into(),
+        created_at: created_at.to_string(),
+        state: String::new(),
+    }
+}
+
+/// Keep the description card first, then append activity sorted by `created_at`.
+pub(crate) fn finalize_conversation_timeline(
+    mut description: PullRequestConversationItem,
+    activity: Vec<PullRequestConversationItem>,
+) -> Vec<PullRequestConversationItem> {
+    description.kind = "description".to_string();
+
+    // Treat a GitHub-style `commits` header and its following `commit` rows as
+    // one atomic timeline block. Sorting every row independently separates the
+    // "added N commits" record from commits whose authored dates differ. This
+    // block normalization is shared by GitHub, GitLab, and both Gitee profiles.
+    let mut blocks = Vec::<(String, Vec<PullRequestConversationItem>)>::new();
+    let mut activity = activity.into_iter().peekable();
+    while let Some(item) = activity.next() {
+        let sort_at = item.created_at.clone();
+        let mut block = vec![item];
+        if block[0].kind == "commits" {
+            while activity.peek().is_some_and(|next| next.kind == "commit") {
+                if let Some(commit) = activity.next() {
+                    block.push(commit);
+                }
+            }
+        } else if block[0].kind == "review_summary"
+            && activity.peek().is_some_and(|next| next.kind == "review")
+        {
+            if let Some(review) = activity.next() {
+                block.push(review);
+            }
+        }
+        blocks.push((sort_at, block));
+    }
+    blocks.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut items = Vec::new();
+    items.push(description);
+    items.extend(blocks.into_iter().flat_map(|(_, block)| block.into_iter()));
+    items
+}
+
+/// True when a provider system note is already covered by structured commit rows.
+pub(crate) fn is_redundant_commit_system_note(body: &str) -> bool {
+    let normalized = body.trim().to_ascii_lowercase();
+    normalized.starts_with("added ") && normalized.contains("commit")
+}
+
+/// True when a provider system note is already covered by a structured merge row.
+pub(crate) fn is_redundant_merge_system_note(body: &str) -> bool {
+    let normalized = body.trim().to_ascii_lowercase();
+    normalized == "merged"
+        || normalized.starts_with("merged commit")
+        || normalized.starts_with("merged this")
+        || normalized.starts_with("accepted this")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +349,7 @@ pub(crate) struct PullRequestCommit {
     pub(crate) title: String,
     pub(crate) message: String,
     pub(crate) author: String,
+    pub(crate) avatar_url: String,
     pub(crate) authored_at: String,
     pub(crate) verified: bool,
 }
@@ -942,9 +1183,186 @@ pub(super) fn configured_gitee_token(profile: GiteeApiProfile) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::{
-        PullRequestState, RepoType, parse_repo_locator, parse_unified_diff, percent_encode_path,
-        supports_ignore_whitespace,
+        PullRequestCommit, PullRequestState, RepoType, commit_count_from_detail,
+        conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
+        finalize_conversation_timeline, is_redundant_commit_system_note,
+        is_redundant_merge_system_note, parse_repo_locator, parse_unified_diff,
+        percent_encode_path, supports_ignore_whitespace,
     };
+
+    #[test]
+    fn reads_badge_counts_for_github_gitlab_and_gitee_detail_shapes() {
+        // GitHub PR detail
+        assert_eq!(
+            commit_count_from_detail(&serde_json::json!({ "commits": 14, "comments": 3 })),
+            Some(14)
+        );
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({ "commits": 14, "comments": 3 })),
+            Some(3)
+        );
+        // GitLab MR detail
+        assert_eq!(
+            commit_count_from_detail(&serde_json::json!({ "commits_count": 2 })),
+            Some(2)
+        );
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({ "user_notes_count": 5 })),
+            Some(5)
+        );
+        // Gitee public / enterprise snake_case and camelCase / data-wrapped shapes
+        assert_eq!(
+            commit_count_from_detail(&serde_json::json!({ "commits_count": 6 })),
+            Some(6)
+        );
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({ "comments_count": 1 })),
+            Some(1)
+        );
+        assert_eq!(
+            commit_count_from_detail(&serde_json::json!({ "data": { "commitsCount": 9 } })),
+            Some(9)
+        );
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({ "data": { "notesCount": 4 } })),
+            Some(4)
+        );
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({
+                "data": [{ "id": 1 }],
+                "note_statistics": { "note_count": 1, "all_note_count": 7 }
+            })),
+            Some(7)
+        );
+        // Public Gitee often omits totals entirely — callers must probe, not assume 0.
+        assert_eq!(commit_count_from_detail(&serde_json::json!({})), None);
+        assert_eq!(conversation_count_from_detail(&serde_json::json!({})), None);
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({ "comments": 0 })),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn reads_conversation_badge_counts_from_provider_detail_fields() {
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({ "comments": 2 })),
+            Some(2)
+        );
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({ "user_notes_count": "4" })),
+            Some(4)
+        );
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({ "notes_count": 1 })),
+            Some(1)
+        );
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({
+                "data": { "commentsCount": 3 }
+            })),
+            Some(3)
+        );
+        assert_eq!(
+            conversation_count_from_detail(&serde_json::json!({
+                "data": { "note_statistics": { "allNoteCount": "8" } }
+            })),
+            Some(8)
+        );
+        assert_eq!(conversation_count_from_detail(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn reads_commit_badge_counts_from_provider_detail_fields() {
+        assert_eq!(
+            commit_count_from_detail(&serde_json::json!({ "commits": 14 })),
+            Some(14)
+        );
+        assert_eq!(
+            commit_count_from_detail(&serde_json::json!({ "commitsCount": "6" })),
+            Some(6)
+        );
+        assert_eq!(
+            commit_count_from_detail(&serde_json::json!({
+                "data": { "commits_count": 2 }
+            })),
+            Some(2)
+        );
+        assert_eq!(commit_count_from_detail(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn builds_github_style_commit_and_merge_conversation_rows() {
+        let commits = vec![
+            PullRequestCommit {
+                sha: "abcdef0123456789".into(),
+                title: "first".into(),
+                message: "first".into(),
+                author: "alice".into(),
+                avatar_url: "https://example.test/alice.png".into(),
+                authored_at: "2026-01-01T00:00:00Z".into(),
+                verified: false,
+            },
+            PullRequestCommit {
+                sha: "1234567890abcdef".into(),
+                title: "second".into(),
+                message: "second".into(),
+                author: "bob".into(),
+                avatar_url: "https://example.test/bob.png".into(),
+                authored_at: "2026-01-02T00:00:00Z".into(),
+                verified: false,
+            },
+        ];
+        let batch = conversation_commit_batch_items(&commits);
+        assert_eq!(batch.len(), 3);
+        assert_eq!(batch[0].kind, "commits");
+        assert_eq!(batch[0].body, "added 2 commits");
+        assert_eq!(batch[1].kind, "commit");
+        assert_eq!(batch[1].state, "abcdef0");
+        assert_eq!(batch[1].avatar_url, "https://example.test/alice.png");
+        assert_eq!(batch[2].state, "1234567");
+        assert_eq!(batch[0].created_at, "2026-01-02T00:00:00Z");
+        assert_eq!(batch[1].created_at, "2026-01-01T00:00:00Z");
+        assert_eq!(batch[2].created_at, batch[0].created_at);
+
+        let merged =
+            conversation_merged_item("carol", "54037a9deadbeef", "main", "2026-01-03T00:00:00Z");
+        assert_eq!(merged.kind, "merged");
+        assert_eq!(merged.body, "54037a9");
+        assert_eq!(merged.state, "main");
+
+        assert!(is_redundant_commit_system_note(
+            "added 2 commits\n<ul><li>x</li></ul>"
+        ));
+        assert!(is_redundant_merge_system_note("merged"));
+        assert!(!is_redundant_merge_system_note("changed the description"));
+
+        let timeline = finalize_conversation_timeline(
+            super::PullRequestConversationItem {
+                id: "description-1".into(),
+                kind: "description".into(),
+                author: "alice".into(),
+                avatar_url: String::new(),
+                author_association: String::new(),
+                body: "hello".into(),
+                created_at: "2025-12-31T00:00:00Z".into(),
+                state: "open".into(),
+            },
+            {
+                let mut activity = batch;
+                activity.push(merged);
+                activity
+            },
+        );
+        assert_eq!(timeline[0].kind, "description");
+        assert_eq!(
+            timeline
+                .iter()
+                .map(|item| item.kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["description", "commits", "commit", "commit", "merged"]
+        );
+    }
 
     #[test]
     fn parses_https_and_ssh_remotes() {

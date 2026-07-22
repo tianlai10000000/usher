@@ -16,6 +16,8 @@ pub(crate) const REPOSITORY_COMPARE_URL: &str =
     "{api_base_url}/repos/{namespace}/{repository}/compare/{base}...{head}";
 pub(crate) const PULL_REQUEST_ISSUE_COMMENTS_URL: &str =
     "{api_base_url}/repos/{namespace}/{repository}/issues/{pull_request_number}/comments";
+pub(crate) const PULL_REQUEST_ISSUE_TIMELINE_URL: &str =
+    "{api_base_url}/repos/{namespace}/{repository}/issues/{pull_request_number}/timeline";
 pub(crate) const PULL_REQUEST_MERGE_URL: &str =
     "{api_base_url}/repos/{namespace}/{repository}/pulls/{pull_request_number}/merge";
 pub(crate) const REPOSITORY_CONTENT_URL: &str =

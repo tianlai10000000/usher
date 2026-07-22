@@ -14,8 +14,11 @@ use super::{
     GiteeApiProfile, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
     PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine, PullRequestItem,
     PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
-    PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, configured_api_base_url,
-    configured_enterprise, configured_gitee_token, gitee_api_profile, percent_encode_path,
+    PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
+    configured_api_base_url, configured_enterprise, configured_gitee_token,
+    conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
+    finalize_conversation_timeline, gitee_api_profile, is_redundant_commit_system_note,
+    is_redundant_merge_system_note, percent_encode_path,
 };
 
 /// Fetch the stable provider project id for a remote repository.
@@ -195,7 +198,7 @@ pub(super) async fn get_pull_request_diff(
         return get_public_pull_request_diff(locator, pull_request_iid).await;
     }
 
-    let endpoint = endpoints::ENTERPRISE_MERGE_REQUEST_DIFFS_URL
+    let diffs_endpoint = endpoints::ENTERPRISE_MERGE_REQUEST_DIFFS_URL
         .replace("{api_base_url}", enterprise_api_base_url()?.as_str())
         .replace(
             "{project_id}",
@@ -205,7 +208,12 @@ pub(super) async fn get_pull_request_diff(
             "{merge_request_iid}",
             percent_encode_path(pull_request_iid.trim()).as_str(),
         );
-    let mut request = http::post(endpoint)
+    let detail_endpoint = enterprise_pull_request_endpoint(
+        endpoints::ENTERPRISE_MERGE_REQUEST_URL,
+        repo_project_id,
+        pull_request_iid,
+    )?;
+    let mut diffs_request = http::post(diffs_endpoint)
         .header("OAUTH", "enabled")
         .header(ACCEPT, "application/json")
         .json(&serde_json::json!({
@@ -214,10 +222,10 @@ pub(super) async fn get_pull_request_diff(
             "ignore_whitespace_change": ignore_whitespace_change,
         }));
     if let Some(enterprise) = configured_enterprise(RepoType::Gitee) {
-        request = request.header("enterprise", enterprise);
+        diffs_request = diffs_request.header("enterprise", enterprise);
     }
     if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
-        request = request.header("PRIVATE-TOKEN", token);
+        diffs_request = diffs_request.header("PRIVATE-TOKEN", token);
     }
 
     log::debug!(
@@ -228,11 +236,53 @@ pub(super) async fn get_pull_request_diff(
         configured_enterprise(RepoType::Gitee).is_some(),
         configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_some(),
     );
-    let payload: Value =
-        http::send_json(request, RequestOptions::new("Load Gitee pull request diff"))
+    let diffs_future = async {
+        http::send_json(
+            diffs_request,
+            RequestOptions::new("Load Gitee pull request diff"),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    };
+    // MR detail supplies Conversation/Commits badge summaries without waiting for
+    // the lazy Conversation tab payload.
+    let detail_future = async {
+        http::send_json(
+            enterprise_authenticated_builder(http::get(detail_endpoint)),
+            RequestOptions::new("Load Gitee enterprise pull request detail summary"),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    };
+    let (payload, detail) = tokio::join!(diffs_future, detail_future);
+    let payload = payload?;
+    if let Err(error) = &detail {
+        log::debug!(
+            "[CodeReview][Gitee] Enterprise badge detail summary unavailable; using bounded probes: {error}"
+        );
+    }
+    let mut decoded = decode_pull_request_diff(&payload)?;
+    // Enterprise Conversation badge: MR detail `user_notes_count` / `notes_count`.
+    // Fallback is a bounded notes page probe, not the full Conversation timeline.
+    decoded.conversation_count = Some(
+        detail
+            .as_ref()
+            .ok()
+            .and_then(conversation_count_from_detail)
+            .or(count_pull_request_comments(locator, pull_request_iid, Some(repo_project_id)).await)
+            .unwrap_or(0),
+    );
+    // Some Enterprise deployments advertise zero in MR detail/diffs until the
+    // commits collection is requested. Only a positive summary is authoritative;
+    // zero or a missing field needs the lightweight commits probe.
+    let advertised_commit_count = trusted_enterprise_commit_count(detail.as_ref().ok(), &payload);
+    decoded.commit_count = match advertised_commit_count {
+        Some(count) if count > 0 => count,
+        _ => count_pull_request_commits(locator, pull_request_iid, Some(repo_project_id))
             .await
-            .map_err(|error| error.to_string())?;
-    decode_pull_request_diff(&payload)
+            .unwrap_or(0),
+    };
+    Ok(decoded)
 }
 
 async fn get_public_pull_request_diff(
@@ -309,9 +359,15 @@ async fn get_public_pull_request_diff(
     Ok(PullRequestDiffDetail {
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
-        commit_count: value_u32(&detail, "commits")
-            .or_else(|| value_u32(&detail, "commits_count"))
+        // Public v5 PR detail often omits commit totals; probe a bounded page.
+        commit_count: commit_count_from_detail(&detail)
+            .or(count_pull_request_commits(locator, pull_request_iid, None).await)
             .unwrap_or(0),
+        conversation_count: Some(
+            conversation_count_from_detail(&detail)
+                .or(count_pull_request_comments(locator, pull_request_iid, None).await)
+                .unwrap_or(0),
+        ),
         base_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
         head_sha: nested_string(&detail, "head", "sha").unwrap_or_default(),
         start_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
@@ -390,6 +446,7 @@ pub(super) async fn get_commit_range_diff(
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
         commit_count,
+        conversation_count: None,
         base_sha: base_sha.to_string(),
         head_sha: head_sha.to_string(),
         start_sha: base_sha.to_string(),
@@ -811,7 +868,7 @@ pub(super) async fn get_pull_request_conversation(
     repo_project_id: &str,
     pull_request_iid: &str,
 ) -> Result<Vec<PullRequestConversationItem>, String> {
-    let (detail, notes) = match gitee_api_profile(locator) {
+    let (detail, notes, reviews) = match gitee_api_profile(locator) {
         GiteeApiProfile::EnterpriseV8 => {
             let detail_endpoint = enterprise_pull_request_endpoint(
                 endpoints::ENTERPRISE_MERGE_REQUEST_URL,
@@ -823,20 +880,42 @@ pub(super) async fn get_pull_request_conversation(
                 repo_project_id,
                 pull_request_iid,
             )?;
-            let detail = http::send_json(
-                enterprise_authenticated_builder(http::get(detail_endpoint)),
-                RequestOptions::new("Load Gitee enterprise merge request conversation header"),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-            let notes = http::send_json(
-                enterprise_authenticated_builder(http::get(notes_endpoint))
-                    .query(&[("per_page", "100")]),
-                RequestOptions::new("Load Gitee enterprise merge request notes"),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-            (detail, notes)
+            let reviews_endpoint = enterprise_pull_request_endpoint(
+                endpoints::ENTERPRISE_MERGE_REQUEST_REVIEWS_URL,
+                repo_project_id,
+                pull_request_iid,
+            )?;
+            let detail_future = async {
+                http::send_json(
+                    enterprise_authenticated_builder(http::get(detail_endpoint)),
+                    RequestOptions::new("Load Gitee enterprise merge request conversation header"),
+                )
+                .await
+                .map_err(|error| error.to_string())
+            };
+            let notes_future = async {
+                http::send_json(
+                    enterprise_authenticated_builder(http::get(notes_endpoint))
+                        .query(&[("per_page", "100")]),
+                    RequestOptions::new("Load Gitee enterprise merge request notes"),
+                )
+                .await
+                .map_err(|error| error.to_string())
+            };
+            // Reviews are best-effort: notes still render if this endpoint is
+            // unavailable or returns an unexpected wrapper.
+            let reviews_future = async {
+                http::send_json(
+                    enterprise_authenticated_builder(http::get(reviews_endpoint))
+                        .query(&[("per_page", "100")]),
+                    RequestOptions::new("Load Gitee enterprise merge request reviews"),
+                )
+                .await
+                .ok()
+            };
+            let (detail, notes, reviews) =
+                tokio::join!(detail_future, notes_future, reviews_future);
+            (detail?, notes?, reviews)
         }
         GiteeApiProfile::PublicV5 => {
             let detail_endpoint = public_repo_endpoint(
@@ -864,7 +943,7 @@ pub(super) async fn get_pull_request_conversation(
             )
             .await
             .map_err(|error| error.to_string())?;
-            (detail, notes)
+            (detail, notes, None)
         }
     };
 
@@ -876,6 +955,12 @@ pub(super) async fn get_pull_request_conversation(
             .or_else(|| nested_string(&detail, "user", "login"))
             .or_else(|| nested_string(&detail, "user", "name"))
             .unwrap_or_else(|| "Unknown author".to_string()),
+        avatar_url: nested_string(&detail, "author", "avatar_url")
+            .or_else(|| nested_string(&detail, "author", "avatar"))
+            .or_else(|| nested_string(&detail, "user", "avatar_url"))
+            .or_else(|| nested_string(&detail, "user", "avatar"))
+            .unwrap_or_default(),
+        author_association: String::new(),
         body: string_field(&detail, "description")
             .or_else(|| string_field(&detail, "body"))
             .unwrap_or_default(),
@@ -883,35 +968,215 @@ pub(super) async fn get_pull_request_conversation(
         state: string_field(&detail, "state").unwrap_or_default(),
     }];
     if let Some(values) = pull_request_values(&notes) {
-        items.extend(values.iter().map(|value| {
-            PullRequestConversationItem {
-                id: string_field(value, "id").unwrap_or_default(),
-                kind: if value
-                    .get("system")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
-                    "event".to_string()
-                } else {
-                    "comment".to_string()
-                },
-                author: nested_string(value, "author", "name")
-                    .or_else(|| nested_string(value, "author", "username"))
-                    .or_else(|| nested_string(value, "user", "name"))
-                    .or_else(|| nested_string(value, "user", "login"))
-                    .unwrap_or_else(|| "Unknown author".to_string()),
-                body: string_field(value, "body")
-                    .or_else(|| string_field(value, "note"))
-                    .unwrap_or_default(),
-                created_at: string_field(value, "created_at").unwrap_or_default(),
-                state: string_field(value, "state").unwrap_or_default(),
+        match gitee_api_profile(locator) {
+            // Enterprise GET /notes returns discussion threads in `data`, with
+            // comment text nested at `notes[].note` (+ optional `children`).
+            // Top-level `content` is diff context and must not be treated as body.
+            GiteeApiProfile::EnterpriseV8 => {
+                items.extend(
+                    expand_enterprise_conversation_notes(values)
+                        .into_iter()
+                        .filter(|item| {
+                            !(item.kind == "event"
+                                && (is_redundant_commit_system_note(item.body.as_str())
+                                    || is_redundant_merge_system_note(item.body.as_str())))
+                        }),
+                );
             }
-        }));
+            // Public v5 keeps a flat comment list with `body`.
+            GiteeApiProfile::PublicV5 => {
+                items.extend(
+                    values
+                        .iter()
+                        .map(decode_conversation_comment)
+                        .filter(|item| {
+                            !(item.kind == "event"
+                                && (is_redundant_commit_system_note(item.body.as_str())
+                                    || is_redundant_merge_system_note(item.body.as_str())))
+                        }),
+                );
+            }
+        }
     }
+
+    if let Some(reviews_payload) = reviews.as_ref() {
+        if let Some(values) = pull_request_values(reviews_payload) {
+            let note_bodies = items
+                .iter()
+                .filter(|item| item.kind == "comment" || item.kind == "review")
+                .map(|item| (item.author.clone(), item.body.trim().to_string()))
+                .filter(|(_, body)| !body.is_empty())
+                .collect::<std::collections::HashSet<_>>();
+            items.extend(values.iter().filter_map(|value| {
+                let review = decode_conversation_review(value)?;
+                // Prefer the richer note card when the same text already exists.
+                if !review.body.trim().is_empty()
+                    && note_bodies
+                        .contains(&(review.author.clone(), review.body.trim().to_string()))
+                {
+                    return None;
+                }
+                Some(review)
+            }));
+        }
+    }
+
+    // Structured commit/merge rows mirror GitHub Conversation activity for both
+    // Gitee profiles. Failures stay silent so notes still render.
+    if let Ok(commits) = get_pull_request_commits(locator, repo_project_id, pull_request_iid).await
+    {
+        items.extend(conversation_commit_batch_items(&commits));
+    }
+    if let Some(merged_at) =
+        string_field(&detail, "merged_at").filter(|value| !value.trim().is_empty())
+    {
+        let merge_sha = string_field(&detail, "merge_commit_sha")
+            .or_else(|| nested_string(&detail, "merge_commit", "sha"))
+            .unwrap_or_default();
+        let target_branch = string_field(&detail, "target_branch")
+            .or_else(|| nested_string(&detail, "base", "ref"))
+            .unwrap_or_default();
+        let author = nested_string(&detail, "merged_by", "name")
+            .or_else(|| nested_string(&detail, "merged_by", "username"))
+            .or_else(|| nested_string(&detail, "merged_by", "login"))
+            .or_else(|| nested_string(&detail, "user", "login"))
+            .or_else(|| nested_string(&detail, "author", "name"))
+            .unwrap_or_else(|| "Unknown author".to_string());
+        if !merge_sha.trim().is_empty() {
+            items.push(conversation_merged_item(
+                author.as_str(),
+                merge_sha.as_str(),
+                if target_branch.trim().is_empty() {
+                    "main"
+                } else {
+                    target_branch.as_str()
+                },
+                merged_at.as_str(),
+            ));
+        }
+    }
+
     let description = items.remove(0);
-    items.sort_by(|left, right| left.created_at.cmp(&right.created_at));
-    items.insert(0, description);
-    Ok(items)
+    let activity = items;
+    Ok(finalize_conversation_timeline(description, activity))
+}
+
+fn expand_enterprise_conversation_notes(values: &[Value]) -> Vec<PullRequestConversationItem> {
+    let mut items = Vec::new();
+    for value in values {
+        let mut nodes = Vec::new();
+        collect_enterprise_note_nodes(value, &mut nodes);
+        items.extend(nodes.into_iter().map(decode_conversation_comment));
+    }
+    items
+}
+
+fn collect_enterprise_note_nodes<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
+    if let Some(notes) = value.get("notes").and_then(Value::as_array) {
+        if !notes.is_empty() {
+            for note in notes {
+                out.push(note);
+                // Enterprise comments are two levels: root + children replies.
+                if let Some(children) = note.get("children").and_then(Value::as_array) {
+                    out.extend(children.iter());
+                }
+            }
+            return;
+        }
+    }
+    // Theme / ordinary comments may appear as a flat `note` on the data item.
+    // Skip thread shells that only carry diff-context `content` and no body.
+    if conversation_note_body(value).is_empty() {
+        return;
+    }
+    out.push(value);
+}
+
+fn decode_conversation_comment(value: &Value) -> PullRequestConversationItem {
+    PullRequestConversationItem {
+        id: string_field(value, "id").unwrap_or_default(),
+        kind: if value
+            .get("system")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            "event".to_string()
+        } else {
+            "comment".to_string()
+        },
+        author: nested_string(value, "author", "name")
+            .or_else(|| nested_string(value, "author", "username"))
+            .or_else(|| nested_string(value, "user", "name"))
+            .or_else(|| nested_string(value, "user", "login"))
+            .unwrap_or_else(|| "Unknown author".to_string()),
+        avatar_url: nested_string(value, "author", "avatar_url")
+            .or_else(|| nested_string(value, "author", "avatar"))
+            .or_else(|| nested_string(value, "user", "avatar_url"))
+            .or_else(|| nested_string(value, "user", "avatar"))
+            .unwrap_or_default(),
+        author_association: String::new(),
+        // Nested enterprise discussion threads use `note`. Official enterprise
+        // notes use markdown string `content` (objects are diff context only).
+        // Public v5 uses `body`; review payloads may use `comment`.
+        body: conversation_note_body(value),
+        created_at: string_field(value, "created_at")
+            .or_else(|| string_field(value, "createdAt"))
+            .unwrap_or_default(),
+        state: string_field(value, "state").unwrap_or_default(),
+    }
+}
+
+fn decode_conversation_review(value: &Value) -> Option<PullRequestConversationItem> {
+    let state = string_field(value, "state")
+        .or_else(|| string_field(value, "result"))
+        .unwrap_or_default();
+    let body = conversation_note_body(value);
+    if body.trim().is_empty() && state.trim().is_empty() {
+        return None;
+    }
+    Some(PullRequestConversationItem {
+        id: string_field(value, "id")
+            .map(|id| format!("review-{id}"))
+            .unwrap_or_else(|| format!("review-{}", body.len())),
+        kind: "review".to_string(),
+        author: nested_string(value, "author", "name")
+            .or_else(|| nested_string(value, "author", "username"))
+            .or_else(|| nested_string(value, "user", "name"))
+            .or_else(|| nested_string(value, "user", "login"))
+            .or_else(|| nested_string(value, "reviewer", "name"))
+            .or_else(|| nested_string(value, "reviewer", "username"))
+            .unwrap_or_else(|| "Unknown reviewer".to_string()),
+        avatar_url: nested_string(value, "author", "avatar_url")
+            .or_else(|| nested_string(value, "author", "avatar"))
+            .or_else(|| nested_string(value, "user", "avatar_url"))
+            .or_else(|| nested_string(value, "user", "avatar"))
+            .or_else(|| nested_string(value, "reviewer", "avatar_url"))
+            .or_else(|| nested_string(value, "reviewer", "avatar"))
+            .unwrap_or_default(),
+        author_association: String::new(),
+        body,
+        created_at: string_field(value, "created_at")
+            .or_else(|| string_field(value, "createdAt"))
+            .or_else(|| string_field(value, "updated_at"))
+            .or_else(|| string_field(value, "updatedAt"))
+            .unwrap_or_default(),
+        state,
+    })
+}
+
+fn conversation_note_body(value: &Value) -> String {
+    // Gitee-only body resolution (GitHub/GitLab keep their own adapters).
+    // Internal enterprise notes docs: top-level / notes[].note is the markdown
+    // body; top-level content is diff context and must stay ignored as an object.
+    // Review submit responses nest the same text at note.note. Public v5 uses body.
+    string_field(value, "note")
+        .filter(|text| !text.trim().is_empty())
+        .or_else(|| nested_string(value, "note", "note").filter(|text| !text.trim().is_empty()))
+        .or_else(|| string_field(value, "body").filter(|text| !text.trim().is_empty()))
+        .or_else(|| string_field(value, "comment").filter(|text| !text.trim().is_empty()))
+        .or_else(|| string_field(value, "content").filter(|text| !text.trim().is_empty()))
+        .map(|text| text.trim().to_string())
+        .unwrap_or_default()
 }
 
 pub(super) async fn get_pull_request_commits(
@@ -951,6 +1216,128 @@ pub(super) async fn get_pull_request_commits(
     Ok(values.iter().map(decode_commit).collect())
 }
 
+/// Bounded commit probe for the Commits tab badge. Never loads/caches the full list.
+///
+/// Enterprise v8 defaults `with_page=false` and returns every commit as a bare
+/// array; badge probes must force `with_page=true` and read `meta.total_count`.
+async fn count_pull_request_commits(
+    locator: &RepoLocator,
+    pull_request_iid: &str,
+    repo_project_id: Option<&str>,
+) -> Option<u32> {
+    const PUBLIC_PROBE_PER_PAGE: u32 = 100;
+    let endpoint = match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => enterprise_pull_request_endpoint(
+            endpoints::ENTERPRISE_MERGE_REQUEST_COMMITS_URL,
+            repo_project_id?,
+            pull_request_iid,
+        )
+        .ok()?,
+        GiteeApiProfile::PublicV5 => public_repo_endpoint(
+            endpoints::PUBLIC_PULL_REQUEST_COMMITS_URL,
+            locator,
+            Some(pull_request_iid),
+            None,
+        ),
+    };
+    let (request, per_page) = match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => (
+            enterprise_authenticated_builder(http::get(endpoint)).query(&[
+                ("with_page", "true"),
+                ("page", "1"),
+                ("per_page", "1"),
+            ]),
+            1_u32,
+        ),
+        GiteeApiProfile::PublicV5 => (
+            public_authenticated_request(endpoint).query(&[("page", "1"), ("per_page", "100")]),
+            PUBLIC_PROBE_PER_PAGE,
+        ),
+    };
+    let response = http::send(
+        request,
+        RequestOptions::new("Count Gitee pull request commits"),
+    )
+    .await
+    .ok()?;
+    let headers = response.headers().clone();
+    let payload: Value = response.json().await.ok()?;
+    match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => {
+            if let Some(total) = enterprise_commit_probe_total(&headers, &payload, per_page) {
+                return Some(total);
+            }
+
+            // A few Enterprise v8 deployments accept `with_page=true` but omit
+            // every pagination total. The documented non-paginated response is
+            // a complete commit collection, so use it only as a compatibility
+            // fallback for the badge. The Commits tab model remains lazy.
+            let endpoint = enterprise_pull_request_endpoint(
+                endpoints::ENTERPRISE_MERGE_REQUEST_COMMITS_URL,
+                repo_project_id?,
+                pull_request_iid,
+            )
+            .ok()?;
+            let payload: Value = http::send_json(
+                enterprise_authenticated_builder(http::get(endpoint))
+                    .query(&[("with_page", "false")]),
+                RequestOptions::new("Count Gitee enterprise pull request commits fallback"),
+            )
+            .await
+            .ok()?;
+            complete_collection_total(&payload)
+        }
+        GiteeApiProfile::PublicV5 => bounded_list_total(&headers, &payload, per_page),
+    }
+}
+
+/// Bounded comments/notes probe for the Conversation tab badge.
+async fn count_pull_request_comments(
+    locator: &RepoLocator,
+    pull_request_iid: &str,
+    repo_project_id: Option<&str>,
+) -> Option<u32> {
+    const PUBLIC_PROBE_PER_PAGE: u32 = 100;
+    let endpoint = match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => enterprise_pull_request_endpoint(
+            endpoints::ENTERPRISE_MERGE_REQUEST_NOTES_URL,
+            repo_project_id?,
+            pull_request_iid,
+        )
+        .ok()?,
+        GiteeApiProfile::PublicV5 => public_repo_endpoint(
+            endpoints::PUBLIC_PULL_REQUEST_COMMENTS_URL,
+            locator,
+            Some(pull_request_iid),
+            None,
+        ),
+    };
+    let (request, per_page) = match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => (
+            enterprise_authenticated_builder(http::get(endpoint)).query(&[
+                ("with_page", "true"),
+                ("page", "1"),
+                ("per_page", "1"),
+            ]),
+            1_u32,
+        ),
+        GiteeApiProfile::PublicV5 => (
+            public_authenticated_request(endpoint).query(&[("page", "1"), ("per_page", "100")]),
+            PUBLIC_PROBE_PER_PAGE,
+        ),
+    };
+    let response = http::send(
+        request,
+        RequestOptions::new("Count Gitee pull request comments"),
+    )
+    .await
+    .ok()?;
+    let headers = response.headers().clone();
+    let payload: Value = response.json().await.ok()?;
+    conversation_count_from_detail(&payload)
+        .or_else(|| bounded_list_total(&headers, &payload, per_page))
+}
+
 fn decode_commit(value: &Value) -> PullRequestCommit {
     let message = string_field(value, "message")
         .or_else(|| {
@@ -975,8 +1362,19 @@ fn decode_commit(value: &Value) -> PullRequestCommit {
                     .and_then(|commit| nested_string(commit, "author", "name"))
             })
             .unwrap_or_else(|| "Unknown author".to_string()),
+        avatar_url: nested_string(value, "author", "avatar_url")
+            .or_else(|| nested_string(value, "author", "avatar"))
+            .or_else(|| nested_string(value, "committer", "avatar_url"))
+            .or_else(|| nested_string(value, "committer", "avatar"))
+            .unwrap_or_default(),
+        // Internal enterprise MR commits document `created_at`; repository
+        // commits still use authored_date/committed_date. Keep both profiles.
         authored_at: string_field(value, "authored_date")
+            .or_else(|| string_field(value, "authoredDate"))
             .or_else(|| string_field(value, "committed_date"))
+            .or_else(|| string_field(value, "committedDate"))
+            .or_else(|| string_field(value, "created_at"))
+            .or_else(|| string_field(value, "createdAt"))
             .or_else(|| {
                 value
                     .get("commit")
@@ -1007,26 +1405,36 @@ pub(super) async fn submit_pull_request_review(
                 );
             }
             let endpoint = enterprise_pull_request_endpoint(
-                endpoints::ENTERPRISE_MERGE_REQUEST_REVIEWS_URL,
+                if action == PullRequestReviewAction::Comment {
+                    endpoints::ENTERPRISE_MERGE_REQUEST_NOTES_URL
+                } else {
+                    endpoints::ENTERPRISE_MERGE_REQUEST_REVIEWS_URL
+                },
                 repo_project_id,
                 pull_request_iid,
             )?;
-            let state = match action {
-                PullRequestReviewAction::Comment => "commented",
-                PullRequestReviewAction::Approve => "approved",
-                PullRequestReviewAction::RequestChanges => "rejected",
-            };
             if action != PullRequestReviewAction::Approve && body.trim().is_empty() {
                 return Err("A review comment is required for this action.".into());
             }
-            let request = enterprise_authenticated_builder(http::post(endpoint))
-                .json(&serde_json::json!({ "comment": body.trim(), "state": state }));
-            http::send(
-                request,
-                RequestOptions::new("Submit Gitee enterprise review"),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
+            let payload = match action {
+                // A Conversation comment is an MR note. `/reviews` represents
+                // review decisions and returns 500 on some Enterprise servers
+                // when it receives a plain `commented` review.
+                PullRequestReviewAction::Comment => enterprise_note_payload(body),
+                PullRequestReviewAction::Approve => enterprise_review_payload("approved", body),
+                PullRequestReviewAction::RequestChanges => {
+                    enterprise_review_payload("rejected", body)
+                }
+            };
+            let request = enterprise_authenticated_builder(http::post(endpoint)).json(&payload);
+            let operation = if action == PullRequestReviewAction::Comment {
+                "Submit Gitee enterprise comment"
+            } else {
+                "Submit Gitee enterprise review"
+            };
+            http::send(request, RequestOptions::new(operation))
+                .await
+                .map_err(|error| error.to_string())?;
             Ok(())
         }
         GiteeApiProfile::PublicV5 => {
@@ -1062,6 +1470,30 @@ pub(super) async fn submit_pull_request_review(
             Ok(())
         }
     }
+}
+
+fn enterprise_review_payload(state: &str, body: &str) -> Value {
+    let mut payload =
+        serde_json::Map::from_iter([("state".to_string(), Value::String(state.to_string()))]);
+    let body = body.trim();
+    if !body.is_empty() {
+        payload.insert("comment".to_string(), Value::String(body.to_string()));
+    }
+    Value::Object(payload)
+}
+
+fn enterprise_note_payload(body: &str) -> Value {
+    // Enterprise v8 requires `noteable_type` even for a plain MR comment.
+    // Keep the optional relation fields aligned with the documented ordinary
+    // comment shape so the request cannot be mistaken for a code-line reply.
+    serde_json::json!({
+        "note": body.trim(),
+        "noteable_type": "PullRequest",
+        "parent_id": null,
+        "reply_user_id": null,
+        "reply_note_id": null,
+        "commit_id": "",
+    })
 }
 
 pub(super) async fn merge_pull_request(
@@ -1235,10 +1667,11 @@ fn decode_pull_request_diff(payload: &Value) -> Result<PullRequestDiffDetail, St
             .unwrap_or_else(|| files.iter().map(|file| file.added_lines).sum()),
         removed_lines: value_u32(payload, "removed_lines")
             .unwrap_or_else(|| files.iter().map(|file| file.removed_lines).sum()),
-        commit_count: value_u32(payload, "commits_count")
-            .or_else(|| value_u32(payload, "commit_count"))
-            .or_else(|| value_u32(payload, "commits"))
-            .unwrap_or(0),
+        // Enterprise diffs document `commits_size` (not `commits_count`). Do not
+        // use top-level `count`: that is the changed-file total.
+        commit_count: commit_count_from_diff_payload(payload).unwrap_or(0),
+        // Enterprise diffs omit comment totals; callers overlay MR detail when available.
+        conversation_count: None,
         base_sha: string_field(refs, "base_sha").unwrap_or_default(),
         head_sha: string_field(refs, "head_sha").unwrap_or_default(),
         start_sha: string_field(refs, "start_sha").unwrap_or_default(),
@@ -1248,6 +1681,35 @@ fn decode_pull_request_diff(payload: &Value) -> Result<PullRequestDiffDetail, St
             .unwrap_or(false),
         files,
     })
+}
+
+/// Enterprise MR diffs expose `commits_size`; some deployments also use
+/// `commits_count` / `commit_count`. Never treat payload `count` as commits.
+fn commit_count_from_diff_payload(payload: &Value) -> Option<u32> {
+    value_u32(payload, "commits_size")
+        .or_else(|| value_u32(payload, "commits_count"))
+        .or_else(|| value_u32(payload, "commit_count"))
+        // Numeric `commits` for provider variants that expose a scalar count.
+        .or_else(|| value_u32(payload, "commits"))
+        // Some enterprise deployments omit every scalar but embed the complete
+        // commit list in the diff response. A non-empty, non-truncated array is
+        // exact and avoids a second request. Empty arrays remain "unknown".
+        .or_else(|| {
+            if payload.get("too_more_commits").and_then(Value::as_bool) != Some(false) {
+                return None;
+            }
+            let commits = payload.get("commits")?.as_array()?;
+            (!commits.is_empty())
+                .then(|| u32::try_from(commits.len()).ok())
+                .flatten()
+        })
+}
+
+fn trusted_enterprise_commit_count(detail: Option<&Value>, diff: &Value) -> Option<u32> {
+    detail
+        .and_then(commit_count_from_detail)
+        .filter(|count| *count > 0)
+        .or_else(|| commit_count_from_diff_payload(diff).filter(|count| *count > 0))
 }
 
 fn decode_diff_file(value: &Value) -> PullRequestDiffFile {
@@ -1488,10 +1950,12 @@ fn pull_request_values(payload: &Value) -> Option<&Vec<Value>> {
         return Some(values);
     }
 
-    const COLLECTION_KEYS: [&str; 6] = [
+    const COLLECTION_KEYS: [&str; 8] = [
         "items",
         "list",
         "content",
+        "commits",
+        "notes",
         "merge_requests",
         "pull_requests",
         "records",
@@ -1534,6 +1998,51 @@ fn pagination_total(headers: &HeaderMap, payload: &Value) -> Option<u32> {
                 .get("pagination")
                 .and_then(|pagination| value_u32(pagination, "total"))
         })
+        .or_else(|| {
+            let data = payload.get("data")?;
+            value_u32(data, "total")
+                .or_else(|| value_u32(data, "total_count"))
+                .or_else(|| value_u32(data, "count"))
+                .or_else(|| data.get("meta").and_then(|meta| value_u32(meta, "total")))
+                .or_else(|| {
+                    data.get("meta")
+                        .and_then(|meta| value_u32(meta, "total_count"))
+                })
+        })
+}
+
+/// Enterprise v8 may return a bare array even when pagination is enabled. A
+/// page whose length exactly equals `per_page` is ambiguous without an explicit
+/// total and must fall back to the documented non-paginated collection. A bare
+/// array larger than the requested page proves pagination was ignored and is
+/// therefore the complete collection; a short page is exact as usual.
+fn enterprise_commit_probe_total(
+    headers: &HeaderMap,
+    payload: &Value,
+    per_page: u32,
+) -> Option<u32> {
+    pagination_total(headers, payload)
+        .or_else(|| {
+            let len = u32::try_from(payload.as_array()?.len()).ok()?;
+            (len != per_page).then_some(len)
+        })
+        .or_else(|| bounded_list_total(headers, payload, per_page))
+}
+
+/// Count a response that is contractually a complete, non-paginated collection.
+fn complete_collection_total(payload: &Value) -> Option<u32> {
+    let values = pull_request_values(payload)?;
+    u32::try_from(values.len()).ok()
+}
+
+/// Prefer provider totals; otherwise a short page (`len < per_page`) is exact.
+/// A full page without a total is ambiguous and returns `None`.
+fn bounded_list_total(headers: &HeaderMap, payload: &Value, per_page: u32) -> Option<u32> {
+    pagination_total(headers, payload).or_else(|| {
+        let values = pull_request_values(payload)?;
+        let len = u32::try_from(values.len()).ok()?;
+        (len < per_page).then_some(len)
+    })
 }
 
 fn pagination_page_count(headers: &HeaderMap, payload: &Value) -> Option<u32> {
@@ -1653,10 +2162,15 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        decode_commit, decode_pull_request_diff, gitee_enterprise_merge_readiness,
-        gitee_public_merge_readiness, pull_request_values, select_enterprise_project_id,
+        bounded_list_total, commit_count_from_diff_payload, complete_collection_total,
+        decode_commit, decode_conversation_comment, decode_conversation_review,
+        decode_pull_request_diff, enterprise_commit_probe_total, enterprise_note_payload,
+        enterprise_review_payload, expand_enterprise_conversation_notes,
+        gitee_enterprise_merge_readiness, gitee_public_merge_readiness, pull_request_values,
+        select_enterprise_project_id, trusted_enterprise_commit_count,
     };
     use crate::git::{PullRequestReadinessKind, parse_repo_locator};
+    use reqwest::header::HeaderMap;
 
     #[test]
     fn chooses_the_exact_remote_match_from_a_search_result() {
@@ -1669,6 +2183,33 @@ mod tests {
         assert_eq!(
             select_enterprise_project_id(&payload, &locator).unwrap(),
             "42"
+        );
+    }
+
+    #[test]
+    fn enterprise_approve_omits_an_empty_comment() {
+        assert_eq!(
+            enterprise_review_payload("approved", "  "),
+            json!({ "state": "approved" })
+        );
+        assert_eq!(
+            enterprise_review_payload("approved", " Looks good. "),
+            json!({ "state": "approved", "comment": "Looks good." })
+        );
+    }
+
+    #[test]
+    fn enterprise_conversation_comments_use_note_payloads() {
+        assert_eq!(
+            enterprise_note_payload("  hello  "),
+            json!({
+                "note": "hello",
+                "noteable_type": "PullRequest",
+                "parent_id": null,
+                "reply_user_id": null,
+                "reply_note_id": null,
+                "commit_id": "",
+            })
         );
     }
 
@@ -1690,6 +2231,10 @@ mod tests {
     fn decodes_public_and_enterprise_commit_shapes() {
         let public = decode_commit(&json!({
             "sha": "public-sha",
+            "author": {
+                "login": "public-author",
+                "avatar_url": "https://gitee.example.test/public.png"
+            },
             "commit": {
                 "message": "Public title\nbody",
                 "author": { "name": "Public Author", "date": "2026-07-20T01:00:00Z" }
@@ -1700,12 +2245,134 @@ mod tests {
             "title": "Enterprise title",
             "message": "Enterprise title\nbody",
             "author_name": "Enterprise Author",
+            "author": {
+                "name": "Enterprise Author",
+                "avatar": "https://gitee.example.test/enterprise.png"
+            },
             "authored_date": "2026-07-20T02:00:00Z"
         }));
         assert_eq!(public.title, "Public title");
-        assert_eq!(public.author, "Public Author");
+        assert_eq!(public.author, "public-author");
+        assert_eq!(public.avatar_url, "https://gitee.example.test/public.png");
         assert_eq!(enterprise.sha, "enterprise-sha");
         assert_eq!(enterprise.author, "Enterprise Author");
+        assert_eq!(
+            enterprise.avatar_url,
+            "https://gitee.example.test/enterprise.png"
+        );
+        assert_eq!(enterprise.authored_at, "2026-07-20T02:00:00Z");
+
+        // Internal enterprise MR commits document created_at instead of authored_date.
+        let mr_commit = decode_commit(&json!({
+            "id": "ed899a2f4b50b4370feeea94676502b42383c746",
+            "short_id": "ed899a2f4b5",
+            "title": "Replace sanitize with escape once",
+            "author_name": "Example User",
+            "author_email": "user@example.com",
+            "created_at": "2012-09-20T11:50:22+03:00",
+            "message": "Replace sanitize with escape once"
+        }));
+        assert_eq!(mr_commit.authored_at, "2012-09-20T11:50:22+03:00");
+    }
+
+    #[test]
+    fn expands_enterprise_nested_notes_without_using_content_object() {
+        // Shape from internal enterprise GET /notes: thread under data with
+        // nested notes[].note; top-level content is diff context only.
+        let expanded = expand_enterprise_conversation_notes(&[json!({
+            "id": 1956,
+            "line_code": "abc_21_21",
+            "author": { "name": "Thread Author", "username": "thread" },
+            "content": {
+                "code": 0,
+                "text": [{ "line_content": "<div>diff</div>", "type": "match" }]
+            },
+            "notes": [
+                {
+                    "id": 1956,
+                    "author": { "name": "Reviewer A", "username": "reviewer-a" },
+                    "note": "请先解决冲突",
+                    "created_at": "2026-07-20T03:00:00+08:00",
+                    "children": [
+                        {
+                            "id": 1957,
+                            "author": { "name": "Reviewer B", "username": "reviewer-b" },
+                            "note": "pr有冲突",
+                            "created_at": "2026-07-20T03:05:00+08:00"
+                        }
+                    ]
+                }
+            ]
+        })]);
+        assert_eq!(expanded.len(), 2);
+        assert_eq!(expanded[0].body, "请先解决冲突");
+        assert_eq!(expanded[0].author, "Reviewer A");
+        assert_eq!(expanded[1].body, "pr有冲突");
+        assert_eq!(expanded[1].author, "Reviewer B");
+
+        let theme = decode_conversation_comment(&json!({
+            "id": 11,
+            "author": { "name": "Theme Author", "username": "theme" },
+            "note": "主题评论",
+            "created_at": "2026-07-20T03:06:00+08:00"
+        }));
+        assert_eq!(theme.kind, "comment");
+        assert_eq!(theme.body, "主题评论");
+
+        // Official enterprise ordinary notes store markdown in string `content`.
+        let ordinary = decode_conversation_comment(&json!({
+            "id": 12,
+            "author": { "name": "Ordinary Author", "username": "ordinary" },
+            "content": "请先解决冲突",
+            "createdAt": "2026-07-20T03:07:00+08:00"
+        }));
+        assert_eq!(ordinary.kind, "comment");
+        assert_eq!(ordinary.body, "请先解决冲突");
+        assert_eq!(ordinary.created_at, "2026-07-20T03:07:00+08:00");
+
+        // Diff-context `content` objects must never become comment bodies.
+        let diff_context = decode_conversation_comment(&json!({
+            "id": 14,
+            "author": { "name": "Diff Author", "username": "diff" },
+            "content": {
+                "code": 0,
+                "text": [{ "line_content": "<div>diff</div>", "type": "match" }]
+            },
+            "created_at": "2026-07-20T03:07:30+08:00"
+        }));
+        assert_eq!(diff_context.body, "");
+
+        // Public v5 flat comments keep body decoding.
+        let public = decode_conversation_comment(&json!({
+            "id": 13,
+            "user": { "login": "public-user" },
+            "body": "public comment body",
+            "created_at": "2026-07-20T03:08:00+08:00"
+        }));
+        assert_eq!(public.kind, "comment");
+        assert_eq!(public.body, "public comment body");
+        assert_eq!(public.author, "public-user");
+
+        let review = decode_conversation_review(&json!({
+            "id": 99,
+            "user": { "name": "Reviewer", "username": "reviewer" },
+            "note": { "note": "pr有冲突" },
+            "state": "rejected",
+            "created_at": "2026-07-20T03:09:00+08:00"
+        }))
+        .expect("review comment");
+        assert_eq!(review.kind, "review");
+        assert_eq!(review.body, "pr有冲突");
+        assert_eq!(review.state, "rejected");
+
+        // Theme comments expose the body on the data item itself.
+        let theme_flat = decode_conversation_comment(&json!({
+            "id": 15,
+            "author": { "name": "Theme Author", "username": "theme" },
+            "note": "主题评论正文",
+            "created_at": "2026-07-20T03:10:00+08:00"
+        }));
+        assert_eq!(theme_flat.body, "主题评论正文");
     }
 
     #[test]
@@ -1713,6 +2380,9 @@ mod tests {
         let payload = json!({
             "added_lines": 1,
             "removed_lines": 1,
+            "commits_size": 1,
+            "count": 3,
+            "commits": [{ "id": "abc" }],
             "diff_refs": { "base_sha": "base", "head_sha": "head", "start_sha": "start" },
             "diffs": [{
                 "added_lines": 1,
@@ -1746,6 +2416,109 @@ mod tests {
         assert_eq!(detail.files[0].lines[1].new_line, 7);
         assert_eq!(detail.files[0].lines[1].content, "let new = true && ready;");
         assert_eq!(detail.head_sha, "head");
+        // Prefer commits_size; ignore file-total `count` and commits array.
+        assert_eq!(detail.commit_count, 1);
+        assert_eq!(commit_count_from_diff_payload(&payload), Some(1));
+        assert_eq!(
+            commit_count_from_diff_payload(&json!({
+                "too_more_commits": false,
+                "commits": [{ "id": "one" }, { "id": "two" }]
+            })),
+            Some(2)
+        );
+        assert_eq!(
+            commit_count_from_diff_payload(&json!({ "count": 9, "commits": [] })),
+            None
+        );
+        assert_eq!(
+            commit_count_from_diff_payload(&json!({
+                "too_more_commits": true,
+                "commits": [{ "id": "preview-only" }]
+            })),
+            None
+        );
+    }
+
+    #[test]
+    fn bounded_list_total_prefers_meta_and_short_pages() {
+        let headers = HeaderMap::new();
+        let meta = json!({
+            "data": [{ "id": 1 }],
+            "meta": { "current_page": 1, "total_pages": 3, "total_count": 3 }
+        });
+        assert_eq!(bounded_list_total(&headers, &meta, 1), Some(3));
+
+        let short = json!([{ "id": 1 }]);
+        assert_eq!(bounded_list_total(&headers, &short, 100), Some(1));
+        assert_eq!(bounded_list_total(&headers, &json!([]), 100), Some(0));
+
+        let full_without_total = json!([{ "id": 1 }]);
+        assert_eq!(bounded_list_total(&headers, &full_without_total, 1), None);
+    }
+
+    #[test]
+    fn enterprise_commit_probe_distinguishes_full_pages_from_complete_arrays() {
+        let headers = HeaderMap::new();
+        // `with_page=true&per_page=1` may still return a bare one-item page.
+        // Without a total, this must trigger the non-paginated fallback.
+        assert_eq!(
+            enterprise_commit_probe_total(&headers, &json!([{ "id": "one" }]), 1),
+            None
+        );
+        assert_eq!(
+            enterprise_commit_probe_total(
+                &headers,
+                &json!([{ "id": "one" }, { "id": "two" }, { "id": "three" }]),
+                1,
+            ),
+            Some(3)
+        );
+        assert_eq!(
+            enterprise_commit_probe_total(&headers, &json!([]), 1),
+            Some(0)
+        );
+        assert_eq!(
+            enterprise_commit_probe_total(
+                &headers,
+                &json!({
+                    "data": {
+                        "list": [{ "id": "one" }],
+                        "meta": { "total_count": 4 }
+                    }
+                }),
+                1,
+            ),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn enterprise_zero_commit_summaries_require_a_probe() {
+        let detail = json!({ "commits_count": 0 });
+        let diff = json!({ "commits_size": 0 });
+        assert_eq!(trusted_enterprise_commit_count(Some(&detail), &diff), None);
+
+        let diff = json!({ "commits_size": 1 });
+        assert_eq!(
+            trusted_enterprise_commit_count(Some(&detail), &diff),
+            Some(1)
+        );
+
+        let detail = json!({ "commits_count": 2 });
+        assert_eq!(
+            trusted_enterprise_commit_count(Some(&detail), &diff),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn complete_enterprise_commit_fallback_accepts_wrapped_collections() {
+        assert_eq!(
+            complete_collection_total(&json!({
+                "data": { "commits": [{ "id": "one" }, { "id": "two" }] }
+            })),
+            Some(2)
+        );
     }
 
     #[test]

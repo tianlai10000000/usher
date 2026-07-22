@@ -2873,8 +2873,6 @@ dependencies = [
 [[package]]
 name = "i-slint-live-preview"
 version = "1.17.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab44adb3f5acbcdf9551aedec799605650438be17d60d1b4931b49ab24dfff5a"
 dependencies = [
  "i-slint-compiler",
  "i-slint-core",

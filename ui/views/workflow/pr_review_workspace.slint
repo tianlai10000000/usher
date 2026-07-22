@@ -53,9 +53,54 @@ export struct WorkflowPrConversationItem {
     id: string,
     kind: string,
     author: string,
+    avatar: image,
+    avatar-label: string,
+    author-association: string,
     body: string,
     created-at: string,
+    created-at-tooltip: string,
     state: string,
+    connect-before: bool,
+    connect-after: bool,
+    // Precomputed ListView row height from Rust so cards can hug short bodies
+    // without relying on Slint string length APIs.
+    row-height: int,
+}
+
+component ConversationAvatar inherits Rectangle {
+    in property <image> avatar;
+    in property <string> fallback-label;
+    in property <length> avatar-size: 40px;
+    in property <length> label-size: 13px;
+
+    width: root.avatar-size;
+    height: root.avatar-size;
+    border-radius: root.avatar-size / 2;
+    border-width: 1px;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: root.avatar.width > 0
+        ? transparent
+        : (AppState.effective-dark-mode ? #21262d : #f6f8fa);
+    clip: true;
+
+    if root.avatar.width > 0: Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.avatar;
+        image-fit: cover;
+    }
+
+    if root.avatar.width <= 0: MaterialText {
+        width: parent.width;
+        height: parent.height;
+        text: root.fallback-label;
+        font-family: "Hiragino Sans GB";
+        font-size: root.label-size;
+        font-weight: 600;
+        color: MaterialPalette.on_surface_variant;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
 }
 
 export struct WorkflowPrCommit {
@@ -84,35 +129,43 @@ component ReviewActionButton inherits Rectangle {
 
     width: 96px;
     height: 36px;
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: root.success ? (AppState.effective-dark-mode ? #238636 : #1f883d) : (root.primary ? MaterialPalette.primary : MaterialPalette.outline);
-    background: root.success
-        ? (action-touch.has-hover && root.button-enabled ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37) : (AppState.effective-dark-mode ? #238636 : #1f883d))
-        : root.primary
-        ? (action-touch.has-hover ? MaterialPalette.primary.darker(8%) : MaterialPalette.primary)
-        : (action-touch.has-hover ? MaterialPalette.surface_container_high : MaterialPalette.surface_container_lowest);
-    opacity: root.button-enabled ? 1 : 0.5;
+    background: transparent;
 
-    MaterialText {
+    // Dim only the button surface when disabled. Tooltips stay full-opacity
+    // children of this root so they do not inherit the disabled fade.
+    button-surface := Rectangle {
         width: parent.width;
         height: parent.height;
-        text: root.text;
-        horizontal_alignment: center;
-        vertical_alignment: center;
-        font_size: 12px;
-        font_weight: 600;
-        color: root.primary || root.success ? #ffffff : MaterialPalette.on_surface;
-    }
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: root.success ? (AppState.effective-dark-mode ? #238636 : #1f883d) : (root.primary ? MaterialPalette.primary : MaterialPalette.outline);
+        background: root.success
+            ? (action-touch.has-hover && root.button-enabled ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37) : (AppState.effective-dark-mode ? #238636 : #1f883d))
+            : root.primary
+            ? (action-touch.has-hover ? MaterialPalette.primary.darker(8%) : MaterialPalette.primary)
+            : (action-touch.has-hover ? MaterialPalette.surface_container_high : MaterialPalette.surface_container_lowest);
+        opacity: root.button-enabled ? 1 : 0.5;
 
-    if root.show-chevron: Image {
-        x: parent.width - 25px;
-        y: (parent.height - self.height) / 2;
-        width: 14px;
-        height: 14px;
-        source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
-        image-fit: contain;
-        colorize: #ffffff;
+        MaterialText {
+            width: parent.width;
+            height: parent.height;
+            text: root.text;
+            horizontal_alignment: center;
+            vertical_alignment: center;
+            font_size: 12px;
+            font_weight: 600;
+            color: root.primary || root.success ? #ffffff : MaterialPalette.on_surface;
+        }
+
+        if root.show-chevron: Image {
+            x: parent.width - 25px;
+            y: (parent.height - self.height) / 2;
+            width: 14px;
+            height: 14px;
+            source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
+            image-fit: contain;
+            colorize: #ffffff;
+        }
     }
 
     action-touch := TouchArea {
@@ -122,6 +175,52 @@ component ReviewActionButton inherits Rectangle {
     if action-touch.has-hover && root.tooltip-text != "": ToolTip {
         x: root.width - self.width;
         y: root.height + 4px;
+        text: root.tooltip-text;
+    }
+}
+
+// Primer-like primary green button used by the Conversation comment composer.
+component GithubCommentButton inherits Rectangle {
+    in property <string> text: "Comment";
+    in property <bool> button-enabled: true;
+    in property <string> tooltip-text: "";
+    callback clicked();
+
+    width: 96px;
+    height: 32px;
+    background: transparent;
+
+    button-surface := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: AppState.effective-dark-mode ? #238636 : #1f883d;
+        background: root.button-enabled
+            ? (action-touch.has-hover
+                ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37)
+                : (AppState.effective-dark-mode ? #238636 : #1f883d))
+            : (AppState.effective-dark-mode ? #23863666 : #94d3a2);
+        label := MaterialText {
+            width: parent.width;
+            height: parent.height;
+            text: root.text;
+            font-family: "Hiragino Sans GB";
+            font-size: 14px;
+            font-weight: 600;
+            color: #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    action-touch := TouchArea {
+        mouse-cursor: root.button-enabled ? pointer : default;
+        clicked => { if (root.button-enabled) { root.clicked(); } }
+    }
+    if action-touch.has-hover && root.tooltip-text != "": ToolTip {
+        // Composer card clips descendants; keep the tip above the footer button.
+        x: root.width - self.width;
+        y: -self.height - 4px;
         text: root.tooltip-text;
     }
 }
@@ -169,23 +268,85 @@ component BranchLabel inherits Rectangle {
     in property <string> text;
     in property <color> background-color;
     in property <color> foreground-color;
-    in property <length> chip-max-width: 190px;
 
-    width: min(root.chip-max-width, branch-label-text.preferred-width + 16px);
+    // GitHub keeps the full branch name visible; never elide into "...".
+    width: branch-label-text.preferred-width + 16px;
     height: 26px;
     border-radius: 6px;
     background: root.background-color;
 
     branch-label-text := MaterialText {
         x: 8px;
-        width: parent.width - 16px;
+        width: self.preferred-width;
         height: parent.height;
         text: root.text;
         font-family: "Hiragino Sans GB";
         vertical-alignment: center;
         font-size: 13px;
         color: root.foreground-color;
+    }
+}
+
+// GitHub-style relative timestamp: muted label with absolute datetime tooltip.
+// Prefer Material ToolTip (no mouse grab). Avoid PopupWindow on hover — it
+// steals input and flickers as has-hover toggles.
+component RelativeTimestamp inherits Rectangle {
+    in property <string> text;
+    in property <string> tooltip-text;
+    in property <color> foreground-color;
+    in property <length> label-font-size: 13px;
+    in property <bool> tooltip-align-right: false;
+    in property <bool> tooltip-above: false;
+    // Place the tip to the left of the label (stays inside clipped headers).
+    in property <bool> tooltip-beside: false;
+    // Place the tip to the right of the label (into trailing free space).
+    in property <bool> tooltip-after: false;
+
+    width: max(1px, time-label.preferred-width);
+    height: 26px;
+    background: transparent;
+    clip: false;
+
+    time-label := MaterialText {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        font-family: "Hiragino Sans GB";
+        font-size: root.label-font-size;
+        color: root.foreground-color;
+        vertical-alignment: center;
         overflow: elide;
+    }
+    time-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: default;
+    }
+    if time-touch.has-hover && root.tooltip-text != "" && (root.tooltip-after || root.tooltip-beside): Rectangle {
+        z: 10000;
+        x: root.tooltip-after ? root.width + 4px : -self.width - 4px;
+        y: (root.height - self.height) / 2;
+        width: tip-label.preferred-width + 16px;
+        height: tip-label.preferred-height + 8px;
+        border-radius: 4px;
+        background: MaterialPalette.inverse_surface;
+        tip-label := MaterialText {
+            x: 8px;
+            y: 4px;
+            width: self.preferred-width;
+            height: self.preferred-height;
+            text: root.tooltip-text;
+            font-family: "Hiragino Sans GB";
+            font-size: 12px;
+            color: MaterialPalette.inverse_on_surface;
+            wrap: no-wrap;
+        }
+    }
+    if time-touch.has-hover && root.tooltip-text != "" && !root.tooltip-after && !root.tooltip-beside: ToolTip {
+        // above/below: pin trailing edge when tooltip-align-right.
+        x: root.tooltip-align-right ? root.width - self.width : 0px;
+        y: root.tooltip-above ? -self.height - 4px : root.height + 4px;
+        text: root.tooltip-text;
     }
 }
 
@@ -195,6 +356,7 @@ component PullRequestSummaryMetrics inherits Rectangle {
     in property <int> commit-count: 0;
     in property <string> target-branch;
     in property <string> source-branch;
+    in property <string> updated-at;
     private property <string> state-label: root.state-kind == "merged"
         ? "Merged"
         : (root.state-kind == "closed" ? "Closed" : "Open");
@@ -202,10 +364,11 @@ component PullRequestSummaryMetrics inherits Rectangle {
         state-measure.preferred-width + 40px
         + min(120px, author-measure.preferred-width)
         + summary-measure.preferred-width
-        + min(210px, target-measure.preferred-width + 16px)
+        + target-measure.preferred-width + 16px
         + from-measure.preferred-width
-        + min(360px, source-measure.preferred-width + 16px)
+        + source-measure.preferred-width + 16px
         + 28px
+        + max(0px, updated-measure.preferred-width)
         + 48px;
 
     visible: false;
@@ -244,6 +407,11 @@ component PullRequestSummaryMetrics inherits Rectangle {
         font-family: "Hiragino Sans GB";
         font-size: 13px;
     }
+    updated-measure := Text {
+        text: root.updated-at;
+        font-family: "Hiragino Sans GB";
+        font-size: 13px;
+    }
 }
 
 component PullRequestSummaryRow inherits Rectangle {
@@ -252,6 +420,8 @@ component PullRequestSummaryRow inherits Rectangle {
     in property <int> commit-count: 0;
     in property <string> target-branch;
     in property <string> source-branch;
+    in property <string> updated-at;
+    in property <string> updated-at-tooltip;
     in property <bool> compact: false;
     in property <color> success-color;
     in property <color> danger-color;
@@ -260,11 +430,15 @@ component PullRequestSummaryRow inherits Rectangle {
     in property <color> muted-background;
     in property <color> branch-background;
     in property <color> branch-foreground;
-    out property <bool> wraps: root.compact && root.width < metrics.inline-width;
+    // Keep branch names fully visible like GitHub: one row when they fit,
+    // otherwise move the branch segment to a second row (never elide).
+    out property <bool> wraps: root.width < metrics.inline-width;
     callback copy-source-branch(string);
 
     height: root.wraps ? 64px : 32px;
-    clip: true;
+    // Tooltips must escape this one-line layout; clipping turns the hovered
+    // timestamp tooltip into a dark underline.
+    clip: false;
 
     metrics := PullRequestSummaryMetrics {
         state-kind: root.state-kind;
@@ -272,13 +446,15 @@ component PullRequestSummaryRow inherits Rectangle {
         commit-count: root.commit-count;
         target-branch: root.target-branch;
         source-branch: root.source-branch;
+        updated-at: root.updated-at;
     }
 
-    if !root.compact || !root.wraps: HorizontalLayout {
+    if !root.wraps: HorizontalLayout {
         width: parent.width;
         height: parent.height;
         spacing: 8px;
         alignment: start;
+        cross-axis-alignment: center;
 
         PullRequestStateBadge {
             kind: root.state-kind;
@@ -314,12 +490,10 @@ component PullRequestSummaryRow inherits Rectangle {
             font-family: "Hiragino Sans GB";
             font-size: 13px;
             color: root.muted-color;
-            overflow: elide;
             vertical-alignment: center;
         }
         BranchLabel {
             text: root.target-branch;
-            chip-max-width: root.compact ? 210px : 190px;
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
         }
@@ -334,7 +508,6 @@ component PullRequestSummaryRow inherits Rectangle {
         }
         BranchLabel {
             text: root.source-branch;
-            chip-max-width: root.compact ? 360px : 190px;
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
         }
@@ -362,6 +535,13 @@ component PullRequestSummaryRow inherits Rectangle {
                 text: "Copy source branch";
             }
         }
+        if root.updated-at != "": RelativeTimestamp {
+            text: root.updated-at;
+            tooltip-text: root.updated-at-tooltip;
+            tooltip-align-right: true;
+            foreground-color: root.muted-color;
+            label-font-size: 13px;
+        }
     }
 
     if root.wraps: HorizontalLayout {
@@ -371,6 +551,7 @@ component PullRequestSummaryRow inherits Rectangle {
         height: 28px;
         spacing: 8px;
         alignment: start;
+        cross-axis-alignment: center;
 
         PullRequestStateBadge {
             kind: root.state-kind;
@@ -379,7 +560,7 @@ component PullRequestSummaryRow inherits Rectangle {
             done-color: root.done-color;
         }
         Rectangle {
-            width: min(120px, compact-author-label.preferred-width);
+            width: min(root.compact ? 120px : 150px, compact-author-label.preferred-width);
             height: 24px;
             compact-author-label := MaterialText {
                 width: parent.width;
@@ -417,10 +598,10 @@ component PullRequestSummaryRow inherits Rectangle {
         height: 28px;
         spacing: 8px;
         alignment: start;
+        cross-axis-alignment: center;
 
         BranchLabel {
             text: root.target-branch;
-            chip-max-width: 210px;
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
         }
@@ -435,7 +616,6 @@ component PullRequestSummaryRow inherits Rectangle {
         }
         BranchLabel {
             text: root.source-branch;
-            chip-max-width: 360px;
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
         }
@@ -462,6 +642,13 @@ component PullRequestSummaryRow inherits Rectangle {
                 y: root.height + 4px;
                 text: "Copy source branch";
             }
+        }
+        if root.updated-at != "": RelativeTimestamp {
+            text: root.updated-at;
+            tooltip-text: root.updated-at-tooltip;
+            tooltip-align-right: true;
+            foreground-color: root.muted-color;
+            label-font-size: 13px;
         }
     }
 }
@@ -557,10 +744,14 @@ component PrTabButton inherits Rectangle {
     border-width: 0px;
 
     // Keep Usher's underline selection treatment, but use GitHub's 16 px
-    // Octicons and inline icon/label/count geometry. Explicit coordinates
-    // prevent preferred-height changes from splitting their baselines.
+    // Octicons and inline icon/label/count geometry. Center the content group
+    // inside the fixed tab width so left/right padding stays balanced.
+    private property <length> count-badge-width: max(22px, count-label.preferred-width + 12px);
+    private property <length> content-width: 16px + 10px + tab-label.preferred-width + 10px + root.count-badge-width;
+    private property <length> content-x: max(0px, (root.width - root.content-width) / 2);
+
     Image {
-        x: 14px;
+        x: root.content-x;
         y: 16px;
         width: 16px;
         height: 16px;
@@ -569,7 +760,7 @@ component PrTabButton inherits Rectangle {
         colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
     }
     tab-label := MaterialText {
-        x: 40px;
+        x: root.content-x + 26px;
         y: 0px;
         width: self.preferred-width;
         height: parent.height;
@@ -582,7 +773,7 @@ component PrTabButton inherits Rectangle {
     Rectangle {
         x: tab-label.x + tab-label.width + 10px;
         y: 14px;
-        width: max(22px, count-label.preferred-width + 12px);
+        width: root.count-badge-width;
         height: 20px;
         border-radius: 10px;
         background: AppState.effective-dark-mode ? #6e768166 : #afb8c133;
@@ -797,12 +988,59 @@ component MergeReadinessBadge inherits Rectangle {
     }
 }
 
+component PrReviewBackButton inherits Rectangle {
+    callback clicked();
+
+    // Sit above the neighboring readiness badge / title row so the hover tip
+    // is not covered by later siblings in the compact or wide header.
+    z: 2;
+    width: 32px;
+    height: 36px;
+    background: transparent;
+
+    button-surface := Rectangle {
+        y: 2px;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        background: back-touch.has-hover
+            ? MaterialPalette.surface_container_high
+            : transparent;
+
+        Image {
+            x: 8px;
+            y: 8px;
+            width: 16px;
+            height: 16px;
+            source: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
+            colorize: MaterialPalette.on_surface;
+        }
+    }
+
+    back-touch := TouchArea {
+        y: button-surface.y;
+        width: button-surface.width;
+        height: button-surface.height;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    if back-touch.has-hover: ToolTip {
+        x: 0px;
+        y: root.height + 4px;
+        text: "Back to pull requests";
+    }
+}
+
 component HeaderActionStrip inherits Rectangle {
     in property <string> readiness-kind;
     in property <string> readiness-label;
     in property <string> readiness-detail;
     in property <string> remote-review-state;
     in property <bool> show-readiness: true;
+    // Wide headers pin actions to the trailing edge; narrow headers keep them
+    // left-aligned beside the back link like GitHub's compact PR header.
+    in property <bool> align-start: false;
     in property <bool> action-loading: false;
     in property <bool> can-comment: false;
     in property <bool> can-approve: false;
@@ -826,7 +1064,11 @@ component HeaderActionStrip inherits Rectangle {
         width: parent.width;
         height: parent.height;
         spacing: 12px;
-        Rectangle { horizontal-stretch: 1; }
+        // Wide strips need stretch so the leading spacer pushes all actions
+        // against the trailing edge. Compact strips intentionally retain
+        // start alignment beside the back link.
+        alignment: root.align-start ? start : stretch;
+        if !root.align-start: Rectangle { horizontal-stretch: 1; }
         if root.show-readiness && root.readiness-label != "": Rectangle {
             width: readiness-badge.width;
             height: parent.height;
@@ -1277,6 +1519,7 @@ component CodeRenderingIndicator inherits Rectangle {
         MaterialText {
             text: "Rendering code";
             vertical-alignment: center;
+            font-family: "Hiragino Sans GB";
             font-size: 12px;
             font-weight: 600;
             color: MaterialPalette.on_surface;
@@ -1500,14 +1743,17 @@ export component PrReviewWorkspace inherits Rectangle {
     in property <string> source-branch;
     in property <string> target-branch;
     in property <string> updated-at;
+    in property <string> updated-at-tooltip;
     in property <int> added-lines: 0;
     in property <int> removed-lines: 0;
     in property <int> commit-count: 0;
+    in property <int> conversation-count: 0;
     in property <string> base-sha;
     in property <string> head-sha;
     in property <bool> too-many-commits: false;
     in-out property <int> selected-tab: 2;
     in property <[WorkflowPrConversationItem]> conversation-items: [];
+    in property <int> conversation-content-height: 0;
     in property <[WorkflowPrCommit]> commits: [];
     in property <bool> conversation-loading: false;
     in property <bool> commits-loading: false;
@@ -1524,6 +1770,7 @@ export component PrReviewWorkspace inherits Rectangle {
     in property <bool> file-filters-active: false;
     in property <[WorkflowPrDiffLine]> lines: [];
     in property <int> max-code-columns: 0;
+    in property <string> longest-code-line;
     in property <int> line-model-revision: 0;
     in property <int> selected-file-index: -1;
     in property <string> selected-file-path;
@@ -1573,6 +1820,8 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <length> code-line-height: 22px;
     private property <length> hunk-line-height: 26px;
     private property <length> code-character-width: 7.8px;
+    private property <length> measured-code-width:
+        max(root.max-code-columns * root.code-character-width, longest-code-line-measure.preferred-width);
     // GitHub Primer functional tokens (primer/primitives:
     // src/tokens/functional/color/fgColor.json5) and DiffBlob tokens.
     private property <color> github-bg-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
@@ -1594,6 +1843,8 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <color> hunk-foreground: root.github-fg-muted;
     private property <string> selected-review-action: "comment";
     private property <string> review-body: "";
+    private property <string> conversation-comment-body: "";
+    private property <string> pending-conversation-comment: "";
     private property <string> selected-merge-method: "merge";
     private property <bool> remove-source-branch: false;
     private property <int> draft-range-start: -1;
@@ -1604,6 +1855,30 @@ export component PrReviewWorkspace inherits Rectangle {
         root.stable-layout-width - 48px < compact-title-measure.preferred-width;
     private property <bool> compact-summary-wraps:
         root.stable-layout-width - 48px < compact-summary-metrics.inline-width;
+    // Wide header column: Primer back icon(32) + actions(640) +
+    // padding(48) + two 16px gaps.
+    private property <bool> wide-title-wraps:
+        root.stable-layout-width - 752px < compact-title-measure.preferred-width;
+    private property <bool> wide-summary-wraps:
+        root.stable-layout-width - 752px < compact-summary-metrics.inline-width;
+    // Estimate wrapped line count from the single-line preferred width. Do not
+    // use Text.preferred-height for the visible title: it can stay on the
+    // single-line metric and let the summary row cover later title lines.
+    private property <length> compact-title-avail-width: max(1px, root.stable-layout-width - 48px);
+    private property <int> compact-title-line-count: !root.compact-title-wraps ? 1
+        : (compact-title-measure.preferred-width <= root.compact-title-avail-width * 2 ? 2 : 3);
+    private property <length> wide-title-avail-width: max(1px, root.stable-layout-width - 752px);
+    private property <int> wide-title-line-count: !root.wide-title-wraps ? 1
+        : (compact-title-measure.preferred-width <= root.wide-title-avail-width * 2 ? 2 : 3);
+    // ~30px per line for 22px Hiragino; 52px was short enough to clip "#N".
+    private property <length> compact-title-block-height: root.compact-title-line-count == 1 ? 32px
+        : (root.compact-title-line-count == 2 ? 60px : 88px);
+    private property <length> wide-title-block-height: root.wide-title-line-count == 1 ? 30px
+        : (root.wide-title-line-count == 2 ? 60px : 88px);
+    private property <length> compact-title-height-extra: root.compact-title-line-count == 1 ? 0px
+        : (root.compact-title-line-count == 2 ? 36px : 64px);
+    private property <length> wide-title-height-extra: root.wide-title-line-count == 1 ? 0px
+        : (root.wide-title-line-count == 2 ? 36px : 64px);
 
     callback close();
     callback select-tab(int);
@@ -1662,6 +1937,13 @@ export component PrReviewWorkspace inherits Rectangle {
             root.selected-review-action = root.can-comment ? "comment" : (root.can-approve ? "approve" : "request_changes");
         }
     }
+    changed remote-review-state => {
+        // Clear the Conversation composer after a successful Comment submit.
+        if root.remote-review-state == "commented" && root.pending-conversation-comment != "" {
+            root.conversation-comment-body = "";
+            root.pending-conversation-comment = "";
+        }
+    }
     changed merge-dialog-open => {
         if (root.merge-dialog-open) {
             root.selected-merge-method = root.merge-method-merge ? "merge" : (root.merge-method-squash ? "squash" : (root.merge-method-rebase ? "rebase" : "fast_forward"));
@@ -1707,6 +1989,18 @@ export component PrReviewWorkspace inherits Rectangle {
         commit-count: root.commit-count;
         target-branch: root.target-branch;
         source-branch: root.source-branch;
+        updated-at: root.updated-at;
+    }
+
+    // One off-screen font measurement keeps the horizontal scroll extent and
+    // every row background on the same pixel width. Column-count estimates are
+    // retained only as a fallback while the measured line is unavailable.
+    longest-code-line-measure := Text {
+        visible: false;
+        text: root.longest-code-line;
+        font-family: root.code-font-family;
+        font-size: root.code-font-size;
+        overflow: clip;
     }
 
     // Consume clicks on non-interactive workspace areas so they cannot reach
@@ -1725,9 +2019,11 @@ export component PrReviewWorkspace inherits Rectangle {
             width: parent.width;
             height: root.stable-layout-width < 1500px
                 ? 124px
-                    + (root.compact-title-wraps ? 24px : 0px)
+                    + root.compact-title-height-extra
                     + (root.compact-summary-wraps ? 32px : 0px)
-                : 104px;
+                : (104px
+                    + root.wide-title-height-extra
+                    + (root.wide-summary-wraps ? 32px : 0px));
             // Keep action-button tooltips above the following files toolbar.
             z: 1;
             background: root.github-bg-default;
@@ -1738,62 +2034,48 @@ export component PrReviewWorkspace inherits Rectangle {
                 height: parent.height;
                 padding-left: 24px;
                 padding-right: 24px;
+                // Pin actions to the title's first line (GitHub wide header).
+                padding-top: 16px;
                 spacing: 16px;
-                Rectangle {
-                    width: 118px;
-                    height: parent.height;
-                    Rectangle {
-                        y: (parent.height - self.height) / 2;
-                        width: parent.width;
-                        height: 36px;
-                        border-radius: 10px;
-                        background: back-touch.has-hover ? MaterialPalette.surface_container_high : transparent;
-                        MaterialText {
-                            width: parent.width;
-                            height: parent.height;
-                            text: "←  Pull requests";
-                            font-family: "Hiragino Sans GB";
-                            horizontal_alignment: center;
-                            vertical_alignment: center;
-                            font_size: 12px;
-                            font_weight: 600;
-                            color: MaterialPalette.primary;
-                        }
-                        back-touch := TouchArea { mouse-cursor: pointer; clicked => { root.close(); } }
-                    }
-                }
-
-                Rectangle {
-                    width: 1px;
-                    height: parent.height;
-                    Rectangle { y: (parent.height - self.height) / 2; width: 1px; height: 34px; background: root.github-border-default; }
+                // Keep default main-axis stretch so the title column expands;
+                // alignment:start would collapse preferred-width:0 siblings and
+                // leave Merged/Review/Merge stuck beside the back link.
+                cross-axis-alignment: start;
+                PrReviewBackButton {
+                    clicked => { root.close(); }
                 }
 
                 Rectangle {
                     horizontal-stretch: 1;
-                    clip: true;
-                    MaterialText {
+                    min-width: 200px;
+                    // Leave open so wrapped title and relative-time tooltips can
+                    // escape like GitHub; title never uses ellipsis.
+                    clip: false;
+                    wide-title := Text {
                         x: 0px;
-                        y: 20px;
+                        y: 0px;
                         width: parent.width;
-                        height: 30px;
+                        height: root.wide-title-block-height;
                         text: root.pull-request-title + " #" + root.pull-request-number;
                         font-family: "Hiragino Sans GB";
-                        font_size: 22px;
-                        font_weight: 600;
+                        font-size: 22px;
+                        font-weight: 600;
                         color: MaterialPalette.on_surface;
-                        overflow: elide;
-                        vertical-alignment: center;
+                        wrap: word-wrap;
+                        overflow: clip;
+                        vertical-alignment: top;
                     }
                     PullRequestSummaryRow {
                         x: 0px;
-                        y: 54px;
+                        y: root.wide-title-block-height + 6px;
                         width: parent.width;
                         state-kind: root.merge-readiness-kind;
                         author: root.author;
                         commit-count: root.commit-count;
                         target-branch: root.target-branch;
                         source-branch: root.source-branch;
+                        updated-at: root.updated-at;
+                        updated-at-tooltip: root.updated-at-tooltip;
                         compact: false;
                         success-color: root.github-success-fg;
                         danger-color: root.github-danger-fg;
@@ -1807,8 +2089,10 @@ export component PrReviewWorkspace inherits Rectangle {
                 }
 
                 HeaderActionStrip {
+                    // Trailing-edge strip: internal leading spacer pins controls
+                    // to the window right on the title's first line.
                     width: 640px;
-                    height: parent.height;
+                    height: 36px;
                     readiness-kind: root.merge-readiness-kind;
                     readiness-label: root.merge-readiness-label;
                     readiness-detail: root.merge-readiness-detail;
@@ -1836,38 +2120,16 @@ export component PrReviewWorkspace inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
 
-                Rectangle {
+                PrReviewBackButton {
                     x: 24px;
                     y: 2px;
-                    width: 118px;
-                    height: 36px;
-                    border-radius: 10px;
-                    background: compact-back-touch.has-hover ? MaterialPalette.surface_container_high : transparent;
-                    MaterialText {
-                        width: parent.width;
-                        height: parent.height;
-                        text: "←  Pull requests";
-                        font-family: "Hiragino Sans GB";
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        font-size: 12px;
-                        font-weight: 600;
-                        color: MaterialPalette.primary;
-                    }
-                    compact-back-touch := TouchArea { mouse-cursor: pointer; clicked => { root.close(); } }
-                }
-                Rectangle {
-                    x: 158px;
-                    y: 3px;
-                    width: 1px;
-                    height: 34px;
-                    background: root.github-border-default;
+                    clicked => { root.close(); }
                 }
                 compact-title := Text {
                     x: 24px;
                     y: 50px;
                     width: parent.width - 48px;
-                    height: min(56px, max(32px, self.preferred-height));
+                    height: root.compact-title-block-height;
                     text: root.pull-request-title + " #" + root.pull-request-number;
                     font-family: "Hiragino Sans GB";
                     font-size: 22px;
@@ -1875,17 +2137,19 @@ export component PrReviewWorkspace inherits Rectangle {
                     color: MaterialPalette.on_surface;
                     wrap: word-wrap;
                     overflow: clip;
-                    vertical-alignment: center;
+                    vertical-alignment: top;
                 }
                 compact-summary-row := PullRequestSummaryRow {
                     x: 24px;
-                    y: compact-title.y + compact-title.height + 6px;
+                    y: 50px + root.compact-title-block-height + 6px;
                     width: parent.width - 48px;
                     state-kind: root.merge-readiness-kind;
                     author: root.author;
                     commit-count: root.commit-count;
                     target-branch: root.target-branch;
                     source-branch: root.source-branch;
+                    updated-at: root.updated-at;
+                    updated-at-tooltip: root.updated-at-tooltip;
                     compact: true;
                     success-color: root.github-success-fg;
                     danger-color: root.github-danger-fg;
@@ -1897,9 +2161,10 @@ export component PrReviewWorkspace inherits Rectangle {
                     copy-source-branch(branch) => { root.copy-source-branch(branch); }
                 }
                 HeaderActionStrip {
-                    x: 175px;
+                    x: 72px;
                     y: -8px;
-                    width: parent.width - 199px;
+                    width: parent.width - 96px;
+                    align-start: true;
                     show-readiness: true;
                     readiness-kind: root.merge-readiness-kind;
                     readiness-label: root.merge-readiness-label;
@@ -1932,12 +2197,14 @@ export component PrReviewWorkspace inherits Rectangle {
             height: 48px;
             background: root.github-bg-default;
             HorizontalLayout {
-                padding-left: 24px;
+                padding-left: 0px;
                 spacing: 0px;
                 PrTabButton {
                     label: "Conversation";
                     tab-width: 200px;
-                    count: max(0, root.conversation-items.length - 1);
+                    // Badge summaries load with the PR detail. Keep them independent
+                    // from the lazily mounted Conversation payload.
+                    count: root.conversation-count;
                     icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg");
                     selected: root.selected-tab == 0;
                     clicked => {
@@ -1948,7 +2215,8 @@ export component PrReviewWorkspace inherits Rectangle {
                 PrTabButton {
                     label: "Commits";
                     tab-width: 170px;
-                    count: max(root.commit-count, root.commits.length);
+                    // Loading this tab must not be what makes its badge appear.
+                    count: root.commit-count;
                     icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
                     selected: root.selected-tab == 1;
                     clicked => {
@@ -2050,6 +2318,7 @@ export component PrReviewWorkspace inherits Rectangle {
                 text: "Loading conversation…";
                 horizontal-alignment: center;
                 vertical-alignment: center;
+                font-family: "Hiragino Sans GB";
                 color: root.github-fg-muted;
             }
             if !root.conversation-loading && root.conversation-error != "": CenteredErrorState {
@@ -2061,78 +2330,645 @@ export component PrReviewWorkspace inherits Rectangle {
                 muted-color: root.github-fg-muted;
                 retry => { root.select-tab(0); }
             }
-            if !root.conversation-loading && root.conversation-error == "": ListView {
+            if !root.conversation-loading && root.conversation-error == "": conversation-scroll := ScrollView {
+                // GitHub Conversation is one document: timeline + composer share
+                // a single scroll, so the Write box sits after the last event
+                // instead of staying pinned to the viewport bottom.
                 x: max(24px, (parent.width - min(920px, parent.width - 48px)) / 2);
                 y: 20px;
                 width: min(920px, parent.width - 48px);
                 height: parent.height - 40px;
-                for item[index] in root.conversation-items: Rectangle {
-                    height: item.kind == "event" ? 54px : 164px;
-                    background: transparent;
-                    if item.kind == "event": MaterialText {
-                        x: 20px;
-                        width: parent.width - 40px;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+                viewport-width: self.visible-width;
+                viewport-height: conversation-flow.preferred-height;
+
+                conversation-flow := VerticalLayout {
+                    width: conversation-scroll.visible-width;
+                    spacing: 16px;
+                    alignment: start;
+                    padding-bottom: 24px;
+
+                if root.conversation-items.length == 0: Rectangle {
+                    width: parent.width;
+                    height: 120px;
+                    MaterialText {
+                        width: parent.width;
                         height: parent.height;
-                        text: "●  " + item.author + "  " + item.body;
+                        text: "No conversation activity was returned by this provider.";
+                        horizontal-alignment: center;
                         vertical-alignment: center;
                         color: root.github-fg-muted;
-                        overflow: elide;
                     }
-                    if item.kind != "event": Rectangle {
-                        x: 20px;
-                        y: 8px;
-                        width: parent.width - 40px;
-                        height: parent.height - 16px;
+                }
+                if root.conversation-items.length > 0: ListView {
+                    width: parent.width;
+                    height: root.conversation-content-height * 1px;
+                    vertical-stretch: 0;
+                    horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
+                    vertical_scrollbar_policy: ScrollBarPolicy.always_off;
+                    for item[index] in root.conversation-items: Rectangle {
+                        private property <bool> is-card:
+                            item.kind == "description" || item.kind == "comment" || item.kind == "review";
+                        // GitHub's timeline rail is not the avatar axis. It sits
+                        // 16 px inside the card edge (x=52) and activity content
+                        // begins another 28 px to its right.
+                        private property <length> rail-x: 68px;
+                        private property <length> rail-before-end-y:
+                            self.is-card ? 6px : self.height / 2;
+                        private property <length> rail-after-start-y:
+                            self.is-card ? self.height - 6px : self.height / 2;
+                        // GitHub Primer Timeline: one continuous rail through
+                        // avatar centers. Row heights come from Rust so short
+                        // comments hug their text like GitHub.
+                        height: item.row-height * 1px;
+                        background: transparent;
+
+                        if item.connect-before: Rectangle {
+                            x: parent.rail-x - 1px;
+                            y: 0px;
+                            width: 2px;
+                            height: parent.rail-before-end-y;
+                            background: root.github-border-default;
+                        }
+                        if item.connect-after: Rectangle {
+                            x: parent.rail-x - 1px;
+                            y: parent.rail-after-start-y;
+                            width: 2px;
+                            height: parent.height - parent.rail-after-start-y;
+                            background: root.github-border-default;
+                        }
+
+                        if item.kind == "commits": Rectangle {
+                            x: 56px;
+                            y: (parent.height - 24px) / 2;
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 12px;
+                            background: root.github-bg-default;
+                            Image {
+                                x: 4px;
+                                y: 4px;
+                                width: 16px;
+                                height: 16px;
+                                source: @image-url("../../assets/icons/octicon-repo-push-16.svg");
+                                colorize: root.github-fg-muted;
+                            }
+                        }
+
+                        if item.kind == "commits": HorizontalLayout {
+                            x: 96px;
+                            width: parent.width - 96px;
+                            height: parent.height;
+                            spacing: 8px;
+                            cross-axis-alignment: center;
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: item.author;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: root.github-fg-default;
+                                vertical-alignment: center;
+                            }
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: item.body;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                                color: root.github-fg-muted;
+                                vertical-alignment: center;
+                            }
+                            if item.created-at != "": RelativeTimestamp {
+                                text: item.created-at;
+                                tooltip-text: item.created-at-tooltip;
+                                // Trailing free space after the label; avoids ListView clip.
+                                tooltip-after: true;
+                                foreground-color: root.github-fg-muted;
+                                label-font-size: 12px;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+
+                        if item.kind == "commit": Rectangle {
+                            // 12px badge centered on the 2px rail at x=20.
+                            x: 62px;
+                            y: (parent.height - 12px) / 2;
+                            width: 12px;
+                            height: 12px;
+                            background: root.github-bg-default;
+                            Image {
+                                width: parent.width;
+                                height: parent.height;
+                                source: @image-url("../../assets/icons/octicon-git-commit-16.svg");
+                                colorize: root.github-fg-muted;
+                            }
+                        }
+
+                        if item.kind == "commit": HorizontalLayout {
+                            x: 96px;
+                            width: parent.width - 96px;
+                            height: parent.height;
+                            spacing: 8px;
+                            cross-axis-alignment: center;
+                            ConversationAvatar {
+                                avatar-size: 20px;
+                                label-size: 9px;
+                                avatar: item.avatar;
+                                fallback-label: item.avatar-label;
+                            }
+                            MaterialText {
+                                horizontal-stretch: 1;
+                                text: item.body;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                                color: root.github-fg-default;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: item.state;
+                                font-family: "Menlo";
+                                font-size: 12px;
+                                color: root.github-fg-muted;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        if item.kind == "merged": Rectangle {
+                            x: 54px;
+                            y: (parent.height - 28px) / 2;
+                            width: 28px;
+                            height: 28px;
+                            border-radius: 14px;
+                            background: root.github-done-fg;
+                            Image {
+                                x: 6px;
+                                y: 6px;
+                                width: 16px;
+                                height: 16px;
+                                source: @image-url("../../assets/icons/octicon-git-merge-16.svg");
+                                colorize: #ffffff;
+                            }
+                        }
+
+                        if item.kind == "merged": HorizontalLayout {
+                            x: 96px;
+                            width: parent.width - 96px;
+                            height: parent.height;
+                            spacing: 8px;
+                            cross-axis-alignment: center;
+                            ConversationAvatar {
+                                avatar-size: 20px;
+                                label-size: 9px;
+                                avatar: item.avatar;
+                                fallback-label: item.avatar-label;
+                            }
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: item.author;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: root.github-fg-default;
+                                vertical-alignment: center;
+                            }
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: "merged commit";
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                                color: root.github-fg-muted;
+                                vertical-alignment: center;
+                            }
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: item.body;
+                                font-family: "Menlo";
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: root.github-fg-default;
+                                vertical-alignment: center;
+                            }
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: "into";
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                                color: root.github-fg-muted;
+                                vertical-alignment: center;
+                            }
+                            BranchLabel {
+                                text: item.state;
+                                background-color: root.github-accent-muted;
+                                foreground-color: AppState.effective-dark-mode ? #58a6ff : #0969da;
+                            }
+                            if item.created-at != "": RelativeTimestamp {
+                                text: item.created-at;
+                                tooltip-text: item.created-at-tooltip;
+                                tooltip-above: true;
+                                foreground-color: root.github-fg-muted;
+                                label-font-size: 12px;
+                            }
+                        }
+
+                        if item.kind == "review_summary": ConversationAvatar {
+                            x: 0px;
+                            y: 4px;
+                            avatar: item.avatar;
+                            fallback-label: item.avatar-label;
+                        }
+
+                        if item.kind == "review_summary": Rectangle {
+                            x: 56px;
+                            y: (parent.height - 24px) / 2;
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 12px;
+                            background: root.github-bg-default;
+                            Image {
+                                x: 4px;
+                                y: 4px;
+                                width: 16px;
+                                height: 16px;
+                                source: @image-url("../../assets/icons/octicon-eye-16.svg");
+                                colorize: root.github-fg-muted;
+                            }
+                        }
+
+                        if item.kind == "review_summary": HorizontalLayout {
+                            x: 96px;
+                            width: parent.width - 96px;
+                            height: parent.height;
+                            spacing: 7px;
+                            cross-axis-alignment: center;
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: item.author;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: root.github-fg-default;
+                            }
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: item.body;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                                color: root.github-fg-muted;
+                            }
+                            if item.created-at != "": RelativeTimestamp {
+                                text: item.created-at;
+                                tooltip-text: item.created-at-tooltip;
+                                foreground-color: root.github-fg-muted;
+                                label-font-size: 12px;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+
+                        if item.kind == "event": Rectangle {
+                            x: 54px;
+                            y: (parent.height - 28px) / 2;
+                            width: 28px;
+                            height: 28px;
+                            border-radius: 14px;
+                            background: root.github-bg-muted;
+                            border-width: 1px;
+                            border-color: root.github-border-default;
+                            MaterialText {
+                                width: parent.width;
+                                height: parent.height;
+                                text: "●";
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                color: root.github-fg-muted;
+                                font-size: 10px;
+                            }
+                        }
+
+                        if item.kind == "event": HorizontalLayout {
+                            x: 96px;
+                            width: parent.width - 96px;
+                            height: parent.height;
+                            spacing: 10px;
+                            cross-axis-alignment: center;
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: item.author;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: root.github-fg-default;
+                                vertical-alignment: center;
+                            }
+                            MaterialText {
+                                horizontal-stretch: 1;
+                                text: item.body;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                                color: root.github-fg-muted;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            if item.created-at != "": RelativeTimestamp {
+                                text: item.created-at;
+                                tooltip-text: item.created-at-tooltip;
+                                tooltip-align-right: true;
+                                tooltip-above: true;
+                                foreground-color: root.github-fg-muted;
+                                label-font-size: 12px;
+                            }
+                        }
+
+                        if self.is-card && item.kind != "review": ConversationAvatar {
+                            x: 0px;
+                            y: 6px;
+                            avatar: item.avatar;
+                            fallback-label: item.avatar-label;
+                        }
+
+                        if self.is-card: Rectangle {
+                            x: 52px;
+                            y: 6px;
+                            width: parent.width - 52px;
+                            height: parent.height - 12px;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: root.github-border-default;
+                            background: root.github-bg-default;
+                            clip: true;
+
+                            VerticalLayout {
+                                width: parent.width;
+                                height: parent.height;
+                                spacing: 0px;
+
+                                Rectangle {
+                                    width: parent.width;
+                                    height: 36px;
+                                    background: item.kind == "description" || item.kind == "review"
+                                        ? root.github-accent-muted
+                                        : root.github-bg-muted;
+                                    HorizontalLayout {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        spacing: 8px;
+                                        cross-axis-alignment: center;
+                                        MaterialText {
+                                            width: self.preferred-width;
+                                            text: item.author;
+                                            font-family: "Hiragino Sans GB";
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: root.github-fg-default;
+                                            vertical-alignment: center;
+                                        }
+                                        MaterialText {
+                                            width: self.preferred-width;
+                                            text: item.kind == "review" && item.state != ""
+                                                ? (item.state == "approved"
+                                                    ? "approved these changes"
+                                                    : (item.state == "changes_requested" || item.state == "rejected"
+                                                        ? "requested changes"
+                                                        : "left a comment"))
+                                                : "commented";
+                                            font-family: "Hiragino Sans GB";
+                                            font-size: 12px;
+                                            color: root.github-fg-muted;
+                                            vertical-alignment: center;
+                                        }
+                                        if item.kind != "review" && item.created-at != "": RelativeTimestamp {
+                                            text: item.created-at;
+                                            tooltip-text: item.created-at-tooltip;
+                                            // Trailing free space in the card header.
+                                            tooltip-after: true;
+                                            foreground-color: root.github-fg-muted;
+                                            label-font-size: 11px;
+                                        }
+                                        if item.kind == "review" && item.author-association == "AUTHOR": Rectangle {
+                                            width: 46px;
+                                            height: 22px;
+                                            border-radius: 11px;
+                                            border-width: 1px;
+                                            border-color: root.github-border-default;
+                                            background: transparent;
+                                            MaterialText {
+                                                width: parent.width;
+                                                height: parent.height;
+                                                text: "Author";
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                                font-size: 10px;
+                                                color: root.github-fg-muted;
+                                            }
+                                        }
+                                        Rectangle { horizontal-stretch: 1; }
+                                    }
+                                }
+
+                                if item.body == "": Rectangle {
+                                    width: parent.width;
+                                    height: 40px;
+                                    background: root.github-bg-default;
+                                    Text {
+                                        x: 14px;
+                                        y: 10px;
+                                        width: parent.width - 28px;
+                                        height: 20px;
+                                        text: "No description provided.";
+                                        wrap: word-wrap;
+                                        overflow: clip;
+                                        font-family: "Hiragino Sans GB";
+                                        font-size: 13px;
+                                        color: root.github-fg-default;
+                                        font-italic: true;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                if item.body != "": Rectangle {
+                                    width: parent.width;
+                                    vertical-stretch: 1;
+                                    background: root.github-bg-default;
+                                    Text {
+                                        x: 14px;
+                                        y: 12px;
+                                        width: parent.width - 28px;
+                                        height: parent.height - 24px;
+                                        text: item.body;
+                                        wrap: word-wrap;
+                                        overflow: clip;
+                                        font-family: "Hiragino Sans GB";
+                                        font-size: 13px;
+                                        color: root.github-fg-default;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // GitHub Conversation comment composer (plain text only; no Preview).
+                Rectangle {
+                    width: parent.width;
+                    height: 228px;
+                    vertical-stretch: 0;
+                    background: transparent;
+
+                    ConversationAvatar {
+                        x: 0px;
+                        y: 0px;
+                        avatar: AppState.user-avatar;
+                        fallback-label: "Y";
+                    }
+
+                    Rectangle {
+                        x: 52px;
+                        y: 0px;
+                        width: parent.width - 52px;
+                        height: parent.height;
                         border-radius: 6px;
                         border-width: 1px;
                         border-color: root.github-border-default;
                         background: root.github-bg-default;
                         clip: true;
+
                         VerticalLayout {
                             width: parent.width;
                             height: parent.height;
                             spacing: 0px;
+
+                            // Tab header: selected Write tab sits on the muted bar.
                             Rectangle {
                                 width: parent.width;
                                 height: 40px;
-                                background: index == 0 ? root.github-accent-muted : root.github-bg-muted;
-                                HorizontalLayout {
-                                    padding-left: 12px;
-                                    padding-right: 12px;
-                                    spacing: 8px;
-                                    MaterialText { text: item.author; font-size: 13px; font-weight: 600; color: root.github-fg-default; vertical-alignment: center; }
-                                    MaterialText { text: item.kind == "review" && item.state != "" ? item.state : (index == 0 ? "opened this pull request" : "commented"); font-size: 12px; color: root.github-fg-muted; vertical-alignment: center; }
-                                    Rectangle { horizontal-stretch: 1; }
-                                    MaterialText { text: item.created-at; font-size: 11px; color: root.github-fg-muted; vertical-alignment: center; overflow: elide; }
+                                background: root.github-bg-muted;
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    width: parent.width;
+                                    height: 1px;
+                                    background: root.github-border-default;
+                                }
+                                Rectangle {
+                                    x: 8px;
+                                    y: 8px;
+                                    width: 64px;
+                                    height: 33px;
+                                    border-top-left-radius: 6px;
+                                    border-top-right-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: root.github-border-default;
+                                    background: root.github-bg-default;
+                                    Rectangle {
+                                        x: 1px;
+                                        y: parent.height - 1px;
+                                        width: parent.width - 2px;
+                                        height: 2px;
+                                        background: root.github-bg-default;
+                                    }
+                                    MaterialText {
+                                        width: parent.width;
+                                        height: parent.height - 1px;
+                                        text: "Write";
+                                        font-family: "Hiragino Sans GB";
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: root.github-fg-default;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
                                 }
                             }
+
                             Rectangle {
                                 width: parent.width;
                                 vertical-stretch: 1;
+                                min-height: 120px;
                                 background: root.github-bg-default;
-                                Text {
-                                    x: 14px;
+                                Rectangle {
+                                    x: 12px;
                                     y: 12px;
-                                    width: parent.width - 28px;
-                                    height: parent.height - 24px;
-                                    text: item.body == "" ? "No description provided." : item.body;
-                                    wrap: word-wrap;
-                                    overflow: clip;
-                                    font-size: 13px;
-                                    color: root.github-fg-default;
+                                    width: parent.width - 24px;
+                                    height: parent.height - 16px;
+                                    border-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: conversation-comment-editor.has-focus
+                                        ? #0969da
+                                        : root.github-border-default;
+                                    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+                                    if root.conversation-comment-body == "" && !conversation-comment-editor.has-focus: MaterialText {
+                                        x: 12px;
+                                        y: 10px;
+                                        width: parent.width - 24px;
+                                        height: 20px;
+                                        text: "Leave a comment";
+                                        font-family: "Hiragino Sans GB";
+                                        font-size: 14px;
+                                        color: root.github-fg-muted;
+                                    }
+                                    conversation-comment-editor := TextInput {
+                                        x: 12px;
+                                        y: 8px;
+                                        width: parent.width - 24px;
+                                        height: parent.height - 16px;
+                                        text <=> root.conversation-comment-body;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                        color: root.github-fg-default;
+                                        font-size: 14px;
+                                        font-family: "Hiragino Sans GB";
+                                        enabled: root.can-comment && !root.action-loading;
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: parent.width;
+                                height: 52px;
+                                background: root.github-bg-default;
+                                Rectangle {
+                                    y: 0px;
+                                    width: parent.width;
+                                    height: 1px;
+                                    background: root.github-border-default;
+                                }
+                                MaterialText {
+                                    x: 12px;
+                                    y: 1px;
+                                    width: parent.width - 140px;
+                                    height: parent.height - 1px;
+                                    text: root.can-comment
+                                        ? "Plain text comments are supported."
+                                        : "Configure provider credentials to comment.";
+                                    font-family: "Hiragino Sans GB";
+                                    font-size: 12px;
+                                    color: root.github-fg-muted;
+                                    vertical-alignment: center;
+                                }
+                                GithubCommentButton {
+                                    x: parent.width - 108px;
+                                    y: 10px;
+                                    width: 96px;
+                                    height: 32px;
+                                    text: root.action-loading ? "Commenting…" : "Comment";
+                                    button-enabled: root.can-comment && !root.action-loading && root.conversation-comment-body != "";
+                                    tooltip-text: root.can-comment
+                                        ? (root.conversation-comment-body == ""
+                                            ? "Write a comment before submitting"
+                                            : "Add a comment on this pull request")
+                                        : "Configure provider credentials to comment";
+                                    clicked => {
+                                        root.pending-conversation-comment = root.conversation-comment-body;
+                                        root.submit-review("comment", root.conversation-comment-body);
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            if !root.conversation-loading && root.conversation-error == "" && root.conversation-items.length == 0: MaterialText {
-                width: parent.width;
-                height: parent.height;
-                text: "No conversation activity was returned by this provider.";
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                color: root.github-fg-muted;
             }
         }
 
@@ -2146,6 +2982,7 @@ export component PrReviewWorkspace inherits Rectangle {
                 text: "Loading commits…";
                 horizontal-alignment: center;
                 vertical-alignment: center;
+                font-family: "Hiragino Sans GB";
                 color: root.github-fg-muted;
             }
             if !root.commits-loading && root.commits-error != "": CenteredErrorState {
@@ -2222,6 +3059,26 @@ export component PrReviewWorkspace inherits Rectangle {
                         width: parent.width - 66px;
                         height: 72px;
                         background: transparent;
+
+                        // Hover fill stays inside the group border (GitHub:
+                        // bgColor-muted under the 1px frame, never over it).
+                        Rectangle {
+                            x: 1px;
+                            y: commit.group-start ? 1px : 0px;
+                            width: parent.width - 2px;
+                            height: parent.height
+                                - (commit.group-start ? 1px : 0px)
+                                - (commit.group-end ? 1px : 0px);
+                            background: commit-row-touch.has-hover ? root.github-bg-muted : transparent;
+                            border-top-left-radius: commit.group-start ? 5px : 0px;
+                            border-top-right-radius: commit.group-start ? 5px : 0px;
+                            border-bottom-left-radius: commit.group-end ? 5px : 0px;
+                            border-bottom-right-radius: commit.group-end ? 5px : 0px;
+                        }
+
+                        commit-row-touch := TouchArea {
+                            mouse-cursor: default;
+                        }
 
                         MaterialText {
                             x: 14px;
@@ -2303,6 +3160,7 @@ export component PrReviewWorkspace inherits Rectangle {
                 text: "Loading changed files…";
                 horizontal_alignment: center;
                 vertical_alignment: center;
+                font-family: "Hiragino Sans GB";
                 font_size: 14px;
                 color: MaterialPalette.on_surface_variant;
             }
@@ -2652,7 +3510,7 @@ export component PrReviewWorkspace inherits Rectangle {
                             vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
 
                             for line[line-index] in root.lines: Rectangle {
-                                width: max(diff-scroll.visible_width, 108px + root.max-code-columns * root.code-character-width);
+                                width: max(diff-scroll.visible_width, 116px + root.measured-code-width);
                                 height: line.kind == "hunk" ? root.hunk-line-height : root.code-line-height;
                                 background: line.kind == "addition"
                                     ? root.diff-addition-background
@@ -2981,6 +3839,7 @@ export component PrReviewWorkspace inherits Rectangle {
                             text: "Loading commits…";
                             horizontal-alignment: center;
                             vertical-alignment: center;
+                            font-family: "Hiragino Sans GB";
                             color: root.github-fg-muted;
                         }
                     }

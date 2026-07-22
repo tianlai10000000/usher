@@ -2,8 +2,13 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use slint::{Color, ComponentHandle, Model, ModelRc, ModelTracker, VecModel};
+use futures_util::{StreamExt, stream};
+use slint::{
+    Color, ComponentHandle, Image, Model, ModelRc, ModelTracker, Rgba8Pixel, SharedPixelBuffer,
+    VecModel,
+};
 
 use crate::git::{
     PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
@@ -12,6 +17,7 @@ use crate::git::{
     get_pull_request_conversation, get_pull_request_diff, get_repository_file_text,
     merge_pull_request, submit_pull_request_review, supports_ignore_whitespace,
 };
+use crate::http::{self, RequestOptions};
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{
     MainWindow, Route, WorkflowPrCommit, WorkflowPrConversationItem, WorkflowPrDiffFile,
@@ -27,6 +33,12 @@ const HIGHLIGHT_CACHE_CAPACITY: usize = 4;
 const SOURCE_CACHE_CAPACITY: usize = 3;
 const RANGE_DIFF_CACHE_CAPACITY: usize = 4;
 const VISIBLE_LINE_CACHE_CAPACITY: usize = 64;
+
+struct ConversationAvatarPixels {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
 
 #[derive(Debug)]
 struct BoundedCache<T> {
@@ -701,7 +713,10 @@ impl WorkflowPrReviewController {
                 commits.clear();
             }
             ui.set_workflow_pr_review_tab(2);
+            ui.set_workflow_pr_review_conversation_count(0);
+            ui.set_workflow_pr_review_commit_count(0);
             ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
+            ui.set_workflow_pr_review_conversation_content_height(0);
             ui.set_workflow_pr_review_commits(empty_commit_model());
             ui.set_workflow_pr_review_conversation_error("".into());
             ui.set_workflow_pr_review_commits_error("".into());
@@ -720,7 +735,6 @@ impl WorkflowPrReviewController {
         if let Ok(mut active_request) = self.active_request.lock() {
             *active_request = Some(request.clone());
         }
-
         let cached = self.cache.lock().ok().and_then(|guard| {
             guard
                 .as_ref()
@@ -886,6 +900,14 @@ impl WorkflowPrReviewController {
                 }
                 Err(error) => Err(error),
             };
+            let avatars = match &result {
+                Ok(items) => {
+                    tokio::time::timeout(Duration::from_secs(3), load_conversation_avatars(items))
+                        .await
+                        .unwrap_or_default()
+                }
+                Err(_) => HashMap::new(),
+            };
             let _ = slint::invoke_from_event_loop(move || {
                 if controller.conversation_sequence.load(Ordering::SeqCst) != sequence {
                     return;
@@ -896,7 +918,12 @@ impl WorkflowPrReviewController {
                 ui.set_workflow_pr_review_conversation_loading(false);
                 match result {
                     Ok(items) => {
-                        ui.set_workflow_pr_review_conversation_items(conversation_model(&items));
+                        ui.set_workflow_pr_review_conversation_content_height(
+                            conversation_content_height(&items),
+                        );
+                        ui.set_workflow_pr_review_conversation_items(conversation_model(
+                            &items, &avatars,
+                        ));
                         if let Ok(mut loaded) = controller.conversation_loaded.lock() {
                             *loaded = true;
                         }
@@ -968,6 +995,11 @@ impl WorkflowPrReviewController {
                 ui.set_workflow_pr_review_commits_loading(false);
                 match result {
                     Ok(commits) => {
+                        // Provider summaries normally populate the badge before
+                        // activation. Keep the successfully loaded list as a
+                        // final compatibility fallback for older enterprise APIs.
+                        let current = ui.get_workflow_pr_review_commit_count();
+                        ui.set_workflow_pr_review_commit_count(current.max(commits.len() as i32));
                         ui.set_workflow_pr_review_commits(commit_model(&commits));
                         if let Ok(mut stored) = controller.commits.lock() {
                             *stored = commits;
@@ -1266,6 +1298,10 @@ impl WorkflowPrReviewController {
                 match result {
                     Ok(()) => {
                         ui.set_workflow_pr_review_dialog_open(false);
+                        if action == PullRequestReviewAction::Comment {
+                            let count = ui.get_workflow_pr_review_conversation_count();
+                            ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
+                        }
                         ui.set_workflow_pr_remote_review_state(
                             match action {
                                 PullRequestReviewAction::Comment => "commented",
@@ -2112,7 +2148,12 @@ fn apply_review_header(ui: &MainWindow, request: &ReviewRequest) {
     ui.set_workflow_pr_review_author(request.author.clone().into());
     ui.set_workflow_pr_review_source_branch(request.source_branch.clone().into());
     ui.set_workflow_pr_review_target_branch(request.target_branch.clone().into());
-    ui.set_workflow_pr_review_updated_at(request.updated_at.clone().into());
+    ui.set_workflow_pr_review_updated_at(
+        super::pr_list::format_github_relative_time(request.updated_at.as_str()).into(),
+    );
+    ui.set_workflow_pr_review_updated_at_tooltip(
+        super::pr_list::format_github_absolute_tooltip(request.updated_at.as_str()).into(),
+    );
     ui.set_workflow_pr_review_ignore_whitespace(request.ignore_whitespace);
 }
 
@@ -2121,7 +2162,14 @@ fn apply_detail_summary(ui: &MainWindow, detail: &PullRequestDiffDetail) {
     ui.set_workflow_pr_review_files(ModelRc::new(VecModel::from(files)));
     ui.set_workflow_pr_review_added_lines(detail.added_lines as i32);
     ui.set_workflow_pr_review_removed_lines(detail.removed_lines as i32);
-    ui.set_workflow_pr_review_commit_count(detail.commit_count as i32);
+    // Prefer the larger of the summary field and any already-visible badge so a
+    // later range compare with a missing total cannot wipe the Commits counter.
+    let current_commits = ui.get_workflow_pr_review_commit_count();
+    ui.set_workflow_pr_review_commit_count(current_commits.max(detail.commit_count as i32));
+    if let Some(conversation_count) = detail.conversation_count {
+        let current = ui.get_workflow_pr_review_conversation_count();
+        ui.set_workflow_pr_review_conversation_count(current.max(conversation_count as i32));
+    }
     ui.set_workflow_pr_review_base_sha(detail.base_sha.clone().into());
     ui.set_workflow_pr_review_head_sha(detail.head_sha.clone().into());
     ui.set_workflow_pr_review_too_many_commits(detail.too_many_commits);
@@ -2134,6 +2182,7 @@ fn clear_selected_file(ui: &MainWindow) {
     ui.set_workflow_pr_review_selected_file_added_lines(0);
     ui.set_workflow_pr_review_selected_file_removed_lines(0);
     ui.set_workflow_pr_review_max_code_columns(0);
+    ui.set_workflow_pr_review_longest_code_line("".into());
     ui.set_workflow_pr_review_lines(empty_line_model());
     ui.set_workflow_pr_review_code_loading(false);
     ui.set_workflow_pr_review_context_expanded(false);
@@ -2157,7 +2206,18 @@ fn apply_highlighted_file(
         .map(|line| line.columns)
         .max()
         .unwrap_or(0);
+    let longest_code_line = highlighted
+        .iter()
+        .max_by_key(|line| line.columns)
+        .map(|line| {
+            line.tokens
+                .iter()
+                .map(|token| token.text.as_str())
+                .collect::<String>()
+        })
+        .unwrap_or_default();
     ui.set_workflow_pr_review_max_code_columns(max_columns as i32);
+    ui.set_workflow_pr_review_longest_code_line(longest_code_line.into());
     ui.set_workflow_pr_review_lines(ModelRc::new(LazyPrDiffLineModel::new(
         file.clone(),
         highlighted,
@@ -2582,29 +2642,173 @@ fn empty_conversation_model() -> ModelRc<WorkflowPrConversationItem> {
     ModelRc::new(VecModel::from(Vec::<WorkflowPrConversationItem>::new()))
 }
 
+fn conversation_row_height(item: &PullRequestConversationItem) -> i32 {
+    match item.kind.as_str() {
+        "commit" => 36,
+        "commits" | "event" | "merged" | "review_summary" => 48,
+        _ => conversation_card_row_height(item.body.as_str()),
+    }
+}
+
+fn conversation_content_height(items: &[PullRequestConversationItem]) -> i32 {
+    items.iter().map(conversation_row_height).sum()
+}
+
+/// GitHub Conversation cards hug their text: header + padded body lines, not a
+/// fixed tall viewport. Long bodies are capped so ListView row heights stay bounded.
+fn conversation_card_row_height(body: &str) -> i32 {
+    const OUTER_MARGIN: i32 = 12;
+    const HEADER: i32 = 36;
+    const EMPTY_BODY: i32 = 40;
+    const BODY_PADDING: i32 = 24;
+    const LINE_HEIGHT: i32 = 20;
+    const WRAP_COLUMNS: usize = 72;
+    const MAX_LINES: i32 = 12;
+
+    if body.trim().is_empty() {
+        return OUTER_MARGIN + HEADER + EMPTY_BODY;
+    }
+
+    let mut lines = 0i32;
+    for paragraph in body.lines() {
+        let chars = paragraph.chars().count().max(1);
+        lines += chars.div_ceil(WRAP_COLUMNS) as i32;
+    }
+    let lines = lines.clamp(1, MAX_LINES);
+    OUTER_MARGIN + HEADER + BODY_PADDING + lines * LINE_HEIGHT
+}
+
+async fn load_conversation_avatars(
+    items: &[PullRequestConversationItem],
+) -> HashMap<String, ConversationAvatarPixels> {
+    let urls = items
+        .iter()
+        .filter_map(|item| {
+            let url = item.avatar_url.trim();
+            (!url.is_empty()).then(|| url.to_string())
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .take(32);
+
+    stream::iter(urls)
+        .map(|url| async move {
+            let image = load_conversation_avatar(url.as_str()).await?;
+            Some((url, image))
+        })
+        .buffer_unordered(6)
+        .filter_map(async move |item| item)
+        .collect()
+        .await
+}
+
+async fn load_conversation_avatar(url: &str) -> Option<ConversationAvatarPixels> {
+    const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
+
+    let mut response = http::send(
+        http::get(url),
+        RequestOptions::new("Load pull request conversation avatar"),
+    )
+    .await
+    .ok()?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_AVATAR_BYTES as u64)
+    {
+        return None;
+    }
+
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if bytes.len() + chunk.len() > MAX_AVATAR_BYTES {
+            return None;
+        }
+        bytes.extend_from_slice(chunk.as_ref());
+    }
+
+    let decoded = image::load_from_memory(bytes.as_slice()).ok()?;
+    let resized = decoded
+        .resize_to_fill(80, 80, image::imageops::FilterType::Lanczos3)
+        .to_rgba8();
+    Some(ConversationAvatarPixels {
+        width: resized.width(),
+        height: resized.height(),
+        rgba: resized.into_raw(),
+    })
+}
+
 fn empty_commit_model() -> ModelRc<WorkflowPrCommit> {
     ModelRc::new(VecModel::from(Vec::<WorkflowPrCommit>::new()))
 }
 
 fn conversation_model(
     items: &[PullRequestConversationItem],
+    avatars: &HashMap<String, ConversationAvatarPixels>,
 ) -> ModelRc<WorkflowPrConversationItem> {
     ModelRc::new(VecModel::from(
         items
             .iter()
-            .map(|item| WorkflowPrConversationItem {
+            .enumerate()
+            .map(|(index, item)| WorkflowPrConversationItem {
                 id: item.id.clone().into(),
                 kind: item.kind.clone().into(),
                 author: item.author.clone().into(),
+                avatar: avatars
+                    .get(item.avatar_url.as_str())
+                    .map(|avatar| {
+                        Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                            avatar.rgba.as_slice(),
+                            avatar.width,
+                            avatar.height,
+                        ))
+                    })
+                    .unwrap_or_default(),
+                avatar_label: item
+                    .author
+                    .chars()
+                    .next()
+                    .map(|character| character.to_uppercase().collect::<String>())
+                    .unwrap_or_else(|| "?".to_string())
+                    .into(),
+                author_association: item.author_association.clone().into(),
                 body: item.body.clone().into(),
-                created_at: super::pr_list::format_updated_at_in_utc_plus_eight(
+                created_at: super::pr_list::format_github_relative_time(item.created_at.as_str())
+                    .into(),
+                created_at_tooltip: super::pr_list::format_github_absolute_tooltip(
                     item.created_at.as_str(),
                 )
                 .into(),
                 state: item.state.clone().into(),
+                connect_before: conversation_items_connect(
+                    index
+                        .checked_sub(1)
+                        .and_then(|previous| items.get(previous)),
+                    Some(item),
+                ),
+                connect_after: conversation_items_connect(Some(item), items.get(index + 1)),
+                row_height: conversation_row_height(item),
             })
             .collect::<Vec<_>>(),
     ))
+}
+
+fn conversation_items_connect(
+    before: Option<&PullRequestConversationItem>,
+    after: Option<&PullRequestConversationItem>,
+) -> bool {
+    let (Some(before), Some(after)) = (before, after) else {
+        return false;
+    };
+    if before.kind == "merged" {
+        return false;
+    }
+    if after.kind == "review_summary" {
+        // Adjacent GitHub reviews are separate summary/card pairs, but their
+        // visual timeline remains continuous between the preceding card and
+        // the next summary marker.
+        return before.kind == "review";
+    }
+    before.kind == "review_summary" && after.kind == "review" || before.kind != "review_summary"
 }
 
 fn commit_model(commits: &[PullRequestCommit]) -> ModelRc<WorkflowPrCommit> {
@@ -2768,14 +2972,17 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_selected_file_added_lines(0);
     ui.set_workflow_pr_review_selected_file_removed_lines(0);
     ui.set_workflow_pr_review_max_code_columns(0);
+    ui.set_workflow_pr_review_longest_code_line("".into());
     ui.set_workflow_pr_review_added_lines(0);
     ui.set_workflow_pr_review_removed_lines(0);
     ui.set_workflow_pr_review_commit_count(0);
+    ui.set_workflow_pr_review_conversation_count(0);
     ui.set_workflow_pr_review_base_sha("".into());
     ui.set_workflow_pr_review_head_sha("".into());
     ui.set_workflow_pr_review_too_many_commits(false);
     ui.set_workflow_pr_review_tab(2);
     ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
+    ui.set_workflow_pr_review_conversation_content_height(0);
     ui.set_workflow_pr_review_commits(empty_commit_model());
     ui.set_workflow_pr_review_conversation_loading(false);
     ui.set_workflow_pr_review_commits_loading(false);
@@ -2802,12 +3009,14 @@ mod tests {
 
     use super::{
         BoundedCache, LazyPrDiffLineModel, RANGE_DIFF_CACHE_CAPACITY, ReviewCache, ReviewRequest,
-        VISIBLE_LINE_CACHE_CAPACITY, build_tree_items, commit_range_label, expand_all_hunk_context,
-        expand_hunk_context, format_commit_short_date, full_source_file, hunk_is_expandable,
-        range_covers_all_commits, restore_original_diff,
+        VISIBLE_LINE_CACHE_CAPACITY, build_tree_items, commit_range_label,
+        conversation_card_row_height, conversation_content_height, conversation_items_connect,
+        expand_all_hunk_context, expand_hunk_context, format_commit_short_date, full_source_file,
+        hunk_is_expandable, range_covers_all_commits, restore_original_diff,
     };
     use crate::git::{
-        PullRequestCommit, PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine,
+        PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail, PullRequestDiffFile,
+        PullRequestDiffLine,
     };
     use crate::project::ProjectRepositoryMetadata;
     use crate::workflow::syntax_highlight::{HighlightedLine, HighlightedToken};
@@ -2825,12 +3034,69 @@ mod tests {
     }
 
     #[test]
+    fn measures_conversation_rows_without_viewport_filler_space() {
+        let item = |kind: &str, body: &str| PullRequestConversationItem {
+            id: kind.to_string(),
+            kind: kind.to_string(),
+            author: "alice".to_string(),
+            avatar_url: String::new(),
+            author_association: String::new(),
+            body: body.to_string(),
+            created_at: String::new(),
+            state: String::new(),
+        };
+        let items = vec![
+            item("description", ""),
+            item("commits", "added 2 commits"),
+            item("commit", "first"),
+            item("commit", "second"),
+            item("merged", "abcdef0"),
+            item("event", "closed this pull request"),
+        ];
+
+        assert_eq!(conversation_content_height(&items), 304);
+        assert_eq!(conversation_card_row_height("请先解决冲突"), 92);
+        assert_eq!(conversation_card_row_height(""), 88);
+    }
+
+    #[test]
+    fn connects_adjacent_review_pairs_without_crossing_terminal_merge() {
+        let item = |kind: &str| PullRequestConversationItem {
+            id: kind.to_string(),
+            kind: kind.to_string(),
+            author: "alice".to_string(),
+            avatar_url: String::new(),
+            author_association: String::new(),
+            body: String::new(),
+            created_at: String::new(),
+            state: String::new(),
+        };
+        let summary = item("review_summary");
+        let review = item("review");
+        let next_summary = item("review_summary");
+        let next_review = item("review");
+        let merged = item("merged");
+
+        assert!(conversation_items_connect(Some(&summary), Some(&review)));
+        assert!(conversation_items_connect(
+            Some(&review),
+            Some(&next_summary)
+        ));
+        assert!(conversation_items_connect(
+            Some(&next_summary),
+            Some(&next_review)
+        ));
+        assert!(!conversation_items_connect(Some(&merged), Some(&summary)));
+    }
+
+    #[test]
     fn labels_single_and_multi_commit_ranges() {
         let commit = |sha: &str| PullRequestCommit {
             sha: sha.to_string(),
             title: String::new(),
             message: String::new(),
             author: String::new(),
+            avatar_url: String::new(),
             authored_at: String::new(),
             verified: false,
         };
@@ -2860,6 +3126,7 @@ mod tests {
             added_lines: 2,
             removed_lines: 0,
             commit_count: 2,
+            conversation_count: Some(0),
             base_sha: "base".to_string(),
             head_sha: "head".to_string(),
             start_sha: "start".to_string(),

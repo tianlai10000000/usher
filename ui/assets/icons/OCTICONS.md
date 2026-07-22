@@ -21,6 +21,10 @@ overflow menu.
 navigation tabs.
 `octicon-git-pull-request-16.svg` is the upstream-style 16 px pull-request
 status icon used by the PR review summary badge.
+`octicon-arrow-left-16.svg` is the unchanged Primer back-navigation icon used
+by the PR review header.
+`octicon-repo-push-16.svg` is downloaded unchanged from Primer Octicons and is
+used by the Conversation timeline's `added N commits` batch record.
 `octicon-stack-16.svg` and `octicon-x-16.svg` are the upstream controls used
 by the PR commit-range selector.
 `octicon-alert-16.svg` is the upstream warning mark used by GitHub-style

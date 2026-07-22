@@ -33,7 +33,7 @@ Linux may build with a suitable Slint backend, but it is not currently covered b
 - Platform build dependencies required by Slint/winit.
 - Optional: `cargo-bundle` and `create-dmg` for macOS packaging.
 
-Production builds enable only FemtoVG, which keeps renderer selection deterministic and avoids linking Skia into the normal application. Skia remains available as an opt-in diagnostic build.
+Production builds enable only FemtoVG, which keeps renderer selection deterministic and avoids linking Skia or Slint live-preview support into the normal application. Skia and live preview remain explicit development options.
 
 ## Quick start
 
@@ -50,6 +50,16 @@ cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
 ```
+
+In-process Slint live preview is development-only and excluded from normal and
+release builds. Enable it explicitly when needed:
+
+```sh
+SLINT_LIVE_PREVIEW=1 cargo run --features live-preview
+```
+
+On macOS this opt-in path uses the documented local Slint watcher patch under
+`vendor/i-slint-live-preview`; default and release builds do not select it.
 
 The full `cargo test --locked` command currently exposes a pre-existing failing doctest in `src/logger/debug_logger.rs`; the library unit tests pass.
 

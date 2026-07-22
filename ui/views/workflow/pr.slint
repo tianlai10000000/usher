@@ -296,7 +296,7 @@ export component PrFlow {
 
                 if root.pr-loading: Rectangle {
                     height: 112px;
-                    MaterialText { width: parent.width; height: parent.height; text: "Loading pull requests…"; horizontal_alignment: center; vertical_alignment: center; font_size: 13px; color: MaterialPalette.on_surface_variant; }
+                    MaterialText { width: parent.width; height: parent.height; text: "Loading pull requests…"; horizontal_alignment: center; vertical_alignment: center; font-family: "Hiragino Sans GB"; font_size: 13px; color: MaterialPalette.on_surface_variant; }
                 }
 
                 if !root.pr-loading && root.pr-error != "": PrListStatePanel {

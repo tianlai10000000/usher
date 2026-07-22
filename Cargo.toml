@@ -17,6 +17,9 @@ default = ["renderer-femtovg"]
 renderer-femtovg = ["slint/renderer-femtovg"]
 renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu"]
 renderer-skia = ["slint/renderer-skia"]
+# Development-only in-process UI hot reload. Production builds must leave this
+# feature disabled so the live-preview interpreter and watcher are not built.
+live-preview = ["slint/live-preview"]
 
 [[bin]]
 path = "src/main.rs"
@@ -24,12 +27,10 @@ name = "usher"
 
 [dependencies]
 # "backend-android-activity-06",
-# 注意：live-preview feature 已移除以减小 release 构建体积
-# 如需开发时使用 live-preview，可以临时添加 features = ["live-preview"]
 # 生产构建只启用 FemtoVG/OpenGL。Skia 与 FemtoVG/WGPU 仅用于显式诊断构建：
 #   SLINT_BACKEND=winit-skia cargo run --no-default-features --features renderer-skia
 #   SLINT_BACKEND=winit-femtovg-wgpu cargo run --no-default-features --features renderer-femtovg-wgpu
-slint = { version = "1.17.1", default-features = false, features = ["live-preview", "std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
+slint = { version = "1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
@@ -105,3 +106,8 @@ incremental = false  # Disable incremental compilation for release
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[patch.crates-io]
+# Temporary upstream override for the opt-in development live preview only.
+# See vendor/i-slint-live-preview/USHER_PATCHES.md.
+i-slint-live-preview = { path = "vendor/i-slint-live-preview" }

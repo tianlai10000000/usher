@@ -13,8 +13,10 @@ use super::{
     PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
     PullRequestDiffFile, PullRequestItem, PullRequestMergeMethod, PullRequestPage,
     PullRequestReadiness, PullRequestReadinessKind, PullRequestReviewAction, PullRequestState,
-    RepoLocator, RepoType, configured_api_base_url, configured_token,
-    is_configured_enterprise_host, parse_unified_diff, percent_encode_path, unavailable_diff_file,
+    RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url, configured_token,
+    conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
+    conversation_system_event_item, finalize_conversation_timeline, is_configured_enterprise_host,
+    parse_unified_diff, percent_encode_path, unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -202,10 +204,28 @@ pub(super) async fn get_pull_request_diff(
         }
     }
     let files = values.iter().map(decode_diff_file).collect::<Vec<_>>();
+    let commit_count = match commit_count_from_detail(&detail) {
+        Some(count) => count,
+        None => count_pull_request_commits(locator, pull_request_number)
+            .await
+            .unwrap_or(0),
+    };
+    // GitHub's PR `comments` field counts issue comments but excludes reviews
+    // submitted through `/pulls/{number}/reviews` (including COMMENT reviews).
+    // Count that collection with one item per page so both kinds contribute to
+    // the Conversation badge without loading the full timeline.
+    let conversation_count = conversation_count_from_detail(&detail)
+        .unwrap_or(0)
+        .saturating_add(
+            count_pull_request_reviews(locator, pull_request_number)
+                .await
+                .unwrap_or(0),
+        );
     Ok(PullRequestDiffDetail {
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
-        commit_count: value_u32(&detail, "commits").unwrap_or(0),
+        commit_count,
+        conversation_count: Some(conversation_count),
         base_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
         head_sha: nested_string(&detail, "head", "sha").unwrap_or_default(),
         start_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
@@ -238,6 +258,7 @@ pub(super) async fn get_commit_range_diff(
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
         commit_count,
+        conversation_count: None,
         base_sha: base_sha.to_string(),
         head_sha: head_sha.to_string(),
         start_sha: base_sha.to_string(),
@@ -393,50 +414,70 @@ pub(super) async fn get_pull_request_conversation(
         Some(pull_request_number),
         None,
     );
-    let detail: Value = http::send_json(
-        authenticated_request(locator, detail_endpoint),
-        RequestOptions::new("Load GitHub pull request conversation header"),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-
     let comments_endpoint = repository_endpoint(
         endpoints::PULL_REQUEST_ISSUE_COMMENTS_URL,
         locator,
         Some(pull_request_number),
         None,
     );
-    let comments = load_github_pages(
-        locator,
-        comments_endpoint,
-        "Load GitHub pull request comments",
-    )
-    .await?;
-
     let reviews_endpoint = repository_endpoint(
         endpoints::PULL_REQUEST_REVIEWS_URL,
         locator,
         Some(pull_request_number),
         None,
     );
-    let reviews = load_github_pages(
+    let timeline_endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_ISSUE_TIMELINE_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+
+    let detail_future = async {
+        http::send_json(
+            authenticated_request(locator, detail_endpoint),
+            RequestOptions::new("Load GitHub pull request conversation header"),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    };
+    let comments_future = load_github_pages(
+        locator,
+        comments_endpoint,
+        "Load GitHub pull request comments",
+    );
+    let reviews_future = load_github_pages(
         locator,
         reviews_endpoint,
         "Load GitHub pull request reviews",
-    )
-    .await?;
+    );
+    let timeline_future = load_github_pages(
+        locator,
+        timeline_endpoint,
+        "Load GitHub pull request timeline",
+    );
+    let (detail, comments, reviews, timeline) = tokio::try_join!(
+        detail_future,
+        comments_future,
+        reviews_future,
+        timeline_future
+    )?;
 
-    let mut items = Vec::new();
-    items.push(PullRequestConversationItem {
+    let description = PullRequestConversationItem {
         id: format!("description-{pull_request_number}"),
         kind: "description".to_string(),
         author: nested_string(&detail, "user", "login")
             .unwrap_or_else(|| "Unknown author".to_string()),
+        avatar_url: nested_string(&detail, "user", "avatar_url").unwrap_or_default(),
+        author_association: string_field(&detail, "author_association").unwrap_or_default(),
         body: string_field(&detail, "body").unwrap_or_default(),
         created_at: string_field(&detail, "created_at").unwrap_or_default(),
         state: string_field(&detail, "state").unwrap_or_default(),
-    });
-    items.extend(
+    };
+    let target_branch = nested_string(&detail, "base", "ref").unwrap_or_default();
+
+    let mut activity = Vec::new();
+    activity.extend(
         comments
             .into_iter()
             .map(|value| PullRequestConversationItem {
@@ -444,31 +485,168 @@ pub(super) async fn get_pull_request_conversation(
                 kind: "comment".to_string(),
                 author: nested_string(&value, "user", "login")
                     .unwrap_or_else(|| "Unknown author".to_string()),
+                avatar_url: nested_string(&value, "user", "avatar_url").unwrap_or_default(),
+                author_association: string_field(&value, "author_association").unwrap_or_default(),
                 body: string_field(&value, "body").unwrap_or_default(),
                 created_at: string_field(&value, "created_at").unwrap_or_default(),
                 state: String::new(),
             }),
     );
-    items.extend(reviews.into_iter().filter_map(|value| {
+    activity.extend(reviews.into_iter().flat_map(|value| {
         let body = string_field(&value, "body").unwrap_or_default();
-        let state = string_field(&value, "state").unwrap_or_default();
+        let state = string_field(&value, "state")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
         if body.trim().is_empty() && state.trim().is_empty() {
-            return None;
+            return Vec::new();
         }
-        Some(PullRequestConversationItem {
-            id: string_field(&value, "id").unwrap_or_default(),
-            kind: "review".to_string(),
-            author: nested_string(&value, "user", "login")
-                .unwrap_or_else(|| "Unknown reviewer".to_string()),
-            body,
-            created_at: string_field(&value, "submitted_at").unwrap_or_default(),
-            state,
-        })
+        let id = string_field(&value, "id").unwrap_or_default();
+        let author = nested_string(&value, "user", "login")
+            .unwrap_or_else(|| "Unknown reviewer".to_string());
+        let avatar_url = nested_string(&value, "user", "avatar_url").unwrap_or_default();
+        let author_association = string_field(&value, "author_association").unwrap_or_default();
+        let created_at = string_field(&value, "submitted_at").unwrap_or_default();
+        let mut items = vec![PullRequestConversationItem {
+            id: format!("review-summary-{id}"),
+            kind: "review_summary".to_string(),
+            author: author.clone(),
+            avatar_url: avatar_url.clone(),
+            author_association: author_association.clone(),
+            body: github_review_action(state.as_str()).to_string(),
+            created_at: created_at.clone(),
+            state: state.clone(),
+        }];
+        if !body.trim().is_empty() {
+            items.push(PullRequestConversationItem {
+                id,
+                kind: "review".to_string(),
+                author,
+                avatar_url,
+                author_association,
+                body,
+                created_at,
+                state,
+            });
+        }
+        items
     }));
-    let description = items.remove(0);
-    items.sort_by(|left, right| left.created_at.cmp(&right.created_at));
-    items.insert(0, description);
-    Ok(items)
+    activity.extend(decode_github_timeline_activity(
+        &timeline,
+        target_branch.as_str(),
+    ));
+    Ok(finalize_conversation_timeline(description, activity))
+}
+
+fn decode_github_timeline_activity(
+    timeline: &[Value],
+    target_branch: &str,
+) -> Vec<PullRequestConversationItem> {
+    let mut items = Vec::new();
+    let mut pending_commits = Vec::<PullRequestCommit>::new();
+    let flush_commits = |pending: &mut Vec<PullRequestCommit>,
+                         out: &mut Vec<PullRequestConversationItem>| {
+        if pending.is_empty() {
+            return;
+        }
+        out.extend(conversation_commit_batch_items(pending));
+        pending.clear();
+    };
+
+    let has_merged_event = timeline
+        .iter()
+        .any(|event| string_field(event, "event").as_deref() == Some("merged"));
+    for event in timeline {
+        let event_kind = string_field(event, "event").unwrap_or_default();
+        match event_kind.as_str() {
+            "committed" => {
+                let message = string_field(event, "message").unwrap_or_default();
+                pending_commits.push(PullRequestCommit {
+                    sha: string_field(event, "sha").unwrap_or_default(),
+                    title: message.lines().next().unwrap_or_default().to_string(),
+                    message,
+                    author: nested_string(event, "author", "name")
+                        .or_else(|| nested_string(event, "committer", "name"))
+                        .unwrap_or_else(|| "Unknown author".to_string()),
+                    avatar_url: nested_string(event, "author", "avatar_url")
+                        .or_else(|| nested_string(event, "committer", "avatar_url"))
+                        .unwrap_or_default(),
+                    authored_at: nested_string(event, "author", "date")
+                        .or_else(|| nested_string(event, "committer", "date"))
+                        .unwrap_or_default(),
+                    verified: event
+                        .get("verification")
+                        .and_then(|verification| verification.get("verified"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                });
+            }
+            "merged" => {
+                flush_commits(&mut pending_commits, &mut items);
+                let author = nested_string(event, "actor", "login")
+                    .unwrap_or_else(|| "Unknown author".to_string());
+                let sha = string_field(event, "commit_id").unwrap_or_default();
+                let created_at = string_field(event, "created_at").unwrap_or_default();
+                if !sha.trim().is_empty() {
+                    items.push(conversation_merged_item(
+                        author.as_str(),
+                        sha.as_str(),
+                        if target_branch.trim().is_empty() {
+                            "main"
+                        } else {
+                            target_branch
+                        },
+                        created_at.as_str(),
+                    ));
+                }
+            }
+            "closed"
+            | "reopened"
+            | "head_ref_force_pushed"
+            | "ready_for_review"
+            | "convert_to_draft" => {
+                // GitHub emits both `merged` and `closed` for a merged PR but
+                // renders only the semantically richer merge event.
+                if event_kind == "closed" && has_merged_event {
+                    continue;
+                }
+                flush_commits(&mut pending_commits, &mut items);
+                let author = nested_string(event, "actor", "login")
+                    .unwrap_or_else(|| "Unknown author".to_string());
+                let created_at = string_field(event, "created_at").unwrap_or_default();
+                let body = match event_kind.as_str() {
+                    "closed" => "closed this pull request",
+                    "reopened" => "reopened this pull request",
+                    "head_ref_force_pushed" => "force-pushed the branch",
+                    "ready_for_review" => "marked this pull request as ready for review",
+                    "convert_to_draft" => "converted this pull request to draft",
+                    _ => "updated this pull request",
+                };
+                items.push(conversation_system_event_item(
+                    format!(
+                        "event-{}-{}",
+                        event_kind,
+                        string_field(event, "id").unwrap_or_else(|| created_at.clone())
+                    ),
+                    author.as_str(),
+                    body,
+                    created_at.as_str(),
+                ));
+            }
+            // Comments/reviews are loaded from dedicated endpoints to keep bodies complete.
+            _ => flush_commits(&mut pending_commits, &mut items),
+        }
+    }
+    flush_commits(&mut pending_commits, &mut items);
+    items
+}
+
+fn github_review_action(state: &str) -> &'static str {
+    match state {
+        "approved" => "approved these changes",
+        "changes_requested" => "requested changes",
+        "dismissed" => "had a review dismissed",
+        _ => "commented",
+    }
 }
 
 pub(super) async fn get_pull_request_commits(
@@ -483,6 +661,80 @@ pub(super) async fn get_pull_request_commits(
     );
     let values = load_github_pages(locator, endpoint, "Load GitHub pull request commits").await?;
     Ok(values.iter().map(decode_commit).collect())
+}
+
+/// One-page commit probe for the Commits tab badge. Never loads the full list.
+async fn count_pull_request_commits(
+    locator: &RepoLocator,
+    pull_request_number: &str,
+) -> Option<u32> {
+    let endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_COMMITS_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let response = http::send(
+        authenticated_request(locator, endpoint).query(&[("page", "1"), ("per_page", "1")]),
+        RequestOptions::new("Count GitHub pull request commits"),
+    )
+    .await
+    .ok()?;
+    let headers = response.headers().clone();
+    let values: Vec<Value> = response.json().await.ok()?;
+    single_item_page_total(&headers, values.len())
+}
+
+/// One-page review probe for the Conversation tab badge. GitHub PR detail does
+/// not include reviews in its `comments` total.
+async fn count_pull_request_reviews(
+    locator: &RepoLocator,
+    pull_request_number: &str,
+) -> Option<u32> {
+    let endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_REVIEWS_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let response = http::send(
+        authenticated_request(locator, endpoint).query(&[("page", "1"), ("per_page", "1")]),
+        RequestOptions::new("Count GitHub pull request reviews"),
+    )
+    .await
+    .ok()?;
+    let headers = response.headers().clone();
+    let values: Vec<Value> = response.json().await.ok()?;
+    single_item_page_total(&headers, values.len())
+}
+
+fn single_item_page_total(headers: &reqwest::header::HeaderMap, item_count: usize) -> Option<u32> {
+    if let Some(total) = link_rel_last_page(headers) {
+        return Some(total);
+    }
+    match item_count {
+        0 => Some(0),
+        // No `rel=last` means a single page; with per_page=1 this is exactly one item.
+        1 => Some(1),
+        _ => None,
+    }
+}
+
+fn link_rel_last_page(headers: &reqwest::header::HeaderMap) -> Option<u32> {
+    let link = headers.get(reqwest::header::LINK)?.to_str().ok()?;
+    for part in link.split(',') {
+        let part = part.trim();
+        if !(part.contains("rel=\"last\"") || part.contains("rel='last'")) {
+            continue;
+        }
+        let start = part.find("page=")? + "page=".len();
+        let end = part[start..]
+            .find(|ch: char| !ch.is_ascii_digit())
+            .map(|offset| start + offset)
+            .unwrap_or(part.len());
+        return part[start..end].parse().ok();
+    }
+    None
 }
 
 fn decode_commit(value: &Value) -> PullRequestCommit {
@@ -501,6 +753,9 @@ fn decode_commit(value: &Value) -> PullRequestCommit {
                     .and_then(|commit| nested_string(commit, "author", "name"))
             })
             .unwrap_or_else(|| "Unknown author".to_string()),
+        avatar_url: nested_string(value, "author", "avatar_url")
+            .or_else(|| nested_string(value, "committer", "avatar_url"))
+            .unwrap_or_default(),
         authored_at: value
             .get("commit")
             .and_then(|commit| nested_string(commit, "author", "date"))
@@ -862,9 +1117,26 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        aggregate_review_state, decode_commit, github_merge_readiness, pull_request_branches,
+        aggregate_review_state, decode_commit, decode_github_timeline_activity,
+        github_merge_readiness, github_review_action, link_rel_last_page, pull_request_branches,
+        single_item_page_total,
     };
     use crate::git::PullRequestReadinessKind;
+
+    #[test]
+    fn parses_github_link_rel_last_page_for_commit_badge_counts() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::LINK,
+            reqwest::header::HeaderValue::from_static(
+                r#"<https://api.github.com/repos/o/r/pulls/1/commits?page=2>; rel="next", <https://api.github.com/repos/o/r/pulls/1/commits?page=14>; rel="last""#,
+            ),
+        );
+        assert_eq!(link_rel_last_page(&headers), Some(14));
+        assert_eq!(single_item_page_total(&headers, 1), Some(14));
+        assert_eq!(single_item_page_total(&Default::default(), 0), Some(0));
+        assert_eq!(single_item_page_total(&Default::default(), 1), Some(1));
+    }
 
     #[test]
     fn reads_head_and_base_refs_from_a_pull_request_detail() {
@@ -883,7 +1155,10 @@ mod tests {
     fn decodes_github_pull_request_commit() {
         let commit = decode_commit(&json!({
             "sha": "1234567890abcdef",
-            "author": { "login": "octocat" },
+            "author": {
+                "login": "octocat",
+                "avatar_url": "https://avatars.example.test/octocat"
+            },
             "commit": {
                 "message": "Improve PR navigation\n\nKeep list state.",
                 "author": { "name": "Octo Cat", "date": "2026-07-20T10:00:00Z" },
@@ -893,6 +1168,7 @@ mod tests {
         assert_eq!(commit.sha, "1234567890abcdef");
         assert_eq!(commit.title, "Improve PR navigation");
         assert_eq!(commit.author, "octocat");
+        assert_eq!(commit.avatar_url, "https://avatars.example.test/octocat");
         assert!(commit.verified);
     }
 
@@ -919,6 +1195,38 @@ mod tests {
             json!({ "user": { "login": "bob" }, "state": "DISMISSED" }),
         ];
         assert_eq!(aggregate_review_state(&reviews), "approved");
+    }
+
+    #[test]
+    fn maps_github_review_states_to_timeline_actions() {
+        assert_eq!(github_review_action("commented"), "commented");
+        assert_eq!(github_review_action("approved"), "approved these changes");
+        assert_eq!(
+            github_review_action("changes_requested"),
+            "requested changes"
+        );
+    }
+
+    #[test]
+    fn merged_timeline_suppresses_the_redundant_closed_event() {
+        let timeline = vec![
+            json!({
+                "id": 1,
+                "event": "merged",
+                "actor": { "login": "alice" },
+                "commit_id": "1234567890abcdef",
+                "created_at": "2026-07-21T00:00:00Z"
+            }),
+            json!({
+                "id": 2,
+                "event": "closed",
+                "actor": { "login": "alice" },
+                "created_at": "2026-07-21T00:00:01Z"
+            }),
+        ];
+        let items = decode_github_timeline_activity(&timeline, "main");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, "merged");
     }
 
     #[test]

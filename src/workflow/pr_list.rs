@@ -1,4 +1,4 @@
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, Datelike, FixedOffset, Timelike};
 
 use crate::git::{PullRequestItem, PullRequestState, get_pull_requests};
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
@@ -263,16 +263,128 @@ fn to_slint_item(item: &PullRequestItem) -> WorkflowPullRequestItem {
 }
 
 pub(super) fn format_updated_at_in_utc_plus_eight(value: &str) -> String {
-    let utc_plus_eight =
-        FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
-    DateTime::parse_from_rfc3339(value)
-        .map(|timestamp| {
+    match parse_provider_timestamp(value) {
+        Some(timestamp) => {
+            let utc_plus_eight =
+                FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
             timestamp
                 .with_timezone(&utc_plus_eight)
                 .format("%Y-%m-%d %H:%M:%S %:z")
                 .to_string()
+        }
+        None => value.to_string(),
+    }
+}
+
+/// GitHub-style relative label shown in the PR review workspace.
+///
+/// Examples: `just now`, `3 hours ago`, `yesterday`, `on Jul 15`, `on Jul 15, 2025`.
+pub(super) fn format_github_relative_time(value: &str) -> String {
+    format_github_relative_time_at(value, chrono::Utc::now())
+}
+
+pub(super) fn format_github_absolute_tooltip(value: &str) -> String {
+    match parse_provider_timestamp(value) {
+        Some(timestamp) => {
+            let utc_plus_eight =
+                FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
+            let local = timestamp.with_timezone(&utc_plus_eight);
+            let hour24 = local.hour();
+            let (hour12, meridiem) = match hour24 {
+                0 => (12, "AM"),
+                1..=11 => (hour24, "AM"),
+                12 => (12, "PM"),
+                _ => (hour24 - 12, "PM"),
+            };
+            format!(
+                "{} {}, {}, {}:{:02} {} GMT+8",
+                local.format("%b"),
+                local.day(),
+                local.year(),
+                hour12,
+                local.minute(),
+                meridiem
+            )
+        }
+        None => value.to_string(),
+    }
+}
+
+fn format_github_relative_time_at(value: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+    let Some(timestamp) = parse_provider_timestamp(value) else {
+        return value.to_string();
+    };
+    let instant = timestamp.with_timezone(&chrono::Utc);
+    let delta = now.signed_duration_since(instant);
+    let seconds = delta.num_seconds();
+    if seconds < 0 {
+        return format_github_absolute_tooltip(value);
+    }
+    if seconds < 60 {
+        return "just now".to_string();
+    }
+    let minutes = delta.num_minutes();
+    if minutes < 60 {
+        return if minutes == 1 {
+            "1 minute ago".to_string()
+        } else {
+            format!("{minutes} minutes ago")
+        };
+    }
+    let hours = delta.num_hours();
+    if hours < 24 {
+        return if hours == 1 {
+            "1 hour ago".to_string()
+        } else {
+            format!("{hours} hours ago")
+        };
+    }
+    let days = delta.num_days();
+    if days == 1 {
+        return "yesterday".to_string();
+    }
+    if days < 7 {
+        return format!("{days} days ago");
+    }
+    if days < 28 {
+        let weeks = days / 7;
+        return if weeks == 1 {
+            "last week".to_string()
+        } else {
+            format!("{weeks} weeks ago")
+        };
+    }
+    if days < 365 {
+        let months = (days / 30).max(1);
+        return if months == 1 {
+            "last month".to_string()
+        } else {
+            format!("{months} months ago")
+        };
+    }
+    let years = (days / 365).max(1);
+    if years == 1 {
+        "last year".to_string()
+    } else {
+        format!("{years} years ago")
+    }
+}
+
+fn parse_provider_timestamp(value: &str) -> Option<DateTime<FixedOffset>> {
+    let trimmed = value.trim();
+    DateTime::parse_from_rfc3339(trimmed)
+        .ok()
+        .or_else(|| DateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S %:z").ok())
+        .or_else(|| DateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S %z").ok())
+        .or_else(|| {
+            // Internal Gitee enterprise diffs sometimes omit the offset.
+            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S")
+                .ok()
+                .and_then(|naive| {
+                    FixedOffset::east_opt(8 * 60 * 60)
+                        .and_then(|offset| naive.and_local_timezone(offset).single())
+                })
         })
-        .unwrap_or_else(|_| value.to_string())
 }
 
 fn clear_pages(visited_pages: &Arc<Mutex<HashMap<u32, Vec<PullRequestItem>>>>) {
@@ -297,7 +409,12 @@ fn reset_ui(ui: &MainWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::format_updated_at_in_utc_plus_eight;
+    use chrono::{TimeZone, Utc};
+
+    use super::{
+        format_github_absolute_tooltip, format_github_relative_time_at,
+        format_updated_at_in_utc_plus_eight,
+    };
 
     #[test]
     fn formats_provider_timestamps_in_utc_plus_eight() {
@@ -312,6 +429,39 @@ mod tests {
         assert_eq!(
             format_updated_at_in_utc_plus_eight("unavailable"),
             "unavailable"
+        );
+    }
+
+    #[test]
+    fn formats_github_style_relative_and_tooltip_times() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 21, 6, 0, 0).unwrap();
+        assert_eq!(
+            format_github_relative_time_at("2026-07-21T05:59:20Z", now),
+            "just now"
+        );
+        assert_eq!(
+            format_github_relative_time_at("2026-07-21T03:00:00Z", now),
+            "3 hours ago"
+        );
+        assert_eq!(
+            format_github_relative_time_at("2026-07-20T06:00:00Z", now),
+            "yesterday"
+        );
+        assert_eq!(
+            format_github_relative_time_at("2026-07-15 13:26:44 +08:00", now),
+            "6 days ago"
+        );
+        assert_eq!(
+            format_github_relative_time_at("2026-03-15T05:26:44Z", now),
+            "4 months ago"
+        );
+        assert_eq!(
+            format_github_relative_time_at("2025-03-15T05:26:44Z", now),
+            "last year"
+        );
+        assert_eq!(
+            format_github_absolute_tooltip("2026-07-15T05:26:44Z"),
+            "Jul 15, 2026, 1:26 PM GMT+8"
         );
     }
 }
