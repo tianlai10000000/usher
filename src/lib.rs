@@ -1230,6 +1230,16 @@ fn ui() -> Result<MainWindow> {
         }
     });
 
+    let router_for_back = router.clone();
+    let app_for_back = app.as_weak();
+    app.on_navigate_back(move || {
+        if let Some(state) = router_for_back.back() {
+            if let Some(ui) = app_for_back.upgrade() {
+                ui.invoke_chat_route_visible_changed(state.chat_route_visible);
+            }
+        }
+    });
+
     // ========= Theme ========= //
     let app_weak = app.as_weak();
     AppState::get(&app).on_toggle_theme(move |mode| {

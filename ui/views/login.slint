@@ -3,7 +3,7 @@ import { Route } from "../route/routeMap.slint";
 
 export component Login {
     callback navigate(Route);
-    in property <Route> previous-route: Route.Home;
+    callback back();
     
     Rectangle {
         width: parent.width;
@@ -25,7 +25,7 @@ export component Login {
                 text: "Route to Back Page";
 
                 clicked => {
-                    root.navigate(root.previous-route);
+                    root.back();
                 }
             }
 

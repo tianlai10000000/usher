@@ -57,6 +57,11 @@ export struct WorkflowPrConversationItem {
     avatar-label: string,
     author-association: string,
     body: string,
+    // Commit rows only: body lines after the title for ellipsis expansion.
+    message-body: string,
+    message-body-height: int,
+    // Independent of other rows; multiple commits may stay expanded.
+    message-expanded: bool,
     created-at: string,
     created-at-tooltip: string,
     state: string,
@@ -108,7 +113,15 @@ export struct WorkflowPrCommit {
     short-sha: string,
     title: string,
     message: string,
+    message-body: string,
+    message-body-height: int,
+    // Independent of other rows; multiple commits may stay expanded.
+    message-expanded: bool,
+    // Sum of expand layout extras for this UTC+08:00 date group (group-start only).
+    group-expand-extra: int,
     author: string,
+    avatar: image,
+    avatar-label: string,
     authored-at: string,
     date-label: string,
     short-date-label: string,
@@ -295,15 +308,18 @@ component RelativeTimestamp inherits Rectangle {
     in property <string> tooltip-text;
     in property <color> foreground-color;
     in property <length> label-font-size: 13px;
+    // Match the surrounding author/meta row; 26px is for header chips.
+    in property <length> label-height: 26px;
     in property <bool> tooltip-align-right: false;
     in property <bool> tooltip-above: false;
     // Place the tip to the left of the label (stays inside clipped headers).
     in property <bool> tooltip-beside: false;
     // Place the tip to the right of the label (into trailing free space).
     in property <bool> tooltip-after: false;
+    out property <bool> has-hover: time-touch.has-hover;
 
     width: max(1px, time-label.preferred-width);
-    height: 26px;
+    height: root.label-height;
     background: transparent;
     clip: false;
 
@@ -989,27 +1005,31 @@ component MergeReadinessBadge inherits Rectangle {
 }
 
 component PrReviewBackButton inherits Rectangle {
+    // Parents host the tip as a later, high-z sibling. A nested tip still loses
+    // to following header chrome (summary Open badge, readiness strip) even when
+    // this root has a higher z—overflow is not elevated with the button box.
+    in property <bool> embed-tooltip: true;
+    in property <string> tooltip-text: "Back to pull requests";
+    out property <bool> has-hover: back-touch.has-hover;
     callback clicked();
 
-    // Sit above the neighboring readiness badge / title row so the hover tip
-    // is not covered by later siblings in the compact or wide header.
     z: 2;
-    width: 32px;
+    width: 36px;
     height: 36px;
     background: transparent;
+    clip: false;
 
     button-surface := Rectangle {
-        y: 2px;
-        width: 32px;
-        height: 32px;
-        border-radius: 6px;
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
         background: back-touch.has-hover
             ? MaterialPalette.surface_container_high
             : transparent;
 
         Image {
-            x: 8px;
-            y: 8px;
+            x: 10px;
+            y: 10px;
             width: 16px;
             height: 16px;
             source: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
@@ -1018,17 +1038,17 @@ component PrReviewBackButton inherits Rectangle {
     }
 
     back-touch := TouchArea {
-        y: button-surface.y;
         width: button-surface.width;
         height: button-surface.height;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 
-    if back-touch.has-hover: ToolTip {
+    // Optional embedded tip for callers that already elevate their own host.
+    if root.embed-tooltip && back-touch.has-hover: ToolTip {
         x: 0px;
         y: root.height + 4px;
-        text: "Back to pull requests";
+        text: root.tooltip-text;
     }
 }
 
@@ -1206,6 +1226,58 @@ component TreeIndentGuides inherits Rectangle {
     if root.depth > 5: Rectangle { x: 105px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
 }
 
+// GitHub Commits kebab: bordered muted pill; accent fill + icon when expanded.
+// Clicks must only toggle the message body — never open commit detail.
+component CommitMessageToggleButton inherits Rectangle {
+    in property <bool> expanded: false;
+    out property <bool> has-hover: toggle-touch.has-hover;
+    callback clicked();
+
+    private property <color> accent-fg: AppState.effective-dark-mode ? #58a6ff : #0969da;
+    private property <color> accent-bg: AppState.effective-dark-mode ? #388bfd1a : #ddf4ff;
+    private property <color> accent-bg-hover: AppState.effective-dark-mode ? #388bfd33 : #b6e3ff;
+    private property <color> accent-border: AppState.effective-dark-mode ? #388bfd66 : #54aeff66;
+    private property <color> idle-fg: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    private property <color> idle-border: AppState.effective-dark-mode ? #3d444d : #d0d7de;
+    private property <color> idle-bg: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+    private property <color> idle-bg-hover: AppState.effective-dark-mode ? #656c7633 : #eaeef2;
+
+    // Above sibling title/row hit targets in the commit row.
+    z: 2;
+    width: 28px;
+    height: 20px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.expanded ? root.accent-border : root.idle-border;
+    // Expanded = Primer accent-muted selected chip (GitHub commits list).
+    background: root.expanded
+        ? (toggle-touch.has-hover ? root.accent-bg-hover : root.accent-bg)
+        : (toggle-touch.has-hover ? root.idle-bg-hover : root.idle-bg);
+
+    Image {
+        // 12px Octicon in the 20px chip matches GitHub's compact control.
+        x: (parent.width - 12px) / 2;
+        y: (parent.height - 12px) / 2;
+        width: 12px;
+        height: 12px;
+        source: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
+        image-fit: contain;
+        colorize: root.expanded ? root.accent-fg : root.idle-fg;
+    }
+    toggle-touch := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    if toggle-touch.has-hover: ToolTip {
+        y: -self.height - 4px;
+        text: root.expanded ? "Hide commit description" : "Show commit description";
+    }
+}
+
 component FileToolbarButton inherits Rectangle {
     in property <image> icon-source;
     in property <bool> button-enabled: true;
@@ -1213,6 +1285,7 @@ component FileToolbarButton inherits Rectangle {
     in property <string> tooltip-text;
     in property <bool> tooltip-align-right: false;
     in property <bool> tooltip-above: false;
+    out property <bool> has-hover: button-touch.has-hover;
     callback clicked();
 
     width: 30px;
@@ -1752,6 +1825,7 @@ export component PrReviewWorkspace inherits Rectangle {
     in property <string> head-sha;
     in property <bool> too-many-commits: false;
     in-out property <int> selected-tab: 2;
+    in property <string> back-label: "Back to pull requests";
     in property <[WorkflowPrConversationItem]> conversation-items: [];
     in property <int> conversation-content-height: 0;
     in property <[WorkflowPrCommit]> commits: [];
@@ -1819,6 +1893,20 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <length> code-font-size: 13px;
     private property <length> code-line-height: 22px;
     private property <length> hunk-line-height: 26px;
+    // GitHub Commits tab: one shared card per UTC+08:00 date group.
+    // Match Primer Box-row density (~16px vertical padding) and the gap
+    // under "Commits on …" before the bordered card.
+    private property <length> commit-tab-row-height: 72px;
+    private property <length> commit-tab-group-header-height: 44px;
+    private property <length> commit-tab-content-x: 16px;
+    private property <length> commit-tab-content-y: 12px;
+    private property <length> commit-tab-card-radius: 6px;
+    // Expanded: title band + body + author footer (avatar). Collapsed is 72px.
+    private property <length> commit-tab-title-band: 36px;
+    private property <length> commit-tab-author-band: 28px;
+    private property <length> commit-tab-body-footer-gap: 8px;
+    // Sum of expanded Conversation commit body heights (multi-expand).
+    in property <int> expanded-commit-body-height: 0;
     private property <length> code-character-width: 7.8px;
     private property <length> measured-code-width:
         max(root.max-code-columns * root.code-character-width, longest-code-line-measure.preferred-width);
@@ -1833,6 +1921,7 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <color> github-danger-fg: AppState.effective-dark-mode ? #f85149 : #d1242f;
     private property <color> github-attention-fg: AppState.effective-dark-mode ? #d29922 : #9a6700;
     private property <color> github-done-fg: AppState.effective-dark-mode ? #ab7df8 : #8250df;
+    private property <color> github-accent-fg: AppState.effective-dark-mode ? #58a6ff : #0969da;
     private property <color> github-accent-muted: AppState.effective-dark-mode ? #388bfd1a : #ddf4ff;
     private property <color> diff-addition-background: AppState.effective-dark-mode ? #2ea04326 : #dafbe1;
     private property <color> diff-addition-gutter-background: AppState.effective-dark-mode ? #3fb9504d : #aceebb;
@@ -1849,25 +1938,29 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <bool> remove-source-branch: false;
     private property <int> draft-range-start: -1;
     private property <int> draft-range-end: -1;
+    // Back tip is hosted on the header layer (not nested in the button) so the
+    // summary Open badge and readiness strip cannot cover it.
+    private property <bool> back-button-hovered: false;
+    private property <length> back-button-size: 36px;
     private property <length> stable-layout-width: root.width;
     private property <length> stable-layout-height: root.height;
     private property <bool> compact-title-wraps:
         root.stable-layout-width - 48px < compact-title-measure.preferred-width;
     private property <bool> compact-summary-wraps:
         root.stable-layout-width - 48px < compact-summary-metrics.inline-width;
-    // Wide header column: Primer back icon(32) + actions(640) +
+    // Wide header column: Primer back icon(36) + actions(640) +
     // padding(48) + two 16px gaps.
     private property <bool> wide-title-wraps:
-        root.stable-layout-width - 752px < compact-title-measure.preferred-width;
+        root.stable-layout-width - 756px < compact-title-measure.preferred-width;
     private property <bool> wide-summary-wraps:
-        root.stable-layout-width - 752px < compact-summary-metrics.inline-width;
+        root.stable-layout-width - 756px < compact-summary-metrics.inline-width;
     // Estimate wrapped line count from the single-line preferred width. Do not
     // use Text.preferred-height for the visible title: it can stay on the
     // single-line metric and let the summary row cover later title lines.
     private property <length> compact-title-avail-width: max(1px, root.stable-layout-width - 48px);
     private property <int> compact-title-line-count: !root.compact-title-wraps ? 1
         : (compact-title-measure.preferred-width <= root.compact-title-avail-width * 2 ? 2 : 3);
-    private property <length> wide-title-avail-width: max(1px, root.stable-layout-width - 752px);
+    private property <length> wide-title-avail-width: max(1px, root.stable-layout-width - 756px);
     private property <int> wide-title-line-count: !root.wide-title-wraps ? 1
         : (compact-title-measure.preferred-width <= root.wide-title-avail-width * 2 ? 2 : 3);
     // ~30px per line for 22px Hiragino; 52px was short enough to clip "#N".
@@ -1880,10 +1973,11 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <length> wide-title-height-extra: root.wide-title-line-count == 1 ? 0px
         : (root.wide-title-line-count == 2 ? 36px : 64px);
 
-    callback close();
+    callback back();
     callback select-tab(int);
     callback ensure-commits();
     callback apply-commit-range(int, int);
+    callback open-commit(string);
     callback select-file(int);
     callback select-relative-file(int);
     callback reload(bool);
@@ -1901,6 +1995,8 @@ export component PrReviewWorkspace inherits Rectangle {
     callback copy-commit-sha(string);
     callback copy-source-branch(string);
     callback view-file();
+    // Toggle one commit message body; expansions are independent (not exclusive).
+    callback toggle-commit-message(string);
 
     function toggle-draft-commit(index: int) {
         if root.draft-range-start < 0 || root.draft-range-end < 0 {
@@ -2042,7 +2138,14 @@ export component PrReviewWorkspace inherits Rectangle {
                 // leave Merged/Review/Merge stuck beside the back link.
                 cross-axis-alignment: start;
                 PrReviewBackButton {
-                    clicked => { root.close(); }
+                    // Tip is painted on the header layer below so Open/summary
+                    // chrome cannot cover it; keep position under the icon.
+                    embed-tooltip: false;
+                    tooltip-text: root.back-label;
+                    changed has-hover => {
+                        root.back-button-hovered = self.has-hover;
+                    }
+                    clicked => { root.back(); }
                 }
 
                 Rectangle {
@@ -2119,11 +2222,19 @@ export component PrReviewWorkspace inherits Rectangle {
             if root.stable-layout-width < 1500px: Rectangle {
                 width: parent.width;
                 height: parent.height;
+                clip: false;
 
-                PrReviewBackButton {
+                compact-back := PrReviewBackButton {
                     x: 24px;
                     y: 2px;
-                    clicked => { root.close(); }
+                    // Tip is painted on the header layer below so Open/summary
+                    // chrome cannot cover it; keep position under the icon.
+                    embed-tooltip: false;
+                    tooltip-text: root.back-label;
+                    changed has-hover => {
+                        root.back-button-hovered = self.has-hover;
+                    }
+                    clicked => { root.back(); }
                 }
                 compact-title := Text {
                     x: 24px;
@@ -2187,6 +2298,18 @@ export component PrReviewWorkspace inherits Rectangle {
                     review => { root.review-dialog-open = true; }
                     merge => { root.merge-dialog-open = true; }
                 }
+            }
+
+            // Header-layer tip: same below-icon placement, but declared last with
+            // a high z so summary/readiness siblings cannot occlude it. Do not
+            // change Material ToolTip or other feature tips.
+            if root.back-button-hovered: ToolTip {
+                z: 200;
+                x: 24px;
+                y: root.stable-layout-width >= 1500px
+                    ? 16px + root.back-button-size + 4px
+                    : 2px + root.back-button-size + 4px;
+                text: root.back-label;
             }
         }
 
@@ -2363,26 +2486,44 @@ export component PrReviewWorkspace inherits Rectangle {
                 }
                 if root.conversation-items.length > 0: ListView {
                     width: parent.width;
-                    height: root.conversation-content-height * 1px;
+                    height: root.conversation-content-height * 1px
+                        + root.expanded-commit-body-height * 1px;
                     vertical-stretch: 0;
                     horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
                     vertical_scrollbar_policy: ScrollBarPolicy.always_off;
                     for item[index] in root.conversation-items: Rectangle {
                         private property <bool> is-card:
                             item.kind == "description" || item.kind == "comment" || item.kind == "review";
+                        private property <bool> commit-expanded:
+                            item.kind == "commit" && item.message-expanded;
                         // GitHub's timeline rail is not the avatar axis. It sits
                         // 16 px inside the card edge (x=52) and activity content
                         // begins another 28 px to its right.
                         private property <length> rail-x: 68px;
+                        private property <length> activity-anchor-y:
+                            item.kind == "commit" ? item.row-height * 1px / 2 : self.height / 2;
                         private property <length> rail-before-end-y:
-                            self.is-card ? 6px : self.height / 2;
+                            self.is-card ? 6px : self.activity-anchor-y;
                         private property <length> rail-after-start-y:
-                            self.is-card ? self.height - 6px : self.height / 2;
-                        // GitHub Primer Timeline: one continuous rail through
-                        // avatar centers. Row heights come from Rust so short
-                        // comments hug their text like GitHub.
-                        height: item.row-height * 1px;
+                            self.is-card ? self.height - 6px : self.activity-anchor-y;
+                        // Hug the wrapped body; keep a small gap before the next
+                        // timeline row (Rust message-body-height over-estimates).
+                        private property <length> commit-body-extra:
+                            self.commit-expanded && item.message-body != ""
+                                ? conv-commit-body-measure.preferred-height + 8px
+                                : 0px;
+                        height: item.row-height * 1px + self.commit-body-extra;
                         background: transparent;
+
+                        // Same wrap metrics as the visible expanded body.
+                        conv-commit-body-measure := Text {
+                            visible: false;
+                            width: parent.width - 168px;
+                            text: item.message-body;
+                            font-family: root.code-font-family;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
 
                         if item.connect-before: Rectangle {
                             x: parent.rail-x - 1px;
@@ -2451,9 +2592,10 @@ export component PrReviewWorkspace inherits Rectangle {
                         }
 
                         if item.kind == "commit": Rectangle {
-                            // 12px badge centered on the 2px rail at x=20.
+                            // 12px badge centered on the rail and the collapsed
+                            // title band, not the expanded message body.
                             x: 62px;
-                            y: (parent.height - 12px) / 2;
+                            y: (item.row-height * 1px - 12px) / 2;
                             width: 12px;
                             height: 12px;
                             background: root.github-bg-default;
@@ -2465,35 +2607,99 @@ export component PrReviewWorkspace inherits Rectangle {
                             }
                         }
 
-                        if item.kind == "commit": HorizontalLayout {
+                        if item.kind == "commit": Rectangle {
                             x: 96px;
+                            y: 0px;
                             width: parent.width - 96px;
-                            height: parent.height;
-                            spacing: 8px;
-                            cross-axis-alignment: center;
+                            height: item.row-height * 1px;
+                            background: transparent;
+                            private property <length> title-max-width:
+                                self.width - 28px - 6px - 18px - 8px - 72px;
+                            private property <length> title-width:
+                                min(conv-commit-title-measure.preferred-width, self.title-max-width);
+
                             ConversationAvatar {
+                                x: 0px;
+                                y: (parent.height - self.height) / 2;
                                 avatar-size: 20px;
                                 label-size: 9px;
                                 avatar: item.avatar;
                                 fallback-label: item.avatar-label;
                             }
-                            MaterialText {
-                                horizontal-stretch: 1;
+                            Text {
+                                x: 28px;
+                                y: (parent.height - 22px) / 2;
+                                width: parent.title-width;
+                                height: 22px;
                                 text: item.body;
                                 font-family: "Hiragino Sans GB";
                                 font-size: 13px;
-                                color: root.github-fg-default;
+                                color: conv-commit-title-touch.has-hover ? root.github-accent-fg : root.github-fg-default;
+                                horizontal-alignment: left;
                                 vertical-alignment: center;
                                 overflow: elide;
                             }
+                            if conv-commit-title-touch.has-hover: Rectangle {
+                                x: 28px;
+                                y: (parent.height - 22px) / 2 + 20px;
+                                width: parent.title-width;
+                                height: 1px;
+                                background: root.github-accent-fg;
+                            }
+                            conv-commit-title-measure := Text {
+                                visible: false;
+                                text: item.body;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 13px;
+                            }
+                            conv-commit-title-touch := TouchArea {
+                                x: 28px;
+                                y: (parent.height - 22px) / 2;
+                                width: parent.title-width;
+                                height: 22px;
+                                mouse-cursor: pointer;
+                                clicked => { root.open-commit(item.id); }
+                            }
+                            if item.message-body != "": CommitMessageToggleButton {
+                                x: 28px + parent.title-width + 6px;
+                                y: (parent.height - self.height) / 2;
+                                expanded: item.message-expanded;
+                                clicked => { root.toggle-commit-message(item.id); }
+                            }
                             MaterialText {
-                                width: self.preferred-width;
+                                x: parent.width - 72px;
+                                width: 72px;
+                                height: parent.height;
                                 text: item.state;
                                 font-family: "Menlo";
                                 font-size: 12px;
-                                color: root.github-fg-muted;
+                                color: conv-commit-sha-touch.has-hover ? root.github-accent-fg : root.github-fg-muted;
+                                horizontal-alignment: right;
                                 vertical-alignment: center;
                             }
+                            conv-commit-sha-touch := TouchArea {
+                                x: parent.width - 72px;
+                                width: 72px;
+                                height: parent.height;
+                                mouse-cursor: pointer;
+                                clicked => { root.open-commit(item.id); }
+                            }
+                        }
+                        if item.kind == "commit" && item.message-expanded && item.message-body != "": Text {
+                            // GitHub's expanded message is a preformatted block
+                            // aligned 28 px after the timeline rail; the title
+                            // stays indented by its compact author avatar.
+                            x: 96px;
+                            y: item.row-height * 1px;
+                            width: parent.width - 168px;
+                            height: self.preferred-height;
+                            text: item.message-body;
+                            font-family: root.code-font-family;
+                            font-size: 12px;
+                            color: root.github-fg-muted;
+                            horizontal-alignment: left;
+                            vertical-alignment: top;
+                            wrap: word-wrap;
                         }
 
                         if item.kind == "merged": Rectangle {
@@ -2621,6 +2827,8 @@ export component PrReviewWorkspace inherits Rectangle {
                             if item.created-at != "": RelativeTimestamp {
                                 text: item.created-at;
                                 tooltip-text: item.created-at-tooltip;
+                                // Below tip is clipped by the following review card.
+                                tooltip-above: true;
                                 foreground-color: root.github-fg-muted;
                                 label-font-size: 12px;
                             }
@@ -2999,19 +3207,56 @@ export component PrReviewWorkspace inherits Rectangle {
                 y: 20px;
                 width: min(980px, parent.width - 48px);
                 height: parent.height - 40px;
-                for commit in root.commits: Rectangle {
-                    height: commit.group-start ? 114px : 72px;
+                    for commit in root.commits: commit-item := Rectangle {
+                    private property <bool> commit-expanded: commit.message-expanded;
+                    // Prefer measured wrap height so expanded rows hug body text
+                    // (no blank band above the author footer). Multiple rows may
+                    // stay expanded independently.
+                    private property <length> title-max-width: commit.message-body != ""
+                        ? (parent.width - 66px) - 220px - 36px
+                        : (parent.width - 66px) - 220px;
+                    private property <length> title-block-height:
+                        max(20px, commit-item-title-measure.preferred-height);
+                    private property <length> title-extra:
+                        max(0px, self.title-block-height - 20px);
+                    private property <length> measured-body-height:
+                        !self.commit-expanded || commit.message-body == ""
+                            ? 0px
+                            : commit-tab-body-measure.preferred-height;
+                    // Title wrap grows collapsed and expanded rows; body height
+                    // only applies while expanded.
+                    private property <length> expand-extra: self.title-extra
+                        + (self.commit-expanded
+                            ? self.measured-body-height
+                                + root.commit-tab-title-band
+                                + root.commit-tab-body-footer-gap
+                                + root.commit-tab-author-band
+                                - root.commit-tab-row-height
+                            : 0px);
+                    height: (commit.group-start
+                        ? root.commit-tab-group-header-height + root.commit-tab-row-height
+                        : root.commit-tab-row-height) + self.expand-extra;
                     background: transparent;
+                    commit-item-title-measure := Text {
+                        visible: false;
+                        width: commit-item.title-max-width;
+                        text: commit.title;
+                        font-family: "Hiragino Sans GB";
+                        font-size: 14px;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                    }
                     Rectangle {
                         x: 20px;
-                        y: commit.group-start ? 34px : 0px;
+                        y: commit.group-start ? root.commit-tab-group-header-height : 0px;
                         width: 2px;
-                        height: parent.height - (commit.group-start ? 34px : 0px);
+                        height: parent.height - (commit.group-start ? root.commit-tab-group-header-height : 0px);
                         background: root.github-border-default;
                     }
                     if commit.group-start: Rectangle {
                         x: 12px;
-                        y: 13px;
+                        // Center the timeline badge in the inter-card header gap.
+                        y: (root.commit-tab-group-header-height - self.height) / 2;
                         width: 18px;
                         height: 18px;
                         background: root.github-bg-default;
@@ -3027,87 +3272,289 @@ export component PrReviewWorkspace inherits Rectangle {
                     }
                     if commit.group-start: MaterialText {
                         x: 48px;
-                        y: 7px;
+                        // Same vertical center as the badge so the date label
+                        // sits in the middle of the gap between cards.
+                        y: (root.commit-tab-group-header-height - self.height) / 2;
                         width: parent.width - 66px;
-                        height: 28px;
+                        height: 24px;
                         text: "Commits on " + commit.date-label;
                         vertical-alignment: center;
                         font-size: 14px;
                         font-weight: 600;
                         color: root.github-fg-muted;
                     }
-                    if commit.group-start: Rectangle {
+                    // Per-row card chrome so multi-expand preferred-heights stay
+                    // bordered without a precomputed group-expand-extra sum.
+                    // Use the Rectangle border + radii (Primer medium 6px) so
+                    // corners are not squared off by full-height edge strokes.
+                    // Non-start rows overlap the previous bottom border by 1px
+                    // to keep a single separator between commits.
+                    Rectangle {
                         x: 48px;
-                        y: 42px;
+                        y: commit.group-start
+                            ? root.commit-tab-group-header-height
+                            : -1px;
                         width: parent.width - 66px;
-                        height: commit.group-size * 72px;
-                        border-radius: 6px;
+                        height: root.commit-tab-row-height + commit-item.expand-extra
+                            + (commit.group-start ? 0px : 1px);
+                        background: root.github-bg-default;
                         border-width: 1px;
                         border-color: root.github-border-default;
-                        background: root.github-bg-default;
-                    }
-                    if !commit.group-start: Rectangle {
-                        x: 49px;
-                        y: 0px;
-                        width: parent.width - 68px;
-                        height: 1px;
-                        background: root.github-border-default;
+                        border-top-left-radius: commit.group-start ? root.commit-tab-card-radius : 0px;
+                        border-top-right-radius: commit.group-start ? root.commit-tab-card-radius : 0px;
+                        border-bottom-left-radius: commit.group-end ? root.commit-tab-card-radius : 0px;
+                        border-bottom-right-radius: commit.group-end ? root.commit-tab-card-radius : 0px;
                     }
                     commit-row := Rectangle {
                         x: 48px;
-                        y: commit.group-start ? 42px : 0px;
+                        y: commit.group-start ? root.commit-tab-group-header-height : 0px;
                         width: parent.width - 66px;
-                        height: 72px;
+                        height: root.commit-tab-row-height + commit-item.expand-extra;
                         background: transparent;
+                        // Natural single-line width pins the kebab beside short titles.
+                        private property <length> title-hit-width:
+                            min(commit-item.title-max-width, tab-commit-title-natural.preferred-width);
+                        // TextInput reports the exact caret origin at the end of
+                        // wrapped text. These fallbacks cover the first frame
+                        // before its layout callback runs.
+                        private property <length> title-end-x: self.title-hit-width;
+                        private property <length> title-end-y:
+                            max(0px, commit-item.title-block-height - 20px);
+                        // Child TouchAreas steal hover from the full-row area;
+                        // OR them so chrome fill stays while title/SHA/copy/time
+                        // (and kebab) are hovered. Title underline + SHA chip
+                        // still key off their own has-hover only.
+                        private property <bool> time-hovered: false;
+                        private property <bool> sha-hovered: false;
+                        private property <bool> row-hovered:
+                            tab-commit-row-touch.has-hover
+                            || tab-commit-title-touch.has-hover
+                            || self.sha-hovered
+                            || copy-sha-button.has-hover
+                            || (commit.message-body != "" && commit-kebab.has-hover)
+                            || (commit.short-date-label != "" && self.time-hovered);
+                        private property <length> content-trail-width: 188px;
+                        private property <color> sha-hover-fill: AppState.effective-dark-mode
+                            ? #656c7633
+                            : #eaeef2;
 
-                        // Hover fill stays inside the group border (GitHub:
-                        // bgColor-muted under the 1px frame, never over it).
+                        // Hidden measure keeps expand-extra and the author footer
+                        // aligned to the wrapped body without blank gaps.
+                        commit-tab-body-measure := Text {
+                            visible: false;
+                            width: parent.width - commit-row.content-trail-width;
+                            text: commit.message-body;
+                            font-family: root.code-font-family;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+
+                        // Hover fill covers the full expanded row (title + body +
+                        // author), staying inside the group border / separators.
                         Rectangle {
                             x: 1px;
-                            y: commit.group-start ? 1px : 0px;
+                            y: 1px;
                             width: parent.width - 2px;
-                            height: parent.height
-                                - (commit.group-start ? 1px : 0px)
-                                - (commit.group-end ? 1px : 0px);
-                            background: commit-row-touch.has-hover ? root.github-bg-muted : transparent;
-                            border-top-left-radius: commit.group-start ? 5px : 0px;
-                            border-top-right-radius: commit.group-start ? 5px : 0px;
-                            border-bottom-left-radius: commit.group-end ? 5px : 0px;
-                            border-bottom-right-radius: commit.group-end ? 5px : 0px;
+                            height: parent.height - 2px;
+                            background: commit-row.row-hovered ? root.github-bg-muted : transparent;
+                            border-top-left-radius: commit.group-start ? root.commit-tab-card-radius - 1px : 0px;
+                            border-top-right-radius: commit.group-start ? root.commit-tab-card-radius - 1px : 0px;
+                            border-bottom-left-radius: commit.group-end ? root.commit-tab-card-radius - 1px : 0px;
+                            border-bottom-right-radius: commit.group-end ? root.commit-tab-card-radius - 1px : 0px;
                         }
 
-                        commit-row-touch := TouchArea {
-                            mouse-cursor: default;
+                        // Row chrome: muted fill on hover only. Navigation is
+                        // title + short-SHA only; kebab only expands the body.
+                        tab-commit-row-touch := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
                         }
 
-                        MaterialText {
-                            x: 14px;
-                            y: 8px;
-                            width: parent.width - 184px;
-                            height: 24px;
+                        tab-commit-title-natural := Text {
+                            visible: false;
                             text: commit.title;
+                            font-family: "Hiragino Sans GB";
+                            font-size: 14px;
+                            font-weight: 600;
+                        }
+                        // Layout probe for the exact end of the final wrapped
+                        // title line. It stays mounted and transparent so a
+                        // width change recomputes the kebab position without
+                        // rebuilding the commit model.
+                        title-end-probe := TextInput {
+                            x: root.commit-tab-content-x;
+                            y: root.commit-tab-content-y;
+                            width: commit-item.title-max-width;
+                            height: commit-item.title-block-height;
+                            opacity: 0;
+                            enabled: false;
+                            read-only: true;
+                            single-line: false;
+                            wrap: word-wrap;
+                            text: commit.title;
+                            font-family: "Hiragino Sans GB";
+                            font-size: 14px;
+                            font-weight: 600;
+                            text-cursor-width: 0px;
+                            init => {
+                                self.set-selection-offsets(2147483647, 2147483647);
+                            }
+                            changed width => {
+                                self.set-selection-offsets(2147483647, 2147483647);
+                            }
+                            changed text => {
+                                self.set-selection-offsets(2147483647, 2147483647);
+                            }
+                            cursor-position-changed(position) => {
+                                commit-row.title-end-x = position.x;
+                                commit-row.title-end-y = position.y;
+                            }
+                        }
+                        if !tab-commit-title-touch.has-hover: Text {
+                            x: root.commit-tab-content-x;
+                            y: root.commit-tab-content-y;
+                            width: commit-item.title-max-width;
+                            height: commit-item.title-block-height;
+                            text: commit.title;
+                            font-family: "Hiragino Sans GB";
                             font-size: 14px;
                             font-weight: 600;
                             color: root.github-fg-default;
-                            overflow: elide;
-                            vertical-alignment: center;
+                            horizontal-alignment: left;
+                            vertical-alignment: top;
+                            wrap: word-wrap;
+                            overflow: clip;
                         }
-                        MaterialText {
-                            x: 14px;
-                            y: 35px;
-                            width: parent.width - 184px;
+                        // StyledText draws an underline per glyph run, including
+                        // each wrapped line, matching GitHub's inline link. The
+                        // old Rectangle produced one unrelated blue rule.
+                        if tab-commit-title-touch.has-hover: StyledText {
+                            x: root.commit-tab-content-x;
+                            y: root.commit-tab-content-y;
+                            width: commit-item.title-max-width;
+                            height: commit-item.title-block-height;
+                            text: @markdown("<u>**\{commit.title}**</u>");
+                            default-font-family: "Hiragino Sans GB";
+                            default-font-size: 14px;
+                            default-color: root.github-fg-default;
+                            horizontal-alignment: left;
+                            vertical-alignment: top;
+                        }
+                        tab-commit-title-touch := TouchArea {
+                            x: root.commit-tab-content-x;
+                            y: root.commit-tab-content-y;
+                            width: parent.title-hit-width;
+                            height: commit-item.title-block-height;
+                            mouse-cursor: pointer;
+                            clicked => { root.open-commit(commit.sha); }
+                        }
+
+                        // Collapsed: author under title. Expanded: body then author footer.
+                        if !commit-item.commit-expanded: HorizontalLayout {
+                            x: root.commit-tab-content-x;
+                            y: root.commit-tab-content-y + commit-item.title-block-height + 4px;
+                            width: parent.width - commit-row.content-trail-width;
                             height: 22px;
-                            text: commit.author + " committed on " + commit.short-date-label;
-                            font-size: 12px;
-                            color: root.github-fg-muted;
-                            overflow: elide;
-                            vertical-alignment: center;
+                            spacing: 4px;
+                            cross-axis-alignment: center;
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: commit.author;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 12px;
+                                color: root.github-fg-muted;
+                                vertical-alignment: center;
+                            }
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: "committed";
+                                font-family: "Hiragino Sans GB";
+                                font-size: 12px;
+                                color: root.github-fg-muted;
+                                vertical-alignment: center;
+                            }
+                            if commit.short-date-label != "": RelativeTimestamp {
+                                text: commit.short-date-label;
+                                tooltip-text: commit.authored-at;
+                                tooltip-after: true;
+                                foreground-color: root.github-fg-muted;
+                                label-font-size: 12px;
+                                label-height: 22px;
+                                changed has-hover => {
+                                    commit-row.time-hovered = self.has-hover;
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
                         }
+
+                        if commit-item.commit-expanded && commit.message-body != "": Text {
+                            x: root.commit-tab-content-x;
+                            y: root.commit-tab-title-band + commit-item.title-extra;
+                            width: parent.width - commit-row.content-trail-width;
+                            height: commit-tab-body-measure.preferred-height;
+                            text: commit.message-body;
+                            font-family: root.code-font-family;
+                            font-size: 12px;
+                            color: root.github-fg-default;
+                            horizontal-alignment: left;
+                            vertical-alignment: top;
+                            wrap: word-wrap;
+                        }
+
+                        if commit-item.commit-expanded: HorizontalLayout {
+                            x: root.commit-tab-content-x;
+                            y: root.commit-tab-title-band
+                                + commit-item.title-extra
+                                + (commit.message-body != ""
+                                    ? commit-tab-body-measure.preferred-height
+                                    : 0px)
+                                + root.commit-tab-body-footer-gap;
+                            width: parent.width - commit-row.content-trail-width;
+                            height: root.commit-tab-author-band;
+                            spacing: 6px;
+                            cross-axis-alignment: center;
+                            ConversationAvatar {
+                                avatar-size: 20px;
+                                label-size: 9px;
+                                avatar: commit.avatar;
+                                fallback-label: commit.avatar-label;
+                            }
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: commit.author;
+                                font-family: "Hiragino Sans GB";
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: root.github-fg-default;
+                                vertical-alignment: center;
+                            }
+                            MaterialText {
+                                width: self.preferred-width;
+                                text: "committed";
+                                font-family: "Hiragino Sans GB";
+                                font-size: 12px;
+                                color: root.github-fg-muted;
+                                vertical-alignment: center;
+                            }
+                            if commit.short-date-label != "": RelativeTimestamp {
+                                text: commit.short-date-label;
+                                tooltip-text: commit.authored-at;
+                                tooltip-after: true;
+                                foreground-color: root.github-fg-muted;
+                                label-font-size: 12px;
+                                label-height: root.commit-tab-author-band;
+                                changed has-hover => {
+                                    commit-row.time-hovered = self.has-hover;
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+
                         if commit.verified: MaterialText {
                             x: parent.width - 226px;
                             y: 0px;
                             width: 64px;
-                            height: parent.height;
+                            height: root.commit-tab-row-height;
                             text: "Verified";
                             font-size: 11px;
                             font-weight: 600;
@@ -3115,26 +3562,73 @@ export component PrReviewWorkspace inherits Rectangle {
                             horizontal-alignment: right;
                             vertical-alignment: center;
                         }
-                        MaterialText {
-                            x: parent.width - 154px;
-                            y: 0px;
-                            width: 96px;
-                            height: parent.height;
+                        tab-commit-sha-natural := Text {
+                            visible: false;
                             text: commit.short-sha;
                             font-family: root.code-font-family;
                             font-size: 12px;
-                            color: root.github-fg-muted;
-                            horizontal-alignment: right;
-                            vertical-alignment: center;
                         }
-                        FileToolbarButton {
+                        // GitHub short SHA is plain text at rest. Its rounded
+                        // control-hover pill appears only while the SHA itself
+                        // is hovered—never from row chrome alone. Use Primer
+                        // control hover (`#eaeef2` / translucent dark), not
+                        // page `bg-muted`, so the pill stays visible on both
+                        // white and row-muted fills.
+                        commit-sha-chip := Rectangle {
+                            z: 1;
+                            x: parent.width - 58px - self.width;
+                            y: (parent.height - self.height) / 2;
+                            width: tab-commit-sha-natural.preferred-width + 16px;
+                            height: 28px;
+                            border-radius: 6px;
+                            border-width: 0px;
+                            background: commit-row.sha-hovered
+                                ? commit-row.sha-hover-fill
+                                : transparent;
+                            MaterialText {
+                                width: parent.width;
+                                height: parent.height;
+                                text: commit.short-sha;
+                                font-family: root.code-font-family;
+                                font-size: 12px;
+                                color: root.github-fg-muted;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            tab-commit-sha-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.open-commit(commit.sha); }
+                                changed has-hover => {
+                                    commit-row.sha-hovered = self.has-hover;
+                                }
+                            }
+                            if commit-row.sha-hovered: ToolTip {
+                                x: parent.width - self.width;
+                                y: -self.height - 4px;
+                                text: "View commit details";
+                            }
+                        }
+                        copy-sha-button := FileToolbarButton {
                             x: parent.width - 44px;
-                            y: 13px;
+                            y: (parent.height - self.height) / 2;
                             icon-source: @image-url("../../assets/icons/octicon-copy-16.svg");
                             tooltip-text: "Copy full SHA";
                             tooltip-align-right: true;
                             tooltip-above: true;
                             clicked => { root.copy-commit-sha(commit.sha); }
+                        }
+                        // Always mounted so row-hovered can read has-hover; hide
+                        // when there is no message body to expand. Declared last
+                        // so the kebab wins hit-testing over the title touch.
+                        commit-kebab := CommitMessageToggleButton {
+                            visible: commit.message-body != "";
+                            x: min(
+                                root.commit-tab-content-x + parent.title-end-x + 8px,
+                                root.commit-tab-content-x + commit-item.title-max-width + 8px
+                            );
+                            y: root.commit-tab-content-y + parent.title-end-y;
+                            expanded: commit-item.commit-expanded;
+                            clicked => { root.toggle-commit-message(commit.sha); }
                         }
                     }
                 }

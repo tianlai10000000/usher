@@ -278,7 +278,10 @@ pub(super) fn format_updated_at_in_utc_plus_eight(value: &str) -> String {
 
 /// GitHub-style relative label shown in the PR review workspace.
 ///
-/// Examples: `just now`, `3 hours ago`, `yesterday`, `on Jul 15`, `on Jul 15, 2025`.
+/// Mirrors Primer `<relative-time>` defaults (`format=relative`,
+/// `threshold=P30D`, `prefix=on`): within 30 days use relative phrases
+/// (`just now`, `3 hours ago`, `yesterday`, `last week`); past that switch to
+/// absolute short dates (`on Jul 15`, `on Jul 15, 2025`) in UTC+08:00.
 pub(super) fn format_github_relative_time(value: &str) -> String {
     format_github_relative_time_at(value, chrono::Utc::now())
 }
@@ -310,6 +313,28 @@ pub(super) fn format_github_absolute_tooltip(value: &str) -> String {
     }
 }
 
+fn format_github_absolute_short_at(
+    value: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<String> {
+    let timestamp = parse_provider_timestamp(value)?;
+    let utc_plus_eight =
+        FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
+    let local = timestamp.with_timezone(&utc_plus_eight);
+    let now_local = now.with_timezone(&utc_plus_eight);
+    // Primer defaults: month=short, day=numeric, year only when different.
+    if local.year() == now_local.year() {
+        Some(format!("on {} {}", local.format("%b"), local.day()))
+    } else {
+        Some(format!(
+            "on {} {}, {}",
+            local.format("%b"),
+            local.day(),
+            local.year()
+        ))
+    }
+}
+
 fn format_github_relative_time_at(value: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     let Some(timestamp) = parse_provider_timestamp(value) else {
         return value.to_string();
@@ -319,6 +344,11 @@ fn format_github_relative_time_at(value: &str, now: chrono::DateTime<chrono::Utc
     let seconds = delta.num_seconds();
     if seconds < 0 {
         return format_github_absolute_tooltip(value);
+    }
+    // Past P30D: absolute `on Mar 19` instead of `N months ago`.
+    let days = delta.num_days();
+    if days >= 30 {
+        return format_github_absolute_short_at(value, now).unwrap_or_else(|| value.to_string());
     }
     if seconds < 60 {
         return "just now".to_string();
@@ -339,34 +369,17 @@ fn format_github_relative_time_at(value: &str, now: chrono::DateTime<chrono::Utc
             format!("{hours} hours ago")
         };
     }
-    let days = delta.num_days();
     if days == 1 {
         return "yesterday".to_string();
     }
     if days < 7 {
         return format!("{days} days ago");
     }
-    if days < 28 {
-        let weeks = days / 7;
-        return if weeks == 1 {
-            "last week".to_string()
-        } else {
-            format!("{weeks} weeks ago")
-        };
-    }
-    if days < 365 {
-        let months = (days / 30).max(1);
-        return if months == 1 {
-            "last month".to_string()
-        } else {
-            format!("{months} months ago")
-        };
-    }
-    let years = (days / 365).max(1);
-    if years == 1 {
-        "last year".to_string()
+    let weeks = days / 7;
+    if weeks == 1 {
+        "last week".to_string()
     } else {
-        format!("{years} years ago")
+        format!("{weeks} weeks ago")
     }
 }
 
@@ -451,13 +464,19 @@ mod tests {
             format_github_relative_time_at("2026-07-15 13:26:44 +08:00", now),
             "6 days ago"
         );
+        // Inside P30D: still relative weeks, never months-ago.
+        assert_eq!(
+            format_github_relative_time_at("2026-06-25T06:00:00Z", now),
+            "3 weeks ago"
+        );
+        // Past P30D: Primer absolute short date with `on` prefix.
         assert_eq!(
             format_github_relative_time_at("2026-03-15T05:26:44Z", now),
-            "4 months ago"
+            "on Mar 15"
         );
         assert_eq!(
             format_github_relative_time_at("2025-03-15T05:26:44Z", now),
-            "last year"
+            "on Mar 15, 2025"
         );
         assert_eq!(
             format_github_absolute_tooltip("2026-07-15T05:26:44Z"),

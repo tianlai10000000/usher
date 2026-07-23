@@ -15,7 +15,8 @@ use crate::git::{
     PullRequestDiffFile, PullRequestDiffLine, PullRequestMergeMethod, PullRequestReviewAction,
     get_pull_request_action_state, get_pull_request_commit_range_diff, get_pull_request_commits,
     get_pull_request_conversation, get_pull_request_diff, get_repository_file_text,
-    merge_pull_request, submit_pull_request_review, supports_ignore_whitespace,
+    merge_pull_request, split_commit_message, submit_pull_request_review,
+    supports_ignore_whitespace,
 };
 use crate::http::{self, RequestOptions};
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
@@ -248,6 +249,8 @@ pub(crate) struct WorkflowPrReviewController {
     conversation_loaded: Arc<Mutex<bool>>,
     commits_loaded: Arc<Mutex<bool>>,
     commits: Arc<Mutex<Vec<PullRequestCommit>>>,
+    pending_open_commit: Arc<Mutex<Option<String>>>,
+    commit_detail_return_tab: Arc<Mutex<Option<i32>>>,
 }
 
 fn session_highlight_resources(
@@ -283,6 +286,8 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         conversation_loaded: Arc::new(Mutex::new(false)),
         commits_loaded: Arc::new(Mutex::new(false)),
         commits: Arc::new(Mutex::new(Vec::new())),
+        pending_open_commit: Arc::new(Mutex::new(None)),
+        commit_detail_return_tab: Arc::new(Mutex::new(None)),
     };
 
     let open_controller = controller.clone();
@@ -307,11 +312,11 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         },
     );
 
-    let close_controller = controller.clone();
+    let back_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_close(move || {
+    ui.on_workflow_pr_review_back(move || {
         if let Some(ui) = ui_weak.upgrade() {
-            close_controller.close(&ui);
+            back_controller.navigate_back(&ui);
         }
     });
 
@@ -321,7 +326,14 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
-        ui.set_workflow_pr_review_tab(tab.clamp(0, 2));
+        let tab = tab.clamp(0, 2);
+        ui.set_workflow_pr_review_tab(tab);
+        if tab != 2 {
+            if let Ok(mut return_tab) = tab_controller.commit_detail_return_tab.lock() {
+                *return_tab = None;
+            }
+            ui.set_workflow_pr_review_back_label("Back to pull requests".into());
+        }
         tab_controller.load_tab(&ui, tab);
     });
 
@@ -338,6 +350,14 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
     ui.on_workflow_pr_review_apply_commit_range(move |start, end| {
         if let Some(ui) = ui_weak.upgrade() {
             range_controller.apply_commit_range(&ui, start, end);
+        }
+    });
+
+    let open_commit_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_open_commit(move |sha| {
+        if let Some(ui) = ui_weak.upgrade() {
+            open_commit_controller.open_commit(&ui, sha.as_str());
         }
     });
 
@@ -510,6 +530,13 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
     });
 
     let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_toggle_commit_message(move |sha| {
+        if let Some(ui) = ui_weak.upgrade() {
+            toggle_commit_message_expansion(&ui, sha.as_str());
+        }
+    });
+
+    let ui_weak = ui.as_weak();
     ui.on_workflow_pr_review_copy_source_branch(move |branch| {
         let branch = branch.trim();
         if branch.is_empty() {
@@ -552,7 +579,19 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
 }
 
 impl WorkflowPrReviewController {
-    fn close(&self, ui: &MainWindow) {
+    fn navigate_back(&self, ui: &MainWindow) {
+        let return_tab = self
+            .commit_detail_return_tab
+            .lock()
+            .ok()
+            .and_then(|mut return_tab| return_tab.take());
+        if let Some(tab) = return_tab {
+            ui.set_workflow_pr_review_tab(tab);
+            ui.set_workflow_pr_review_back_label("Back to pull requests".into());
+            self.load_tab(ui, tab);
+            return;
+        }
+
         self.log_memory_diagnostics("review_close.before_clear");
         self.request_sequence.fetch_add(1, Ordering::SeqCst);
         self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
@@ -599,10 +638,14 @@ impl WorkflowPrReviewController {
         if let Ok(mut commits) = self.commits.lock() {
             commits.clear();
         }
-        reset_review_ui(ui);
-        if ui.get_current_route() == Route::PrReview {
-            ui.invoke_navigate(Route::Workflow);
+        if let Ok(mut pending) = self.pending_open_commit.lock() {
+            *pending = None;
         }
+        if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
+            *return_tab = None;
+        }
+        reset_review_ui(ui);
+        ui.invoke_navigate_back();
         self.log_memory_diagnostics("review_close.after_clear");
     }
 
@@ -655,6 +698,12 @@ impl WorkflowPrReviewController {
         }
         if let Ok(mut commits) = self.commits.lock() {
             commits.clear();
+        }
+        if let Ok(mut pending) = self.pending_open_commit.lock() {
+            *pending = None;
+        }
+        if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
+            *return_tab = None;
         }
         reset_review_ui(ui);
         self.log_memory_diagnostics("project_switch.after_clear");
@@ -712,11 +761,18 @@ impl WorkflowPrReviewController {
             if let Ok(mut commits) = self.commits.lock() {
                 commits.clear();
             }
+            if let Ok(mut pending) = self.pending_open_commit.lock() {
+                *pending = None;
+            }
+            if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
+                *return_tab = None;
+            }
             ui.set_workflow_pr_review_tab(2);
             ui.set_workflow_pr_review_conversation_count(0);
             ui.set_workflow_pr_review_commit_count(0);
             ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
             ui.set_workflow_pr_review_conversation_content_height(0);
+            ui.set_workflow_pr_review_expanded_commit_body_height(0);
             ui.set_workflow_pr_review_commits(empty_commit_model());
             ui.set_workflow_pr_review_conversation_error("".into());
             ui.set_workflow_pr_review_commits_error("".into());
@@ -921,6 +977,7 @@ impl WorkflowPrReviewController {
                         ui.set_workflow_pr_review_conversation_content_height(
                             conversation_content_height(&items),
                         );
+                        ui.set_workflow_pr_review_expanded_commit_body_height(0);
                         ui.set_workflow_pr_review_conversation_items(conversation_model(
                             &items, &avatars,
                         ));
@@ -985,6 +1042,17 @@ impl WorkflowPrReviewController {
                 }
                 Err(error) => Err(error),
             };
+            let commits_and_avatars = match result {
+                Ok(commits) => {
+                    let avatars =
+                        tokio::time::timeout(Duration::from_secs(3), load_commit_avatars(&commits))
+                            .await
+                            .ok()
+                            .unwrap_or_default();
+                    Ok((commits, avatars))
+                }
+                Err(error) => Err(error),
+            };
             let _ = slint::invoke_from_event_loop(move || {
                 if controller.commits_sequence.load(Ordering::SeqCst) != sequence {
                     return;
@@ -993,30 +1061,91 @@ impl WorkflowPrReviewController {
                     return;
                 };
                 ui.set_workflow_pr_review_commits_loading(false);
-                match result {
-                    Ok(commits) => {
+                match commits_and_avatars {
+                    Ok((commits, avatars)) => {
                         // Provider summaries normally populate the badge before
                         // activation. Keep the successfully loaded list as a
                         // final compatibility fallback for older enterprise APIs.
                         let current = ui.get_workflow_pr_review_commit_count();
                         ui.set_workflow_pr_review_commit_count(current.max(commits.len() as i32));
-                        ui.set_workflow_pr_review_commits(commit_model(&commits));
+                        ui.set_workflow_pr_review_commits(commit_model(&commits, &avatars));
                         if let Ok(mut stored) = controller.commits.lock() {
                             *stored = commits;
                         }
                         if let Ok(mut loaded) = controller.commits_loaded.lock() {
                             *loaded = true;
                         }
+                        let pending_sha = controller
+                            .pending_open_commit
+                            .lock()
+                            .ok()
+                            .and_then(|mut pending| pending.take());
+                        if let Some(sha) = pending_sha {
+                            controller.open_commit(&ui, sha.as_str());
+                        }
                     }
                     Err(error) => {
+                        let was_opening_commit = controller
+                            .pending_open_commit
+                            .lock()
+                            .map(|mut pending| pending.take().is_some())
+                            .unwrap_or(false);
                         log::warn!("[Workflow][PR Review] Failed to load commits: {error}");
                         ui.set_workflow_pr_review_commits_error(
                             "The provider could not load this pull request's commits.".into(),
                         );
+                        if was_opening_commit {
+                            show_error(&ui, "The selected commit details could not be loaded.");
+                        }
                     }
                 }
             });
         });
+    }
+
+    fn open_commit(&self, ui: &MainWindow, sha: &str) {
+        let sha = sha.trim();
+        if sha.is_empty() {
+            return;
+        }
+        let source_tab = ui.get_workflow_pr_review_tab();
+        if let Some(source_tab) = commit_detail_source_tab(source_tab) {
+            if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
+                *return_tab = Some(source_tab);
+            }
+            ui.set_workflow_pr_review_back_label(
+                if source_tab == 0 {
+                    "Back to Conversation"
+                } else {
+                    "Back to Commits"
+                }
+                .into(),
+            );
+        }
+        ui.set_workflow_pr_review_tab(2);
+        let commit_index = self
+            .commits
+            .lock()
+            .ok()
+            .and_then(|commits| commit_index_by_sha(&commits, sha));
+        if let Some(index) = commit_index {
+            self.apply_commit_range(ui, index as i32, index as i32);
+            return;
+        }
+
+        let commits_loaded = self
+            .commits_loaded
+            .lock()
+            .map(|loaded| *loaded)
+            .unwrap_or(false);
+        if commits_loaded {
+            show_error(ui, "The selected commit is no longer in this pull request.");
+            return;
+        }
+        if let Ok(mut pending) = self.pending_open_commit.lock() {
+            *pending = Some(sha.to_string());
+        }
+        self.load_commits(ui);
     }
 
     fn apply_commit_range(&self, ui: &MainWindow, start: i32, end: i32) {
@@ -2043,6 +2172,10 @@ impl WorkflowPrReviewController {
     }
 }
 
+fn commit_detail_source_tab(tab: i32) -> Option<i32> {
+    matches!(tab, 0 | 1).then_some(tab)
+}
+
 fn diff_storage_stats(files: &[PullRequestDiffFile]) -> OwnedMemoryStats {
     let mut stats = OwnedMemoryStats {
         items: files.len(),
@@ -2654,6 +2787,129 @@ fn conversation_content_height(items: &[PullRequestConversationItem]) -> i32 {
     items.iter().map(conversation_row_height).sum()
 }
 
+/// GitHub commit-message body under the title (kebab expansion).
+/// Prefer a slight under-estimate: over-estimating leaves a blank gap under the
+/// body before the author footer. Slint still sizes the visible Text with
+/// `preferred-height` so wrapped text is not clipped when the estimate is low.
+fn commit_message_body_height(body: &str) -> i32 {
+    const BOTTOM_PADDING: i32 = 4;
+    // Matches the 12px monospace preformatted body closely enough for ListView
+    // row reservation; the visible body uses preferred-height.
+    const LINE_HEIGHT: i32 = 17;
+    // Commits body ≈ list(≤980) − 250 ≈ 730px ≈ 100 Latin cols at 12px.
+    // Conversation body is similar. Wide columns avoid the blank-gap bug.
+    const WRAP_COLUMNS: usize = 100;
+    const MAX_LINES: i32 = 20;
+
+    if body.trim().is_empty() {
+        return 0;
+    }
+    let mut lines = 0i32;
+    for paragraph in body.lines() {
+        if paragraph.is_empty() {
+            lines += 1;
+            continue;
+        }
+        // Treat full-width / CJK as ~2 columns so wraps are not under-counted.
+        let cols = paragraph
+            .chars()
+            .map(|ch| if ch_width_hint(ch) { 2usize } else { 1 })
+            .sum::<usize>()
+            .max(1);
+        lines += cols.div_ceil(WRAP_COLUMNS) as i32;
+    }
+    BOTTOM_PADDING + lines.clamp(1, MAX_LINES) * LINE_HEIGHT
+}
+
+fn ch_width_hint(ch: char) -> bool {
+    ch > '\u{2E7F}'
+}
+
+/// Commits-tab expand layout: title band + body + author band − collapsed row.
+fn commit_tab_expand_layout_extra(body_height: i32) -> i32 {
+    const TITLE_BAND: i32 = 30;
+    const AUTHOR_BAND: i32 = 28;
+    const ROW_HEIGHT: i32 = 52;
+    body_height + TITLE_BAND + AUTHOR_BAND - ROW_HEIGHT
+}
+
+fn toggle_commit_message_expansion(ui: &MainWindow, sha: &str) {
+    let sha = sha.trim();
+    if sha.is_empty() {
+        return;
+    }
+
+    let conversation = ui.get_workflow_pr_review_conversation_items();
+    let mut conversation_items = (0..conversation.row_count())
+        .filter_map(|index| conversation.row_data(index))
+        .collect::<Vec<_>>();
+    let commits = ui.get_workflow_pr_review_commits();
+    let mut commit_items = (0..commits.row_count())
+        .filter_map(|index| commits.row_data(index))
+        .collect::<Vec<_>>();
+
+    // Keep Conversation and Commits in sync for the same SHA. Use the union of
+    // current expand state so a stale tab cannot invert the other.
+    let currently_expanded = conversation_items.iter().any(|item| {
+        item.kind.as_str() == "commit" && item.id.as_str() == sha && item.message_expanded
+    }) || commit_items
+        .iter()
+        .any(|item| item.sha.as_str() == sha && item.message_expanded);
+    let target = !currently_expanded;
+
+    for (index, item) in conversation_items.iter_mut().enumerate() {
+        if item.kind.as_str() == "commit" && item.id.as_str() == sha {
+            item.message_expanded = target;
+            // Preserve the ModelRc identity so an active ListView keeps its
+            // viewport anchor while only this delegate changes height.
+            conversation.set_row_data(index, item.clone());
+        }
+    }
+    let expanded_body_height = conversation_items
+        .iter()
+        .filter(|item| item.kind.as_str() == "commit" && item.message_expanded)
+        .map(|item| item.message_body_height)
+        .sum::<i32>();
+    ui.set_workflow_pr_review_expanded_commit_body_height(expanded_body_height);
+
+    for item in &mut commit_items {
+        if item.sha.as_str() == sha {
+            item.message_expanded = target;
+        }
+    }
+    refresh_commit_group_expand_extras(&mut commit_items);
+    // Updating rows in place is essential here. Replacing the entire model
+    // makes Slint rebuild the ListView and can move the clicked kebab away from
+    // the pointer. Stable row identity keeps everything above the row fixed;
+    // only this row grows and subsequent content moves down.
+    for (index, item) in commit_items.into_iter().enumerate() {
+        commits.set_row_data(index, item);
+    }
+}
+
+fn refresh_commit_group_expand_extras(commits: &mut [WorkflowPrCommit]) {
+    let mut index = 0;
+    while index < commits.len() {
+        if !commits[index].group_start {
+            commits[index].group_expand_extra = 0;
+            index += 1;
+            continue;
+        }
+        let group_size = commits[index].group_size.max(0) as usize;
+        let end = (index + group_size).min(commits.len());
+        let extra = commits[index..end]
+            .iter()
+            .filter(|commit| commit.message_expanded)
+            .map(|commit| commit_tab_expand_layout_extra(commit.message_body_height))
+            .sum::<i32>();
+        commits[index].group_expand_extra = extra;
+        for commit in &mut commits[index + 1..end] {
+            commit.group_expand_extra = 0;
+        }
+        index = end.max(index + 1);
+    }
+}
+
 /// GitHub Conversation cards hug their text: header + padded body lines, not a
 /// fixed tall viewport. Long bodies are capped so ListView row heights stay bounded.
 fn conversation_card_row_height(body: &str) -> i32 {
@@ -2681,16 +2937,39 @@ fn conversation_card_row_height(body: &str) -> i32 {
 async fn load_conversation_avatars(
     items: &[PullRequestConversationItem],
 ) -> HashMap<String, ConversationAvatarPixels> {
-    let urls = items
-        .iter()
-        .filter_map(|item| {
-            let url = item.avatar_url.trim();
-            (!url.is_empty()).then(|| url.to_string())
-        })
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .take(32);
+    load_avatar_urls(
+        items
+            .iter()
+            .filter_map(|item| {
+                let url = item.avatar_url.trim();
+                (!url.is_empty()).then(|| url.to_string())
+            })
+            .collect::<HashSet<_>>()
+            .into_iter(),
+    )
+    .await
+}
 
+async fn load_commit_avatars(
+    commits: &[PullRequestCommit],
+) -> HashMap<String, ConversationAvatarPixels> {
+    load_avatar_urls(
+        commits
+            .iter()
+            .filter_map(|commit| {
+                let url = commit.avatar_url.trim();
+                (!url.is_empty()).then(|| url.to_string())
+            })
+            .collect::<HashSet<_>>()
+            .into_iter(),
+    )
+    .await
+}
+
+async fn load_avatar_urls(
+    urls: impl Iterator<Item = String>,
+) -> HashMap<String, ConversationAvatarPixels> {
+    let urls = urls.take(32);
     stream::iter(urls)
         .map(|url| async move {
             let image = load_conversation_avatar(url.as_str()).await?;
@@ -2749,44 +3028,63 @@ fn conversation_model(
         items
             .iter()
             .enumerate()
-            .map(|(index, item)| WorkflowPrConversationItem {
-                id: item.id.clone().into(),
-                kind: item.kind.clone().into(),
-                author: item.author.clone().into(),
-                avatar: avatars
-                    .get(item.avatar_url.as_str())
-                    .map(|avatar| {
-                        Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                            avatar.rgba.as_slice(),
-                            avatar.width,
-                            avatar.height,
-                        ))
-                    })
-                    .unwrap_or_default(),
-                avatar_label: item
-                    .author
-                    .chars()
-                    .next()
-                    .map(|character| character.to_uppercase().collect::<String>())
-                    .unwrap_or_else(|| "?".to_string())
+            .map(|(index, item)| {
+                let (body, message_body) = if item.kind == "commit" {
+                    let (title, body) = split_commit_message(item.body.as_str());
+                    let title = if title.is_empty() {
+                        item.body.lines().next().unwrap_or("").to_string()
+                    } else {
+                        title
+                    };
+                    (title, body)
+                } else {
+                    (item.body.clone(), String::new())
+                };
+                let message_body_height = commit_message_body_height(message_body.as_str());
+                WorkflowPrConversationItem {
+                    id: item.id.clone().into(),
+                    kind: item.kind.clone().into(),
+                    author: item.author.clone().into(),
+                    avatar: avatars
+                        .get(item.avatar_url.as_str())
+                        .map(|avatar| {
+                            Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                                avatar.rgba.as_slice(),
+                                avatar.width,
+                                avatar.height,
+                            ))
+                        })
+                        .unwrap_or_default(),
+                    avatar_label: item
+                        .author
+                        .chars()
+                        .next()
+                        .map(|character| character.to_uppercase().collect::<String>())
+                        .unwrap_or_else(|| "?".to_string())
+                        .into(),
+                    author_association: item.author_association.clone().into(),
+                    body: body.into(),
+                    message_body: message_body.into(),
+                    message_body_height,
+                    message_expanded: false,
+                    created_at: super::pr_list::format_github_relative_time(
+                        item.created_at.as_str(),
+                    )
                     .into(),
-                author_association: item.author_association.clone().into(),
-                body: item.body.clone().into(),
-                created_at: super::pr_list::format_github_relative_time(item.created_at.as_str())
+                    created_at_tooltip: super::pr_list::format_github_absolute_tooltip(
+                        item.created_at.as_str(),
+                    )
                     .into(),
-                created_at_tooltip: super::pr_list::format_github_absolute_tooltip(
-                    item.created_at.as_str(),
-                )
-                .into(),
-                state: item.state.clone().into(),
-                connect_before: conversation_items_connect(
-                    index
-                        .checked_sub(1)
-                        .and_then(|previous| items.get(previous)),
-                    Some(item),
-                ),
-                connect_after: conversation_items_connect(Some(item), items.get(index + 1)),
-                row_height: conversation_row_height(item),
+                    state: item.state.clone().into(),
+                    connect_before: conversation_items_connect(
+                        index
+                            .checked_sub(1)
+                            .and_then(|previous| items.get(previous)),
+                        Some(item),
+                    ),
+                    connect_after: conversation_items_connect(Some(item), items.get(index + 1)),
+                    row_height: conversation_row_height(item),
+                }
             })
             .collect::<Vec<_>>(),
     ))
@@ -2811,7 +3109,10 @@ fn conversation_items_connect(
     before.kind == "review_summary" && after.kind == "review" || before.kind != "review_summary"
 }
 
-fn commit_model(commits: &[PullRequestCommit]) -> ModelRc<WorkflowPrCommit> {
+fn commit_model(
+    commits: &[PullRequestCommit],
+    avatars: &HashMap<String, ConversationAvatarPixels>,
+) -> ModelRc<WorkflowPrCommit> {
     let date_labels = commits
         .iter()
         .map(|commit| format_commit_date(commit.authored_at.as_str()))
@@ -2838,13 +3139,45 @@ fn commit_model(commits: &[PullRequestCommit]) -> ModelRc<WorkflowPrCommit> {
                     short_sha: commit.sha.chars().take(7).collect::<String>().into(),
                     title: commit.title.clone().into(),
                     message: commit.message.clone().into(),
+                    message_body: {
+                        let (_, body) = split_commit_message(commit.message.as_str());
+                        body.into()
+                    },
+                    message_body_height: {
+                        let (_, body) = split_commit_message(commit.message.as_str());
+                        commit_message_body_height(body.as_str())
+                    },
+                    message_expanded: false,
+                    group_expand_extra: 0,
                     author: commit.author.clone().into(),
-                    authored_at: super::pr_list::format_updated_at_in_utc_plus_eight(
+                    avatar: avatars
+                        .get(commit.avatar_url.as_str())
+                        .map(|avatar| {
+                            Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                                avatar.rgba.as_slice(),
+                                avatar.width,
+                                avatar.height,
+                            ))
+                        })
+                        .unwrap_or_default(),
+                    avatar_label: commit
+                        .author
+                        .chars()
+                        .next()
+                        .map(|character| character.to_uppercase().collect::<String>())
+                        .unwrap_or_else(|| "?".to_string())
+                        .into(),
+                    // Absolute local datetime for the relative-time tooltip.
+                    authored_at: super::pr_list::format_github_absolute_tooltip(
                         commit.authored_at.as_str(),
                     )
                     .into(),
                     date_label: date_label.clone().into(),
-                    short_date_label: format_commit_short_date(commit.authored_at.as_str()).into(),
+                    // GitHub Commits rows: Primer relative-time (P30D → `on Mar 19`).
+                    short_date_label: super::pr_list::format_github_relative_time(
+                        commit.authored_at.as_str(),
+                    )
+                    .into(),
                     group_start,
                     group_end,
                     group_size: group_size as i32,
@@ -2868,6 +3201,10 @@ fn commit_range_label(commits: &[PullRequestCommit], start: usize, end: usize) -
     }
 }
 
+fn commit_index_by_sha(commits: &[PullRequestCommit], sha: &str) -> Option<usize> {
+    commits.iter().position(|commit| commit.sha == sha)
+}
+
 fn range_covers_all_commits(commit_count: usize, start: usize, end: usize) -> bool {
     commit_count > 0 && start == 0 && end == commit_count - 1
 }
@@ -2880,19 +3217,6 @@ fn format_commit_date(value: &str) -> String {
             timestamp
                 .with_timezone(&utc_plus_eight)
                 .format("%b %-d, %Y")
-                .to_string()
-        })
-        .unwrap_or_else(|_| value.split('T').next().unwrap_or(value).to_string())
-}
-
-fn format_commit_short_date(value: &str) -> String {
-    let utc_plus_eight =
-        chrono::FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
-    chrono::DateTime::parse_from_rfc3339(value)
-        .map(|timestamp| {
-            timestamp
-                .with_timezone(&utc_plus_eight)
-                .format("%b %-d")
                 .to_string()
         })
         .unwrap_or_else(|_| value.split('T').next().unwrap_or(value).to_string())
@@ -2981,8 +3305,10 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_head_sha("".into());
     ui.set_workflow_pr_review_too_many_commits(false);
     ui.set_workflow_pr_review_tab(2);
+    ui.set_workflow_pr_review_back_label("Back to pull requests".into());
     ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
     ui.set_workflow_pr_review_conversation_content_height(0);
+    ui.set_workflow_pr_review_expanded_commit_body_height(0);
     ui.set_workflow_pr_review_commits(empty_commit_model());
     ui.set_workflow_pr_review_conversation_loading(false);
     ui.set_workflow_pr_review_commits_loading(false);
@@ -3009,11 +3335,14 @@ mod tests {
 
     use super::{
         BoundedCache, LazyPrDiffLineModel, RANGE_DIFF_CACHE_CAPACITY, ReviewCache, ReviewRequest,
-        VISIBLE_LINE_CACHE_CAPACITY, build_tree_items, commit_range_label,
-        conversation_card_row_height, conversation_content_height, conversation_items_connect,
-        expand_all_hunk_context, expand_hunk_context, format_commit_short_date, full_source_file,
-        hunk_is_expandable, range_covers_all_commits, restore_original_diff,
+        VISIBLE_LINE_CACHE_CAPACITY, build_tree_items, commit_detail_source_tab,
+        commit_index_by_sha, commit_message_body_height, commit_range_label,
+        commit_tab_expand_layout_extra, conversation_card_row_height, conversation_content_height,
+        conversation_items_connect, expand_all_hunk_context, expand_hunk_context, full_source_file,
+        hunk_is_expandable, range_covers_all_commits, refresh_commit_group_expand_extras,
+        restore_original_diff,
     };
+    use crate::WorkflowPrCommit;
     use crate::git::{
         PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail, PullRequestDiffFile,
         PullRequestDiffLine,
@@ -3031,6 +3360,54 @@ mod tests {
             viewed: false,
             lines: Vec::new(),
         }
+    }
+
+    #[test]
+    fn commit_message_body_height_stays_compact_for_short_paragraphs() {
+        let body = "Prevent pointer events on the loading overlay so the review header stays clickable.\n\nAlign the file diff statistics with the Files changed tab badge.";
+        let height = commit_message_body_height(body);
+        // Two short wrapped paragraphs + blank line should not reserve a tall gap.
+        assert!(height > 0);
+        assert!(
+            height <= 90,
+            "short body reserved {height}px; expected a compact GitHub-like band"
+        );
+    }
+
+    #[test]
+    fn commit_group_expand_extras_sum_every_expanded_row() {
+        let make =
+            |sha: &str, group_start: bool, group_size: i32, expanded: bool, body_height: i32| {
+                WorkflowPrCommit {
+                    sha: sha.into(),
+                    short_sha: sha.into(),
+                    title: "title".into(),
+                    message: "title".into(),
+                    message_body: "body".into(),
+                    message_body_height: body_height,
+                    message_expanded: expanded,
+                    group_expand_extra: 0,
+                    author: "alice".into(),
+                    avatar: Default::default(),
+                    avatar_label: "A".into(),
+                    authored_at: "".into(),
+                    date_label: "Jul 20, 2026".into(),
+                    short_date_label: "2 days ago".into(),
+                    group_start,
+                    group_end: false,
+                    group_size,
+                    verified: false,
+                }
+            };
+        let mut commits = vec![
+            make("aaa", true, 2, true, 40),
+            make("bbb", false, 0, true, 20),
+        ];
+        refresh_commit_group_expand_extras(&mut commits);
+        let expected = commit_tab_expand_layout_extra(40) + commit_tab_expand_layout_extra(20);
+        assert_eq!(commits[0].group_expand_extra, expected);
+        assert_eq!(commits[1].group_expand_extra, 0);
+        assert!(commits[0].message_expanded && commits[1].message_expanded);
     }
 
     #[test]
@@ -3107,6 +3484,30 @@ mod tests {
         ];
         assert_eq!(commit_range_label(&commits, 1, 1), "Commit 2222222");
         assert_eq!(commit_range_label(&commits, 0, 2), "1111111 … 3333333");
+    }
+
+    #[test]
+    fn commit_detail_back_point_is_only_created_from_content_tabs() {
+        assert_eq!(commit_detail_source_tab(0), Some(0));
+        assert_eq!(commit_detail_source_tab(1), Some(1));
+        assert_eq!(commit_detail_source_tab(2), None);
+        assert_eq!(commit_detail_source_tab(99), None);
+    }
+
+    #[test]
+    fn resolves_commit_detail_selection_by_full_sha() {
+        let commit = |sha: &str| PullRequestCommit {
+            sha: sha.to_string(),
+            title: String::new(),
+            message: String::new(),
+            author: String::new(),
+            avatar_url: String::new(),
+            authored_at: String::new(),
+            verified: false,
+        };
+        let commits = vec![commit("1111111aaaa"), commit("2222222bbbb")];
+        assert_eq!(commit_index_by_sha(&commits, "2222222bbbb"), Some(1));
+        assert_eq!(commit_index_by_sha(&commits, "2222222"), None);
     }
 
     #[test]
@@ -3378,10 +3779,5 @@ mod tests {
             assert!(model.row_data(index).is_some());
         }
         assert_eq!(model.cached_row_count(), VISIBLE_LINE_CACHE_CAPACITY);
-    }
-
-    #[test]
-    fn formats_commit_row_dates_without_the_year() {
-        assert_eq!(format_commit_short_date("2026-03-19T02:00:00Z"), "Mar 19");
     }
 }

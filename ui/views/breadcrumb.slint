@@ -161,6 +161,7 @@ export component Breadcrumb {
     in property <Route> previous-route: Route.Home;
     
     callback navigate(Route);
+    callback back();
     
     // 判断是否是子页面（需要显示父级路径）
     private property <bool> is-about-page: current-route == Route.About;
@@ -357,7 +358,7 @@ export component Breadcrumb {
                     x: -6px;
                     y: (parent.height - self.height) / 2;
                     clicked => {
-                        root.navigate(root.previous-route);
+                        root.back();
                     }
                 }
             }

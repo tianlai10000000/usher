@@ -186,6 +186,15 @@ pub(crate) fn short_sha(sha: &str) -> String {
     sha.chars().take(7).collect()
 }
 
+/// First line is the title; remaining lines (after blank separators) are the body.
+pub(crate) fn split_commit_message(message: &str) -> (String, String) {
+    let mut lines = message.lines();
+    let title = lines.next().unwrap_or("").trim().to_string();
+    let body = lines.collect::<Vec<_>>().join("\n");
+    let body = body.trim().to_string();
+    (title, body)
+}
+
 /// Build a GitHub-style "added N commits" batch plus one row per commit.
 pub(crate) fn conversation_commit_batch_items(
     commits: &[PullRequestCommit],
@@ -237,7 +246,12 @@ pub(crate) fn conversation_commit_batch_items(
             author: commit.author.clone(),
             avatar_url: commit.avatar_url.clone(),
             author_association: String::new(),
-            body: commit.title.clone(),
+            // Full message so the UI can show the title and expand the body.
+            body: if commit.message.trim().is_empty() {
+                commit.title.clone()
+            } else {
+                commit.message.clone()
+            },
             created_at: commit.authored_at.clone(),
             state: short_sha(commit.sha.as_str()),
         });
@@ -1187,7 +1201,7 @@ mod tests {
         conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
         finalize_conversation_timeline, is_redundant_commit_system_note,
         is_redundant_merge_system_note, parse_repo_locator, parse_unified_diff,
-        percent_encode_path, supports_ignore_whitespace,
+        percent_encode_path, split_commit_message, supports_ignore_whitespace,
     };
 
     #[test]
@@ -1318,12 +1332,28 @@ mod tests {
         assert_eq!(batch[0].kind, "commits");
         assert_eq!(batch[0].body, "added 2 commits");
         assert_eq!(batch[1].kind, "commit");
+        assert_eq!(batch[1].body, "first");
         assert_eq!(batch[1].state, "abcdef0");
         assert_eq!(batch[1].avatar_url, "https://example.test/alice.png");
         assert_eq!(batch[2].state, "1234567");
         assert_eq!(batch[0].created_at, "2026-01-02T00:00:00Z");
         assert_eq!(batch[1].created_at, "2026-01-01T00:00:00Z");
         assert_eq!(batch[2].created_at, batch[0].created_at);
+
+        let with_body = conversation_commit_batch_items(&[PullRequestCommit {
+            sha: "deadbeef".into(),
+            title: "subject".into(),
+            message: "subject\n\n- detail one\n- detail two".into(),
+            author: "alice".into(),
+            avatar_url: String::new(),
+            authored_at: "2026-01-01T00:00:00Z".into(),
+            verified: false,
+        }]);
+        assert_eq!(with_body[1].body, "subject\n\n- detail one\n- detail two");
+        assert_eq!(
+            split_commit_message(with_body[1].body.as_str()),
+            ("subject".into(), "- detail one\n- detail two".into())
+        );
 
         let merged =
             conversation_merged_item("carol", "54037a9deadbeef", "main", "2026-01-03T00:00:00Z");

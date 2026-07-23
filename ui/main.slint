@@ -80,7 +80,7 @@ export component MainWindow inherits Window {
     in-out property <bool> show-chat-page: false;
     in-out property <bool> show-dialog-page: false;
     
-    // 上一个路由，用于返回功能
+    // Router 历史栈顶部，仅供 UI 判断/展示；Back 必须调用 navigate-back。
     in-out property <Route> previous-route: Route.Home;
     private property <bool> shell-drawer-docked-route: root.current-route == Route.Workflow || root.current-route == Route.Project;
     private property <length> page-scroll-offset: (root.current-route == Route.Workflow || root.current-route == Route.Project)
@@ -100,6 +100,7 @@ export component MainWindow inherits Window {
 
     // 导航信号（方便 Rust 端调用）
     callback navigate(Route);
+    callback navigate-back();
     callback navigate-from-nav-index(int);
 
     // 更新相关回调
@@ -208,8 +209,10 @@ export component MainWindow inherits Window {
     in property <string> workflow-pr-review-head-sha: "";
     in property <bool> workflow-pr-review-too-many-commits: false;
     in-out property <int> workflow-pr-review-tab: 2;
+    in property <string> workflow-pr-review-back-label: "Back to pull requests";
     in property <[WorkflowPrConversationItem]> workflow-pr-review-conversation-items: [];
     in property <int> workflow-pr-review-conversation-content-height: 0;
+    in property <int> workflow-pr-review-expanded-commit-body-height: 0;
     in property <[WorkflowPrCommit]> workflow-pr-review-commits: [];
     in property <bool> workflow-pr-review-conversation-loading: false;
     in property <bool> workflow-pr-review-commits-loading: false;
@@ -303,10 +306,11 @@ export component MainWindow inherits Window {
     callback workflow-pr-list-state-change(string);
     callback workflow-pr-list-page-change(int);
     callback workflow-pr-review-open(string, string, string, string, string, string);
-    callback workflow-pr-review-close();
+    callback workflow-pr-review-back();
     callback workflow-pr-review-select-tab(int);
     callback workflow-pr-review-ensure-commits();
     callback workflow-pr-review-apply-commit-range(int, int);
+    callback workflow-pr-review-open-commit(string);
     callback workflow-pr-review-select-file(int);
     callback workflow-pr-review-select-relative-file(int);
     callback workflow-pr-review-reload(bool);
@@ -322,6 +326,7 @@ export component MainWindow inherits Window {
     callback workflow-pr-review-copy-commit-sha(string);
     callback workflow-pr-review-copy-source-branch(string);
     callback workflow-pr-review-view-file();
+    callback workflow-pr-review-toggle-commit-message(string);
     callback workflow-pr-submit-review(string, string);
     callback workflow-pr-merge(string, bool);
     callback workflow-cd-start(string, string, string);
@@ -369,9 +374,6 @@ export component MainWindow inherits Window {
 
     changed current-route => {
         root.page-memory-diag-pending = true;
-        if root.current-route != Route.Workflow && root.current-route != Route.PrReview && root.workflow-pr-review-visible {
-            root.workflow-pr-review-close();
-        }
     }
 
     changed shell-drawer-visible => {
@@ -438,7 +440,6 @@ export component MainWindow inherits Window {
 
                             selected(item_index) => {
                                 if item_index >= 0 {
-                                    root.previous-route = root.current-route;
                                     root.navigate-from-nav-index(item_index);
                                 }
                             }
@@ -469,9 +470,9 @@ export component MainWindow inherits Window {
                         current-route: root.current-route;
                         previous-route: root.previous-route;
                         navigate(route) => {
-                            root.previous-route = root.current-route;
                             root.navigate(route);
                         }
+                        back => { root.navigate-back(); }
                     }
                 }
 
@@ -496,11 +497,10 @@ export component MainWindow inherits Window {
                         padding-bottom: 1px;
 
                         if root.current-route == Route.Login: LoginPage {
-                            previous-route: root.previous-route;
                             navigate(route) => {
-                                root.previous-route = root.current-route;
                                 root.navigate(route);
                             }
+                            back => { root.navigate-back(); }
                         }
                         if root.current-route == Route.Home: HomePage {
                             viewport-height: page-scroll-view.visible-height - 2px;
@@ -527,14 +527,12 @@ export component MainWindow inherits Window {
                         if root.current-route == Route.Notification: NotificationPage {}
                         if root.current-route == Route.Toast: ToastPage {
                             navigate(route) => {
-                                root.previous-route = root.current-route;
                                 root.navigate(route);
                             }
                         }
                         if root.current-route == Route.About: AboutPage {
                             viewport-height: page-scroll-view.visible-height - 2px;
                             navigate(route) => {
-                                root.previous-route = root.current-route;
                                 root.navigate(route);
                             }
                         }
@@ -546,7 +544,6 @@ export component MainWindow inherits Window {
                             viewport-height: page-scroll-view.visible-height - 2px;
                             selected-flow <=> root.workflow-selected-flow;
                             navigate(route) => {
-                                root.previous-route = root.current-route;
                                 root.navigate(route);
                             }
                             branch-result: root.workflow-branch-result;
@@ -649,7 +646,6 @@ export component MainWindow inherits Window {
                             viewport-height: page-scroll-view.visible-height;
                             viewport-width: page-scroll-view.visible-width;
                             navigate(route) => {
-                                root.previous-route = root.current-route;
                                 root.navigate(route);
                             }
                             projects: root.project-items;
@@ -688,7 +684,6 @@ export component MainWindow inherits Window {
                         if root.current-route == Route.Tools: ToolsPage {
                             viewport-height: page-scroll-view.visible-height;
                             navigate(route) => {
-                                root.previous-route = root.current-route;
                                 root.navigate(route);
                             }
                         }
@@ -785,7 +780,6 @@ export component MainWindow inherits Window {
                 copied-message-index <=> root.chat-copied-message-index;
                 loading-phase <=> root.chat-loading-phase;
                 navigate(route) => {
-                    root.previous-route = root.current-route;
                     root.navigate(route);
                 }
                 send-message(text) => {
@@ -809,7 +803,6 @@ export component MainWindow inherits Window {
                 width: parent.width;
                 height: parent.height;
                 navigate(route) => {
-                    root.previous-route = root.current-route;
                     root.navigate(route);
                 }
             }
@@ -950,8 +943,10 @@ export component MainWindow inherits Window {
         head-sha: root.workflow-pr-review-head-sha;
         too-many-commits: root.workflow-pr-review-too-many-commits;
         selected-tab <=> root.workflow-pr-review-tab;
+        back-label: root.workflow-pr-review-back-label;
         conversation-items: root.workflow-pr-review-conversation-items;
         conversation-content-height: root.workflow-pr-review-conversation-content-height;
+        expanded-commit-body-height: root.workflow-pr-review-expanded-commit-body-height;
         commits: root.workflow-pr-review-commits;
         conversation-loading: root.workflow-pr-review-conversation-loading;
         commits-loading: root.workflow-pr-review-commits-loading;
@@ -1002,10 +997,11 @@ export component MainWindow inherits Window {
         merge-method-squash: root.workflow-pr-merge-method-squash;
         merge-method-rebase: root.workflow-pr-merge-method-rebase;
         merge-method-fast-forward: root.workflow-pr-merge-method-fast-forward;
-        close => { root.workflow-pr-review-close(); }
+        back => { root.workflow-pr-review-back(); }
         select-tab(tab) => { root.workflow-pr-review-select-tab(tab); }
         ensure-commits => { root.workflow-pr-review-ensure-commits(); }
         apply-commit-range(start, end) => { root.workflow-pr-review-apply-commit-range(start, end); }
+        open-commit(sha) => { root.workflow-pr-review-open-commit(sha); }
         select-file(index) => { root.workflow-pr-review-select-file(index); }
         select-relative-file(offset) => { root.workflow-pr-review-select-relative-file(offset); }
         reload(ignore-whitespace) => { root.workflow-pr-review-reload(ignore-whitespace); }
@@ -1021,6 +1017,7 @@ export component MainWindow inherits Window {
         copy-commit-sha(sha) => { root.workflow-pr-review-copy-commit-sha(sha); }
         copy-source-branch(branch) => { root.workflow-pr-review-copy-source-branch(branch); }
         view-file => { root.workflow-pr-review-view-file(); }
+        toggle-commit-message(sha) => { root.workflow-pr-review-toggle-commit-message(sha); }
         submit-review(action, body) => { root.workflow-pr-submit-review(action, body); }
         merge(method, remove-source-branch) => { root.workflow-pr-merge(method, remove-source-branch); }
     }

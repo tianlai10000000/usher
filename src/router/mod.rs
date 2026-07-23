@@ -1,7 +1,9 @@
 use crate::{MainWindow, Route};
 use slint::{ModelRc, VecModel, Weak};
+use std::sync::{Arc, Mutex};
 
 const BREADCRUMB_HIDDEN_ROUTES: &[Route] = &[Route::Chat, Route::Login, Route::PrReview];
+const MAX_ROUTE_HISTORY: usize = 64;
 const NAVIGATION_ROUTES: &[Route] = &[
     Route::Home,
     // Route::Search,
@@ -59,11 +61,46 @@ pub fn route_for_navigation_index(index: i32) -> Option<Route> {
 #[derive(Clone)]
 pub struct Router {
     window: Weak<MainWindow>,
+    history: Arc<Mutex<NavigationHistory>>,
+}
+
+#[derive(Debug, Default)]
+struct NavigationHistory {
+    entries: Vec<Route>,
+}
+
+impl NavigationHistory {
+    fn record_forward(&mut self, current: Route, target: Route) {
+        if current != target && self.entries.last().copied() != Some(current) {
+            if self.entries.len() == MAX_ROUTE_HISTORY {
+                self.entries.remove(0);
+            }
+            self.entries.push(current);
+        }
+    }
+
+    fn take_back_target(&mut self, current: Route) -> Option<Route> {
+        while self.entries.last().copied() == Some(current) {
+            self.entries.pop();
+        }
+        self.entries.pop()
+    }
+
+    fn previous_or(&self, fallback: Route) -> Route {
+        self.entries.last().copied().unwrap_or(fallback)
+    }
+
+    fn contains_workflow_route(&self) -> bool {
+        self.entries.iter().copied().any(is_workflow_route)
+    }
 }
 
 impl Router {
     pub fn new(window: Weak<MainWindow>) -> Self {
-        Self { window }
+        Self {
+            window,
+            history: Arc::new(Mutex::new(NavigationHistory::default())),
+        }
     }
 
     pub fn apply_route_ui_state(window: &MainWindow, route: Route) -> RouteUiState {
@@ -81,38 +118,66 @@ impl Router {
         self.window.upgrade().map(|win| {
             let previous = win.get_current_route();
             if previous != route {
-                win.set_previous_route(previous);
+                if let Ok(mut history) = self.history.lock() {
+                    history.record_forward(previous, route);
+                }
             }
-            win.set_current_route(route);
-            let state = Self::apply_route_ui_state(&win, route);
-
-            // Proactively drop large workflow logs/details when leaving the workflow page.
-            // This reduces resident memory after visiting Tag/CD tabs (git command logs can be large).
-            if is_workflow_route(previous) && !is_workflow_route(route) {
-                crate::workflow::state::clear_current_project_heavy_state();
-                win.set_workflow_project_logo("".into());
-                win.set_workflow_project_logo_image(crate::project::resolve_project_logo_image(""));
-                win.set_workflow_pr_count_auto_update(false);
-                win.set_workflow_pr_count_loading(false);
-                win.set_workflow_pr_count_failed(false);
-                win.set_workflow_pr_fat_count("".into());
-                win.set_workflow_pr_uat_count("".into());
-                win.set_workflow_pr_prod_count("".into());
-                win.set_workflow_tag_result("".into());
-                win.set_workflow_tag_steps(ModelRc::new(VecModel::from(Vec::new())));
-                win.set_workflow_cd_summary("".into());
-                win.set_workflow_cd_build_detail("".into());
-                win.set_workflow_cd_test_detail("".into());
-                win.set_workflow_cd_deploy_detail("".into());
-                win.set_workflow_cd_verify_detail("".into());
-            }
-            // Can add other global side effects here, such as:
-            // - Record route history
-            // - Send analytics events
-            // - Lazy load certain resources, etc.
-            log::debug!("→ Navigate to: {:?}", route);
-            state
+            self.apply_transition(&win, previous, route)
         })
+    }
+
+    pub fn back(&self) -> Option<RouteUiState> {
+        self.window.upgrade().and_then(|win| {
+            let current = win.get_current_route();
+            let target = self
+                .history
+                .lock()
+                .ok()
+                .and_then(|mut history| history.take_back_target(current))?;
+            Some(self.apply_transition(&win, current, target))
+        })
+    }
+
+    fn apply_transition(&self, win: &MainWindow, previous: Route, route: Route) -> RouteUiState {
+        win.set_current_route(route);
+        let history_top = self
+            .history
+            .lock()
+            .ok()
+            .map(|history| history.previous_or(route))
+            .unwrap_or(route);
+        win.set_previous_route(history_top);
+        let state = Self::apply_route_ui_state(win, route);
+
+        // Keep Workflow/PR state while a route remains reachable through Back.
+        // Once navigation leaves the workflow domain with no workflow entry in
+        // history, its large logs and models can be released.
+        let workflow_reachable = is_workflow_route(route)
+            || self
+                .history
+                .lock()
+                .map(|history| history.contains_workflow_route())
+                .unwrap_or(false);
+        if is_workflow_route(previous) && !workflow_reachable {
+            crate::workflow::state::clear_current_project_heavy_state();
+            win.set_workflow_project_logo("".into());
+            win.set_workflow_project_logo_image(crate::project::resolve_project_logo_image(""));
+            win.set_workflow_pr_count_auto_update(false);
+            win.set_workflow_pr_count_loading(false);
+            win.set_workflow_pr_count_failed(false);
+            win.set_workflow_pr_fat_count("".into());
+            win.set_workflow_pr_uat_count("".into());
+            win.set_workflow_pr_prod_count("".into());
+            win.set_workflow_tag_result("".into());
+            win.set_workflow_tag_steps(ModelRc::new(VecModel::from(Vec::new())));
+            win.set_workflow_cd_summary("".into());
+            win.set_workflow_cd_build_detail("".into());
+            win.set_workflow_cd_test_detail("".into());
+            win.set_workflow_cd_deploy_detail("".into());
+            win.set_workflow_cd_verify_detail("".into());
+        }
+        log::debug!("→ Navigate to: {:?}", route);
+        state
     }
 }
 
@@ -122,7 +187,7 @@ fn is_workflow_route(route: Route) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_workflow_route, route_ui_state};
+    use super::{MAX_ROUTE_HISTORY, NavigationHistory, is_workflow_route, route_ui_state};
     use crate::Route;
 
     #[test]
@@ -134,5 +199,48 @@ mod tests {
         assert!(is_workflow_route(Route::Workflow));
         assert!(is_workflow_route(Route::PrReview));
         assert!(!is_workflow_route(Route::Home));
+    }
+
+    #[test]
+    fn route_history_returns_from_utility_pages_without_creating_a_bounce() {
+        let mut history = NavigationHistory::default();
+        history.record_forward(Route::Home, Route::Project);
+        history.record_forward(Route::Project, Route::Workflow);
+        history.record_forward(Route::Workflow, Route::PrReview);
+        history.record_forward(Route::PrReview, Route::Settings);
+
+        assert_eq!(
+            history.take_back_target(Route::Settings),
+            Some(Route::PrReview)
+        );
+        assert_eq!(
+            history.take_back_target(Route::PrReview),
+            Some(Route::Workflow)
+        );
+        assert_eq!(
+            history.take_back_target(Route::Workflow),
+            Some(Route::Project)
+        );
+    }
+
+    #[test]
+    fn repeated_navigation_to_the_current_route_does_not_add_history() {
+        let mut history = NavigationHistory::default();
+        history.record_forward(Route::Home, Route::Home);
+        assert_eq!(history.take_back_target(Route::Home), None);
+    }
+
+    #[test]
+    fn route_history_is_bounded() {
+        let mut history = NavigationHistory::default();
+        for index in 0..(MAX_ROUTE_HISTORY * 2) {
+            let (current, target) = if index % 2 == 0 {
+                (Route::Home, Route::Settings)
+            } else {
+                (Route::Settings, Route::Home)
+            };
+            history.record_forward(current, target);
+        }
+        assert_eq!(history.entries.len(), MAX_ROUTE_HISTORY);
     }
 }
