@@ -1,5 +1,11 @@
 {
     "slint.libraryPaths": {
         "material": "./material-1.0-fixed/material.slint"
-    }
+    },
+    "rust-analyzer.check.allTargets": true,
+    "rust-analyzer.check.extraArgs": [
+        "--profile",
+        "ide",
+        "--locked"
+    ]
 }

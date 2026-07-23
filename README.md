@@ -51,6 +51,29 @@ cargo check --locked
 cargo test --lib --locked
 ```
 
+Everyday `dev` and `test` builds retain source line tables and incremental
+compilation, but avoid macOS's default unpacked debug objects. This keeps panic
+backtraces useful while preventing loose `.rcgu.o` files from dominating
+`target/`. When full LLDB variable and type inspection is required, use the
+isolated heavyweight profile:
+
+```sh
+cargo build --profile dev-full
+```
+
+IDE background diagnostics use a compact, non-incremental profile so repeated
+workspace-wide checks do not duplicate the normal dev cache. VS Code/Cursor
+uses it automatically; run the equivalent check manually with:
+
+```sh
+cargo ide-check
+```
+
+After changing from the old profile policy, run `cargo clean` once if the
+existing `target/` still contains historical unpacked objects. See
+[build performance and artifact policy](docs/build-performance.md) for the
+measured trade-offs and cleanup guidance.
+
 In-process Slint live preview is development-only and excluded from normal and
 release builds. Enable it explicitly when needed:
 
@@ -101,7 +124,11 @@ GitHub, GitLab, and Gitee tokens can be managed from Settings. Gitee public and 
 
 ```text
 src/main.rs
-  -> src/lib.rs                application composition and Slint bindings
+  -> src/lib.rs                application composition and callback bindings
+     -> crates/usher-ui/       generated Slint API boundary
+        -> ui/main.slint       root window and exported UI contract
+           -> ui/views/        page-level views
+           -> ui/components/   reusable application components
      -> src/app_runtime.rs     shared Tokio runtime
      -> src/http/mod.rs        shared HTTP clients and interceptors
      -> src/project/           project registry, logos, PR summaries
@@ -110,9 +137,6 @@ src/main.rs
      -> src/chat/              chat transport, history, Markdown, UI binding
      -> src/update/            update checks, download, install
      -> src/{toast,notification,dialog}.rs
-ui/main.slint
-  -> ui/views/                 page-level views
-  -> ui/components/            reusable application components
 material-1.7.1-fixed/            vendored Slint v1.17.1 Material library
 ```
 
@@ -154,6 +178,7 @@ The GitHub release workflow produces macOS archives/DMGs and Windows ZIP bundles
 - [Specification index](docs/specs/README.md)
 - [Pull request workflow specification](docs/specs/pr-review.md)
 - [Terminal behavior specification](docs/specs/terminal.md)
+- [Build performance and artifact policy](docs/build-performance.md)
 - [Historical terminal investigation notes](docs/terminal_viewport_iteration_notes.md)
 
 ## License

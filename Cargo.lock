@@ -7226,7 +7226,6 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "slint",
- "slint-build",
  "syntect",
  "tar",
  "tokio",
@@ -7234,8 +7233,17 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tray-icon",
+ "usher-ui",
  "vt100",
  "webbrowser",
+]
+
+[[package]]
+name = "usher-ui"
+version = "0.0.7-alpha.1"
+dependencies = [
+ "slint",
+ "slint-build",
 ]
 
 [[package]]

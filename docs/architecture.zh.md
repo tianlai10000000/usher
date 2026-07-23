@@ -16,10 +16,11 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 用户
   -> Slint 主窗口和复用组件
      -> ui/main.slint 导出的 callback
-        -> Rust 功能模块
-           -> 本地 Git / PTY / 文件系统
-           -> 统一 reqwest HTTP 管线
-           -> Tokio runtime 或专用阻塞线程
+        -> crates/usher-ui 负责的生成 API
+           -> 由 src/lib.rs 绑定的 Rust 功能模块
+              -> 本地 Git / PTY / 文件系统
+              -> 统一 reqwest HTTP 管线
+              -> Tokio runtime 或专用阻塞线程
         -> 通过 Slint event loop 回写 UI
 ```
 
@@ -32,7 +33,8 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | 路径 | 职责 |
 | --- | --- |
 | `src/main.rs` | 最小二进制入口，转发到库入口。 |
-| `src/lib.rs` | 创建 `MainWindow`、初始化模块、绑定跨模块 callback、管理窗口和关闭流程。 |
+| `src/lib.rs` | 导入并重新导出生成的 UI API，创建 `MainWindow`、初始化模块、绑定跨模块 callback，并管理窗口和关闭流程。 |
+| `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum。 |
 | `src/app_runtime.rs` | 进程级多线程 Tokio runtime，并为 runtime 线程安装 tracing dispatch。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、UI 尺寸关联，以及可取消的周期内存采样。 |
 | `src/shutdown.rs` | 按优先级协调关闭。 |
@@ -68,6 +70,8 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 
 | 路径 | 职责 |
 | --- | --- |
+| `crates/usher-ui/build.rs` | 编译根 Slint 源码树，并将内置 Material 库映射为 `@material`。 |
+| `crates/usher-ui/src/lib.rs` | 包含并公开导出 Slint 生成模块。 |
 | `ui/main.slint` | 根窗口、路由装配、Rust-facing property/callback、Modal 层和 Terminal Dock。 |
 | `ui/route/routeMap.slint` | 完整 `Route` 枚举；主导航只开放其中一部分。 |
 | `ui/state/` | Slint 全局状态适配。 |
@@ -79,6 +83,30 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `vendor/i-slint-live-preview/` | 仅由显式 `live-preview` feature 选择的临时 Slint 1.17.1 override；其中有文档记录的 `mtime` 保护避免 macOS 文件监听误报引发无限重编译。 |
 
 应用 UI 原则上通过 `@material` 导入 Material。只有确实需要访问未导出组件时才允许直接引用内置路径。修改任一 vendored dependency 前必须与上游对比并记录原因；上游提供等价文件监听保护后，应删除 live-preview override。
+
+UI 源码继续保留在仓库根目录的 `ui/` 下，但生成的 Rust 只由 `usher-ui` workspace crate 编译。应用 crate 重新导出这套公开 API，使现有功能模块仍可通过 `crate::{MainWindow, Route, ...}` 引用类型，而不再拥有生成模块。这个边界保证普通 Rust 功能逻辑变化不会迫使 Slint 生成 crate 重编；UI 源码变化则先重编 `usher-ui`，再检查应用绑定。
+
+## 构建产物策略
+
+workspace 根 `Cargo.toml` 中的 profile 统一负责构建产物策略。日常 `dev` 与
+`test` 使用行表级调试信息、`split-debuginfo = "off"`，同时保留增量编译。
+这会覆盖 macOS 上 Cargo 默认的 full/unpacked 调试策略：panic backtrace
+仍有文件名和行号，但 `target/debug/deps` 不再积累松散 `.rcgu.o`。
+
+需要 LLDB 查看完整变量和类型时，显式使用 `dev-full` profile。它继承日常开发
+设置，但把完整 packed 调试信息写入独立 profile 目录；因此可以通过
+`cargo clean --profile dev-full` 单独移除，而不丢弃日常开发产物。Release 和
+dist profile 保持独立：Release 继续禁用调试信息和增量编译。
+
+workspace 全目标 IDE 后台诊断使用隔离的 `ide` profile：不生成调试信息，也不
+保留增量状态，避免后台分析重复制造数 GiB 的应用与生成 UI 缓存。VS
+Code/Cursor 通过 workspace 设置自动选择该 profile；RustRover 则在 Cargo
+external linter 中选择。交互式 build、run、test 仍使用各自的增量 profile。
+
+Cargo 目前不会对 workspace 的 `target/` 实施容量上限或自动保留策略。从旧的
+unpacked 策略升级后，开发者应执行一次完整 `cargo clean`；后续优先按 profile
+或交叉编译 target 定向清理。可复现测试数据与命令记录在
+[build-performance.md](build-performance.md)。
 
 ## 启动生命周期
 

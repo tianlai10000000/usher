@@ -16,10 +16,11 @@ Production builds select Winit with FemtoVG/OpenGL at compile time. Skia and Fem
 User
   -> Slint window and reusable components
      -> callbacks exported by ui/main.slint
-        -> Rust feature modules
-           -> local Git / PTY / filesystem
-           -> shared reqwest HTTP pipeline
-           -> Tokio runtime or dedicated blocking threads
+        -> generated API owned by crates/usher-ui
+           -> Rust feature modules bound by src/lib.rs
+              -> local Git / PTY / filesystem
+              -> shared reqwest HTTP pipeline
+              -> Tokio runtime or dedicated blocking threads
         -> UI updates scheduled on the Slint event loop
 ```
 
@@ -32,7 +33,8 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | Path | Responsibility |
 | --- | --- |
 | `src/main.rs` | Minimal binary entry point. Delegates to the library entry point. |
-| `src/lib.rs` | Creates `MainWindow`, initializes modules, wires cross-cutting callbacks, manages window lifecycle and shutdown. |
+| `src/lib.rs` | Imports and re-exports the generated UI API, creates `MainWindow`, initializes modules, wires cross-cutting callbacks, and manages window lifecycle and shutdown. |
+| `crates/usher-ui/` | Owns the Slint build script and generated Rust API. Compiles the repository-level `ui/main.slint` tree and exports its window, globals, models, structs, and enums. |
 | `src/app_runtime.rs` | Process-wide multi-thread Tokio runtime. Runtime threads install the tracing dispatch. |
 | `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots, startup checkpoints, UI-size correlation, and the cancellable periodic memory sampler. |
 | `src/shutdown.rs` | Ordered shutdown coordination. |
@@ -68,6 +70,8 @@ Repository endpoint definitions and executable behavior are intentionally separa
 
 | Path | Responsibility |
 | --- | --- |
+| `crates/usher-ui/build.rs` | Compiles the root Slint source tree and maps the vendored Material library to `@material`. |
+| `crates/usher-ui/src/lib.rs` | Includes and publicly exports the generated Slint module. |
 | `ui/main.slint` | Root window, route composition, Rust-facing properties/callbacks, modal layers, and terminal docking. |
 | `ui/route/routeMap.slint` | Complete `Route` enum. Only a subset is exposed in main navigation. |
 | `ui/state/` | Slint global state adapters. |
@@ -79,6 +83,37 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `vendor/i-slint-live-preview/` | Temporary Slint 1.17.1 override selected only by the opt-in `live-preview` feature. Its documented `mtime` guard prevents spurious macOS watcher events from causing an endless recompile loop. |
 
 Application UI must import Material through `@material` unless direct access to a non-exported vendored component is required. Changes to either vendored dependency require an upstream comparison and a documented reason. The live-preview override must be removed when upstream provides an equivalent watcher guard.
+
+The UI source remains under the repository-level `ui/` directory, but generated Rust is compiled only by the `usher-ui` workspace crate. The application crate re-exports that public API so existing feature modules can continue to import `crate::{MainWindow, Route, ...}` without owning the generated module. This is a compile boundary: changing Rust feature logic must not force the Slint-generated crate to rebuild, while a UI source change rebuilds `usher-ui` before the application bindings are checked.
+
+## Build artifact policy
+
+Workspace-root Cargo profiles own the build-artifact policy. Everyday `dev` and
+`test` builds use line-table debug information with `split-debuginfo = "off"`
+and keep incremental compilation enabled. On macOS this overrides Cargo's
+full/unpacked debug default, retaining file-and-line backtraces without
+accumulating loose `.rcgu.o` files in `target/debug/deps`.
+
+Full LLDB variable/type inspection is explicit through the `dev-full` profile.
+It inherits normal development behavior but emits full, packed debug
+information into its own profile directory. This keeps heavyweight symbols
+separate and allows `cargo clean --profile dev-full` to remove them without
+discarding normal development artifacts. Release and dist profiles remain
+independent: release builds disable debug information and incremental
+compilation.
+
+Workspace-wide IDE diagnostics use the isolated `ide` profile. It checks all
+targets without debug information or incremental state, preventing background
+analysis from duplicating several GiB of application and generated-UI caches.
+VS Code/Cursor selects it through workspace settings; RustRover users select it
+as the Cargo external-linter profile. Interactive build, run, and test commands
+continue to use their incremental profiles.
+
+Cargo does not currently enforce a size limit or automatic retention policy for
+workspace `target/` artifacts. Developers upgrading from the previous unpacked
+policy should run one full `cargo clean`; later cleanup should prefer a specific
+profile or cross-compilation target. Reproducible measurements and commands are
+recorded in [build-performance.md](build-performance.md).
 
 ## Startup lifecycle
 

@@ -11,8 +11,9 @@ extern crate objc;
 
 use slint::{CloseRequestResponse, ComponentHandle, Global, Model, Timer};
 
-// Must be called before module declarations so generated types are available in all modules
-slint::include_modules!();
+// Re-export generated UI types at the composition-root namespace so feature
+// modules retain their existing `crate::{MainWindow, Route, ...}` imports.
+pub use usher_ui::*;
 
 mod notification;
 

@@ -51,6 +51,26 @@ cargo check --locked
 cargo test --lib --locked
 ```
 
+日常 `dev` 和 `test` 构建保留源码行号与增量编译，但不再使用 macOS 默认的
+unpacked 调试对象。这样既能让 panic backtrace 保留文件与行号，也能避免松散
+`.rcgu.o` 长期占据 `target/`。确实需要 LLDB 查看完整变量和类型时，使用隔离的
+重量级 profile：
+
+```sh
+cargo build --profile dev-full
+```
+
+IDE 后台诊断使用紧凑、无增量缓存的独立 profile，避免 workspace 全目标检查
+重复制造日常开发缓存。VS Code/Cursor 已自动使用该配置；命令行等价检查为：
+
+```sh
+cargo ide-check
+```
+
+从旧策略升级后，如果现有 `target/` 仍包含历史 unpacked 对象，可执行一次
+`cargo clean`。实测取舍和清理建议见
+[构建性能与产物策略](docs/build-performance.md)。
+
 应用内 Slint 实时预览仅用于开发，常规构建和 Release 构建默认不包含它。需要时显式启用：
 
 ```sh
@@ -99,7 +119,11 @@ GitHub、GitLab 和 Gitee Token 可在设置页面管理。Gitee 公有版与企
 
 ```text
 src/main.rs
-  -> src/lib.rs                应用装配和 Slint 绑定
+  -> src/lib.rs                应用装配和 callback 绑定
+     -> crates/usher-ui/       Slint 生成 API 边界
+        -> ui/main.slint       根窗口和导出的 UI 契约
+           -> ui/views/        页面级视图
+           -> ui/components/   应用可复用组件
      -> src/app_runtime.rs     共享 Tokio runtime
      -> src/http/mod.rs        统一 HTTP 客户端和拦截器
      -> src/project/           项目、Logo、PR 概览
@@ -108,9 +132,6 @@ src/main.rs
      -> src/chat/              聊天请求、历史、Markdown、UI 绑定
      -> src/update/            更新检查、下载和安装
      -> src/{toast,notification,dialog}.rs
-ui/main.slint
-  -> ui/views/                 页面级视图
-  -> ui/components/            应用可复用组件
 material-1.7.1-fixed/            内置 Slint v1.17.1 Material 库
 ```
 
@@ -152,6 +173,7 @@ GitHub Release 工作流会生成 macOS 压缩包/DMG 和 Windows ZIP Bundle。
 - [规格索引](docs/specs/README.md)
 - [Pull Request 工作流规格](docs/specs/pr-review.md)
 - [终端行为规格](docs/specs/terminal.md)
+- [构建性能与产物策略](docs/build-performance.md)
 - [终端历史排障记录](docs/terminal_viewport_iteration_notes.md)
 
 ## 许可证

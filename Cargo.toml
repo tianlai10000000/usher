@@ -5,6 +5,11 @@ edition = "2024"
 repository = "https://github.com/tianlai10000000/usher"
 authors = ["yuankai <tanlai10000000@gmail.com>"]
 
+[workspace]
+members = [".", "crates/usher-ui"]
+default-members = ["."]
+resolver = "3"
+
 [lib]
 crate-type = ["lib", "cdylib"]
 path = "src/lib.rs"
@@ -14,12 +19,12 @@ name = "usher_lib"
 # Production builds use one deterministic renderer. Skia remains available for
 # diagnostics and renderer comparisons without being linked into normal builds.
 default = ["renderer-femtovg"]
-renderer-femtovg = ["slint/renderer-femtovg"]
-renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu"]
-renderer-skia = ["slint/renderer-skia"]
+renderer-femtovg = ["slint/renderer-femtovg", "usher-ui/renderer-femtovg"]
+renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu", "usher-ui/renderer-femtovg-wgpu"]
+renderer-skia = ["slint/renderer-skia", "usher-ui/renderer-skia"]
 # Development-only in-process UI hot reload. Production builds must leave this
 # feature disabled so the live-preview interpreter and watcher are not built.
-live-preview = ["slint/live-preview"]
+live-preview = ["slint/live-preview", "usher-ui/live-preview"]
 
 [[bin]]
 path = "src/main.rs"
@@ -31,6 +36,7 @@ name = "usher"
 #   SLINT_BACKEND=winit-skia cargo run --no-default-features --features renderer-skia
 #   SLINT_BACKEND=winit-femtovg-wgpu cargo run --no-default-features --features renderer-femtovg-wgpu
 slint = { version = "1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
+usher-ui = { path = "crates/usher-ui", default-features = false }
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
@@ -72,9 +78,6 @@ objc = "0.2"
 # wasm-bindgen = { version = "0.2" }
 # console_error_panic_hook = "0.1.5"
 
-[build-dependencies]
-slint-build = { version = "1.17.1" }
-
 # [package.metadata.android]
 # package = "dev.slint.material_template"
 # apk_name = "usher"
@@ -92,6 +95,34 @@ category = "Utility"
 short_description = "Usher Application"
 long_description = "A modern desktop application built with Slint"
 osx_minimum_system_version = "10.14"
+
+# Keep everyday macOS builds compact without giving up incremental compilation.
+# Cargo otherwise defaults to full + unpacked debug info on macOS, which retains
+# thousands of loose rustc codegen objects in target/debug/deps.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "off"
+incremental = true
+
+[profile.test]
+debug = "line-tables-only"
+split-debuginfo = "off"
+incremental = true
+
+# IDE background analysis checks every workspace target frequently. Keep those
+# disposable artifacts small and stable instead of duplicating dev incremental
+# caches. Command-line build/run/test workflows continue to use dev/test.
+[profile.ide]
+inherits = "dev"
+debug = "none"
+incremental = false
+
+# Opt in when full LLDB variable/type inspection is required. Packed symbols
+# keep this heavyweight profile isolated from the normal dev artifact layout.
+[profile.dev-full]
+inherits = "dev"
+debug = "full"
+split-debuginfo = "packed"
 
 [profile.release]
 strip = true  # Automatically strip symbols from the binary.
