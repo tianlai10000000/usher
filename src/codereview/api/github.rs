@@ -1,6 +1,7 @@
 //! GitHub API URL templates.
 
 pub(crate) const PUBLIC_API_BASE_URL: &str = "https://api.github.com";
+pub(crate) const PUBLIC_GRAPHQL_URL: &str = "https://api.github.com/graphql";
 pub(crate) const ENTERPRISE_API_VERSION_PATH: &str = "/api/v3";
 pub(crate) const REPOSITORY_URL: &str = "{api_base_url}/repos/{namespace}/{repository}";
 pub(crate) const SEARCH_PULL_REQUESTS_URL: &str = "{api_base_url}/search/issues";

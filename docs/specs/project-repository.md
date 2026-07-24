@@ -31,7 +31,7 @@ This specification covers provider metadata resolved on the Project page and the
 7. If lookup, parsing, or local persistence fails, no new partial project record is written and an existing record remains unchanged.
 8. A duplicate save for the same project while a lookup is running is rejected. Network work must not block the Slint event loop.
 9. Opening Workflow loads `repo_project_id` and `repo_type` from `projects.json`, then requests open PRs by default. Open, closed, merged, and all are explicit caller-selected filters; provider APIs do not inject a default state query.
-10. The PR tab displays 10 records per page and bottom-centered pagination. It must lazily request only the page selected by the user. GitHub may issue one detail request for each visible row to enrich its search response with source and target branch names; these requests remain scoped to that selected page. All parseable provider `updated_at` timestamps are displayed in UTC+08:00. The documented response `meta.total_count` and `meta.total_pages` determine the exact total and total pages where available. Stale responses must not overwrite the current project/filter/page.
+10. The PR tab displays 10 records per page and bottom-centered pagination. It must lazily request only the page selected by the user. GitHub may issue one detail request for each visible row to enrich its search response with source and target branch names; these requests remain scoped to that selected page. All parseable provider `updated_at` timestamps are displayed in UTC+08:00. Branch pairs and Updated timestamps wrap to additional lines instead of eliding; when the list card is narrower than the table floor width, the table scrolls horizontally rather than dropping columns. The documented response `meta.total_count` and `meta.total_pages` determine the exact total and total pages where available. Stale responses must not overwrite the current project/filter/page.
 11. `src/codereview/api/` must remain constants-only. It must not execute requests or own provider response models; endpoint changes must not require changing operation call sites.
 
 1. `remote_repo` 决定 Provider，支持 `gitee`、`gitlab`、`github`。
@@ -43,7 +43,7 @@ This specification covers provider metadata resolved on the Project page and the
 7. 查询、解析或本地持久化失败时，不写入新的不完整项目记录，已有记录也保持不变。
 8. 同一项目在查询未完成时重复保存必须被拒绝；网络工作不得阻塞 Slint event loop。
 9. 进入 Workflow 时从 `projects.json` 读取 `repo_project_id`、`repo_type`，默认查询 open PR。open、closed、merged、all 均由调用场景显式选择，Provider API 不自行注入默认状态 query。
-10. PR Tab 每页显示 10 条以及底部水平居中的分页，并且必须只懒加载用户选中的页。GitHub 可以为当前可见的每一行补充发起一个详情请求，以从搜索响应中补齐源分支和目标分支；这些请求必须始终限定在已选中的页面内。所有可解析的 Provider `updated_at` 时间戳均按东八区（UTC+08:00）显示。可用时使用接口响应中定义的 `meta.total_count`、`meta.total_pages` 显示准确总条数和总页数；旧项目、旧筛选或旧页码响应不得覆盖当前视图。
+10. PR Tab 每页显示 10 条以及底部水平居中的分页，并且必须只懒加载用户选中的页。GitHub 可以为当前可见的每一行补充发起一个详情请求，以从搜索响应中补齐源分支和目标分支；这些请求必须始终限定在已选中的页面内。所有可解析的 Provider `updated_at` 时间戳均按东八区（UTC+08:00）显示。Branch 与 Updated 列换行完整显示，不得省略号截断；列表卡片窄于表宽下限时横向滚动，而不是丢列。可用时使用接口响应中定义的 `meta.total_count`、`meta.total_pages` 显示准确总条数和总页数；旧项目、旧筛选或旧页码响应不得覆盖当前视图。
 11. `src/codereview/api/` 必须保持仅包含常量，不得执行请求或持有 Provider 响应模型；修改接口地址时不应要求修改业务调用点。
 
 ## Provider requests / Provider 请求

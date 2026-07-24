@@ -18,10 +18,14 @@ pub(crate) const ENTERPRISE_MERGE_REQUEST_CURRENT_STATE_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/current_state";
 pub(crate) const ENTERPRISE_MERGE_REQUEST_MERGE_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/merge";
+pub(crate) const ENTERPRISE_REPOSITORY_COMMIT_REFS_URL: &str =
+    "{api_base_url}/projects/{project_id}/repository/commits/{commit_sha}/refs";
+pub(crate) const ENTERPRISE_REPOSITORY_COMMIT_REVERT_URL: &str =
+    "{api_base_url}/projects/{project_id}/repository/commits/{commit_sha}/revert";
 pub(crate) const ENTERPRISE_REPOSITORY_FILE_URL: &str =
     "{api_base_url}/projects/{project_id}/repository/files/{file_path}";
-pub(crate) const ENTERPRISE_REPOSITORY_COMPARE_URL: &str =
-    "{api_base_url}/projects/{project_id}/repository/compare";
+pub(crate) const ENTERPRISE_REPOSITORY_COMPARE_DIFFS_URL: &str =
+    "{api_base_url}/projects/{project_id}/repository/compare/diffs";
 pub(crate) const PUBLIC_REPOSITORY_URL: &str =
     "{scheme}://{authority}/api/v5/repos/{namespace}/{repository}";
 pub(crate) const PUBLIC_PULL_REQUESTS_URL: &str =

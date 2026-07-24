@@ -12,11 +12,12 @@ use crate::http::{self, RequestOptions};
 use super::{
     PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
     PullRequestDiffFile, PullRequestItem, PullRequestMergeMethod, PullRequestPage,
-    PullRequestReadiness, PullRequestReadinessKind, PullRequestReviewAction, PullRequestState,
-    RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url, configured_token,
-    conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
-    conversation_system_event_item, finalize_conversation_timeline, is_configured_enterprise_host,
-    parse_unified_diff, percent_encode_path, unavailable_diff_file,
+    PullRequestReadiness, PullRequestReadinessKind, PullRequestRevertResult,
+    PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
+    configured_api_base_url, configured_token, conversation_commit_batch_items,
+    conversation_count_from_detail, conversation_merged_item, conversation_system_event_item,
+    finalize_conversation_timeline, is_configured_enterprise_host, parse_unified_diff,
+    percent_encode_path, unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -360,11 +361,28 @@ pub(super) async fn get_pull_request_action_state(
     let has_token = configured_token(RepoType::GitHub).is_some();
     let review_state = aggregate_review_state(reviews.as_slice());
     let readiness = github_merge_readiness(&detail, review_state.as_str());
+    let terminal = matches!(
+        readiness.kind,
+        PullRequestReadinessKind::Merged | PullRequestReadinessKind::Closed
+    );
+    let pull_request_node_id = string_field(&detail, "node_id").unwrap_or_default();
     let can_merge = has_token && readiness.kind == PullRequestReadinessKind::Ready;
+    let can_revert = has_token
+        && readiness.kind == PullRequestReadinessKind::Merged
+        && !pull_request_node_id.is_empty();
     let merge_block_reason = if !has_token {
         "Configure a GitHub Token in Settings to review or merge this pull request.".to_string()
     } else if readiness.kind != PullRequestReadinessKind::Ready {
         readiness.detail.clone()
+    } else {
+        String::new()
+    };
+    let revert_block_reason = if !has_token {
+        "Configure a GitHub Token in Settings to create a revert pull request.".to_string()
+    } else if readiness.kind != PullRequestReadinessKind::Merged {
+        "Only a merged pull request can be reverted.".to_string()
+    } else if pull_request_node_id.is_empty() {
+        "GitHub did not return the pull request node identifier required for a revert.".to_string()
     } else {
         String::new()
     };
@@ -393,13 +411,19 @@ pub(super) async fn get_pull_request_action_state(
     }
 
     Ok(PullRequestActionState {
-        can_comment: has_token,
-        can_approve: has_token,
-        can_request_changes: has_token,
+        can_comment: has_token && !terminal,
+        can_approve: has_token && !terminal,
+        can_request_changes: has_token && !terminal,
         can_merge,
+        can_revert,
         review_state,
         readiness,
         merge_block_reason,
+        revert_block_reason,
+        revert_action_label: "Create revert PR".to_string(),
+        revert_confirmation:
+            "GitHub will create a separate pull request that reverses the merged changes. The original pull request remains merged."
+                .to_string(),
         allowed_merge_methods,
     })
 }
@@ -861,6 +885,102 @@ pub(super) async fn merge_pull_request(
     Ok(())
 }
 
+pub(super) async fn revert_pull_request(
+    locator: &RepoLocator,
+    pull_request_number: &str,
+) -> Result<PullRequestRevertResult, String> {
+    let Some(token) = configured_token(RepoType::GitHub) else {
+        return Err(
+            "Configure a GitHub Token in Settings before creating a revert pull request.".into(),
+        );
+    };
+    let detail_endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let detail: Value = http::send_json(
+        authenticated_request(locator, detail_endpoint),
+        RequestOptions::new("Load GitHub pull request before revert"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let readiness = github_merge_readiness(&detail, "");
+    if readiness.kind != PullRequestReadinessKind::Merged {
+        return Err("Only a merged GitHub pull request can be reverted.".to_string());
+    }
+    let pull_request_node_id = string_field(&detail, "node_id").ok_or_else(|| {
+        "GitHub did not return the pull request node identifier required for a revert.".to_string()
+    })?;
+    let request = authenticated_builder(http::post(graphql_url(locator)), Some(token.as_str()))
+        .json(&revert_pull_request_payload(pull_request_node_id.as_str()));
+    let payload: Value = http::send_json(
+        request,
+        RequestOptions::new("Create GitHub revert pull request"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    decode_revert_pull_request_result(&payload)
+}
+
+fn revert_pull_request_payload(pull_request_node_id: &str) -> Value {
+    serde_json::json!({
+        "query": "mutation RevertPullRequest($input: RevertPullRequestInput!) { revertPullRequest(input: $input) { revertPullRequest { number title url } } }",
+        "variables": {
+            "input": {
+                "pullRequestId": pull_request_node_id
+            }
+        }
+    })
+}
+
+fn decode_revert_pull_request_result(payload: &Value) -> Result<PullRequestRevertResult, String> {
+    if let Some(message) = payload
+        .get("errors")
+        .and_then(Value::as_array)
+        .and_then(|errors| errors.first())
+        .and_then(|error| string_field(error, "message"))
+    {
+        return Err(message);
+    }
+    let pull_request = payload
+        .get("data")
+        .and_then(|data| data.get("revertPullRequest"))
+        .and_then(|result| result.get("revertPullRequest"))
+        .ok_or_else(|| {
+            "GitHub did not return the newly created revert pull request.".to_string()
+        })?;
+    let number = pull_request
+        .get("number")
+        .and_then(Value::as_u64)
+        .map(|number| number.to_string())
+        .or_else(|| string_field(pull_request, "number"))
+        .ok_or_else(|| {
+            "GitHub revert response did not include a pull request number.".to_string()
+        })?;
+    Ok(PullRequestRevertResult {
+        message: format!("Created revert pull request #{number}."),
+        number,
+        title: string_field(pull_request, "title").unwrap_or_default(),
+        web_url: string_field(pull_request, "url").unwrap_or_default(),
+    })
+}
+
+fn graphql_url(locator: &RepoLocator) -> String {
+    graphql_url_from_rest_base(api_base_url(locator).as_str())
+}
+
+fn graphql_url_from_rest_base(rest_base: &str) -> String {
+    if rest_base == endpoints::PUBLIC_API_BASE_URL {
+        return endpoints::PUBLIC_GRAPHQL_URL.to_string();
+    }
+    rest_base
+        .strip_suffix(endpoints::ENTERPRISE_API_VERSION_PATH)
+        .map(|base| format!("{base}/api/graphql"))
+        .unwrap_or_else(|| format!("{}/graphql", rest_base.trim_end_matches('/')))
+}
+
 fn authenticated_request(_locator: &RepoLocator, endpoint: String) -> reqwest::RequestBuilder {
     authenticated_builder(
         http::get(endpoint),
@@ -1118,8 +1238,9 @@ mod tests {
 
     use super::{
         aggregate_review_state, decode_commit, decode_github_timeline_activity,
-        github_merge_readiness, github_review_action, link_rel_last_page, pull_request_branches,
-        single_item_page_total,
+        decode_revert_pull_request_result, github_merge_readiness, github_review_action,
+        graphql_url_from_rest_base, link_rel_last_page, pull_request_branches,
+        revert_pull_request_payload, single_item_page_total,
     };
     use crate::git::PullRequestReadinessKind;
 
@@ -1136,6 +1257,58 @@ mod tests {
         assert_eq!(single_item_page_total(&headers, 1), Some(14));
         assert_eq!(single_item_page_total(&Default::default(), 0), Some(0));
         assert_eq!(single_item_page_total(&Default::default(), 1), Some(1));
+    }
+
+    #[test]
+    fn builds_github_revert_mutation_and_decodes_the_created_pull_request() {
+        let request = revert_pull_request_payload("PR_node_123");
+        assert_eq!(
+            request["variables"]["input"]["pullRequestId"],
+            "PR_node_123"
+        );
+        assert!(
+            request["query"]
+                .as_str()
+                .unwrap()
+                .contains("revertPullRequest")
+        );
+
+        let result = decode_revert_pull_request_result(&json!({
+            "data": {
+                "revertPullRequest": {
+                    "revertPullRequest": {
+                        "number": 42,
+                        "title": "Revert \"Feature\"",
+                        "url": "https://github.example/o/r/pull/42"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        assert_eq!(result.number, "42");
+        assert_eq!(result.title, "Revert \"Feature\"");
+        assert_eq!(result.message, "Created revert pull request #42.");
+    }
+
+    #[test]
+    fn surfaces_github_revert_graphql_errors() {
+        let error = decode_revert_pull_request_result(&json!({
+            "errors": [{ "message": "Revert conflict" }]
+        }))
+        .unwrap_err();
+        assert_eq!(error, "Revert conflict");
+    }
+
+    #[test]
+    fn derives_public_and_enterprise_github_graphql_urls() {
+        assert_eq!(
+            graphql_url_from_rest_base("https://api.github.com"),
+            "https://api.github.com/graphql"
+        );
+        assert_eq!(
+            graphql_url_from_rest_base("https://github.example/api/v3"),
+            "https://github.example/api/graphql"
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import { FilledButton, MaterialPalette, MaterialText, Switch } from "@material";
+import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
 import { CompactTextField } from "../../components/input/compact_text_field.slint";
 
 export struct WorkflowPullRequestItem {
@@ -206,7 +207,6 @@ export component PrFlow {
     private property <string> pr-summary: "";
     private property <bool> ci-green: true;
     private property <bool> reviewers-ready: false;
-    private property <bool> compact-table: root.width < 820px;
     private property <string> empty-title: root.pr-state == "open"
         ? "There aren’t any open pull requests."
         : (root.pr-state == "closed"
@@ -217,8 +217,16 @@ export component PrFlow {
     private property <string> empty-description: root.pr-state == "all"
         ? "New pull requests will appear here when they’re created."
         : "Try another status filter.";
-    // Keep the header and row cells on the same branch-column boundary.
-    private property <length> branch-column-width: min(320px, max(240px, root.width * 0.2));
+    // Fixed column geometry so Branch / Updated can wrap instead of eliding.
+    // When the card is narrower than this floor, the table scrolls horizontally.
+    private property <length> title-column-min-width: 220px;
+    private property <length> branch-column-width: 280px;
+    private property <length> author-column-width: 110px;
+    private property <length> updated-column-width: 168px;
+    private property <length> table-min-width:
+        28px + 62px + 12px + root.title-column-min-width + 12px
+            + root.branch-column-width + 12px + root.author-column-width
+            + 12px + root.updated-column-width;
     private property <length> dual-field-width: max(0px, (root.width - 12px) / 2);
 
     VerticalLayout {
@@ -268,8 +276,9 @@ export component PrFlow {
 
         Rectangle {
             width: parent.width;
-            // One page always reserves space for its header plus ten 58px rows.
-            // The enclosing Workflow page scrolls instead of shrinking this table.
+            // One page always reserves space for its header plus ten base rows.
+            // Wrapped Branch/Updated cells can grow taller; the enclosing Workflow
+            // page scrolls vertically. Narrow cards scroll this table horizontally.
             min-height: 618px;
             border-radius: 12px;
             border-width: 1px;
@@ -277,56 +286,124 @@ export component PrFlow {
             background: MaterialPalette.surface_container_lowest;
             clip: true;
 
-            VerticalLayout {
+            if root.pr-loading: Rectangle {
+                height: 112px;
+                MaterialText { width: parent.width; height: parent.height; text: "Loading pull requests…"; horizontal_alignment: center; vertical_alignment: center; font-family: "Hiragino Sans GB"; font_size: 13px; color: MaterialPalette.on_surface_variant; }
+            }
+
+            if !root.pr-loading && root.pr-error != "": PrListStatePanel {
+                error-state: true;
+                title: "Unable to load pull requests";
+                description: "Check your code hosting configuration or connection, then try again.";
+                show-action: true;
+                action => { root.change-page(root.pr-page); }
+            }
+
+            if !root.pr-loading && root.pr-error == "" && root.pr-items.length == 0: PrListStatePanel {
+                title: root.empty-title;
+                description: root.empty-description;
+            }
+
+            if !root.pr-loading && root.pr-error == "" && root.pr-items.length > 0: pr-table-scroll := ScrollView {
                 width: parent.width;
-                spacing: 0px;
+                // Grow with wrapped rows; Workflow owns vertical page scrolling.
+                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                horizontal-scrollbar-policy: ScrollBarPolicy.as-needed;
+                viewport-width: max(self.visible-width, root.table-min-width);
+                viewport-height: pr-table-body.preferred-height;
 
-                Rectangle {
-                    height: 38px;
-                    background: MaterialPalette.surface_container_low;
-                    HorizontalLayout {
-                        padding-left: 14px; padding-right: 14px; spacing: 12px;
-                        MaterialText { width: 62px; text: "PR"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        MaterialText { horizontal-stretch: 3; text: "Title"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        if !root.compact-table: MaterialText { width: root.branch-column-width; text: "Branch"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        if !root.compact-table: MaterialText { width: 110px; text: "Author"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        MaterialText { width: 142px; text: "Updated"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                    }
-                }
-
-                if root.pr-loading: Rectangle {
-                    height: 112px;
-                    MaterialText { width: parent.width; height: parent.height; text: "Loading pull requests…"; horizontal_alignment: center; vertical_alignment: center; font-family: "Hiragino Sans GB"; font_size: 13px; color: MaterialPalette.on_surface_variant; }
-                }
-
-                if !root.pr-loading && root.pr-error != "": PrListStatePanel {
-                    error-state: true;
-                    title: "Unable to load pull requests";
-                    description: "Check your code hosting configuration or connection, then try again.";
-                    show-action: true;
-                    action => { root.change-page(root.pr-page); }
-                }
-
-                if !root.pr-loading && root.pr-error == "" && root.pr-items.length == 0: PrListStatePanel {
-                    title: root.empty-title;
-                    description: root.empty-description;
-                }
-
-                if !root.pr-loading && root.pr-error == "": VerticalLayout {
+                pr-table-body := VerticalLayout {
+                    width: max(pr-table-scroll.visible-width, root.table-min-width);
                     spacing: 0px;
+
+                    Rectangle {
+                        height: 38px;
+                        background: MaterialPalette.surface_container_low;
+                        HorizontalLayout {
+                            padding-left: 14px; padding-right: 14px; spacing: 12px;
+                            MaterialText { width: 62px; text: "PR"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                            MaterialText {
+                                horizontal-stretch: 1;
+                                min-width: root.title-column-min-width;
+                                text: "Title";
+                                font-family: "Hiragino Sans GB";
+                                font_size: 11px;
+                                font_weight: 600;
+                                color: MaterialPalette.on_surface_variant;
+                                vertical_alignment: center;
+                            }
+                            MaterialText { width: root.branch-column-width; text: "Branch"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                            MaterialText { width: root.author-column-width; text: "Author"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                            MaterialText { width: root.updated-column-width; text: "Updated"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
+                        }
+                    }
+
                     for item[index] in root.pr-items: Rectangle {
-                        height: 58px;
+                        // Grow with wrapped Branch/Updated cells so multi-line
+                        // pairs are not clipped by the 58px floor height.
+                        height: max(
+                            58px,
+                            max(branch-cell.preferred-height, updated-cell.preferred-height) + 24px
+                        );
                         background: row-hover.has-hover
                             ? MaterialPalette.surface_container_high
                             : (Math.mod(index, 2) == 0 ? MaterialPalette.surface_container_lowest : MaterialPalette.surface_container_low);
                         border-width: 0px;
                         HorizontalLayout {
-                            padding-left: 14px; padding-right: 14px; spacing: 12px;
-                            MaterialText { width: 62px; text: "#" + item.number; font-family: "Hiragino Sans GB"; font_size: 12px; font_weight: 600; color: MaterialPalette.primary; vertical_alignment: center; overflow: elide; }
-                            MaterialText { horizontal-stretch: 3; text: item.title; font-family: "Hiragino Sans GB"; font_size: 13px; color: MaterialPalette.on_surface; vertical_alignment: center; overflow: elide; }
-                            if !root.compact-table: MaterialText { width: root.branch-column-width; text: item.source-branch + " → " + item.target-branch; font-family: "Hiragino Sans GB"; font_size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
-                            if !root.compact-table: MaterialText { width: 110px; text: item.author; font-family: "Hiragino Sans GB"; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
-                            MaterialText { width: 142px; text: item.updated-at; font-family: "Hiragino Sans GB"; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; overflow: elide; }
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            padding-top: 12px;
+                            padding-bottom: 12px;
+                            spacing: 12px;
+                            MaterialText {
+                                width: 62px;
+                                text: "#" + item.number;
+                                font-family: "Hiragino Sans GB";
+                                font_size: 12px;
+                                font_weight: 600;
+                                color: MaterialPalette.primary;
+                                vertical_alignment: center;
+                                overflow: elide;
+                            }
+                            MaterialText {
+                                horizontal-stretch: 1;
+                                min-width: root.title-column-min-width;
+                                text: item.title;
+                                font-family: "Hiragino Sans GB";
+                                font_size: 13px;
+                                color: MaterialPalette.on_surface;
+                                vertical_alignment: center;
+                                overflow: elide;
+                            }
+                            // Branch pair wraps fully — never elide into "...".
+                            branch-cell := Text {
+                                width: root.branch-column-width;
+                                text: item.source-branch + " → " + item.target-branch;
+                                font-family: "Hiragino Sans GB";
+                                font_size: 11px;
+                                color: MaterialPalette.on_surface_variant;
+                                vertical_alignment: center;
+                                wrap: word-wrap;
+                            }
+                            MaterialText {
+                                width: root.author-column-width;
+                                text: item.author;
+                                font-family: "Hiragino Sans GB";
+                                font_size: 11px;
+                                color: MaterialPalette.on_surface_variant;
+                                vertical_alignment: center;
+                                overflow: elide;
+                            }
+                            // Absolute UTC+08:00 timestamps wrap fully — never elide.
+                            updated-cell := Text {
+                                width: root.updated-column-width;
+                                text: item.updated-at;
+                                font-family: "Hiragino Sans GB";
+                                font_size: 11px;
+                                color: MaterialPalette.on_surface_variant;
+                                vertical_alignment: center;
+                                wrap: word-wrap;
+                            }
                         }
                         // Keep the hover target mounted so row feedback remains stable.
                         row-hover := TouchArea {

@@ -291,9 +291,16 @@ pub(super) async fn get_pull_request_action_state(
         can_approve: false,
         can_request_changes: false,
         can_merge: false,
+        can_revert: false,
         review_state,
         readiness,
         merge_block_reason,
+        revert_block_reason: "Automated merge-request revert is not implemented for GitLab yet."
+            .to_string(),
+        revert_action_label: "Revert changes".to_string(),
+        revert_confirmation:
+            "This provider does not currently expose a supported automatic revert operation."
+                .to_string(),
         allowed_merge_methods: Vec::new(),
     })
 }
@@ -417,7 +424,8 @@ pub(super) async fn get_pull_request_conversation(
             }
         })
         .collect::<Vec<_>>();
-    // GitLab returns newest-first; Conversation/GitHub-style batches are oldest-first.
+    // GitLab returns newest-first; normalize to oldest→newest before the shared
+    // Conversation batch builder (which renders newest-first for display).
     let commits = {
         let mut commits = commits;
         commits.reverse();

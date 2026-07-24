@@ -196,6 +196,9 @@ pub(crate) fn split_commit_message(message: &str) -> (String, String) {
 }
 
 /// Build a GitHub-style "added N commits" batch plus one row per commit.
+///
+/// `commits` must be oldest→newest (provider-neutral). The Conversation rows
+/// under the batch header render newest→oldest so the latest change is first.
 pub(crate) fn conversation_commit_batch_items(
     commits: &[PullRequestCommit],
 ) -> Vec<PullRequestConversationItem> {
@@ -239,7 +242,7 @@ pub(crate) fn conversation_commit_batch_items(
         created_at,
         state: count.to_string(),
     });
-    for commit in commits {
+    for commit in commits.iter().rev() {
         items.push(PullRequestConversationItem {
             id: commit.sha.clone(),
             kind: "commit".to_string(),
@@ -494,10 +497,22 @@ pub(crate) struct PullRequestActionState {
     pub(crate) can_approve: bool,
     pub(crate) can_request_changes: bool,
     pub(crate) can_merge: bool,
+    pub(crate) can_revert: bool,
     pub(crate) review_state: String,
     pub(crate) readiness: PullRequestReadiness,
     pub(crate) merge_block_reason: String,
+    pub(crate) revert_block_reason: String,
+    pub(crate) revert_action_label: String,
+    pub(crate) revert_confirmation: String,
     pub(crate) allowed_merge_methods: Vec<PullRequestMergeMethod>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PullRequestRevertResult {
+    pub(crate) number: String,
+    pub(crate) title: String,
+    pub(crate) web_url: String,
+    pub(crate) message: String,
 }
 
 /// Provider-neutral status filter. `None` means the caller intentionally
@@ -899,6 +914,32 @@ pub(crate) async fn merge_pull_request(
         }
         RepoType::GitLab => {
             Err("Remote merge actions are not implemented for GitLab yet.".to_string())
+        }
+    }
+}
+
+/// Create a provider-native reverse change for one merged pull request.
+///
+/// The portable contract is intentionally capability-gated: providers that do
+/// not expose a safe server-side operation return an explicit unsupported
+/// error instead of reconstructing commit ranges in the client.
+pub(crate) async fn revert_pull_request(
+    repo_type: &str,
+    repo_project_id: &str,
+    remote_repo: &str,
+    pull_request_iid: &str,
+) -> Result<PullRequestRevertResult, String> {
+    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    if pull_request_iid.trim().is_empty() {
+        return Err("Pull request number is empty.".to_string());
+    }
+    match locator.repo_type {
+        RepoType::GitHub => github::revert_pull_request(&locator, pull_request_iid).await,
+        RepoType::Gitee => {
+            gitee::revert_pull_request(&locator, repo_project_id, pull_request_iid).await
+        }
+        RepoType::GitLab => {
+            Err("Automated merge-request revert is not implemented for GitLab yet.".to_string())
         }
     }
 }
@@ -1332,13 +1373,15 @@ mod tests {
         assert_eq!(batch[0].kind, "commits");
         assert_eq!(batch[0].body, "added 2 commits");
         assert_eq!(batch[1].kind, "commit");
-        assert_eq!(batch[1].body, "first");
-        assert_eq!(batch[1].state, "abcdef0");
-        assert_eq!(batch[1].avatar_url, "https://example.test/alice.png");
-        assert_eq!(batch[2].state, "1234567");
+        // Display order is newest→oldest while input stays oldest→newest.
+        assert_eq!(batch[1].body, "second");
+        assert_eq!(batch[1].state, "1234567");
+        assert_eq!(batch[1].avatar_url, "https://example.test/bob.png");
+        assert_eq!(batch[2].body, "first");
+        assert_eq!(batch[2].state, "abcdef0");
         assert_eq!(batch[0].created_at, "2026-01-02T00:00:00Z");
-        assert_eq!(batch[1].created_at, "2026-01-01T00:00:00Z");
-        assert_eq!(batch[2].created_at, batch[0].created_at);
+        assert_eq!(batch[1].created_at, batch[0].created_at);
+        assert_eq!(batch[2].created_at, "2026-01-01T00:00:00Z");
 
         let with_body = conversation_commit_batch_items(&[PullRequestCommit {
             sha: "deadbeef".into(),

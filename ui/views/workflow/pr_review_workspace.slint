@@ -1,4 +1,4 @@
-import { MaterialPalette, MaterialText, Switch, ToolTip } from "@material";
+import { MaterialPalette, MaterialText, ToolTip } from "@material";
 import { ListView } from "../../../material-1.7.1-fixed/ui/components/list_view.slint";
 import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
 import { AppState } from "../../state/app_state.slint";
@@ -135,12 +135,32 @@ component ReviewActionButton inherits Rectangle {
     in property <string> text;
     in property <bool> primary: false;
     in property <bool> success: false;
+    in property <bool> danger: false;
     in property <bool> button-enabled: true;
     in property <bool> show-chevron: false;
+    // When true, width follows Primer Button medium inline padding (12px×2)
+    // plus the label, matching GitHub's content-sized secondary actions.
+    in property <bool> hug-content: false;
+    // Parents that paint later siblings over this control (PR title under the
+    // compact header actions) host the tip themselves. Nested tips still lose.
+    in property <bool> embed-tooltip: true;
+    // Compact leading-edge headers left-align tips so a long tip cannot flush
+    // past the window's left gutter. Trailing-edge strips keep end alignment.
+    in property <bool> tooltip-align-start: false;
     in property <string> tooltip-text: "";
+    out property <bool> has-hover: action-touch.has-hover;
     callback clicked();
 
-    width: 96px;
+    // Primer default Button tokens (not Material surfaces) so header actions
+    // like "Create revert PR" match GitHub's secondary btn.
+    private property <color> default-fg: AppState.effective-dark-mode ? #f0f6fc : #25292e;
+    private property <color> default-border: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    private property <color> default-bg: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+    private property <color> default-bg-hover: AppState.effective-dark-mode ? #292e36 : #eff2f5;
+
+    width: root.hug-content
+        ? (label-text.preferred-width + (root.show-chevron ? 40px : 24px))
+        : 96px;
     height: 36px;
     background: transparent;
 
@@ -149,25 +169,36 @@ component ReviewActionButton inherits Rectangle {
     button-surface := Rectangle {
         width: parent.width;
         height: parent.height;
-        border-radius: 10px;
+        border-radius: 6px;
         border-width: 1px;
-        border-color: root.success ? (AppState.effective-dark-mode ? #238636 : #1f883d) : (root.primary ? MaterialPalette.primary : MaterialPalette.outline);
+        border-color: root.danger
+            ? (AppState.effective-dark-mode ? #da3633 : #cf222e)
+            : (root.success
+                ? (AppState.effective-dark-mode ? #238636 : #1f883d)
+                : (root.primary ? MaterialPalette.primary : root.default-border));
         background: root.success
             ? (action-touch.has-hover && root.button-enabled ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37) : (AppState.effective-dark-mode ? #238636 : #1f883d))
+            : root.danger
+            ? (action-touch.has-hover && root.button-enabled
+                ? (AppState.effective-dark-mode ? #f85149 : #a40e26)
+                : (AppState.effective-dark-mode ? #da3633 : #cf222e))
             : root.primary
             ? (action-touch.has-hover ? MaterialPalette.primary.darker(8%) : MaterialPalette.primary)
-            : (action-touch.has-hover ? MaterialPalette.surface_container_high : MaterialPalette.surface_container_lowest);
+            : (action-touch.has-hover && root.button-enabled ? root.default-bg-hover : root.default-bg);
         opacity: root.button-enabled ? 1 : 0.5;
 
-        MaterialText {
-            width: parent.width;
+        label-text := MaterialText {
+            // Keep an unconstrained preferred-width when hugging so the root
+            // width binding cannot circularly clamp the measured label.
+            x: root.hug-content ? (parent.width - self.preferred-width) / 2 : 0px;
+            width: root.hug-content ? self.preferred-width : parent.width;
             height: parent.height;
             text: root.text;
             horizontal_alignment: center;
             vertical_alignment: center;
             font_size: 12px;
             font_weight: 600;
-            color: root.primary || root.success ? #ffffff : MaterialPalette.on_surface;
+            color: root.primary || root.success || root.danger ? #ffffff : root.default-fg;
         }
 
         if root.show-chevron: Image {
@@ -185,8 +216,8 @@ component ReviewActionButton inherits Rectangle {
         mouse-cursor: root.button-enabled ? pointer : default;
         clicked => { if (root.button-enabled) { root.clicked(); } }
     }
-    if action-touch.has-hover && root.tooltip-text != "": ToolTip {
-        x: root.width - self.width;
+    if root.embed-tooltip && action-touch.has-hover && root.tooltip-text != "": ToolTip {
+        x: root.tooltip-align-start ? 0px : root.width - self.width;
         y: root.height + 4px;
         text: root.tooltip-text;
     }
@@ -870,6 +901,14 @@ component MergeReadinessBadge inherits Rectangle {
     in property <string> kind;
     in property <string> label;
     in property <string> detail;
+    // Trailing-edge badges open with ActionMenu `align: end`. Leading-edge
+    // compact headers use `align: start` so a wide overlay does not flush the
+    // window's left margin.
+    in property <bool> popup-align-end: true;
+    // Workspace modals disable the badge and close any open detail so the
+    // in-window popover cannot outlive the scrim.
+    in property <bool> interactions-enabled: true;
+    in property <bool> popup-open: false;
     in property <color> background-color;
     in property <color> badge-border-color;
     in property <color> foreground-color;
@@ -893,11 +932,9 @@ component MergeReadinessBadge inherits Rectangle {
             ? "×"
             : ((root.kind == "checking" || root.kind == "unavailable") ? "…" : "!"));
 
-    // The status copy is provider-derived and can be localized, so size the
-    // control to its rendered label instead of reserving a fixed empty tail.
-    // Keep a practical cap so an unusually long provider message cannot push
-    // the review and merge controls out of the header.
-    width: min(236px, max(118px, label-text.preferred-width + 48px));
+    // Primer Button medium + leadingVisual geometry: 12px inline padding, 16px
+    // icon, 8px gap. Do not floor the width — GitHub hugs the label ("Merged").
+    width: min(320px, label-text.preferred-width + 48px);
     height: 36px;
     border-radius: 6px;
     border-width: 1px;
@@ -928,7 +965,7 @@ component MergeReadinessBadge inherits Rectangle {
     label-text := Text {
         x: 36px;
         y: (parent.height - self.height) / 2 + 1px;
-        width: min(self.preferred-width, parent.width - self.x - 10px);
+        width: min(self.preferred-width, parent.width - self.x - 12px);
         height: 20px;
         text: root.label;
         vertical-alignment: center;
@@ -938,16 +975,62 @@ component MergeReadinessBadge inherits Rectangle {
         overflow: elide;
     }
     badge-touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { readiness-popup.show(); }
+        enabled: root.interactions-enabled;
+        mouse-cursor: root.interactions-enabled ? pointer : default;
+        clicked => { root.toggle-popup(); }
     }
+    callback toggle-popup();
 
-    readiness-popup := PopupWindow {
+    // Primer Overlay/ActionMenu metrics: spacer-3 (16px) padding, large radius
+    // (12px), max width ~320px.
+    popup-measure-title := Text {
         x: 0px;
-        y: root.height + 6px;
-        width: 320px;
-        height: 112px;
-        close-policy: close-on-click-outside;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        text: root.label;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    popup-measure-detail := Text {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        text: root.detail;
+        font-size: 12px;
+    }
+    private property <length> popup-width: min(
+        320px,
+        max(
+            popup-measure-title.preferred-width + 52px,
+            popup-measure-detail.preferred-width + 32px
+        )
+    );
+    popup-measure-detail-wrapped := Text {
+        x: 0px;
+        y: 0px;
+        width: root.popup-width - 32px;
+        height: self.preferred-height;
+        opacity: 0;
+        text: root.detail;
+        wrap: word-wrap;
+        font-size: 12px;
+    }
+    private property <length> popup-height: 16px + 28px + 8px + max(20px, popup-measure-detail-wrapped.preferred-height) + 16px;
+
+    readiness-popup := Rectangle {
+        // Compact headers sit near the left edge: open start-aligned so the
+        // overlay grows rightward with the usual page gutter. Wide headers pin
+        // the badge to the trailing edge: open end-aligned like Primer ActionMenu.
+        x: root.popup-align-end ? root.width - root.popup-width : 0px;
+        y: root.height + 4px;
+        width: root.popup-width;
+        height: root.popup-height;
+        visible: root.popup-open && root.interactions-enabled;
+        z: 10000;
 
         Rectangle {
             width: parent.width;
@@ -962,7 +1045,7 @@ component MergeReadinessBadge inherits Rectangle {
 
             Rectangle {
                 x: 16px;
-                y: 17px;
+                y: 18px;
                 width: 18px;
                 height: 18px;
                 border-radius: 9px;
@@ -991,9 +1074,9 @@ component MergeReadinessBadge inherits Rectangle {
             }
             MaterialText {
                 x: 16px;
-                y: 46px;
+                y: 48px;
                 width: parent.width - 32px;
-                height: 54px;
+                height: parent.height - 64px;
                 text: root.detail;
                 vertical_alignment: top;
                 wrap: word-wrap;
@@ -1066,6 +1149,12 @@ component HeaderActionStrip inherits Rectangle {
     in property <bool> can-approve: false;
     in property <bool> can-request-changes: false;
     in property <bool> can-merge: false;
+    in property <bool> can-revert: false;
+    // When a workspace modal is open, freeze header actions so popovers and
+    // hover tips cannot outlive the scrim.
+    in property <bool> actions-enabled: true;
+    in property <bool> readiness-popup-open: false;
+    in property <string> revert-action-label: "Revert pull request";
     in property <string> merge-block-reason;
     in property <color> background-color;
     in property <color> outline-color;
@@ -1077,8 +1166,13 @@ component HeaderActionStrip inherits Rectangle {
     in property <color> done-color;
     callback review();
     callback merge();
+    callback revert();
+    callback toggle-readiness-popup();
 
-    height: 60px;
+    private property <bool> terminal-state:
+        root.readiness-kind == "merged" || root.readiness-kind == "closed";
+
+    height: 36px;
 
     HorizontalLayout {
         width: parent.width;
@@ -1097,6 +1191,12 @@ component HeaderActionStrip inherits Rectangle {
                 kind: root.readiness-kind;
                 label: root.readiness-label;
                 detail: root.readiness-detail;
+                // Compact (align-start) headers keep the badge near the left
+                // gutter; open the overlay start-aligned so it cannot flush the
+                // window edge. Wide strips keep ActionMenu end alignment.
+                popup-align-end: !root.align-start;
+                interactions-enabled: root.actions-enabled;
+                popup-open: root.readiness-popup-open;
                 background-color: root.background-color;
                 badge-border-color: root.outline-color;
                 foreground-color: root.foreground-color;
@@ -1105,9 +1205,10 @@ component HeaderActionStrip inherits Rectangle {
                 attention-color: root.attention-color;
                 danger-color: root.danger-color;
                 done-color: root.done-color;
+                toggle-popup => { root.toggle-readiness-popup(); }
             }
         }
-        if root.remote-review-state == "review_approved" || root.remote-review-state == "approved": Rectangle {
+        if !root.terminal-state && (root.remote-review-state == "review_approved" || root.remote-review-state == "approved"): Rectangle {
             width: 88px;
             height: parent.height;
             MaterialText {
@@ -1122,21 +1223,22 @@ component HeaderActionStrip inherits Rectangle {
                 color: root.success-color;
             }
         }
-        Rectangle {
+        if !root.terminal-state: Rectangle {
             width: 120px;
             height: parent.height;
             ReviewActionButton {
                 y: (parent.height - self.height) / 2;
                 width: parent.width;
                 text: "Review changes";
-                button-enabled: !root.action-loading && (root.can-comment || root.can-approve || root.can-request-changes);
+                tooltip-align-start: root.align-start;
+                button-enabled: root.actions-enabled && !root.action-loading && (root.can-comment || root.can-approve || root.can-request-changes);
                 tooltip-text: root.can-comment || root.can-approve || root.can-request-changes
                     ? "Comment, approve, or request changes"
                     : "Configure provider credentials to submit a review";
                 clicked => { root.review(); }
             }
         }
-        Rectangle {
+        if !root.terminal-state: Rectangle {
             width: 172px;
             height: parent.height;
             ReviewActionButton {
@@ -1145,9 +1247,26 @@ component HeaderActionStrip inherits Rectangle {
                 text: root.action-loading ? "Working…" : "Merge pull request";
                 success: true;
                 show-chevron: true;
-                button-enabled: !root.action-loading && root.can-merge;
+                tooltip-align-start: root.align-start;
+                button-enabled: root.actions-enabled && !root.action-loading && root.can-merge;
                 tooltip-text: root.can-merge ? "Choose a merge method" : root.merge-block-reason;
                 clicked => { root.merge(); }
+            }
+        }
+        if root.readiness-kind == "merged" && root.can-revert: Rectangle {
+            // Prefer a visible Primer-style secondary button on the same row as
+            // the readiness control over GitHub's kebab ActionMenu, so the full
+            // provider label stays readable without a truncated overflow item.
+            width: revert-action.width;
+            height: parent.height;
+            revert-action := ReviewActionButton {
+                y: (parent.height - self.height) / 2;
+                hug-content: true;
+                tooltip-align-start: root.align-start;
+                text: root.action-loading ? "Working…" : root.revert-action-label;
+                button-enabled: root.actions-enabled && !root.action-loading;
+                tooltip-text: "Reverse the changes from this merged pull request";
+                clicked => { root.revert(); }
             }
         }
     }
@@ -1333,6 +1452,144 @@ component FileToolbarButton inherits Rectangle {
     }
 }
 
+component CommitSummaryNavButton inherits Rectangle {
+    in property <string> text;
+    in property <image> icon-source;
+    in property <bool> icon-after: false;
+    in property <bool> button-enabled: true;
+    in property <bool> draw-divider: false;
+    callback clicked();
+
+    height: 28px;
+    background: nav-touch.has-hover && root.button-enabled
+        ? (AppState.effective-dark-mode ? #656c7626 : #f3f4f6)
+        : transparent;
+    opacity: root.button-enabled ? 1 : 0.5;
+
+    if root.draw-divider: Rectangle {
+        x: 0px;
+        width: 1px;
+        height: parent.height;
+        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    }
+
+    HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding-left: 9px;
+        padding-right: 9px;
+        spacing: 4px;
+        alignment: center;
+        cross-axis-alignment: center;
+
+        if !root.icon-after: Image {
+            width: 12px;
+            height: 12px;
+            source: root.icon-source;
+            image-fit: contain;
+            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        }
+        MaterialText {
+            width: self.preferred-width;
+            height: parent.height;
+            text: root.text;
+            font-size: 12px;
+            font-weight: 500;
+            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+            vertical-alignment: center;
+        }
+        if root.icon-after: Image {
+            width: 12px;
+            height: 12px;
+            source: root.icon-source;
+            image-fit: contain;
+            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        }
+    }
+
+    nav-touch := TouchArea {
+        mouse-cursor: root.button-enabled ? pointer : default;
+        clicked => {
+            if root.button-enabled {
+                root.clicked();
+            }
+        }
+    }
+}
+
+// Shared by the Files changed tree and the selected-file toolbar so both
+// surfaces use the same Primer status Octicon for a given change type.
+component FileChangeTypeIcon inherits Image {
+    in property <string> change-type: "edit_file";
+    in property <color> muted-fg;
+    in property <color> success-fg;
+    in property <color> danger-fg;
+    in property <color> attention-fg;
+
+    width: 14px;
+    height: 14px;
+    source: root.change-type == "new_file"
+        ? @image-url("../../assets/icons/octicon-file-added-16.svg")
+        : (root.change-type == "deleted_file"
+            ? @image-url("../../assets/icons/octicon-file-removed-16.svg")
+            : (root.change-type == "renamed_file"
+                ? @image-url("../../assets/icons/octicon-file-moved-16.svg")
+                : @image-url("../../assets/icons/octicon-file-diff-16.svg")));
+    image-fit: contain;
+    colorize: root.change-type == "new_file"
+        ? root.success-fg
+        : (root.change-type == "deleted_file"
+            ? root.danger-fg
+            : (root.change-type == "renamed_file"
+                ? root.attention-fg
+                : root.muted-fg));
+}
+
+// Primer ToggleSwitch `size="small"` (48×24). Medium is 64×32; the Files
+// changed toolbar is dense, so small matches GitHub's PR chrome.
+component GitHubToggleSwitch inherits Rectangle {
+    in-out property <bool> checked: false;
+    callback toggled(bool);
+
+    width: 48px;
+    height: 24px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.checked
+        ? transparent
+        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
+    background: root.checked
+        ? (toggle-touch.has-hover
+            ? (AppState.effective-dark-mode ? #1f6feb : #0860ca)
+            : (AppState.effective-dark-mode ? #1f6feb : #0969da))
+        : (toggle-touch.has-hover
+            ? (AppState.effective-dark-mode ? #262c36 : #dde3ea)
+            : (AppState.effective-dark-mode ? #21262d : #eaeef2));
+    clip: true;
+
+    // Knob is half the track, inset 1px — Primer `.ToggleKnob`.
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 1px : 1px;
+        y: 1px;
+        width: (parent.width - 2px) / 2;
+        height: parent.height - 2px;
+        border-radius: 5px;
+        border-width: 1px;
+        border-color: root.checked
+            ? (AppState.effective-dark-mode ? #1f6feb : #0969da)
+            : (AppState.effective-dark-mode ? #3d444d : #858f99);
+        background: AppState.effective-dark-mode ? #f0f6fc : #ffffff;
+    }
+
+    toggle-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
 component FileTreeToggleButton inherits Rectangle {
     in property <bool> file-tree-visible: true;
     callback clicked();
@@ -1382,7 +1639,9 @@ component FileTreeToggleButton inherits Rectangle {
 component FileMenuButton inherits Rectangle {
     in property <bool> button-enabled: true;
     in property <bool> viewing-file: false;
+    in property <bool> open: false;
     callback action();
+    callback toggle-menu();
 
     width: 30px;
     height: 46px;
@@ -1392,18 +1651,19 @@ component FileMenuButton inherits Rectangle {
         height: parent.height;
         icon-source: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
         button-enabled: root.button-enabled;
-        selected: menu-popup.is-open;
+        selected: root.open;
         tooltip-text: "More file actions";
         tooltip-align-right: true;
-        clicked => { menu-popup.show(); }
+        clicked => { root.toggle-menu(); }
     }
 
-    menu-popup := PopupWindow {
+    menu-popup := Rectangle {
         x: root.width - self.width;
         y: root.height - 4px;
         width: 192px;
         height: 52px;
-        close-policy: close-on-click-outside;
+        visible: root.open;
+        z: 10000;
 
         Rectangle {
             width: parent.width;
@@ -1447,7 +1707,6 @@ component FileMenuButton inherits Rectangle {
                 view-file-touch := TouchArea {
                     mouse-cursor: pointer;
                     clicked => {
-                        menu-popup.close();
                         root.action();
                     }
                 }
@@ -1655,7 +1914,7 @@ component GitHubFilterMenu inherits Rectangle {
     in property <bool> only-manifest-files: false;
     in property <bool> show-viewed-files: true;
     in property <string> font-family: ".SF NS";
-    out property <bool> open: filter-popup.is-open;
+    in property <bool> open: false;
     callback toggle-extension(string);
     callback toggle-manifest();
     callback toggle-viewed();
@@ -1664,14 +1923,13 @@ component GitHubFilterMenu inherits Rectangle {
     height: 34px;
     background: transparent;
 
-    public function show() { filter-popup.show(); }
-
-    filter-popup := PopupWindow {
+    filter-popup := Rectangle {
         x: 0px;
         y: root.height + 6px;
         width: 224px;
         height: 53px + min(root.extension-filters.length * 36px, 252px) + 1px + 72px;
-        close-policy: close-on-click-outside;
+        visible: root.open;
+        z: 10000;
 
         Rectangle {
             width: parent.width;
@@ -1850,6 +2108,10 @@ export component PrReviewWorkspace inherits Rectangle {
     in property <string> selected-file-path;
     in property <int> selected-file-added-lines: 0;
     in property <int> selected-file-removed-lines: 0;
+    private property <string> selected-file-change-type:
+        root.selected-file-index >= 0 && root.selected-file-index < root.files.length
+            ? root.files[root.selected-file-index].change-type
+            : "edit_file";
     in property <bool> has-expandable-hunks: false;
     in property <bool> context-expanded: false;
     in property <bool> viewing-file: false;
@@ -1861,6 +2123,7 @@ export component PrReviewWorkspace inherits Rectangle {
     in-out property <string> file-filter: "";
     in-out property <bool> review-dialog-open: false;
     in-out property <bool> merge-dialog-open: false;
+    in-out property <bool> revert-dialog-open: false;
     in-out property <bool> commit-range-dialog-open: false;
     in property <bool> action-loading: false;
     in property <bool> can-comment: false;
@@ -1868,10 +2131,14 @@ export component PrReviewWorkspace inherits Rectangle {
     in property <bool> can-request-changes: false;
     in property <string> remote-review-state: "";
     in property <bool> can-merge: false;
+    in property <bool> can-revert: false;
     in property <string> merge-readiness-kind: "";
     in property <string> merge-readiness-label: "";
     in property <string> merge-readiness-detail: "";
     in property <string> merge-block-reason: "";
+    in property <string> revert-block-reason: "";
+    in property <string> revert-action-label: "Revert changes";
+    in property <string> revert-confirmation: "";
     in property <bool> merge-method-merge: false;
     in property <bool> merge-method-squash: false;
     in property <bool> merge-method-rebase: false;
@@ -1885,7 +2152,12 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <length> file-list-width: max(root.file-list-min-width, min(root.file-list-max-width, root.file-list-preferred-width));
     private property <bool> file-list-resizing: false;
     private property <length> file-list-drag-start-width: root.file-list-width;
-    private property <bool> file-list-visible: true;
+    // Session preference while the window is wide enough for the tree.
+    private property <bool> file-list-user-visible: true;
+    private property <bool> show-single-commit-summary:
+        root.commit-range-start >= 0
+            && root.commit-range-start == root.commit-range-end
+            && root.commit-range-start < root.commits.length;
     // Rust registers GitHub's preferred macOS monospace face (SFMono-Regular)
     // at startup. Menlo remains the explicit fallback when that system font is
     // unavailable; Slint 1.17 accepts one family name rather than a CSS stack.
@@ -1942,8 +2214,25 @@ export component PrReviewWorkspace inherits Rectangle {
     // summary Open badge and readiness strip cannot cover it.
     private property <bool> back-button-hovered: false;
     private property <length> back-button-size: 36px;
+    private property <bool> modal-open:
+        root.review-dialog-open
+            || root.merge-dialog-open
+            || root.revert-dialog-open
+            || root.commit-range-dialog-open;
+    // Lightweight menus share one in-window popover state. Native PopupWindow
+    // grabs the pointer on macOS, suppressing underlay hover and consuming the
+    // first click that should switch directly to another menu.
+    private property <string> active-popover: "";
     private property <length> stable-layout-width: root.width;
     private property <length> stable-layout-height: root.height;
+    // Primer `$width-md` (768px). GitHub's PR Files changed Layout uses
+    // `Layout--flowRow-until-md` + `sidebarPosition-flowRow-none`, which sets
+    // `.Layout-sidebar { display: none }` under `max-width: 767.98px`.
+    private property <length> file-tree-collapse-breakpoint: 768px;
+    private property <bool> file-list-below-breakpoint:
+        root.stable-layout-width < root.file-tree-collapse-breakpoint;
+    private property <bool> file-list-visible:
+        !root.file-list-below-breakpoint && root.file-list-user-visible;
     private property <bool> compact-title-wraps:
         root.stable-layout-width - 48px < compact-title-measure.preferred-width;
     private property <bool> compact-summary-wraps:
@@ -1983,6 +2272,7 @@ export component PrReviewWorkspace inherits Rectangle {
     callback reload(bool);
     callback submit-review(string, string);
     callback merge(string, bool);
+    callback revert();
     callback filter-files(string);
     callback toggle-extension-filter(string);
     callback toggle-manifest-filter();
@@ -2030,6 +2320,7 @@ export component PrReviewWorkspace inherits Rectangle {
     changed file-filter => { root.filter-files(root.file-filter); }
     changed review-dialog-open => {
         if (root.review-dialog-open) {
+            root.active-popover = "";
             root.selected-review-action = root.can-comment ? "comment" : (root.can-approve ? "approve" : "request_changes");
         }
     }
@@ -2042,11 +2333,18 @@ export component PrReviewWorkspace inherits Rectangle {
     }
     changed merge-dialog-open => {
         if (root.merge-dialog-open) {
+            root.active-popover = "";
             root.selected-merge-method = root.merge-method-merge ? "merge" : (root.merge-method-squash ? "squash" : (root.merge-method-rebase ? "rebase" : "fast_forward"));
+        }
+    }
+    changed revert-dialog-open => {
+        if root.revert-dialog-open {
+            root.active-popover = "";
         }
     }
     changed commit-range-dialog-open => {
         if root.commit-range-dialog-open {
+            root.active-popover = "";
             root.draft-range-start = root.commit-range-start;
             root.draft-range-end = root.commit-range-end;
         }
@@ -2104,6 +2402,7 @@ export component PrReviewWorkspace inherits Rectangle {
     TouchArea {
         width: root.width;
         height: root.height;
+        clicked => { root.active-popover = ""; }
     }
 
     VerticalLayout {
@@ -2120,8 +2419,10 @@ export component PrReviewWorkspace inherits Rectangle {
                 : (104px
                     + root.wide-title-height-extra
                     + (root.wide-summary-wraps ? 32px : 0px));
-            // Keep action-button tooltips above the following files toolbar.
+            // Keep action-button tooltips above the following files toolbar and
+            // above the title/summary that are painted later in this band.
             z: 1;
+            clip: false;
             background: root.github-bg-default;
             border-width: 0px;
 
@@ -2154,6 +2455,7 @@ export component PrReviewWorkspace inherits Rectangle {
                     // Leave open so wrapped title and relative-time tooltips can
                     // escape like GitHub; title never uses ellipsis.
                     clip: false;
+                    z: 0;
                     wide-title := Text {
                         x: 0px;
                         y: 0px;
@@ -2193,7 +2495,9 @@ export component PrReviewWorkspace inherits Rectangle {
 
                 HeaderActionStrip {
                     // Trailing-edge strip: internal leading spacer pins controls
-                    // to the window right on the title's first line.
+                    // to the window right on the title's first line. z above the
+                    // title column so downward action tips are not covered.
+                    z: 2;
                     width: 640px;
                     height: 36px;
                     readiness-kind: root.merge-readiness-kind;
@@ -2201,10 +2505,14 @@ export component PrReviewWorkspace inherits Rectangle {
                     readiness-detail: root.merge-readiness-detail;
                     remote-review-state: root.remote-review-state;
                     action-loading: root.action-loading;
+                    actions-enabled: !root.modal-open;
+                    readiness-popup-open: root.active-popover == "readiness";
                     can-comment: root.can-comment;
                     can-approve: root.can-approve;
                     can-request-changes: root.can-request-changes;
                     can-merge: root.can-merge;
+                    can-revert: root.can-revert;
+                    revert-action-label: root.revert-action-label;
                     merge-block-reason: root.merge-block-reason;
                     background-color: root.github-bg-default;
                     outline-color: root.github-border-default;
@@ -2216,6 +2524,10 @@ export component PrReviewWorkspace inherits Rectangle {
                     done-color: root.github-done-fg;
                     review => { root.review-dialog-open = true; }
                     merge => { root.merge-dialog-open = true; }
+                    revert => { root.revert-dialog-open = true; }
+                    toggle-readiness-popup => {
+                        root.active-popover = root.active-popover == "readiness" ? "" : "readiness";
+                    }
                 }
             }
 
@@ -2224,19 +2536,66 @@ export component PrReviewWorkspace inherits Rectangle {
                 height: parent.height;
                 clip: false;
 
-                compact-back := PrReviewBackButton {
+                // One shared action row so the back control and readiness /
+                // review / merge / revert buttons share the same vertical
+                // centerline (the previous absolute y:-8 / y:2 offsets drifted).
+                // z above title/summary so nested action ToolTips stay complete.
+                HorizontalLayout {
+                    z: 2;
                     x: 24px;
-                    y: 2px;
-                    // Tip is painted on the header layer below so Open/summary
-                    // chrome cannot cover it; keep position under the icon.
-                    embed-tooltip: false;
-                    tooltip-text: root.back-label;
-                    changed has-hover => {
-                        root.back-button-hovered = self.has-hover;
+                    y: 8px;
+                    width: parent.width - 48px;
+                    height: 36px;
+                    spacing: 12px;
+                    cross-axis-alignment: center;
+
+                    PrReviewBackButton {
+                        // Tip is painted on the header layer below so Open/summary
+                        // chrome cannot cover it; keep position under the icon.
+                        embed-tooltip: false;
+                        tooltip-text: root.back-label;
+                        changed has-hover => {
+                            root.back-button-hovered = self.has-hover;
+                        }
+                        clicked => { root.back(); }
                     }
-                    clicked => { root.back(); }
+                    HeaderActionStrip {
+                        height: 36px;
+                        horizontal-stretch: 1;
+                        align-start: true;
+                        show-readiness: true;
+                        readiness-kind: root.merge-readiness-kind;
+                        readiness-label: root.merge-readiness-label;
+                        readiness-detail: root.merge-readiness-detail;
+                        remote-review-state: root.remote-review-state;
+                        action-loading: root.action-loading;
+                        actions-enabled: !root.modal-open;
+                        readiness-popup-open: root.active-popover == "readiness";
+                        can-comment: root.can-comment;
+                        can-approve: root.can-approve;
+                        can-request-changes: root.can-request-changes;
+                        can-merge: root.can-merge;
+                        can-revert: root.can-revert;
+                        revert-action-label: root.revert-action-label;
+                        merge-block-reason: root.merge-block-reason;
+                        background-color: root.github-bg-default;
+                        outline-color: root.github-border-default;
+                        foreground-color: root.github-fg-default;
+                        muted-color: root.github-fg-muted;
+                        success-color: root.github-success-fg;
+                        attention-color: root.github-attention-fg;
+                        danger-color: root.github-danger-fg;
+                        done-color: root.github-done-fg;
+                        review => { root.review-dialog-open = true; }
+                        merge => { root.merge-dialog-open = true; }
+                        revert => { root.revert-dialog-open = true; }
+                        toggle-readiness-popup => {
+                            root.active-popover = root.active-popover == "readiness" ? "" : "readiness";
+                        }
+                    }
                 }
                 compact-title := Text {
+                    z: 0;
                     x: 24px;
                     y: 50px;
                     width: parent.width - 48px;
@@ -2251,6 +2610,7 @@ export component PrReviewWorkspace inherits Rectangle {
                     vertical-alignment: top;
                 }
                 compact-summary-row := PullRequestSummaryRow {
+                    z: 0;
                     x: 24px;
                     y: 50px + root.compact-title-block-height + 6px;
                     width: parent.width - 48px;
@@ -2271,33 +2631,6 @@ export component PrReviewWorkspace inherits Rectangle {
                     branch-foreground: AppState.effective-dark-mode ? #58a6ff : #0969da;
                     copy-source-branch(branch) => { root.copy-source-branch(branch); }
                 }
-                HeaderActionStrip {
-                    x: 72px;
-                    y: -8px;
-                    width: parent.width - 96px;
-                    align-start: true;
-                    show-readiness: true;
-                    readiness-kind: root.merge-readiness-kind;
-                    readiness-label: root.merge-readiness-label;
-                    readiness-detail: root.merge-readiness-detail;
-                    remote-review-state: root.remote-review-state;
-                    action-loading: root.action-loading;
-                    can-comment: root.can-comment;
-                    can-approve: root.can-approve;
-                    can-request-changes: root.can-request-changes;
-                    can-merge: root.can-merge;
-                    merge-block-reason: root.merge-block-reason;
-                    background-color: root.github-bg-default;
-                    outline-color: root.github-border-default;
-                    foreground-color: root.github-fg-default;
-                    muted-color: root.github-fg-muted;
-                    success-color: root.github-success-fg;
-                    attention-color: root.github-attention-fg;
-                    danger-color: root.github-danger-fg;
-                    done-color: root.github-done-fg;
-                    review => { root.review-dialog-open = true; }
-                    merge => { root.merge-dialog-open = true; }
-                }
             }
 
             // Header-layer tip: same below-icon placement, but declared last with
@@ -2308,7 +2641,7 @@ export component PrReviewWorkspace inherits Rectangle {
                 x: 24px;
                 y: root.stable-layout-width >= 1500px
                     ? 16px + root.back-button-size + 4px
-                    : 2px + root.back-button-size + 4px;
+                    : 8px + root.back-button-size + 4px;
                 text: root.back-label;
             }
         }
@@ -2331,6 +2664,7 @@ export component PrReviewWorkspace inherits Rectangle {
                     icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg");
                     selected: root.selected-tab == 0;
                     clicked => {
+                        root.active-popover = "";
                         root.selected-tab = 0;
                         root.select-tab(0);
                     }
@@ -2343,6 +2677,7 @@ export component PrReviewWorkspace inherits Rectangle {
                     icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
                     selected: root.selected-tab == 1;
                     clicked => {
+                        root.active-popover = "";
                         root.selected-tab = 1;
                         root.select-tab(1);
                     }
@@ -2354,6 +2689,7 @@ export component PrReviewWorkspace inherits Rectangle {
                     icon: @image-url("../../assets/icons/octicon-file-diff-16.svg");
                     selected: root.selected-tab == 2;
                     clicked => {
+                        root.active-popover = "";
                         root.selected-tab = 2;
                         root.select-tab(2);
                     }
@@ -2375,38 +2711,171 @@ export component PrReviewWorkspace inherits Rectangle {
         if root.selected-tab == 2: Rectangle {
             width: parent.width;
             height: 46px;
+            // The SHA tooltip opens below this row. Keep the row above the
+            // following file toolbar so the GitHub-style bubble is not covered.
+            z: 80;
             background: root.github-bg-muted;
 
             HorizontalLayout {
-                padding-left: 12px;
                 padding-right: 24px;
-                spacing: 12px;
-                FileTreeToggleButton {
-                    file-tree-visible: root.file-list-visible;
-                    clicked => {
-                        root.file-list-resizing = false;
-                        root.file-list-visible = !root.file-list-visible;
-                    }
-                }
-                CommitRangeButton {
-                    y: (parent.height - self.height) / 2;
-                    text: root.commit-range-label;
-                    clicked => {
-                        root.commit-range-dialog-open = true;
-                        root.ensure-commits();
-                    }
-                }
-                Rectangle { horizontal-stretch: 1; }
-                if root.ignore-whitespace-supported: MaterialText { height: parent.height; text: "Ignore whitespace"; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                if root.ignore-whitespace-supported: Rectangle {
-                    width: 44px;
+                spacing: 0px;
+
+                Rectangle {
+                    // Keep the commit summary origin attached to the live file-tree
+                    // divider while the user drags it; never snapshot this width.
+                    width: root.file-list-visible ? root.file-list-width + 1px : 320px;
                     height: parent.height;
-                    Switch {
-                        y: (parent.height - self.height) / 2;
-                        width: 44px;
-                        height: 26px;
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 12px;
+
+                        FileTreeToggleButton {
+                            file-tree-visible: root.file-list-visible;
+                            clicked => {
+                                root.file-list-resizing = false;
+                                // Below Primer md GitHub keeps the tree hidden;
+                                // only flip the wide-window preference there.
+                                if !root.file-list-below-breakpoint {
+                                    root.file-list-user-visible = !root.file-list-user-visible;
+                                }
+                            }
+                        }
+                        CommitRangeButton {
+                            y: (parent.height - self.height) / 2;
+                            text: root.commit-range-label;
+                            clicked => {
+                                root.commit-range-dialog-open = true;
+                                root.ensure-commits();
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+
+                if !root.show-single-commit-summary: Rectangle { horizontal-stretch: 1; }
+
+                if root.show-single-commit-summary: HorizontalLayout {
+                    horizontal-stretch: 1;
+                    height: parent.height;
+                    spacing: 8px;
+                    cross-axis-alignment: center;
+
+                    single-commit-title := MaterialText {
+                        horizontal-stretch: 1;
+                        height: parent.height;
+                        text: root.commits[root.commit-range-start].title;
+                        font-family: root.tree-font-family;
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: root.github-fg-default;
+                        horizontal-alignment: left;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Rectangle {
+                        width: 112px;
+                        height: 28px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: root.github-border-default;
+                        background: root.github-bg-default;
+                        clip: true;
+
+                        CommitSummaryNavButton {
+                            x: 0px;
+                            width: 56px;
+                            text: "Prev";
+                            icon-source: @image-url("../../assets/icons/octicon-chevron-left-16.svg");
+                            button-enabled: root.commit-range-start + 1 < root.commits.length;
+                            clicked => {
+                                root.apply-commit-range(
+                                    root.commit-range-start + 1,
+                                    root.commit-range-start + 1
+                                );
+                            }
+                        }
+                        CommitSummaryNavButton {
+                            x: 56px;
+                            width: 56px;
+                            text: "Next";
+                            icon-source: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
+                            icon-after: true;
+                            draw-divider: true;
+                            button-enabled: root.commit-range-start > 0;
+                            clicked => {
+                                root.apply-commit-range(
+                                    root.commit-range-start - 1,
+                                    root.commit-range-start - 1
+                                );
+                            }
+                        }
+                    }
+
+                    if root.width >= 1100px: ConversationAvatar {
+                        avatar-size: 22px;
+                        label-size: 9px;
+                        avatar: root.commits[root.commit-range-start].avatar;
+                        fallback-label: root.commits[root.commit-range-start].avatar-label;
+                    }
+                    if root.width >= 1100px: single-commit-author := MaterialText {
+                        width: min(190px, self.preferred-width);
+                        height: parent.height;
+                        text: root.commits[root.commit-range-start].author
+                            + " committed "
+                            + root.commits[root.commit-range-start].short-date-label;
+                        font-family: root.tree-font-family;
+                        font-size: 11px;
+                        color: root.github-fg-muted;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    MaterialText {
+                        width: 96px;
+                        height: parent.height;
+                        text: "Commit " + root.commits[root.commit-range-start].short-sha;
+                        font-family: root.code-font-family;
+                        font-size: 11px;
+                        color: root.github-fg-muted;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                    }
+                    FileToolbarButton {
+                        width: 30px;
+                        height: parent.height;
+                        icon-source: @image-url("../../assets/icons/octicon-copy-16.svg");
+                        tooltip-text: "Copy full SHA for "
+                            + root.commits[root.commit-range-start].short-sha;
+                        tooltip-align-right: true;
+                        clicked => {
+                            root.copy-commit-sha(root.commits[root.commit-range-start].sha);
+                        }
+                    }
+                }
+
+                if root.ignore-whitespace-supported: HorizontalLayout {
+                    height: parent.height;
+                    spacing: 4px;
+                    horizontal-stretch: 0;
+                    cross-axis-alignment: center;
+
+                    MaterialText {
+                        // Preferred width only — stretching this label was what
+                        // shoved the switch to the far right of the toolbar.
+                        width: self.preferred-width;
+                        height: parent.height;
+                        text: "Ignore whitespace";
+                        font-family: root.tree-font-family;
+                        font-size: 13px;
+                        font-weight: 500;
+                        color: root.github-fg-muted;
+                        vertical-alignment: center;
+                    }
+                    GitHubToggleSwitch {
                         checked: root.ignore-whitespace;
-                        checked_state_changed(checked) => {
+                        toggled(checked) => {
                             root.ignore-whitespace = checked;
                             root.reload(checked);
                         }
@@ -3694,6 +4163,7 @@ export component PrReviewWorkspace inherits Rectangle {
                         Rectangle {
                             width: parent.width;
                             height: 52px;
+                            z: 20;
                             background: root.github-bg-default;
                             GitHubFileFilterField {
                                 x: 12px;
@@ -3701,17 +4171,6 @@ export component PrReviewWorkspace inherits Rectangle {
                                 width: parent.width - 66px;
                                 text <=> root.file-filter;
                                 font-family: root.tree-font-family;
-                            }
-                            filter-menu := GitHubFilterMenu {
-                                x: parent.width - 46px;
-                                y: 9px;
-                                extension-filters: root.extension-filters;
-                                only-manifest-files: root.only-manifest-files;
-                                show-viewed-files: root.show-viewed-files;
-                                font-family: root.tree-font-family;
-                                toggle-extension(extension) => { root.toggle-extension-filter(extension); }
-                                toggle-manifest => { root.toggle-manifest-filter(); }
-                                toggle-viewed => { root.toggle-viewed-files(); }
                             }
                             Rectangle {
                                 x: parent.width - 46px;
@@ -3724,10 +4183,10 @@ export component PrReviewWorkspace inherits Rectangle {
                                     ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
                                     : root.github-border-default;
                                 background: filter-button-touch.has-hover
-                                    ? (filter-menu.open
+                                    ? (root.active-popover == "file-filter"
                                         ? (AppState.effective-dark-mode ? #656c7626 : #eff2f5)
                                         : root.github-bg-muted)
-                                    : (filter-menu.open
+                                    : (root.active-popover == "file-filter"
                                         ? (AppState.effective-dark-mode ? #656c7633 : #e6eaef)
                                         : root.github-bg-default);
                                 Image {
@@ -3743,7 +4202,9 @@ export component PrReviewWorkspace inherits Rectangle {
                                 }
                                 filter-button-touch := TouchArea {
                                     mouse-cursor: pointer;
-                                    clicked => { filter-menu.show(); }
+                                    clicked => {
+                                        root.active-popover = root.active-popover == "file-filter" ? "" : "file-filter";
+                                    }
                                 }
                             }
                         }
@@ -3792,26 +4253,16 @@ export component PrReviewWorkspace inherits Rectangle {
                                                     : @image-url("../../assets/icons/octicon-file-directory-fill-16.svg");
                                                 image-fit: contain;
                                             }
-                                            if item.kind == "file": Image {
+                                            if item.kind == "file": FileChangeTypeIcon {
                                                 x: 18px;
                                                 y: (parent.height - self.height) / 2;
                                                 width: 14px;
                                                 height: 14px;
-                                                source: item.change-type == "new_file"
-                                                    ? @image-url("../../assets/icons/octicon-file-added-16.svg")
-                                                    : (item.change-type == "deleted_file"
-                                                        ? @image-url("../../assets/icons/octicon-file-removed-16.svg")
-                                                        : (item.change-type == "renamed_file"
-                                                            ? @image-url("../../assets/icons/octicon-file-moved-16.svg")
-                                                            : @image-url("../../assets/icons/octicon-file-diff-16.svg")));
-                                                image-fit: contain;
-                                                colorize: item.change-type == "new_file"
-                                                    ? root.github-success-fg
-                                                    : (item.change-type == "deleted_file"
-                                                        ? root.github-danger-fg
-                                                        : (item.change-type == "renamed_file"
-                                                            ? root.github-attention-fg
-                                                            : root.github-fg-muted));
+                                                change-type: item.change-type;
+                                                muted-fg: root.github-fg-muted;
+                                                success-fg: root.github-success-fg;
+                                                danger-fg: root.github-danger-fg;
+                                                attention-fg: root.github-attention-fg;
                                             }
                                         }
                                         if item.kind == "folder": Text {
@@ -3881,6 +4332,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                     tree-touch := TouchArea {
                                         mouse-cursor: pointer;
                                         clicked => {
+                                            root.active-popover = "";
                                             if item.kind == "folder" { root.toggle-folder(item.path); }
                                             else { root.select-file(item.file-index); }
                                         }
@@ -3928,7 +4380,16 @@ export component PrReviewWorkspace inherits Rectangle {
                                 Rectangle {
                                     width: 16px;
                                     height: parent.height;
-                                    Image { y: (parent.height - self.height) / 2; width: 16px; height: 16px; source: @image-url("../../assets/icons/octicon-file-diff-16.svg"); image-fit: contain; colorize: root.github-fg-muted; }
+                                    FileChangeTypeIcon {
+                                        y: (parent.height - self.height) / 2;
+                                        width: 16px;
+                                        height: 16px;
+                                        change-type: root.selected-file-change-type;
+                                        muted-fg: root.github-fg-muted;
+                                        success-fg: root.github-success-fg;
+                                        danger-fg: root.github-danger-fg;
+                                        attention-fg: root.github-attention-fg;
+                                    }
                                 }
                                 Rectangle {
                                     horizontal-stretch: 1;
@@ -3991,7 +4452,14 @@ export component PrReviewWorkspace inherits Rectangle {
                                 FileMenuButton {
                                     button-enabled: root.selected-file-index >= 0 && !root.code-loading;
                                     viewing-file: root.viewing-file;
-                                    action => { root.view-file(); }
+                                    open: root.active-popover == "file-menu";
+                                    toggle-menu => {
+                                        root.active-popover = root.active-popover == "file-menu" ? "" : "file-menu";
+                                    }
+                                    action => {
+                                        root.active-popover = "";
+                                        root.view-file();
+                                    }
                                 }
                             }
                             Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: root.github-border-default; }
@@ -4159,6 +4627,23 @@ export component PrReviewWorkspace inherits Rectangle {
                     background: MaterialPalette.primary;
                     opacity: root.file-list-visible && (root.file-list-resizing || file-list-resize-handle.has-hover) ? 0.8 : 0;
                 }
+
+                // Mount the popover after both the file tree and diff panes.
+                // A child of the left pane cannot out-z the later-painted diff
+                // sibling, regardless of its local z value.
+                if root.file-list-visible: filter-menu := GitHubFilterMenu {
+                    z: 1000;
+                    x: root.file-list-width - 46px;
+                    y: 9px;
+                    open: root.active-popover == "file-filter";
+                    extension-filters: root.extension-filters;
+                    only-manifest-files: root.only-manifest-files;
+                    show-viewed-files: root.show-viewed-files;
+                    font-family: root.tree-font-family;
+                    toggle-extension(extension) => { root.toggle-extension-filter(extension); }
+                    toggle-manifest => { root.toggle-manifest-filter(); }
+                    toggle-viewed => { root.toggle-viewed-files(); }
+                }
             }
         }
     }
@@ -4170,6 +4655,14 @@ export component PrReviewWorkspace inherits Rectangle {
         height: root.height;
         z: 1000;
         background: #00000066;
+
+        // Slint rectangles do not capture pointer input. Without this, clicks and
+        // hovers fall through the scrim to header actions and the Files tree.
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+        }
 
         Rectangle {
             x: (parent.width - self.width) / 2;
@@ -4482,6 +4975,14 @@ export component PrReviewWorkspace inherits Rectangle {
         z: 1000;
         background: #00000066;
 
+        // Slint rectangles do not capture pointer input. Without this, clicks and
+        // hovers fall through the scrim to readiness / review / merge controls.
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+        }
+
         Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -4628,6 +5129,13 @@ export component PrReviewWorkspace inherits Rectangle {
         height: root.height;
         z: 1000;
         background: #00000066;
+
+        // Same scrim hit-target as review/revert: block all underlay interaction.
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+        }
 
         Rectangle {
             x: (parent.width - self.width) / 2;
@@ -4789,6 +5297,125 @@ export component PrReviewWorkspace inherits Rectangle {
                     button-enabled: !root.action-loading && root.can-merge;
                     clicked => { root.merge(root.selected-merge-method, root.remove-source-branch); }
                 }
+            }
+        }
+    }
+
+    if root.revert-dialog-open: Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        z: 1000;
+        background: #00000066;
+
+        // Same scrim hit-target as review/merge: block all underlay interaction.
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+        }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(500px, parent.width - 48px);
+            height: 300px;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: root.github-border-default;
+            background: root.github-bg-default;
+
+            MaterialText {
+                x: 20px;
+                y: 16px;
+                width: parent.width - 64px;
+                height: 28px;
+                text: "Revert pull request #" + root.pull-request-number;
+                font-size: 16px;
+                font-weight: 600;
+                color: root.github-fg-default;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                x: parent.width - 44px;
+                y: 12px;
+                width: 32px;
+                height: 32px;
+                border-radius: 6px;
+                background: revert-close-touch.has-hover ? root.github-bg-muted : transparent;
+                Image {
+                    x: 8px;
+                    y: 8px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/close.svg");
+                    colorize: root.github-fg-muted;
+                }
+                revert-close-touch := TouchArea {
+                    enabled: !root.action-loading;
+                    mouse-cursor: root.action-loading ? default : pointer;
+                    clicked => { root.revert-dialog-open = false; }
+                }
+            }
+            Rectangle {
+                x: 0px;
+                y: 56px;
+                width: parent.width;
+                height: 1px;
+                background: root.github-border-default;
+            }
+            MaterialText {
+                x: 20px;
+                y: 78px;
+                width: parent.width - 40px;
+                height: 28px;
+                text: "Reverse the changes introduced by this merged pull request?";
+                font-size: 14px;
+                font-weight: 600;
+                color: root.github-fg-default;
+                wrap: word-wrap;
+                vertical-alignment: top;
+            }
+            MaterialText {
+                x: 20px;
+                y: 122px;
+                width: parent.width - 40px;
+                height: 92px;
+                text: root.revert-confirmation;
+                font-size: 12px;
+                color: root.github-fg-muted;
+                wrap: word-wrap;
+                vertical-alignment: top;
+            }
+            Rectangle {
+                x: 0px;
+                y: parent.height - 62px;
+                width: parent.width;
+                height: 1px;
+                background: root.github-border-default;
+            }
+            Rectangle {
+                x: parent.width - 20px - confirm-revert.width - 12px - 94px;
+                y: parent.height - 49px;
+                width: 94px;
+                height: 36px;
+                ReviewActionButton {
+                    width: parent.width;
+                    text: "Cancel";
+                    button-enabled: !root.action-loading;
+                    clicked => { root.revert-dialog-open = false; }
+                }
+            }
+            confirm-revert := ReviewActionButton {
+                x: parent.width - 20px - self.width;
+                y: parent.height - 49px;
+                hug-content: true;
+                text: root.action-loading ? "Working…" : root.revert-action-label;
+                danger: true;
+                button-enabled: !root.action-loading && root.can-revert;
+                tooltip-text: root.can-revert ? "" : root.revert-block-reason;
+                clicked => { root.revert(); }
             }
         }
     }

@@ -15,7 +15,7 @@ use crate::git::{
     PullRequestDiffFile, PullRequestDiffLine, PullRequestMergeMethod, PullRequestReviewAction,
     get_pull_request_action_state, get_pull_request_commit_range_diff, get_pull_request_commits,
     get_pull_request_conversation, get_pull_request_diff, get_repository_file_text,
-    merge_pull_request, split_commit_message, submit_pull_request_review,
+    merge_pull_request, revert_pull_request, split_commit_message, submit_pull_request_review,
     supports_ignore_whitespace,
 };
 use crate::http::{self, RequestOptions};
@@ -575,6 +575,15 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         merge_controller.merge(&ui, method.as_str(), remove_source_branch);
     });
 
+    let revert_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_revert(move || {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        revert_controller.revert(&ui);
+    });
+
     controller
 }
 
@@ -996,6 +1005,16 @@ impl WorkflowPrReviewController {
         });
     }
 
+    fn refresh_conversation_after_remote_action(&self, ui: &MainWindow) {
+        self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut loaded) = self.conversation_loaded.lock() {
+            *loaded = false;
+        }
+        if ui.get_workflow_pr_review_tab() == 0 {
+            self.load_conversation(ui);
+        }
+    }
+
     fn load_commits(&self, ui: &MainWindow) {
         if self
             .commits_loaded
@@ -1123,11 +1142,11 @@ impl WorkflowPrReviewController {
             );
         }
         ui.set_workflow_pr_review_tab(2);
-        let commit_index = self
-            .commits
-            .lock()
-            .ok()
-            .and_then(|commits| commit_index_by_sha(&commits, sha));
+        let commit_index = self.commits.lock().ok().and_then(|commits| {
+            commit_index_by_sha(&commits, sha).and_then(|chrono_index| {
+                chrono_commit_index_to_display(chrono_index, commits.len())
+            })
+        });
         if let Some(index) = commit_index {
             self.apply_commit_range(ui, index as i32, index as i32);
             return;
@@ -1166,7 +1185,9 @@ impl WorkflowPrReviewController {
             return;
         }
 
-        let (start, end) = if start <= end {
+        // UI indices are newest-first (same order as the Commits model). Convert
+        // to oldest→newest before base/head selection against stored commits.
+        let (display_start, display_end) = if start <= end {
             (start as usize, end as usize)
         } else {
             (end as usize, start as usize)
@@ -1176,13 +1197,15 @@ impl WorkflowPrReviewController {
             .lock()
             .map(|commits| commits.clone())
             .unwrap_or_default();
-        if commits.is_empty() || end >= commits.len() {
+        let Some((start, end)) =
+            display_commit_range_to_chrono(display_start, display_end, commits.len())
+        else {
             show_error(
                 ui,
                 "Load the pull request commits before selecting a range.",
             );
             return;
-        }
+        };
         let label = commit_range_label(&commits, start, end);
         if range_covers_all_commits(commits.len(), start, end) {
             let detail = self
@@ -1193,8 +1216,8 @@ impl WorkflowPrReviewController {
             if let Some(detail) = detail {
                 self.request_sequence.fetch_add(1, Ordering::SeqCst);
                 self.activate_commit_range(ui, detail);
-                ui.set_workflow_pr_review_commit_range_start(start as i32);
-                ui.set_workflow_pr_review_commit_range_end(end as i32);
+                ui.set_workflow_pr_review_commit_range_start(display_start as i32);
+                ui.set_workflow_pr_review_commit_range_end(display_end as i32);
                 ui.set_workflow_pr_review_commit_range_label(label.into());
                 ui.set_workflow_pr_review_error("".into());
                 return;
@@ -1235,8 +1258,8 @@ impl WorkflowPrReviewController {
         if let Some(detail) = cached {
             self.request_sequence.fetch_add(1, Ordering::SeqCst);
             self.activate_commit_range(ui, detail);
-            ui.set_workflow_pr_review_commit_range_start(start as i32);
-            ui.set_workflow_pr_review_commit_range_end(end as i32);
+            ui.set_workflow_pr_review_commit_range_start(display_start as i32);
+            ui.set_workflow_pr_review_commit_range_end(display_end as i32);
             ui.set_workflow_pr_review_commit_range_label(label.into());
             ui.set_workflow_pr_review_error("".into());
             return;
@@ -1277,13 +1300,13 @@ impl WorkflowPrReviewController {
                                 .insert(cache_key, detail.clone());
                         }
                         controller.activate_commit_range(&ui, detail);
-                        ui.set_workflow_pr_review_commit_range_start(start as i32);
-                        ui.set_workflow_pr_review_commit_range_end(end as i32);
+                        ui.set_workflow_pr_review_commit_range_start(display_start as i32);
+                        ui.set_workflow_pr_review_commit_range_end(display_end as i32);
                         ui.set_workflow_pr_review_commit_range_label(label.into());
                         log::info!(
                             "[Workflow][PR Review] Applied commit range: start={} end={} base={} head={}",
-                            start,
-                            end,
+                            display_start,
+                            display_end,
                             base_sha,
                             head_sha
                         );
@@ -1441,15 +1464,7 @@ impl WorkflowPrReviewController {
                         );
                         show_success(&ui, "Review submitted to the remote repository.");
                         controller.refresh_action_state(&ui);
-                        controller
-                            .conversation_sequence
-                            .fetch_add(1, Ordering::SeqCst);
-                        if let Ok(mut loaded) = controller.conversation_loaded.lock() {
-                            *loaded = false;
-                        }
-                        if ui.get_workflow_pr_review_tab() == 0 {
-                            controller.load_conversation(&ui);
-                        }
+                        controller.refresh_conversation_after_remote_action(&ui);
                     }
                     Err(error) => {
                         log::warn!("[Workflow][PR Review] Failed to submit review: {error}");
@@ -1527,11 +1542,73 @@ impl WorkflowPrReviewController {
                         );
                         show_success(&ui, "Pull request merged successfully.");
                         controller.refresh_action_state(&ui);
+                        controller.refresh_conversation_after_remote_action(&ui);
                     }
                     Err(error) => {
                         log::warn!("[Workflow][PR Review] Failed to merge pull request: {error}");
                         show_error(&ui, error.as_str());
                         controller.refresh_action_state(&ui);
+                    }
+                }
+            });
+        });
+    }
+
+    fn revert(&self, ui: &MainWindow) {
+        if !ui.get_workflow_pr_can_revert() {
+            let reason = ui.get_workflow_pr_revert_block_reason();
+            show_error(
+                ui,
+                if reason.trim().is_empty() {
+                    "This merged pull request cannot be reverted automatically."
+                } else {
+                    reason.as_str()
+                },
+            );
+            return;
+        }
+        let Some((metadata, pull_request_iid)) = self.action_context() else {
+            show_error(ui, "The pull request repository context is unavailable.");
+            return;
+        };
+        let sequence = self.action_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        ui.set_workflow_pr_action_loading(true);
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let result = revert_pull_request(
+                metadata.repo_type.as_str(),
+                metadata.repo_project_id.as_str(),
+                metadata.remote_repo.as_str(),
+                pull_request_iid.as_str(),
+            )
+            .await;
+            let _ = slint::invoke_from_event_loop(move || {
+                if controller.action_sequence.load(Ordering::SeqCst) != sequence {
+                    return;
+                }
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_action_loading(false);
+                match result {
+                    Ok(revert) => {
+                        ui.set_workflow_pr_revert_dialog_open(false);
+                        ui.set_workflow_pr_can_revert(false);
+                        ui.set_workflow_pr_revert_block_reason(
+                            "The revert action already completed in this review session.".into(),
+                        );
+                        show_success(&ui, revert.message.as_str());
+                        log::info!(
+                            "[Workflow][PR Review] Completed revert action reference={} title_present={} url_present={}",
+                            revert.number,
+                            !revert.title.trim().is_empty(),
+                            !revert.web_url.trim().is_empty()
+                        );
+                    }
+                    Err(error) => {
+                        log::warn!("[Workflow][PR Review] Revert action failed: {error}");
+                        show_error(&ui, error.as_str());
                     }
                 }
             });
@@ -3113,12 +3190,15 @@ fn commit_model(
     commits: &[PullRequestCommit],
     avatars: &HashMap<String, ConversationAvatarPixels>,
 ) -> ModelRc<WorkflowPrCommit> {
-    let date_labels = commits
+    // Provider lists stay oldest→newest for range math; the Commits tab and
+    // commit-range picker show newest→oldest.
+    let display = commits.iter().rev().collect::<Vec<_>>();
+    let date_labels = display
         .iter()
         .map(|commit| format_commit_date(commit.authored_at.as_str()))
         .collect::<Vec<_>>();
     ModelRc::new(VecModel::from(
-        commits
+        display
             .iter()
             .enumerate()
             .map(|(index, commit)| {
@@ -3188,6 +3268,30 @@ fn commit_model(
     ))
 }
 
+/// Map a newest-first display index range onto the oldest→newest provider list.
+fn display_commit_range_to_chrono(
+    display_start: usize,
+    display_end: usize,
+    len: usize,
+) -> Option<(usize, usize)> {
+    if len == 0 || display_start >= len || display_end >= len {
+        return None;
+    }
+    let (display_lo, display_hi) = if display_start <= display_end {
+        (display_start, display_end)
+    } else {
+        (display_end, display_start)
+    };
+    Some((len - 1 - display_hi, len - 1 - display_lo))
+}
+
+fn chrono_commit_index_to_display(chrono_index: usize, len: usize) -> Option<usize> {
+    if len == 0 || chrono_index >= len {
+        return None;
+    }
+    Some(len - 1 - chrono_index)
+}
+
 fn commit_range_label(commits: &[PullRequestCommit], start: usize, end: usize) -> String {
     let short = |sha: &str| sha.chars().take(7).collect::<String>();
     if start == end {
@@ -3227,6 +3331,7 @@ fn apply_action_state(ui: &MainWindow, state: &PullRequestActionState) {
     ui.set_workflow_pr_can_approve(state.can_approve);
     ui.set_workflow_pr_can_request_changes(state.can_request_changes);
     ui.set_workflow_pr_can_merge(state.can_merge);
+    ui.set_workflow_pr_can_revert(state.can_revert);
     if !state.review_state.trim().is_empty() {
         ui.set_workflow_pr_remote_review_state(state.review_state.clone().into());
     }
@@ -3234,6 +3339,9 @@ fn apply_action_state(ui: &MainWindow, state: &PullRequestActionState) {
     ui.set_workflow_pr_merge_readiness_label(state.readiness.kind.label().into());
     ui.set_workflow_pr_merge_readiness_detail(state.readiness.detail.clone().into());
     ui.set_workflow_pr_merge_block_reason(state.merge_block_reason.clone().into());
+    ui.set_workflow_pr_revert_block_reason(state.revert_block_reason.clone().into());
+    ui.set_workflow_pr_revert_action_label(state.revert_action_label.clone().into());
+    ui.set_workflow_pr_revert_confirmation(state.revert_confirmation.clone().into());
     ui.set_workflow_pr_merge_method_merge(
         state
             .allowed_merge_methods
@@ -3261,6 +3369,7 @@ fn reset_action_capabilities(ui: &MainWindow) {
     ui.set_workflow_pr_can_approve(false);
     ui.set_workflow_pr_can_request_changes(false);
     ui.set_workflow_pr_can_merge(false);
+    ui.set_workflow_pr_can_revert(false);
     ui.set_workflow_pr_merge_method_merge(false);
     ui.set_workflow_pr_merge_method_squash(false);
     ui.set_workflow_pr_merge_method_rebase(false);
@@ -3270,12 +3379,16 @@ fn reset_action_capabilities(ui: &MainWindow) {
 fn reset_action_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_dialog_open(false);
     ui.set_workflow_pr_merge_dialog_open(false);
+    ui.set_workflow_pr_revert_dialog_open(false);
     ui.set_workflow_pr_action_loading(false);
     ui.set_workflow_pr_remote_review_state("".into());
     ui.set_workflow_pr_merge_readiness_kind("".into());
     ui.set_workflow_pr_merge_readiness_label("".into());
     ui.set_workflow_pr_merge_readiness_detail("".into());
     ui.set_workflow_pr_merge_block_reason("".into());
+    ui.set_workflow_pr_revert_block_reason("".into());
+    ui.set_workflow_pr_revert_action_label("Revert changes".into());
+    ui.set_workflow_pr_revert_confirmation("".into());
     reset_action_capabilities(ui);
 }
 
@@ -3335,12 +3448,12 @@ mod tests {
 
     use super::{
         BoundedCache, LazyPrDiffLineModel, RANGE_DIFF_CACHE_CAPACITY, ReviewCache, ReviewRequest,
-        VISIBLE_LINE_CACHE_CAPACITY, build_tree_items, commit_detail_source_tab,
-        commit_index_by_sha, commit_message_body_height, commit_range_label,
-        commit_tab_expand_layout_extra, conversation_card_row_height, conversation_content_height,
-        conversation_items_connect, expand_all_hunk_context, expand_hunk_context, full_source_file,
-        hunk_is_expandable, range_covers_all_commits, refresh_commit_group_expand_extras,
-        restore_original_diff,
+        VISIBLE_LINE_CACHE_CAPACITY, build_tree_items, chrono_commit_index_to_display,
+        commit_detail_source_tab, commit_index_by_sha, commit_message_body_height,
+        commit_range_label, commit_tab_expand_layout_extra, conversation_card_row_height,
+        conversation_content_height, conversation_items_connect, display_commit_range_to_chrono,
+        expand_all_hunk_context, expand_hunk_context, full_source_file, hunk_is_expandable,
+        range_covers_all_commits, refresh_commit_group_expand_extras, restore_original_diff,
     };
     use crate::WorkflowPrCommit;
     use crate::git::{
@@ -3508,6 +3621,18 @@ mod tests {
         let commits = vec![commit("1111111aaaa"), commit("2222222bbbb")];
         assert_eq!(commit_index_by_sha(&commits, "2222222bbbb"), Some(1));
         assert_eq!(commit_index_by_sha(&commits, "2222222"), None);
+    }
+
+    #[test]
+    fn maps_newest_first_display_ranges_onto_oldest_first_provider_lists() {
+        assert_eq!(display_commit_range_to_chrono(0, 0, 3), Some((2, 2)));
+        assert_eq!(display_commit_range_to_chrono(0, 2, 3), Some((0, 2)));
+        assert_eq!(display_commit_range_to_chrono(0, 1, 3), Some((1, 2)));
+        assert_eq!(display_commit_range_to_chrono(2, 0, 3), Some((0, 2)));
+        assert_eq!(chrono_commit_index_to_display(0, 3), Some(2));
+        assert_eq!(chrono_commit_index_to_display(2, 3), Some(0));
+        assert_eq!(display_commit_range_to_chrono(0, 0, 0), None);
+        assert_eq!(chrono_commit_index_to_display(0, 0), None);
     }
 
     #[test]

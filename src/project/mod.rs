@@ -1004,6 +1004,10 @@ pub(crate) fn resolve_project_logo_image(value: &str) -> slint::Image {
     let normalized = normalize_project_logo(value);
     let cache_key = logo_image_cache_key(&normalized);
 
+    if is_valid_logo_remote_url(&normalized) {
+        return resolve_remote_project_logo_image(&normalized, cache_key);
+    }
+
     if let Some(image) = cached_logo_image(&cache_key) {
         return image;
     }
@@ -1012,12 +1016,6 @@ pub(crate) fn resolve_project_logo_image(value: &str) -> slint::Image {
         load_default_logo_image()
     } else if is_valid_logo_path(&normalized) {
         load_project_logo_path(Path::new(&normalized)).unwrap_or_else(load_default_logo_image)
-    } else if is_valid_logo_remote_url(&normalized) {
-        if let Some(image) = load_cached_remote_logo_image(&normalized) {
-            image
-        } else {
-            load_default_logo_image()
-        }
     } else if is_valid_logo_base64(&normalized) {
         if let Some(image) = load_base64_logo_image(&normalized) {
             image
@@ -1032,6 +1030,26 @@ pub(crate) fn resolve_project_logo_image(value: &str) -> slint::Image {
     image
 }
 
+/// Remote logos briefly fall back to the app default while the file downloads.
+/// That fallback must not be stored under the remote URL key, or a later
+/// successful download keeps showing the default for the rest of the session.
+fn resolve_remote_project_logo_image(url: &str, cache_key: String) -> slint::Image {
+    if find_cached_remote_logo_path(url).is_some() {
+        if let Some(image) = cached_logo_image(&cache_key) {
+            return image;
+        }
+        if let Some(image) = load_cached_remote_logo_image(url) {
+            cache_logo_image(cache_key, image.clone());
+            return image;
+        }
+        // Disk entry exists but could not be decoded; avoid caching the fallback.
+        return load_default_logo_image();
+    }
+
+    invalidate_cached_logo_image(&cache_key);
+    load_default_logo_image()
+}
+
 fn cached_logo_image(key: &str) -> Option<slint::Image> {
     PROJECT_LOGO_IMAGE_CACHE.with(|cache| cache.borrow().get(key).cloned())
 }
@@ -1039,6 +1057,12 @@ fn cached_logo_image(key: &str) -> Option<slint::Image> {
 fn cache_logo_image(key: String, image: slint::Image) {
     PROJECT_LOGO_IMAGE_CACHE.with(|cache| {
         cache.borrow_mut().insert(key, image);
+    });
+}
+
+fn invalidate_cached_logo_image(key: &str) {
+    PROJECT_LOGO_IMAGE_CACHE.with(|cache| {
+        cache.borrow_mut().remove(key);
     });
 }
 
@@ -1217,6 +1241,7 @@ fn prefetch_remote_logos(
                 let Some(ui) = ui_weak_task.upgrade() else {
                     return;
                 };
+                invalidate_cached_logo_image(&logo_image_cache_key(url.as_str()));
                 let query = ui.get_project_search_query();
                 refresh_project_items(
                     &ui,
@@ -1331,6 +1356,11 @@ fn refresh_logo_preview(
     let trimmed = logo.trim();
     let normalized = normalize_project_logo(logo);
     ui.set_project_logo_preview_status(preview_logo_status(trimmed).into());
+    if is_valid_logo_remote_url(&normalized) && find_cached_remote_logo_path(&normalized).is_some()
+    {
+        // Re-read from disk so a previously cached pending-default cannot stick.
+        invalidate_cached_logo_image(&logo_image_cache_key(&normalized));
+    }
     ui.set_project_logo_preview_image(resolve_project_logo_image(&normalized));
 
     if !is_valid_logo_remote_url(&normalized) || find_cached_remote_logo_path(&normalized).is_some()
@@ -1362,6 +1392,7 @@ fn refresh_logo_preview(
                 return;
             };
             if ui.get_project_new_logo().as_str() == normalized {
+                invalidate_cached_logo_image(&logo_image_cache_key(&normalized));
                 ui.set_project_logo_preview_status("Remote URL".into());
                 ui.set_project_logo_preview_image(resolve_project_logo_image(&normalized));
             }
@@ -1464,4 +1495,69 @@ fn show_error(ui: &MainWindow, message: &str) {
         loading_type: "".into(),
         width: "auto".into(),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::codecs::webp::WebPEncoder;
+    use image::{ExtendedColorType, ImageEncoder};
+
+    fn clear_remote_logo_disk_cache(url: &str) {
+        for ext in ["png", "jpg", "webp", "gif", "svg"] {
+            if let Some(path) = remote_logo_cache_path(url, ext) {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+
+    fn encode_solid_webp(rgb: [u8; 3]) -> Vec<u8> {
+        let mut pixels = Vec::with_capacity(2 * 2 * 3);
+        for _ in 0..4 {
+            pixels.extend_from_slice(&rgb);
+        }
+        let mut bytes = Vec::new();
+        WebPEncoder::new_lossless(&mut bytes)
+            .write_image(pixels.as_slice(), 2, 2, ExtendedColorType::Rgb8)
+            .expect("webp encode");
+        bytes
+    }
+
+    #[test]
+    fn remote_logo_pending_default_does_not_poison_memory_cache() {
+        let url = "https://example.test/usher-remote-logo-cache-poison.webp";
+        clear_remote_logo_disk_cache(url);
+        let cache_key = logo_image_cache_key(url);
+        invalidate_cached_logo_image(&cache_key);
+
+        let _ = resolve_project_logo_image(url);
+        assert!(
+            cached_logo_image(&cache_key).is_none(),
+            "pending remote fallback must not be stored under the remote URL cache key"
+        );
+
+        let webp = encode_solid_webp([12, 34, 56]);
+        let path = remote_logo_cache_path(url, "webp").expect("cache path");
+        fs::write(&path, webp.as_slice()).expect("write cached webp");
+
+        let loaded = resolve_project_logo_image(url);
+        assert!(
+            cached_logo_image(&cache_key).is_some(),
+            "successful remote logo loads should populate the memory cache"
+        );
+        assert!(loaded.size().width > 0);
+        assert!(loaded.size().height > 0);
+
+        clear_remote_logo_disk_cache(url);
+        invalidate_cached_logo_image(&cache_key);
+    }
+
+    #[test]
+    fn load_image_from_bytes_decodes_webp() {
+        let webp = encode_solid_webp([200, 100, 50]);
+        let image =
+            load_image_from_bytes(webp.as_slice(), "webp").expect("webp logo bytes should decode");
+        assert_eq!(image.size().width, 2);
+        assert_eq!(image.size().height, 2);
+    }
 }

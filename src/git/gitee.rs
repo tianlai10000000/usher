@@ -14,11 +14,11 @@ use super::{
     GiteeApiProfile, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
     PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine, PullRequestItem,
     PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
-    PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
-    configured_api_base_url, configured_enterprise, configured_gitee_token,
-    conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
-    finalize_conversation_timeline, gitee_api_profile, is_redundant_commit_system_note,
-    is_redundant_merge_system_note, percent_encode_path,
+    PullRequestRevertResult, PullRequestReviewAction, PullRequestState, RepoLocator, RepoType,
+    commit_count_from_detail, configured_api_base_url, configured_enterprise,
+    configured_gitee_token, conversation_commit_batch_items, conversation_count_from_detail,
+    conversation_merged_item, finalize_conversation_timeline, gitee_api_profile,
+    is_redundant_commit_system_note, is_redundant_merge_system_note, percent_encode_path,
 };
 
 /// Fetch the stable provider project id for a remote repository.
@@ -402,28 +402,15 @@ pub(super) async fn get_commit_range_diff(
             .map_err(|error| error.to_string())?
         }
         GiteeApiProfile::EnterpriseV8 => {
-            let endpoint = endpoints::ENTERPRISE_REPOSITORY_COMPARE_URL
+            let endpoint = endpoints::ENTERPRISE_REPOSITORY_COMPARE_DIFFS_URL
                 .replace("{api_base_url}", enterprise_api_base_url()?.as_str())
                 .replace(
                     "{project_id}",
                     percent_encode_path(repo_project_id.trim()).as_str(),
                 );
-            let mut request = enterprise_authenticated_builder(http::get(endpoint)).query(&[
-                ("from", base_sha.trim()),
-                ("to", head_sha.trim()),
-                ("straight", "true"),
-                (
-                    "ignore_whitespace_change",
-                    if ignore_whitespace_change {
-                        "true"
-                    } else {
-                        "false"
-                    },
-                ),
-            ]);
-            if let Some(enterprise) = configured_enterprise(RepoType::Gitee) {
-                request = request.header("enterprise", enterprise);
-            }
+            let request = enterprise_authenticated_builder(http::post(endpoint)).json(
+                &enterprise_compare_diff_payload(base_sha, head_sha, ignore_whitespace_change),
+            );
             http::send_json(
                 request,
                 RequestOptions::new("Compare Gitee Enterprise pull request commits"),
@@ -455,6 +442,22 @@ pub(super) async fn get_commit_range_diff(
             .and_then(Value::as_bool)
             .unwrap_or(false),
         files,
+    })
+}
+
+fn enterprise_compare_diff_payload(
+    base_sha: &str,
+    head_sha: &str,
+    ignore_whitespace_change: bool,
+) -> Value {
+    serde_json::json!({
+        // Enterprise names the newer/source ref `from` and the older/target
+        // ref `to`, opposite to conventional base..head notation.
+        "from": head_sha.trim(),
+        "to": base_sha.trim(),
+        "paths": [],
+        "view_mode": "",
+        "ignore_whitespace_change": ignore_whitespace_change,
     })
 }
 
@@ -591,6 +594,7 @@ async fn get_enterprise_pull_request_action_state(
             can_approve: false,
             can_request_changes: false,
             can_merge: false,
+            can_revert: false,
             review_state: String::new(),
             readiness: PullRequestReadiness::new(
                 PullRequestReadinessKind::Unavailable,
@@ -598,6 +602,13 @@ async fn get_enterprise_pull_request_action_state(
             ),
             merge_block_reason:
                 "Configure a Gitee Enterprise Token in Settings to review or merge this pull request."
+                    .to_string(),
+            revert_block_reason:
+                "Configure a Gitee Enterprise Token in Settings to inspect and revert a supported merged pull request."
+                    .to_string(),
+            revert_action_label: "Revert pull request".to_string(),
+            revert_confirmation:
+                "Gitee Enterprise will add a revert commit directly to the target branch. The original pull request remains merged."
                     .to_string(),
             allowed_merge_methods: Vec::new(),
         });
@@ -627,18 +638,25 @@ async fn get_enterprise_pull_request_action_state(
     .map_err(|error| error.to_string())?;
 
     let has_token = configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_some();
-    let server_can_merge = current
+    let current_object = enterprise_data_object(&current);
+    let detail_object = enterprise_data_object(&detail);
+    let server_can_merge = current_object
         .get("can_merge")
         .and_then(Value::as_bool)
-        .or_else(|| current.get("can_be_merge").and_then(Value::as_bool))
+        .or_else(|| current_object.get("can_be_merge").and_then(Value::as_bool))
         .unwrap_or(false);
-    let review_state = string_field(&detail, "review_state")
-        .or_else(|| string_field(&current, "review_state"))
+    let review_state = string_field(detail_object, "review_state")
+        .or_else(|| string_field(current_object, "review_state"))
         .unwrap_or_default();
-    let readiness = gitee_enterprise_merge_readiness(&current, &detail, review_state.as_str());
+    let readiness =
+        gitee_enterprise_merge_readiness(current_object, detail_object, review_state.as_str());
+    let terminal = matches!(
+        readiness.kind,
+        PullRequestReadinessKind::Merged | PullRequestReadinessKind::Closed
+    );
     let can_merge =
         has_token && server_can_merge && readiness.kind == PullRequestReadinessKind::Ready;
-    let mut allowed_merge_methods = detail
+    let mut allowed_merge_methods = detail_object
         .get("restrict_merge_type")
         .and_then(Value::as_array)
         .map(|methods| {
@@ -665,15 +683,38 @@ async fn get_enterprise_pull_request_action_state(
     } else {
         readiness.detail.clone()
     };
+    let (can_revert, revert_block_reason) = if readiness.kind == PullRequestReadinessKind::Merged {
+        match enterprise_revert_context_from_detail(
+            repo_project_id,
+            pull_request_iid,
+            detail_object,
+        )
+        .await
+        {
+            Ok(_) => (true, String::new()),
+            Err(reason) => (false, reason),
+        }
+    } else {
+        (
+            false,
+            "Only a merged pull request can be reverted.".to_string(),
+        )
+    };
 
     Ok(PullRequestActionState {
-        can_comment: has_token,
-        can_approve: has_token,
-        can_request_changes: has_token,
+        can_comment: has_token && !terminal,
+        can_approve: has_token && !terminal,
+        can_request_changes: has_token && !terminal,
         can_merge,
+        can_revert,
         review_state,
         readiness,
         merge_block_reason,
+        revert_block_reason,
+        revert_action_label: "Revert pull request".to_string(),
+        revert_confirmation:
+            "Gitee Enterprise will add a revert commit directly to the target branch. This changes the branch immediately; it does not create a new pull request, and the original pull request remains merged."
+                .to_string(),
         allowed_merge_methods,
     })
 }
@@ -696,6 +737,10 @@ async fn get_public_pull_request_action_state(
     .map_err(|error| error.to_string())?;
     let has_token = configured_gitee_token(GiteeApiProfile::PublicV5).is_some();
     let readiness = gitee_public_merge_readiness(&detail);
+    let terminal = matches!(
+        readiness.kind,
+        PullRequestReadinessKind::Merged | PullRequestReadinessKind::Closed
+    );
     let can_merge = has_token && readiness.kind == PullRequestReadinessKind::Ready;
     let merge_block_reason = if !has_token {
         "Configure a Gitee Public Token in Settings to comment or merge this pull request."
@@ -704,14 +749,21 @@ async fn get_public_pull_request_action_state(
         readiness.detail.clone()
     };
     Ok(PullRequestActionState {
-        can_comment: has_token,
+        can_comment: has_token && !terminal,
         // Gitee public v5 exposes PR comments but has no approve/request-change review endpoint.
         can_approve: false,
         can_request_changes: false,
         can_merge,
+        can_revert: false,
         review_state: String::new(),
         readiness,
         merge_block_reason,
+        revert_block_reason:
+            "Automated revert is not supported by the configured Gitee Public provider.".to_string(),
+        revert_action_label: "Revert changes".to_string(),
+        revert_confirmation:
+            "This provider does not currently expose a supported automatic revert operation."
+                .to_string(),
         allowed_merge_methods: vec![
             PullRequestMergeMethod::Merge,
             PullRequestMergeMethod::Squash,
@@ -1213,7 +1265,29 @@ pub(super) async fn get_pull_request_commits(
     .map_err(|error| error.to_string())?;
     let values = pull_request_values(&payload)
         .ok_or_else(|| "Gitee pull request commit response is not a list.".to_string())?;
-    Ok(values.iter().map(decode_commit).collect())
+    let mut commits = values.iter().map(decode_commit).collect::<Vec<_>>();
+    if gitee_api_profile(locator) == GiteeApiProfile::EnterpriseV8 {
+        normalize_enterprise_commit_order(&mut commits);
+    }
+    Ok(commits)
+}
+
+/// Commit range selection expects the provider-neutral list to run from the
+/// oldest PR commit to the newest. Enterprise deployments commonly return the
+/// MR collection newest-first, while other Gitee profiles return oldest-first.
+fn normalize_enterprise_commit_order(commits: &mut [PullRequestCommit]) {
+    let parse_time = |commit: &PullRequestCommit| {
+        chrono::DateTime::parse_from_rfc3339(commit.authored_at.trim()).ok()
+    };
+    let Some(first_time) = commits.iter().find_map(parse_time) else {
+        return;
+    };
+    let Some(last_time) = commits.iter().rev().find_map(parse_time) else {
+        return;
+    };
+    if first_time > last_time {
+        commits.reverse();
+    }
 }
 
 /// Bounded commit probe for the Commits tab badge. Never loads/caches the full list.
@@ -1560,6 +1634,159 @@ pub(super) async fn merge_pull_request(
             Ok(())
         }
     }
+}
+
+pub(super) async fn revert_pull_request(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Result<PullRequestRevertResult, String> {
+    match gitee_api_profile(locator) {
+        GiteeApiProfile::EnterpriseV8 => {
+            if configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_none() {
+                return Err(
+                    "Configure a Gitee Enterprise Token in Settings before reverting.".to_string(),
+                );
+            }
+            let detail_endpoint = enterprise_pull_request_endpoint(
+                endpoints::ENTERPRISE_MERGE_REQUEST_URL,
+                repo_project_id,
+                pull_request_iid,
+            )?;
+            let detail: Value = http::send_json(
+                enterprise_authenticated_builder(http::get(detail_endpoint)),
+                RequestOptions::new("Reload Gitee enterprise pull request before revert"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            let (commit_sha, target_branch) = enterprise_revert_context_from_detail(
+                repo_project_id,
+                pull_request_iid,
+                enterprise_data_object(&detail),
+            )
+            .await?;
+            let endpoint = enterprise_repository_commit_endpoint(
+                endpoints::ENTERPRISE_REPOSITORY_COMMIT_REVERT_URL,
+                repo_project_id,
+                commit_sha.as_str(),
+            )?;
+            let response: Value = http::send_json(
+                enterprise_authenticated_builder(http::post(endpoint))
+                    .json(&serde_json::json!({ "branch_name": target_branch })),
+                RequestOptions::new("Revert Gitee enterprise pull request merge commit"),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            if response.get("code").and_then(Value::as_i64).unwrap_or(0) != 0 {
+                return Err(string_field(&response, "message").unwrap_or_else(|| {
+                    "Gitee Enterprise rejected the revert operation.".to_string()
+                }));
+            }
+            Ok(PullRequestRevertResult {
+                number: String::new(),
+                title: format!("Revert {}", short_sha(commit_sha.as_str())),
+                web_url: String::new(),
+                message: format!(
+                    "Reverted the merged changes on target branch {}.",
+                    target_branch
+                ),
+            })
+        }
+        GiteeApiProfile::PublicV5 => {
+            Err("Automated revert is not supported by Gitee Public v5.".to_string())
+        }
+    }
+}
+
+async fn enterprise_revert_context_from_detail(
+    repo_project_id: &str,
+    pull_request_iid: &str,
+    detail: &Value,
+) -> Result<(String, String), String> {
+    if string_field(detail, "state").as_deref() != Some("merged") {
+        return Err("Only a merged pull request can be reverted.".to_string());
+    }
+    let commit_sha = string_field(detail, "merge_commit_sha")
+        .or_else(|| string_field(detail, "squash_commit_sha"))
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            "This merge has no dedicated merge or squash commit. Rebase and fast-forward merges cannot be safely reverted automatically."
+                .to_string()
+        })?;
+    let target_branch = string_field(detail, "target_branch")
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            "Gitee Enterprise did not return the pull request target branch.".to_string()
+        })?;
+    let endpoint = enterprise_repository_commit_endpoint(
+        endpoints::ENTERPRISE_REPOSITORY_COMMIT_REFS_URL,
+        repo_project_id,
+        commit_sha.as_str(),
+    )?;
+    let refs: Value = http::send_json(
+        enterprise_authenticated_builder(http::get(endpoint)),
+        RequestOptions::new("Inspect Gitee enterprise commit references for revert capability"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    if !enterprise_commit_refs_can_revert(enterprise_data_object(&refs), pull_request_iid) {
+        return Err(
+            "Gitee Enterprise did not mark this pull-request commit as safely revertible. Rebase and fast-forward merges remain unsupported."
+                .to_string(),
+        );
+    }
+    Ok((commit_sha, target_branch))
+}
+
+fn enterprise_commit_refs_can_revert(refs: &Value, pull_request_iid: &str) -> bool {
+    let pull_request_matches = refs
+        .get("pull_request")
+        .filter(|pull_request| pull_request.is_object())
+        .and_then(|pull_request| string_field(pull_request, "iid"))
+        .map(|value| value == pull_request_iid)
+        // Some enterprise versions document the association but omit the PR
+        // object. The two explicit capability flags remain authoritative.
+        .unwrap_or(true);
+    pull_request_matches
+        && refs
+            .get("merge_commit_by_pr")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        && refs
+            .get("can_revert")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+}
+
+fn enterprise_data_object(payload: &Value) -> &Value {
+    payload
+        .get("data")
+        .filter(|value| value.is_object())
+        .unwrap_or(payload)
+}
+
+fn enterprise_repository_commit_endpoint(
+    template: &str,
+    repo_project_id: &str,
+    commit_sha: &str,
+) -> Result<String, String> {
+    if repo_project_id.trim().is_empty() || commit_sha.trim().is_empty() {
+        return Err("Gitee project id or commit SHA is empty.".to_string());
+    }
+    Ok(template
+        .replace("{api_base_url}", enterprise_api_base_url()?.as_str())
+        .replace(
+            "{project_id}",
+            percent_encode_path(repo_project_id.trim()).as_str(),
+        )
+        .replace(
+            "{commit_sha}",
+            percent_encode_path(commit_sha.trim()).as_str(),
+        ))
+}
+
+fn short_sha(sha: &str) -> &str {
+    sha.get(..7).unwrap_or(sha)
 }
 
 fn enterprise_pull_request_endpoint(
@@ -2164,11 +2391,14 @@ mod tests {
     use super::{
         bounded_list_total, commit_count_from_diff_payload, complete_collection_total,
         decode_commit, decode_conversation_comment, decode_conversation_review,
-        decode_pull_request_diff, enterprise_commit_probe_total, enterprise_note_payload,
+        decode_pull_request_diff, enterprise_commit_probe_total, enterprise_commit_refs_can_revert,
+        enterprise_compare_diff_payload, enterprise_data_object, enterprise_note_payload,
         enterprise_review_payload, expand_enterprise_conversation_notes,
-        gitee_enterprise_merge_readiness, gitee_public_merge_readiness, pull_request_values,
-        select_enterprise_project_id, trusted_enterprise_commit_count,
+        gitee_enterprise_merge_readiness, gitee_public_merge_readiness,
+        normalize_enterprise_commit_order, pull_request_values, select_enterprise_project_id,
+        trusted_enterprise_commit_count,
     };
+    use crate::codereview::api::gitee as endpoints;
     use crate::git::{PullRequestReadinessKind, parse_repo_locator};
     use reqwest::header::HeaderMap;
 
@@ -2184,6 +2414,107 @@ mod tests {
             select_enterprise_project_id(&payload, &locator).unwrap(),
             "42"
         );
+    }
+
+    #[test]
+    fn enterprise_commit_ranges_use_the_documented_compare_diffs_contract() {
+        assert_eq!(
+            endpoints::ENTERPRISE_REPOSITORY_COMPARE_DIFFS_URL,
+            "{api_base_url}/projects/{project_id}/repository/compare/diffs"
+        );
+        assert_eq!(
+            enterprise_compare_diff_payload(" base-sha ", " head-sha ", true),
+            json!({
+                "from": "head-sha",
+                "to": "base-sha",
+                "paths": [],
+                "view_mode": "",
+                "ignore_whitespace_change": true,
+            })
+        );
+    }
+
+    #[test]
+    fn normalizes_newest_first_enterprise_commits_for_range_selection() {
+        let mut commits = vec![
+            decode_commit(&json!({
+                "id": "newest",
+                "created_at": "2026-07-23T10:00:00+08:00"
+            })),
+            decode_commit(&json!({
+                "id": "middle",
+                "created_at": "2026-07-23T09:00:00+08:00"
+            })),
+            decode_commit(&json!({
+                "id": "oldest",
+                "created_at": "2026-07-23T08:00:00+08:00"
+            })),
+        ];
+
+        normalize_enterprise_commit_order(&mut commits);
+
+        assert_eq!(
+            commits
+                .iter()
+                .map(|commit| commit.sha.as_str())
+                .collect::<Vec<_>>(),
+            vec!["oldest", "middle", "newest"]
+        );
+    }
+
+    #[test]
+    fn trusts_only_server_marked_pull_request_refs_for_enterprise_revert() {
+        assert!(enterprise_commit_refs_can_revert(
+            &json!({
+                "merge_commit_by_pr": true,
+                "can_revert": true,
+                "pull_request": { "iid": 21 }
+            }),
+            "21"
+        ));
+        assert!(!enterprise_commit_refs_can_revert(
+            &json!({
+                "merge_commit_by_pr": true,
+                "can_revert": true,
+                "pull_request": { "iid": 22 }
+            }),
+            "21"
+        ));
+        assert!(!enterprise_commit_refs_can_revert(
+            &json!({
+                "merge_commit_by_pr": false,
+                "can_revert": true
+            }),
+            "21"
+        ));
+        assert!(!enterprise_commit_refs_can_revert(
+            &json!({
+                "merge_commit_by_pr": true,
+                "can_revert": false
+            }),
+            "21"
+        ));
+        assert!(enterprise_commit_refs_can_revert(
+            &json!({
+                "merge_commit_by_pr": true,
+                "can_revert": true
+            }),
+            "21"
+        ));
+    }
+
+    #[test]
+    fn unwraps_enterprise_data_objects_before_capability_checks() {
+        let payload = json!({
+            "code": 0,
+            "data": {
+                "state": "merged",
+                "merge_commit_sha": "abcdef123456"
+            }
+        });
+        let detail = enterprise_data_object(&payload);
+        assert_eq!(detail["state"], "merged");
+        assert_eq!(detail["merge_commit_sha"], "abcdef123456");
     }
 
     #[test]
