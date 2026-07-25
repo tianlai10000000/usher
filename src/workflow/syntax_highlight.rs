@@ -356,7 +356,7 @@ fn display_columns(value: &str) -> u32 {
     value.chars().map(character_columns).sum()
 }
 
-fn character_columns(character: char) -> u32 {
+pub(super) fn character_columns(character: char) -> u32 {
     if matches!(
         character as u32,
         0x1100..=0x115f

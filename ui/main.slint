@@ -11,7 +11,7 @@ import { Settings as SettingsPage } from "./views/settings.slint";
 import { About as AboutPage } from "./views/about.slint";
 import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
 import { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
-import { PrReviewWorkspace, WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./views/workflow/pr_review_workspace.slint";
+import { PrReviewWorkspace, WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./views/workflow/pr_review_workspace.slint";
 import { StepItem } from "./components/workflow/steps.slint";
 
 import { List as ListPage } from "./views/list.slint";
@@ -51,7 +51,7 @@ export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
 export { StepItem } from "./components/workflow/steps.slint";
 export { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
-export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./views/workflow/pr_review_workspace.slint";
+export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./views/workflow/pr_review_workspace.slint";
 
 // import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
 
@@ -337,6 +337,8 @@ export component MainWindow inherits Window {
     callback workflow-pr-review-copy-file-path(string);
     callback workflow-pr-review-copy-commit-sha(string);
     callback workflow-pr-review-copy-source-branch(string);
+    callback workflow-pr-review-copy-diff-selection(int, int, int, int, string);
+    callback workflow-pr-review-resolve-diff-selection(int, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
     callback workflow-pr-review-view-file();
     callback workflow-pr-review-toggle-commit-message(string);
     callback workflow-pr-submit-review(string, string);
@@ -1043,6 +1045,12 @@ export component MainWindow inherits Window {
         copy-file-path(path) => { root.workflow-pr-review-copy-file-path(path); }
         copy-commit-sha(sha) => { root.workflow-pr-review-copy-commit-sha(sha); }
         copy-source-branch(branch) => { root.workflow-pr-review-copy-source-branch(branch); }
+        copy-diff-selection(start-line, start-col, end-line, end-col, side) => {
+            root.workflow-pr-review-copy-diff-selection(start-line, start-col, end-line, end-col, side);
+        }
+        resolve-diff-selection(line, x, y, row-height, code-width, cell-width, side) => {
+            root.workflow-pr-review-resolve-diff-selection(line, x, y, row-height, code-width, cell-width, side)
+        }
         view-file => { root.workflow-pr-review-view-file(); }
         toggle-commit-message(sha) => { root.workflow-pr-review-toggle-commit-message(sha); }
         submit-review(action, body) => { root.workflow-pr-submit-review(action, body); }

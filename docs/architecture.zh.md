@@ -172,7 +172,7 @@ Conversation adapter 归一化 GitHub、GitLab、Gitee 公有 v5 与 Gitee 企�
 
 Conversation 提交批次使用 Primer 官方 `repo-push` Octicon；相对时间紧跟 `added N commits`，共享的绝对时间 Tooltip 保留 Provider 的准确时间。GitHub Review 会展开为不可拆分的活动摘要与可选正文卡片；review state 决定话术，相对时间采用 GitHub 自动单位，merged 活动抑制冗余 closed 事件。连接线按事件语义边界分段，但连续 Review 对之间必须从前一张卡片到下一条 summary 标记保持连续轨道。Gitee 企业版普通评论使用 MR `/notes`，并固定发送 `noteable_type: PullRequest`；`/reviews` 只用于 Review 决策。commit 计数探测若没有 total 且响应恰好填满请求页，即使是裸数组也视为不确定，随后统计并丢弃文档约定的完整非分页集合，不挂载懒加载 Commits model。
 
-Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度，从而避免最右侧露出未绘制区域。
+Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度，从而避免最右侧露出未绘制区域，并保持 Tab/双宽字符对齐。代码栏支持 GitHub 风格的跨 ListView 行拖拽选中（不含行号栏；hunk/meta 行不可选且不进入剪贴板）；review controller 的同步命中测试按投影 model 中每个逻辑行的实际换行高度遍历，因此正向或反向拖入软换行终点时都能精确落到字符。⌘/Ctrl+C 静默写入剪贴板。选中状态只保存两个端点，选区矩形只由已选且可见的 delegate 创建，因此保留有界懒加载 model 与普通 token-only 滚动路径。
 
 Conversation 与 Commits 的 commit 链接会按 SHA 定位并复用 Files changed 工作区，把当前 commit 应用为单项范围。审核控制器会把来源 Conversation 或 Commits Tab 记录为 feature 页内下钻返回点，因此页头 Back 会先恢复来源 Tab，下一次 Back 才返回 Workflow 的 PR 列表；如果 commits 尚未加载，控制器会在加载完成后应用待处理选择，复制 SHA 保持独立。
 

@@ -108,6 +108,9 @@ export component ScrollBar {
 
 export component ScrollView {
     in property <bool> enabled: true;
+    // Local extension: expose Flickable's gesture arbitration. Wheel/touchpad
+    // scrolling remains active when this is false.
+    in property <bool> interactive <=> flickable.interactive;
     out property <length> visible_width <=> flickable.width;
     out property <length> visible_height <=> flickable.height;
     in_out property <length> viewport_width <=> flickable.viewport_width;

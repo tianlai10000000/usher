@@ -21,6 +21,11 @@ export struct WorkflowPrDiffToken {
     italic: bool,
 }
 
+export struct WorkflowPrDiffSelectionHit {
+    line: int,
+    column: int,
+}
+
 export struct WorkflowPrDiffLine {
     old-line: int,
     new-line: int,
@@ -1565,10 +1570,183 @@ component FileChangeTypeIcon inherits Image {
                 : root.muted-fg));
 }
 
+// GitHub-style selectable code cell. Syntax tokens stay as Text; selection is a
+// workspace-owned range so drag can cross ListView rows. Gutters and +/- stay
+// outside this component, matching GitHub's code-column copy behavior.
+component SelectableDiffCode inherits Rectangle {
+    in property <string> content;
+    in property <int> content-columns: content.character-count;
+    in property <[WorkflowPrDiffToken]> tokens;
+    in property <bool> show-tokens: false;
+    in property <bool> wrap-content: false;
+    in property <string> code-font-family;
+    in property <length> code-font-size;
+    in property <length> code-character-width: 7.2px;
+    in property <length> nominal-row-height: 28px;
+    in property <color> fg-default;
+    in property <color> selection-background;
+    in property <int> line-index: -1;
+    in property <string> side: "";
+    in property <bool> multi-sel-active: false;
+    in property <string> multi-sel-side: "";
+    in property <int> multi-sel-lo-line: -1;
+    in property <int> multi-sel-hi-line: -1;
+    in property <int> multi-sel-lo-col: 0;
+    in property <int> multi-sel-hi-col: 0;
+    in property <bool> multi-sel-select-all: false;
+    callback multi-sel-begin(int, int, string);
+    callback multi-sel-update(int, int, string);
+    callback multi-sel-end();
+    callback multi-sel-edge(int);
+    callback resolve-hit(int, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
+
+    private property <bool> in-multi-sel:
+        root.multi-sel-active
+        && root.multi-sel-side == root.side
+        && root.line-index >= root.multi-sel-lo-line
+        && root.line-index <= root.multi-sel-hi-line;
+    private property <int> visible-columns:
+        max(1, Math.floor(max(1px, root.width) / root.code-character-width));
+    private property <int> visual-line-count:
+        root.wrap-content
+            ? max(1, Math.ceil(max(1, root.content-columns) / root.visible-columns))
+            : 1;
+    private property <bool> highlight-from-start:
+        root.line-index > root.multi-sel-lo-line;
+    private property <bool> highlight-to-end:
+        root.line-index < root.multi-sel-hi-line;
+    private property <int> highlight-start-col:
+        root.highlight-from-start ? 0 : root.multi-sel-lo-col;
+    private property <int> highlight-end-col:
+        root.highlight-to-end
+            ? max(root.content-columns, root.highlight-start-col + 1)
+            : max(root.highlight-start-col, min(root.multi-sel-hi-col, root.content-columns));
+    clip: true;
+
+    // Selection rectangles only exist for selected, visible ListView rows.
+    // Normal scrolling remains token-only and keeps the lazy model bounded.
+    if root.in-multi-sel && root.multi-sel-select-all: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: root.selection-background;
+    }
+
+    for visual-line in root.in-multi-sel && !root.multi-sel-select-all ? root.visual-line-count : 0: Rectangle {
+        private property <int> segment-start:
+            root.wrap-content ? visual-line * root.visible-columns : 0;
+        private property <int> segment-end:
+            root.wrap-content
+                ? min(root.content-columns, self.segment-start + root.visible-columns)
+                : root.content-columns;
+        private property <int> selected-start:
+            max(root.highlight-start-col, self.segment-start);
+        private property <int> selected-end:
+            min(root.highlight-end-col, self.segment-end);
+
+        visible: self.selected-end > self.selected-start;
+        x: (self.selected-start - self.segment-start) * root.code-character-width;
+        y: root.wrap-content
+            ? visual-line * root.nominal-row-height
+            : (root.height - root.nominal-row-height) / 2;
+        width: max(
+            root.code-character-width,
+            (self.selected-end - self.selected-start) * root.code-character-width
+        );
+        height: root.nominal-row-height;
+        background: root.selection-background;
+    }
+
+    if root.show-tokens: HorizontalLayout {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        spacing: 0px;
+        for token in root.tokens: Text {
+            width: self.preferred-width;
+            height: parent.height;
+            text: token.text;
+            vertical-alignment: center;
+            overflow: clip;
+            font-family: root.code-font-family;
+            font-size: root.code-font-size;
+            font-weight: token.bold ? 600 : 400;
+            font-italic: token.italic;
+            color: AppState.effective-dark-mode ? token.dark-color : token.color;
+        }
+    }
+    if !root.show-tokens: Text {
+        x: 0px;
+        y: root.wrap-content ? 2px : 0px;
+        width: parent.width;
+        height: parent.height - (root.wrap-content ? 2px : 0px);
+        text: root.content;
+        vertical-alignment: root.wrap-content ? top : center;
+        overflow: clip;
+        // Row height and selection hit-testing use the same fixed-column
+        // segmentation. Avoid word-wrap choosing different break points.
+        wrap: root.wrap-content ? char-wrap : no-wrap;
+        font-family: root.code-font-family;
+        font-size: root.code-font-size;
+        color: root.fg-default;
+    }
+
+    TouchArea {
+        mouse-cursor: text;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.multi-sel-begin(
+                    root.line-index,
+                    root.col-at(self.mouse-x, self.mouse-y),
+                    root.side
+                );
+            } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                root.multi-sel-end();
+            }
+        }
+        moved => {
+            if (!self.pressed) {
+                return;
+            }
+            let hit = root.resolve-hit(
+                root.line-index,
+                self.mouse-x / 1px,
+                self.mouse-y / 1px,
+                root.height / 1px,
+                root.width / 1px,
+                root.code-character-width / 1px,
+                root.side
+            );
+            root.multi-sel-update(hit.line, hit.column, root.side);
+            root.multi-sel-edge(
+                self.mouse-y < 0px ? -1 : (self.mouse-y > root.height ? 1 : 0)
+            );
+        }
+    }
+
+    function col-at(x: length, y: length) -> int {
+        let visual-line = root.wrap-content
+            ? max(0, min(root.visual-line-count - 1, Math.floor(y / root.nominal-row-height)))
+            : 0;
+        // Round to the nearest caret boundary so releasing on the right half of
+        // a glyph includes that character in the copied range.
+        return max(
+            0,
+            min(
+                root.content-columns,
+                visual-line * root.visible-columns
+                    + Math.floor((max(0px, x) + root.code-character-width / 2) / root.code-character-width)
+            )
+        );
+    }
+
+}
+
 component SplitDiffSide inherits Rectangle {
     in property <int> line-number;
     in property <string> kind;
     in property <string> content;
+    in property <int> content-columns: content.character-count;
     in property <[WorkflowPrDiffToken]> tokens;
     in property <bool> live-resizing: false;
     in property <bool> wrap-content: false;
@@ -1582,6 +1760,22 @@ component SplitDiffSide inherits Rectangle {
     in property <color> addition-gutter-background;
     in property <color> deletion-background;
     in property <color> deletion-gutter-background;
+    in property <color> selection-background;
+    in property <length> code-character-width: 7.2px;
+    in property <int> line-index: -1;
+    in property <string> side: "";
+    in property <bool> multi-sel-active: false;
+    in property <string> multi-sel-side: "";
+    in property <int> multi-sel-lo-line: -1;
+    in property <int> multi-sel-hi-line: -1;
+    in property <int> multi-sel-lo-col: 0;
+    in property <int> multi-sel-hi-col: 0;
+    in property <bool> multi-sel-select-all: false;
+    callback multi-sel-begin(int, int, string);
+    callback multi-sel-update(int, int, string);
+    callback multi-sel-end();
+    callback multi-sel-edge(int);
+    callback resolve-hit(int, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
 
     background: root.kind == "addition"
         ? root.addition-background
@@ -1630,36 +1824,37 @@ component SplitDiffSide inherits Rectangle {
             color: root.fg-default;
         }
     }
-    if root.live-resizing || root.wrap-content: Text {
-        x: 70px;
-        y: 2px;
-        width: parent.width - 70px;
-        height: parent.height - 2px;
-        text: root.content;
-        vertical-alignment: top;
-        overflow: clip;
-        wrap: root.wrap-content ? word-wrap : no-wrap;
-        font-family: root.code-font-family;
-        font-size: root.code-font-size;
-        color: root.fg-default;
-    }
-    if !root.live-resizing && !root.wrap-content: HorizontalLayout {
+    SelectableDiffCode {
         x: 70px;
         y: 0px;
         width: parent.width - 70px;
-        height: root.code-line-height;
-        spacing: 0px;
-        for token in root.tokens: Text {
-            width: self.preferred-width;
-            height: parent.height;
-            text: token.text;
-            vertical-alignment: center;
-            overflow: clip;
-            font-family: root.code-font-family;
-            font-size: root.code-font-size;
-            font-weight: token.bold ? 600 : 400;
-            font-italic: token.italic;
-            color: AppState.effective-dark-mode ? token.dark-color : token.color;
+        height: parent.height;
+        content: root.content;
+        content-columns: root.content-columns;
+        tokens: root.tokens;
+        show-tokens: !root.live-resizing && !root.wrap-content;
+        wrap-content: root.wrap-content;
+        code-font-family: root.code-font-family;
+        code-font-size: root.code-font-size;
+        code-character-width: root.code-character-width;
+        nominal-row-height: root.code-line-height;
+        fg-default: root.fg-default;
+        selection-background: root.selection-background;
+        line-index: root.line-index;
+        side: root.side;
+        multi-sel-active: root.multi-sel-active;
+        multi-sel-side: root.multi-sel-side;
+        multi-sel-lo-line: root.multi-sel-lo-line;
+        multi-sel-hi-line: root.multi-sel-hi-line;
+        multi-sel-lo-col: root.multi-sel-lo-col;
+        multi-sel-hi-col: root.multi-sel-hi-col;
+        multi-sel-select-all: root.multi-sel-select-all;
+        multi-sel-begin(line, col, side) => { root.multi-sel-begin(line, col, side); }
+        multi-sel-update(line, col, side) => { root.multi-sel-update(line, col, side); }
+        multi-sel-end => { root.multi-sel-end(); }
+        multi-sel-edge(direction) => { root.multi-sel-edge(direction); }
+        resolve-hit(line, x, y, row-height, code-width, cell-width, side) => {
+            root.resolve-hit(line, x, y, row-height, code-width, cell-width, side)
         }
     }
 }
@@ -2655,7 +2850,10 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <length> commit-tab-body-footer-gap: 8px;
     // Sum of expanded Conversation commit body heights (multi-expand).
     in property <int> expanded-commit-body-height: 0;
-    private property <length> code-character-width: 7.2px;
+    // Derive the cell advance from the actual registered face instead of a
+    // hard-coded estimate. Selection, wrapping, and token geometry share it.
+    private property <length> code-character-width:
+        max(1px, code-cell-measure.preferred-width / 32);
     private property <length> measured-code-width:
         max(root.max-code-columns * root.code-character-width, longest-code-line-measure.preferred-width);
     // GitHub Primer functional tokens (primer/primitives:
@@ -2671,6 +2869,30 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <color> github-done-fg: AppState.effective-dark-mode ? #ab7df8 : #8250df;
     private property <color> github-accent-fg: AppState.effective-dark-mode ? #58a6ff : #0969da;
     private property <color> github-accent-muted: AppState.effective-dark-mode ? #388bfd1a : #ddf4ff;
+    // Match the filter-input selection brush so diff copy looks Primer-native.
+    private property <color> diff-selection-background: AppState.effective-dark-mode ? #388bfd66 : #0969da55;
+    // GitHub-style code selection (code column only; gutters are excluded).
+    private property <int> diff-sel-anchor-line: -1;
+    private property <int> diff-sel-anchor-col: 0;
+    private property <int> diff-sel-focus-line: -1;
+    private property <int> diff-sel-focus-col: 0;
+    private property <string> diff-sel-side: "";
+    private property <string> diff-selection-focus-side: "";
+    private property <bool> diff-selecting: false;
+    private property <bool> diff-sel-select-all: false;
+    private property <bool> diff-sel-active: root.diff-sel-anchor-line >= 0 && root.diff-sel-focus-line >= 0;
+    private property <bool> diff-sel-anchor-first:
+        root.diff-sel-anchor-line < root.diff-sel-focus-line
+            || (root.diff-sel-anchor-line == root.diff-sel-focus-line
+                && root.diff-sel-anchor-col <= root.diff-sel-focus-col);
+    private property <int> diff-sel-lo-line:
+        root.diff-sel-anchor-first ? root.diff-sel-anchor-line : root.diff-sel-focus-line;
+    private property <int> diff-sel-hi-line:
+        root.diff-sel-anchor-first ? root.diff-sel-focus-line : root.diff-sel-anchor-line;
+    private property <int> diff-sel-lo-col:
+        root.diff-sel-anchor-first ? root.diff-sel-anchor-col : root.diff-sel-focus-col;
+    private property <int> diff-sel-hi-col:
+        root.diff-sel-anchor-first ? root.diff-sel-focus-col : root.diff-sel-anchor-col;
     private property <color> diff-addition-background: AppState.effective-dark-mode ? #2ea04326 : #dafbe1;
     private property <color> diff-addition-gutter-background: AppState.effective-dark-mode ? #3fb9504d : #aceebb;
     private property <color> diff-deletion-background: AppState.effective-dark-mode ? #f851491a : #ffebe9;
@@ -2767,9 +2989,83 @@ export component PrReviewWorkspace inherits Rectangle {
     callback copy-file-path(string);
     callback copy-commit-sha(string);
     callback copy-source-branch(string);
+    // Copy the current code-column selection (start/end are document-ordered).
+    callback copy-diff-selection(int, int, int, int, string);
+    callback resolve-diff-selection(int, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
     callback view-file();
     // Toggle one commit message body; expansions are independent (not exclusive).
     callback toggle-commit-message(string);
+
+    function begin-diff-selection(line: int, col: int, side: string) {
+        root.diff-sel-anchor-line = line;
+        root.diff-sel-anchor-col = max(0, col);
+        root.diff-sel-focus-line = line;
+        root.diff-sel-focus-col = max(0, col);
+        root.diff-sel-side = side;
+        root.diff-selection-focus-side = side;
+        root.diff-selecting = true;
+        root.diff-sel-select-all = false;
+        diff-selection-focus.focus();
+    }
+
+    function update-diff-selection(line: int, col: int, side: string) {
+        if (!root.diff-selecting || side != root.diff-sel-side) {
+            return;
+        }
+        root.diff-sel-focus-line = max(0, min(line, max(0, root.lines.length - 1)));
+        root.diff-sel-focus-col = max(0, col);
+    }
+
+    function end-diff-selection() {
+        root.diff-selecting = false;
+        // A plain click without drag is not a selection (GitHub keeps no range).
+        if (root.diff-sel-anchor-line == root.diff-sel-focus-line
+            && root.diff-sel-anchor-col == root.diff-sel-focus-col) {
+            root.clear-diff-selection();
+            return;
+        }
+        if (root.diff-sel-active) {
+            diff-selection-focus.focus();
+        }
+    }
+
+    function clear-diff-selection() {
+        root.diff-sel-anchor-line = -1;
+        root.diff-sel-anchor-col = 0;
+        root.diff-sel-focus-line = -1;
+        root.diff-sel-focus-col = 0;
+        root.diff-sel-side = "";
+        root.diff-selecting = false;
+        root.diff-sel-select-all = false;
+    }
+
+    function copy-active-diff-selection() {
+        if (!root.diff-sel-active) {
+            return;
+        }
+        root.copy-diff-selection(
+            root.diff-sel-lo-line,
+            root.diff-sel-lo-col,
+            root.diff-sel-hi-line,
+            root.diff-sel-hi-col,
+            root.diff-sel-side
+        );
+    }
+
+    function select-all-diff-content() {
+        if (root.lines.length == 0) {
+            return;
+        }
+        root.diff-sel-anchor-line = 0;
+        root.diff-sel-anchor-col = 0;
+        root.diff-sel-focus-line = root.lines.length - 1;
+        root.diff-sel-focus-col = 2147483647;
+        root.diff-sel-side = root.diff-view == "split"
+            ? (root.diff-selection-focus-side == "left" ? "left" : "right")
+            : "";
+        root.diff-selecting = false;
+        root.diff-sel-select-all = true;
+    }
 
     function toggle-draft-commit(index: int) {
         if root.draft-range-start < 0 || root.draft-range-end < 0 {
@@ -2801,6 +3097,11 @@ export component PrReviewWorkspace inherits Rectangle {
     }
 
     changed file-filter => { root.filter-files(root.file-filter); }
+    changed selected-file-index => { root.clear-diff-selection(); }
+    changed selected-tab => { root.clear-diff-selection(); }
+    changed diff-view => { root.clear-diff-selection(); }
+    changed line-model-revision => { root.clear-diff-selection(); }
+    changed viewing-file => { root.clear-diff-selection(); }
     changed review-dialog-open => {
         if (root.review-dialog-open) {
             root.active-popover = "";
@@ -2863,6 +3164,33 @@ export component PrReviewWorkspace inherits Rectangle {
     border-width: 0px;
     clip: true;
 
+    // Owns ⌘/Ctrl+C for code selection. Zero-size at the workspace root so
+    // nested Files changed conditionals cannot hide the focus target.
+    diff-selection-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            // Slint's winit backend mirrors Qt on Apple: ⌘ is reported as
+            // `control`, and the physical Control key as `meta`. Use `control`
+            // on every platform so ⌘/Ctrl+C matches the terminal drawer.
+            if (event.modifiers.control && (event.text == "c" || event.text == "C")) {
+                root.copy-active-diff-selection();
+                return accept;
+            }
+            if (event.modifiers.control && (event.text == "a" || event.text == "A")) {
+                root.select-all-diff-content();
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                root.clear-diff-selection();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
     compact-title-measure := Text {
         visible: false;
         text: root.pull-request-title + " #" + root.pull-request-number;
@@ -2888,6 +3216,14 @@ export component PrReviewWorkspace inherits Rectangle {
         font-family: root.code-font-family;
         font-size: root.code-font-size;
         overflow: clip;
+    }
+    code-cell-measure := Text {
+        visible: false;
+        text: "00000000000000000000000000000000";
+        font-family: root.code-font-family;
+        font-size: root.code-font-size;
+        overflow: clip;
+        wrap: no-wrap;
     }
 
     // Consume clicks on non-interactive workspace areas so they cannot reach
@@ -3207,7 +3543,9 @@ export component PrReviewWorkspace inherits Rectangle {
             // The SHA tooltip opens below this row. Keep the row above the
             // following file toolbar so the GitHub-style bubble is not covered.
             z: 80;
-            background: root.github-bg-muted;
+            // GitHub Files changed commit toolbar: default surface + hairline
+            // top/bottom borders (top is the shared 1px rule above this row).
+            background: root.github-bg-default;
             clip: false;
 
             // Gear center in toolbar coordinates. Derive panel x and caret x
@@ -3399,6 +3737,13 @@ export component PrReviewWorkspace inherits Rectangle {
                     root.active-popover = "";
                     root.apply-diff-settings(view, ignore-whitespace);
                 }
+            }
+
+            Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: root.github-border-default;
             }
         }
 
@@ -4989,6 +5334,11 @@ export component PrReviewWorkspace inherits Rectangle {
                             width: parent.width;
                             vertical-stretch: 1;
                             visible: !root.large-diff-deferred && !root.large-diff-loading;
+                            // A Flickable normally steals vertical drags after
+                            // 8px and cancels the code TouchArea. GitHub treats
+                            // dragging code as selection; wheel/touchpad and
+                            // both scrollbars continue to scroll this ListView.
+                            interactive: false;
                             horizontal_scrollbar_policy: ScrollBarPolicy.as_needed;
                             vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
 
@@ -5146,57 +5496,46 @@ export component PrReviewWorkspace inherits Rectangle {
                                                 color: root.github-fg-default;
                                             }
                                         }
-                                        if line.kind == "hunk": Rectangle {
+                                        // Hunk headers are not selectable on GitHub; keep
+                                        // plain Text so drag/⌘A/copy never target @@ rows.
+                                        if line.kind == "hunk" || line.kind == "meta": Text {
                                             horizontal-stretch: 1;
                                             height: parent.height;
-                                            Text {
-                                                x: 0px;
-                                                y: 0px;
-                                                width: parent.width;
-                                                height: parent.height;
-                                                text: line.content;
-                                                horizontal_alignment: left;
-                                                vertical_alignment: center;
-                                                overflow: clip;
-                                                font-family: root.code-font-family;
-                                                font-size: root.code-font-size;
-                                                color: root.hunk-foreground;
-                                            }
+                                            text: line.content;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            font-family: root.code-font-family;
+                                            font-size: root.code-font-size;
+                                            color: root.hunk-foreground;
                                         }
-                                        if line.kind != "hunk" && (root.live-resizing || diff-line-row.unified-wraps): Rectangle {
+                                        if line.kind != "hunk" && line.kind != "meta": SelectableDiffCode {
                                             horizontal-stretch: 1;
                                             height: parent.height;
-                                            Text {
-                                                x: 0px;
-                                                y: diff-line-row.unified-wraps ? 2px : 0px;
-                                                width: parent.width;
-                                                height: parent.height - (diff-line-row.unified-wraps ? 2px : 0px);
-                                                text: line.content;
-                                                vertical_alignment: diff-line-row.unified-wraps ? top : center;
-                                                overflow: clip;
-                                                wrap: diff-line-row.unified-wraps ? word-wrap : no-wrap;
-                                                font-family: root.code-font-family;
-                                                font-size: root.code-font-size;
-                                                color: root.github-fg-default;
-                                            }
-                                        }
-                                        if line.kind != "hunk" && !root.live-resizing && !diff-line-row.unified-wraps: HorizontalLayout {
-                                            horizontal-stretch: 1;
-                                            height: parent.height;
-                                            spacing: 0px;
-                                            for token in line.tokens: Text {
-                                                width: self.preferred-width;
-                                                height: parent.height;
-                                                text: token.text;
-                                                vertical_alignment: center;
-                                                overflow: clip;
-                                                font-family: root.code-font-family;
-                                                font-size: root.code-font-size;
-                                                font-weight: token.bold ? 600 : 400;
-                                                font-italic: token.italic;
-                                                color: line.kind == "hunk"
-                                                    ? MaterialPalette.on_secondary_container
-                                                    : (AppState.effective-dark-mode ? token.dark-color : token.color);
+                                            content: line.content;
+                                            content-columns: line.left-columns;
+                                            tokens: line.tokens;
+                                            show-tokens: !root.live-resizing && !diff-line-row.unified-wraps;
+                                            wrap-content: diff-line-row.unified-wraps;
+                                            code-font-family: root.code-font-family;
+                                            code-font-size: root.code-font-size;
+                                            code-character-width: root.code-character-width;
+                                            nominal-row-height: root.code-line-height;
+                                            fg-default: root.github-fg-default;
+                                            selection-background: root.diff-selection-background;
+                                            line-index: line-index;
+                                            side: "";
+                                            multi-sel-active: root.diff-sel-active;
+                                            multi-sel-side: root.diff-sel-side;
+                                            multi-sel-lo-line: root.diff-sel-lo-line;
+                                            multi-sel-hi-line: root.diff-sel-hi-line;
+                                            multi-sel-lo-col: root.diff-sel-lo-col;
+                                            multi-sel-hi-col: root.diff-sel-hi-col;
+                                            multi-sel-select-all: root.diff-sel-select-all;
+                                            multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
+                                            multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
+                                            multi-sel-end => { root.end-diff-selection(); }
+                                            resolve-hit(line, x, y, row-height, code-width, cell-width, side) => {
+                                                root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, side)
                                             }
                                         }
                                 }
@@ -5210,6 +5549,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                         line-number: line.left-line;
                                         kind: line.left-kind;
                                         content: line.left-content;
+                                        content-columns: line.left-columns;
                                         tokens: line.left-tokens;
                                         live-resizing: root.live-resizing;
                                         wrap-content: line.left-columns * root.code-character-width
@@ -5217,6 +5557,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                         code-font-family: root.code-font-family;
                                         code-font-size: root.code-font-size;
                                         code-line-height: root.code-line-height;
+                                        code-character-width: root.code-character-width;
                                         bg-default: root.github-bg-default;
                                         fg-default: root.github-fg-default;
                                         fg-muted: root.github-fg-muted;
@@ -5224,6 +5565,22 @@ export component PrReviewWorkspace inherits Rectangle {
                                         addition-gutter-background: root.diff-addition-gutter-background;
                                         deletion-background: root.diff-deletion-background;
                                         deletion-gutter-background: root.diff-deletion-gutter-background;
+                                        selection-background: root.diff-selection-background;
+                                        line-index: line-index;
+                                        side: "left";
+                                        multi-sel-active: root.diff-sel-active;
+                                        multi-sel-side: root.diff-sel-side;
+                                        multi-sel-lo-line: root.diff-sel-lo-line;
+                                        multi-sel-hi-line: root.diff-sel-hi-line;
+                                        multi-sel-lo-col: root.diff-sel-lo-col;
+                                        multi-sel-hi-col: root.diff-sel-hi-col;
+                                        multi-sel-select-all: root.diff-sel-select-all;
+                                        multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
+                                        multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
+                                        multi-sel-end => { root.end-diff-selection(); }
+                                        resolve-hit(line, x, y, row-height, code-width, cell-width, side) => {
+                                            root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, side)
+                                        }
                                     }
                                     Rectangle {
                                         width: 1px;
@@ -5236,6 +5593,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                         line-number: line.right-line;
                                         kind: line.right-kind;
                                         content: line.right-content;
+                                        content-columns: line.right-columns;
                                         tokens: line.right-tokens;
                                         live-resizing: root.live-resizing;
                                         wrap-content: line.right-columns * root.code-character-width
@@ -5243,6 +5601,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                         code-font-family: root.code-font-family;
                                         code-font-size: root.code-font-size;
                                         code-line-height: root.code-line-height;
+                                        code-character-width: root.code-character-width;
                                         bg-default: root.github-bg-default;
                                         fg-default: root.github-fg-default;
                                         fg-muted: root.github-fg-muted;
@@ -5250,6 +5609,22 @@ export component PrReviewWorkspace inherits Rectangle {
                                         addition-gutter-background: root.diff-addition-gutter-background;
                                         deletion-background: root.diff-deletion-background;
                                         deletion-gutter-background: root.diff-deletion-gutter-background;
+                                        selection-background: root.diff-selection-background;
+                                        line-index: line-index;
+                                        side: "right";
+                                        multi-sel-active: root.diff-sel-active;
+                                        multi-sel-side: root.diff-sel-side;
+                                        multi-sel-lo-line: root.diff-sel-lo-line;
+                                        multi-sel-hi-line: root.diff-sel-hi-line;
+                                        multi-sel-lo-col: root.diff-sel-lo-col;
+                                        multi-sel-hi-col: root.diff-sel-hi-col;
+                                        multi-sel-select-all: root.diff-sel-select-all;
+                                        multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
+                                        multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
+                                        multi-sel-end => { root.end-diff-selection(); }
+                                        resolve-hit(line, x, y, row-height, code-width, cell-width, side) => {
+                                            root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, side)
+                                        }
                                     }
                                 }
                                 if root.diff-view == "split" && line.kind != "split": HorizontalLayout {
@@ -5270,18 +5645,46 @@ export component PrReviewWorkspace inherits Rectangle {
                                             ? root.hunk-background
                                             : root.github-bg-default;
                                     }
-                                    Text {
+                                    if line.kind == "hunk" || line.kind == "meta": Text {
                                         horizontal-stretch: 1;
                                         height: parent.height;
                                         text: line.content;
-                                        horizontal-alignment: left;
                                         vertical-alignment: center;
-                                        overflow: clip;
+                                        overflow: elide;
                                         font-family: root.code-font-family;
                                         font-size: root.code-font-size;
                                         color: line.kind == "hunk"
                                             ? root.hunk-foreground
                                             : root.github-fg-muted;
+                                    }
+                                    if line.kind != "hunk" && line.kind != "meta": SelectableDiffCode {
+                                        horizontal-stretch: 1;
+                                        height: parent.height;
+                                        content: line.content;
+                                        content-columns: line.left-columns;
+                                        show-tokens: false;
+                                        wrap-content: false;
+                                        code-font-family: root.code-font-family;
+                                        code-font-size: root.code-font-size;
+                                        code-character-width: root.code-character-width;
+                                        nominal-row-height: root.code-line-height;
+                                        fg-default: root.github-fg-muted;
+                                        selection-background: root.diff-selection-background;
+                                        line-index: line-index;
+                                        side: "";
+                                        multi-sel-active: root.diff-sel-active;
+                                        multi-sel-side: root.diff-sel-side;
+                                        multi-sel-lo-line: root.diff-sel-lo-line;
+                                        multi-sel-hi-line: root.diff-sel-hi-line;
+                                        multi-sel-lo-col: root.diff-sel-lo-col;
+                                        multi-sel-hi-col: root.diff-sel-hi-col;
+                                        multi-sel-select-all: root.diff-sel-select-all;
+                                        multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
+                                        multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
+                                        multi-sel-end => { root.end-diff-selection(); }
+                                        resolve-hit(line, x, y, row-height, code-width, cell-width, side) => {
+                                            root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, side)
+                                        }
                                     }
                                 }
                                 if line.kind == "hunk" && line.expandable && root.diff-view == "split": Rectangle {
