@@ -28,6 +28,20 @@ export struct WorkflowPrDiffLine {
     content: string,
     tokens: [WorkflowPrDiffToken],
     expandable: bool,
+    expand-all: bool,
+    expand-up: bool,
+    expand-down: bool,
+    source-index: int,
+    left-line: int,
+    left-columns: int,
+    left-kind: string,
+    left-content: string,
+    left-tokens: [WorkflowPrDiffToken],
+    right-line: int,
+    right-columns: int,
+    right-kind: string,
+    right-content: string,
+    right-tokens: [WorkflowPrDiffToken],
 }
 
 export struct WorkflowPrTreeItem {
@@ -1401,6 +1415,7 @@ component FileToolbarButton inherits Rectangle {
     in property <image> icon-source;
     in property <bool> button-enabled: true;
     in property <bool> selected: false;
+    in property <bool> outlined: false;
     in property <string> tooltip-text;
     in property <bool> tooltip-align-right: false;
     in property <bool> tooltip-above: false;
@@ -1416,13 +1431,17 @@ component FileToolbarButton inherits Rectangle {
         width: parent.width;
         height: 28px;
         border-radius: 6px;
-        border-width: 0px;
-        border-color: MaterialPalette.outline_variant;
+        border-width: root.outlined ? 1px : 0px;
+        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
         background: root.selected
             ? (button-touch.has-hover
                 ? (AppState.effective-dark-mode ? #656c7626 : #eff2f5)
                 : (AppState.effective-dark-mode ? #656c7633 : #e6eaef))
-            : (button-touch.has-hover && root.button-enabled ? MaterialPalette.surface_container_high : transparent);
+            : (root.outlined
+                ? (button-touch.has-hover && root.button-enabled
+                    ? (AppState.effective-dark-mode ? #262c36 : #eff2f5)
+                    : (AppState.effective-dark-mode ? #212830 : #f6f8fa))
+                : (button-touch.has-hover && root.button-enabled ? MaterialPalette.surface_container_high : transparent));
         opacity: root.button-enabled ? 1 : 0.38;
 
         Image {
@@ -1432,6 +1451,7 @@ component FileToolbarButton inherits Rectangle {
             height: 16px;
             source: root.icon-source;
             image-fit: contain;
+            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
         }
     }
     button-touch := TouchArea {
@@ -1442,7 +1462,7 @@ component FileToolbarButton inherits Rectangle {
             if root.button-enabled { root.clicked(); }
         }
     }
-    if button-touch.has-hover && root.tooltip-text != "": ToolTip {
+    if button-touch.has-hover && !root.selected && root.tooltip-text != "": ToolTip {
         x: root.tooltip-align-right ? root.width - self.width : 0px;
         // List delegates paint in order. A downward tooltip from a commit-row
         // copy action would therefore be covered by the following row, even
@@ -1545,47 +1565,419 @@ component FileChangeTypeIcon inherits Image {
                 : root.muted-fg));
 }
 
-// Primer ToggleSwitch `size="small"` (48×24). Medium is 64×32; the Files
-// changed toolbar is dense, so small matches GitHub's PR chrome.
-component GitHubToggleSwitch inherits Rectangle {
-    in-out property <bool> checked: false;
-    callback toggled(bool);
+component SplitDiffSide inherits Rectangle {
+    in property <int> line-number;
+    in property <string> kind;
+    in property <string> content;
+    in property <[WorkflowPrDiffToken]> tokens;
+    in property <bool> live-resizing: false;
+    in property <bool> wrap-content: false;
+    in property <string> code-font-family;
+    in property <length> code-font-size;
+    in property <length> code-line-height;
+    in property <color> bg-default;
+    in property <color> fg-default;
+    in property <color> fg-muted;
+    in property <color> addition-background;
+    in property <color> addition-gutter-background;
+    in property <color> deletion-background;
+    in property <color> deletion-gutter-background;
 
-    width: 48px;
-    height: 24px;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: root.checked
-        ? transparent
-        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
-    background: root.checked
-        ? (toggle-touch.has-hover
-            ? (AppState.effective-dark-mode ? #1f6feb : #0860ca)
-            : (AppState.effective-dark-mode ? #1f6feb : #0969da))
-        : (toggle-touch.has-hover
-            ? (AppState.effective-dark-mode ? #262c36 : #dde3ea)
-            : (AppState.effective-dark-mode ? #21262d : #eaeef2));
-    clip: true;
+    background: root.kind == "addition"
+        ? root.addition-background
+        : (root.kind == "deletion" ? root.deletion-background : root.bg-default);
 
-    // Knob is half the track, inset 1px — Primer `.ToggleKnob`.
+    // Absolute columns match GitHub's table-cell geometry and prevent a tall
+    // wrapped row from cross-axis-centering its line number.
     Rectangle {
-        x: root.checked ? parent.width - self.width - 1px : 1px;
-        y: 1px;
-        width: (parent.width - 2px) / 2;
+        x: 0px;
+        y: 0px;
+        width: 50px;
+        height: parent.height;
+        background: root.kind == "addition"
+            ? root.addition-gutter-background
+            : (root.kind == "deletion" ? root.deletion-gutter-background : root.bg-default);
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: root.code-line-height;
+            text: root.line-number == 0 ? "" : root.line-number;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-family: root.code-font-family;
+            font-size: root.code-font-size;
+            color: root.kind == "addition" || root.kind == "deletion"
+                ? root.fg-default
+                : root.fg-muted;
+        }
+    }
+    Rectangle {
+        x: 50px;
+        y: 0px;
+        width: 20px;
+        height: parent.height;
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: root.code-line-height;
+            text: root.kind == "addition" ? "+" : (root.kind == "deletion" ? "-" : "");
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-family: root.code-font-family;
+            font-size: root.code-font-size;
+            color: root.fg-default;
+        }
+    }
+    if root.live-resizing || root.wrap-content: Text {
+        x: 70px;
+        y: 2px;
+        width: parent.width - 70px;
         height: parent.height - 2px;
-        border-radius: 5px;
-        border-width: 1px;
-        border-color: root.checked
-            ? (AppState.effective-dark-mode ? #1f6feb : #0969da)
-            : (AppState.effective-dark-mode ? #3d444d : #858f99);
-        background: AppState.effective-dark-mode ? #f0f6fc : #ffffff;
+        text: root.content;
+        vertical-alignment: top;
+        overflow: clip;
+        wrap: root.wrap-content ? word-wrap : no-wrap;
+        font-family: root.code-font-family;
+        font-size: root.code-font-size;
+        color: root.fg-default;
+    }
+    if !root.live-resizing && !root.wrap-content: HorizontalLayout {
+        x: 70px;
+        y: 0px;
+        width: parent.width - 70px;
+        height: root.code-line-height;
+        spacing: 0px;
+        for token in root.tokens: Text {
+            width: self.preferred-width;
+            height: parent.height;
+            text: token.text;
+            vertical-alignment: center;
+            overflow: clip;
+            font-family: root.code-font-family;
+            font-size: root.code-font-size;
+            font-weight: token.bold ? 600 : 400;
+            font-italic: token.italic;
+            color: AppState.effective-dark-mode ? token.dark-color : token.color;
+        }
+    }
+}
+
+component DiffViewPreview inherits Rectangle {
+    in property <bool> split: false;
+    in property <color> canvas-color;
+    in property <color> outline-color;
+    in property <color> addition-color;
+    in property <color> deletion-color;
+    in property <color> neutral-color;
+
+    width: 52px;
+    height: 52px;
+    border-radius: 5px;
+    border-width: 1px;
+    border-color: root.outline-color;
+    background: root.canvas-color;
+
+    if !root.split: VerticalLayout {
+        x: 7px;
+        y: 7px;
+        width: parent.width - 14px;
+        height: parent.height - 14px;
+        spacing: 3px;
+        Rectangle { height: 4px; border-radius: 2px; background: root.addition-color; }
+        Rectangle { height: 4px; border-radius: 2px; background: root.neutral-color; }
+        Rectangle { height: 4px; border-radius: 2px; background: root.deletion-color; }
+        Rectangle { height: 4px; border-radius: 2px; background: root.deletion-color; }
+        Rectangle { height: 4px; border-radius: 2px; background: root.addition-color; }
+        Rectangle { height: 4px; border-radius: 2px; background: root.neutral-color; }
     }
 
-    toggle-touch := TouchArea {
+    if root.split: HorizontalLayout {
+        x: 7px;
+        y: 7px;
+        width: parent.width - 14px;
+        height: parent.height - 14px;
+        spacing: 4px;
+        VerticalLayout {
+            spacing: 3px;
+            Rectangle { height: 4px; border-radius: 2px; background: root.deletion-color; }
+            Rectangle { height: 4px; border-radius: 2px; background: root.deletion-color; }
+            Rectangle { height: 4px; border-radius: 2px; background: root.neutral-color; }
+            Rectangle { height: 4px; border-radius: 2px; background: root.deletion-color; }
+            Rectangle { height: 4px; border-radius: 2px; background: root.neutral-color; }
+            Rectangle { height: 4px; border-radius: 2px; background: root.neutral-color; }
+        }
+        VerticalLayout {
+            spacing: 3px;
+            Rectangle { height: 4px; border-radius: 2px; background: root.addition-color; }
+            Rectangle { height: 4px; border-radius: 2px; background: root.addition-color; }
+            Rectangle { height: 4px; border-radius: 2px; background: root.neutral-color; }
+            Rectangle { height: 4px; border-radius: 2px; background: root.addition-color; }
+            Rectangle { height: 4px; border-radius: 2px; background: root.neutral-color; }
+            Rectangle { height: 4px; border-radius: 2px; background: root.neutral-color; }
+        }
+    }
+}
+
+component DiffViewChoice inherits Rectangle {
+    in property <string> label;
+    in property <bool> split: false;
+    in property <bool> selected: false;
+    in property <color> bg-default;
+    in property <color> bg-hover;
+    in property <color> border-default;
+    in property <color> accent-fg;
+    in property <color> fg-default;
+    in property <color> addition-color;
+    in property <color> deletion-color;
+    in property <color> neutral-color;
+    in property <string> font-family;
+    callback choose();
+
+    width: 100px;
+    height: 98px;
+    border-radius: 6px;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? root.accent-fg : root.border-default;
+    background: choice-touch.has-hover ? root.bg-hover : root.bg-default;
+
+    DiffViewPreview {
+        x: (parent.width - self.width) / 2;
+        y: 10px;
+        split: root.split;
+        canvas-color: root.bg-default;
+        outline-color: root.border-default;
+        addition-color: root.addition-color;
+        deletion-color: root.deletion-color;
+        neutral-color: root.neutral-color;
+    }
+    Rectangle {
+        x: 10px;
+        y: 72px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        border-width: 1px;
+        border-color: root.selected ? root.accent-fg : root.border-default;
+        background: root.selected ? root.accent-fg : root.bg-default;
+        if root.selected: Rectangle {
+            x: 4px;
+            y: 4px;
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: #ffffff;
+        }
+    }
+    MaterialText {
+        x: 29px;
+        y: 68px;
+        width: parent.width - 36px;
+        height: 22px;
+        text: root.label;
+        font-family: root.font-family;
+        font-size: 12px;
+        font-weight: 600;
+        color: root.fg-default;
+        vertical-alignment: center;
+    }
+    choice-touch := TouchArea {
         mouse-cursor: pointer;
+        clicked => { root.choose(); }
+    }
+}
+
+component DiffSettingsPopover inherits Rectangle {
+    in property <bool> open: false;
+    // Tip of the upward Primer caret, relative to this popover's left edge.
+    // Callers set this to the trigger-button center minus the panel's x so the
+    // caret stays under the gear even when the panel is edge-clamped.
+    in property <length> caret-x: self.width / 2;
+    in-out property <string> pending-view: "unified";
+    in-out property <bool> pending-ignore-whitespace: false;
+    in property <bool> ignore-whitespace-supported: false;
+    in property <color> bg-default;
+    in property <color> bg-hover;
+    in property <color> bg-muted;
+    in property <color> border-default;
+    in property <color> accent-fg;
+    in property <color> fg-default;
+    in property <color> fg-muted;
+    in property <color> addition-color;
+    in property <color> deletion-color;
+    in property <string> font-family;
+    callback apply(string, bool);
+
+    visible: root.open;
+    width: 232px;
+    height: 212px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.border-default;
+    background: root.bg-default;
+    // Caret draws above the top edge; do not clip it.
+    clip: false;
+
+    // The visual overlay must also own its complete pointer area. Without this
+    // mounted hit target, blank areas of the popover allow hover to reach the
+    // file-tree delegates painted underneath it.
+    popover-pointer-shield := TouchArea {
+        mouse-cursor: default;
+    }
+
+    // Primer `.Popover-message` caret: CSS border triangles (::before 8px /
+    // ::after 7px). Slint Path fill is unreliable for this; use 45° squares
+    // so the tip reads as a bordered speech-bubble like GitHub.
+    private property <length> caret-tip-x: max(18px, min(root.width - 18px, root.caret-x));
+    // Outer diamond = borderColor-default
+    Rectangle {
+        x: root.caret-tip-x - 6px;
+        y: -6px;
+        width: 12px;
+        height: 12px;
+        background: root.border-default;
+        transform-rotation: 45deg;
+        transform-origin: { x: 6px, y: 6px };
+    }
+    // Inner diamond = overlay bg; sit 1px lower so the tip keeps a border rim
+    Rectangle {
+        x: root.caret-tip-x - 5px;
+        y: -4px;
+        width: 10px;
+        height: 10px;
+        background: root.bg-default;
+        transform-rotation: 45deg;
+        transform-origin: { x: 5px, y: 5px };
+    }
+    // Cover the panel's top border under the caret so it joins seamlessly.
+    Rectangle {
+        x: root.caret-tip-x - 6px;
+        y: 0px;
+        width: 12px;
+        height: 2px;
+        background: root.bg-default;
+    }
+
+    MaterialText {
+        x: 12px;
+        y: 8px;
+        width: parent.width - 24px;
+        height: 22px;
+        text: "Diff view";
+        font-family: root.font-family;
+        font-size: 13px;
+        font-weight: 600;
+        color: root.fg-default;
+        vertical-alignment: center;
+    }
+    DiffViewChoice {
+        x: 12px;
+        y: 34px;
+        label: "Unified";
+        selected: root.pending-view != "split";
+        bg-default: root.bg-default;
+        bg-hover: root.bg-hover;
+        border-default: root.border-default;
+        accent-fg: root.accent-fg;
+        fg-default: root.fg-default;
+        addition-color: root.addition-color;
+        deletion-color: root.deletion-color;
+        neutral-color: root.bg-muted;
+        font-family: root.font-family;
+        choose => { root.pending-view = "unified"; }
+    }
+    DiffViewChoice {
+        x: 120px;
+        y: 34px;
+        label: "Split";
+        split: true;
+        selected: root.pending-view == "split";
+        bg-default: root.bg-default;
+        bg-hover: root.bg-hover;
+        border-default: root.border-default;
+        accent-fg: root.accent-fg;
+        fg-default: root.fg-default;
+        addition-color: root.addition-color;
+        deletion-color: root.deletion-color;
+        neutral-color: root.bg-muted;
+        font-family: root.font-family;
+        choose => { root.pending-view = "split"; }
+    }
+
+    Rectangle {
+        x: 12px;
+        y: 140px;
+        width: 16px;
+        height: 16px;
+        border-radius: 3px;
+        border-width: 1px;
+        border-color: root.pending-ignore-whitespace && root.ignore-whitespace-supported
+            ? root.accent-fg
+            : root.border-default;
+        background: root.pending-ignore-whitespace && root.ignore-whitespace-supported
+            ? root.accent-fg
+            : root.bg-default;
+        opacity: root.ignore-whitespace-supported ? 1 : 0.5;
+        if root.pending-ignore-whitespace && root.ignore-whitespace-supported: Image {
+            x: 2px;
+            y: 2px;
+            width: 12px;
+            height: 12px;
+            source: @image-url("../../assets/icons/octicon-check-16.svg");
+            colorize: #ffffff;
+        }
+    }
+    MaterialText {
+        x: 34px;
+        y: 136px;
+        width: parent.width - 46px;
+        height: 24px;
+        text: "Hide whitespace";
+        font-family: root.font-family;
+        font-size: 12px;
+        font-weight: 600;
+        color: root.ignore-whitespace-supported ? root.fg-default : root.fg-muted;
+        vertical-alignment: center;
+    }
+    whitespace-touch := TouchArea {
+        x: 8px;
+        y: 134px;
+        width: parent.width - 16px;
+        height: 28px;
+        mouse-cursor: root.ignore-whitespace-supported ? pointer : default;
         clicked => {
-            root.checked = !root.checked;
-            root.toggled(root.checked);
+            if root.ignore-whitespace-supported {
+                root.pending-ignore-whitespace = !root.pending-ignore-whitespace;
+            }
+        }
+    }
+
+    Rectangle {
+        x: 12px;
+        y: 170px;
+        width: parent.width - 24px;
+        height: 30px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: root.border-default;
+        background: apply-touch.has-hover ? root.bg-hover : root.bg-muted;
+        MaterialText {
+            width: parent.width;
+            height: parent.height;
+            text: "Apply and reload";
+            font-family: root.font-family;
+            font-size: 12px;
+            font-weight: 600;
+            color: root.fg-default;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        apply-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.apply(root.pending-view, root.pending-ignore-whitespace);
+            }
         }
     }
 }
@@ -1859,6 +2251,86 @@ component CodeRenderingIndicator inherits Rectangle {
     }
 }
 
+component LargeDiffPlaceholder inherits Rectangle {
+    in property <bool> loading: false;
+    in property <color> bg-default;
+    in property <color> bg-muted;
+    in property <color> fg-muted;
+    in property <color> accent-fg;
+    in property <string> font-family;
+    callback load();
+
+    background: root.bg-default;
+    // GitHub renders the large-diff prompt in a compact diff body instead of
+    // vertically centering it in the entire remaining viewport.
+    private property <length> github-placeholder-height: min(root.height, 264px);
+
+    // GitHub keeps a faint code-shaped skeleton behind the action and status.
+    Rectangle { x: 24px; y: 24px; width: 110px; height: 12px; border-radius: 3px; background: root.bg-muted; }
+    Rectangle { x: 146px; y: 24px; width: 210px; height: 12px; border-radius: 3px; background: root.bg-muted; }
+    Rectangle { x: 52px; y: 48px; width: 230px; height: 12px; border-radius: 3px; background: root.bg-muted; }
+    Rectangle { x: 294px; y: 48px; width: 260px; height: 12px; border-radius: 3px; background: root.bg-muted; }
+    Rectangle { x: 52px; y: 72px; width: 150px; height: 12px; border-radius: 3px; background: root.bg-muted; }
+    Rectangle { x: 214px; y: 72px; width: 96px; height: 12px; border-radius: 3px; background: root.bg-muted; }
+    Rectangle { x: 322px; y: 72px; width: 132px; height: 12px; border-radius: 3px; background: root.bg-muted; }
+    Rectangle { x: 24px; y: 96px; width: 80px; height: 12px; border-radius: 3px; background: root.bg-muted; }
+
+    if !root.loading: Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: max(26px, root.github-placeholder-height / 2 - 38px);
+        width: load-label.preferred-width + 16px;
+        height: 32px;
+        background: transparent;
+        load-label := MaterialText {
+            width: parent.width;
+            height: parent.height;
+            text: "Load diff";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-family: root.font-family;
+            // GitHub: Button--link Button--medium Button f4.
+            font-size: 16px;
+            font-weight: 500;
+            color: root.accent-fg;
+        }
+        load-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.load(); }
+        }
+    }
+
+    if root.loading: Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: max(26px, root.github-placeholder-height / 2 - 42px);
+        width: 32px;
+        height: 32px;
+        // GitHub Primer Spinner uses a 1000ms linear rotation.
+        private property <float> rotation-progress: mod(animation-tick(), 1000ms) / 1000ms;
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: @image-url("../../assets/icons/github-spinner-16.svg");
+            image-fit: contain;
+            colorize: root.fg-muted;
+            transform-rotation: parent.rotation-progress * 360deg;
+            transform-origin: { x: self.width / 2, y: self.height / 2 };
+        }
+    }
+
+    MaterialText {
+        x: 16px;
+        y: max(62px, root.github-placeholder-height / 2);
+        width: parent.width - 32px;
+        height: 28px;
+        text: "Large diffs are not rendered by default.";
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-family: root.font-family;
+        font-size: 13px;
+        color: root.fg-muted;
+    }
+}
+
 component GitHubFileFilterField inherits Rectangle {
     in-out property <string> text;
     in property <string> font-family: ".SF NS";
@@ -2117,9 +2589,12 @@ export component PrReviewWorkspace inherits Rectangle {
     in property <bool> viewing-file: false;
     in property <bool> loading: false;
     in property <bool> code-loading: false;
+    in property <bool> large-diff-deferred: false;
+    in property <bool> large-diff-loading: false;
     in property <string> error-text;
     in property <bool> ignore-whitespace-supported: false;
     in-out property <bool> ignore-whitespace: false;
+    in-out property <string> diff-view: "unified";
     in-out property <string> file-filter: "";
     in-out property <bool> review-dialog-open: false;
     in-out property <bool> merge-dialog-open: false;
@@ -2152,7 +2627,8 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <length> file-list-width: max(root.file-list-min-width, min(root.file-list-max-width, root.file-list-preferred-width));
     private property <bool> file-list-resizing: false;
     private property <length> file-list-drag-start-width: root.file-list-width;
-    // Session preference while the window is wide enough for the tree.
+    // Session show/hide preference. Width-threshold crossings auto-set this;
+    // the toolbar toggle always flips it, including while below the breakpoint.
     private property <bool> file-list-user-visible: true;
     private property <bool> show-single-commit-summary:
         root.commit-range-start >= 0
@@ -2164,7 +2640,7 @@ export component PrReviewWorkspace inherits Rectangle {
     in property <string> code-font-family: "Menlo";
     private property <length> code-font-size: 13px;
     private property <length> code-line-height: 22px;
-    private property <length> hunk-line-height: 26px;
+    private property <length> hunk-line-height: 28px;
     // GitHub Commits tab: one shared card per UTC+08:00 date group.
     // Match Primer Box-row density (~16px vertical padding) and the gap
     // under "Commits on …" before the bordered card.
@@ -2179,7 +2655,7 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <length> commit-tab-body-footer-gap: 8px;
     // Sum of expanded Conversation commit body heights (multi-expand).
     in property <int> expanded-commit-body-height: 0;
-    private property <length> code-character-width: 7.8px;
+    private property <length> code-character-width: 7.2px;
     private property <length> measured-code-width:
         max(root.max-code-columns * root.code-character-width, longest-code-line-measure.preferred-width);
     // GitHub Primer functional tokens (primer/primitives:
@@ -2223,16 +2699,21 @@ export component PrReviewWorkspace inherits Rectangle {
     // grabs the pointer on macOS, suppressing underlay hover and consuming the
     // first click that should switch directly to another menu.
     private property <string> active-popover: "";
+    private property <string> pending-diff-view: root.diff-view;
+    private property <bool> pending-ignore-whitespace: root.ignore-whitespace;
     private property <length> stable-layout-width: root.width;
     private property <length> stable-layout-height: root.height;
     // Primer `$width-md` (768px). GitHub's PR Files changed Layout uses
     // `Layout--flowRow-until-md` + `sidebarPosition-flowRow-none`, which sets
     // `.Layout-sidebar { display: none }` under `max-width: 767.98px`.
+    // Crossing the threshold auto-collapses / auto-expands; the toolbar
+    // toggle always overrides so the tree can be reopened while narrow.
+    // Use live `root.width` (not frozen `stable-layout-width`); MainWindow
+    // min-width is 640px so this threshold is reachable.
     private property <length> file-tree-collapse-breakpoint: 768px;
     private property <bool> file-list-below-breakpoint:
-        root.stable-layout-width < root.file-tree-collapse-breakpoint;
-    private property <bool> file-list-visible:
-        !root.file-list-below-breakpoint && root.file-list-user-visible;
+        root.width < root.file-tree-collapse-breakpoint;
+    private property <bool> file-list-visible: root.file-list-user-visible;
     private property <bool> compact-title-wraps:
         root.stable-layout-width - 48px < compact-title-measure.preferred-width;
     private property <bool> compact-summary-wraps:
@@ -2270,6 +2751,8 @@ export component PrReviewWorkspace inherits Rectangle {
     callback select-file(int);
     callback select-relative-file(int);
     callback reload(bool);
+    callback apply-diff-settings(string, bool);
+    callback load-large-diff();
     callback submit-review(string, string);
     callback merge(string, bool);
     callback revert();
@@ -2278,7 +2761,7 @@ export component PrReviewWorkspace inherits Rectangle {
     callback toggle-manifest-filter();
     callback toggle-viewed-files();
     callback toggle-folder(string);
-    callback expand-hunk(int);
+    callback expand-hunk(int, string);
     callback expand-all-hunks();
     callback collapse-non-diff-lines();
     callback copy-file-path(string);
@@ -2363,6 +2846,16 @@ export component PrReviewWorkspace inherits Rectangle {
     changed height => {
         if !root.live-resizing {
             root.stable-layout-height = root.height;
+        }
+    }
+    changed file-list-below-breakpoint => {
+        // Auto-collapse when crossing below Primer md; auto-expand when
+        // returning above. Manual toggle may still reopen while narrow.
+        root.file-list-user-visible = !root.file-list-below-breakpoint;
+    }
+    init => {
+        if root.file-list-below-breakpoint {
+            root.file-list-user-visible = false;
         }
     }
 
@@ -2708,19 +3201,30 @@ export component PrReviewWorkspace inherits Rectangle {
 
         Rectangle { width: parent.width; height: 1px; background: root.github-border-default; }
 
-        if root.selected-tab == 2: Rectangle {
+        if root.selected-tab == 2: files-changed-toolbar := Rectangle {
             width: parent.width;
             height: 46px;
             // The SHA tooltip opens below this row. Keep the row above the
             // following file toolbar so the GitHub-style bubble is not covered.
             z: 80;
             background: root.github-bg-muted;
+            clip: false;
+
+            // Gear center in toolbar coordinates. Derive panel x and caret x
+            // from this same value so caret never depends on popover.self.x
+            // (which can disagree with the bound x during layout).
+            property <length> diff-settings-anchor-x:
+                files-toolbar-leading.x + diff-settings-button.x + 15px;
+            property <length> diff-settings-popover-x:
+                max(8px, min(self.width - 232px - 8px, self.diff-settings-anchor-x - 116px));
+            property <length> diff-settings-caret-x:
+                max(18px, min(214px, self.diff-settings-anchor-x - self.diff-settings-popover-x));
 
             HorizontalLayout {
                 padding-right: 24px;
                 spacing: 0px;
 
-                Rectangle {
+                files-toolbar-leading := Rectangle {
                     // Keep the commit summary origin attached to the live file-tree
                     // divider while the user drags it; never snapshot this width.
                     width: root.file-list-visible ? root.file-list-width + 1px : 320px;
@@ -2735,19 +3239,32 @@ export component PrReviewWorkspace inherits Rectangle {
                             file-tree-visible: root.file-list-visible;
                             clicked => {
                                 root.file-list-resizing = false;
-                                // Below Primer md GitHub keeps the tree hidden;
-                                // only flip the wide-window preference there.
-                                if !root.file-list-below-breakpoint {
-                                    root.file-list-user-visible = !root.file-list-user-visible;
-                                }
+                                root.file-list-user-visible = !root.file-list-user-visible;
                             }
                         }
-                        CommitRangeButton {
+                        commit-range-button := CommitRangeButton {
                             y: (parent.height - self.height) / 2;
                             text: root.commit-range-label;
                             clicked => {
                                 root.commit-range-dialog-open = true;
                                 root.ensure-commits();
+                            }
+                        }
+                        diff-settings-button := FileToolbarButton {
+                            width: 30px;
+                            height: parent.height;
+                            icon-source: @image-url("../../assets/icons/settings.svg");
+                            selected: root.active-popover == "diff-settings";
+                            outlined: true;
+                            tooltip-text: "Open diff view settings";
+                            clicked => {
+                                if root.active-popover == "diff-settings" {
+                                    root.active-popover = "";
+                                } else {
+                                    root.pending-diff-view = root.diff-view;
+                                    root.pending-ignore-whitespace = root.ignore-whitespace;
+                                    root.active-popover = "diff-settings";
+                                }
                             }
                         }
                         Rectangle { horizontal-stretch: 1; }
@@ -2854,32 +3371,33 @@ export component PrReviewWorkspace inherits Rectangle {
                         }
                     }
                 }
+            }
 
-                if root.ignore-whitespace-supported: HorizontalLayout {
-                    height: parent.height;
-                    spacing: 4px;
-                    horizontal-stretch: 0;
-                    cross-axis-alignment: center;
-
-                    MaterialText {
-                        // Preferred width only — stretching this label was what
-                        // shoved the switch to the far right of the toolbar.
-                        width: self.preferred-width;
-                        height: parent.height;
-                        text: "Ignore whitespace";
-                        font-family: root.tree-font-family;
-                        font-size: 13px;
-                        font-weight: 500;
-                        color: root.github-fg-muted;
-                        vertical-alignment: center;
-                    }
-                    GitHubToggleSwitch {
-                        checked: root.ignore-whitespace;
-                        toggled(checked) => {
-                            root.ignore-whitespace = checked;
-                            root.reload(checked);
-                        }
-                    }
+            // Host on the full toolbar row (not the leading strip) so the panel
+            // can extend over the diff while the Primer caret stays under the gear.
+            DiffSettingsPopover {
+                z: 1000;
+                x: files-changed-toolbar.diff-settings-popover-x;
+                // Leave Primer-like gap under the gear (mt-2 + caret height).
+                y: 50px;
+                caret-x: files-changed-toolbar.diff-settings-caret-x;
+                open: root.active-popover == "diff-settings";
+                pending-view <=> root.pending-diff-view;
+                pending-ignore-whitespace <=> root.pending-ignore-whitespace;
+                ignore-whitespace-supported: root.ignore-whitespace-supported;
+                bg-default: root.github-bg-default;
+                bg-hover: AppState.effective-dark-mode ? #262c36 : #f3f4f6;
+                bg-muted: root.github-bg-muted;
+                border-default: root.github-border-default;
+                accent-fg: root.github-accent-fg;
+                fg-default: root.github-fg-default;
+                fg-muted: root.github-fg-muted;
+                addition-color: AppState.effective-dark-mode ? #2ea04366 : #aceebb;
+                deletion-color: AppState.effective-dark-mode ? #f8514966 : #ffcecb;
+                font-family: root.tree-font-family;
+                apply(view, ignore-whitespace) => {
+                    root.active-popover = "";
+                    root.apply-diff-settings(view, ignore-whitespace);
                 }
             }
         }
@@ -4223,7 +4741,9 @@ export component PrReviewWorkspace inherits Rectangle {
                                     height: 28px;
                                     background: item.kind == "file" && root.selected-file-index == item.file-index
                                         ? root.github-accent-muted
-                                        : (tree-touch.has-hover ? root.github-bg-muted : transparent);
+                                        : (root.active-popover != "diff-settings" && tree-touch.has-hover
+                                            ? root.github-bg-muted
+                                            : transparent);
                                     border-width: 0px;
                                     TreeIndentGuides { width: parent.width; height: parent.height; depth: item.depth; }
                                     HorizontalLayout {
@@ -4468,38 +4988,163 @@ export component PrReviewWorkspace inherits Rectangle {
                         diff-scroll := ListView {
                             width: parent.width;
                             vertical-stretch: 1;
+                            visible: !root.large-diff-deferred && !root.large-diff-loading;
                             horizontal_scrollbar_policy: ScrollBarPolicy.as_needed;
                             vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
 
-                            for line[line-index] in root.lines: Rectangle {
-                                width: max(diff-scroll.visible_width, 116px + root.measured-code-width);
-                                height: line.kind == "hunk" ? root.hunk-line-height : root.code-line-height;
+                            for line[line-index] in root.lines: diff-line-row := Rectangle {
+                                private property <length> split-code-width:
+                                    max(1px, (diff-scroll.visible_width - 1px) / 2 - 70px);
+                                private property <length> split-content-width:
+                                    max(line.left-columns, line.right-columns) * root.code-character-width;
+                                private property <int> split-visual-lines:
+                                    max(1, Math.ceil(self.split-content-width / self.split-code-width));
+                                private property <length> unified-code-width:
+                                    max(1px, diff-scroll.visible_width - 120px);
+                                private property <length> unified-content-width:
+                                    line.left-columns * root.code-character-width;
+                                private property <bool> unified-wraps:
+                                    root.diff-view != "split"
+                                    && line.kind != "hunk"
+                                    && self.unified-content-width > self.unified-code-width;
+                                private property <int> unified-visual-lines:
+                                    max(1, Math.ceil(self.unified-content-width / self.unified-code-width));
+                                width: diff-scroll.visible_width;
+                                height: line.kind == "hunk"
+                                    ? (line.expand-up && line.expand-down ? 52px : root.hunk-line-height)
+                                    : (root.diff-view == "split"
+                                        ? root.code-line-height * self.split-visual-lines
+                                        : root.code-line-height * self.unified-visual-lines);
                                 background: line.kind == "addition"
                                     ? root.diff-addition-background
                                     : (line.kind == "deletion"
                                         ? root.diff-deletion-background
                                         : (line.kind == "hunk" ? root.hunk-background : root.github-bg-default));
-                                HorizontalLayout {
+                                if root.diff-view != "split": HorizontalLayout {
                                         width: parent.width;
                                         height: parent.height;
                                         spacing: 0px;
-                                        Rectangle {
-                                            width: 44px;
+                                        // Expandable hunks use one combined number gutter so
+                                        // Primer fold controls center across both columns
+                                        // (GitHub unified). Ordinary rows keep two 50px columns.
+                                        if line.kind == "hunk" && line.expandable: Rectangle {
+                                            width: 100px;
                                             height: parent.height;
-                                            background: line.kind == "addition" ? root.diff-addition-gutter-background : (line.kind == "deletion" ? root.diff-deletion-gutter-background : (line.kind == "hunk" ? root.hunk-gutter-background : root.github-bg-default));
-                                            MaterialText { width: parent.width - 7px; height: parent.height; text: line.old-line == 0 ? "" : line.old-line; horizontal_alignment: right; vertical_alignment: center; font-family: root.code-font-family; font-size: root.code-font-size; color: root.github-fg-muted; }
+                                            background: root.hunk-gutter-background;
+
+                                            if line.expand-all: Rectangle {
+                                                width: parent.width;
+                                                height: parent.height;
+                                                background: hunk-expand-all-touch.has-hover ? root.github-accent-fg : transparent;
+                                                Image {
+                                                    x: (parent.width - 16px) / 2;
+                                                    y: (parent.height - 16px) / 2;
+                                                    width: 16px;
+                                                    height: 16px;
+                                                    source: @image-url("../../assets/icons/octicon-unfold-16.svg");
+                                                    image-fit: contain;
+                                                    colorize: hunk-expand-all-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                                }
+                                                hunk-expand-all-touch := TouchArea {
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.expand-hunk(line.source-index, "all"); }
+                                                }
+                                            }
+                                            if line.expand-down && !line.expand-all: Rectangle {
+                                                x: 0px;
+                                                y: 0px;
+                                                width: parent.width;
+                                                height: line.expand-up ? parent.height / 2 : parent.height;
+                                                background: hunk-expand-down-touch.has-hover ? root.github-accent-fg : transparent;
+                                                Image {
+                                                    x: (parent.width - 16px) / 2;
+                                                    y: (parent.height - 16px) / 2;
+                                                    width: 16px;
+                                                    height: 16px;
+                                                    source: @image-url("../../assets/icons/octicon-fold-down-16.svg");
+                                                    image-fit: contain;
+                                                    colorize: hunk-expand-down-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                                }
+                                                hunk-expand-down-touch := TouchArea {
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.expand-hunk(line.source-index, "down"); }
+                                                }
+                                            }
+                                            if line.expand-up && !line.expand-all: Rectangle {
+                                                x: 0px;
+                                                y: line.expand-down ? parent.height / 2 : 0px;
+                                                width: parent.width;
+                                                height: line.expand-down ? parent.height / 2 : parent.height;
+                                                background: hunk-expand-up-touch.has-hover ? root.github-accent-fg : transparent;
+                                                Image {
+                                                    x: (parent.width - 16px) / 2;
+                                                    y: (parent.height - 16px) / 2;
+                                                    width: 16px;
+                                                    height: 16px;
+                                                    source: @image-url("../../assets/icons/octicon-fold-up-16.svg");
+                                                    image-fit: contain;
+                                                    colorize: hunk-expand-up-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                                }
+                                                hunk-expand-up-touch := TouchArea {
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.expand-hunk(line.source-index, "up"); }
+                                                }
+                                            }
                                         }
-                                        Rectangle {
-                                            width: 44px;
+                                        if !(line.kind == "hunk" && line.expandable): Rectangle {
+                                            width: 50px;
                                             height: parent.height;
                                             background: line.kind == "addition" ? root.diff-addition-gutter-background : (line.kind == "deletion" ? root.diff-deletion-gutter-background : (line.kind == "hunk" ? root.hunk-gutter-background : root.github-bg-default));
-                                            MaterialText { width: parent.width - 7px; height: parent.height; text: line.new-line == 0 ? "" : line.new-line; horizontal_alignment: right; vertical_alignment: center; font-family: root.code-font-family; font-size: root.code-font-size; color: root.github-fg-muted; }
+                                            // GitHub `.new-diff-line-number` uses text-align:center
+                                            // in each 50px column so old/new numbers look symmetric.
+                                            Text {
+                                                x: 0px;
+                                                y: 0px;
+                                                width: parent.width;
+                                                height: parent.height;
+                                                text: line.old-line == 0 ? "" : line.old-line;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                                font-family: root.code-font-family;
+                                                font-size: root.code-font-size;
+                                                color: line.kind == "addition" || line.kind == "deletion" ? root.github-fg-default : root.github-fg-muted;
+                                            }
+                                        }
+                                        if !(line.kind == "hunk" && line.expandable): Rectangle {
+                                            width: 50px;
+                                            height: parent.height;
+                                            background: line.kind == "addition" ? root.diff-addition-gutter-background : (line.kind == "deletion" ? root.diff-deletion-gutter-background : (line.kind == "hunk" ? root.hunk-gutter-background : root.github-bg-default));
+                                            Text {
+                                                x: 0px;
+                                                y: 0px;
+                                                width: parent.width;
+                                                height: parent.height;
+                                                text: line.new-line == 0 ? "" : line.new-line;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                                font-family: root.code-font-family;
+                                                font-size: root.code-font-size;
+                                                color: line.kind == "addition" || line.kind == "deletion" ? root.github-fg-default : root.github-fg-muted;
+                                            }
                                         }
                                         Rectangle {
                                             width: 20px;
                                             height: parent.height;
                                             background: line.kind == "hunk" ? root.hunk-background : transparent;
-                                            MaterialText { width: parent.width; height: parent.height; text: line.kind == "addition" ? "+" : (line.kind == "deletion" ? "−" : ""); horizontal_alignment: center; vertical_alignment: center; font-family: root.code-font-family; font-size: root.code-font-size; color: root.github-fg-default; }
+                                            // GitHub pins the change marker to the first visual
+                                            // code line instead of centering it in a wrapped row.
+                                            Text {
+                                                x: 0px;
+                                                y: 0px;
+                                                width: parent.width;
+                                                height: root.code-line-height;
+                                                text: line.kind == "addition" ? "+" : (line.kind == "deletion" ? "-" : "");
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                                font-family: root.code-font-family;
+                                                font-size: root.code-font-size;
+                                                color: root.github-fg-default;
+                                            }
                                         }
                                         if line.kind == "hunk": Rectangle {
                                             horizontal-stretch: 1;
@@ -4518,21 +5163,24 @@ export component PrReviewWorkspace inherits Rectangle {
                                                 color: root.hunk-foreground;
                                             }
                                         }
-                                        if line.kind != "hunk" && root.live-resizing: Rectangle {
+                                        if line.kind != "hunk" && (root.live-resizing || diff-line-row.unified-wraps): Rectangle {
                                             horizontal-stretch: 1;
                                             height: parent.height;
                                             Text {
+                                                x: 0px;
+                                                y: diff-line-row.unified-wraps ? 2px : 0px;
                                                 width: parent.width;
-                                                height: parent.height;
+                                                height: parent.height - (diff-line-row.unified-wraps ? 2px : 0px);
                                                 text: line.content;
-                                                vertical_alignment: center;
+                                                vertical_alignment: diff-line-row.unified-wraps ? top : center;
                                                 overflow: clip;
+                                                wrap: diff-line-row.unified-wraps ? word-wrap : no-wrap;
                                                 font-family: root.code-font-family;
                                                 font-size: root.code-font-size;
                                                 color: root.github-fg-default;
                                             }
                                         }
-                                        if line.kind != "hunk" && !root.live-resizing: HorizontalLayout {
+                                        if line.kind != "hunk" && !root.live-resizing && !diff-line-row.unified-wraps: HorizontalLayout {
                                             horizontal-stretch: 1;
                                             height: parent.height;
                                             spacing: 0px;
@@ -4552,23 +5200,160 @@ export component PrReviewWorkspace inherits Rectangle {
                                             }
                                         }
                                 }
-                                if line.kind == "hunk" && line.expandable: Rectangle {
+                                if root.diff-view == "split" && line.kind == "split": HorizontalLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 0px;
+                                    SplitDiffSide {
+                                        width: (parent.width - 1px) / 2;
+                                        height: parent.height;
+                                        line-number: line.left-line;
+                                        kind: line.left-kind;
+                                        content: line.left-content;
+                                        tokens: line.left-tokens;
+                                        live-resizing: root.live-resizing;
+                                        wrap-content: line.left-columns * root.code-character-width
+                                            > (parent.width - 1px) / 2 - 70px;
+                                        code-font-family: root.code-font-family;
+                                        code-font-size: root.code-font-size;
+                                        code-line-height: root.code-line-height;
+                                        bg-default: root.github-bg-default;
+                                        fg-default: root.github-fg-default;
+                                        fg-muted: root.github-fg-muted;
+                                        addition-background: root.diff-addition-background;
+                                        addition-gutter-background: root.diff-addition-gutter-background;
+                                        deletion-background: root.diff-deletion-background;
+                                        deletion-gutter-background: root.diff-deletion-gutter-background;
+                                    }
+                                    Rectangle {
+                                        width: 1px;
+                                        height: parent.height;
+                                        background: root.github-border-default;
+                                    }
+                                    SplitDiffSide {
+                                        width: (parent.width - 1px) / 2;
+                                        height: parent.height;
+                                        line-number: line.right-line;
+                                        kind: line.right-kind;
+                                        content: line.right-content;
+                                        tokens: line.right-tokens;
+                                        live-resizing: root.live-resizing;
+                                        wrap-content: line.right-columns * root.code-character-width
+                                            > (parent.width - 1px) / 2 - 70px;
+                                        code-font-family: root.code-font-family;
+                                        code-font-size: root.code-font-size;
+                                        code-line-height: root.code-line-height;
+                                        bg-default: root.github-bg-default;
+                                        fg-default: root.github-fg-default;
+                                        fg-muted: root.github-fg-muted;
+                                        addition-background: root.diff-addition-background;
+                                        addition-gutter-background: root.diff-addition-gutter-background;
+                                        deletion-background: root.diff-deletion-background;
+                                        deletion-gutter-background: root.diff-deletion-gutter-background;
+                                    }
+                                }
+                                if root.diff-view == "split" && line.kind != "split": HorizontalLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 0px;
+                                    Rectangle {
+                                        width: 50px;
+                                        height: parent.height;
+                                        background: line.kind == "hunk"
+                                            ? root.hunk-gutter-background
+                                            : root.github-bg-default;
+                                    }
+                                    Rectangle {
+                                        width: 20px;
+                                        height: parent.height;
+                                        background: line.kind == "hunk"
+                                            ? root.hunk-background
+                                            : root.github-bg-default;
+                                    }
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        height: parent.height;
+                                        text: line.content;
+                                        horizontal-alignment: left;
+                                        vertical-alignment: center;
+                                        overflow: clip;
+                                        font-family: root.code-font-family;
+                                        font-size: root.code-font-size;
+                                        color: line.kind == "hunk"
+                                            ? root.hunk-foreground
+                                            : root.github-fg-muted;
+                                    }
+                                }
+                                if line.kind == "hunk" && line.expandable && root.diff-view == "split": Rectangle {
                                     x: 0px;
                                     y: 0px;
-                                    width: 88px;
+                                    // Split has one number column per pane; keep
+                                    // the expander inside that 50px gutter.
+                                    width: 50px;
                                     height: parent.height;
-                                    background: hunk-expand-touch.has-hover ? MaterialPalette.primary_container : transparent;
-                                    Image {
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2;
-                                        width: 16px;
-                                        height: 16px;
-                                        source: @image-url("../../assets/icons/octicon-unfold-16.svg");
-                                        image-fit: contain;
+                                    background: transparent;
+                                    split-hunk-expand-all-action := Rectangle {
+                                        visible: line.expand-all;
+                                        x: 0px;
+                                        y: 0px;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        background: split-hunk-expand-all-touch.has-hover ? root.github-accent-fg : transparent;
+                                        Image {
+                                            x: (parent.width - 16px) / 2;
+                                            y: (parent.height - 16px) / 2;
+                                            width: 16px;
+                                            height: 16px;
+                                            source: @image-url("../../assets/icons/octicon-unfold-16.svg");
+                                            image-fit: contain;
+                                            colorize: split-hunk-expand-all-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                        }
+                                        split-hunk-expand-all-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.expand-hunk(line.source-index, "all"); }
+                                        }
                                     }
-                                    hunk-expand-touch := TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.expand-hunk(line-index); }
+                                    split-hunk-expand-down-action := Rectangle {
+                                        visible: line.expand-down && !line.expand-all;
+                                        x: 0px;
+                                        y: 0px;
+                                        width: parent.width;
+                                        height: line.expand-up ? parent.height / 2 : parent.height;
+                                        background: split-hunk-expand-down-touch.has-hover ? root.github-accent-fg : transparent;
+                                        Image {
+                                            x: (parent.width - 16px) / 2;
+                                            y: (parent.height - 16px) / 2;
+                                            width: 16px;
+                                            height: 16px;
+                                            source: @image-url("../../assets/icons/octicon-fold-down-16.svg");
+                                            image-fit: contain;
+                                            colorize: split-hunk-expand-down-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                        }
+                                        split-hunk-expand-down-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.expand-hunk(line.source-index, "down"); }
+                                        }
+                                    }
+                                    split-hunk-expand-up-action := Rectangle {
+                                        visible: line.expand-up && !line.expand-all;
+                                        x: 0px;
+                                        y: line.expand-down ? parent.height / 2 : 0px;
+                                        width: parent.width;
+                                        height: line.expand-down ? parent.height / 2 : parent.height;
+                                        background: split-hunk-expand-up-touch.has-hover ? root.github-accent-fg : transparent;
+                                        Image {
+                                            x: (parent.width - 16px) / 2;
+                                            y: (parent.height - 16px) / 2;
+                                            width: 16px;
+                                            height: 16px;
+                                            source: @image-url("../../assets/icons/octicon-fold-up-16.svg");
+                                            image-fit: contain;
+                                            colorize: split-hunk-expand-up-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                        }
+                                        split-hunk-expand-up-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.expand-hunk(line.source-index, "up"); }
+                                        }
                                     }
                                 }
                             }
@@ -4576,7 +5361,22 @@ export component PrReviewWorkspace inherits Rectangle {
 
                     }
 
-                    if root.code-loading: CodeRenderingIndicator {
+                    if root.large-diff-deferred || root.large-diff-loading: LargeDiffPlaceholder {
+                        z: 30;
+                        x: 0px;
+                        y: 46px;
+                        width: parent.width;
+                        height: parent.height - 46px;
+                        loading: root.large-diff-loading;
+                        bg-default: root.github-bg-default;
+                        bg-muted: root.github-bg-muted;
+                        fg-muted: root.github-fg-muted;
+                        accent-fg: AppState.effective-dark-mode ? #4493f8 : #0969da;
+                        font-family: root.tree-font-family;
+                        load => { root.load-large-diff(); }
+                    }
+
+                    if root.code-loading && !root.large-diff-loading: CodeRenderingIndicator {
                         x: (parent.width - self.width) / 2;
                         y: 56px;
                     }

@@ -11,6 +11,12 @@ by Slint with GitHub Primer semantic foreground tokens rather than embedded fill
 `octicon-file-directory-open-fill-16.svg` is the Primer Octicons `file-directory-open-fill-16` icon.
 `octicon-copy-16.svg` is the Primer Octicons `copy-16` icon.
 `octicon-fold-16.svg` is the Primer Octicons `fold-16` icon.
+`octicon-fold-down-16.svg` is the Primer Octicons `fold-down-16` icon used by
+GitHub's per-hunk “expand following lines” gutter control.
+`octicon-fold-up-16.svg` is the Primer Octicons `fold-up-16` icon used by
+GitHub's per-hunk “expand preceding lines” gutter control.
+`octicon-unfold-16.svg` is the unchanged current Primer Octicons `unfold-16`
+icon used by the selected-file “Expand all lines” action.
 `octicon-kebab-horizontal-16.svg` is the Primer Octicons `kebab-horizontal-16` icon.
 `octicon-sidebar-collapse-16.svg` and `octicon-sidebar-expand-16.svg` are the
 matching Primer Octicons used by the PR file-tree visibility toggle.

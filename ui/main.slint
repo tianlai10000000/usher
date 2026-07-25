@@ -56,7 +56,9 @@ export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPr
 // import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
 
 export component MainWindow inherits Window {
-    min-width: 800px;
+    // Keep below Primer `$width-md` (768px) so the PR file tree can auto-collapse
+    // at the same viewport threshold GitHub uses (`max-width: 767.98px`).
+    min-width: 640px;
     min-height: 600px;
     title: "Usher";
     // Use one shared surface color for the native title bar and the main content area.
@@ -193,6 +195,8 @@ export component MainWindow inherits Window {
     in-out property <bool> workflow-pr-review-visible: false;
     in property <bool> workflow-pr-review-loading: false;
     in property <bool> workflow-pr-review-code-loading: false;
+    in property <bool> workflow-pr-review-large-diff-deferred: false;
+    in property <bool> workflow-pr-review-large-diff-loading: false;
     in property <string> workflow-pr-review-error: "";
     in property <string> workflow-pr-review-number: "";
     in property <string> workflow-pr-review-title: "";
@@ -243,6 +247,7 @@ export component MainWindow inherits Window {
     in property <bool> workflow-pr-review-viewing-file: false;
     in property <bool> workflow-pr-review-ignore-whitespace-supported: false;
     in-out property <bool> workflow-pr-review-ignore-whitespace: false;
+    in-out property <string> workflow-pr-review-diff-view: "unified";
     in-out property <string> workflow-pr-review-file-filter: "";
     in-out property <bool> workflow-pr-review-dialog-open: false;
     in-out property <bool> workflow-pr-merge-dialog-open: false;
@@ -319,12 +324,14 @@ export component MainWindow inherits Window {
     callback workflow-pr-review-select-file(int);
     callback workflow-pr-review-select-relative-file(int);
     callback workflow-pr-review-reload(bool);
+    callback workflow-pr-review-apply-diff-settings(string, bool);
+    callback workflow-pr-review-load-large-diff();
     callback workflow-pr-review-filter-files(string);
     callback workflow-pr-review-toggle-extension-filter(string);
     callback workflow-pr-review-toggle-manifest-filter();
     callback workflow-pr-review-toggle-viewed-files();
     callback workflow-pr-review-toggle-folder(string);
-    callback workflow-pr-review-expand-hunk(int);
+    callback workflow-pr-review-expand-hunk(int, string);
     callback workflow-pr-review-expand-all-hunks();
     callback workflow-pr-review-collapse-non-diff-lines();
     callback workflow-pr-review-copy-file-path(string);
@@ -983,9 +990,12 @@ export component MainWindow inherits Window {
         viewing-file: root.workflow-pr-review-viewing-file;
         loading: root.workflow-pr-review-loading;
         code-loading: root.workflow-pr-review-code-loading;
+        large-diff-deferred: root.workflow-pr-review-large-diff-deferred;
+        large-diff-loading: root.workflow-pr-review-large-diff-loading;
         error-text: root.workflow-pr-review-error;
         ignore-whitespace-supported: root.workflow-pr-review-ignore-whitespace-supported;
         ignore-whitespace <=> root.workflow-pr-review-ignore-whitespace;
+        diff-view <=> root.workflow-pr-review-diff-view;
         file-filter <=> root.workflow-pr-review-file-filter;
         review-dialog-open <=> root.workflow-pr-review-dialog-open;
         merge-dialog-open <=> root.workflow-pr-merge-dialog-open;
@@ -1016,12 +1026,18 @@ export component MainWindow inherits Window {
         select-file(index) => { root.workflow-pr-review-select-file(index); }
         select-relative-file(offset) => { root.workflow-pr-review-select-relative-file(offset); }
         reload(ignore-whitespace) => { root.workflow-pr-review-reload(ignore-whitespace); }
+        apply-diff-settings(diff-view, ignore-whitespace) => {
+            root.workflow-pr-review-apply-diff-settings(diff-view, ignore-whitespace);
+        }
+        load-large-diff => { root.workflow-pr-review-load-large-diff(); }
         filter-files(query) => { root.workflow-pr-review-filter-files(query); }
         toggle-extension-filter(extension) => { root.workflow-pr-review-toggle-extension-filter(extension); }
         toggle-manifest-filter => { root.workflow-pr-review-toggle-manifest-filter(); }
         toggle-viewed-files => { root.workflow-pr-review-toggle-viewed-files(); }
         toggle-folder(path) => { root.workflow-pr-review-toggle-folder(path); }
-        expand-hunk(line-index) => { root.workflow-pr-review-expand-hunk(line-index); }
+        expand-hunk(line-index, direction) => {
+            root.workflow-pr-review-expand-hunk(line-index, direction);
+        }
         expand-all-hunks => { root.workflow-pr-review-expand-all-hunks(); }
         collapse-non-diff-lines => { root.workflow-pr-review-collapse-non-diff-lines(); }
         copy-file-path(path) => { root.workflow-pr-review-copy-file-path(path); }

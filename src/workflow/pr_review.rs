@@ -34,6 +34,13 @@ const HIGHLIGHT_CACHE_CAPACITY: usize = 4;
 const SOURCE_CACHE_CAPACITY: usize = 3;
 const RANGE_DIFF_CACHE_CAPACITY: usize = 4;
 const VISIBLE_LINE_CACHE_CAPACITY: usize = 64;
+const LARGE_DIFF_LINE_THRESHOLD: usize = 400;
+const LARGE_DIFF_BYTE_THRESHOLD: usize = 64 * 1024;
+// Match GitHub's signed-in improved `/changes/{commit}` Files changed view:
+// a directional hunk expansion reveals 21 primary-side source rows. The
+// signed-out classic `/commits/{commit}` page uses a different 20-row behavior
+// and is intentionally not the UI baseline for this workspace.
+const HUNK_CONTEXT_PAGE_SIZE: usize = 21;
 
 struct ConversationAvatarPixels {
     width: u32,
@@ -90,14 +97,21 @@ struct OwnedMemoryStats {
 struct LazyPrDiffLineModel {
     file: Arc<PullRequestDiffFile>,
     highlighted: Arc<Vec<HighlightedLine>>,
+    rows_projection: Vec<DiffRowProjection>,
     rows: RefCell<LazyLineCache>,
 }
 
 impl LazyPrDiffLineModel {
-    fn new(file: Arc<PullRequestDiffFile>, highlighted: Arc<Vec<HighlightedLine>>) -> Self {
+    fn new(
+        file: Arc<PullRequestDiffFile>,
+        highlighted: Arc<Vec<HighlightedLine>>,
+        split: bool,
+    ) -> Self {
+        let rows_projection = diff_row_projection(file.lines.as_slice(), split);
         Self {
             file,
             highlighted,
+            rows_projection,
             rows: RefCell::new(LazyLineCache::new(VISIBLE_LINE_CACHE_CAPACITY)),
         }
     }
@@ -112,7 +126,7 @@ impl Model for LazyPrDiffLineModel {
     type Data = WorkflowPrDiffLine;
 
     fn row_count(&self) -> usize {
-        self.file.lines.len().min(self.highlighted.len())
+        self.rows_projection.len()
     }
 
     fn row_data(&self, row: usize) -> Option<Self::Data> {
@@ -122,12 +136,27 @@ impl Model for LazyPrDiffLineModel {
         if let Some(data) = self.rows.borrow_mut().get(row) {
             return Some(data);
         }
-        let data = to_slint_line(
-            &self.file,
-            row,
-            self.file.lines.get(row)?,
-            self.highlighted.get(row)?,
-        );
+        let data = match *self.rows_projection.get(row)? {
+            DiffRowProjection::Unified(source_index) => to_slint_line(
+                &self.file,
+                source_index,
+                self.file.lines.get(source_index)?,
+                self.highlighted.get(source_index)?,
+            ),
+            DiffRowProjection::Split {
+                left,
+                right,
+                source_index,
+                spanning,
+            } => to_slint_split_line(
+                &self.file,
+                left,
+                right,
+                source_index,
+                spanning,
+                &self.highlighted,
+            ),
+        };
         self.rows.borrow_mut().insert(row, data.clone());
         Some(data)
     }
@@ -139,6 +168,75 @@ impl Model for LazyPrDiffLineModel {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiffRowProjection {
+    Unified(usize),
+    Split {
+        left: Option<usize>,
+        right: Option<usize>,
+        source_index: usize,
+        spanning: bool,
+    },
+}
+
+fn diff_row_projection(lines: &[PullRequestDiffLine], split: bool) -> Vec<DiffRowProjection> {
+    if !split {
+        return (0..lines.len()).map(DiffRowProjection::Unified).collect();
+    }
+
+    let mut rows = Vec::with_capacity(lines.len());
+    let mut index = 0;
+    while index < lines.len() {
+        let line = &lines[index];
+        match line.kind.as_str() {
+            "hunk" | "meta" => {
+                rows.push(DiffRowProjection::Split {
+                    left: Some(index),
+                    right: None,
+                    source_index: index,
+                    spanning: true,
+                });
+                index += 1;
+            }
+            "context" => {
+                rows.push(DiffRowProjection::Split {
+                    left: Some(index),
+                    right: Some(index),
+                    source_index: index,
+                    spanning: false,
+                });
+                index += 1;
+            }
+            _ => {
+                let block_start = index;
+                while index < lines.len()
+                    && !matches!(lines[index].kind.as_str(), "hunk" | "meta" | "context")
+                {
+                    index += 1;
+                }
+                let deletions = (block_start..index)
+                    .filter(|candidate| lines[*candidate].kind == "deletion")
+                    .collect::<Vec<_>>();
+                let additions = (block_start..index)
+                    .filter(|candidate| lines[*candidate].kind == "addition")
+                    .collect::<Vec<_>>();
+                let row_count = deletions.len().max(additions.len());
+                for offset in 0..row_count {
+                    let left = deletions.get(offset).copied();
+                    let right = additions.get(offset).copied();
+                    rows.push(DiffRowProjection::Split {
+                        left,
+                        right,
+                        source_index: left.or(right).unwrap_or(block_start),
+                        spanning: false,
+                    });
+                }
+            }
+        }
+    }
+    rows
 }
 
 struct LazyLineCache {
@@ -204,6 +302,7 @@ struct ReviewCache {
     base_detail: Arc<PullRequestDiffDetail>,
     range_diffs: BoundedCache<Arc<PullRequestDiffDetail>>,
     expanded_files: HashMap<usize, PullRequestDiffFile>,
+    loaded_large_diffs: HashSet<usize>,
 }
 
 impl ReviewCache {
@@ -400,6 +499,71 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         }
     });
 
+    let diff_settings_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_apply_diff_settings(move |diff_view, ignore_whitespace| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        let diff_view = if diff_view.as_str() == "split" {
+            "split"
+        } else {
+            "unified"
+        };
+        let ignore_whitespace =
+            ui.get_workflow_pr_review_ignore_whitespace_supported() && ignore_whitespace;
+        let whitespace_changed = ui.get_workflow_pr_review_ignore_whitespace() != ignore_whitespace;
+
+        ui.set_workflow_pr_review_diff_view(diff_view.into());
+        ui.set_workflow_pr_review_ignore_whitespace(ignore_whitespace);
+
+        if whitespace_changed {
+            let request = diff_settings_controller
+                .active_request
+                .lock()
+                .ok()
+                .and_then(|guard| guard.clone());
+            if let Some(mut request) = request {
+                request.ignore_whitespace = ignore_whitespace;
+                ui.set_workflow_pr_review_commit_range_start(-1);
+                ui.set_workflow_pr_review_commit_range_end(-1);
+                ui.set_workflow_pr_review_commit_range_label("All commits".into());
+                diff_settings_controller.open(&ui, request);
+            }
+        } else {
+            let selected = ui.get_workflow_pr_review_selected_file_index();
+            if selected >= 0 {
+                diff_settings_controller.select_file(&ui, selected);
+            }
+        }
+    });
+
+    let load_large_diff_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_load_large_diff(move || {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        let selected = ui.get_workflow_pr_review_selected_file_index();
+        if selected < 0 {
+            return;
+        }
+        let marked = load_large_diff_controller
+            .cache
+            .lock()
+            .ok()
+            .and_then(|mut cache| {
+                let cache = cache.as_mut()?;
+                is_large_diff(cache.file(selected as usize)?)
+                    .then(|| cache.loaded_large_diffs.insert(selected as usize))
+            })
+            .unwrap_or(false);
+        if marked {
+            load_large_diff_controller.select_file(&ui, selected);
+            ui.set_workflow_pr_review_large_diff_loading(ui.get_workflow_pr_review_code_loading());
+        }
+    });
+
     let filter_controller = controller.clone();
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_review_filter_files(move |query| {
@@ -453,11 +617,16 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
 
     let expand_controller = controller.clone();
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_expand_hunk(move |line_index| {
+    ui.on_workflow_pr_review_expand_hunk(move |line_index, direction| {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
-        expand_controller.expand_hunk(&ui, line_index);
+        let direction = match direction.as_str() {
+            "down" => HunkExpansionDirection::Down,
+            "all" => HunkExpansionDirection::All,
+            _ => HunkExpansionDirection::Up,
+        };
+        expand_controller.expand_hunk(&ui, line_index, direction);
     });
 
     let expand_all_controller = controller.clone();
@@ -821,6 +990,8 @@ impl WorkflowPrReviewController {
 
         ui.set_workflow_pr_review_loading(true);
         ui.set_workflow_pr_review_code_loading(false);
+        ui.set_workflow_pr_review_large_diff_deferred(false);
+        ui.set_workflow_pr_review_large_diff_loading(false);
         ui.set_workflow_pr_review_files(empty_file_model());
         ui.set_workflow_pr_review_tree_items(empty_tree_model());
         ui.set_workflow_pr_review_lines(empty_line_model());
@@ -894,6 +1065,7 @@ impl WorkflowPrReviewController {
                                 base_detail: detail.clone(),
                                 range_diffs: BoundedCache::new(RANGE_DIFF_CACHE_CAPACITY),
                                 expanded_files: HashMap::new(),
+                                loaded_large_diffs: HashSet::new(),
                             });
                         }
                         controller.apply_detail(&ui, &detail);
@@ -1338,6 +1510,7 @@ impl WorkflowPrReviewController {
         {
             cache.base_detail = detail.clone();
             cache.expanded_files.clear();
+            cache.loaded_large_diffs.clear();
         }
         self.apply_detail(ui, &detail);
     }
@@ -1616,15 +1789,17 @@ impl WorkflowPrReviewController {
     }
 
     fn select_file(&self, ui: &MainWindow, index: i32) {
+        ui.set_workflow_pr_review_large_diff_loading(false);
         let index = index.max(0) as usize;
         let selected = self.cache.lock().ok().and_then(|guard| {
             let cache = guard.as_ref()?;
             Some((
                 Arc::new(cache.file(index)?.clone()),
                 cache.expanded_files.contains_key(&index),
+                cache.loaded_large_diffs.contains(&index),
             ))
         });
-        let Some((file, context_expanded)) = selected else {
+        let Some((file, context_expanded, large_diff_loaded)) = selected else {
             return;
         };
         ui.set_workflow_pr_review_viewing_file(false);
@@ -1632,6 +1807,24 @@ impl WorkflowPrReviewController {
         ui.set_workflow_pr_review_context_expanded(context_expanded);
         let reset_scroll = ui.get_workflow_pr_review_selected_file_path().as_str() != file.path;
         apply_file_header(ui, index, &file);
+        if is_large_diff(&file) && !large_diff_loaded {
+            self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
+            ui.set_workflow_pr_review_lines(empty_line_model());
+            ui.set_workflow_pr_review_max_code_columns(0);
+            ui.set_workflow_pr_review_longest_code_line("".into());
+            ui.set_workflow_pr_review_code_loading(false);
+            ui.set_workflow_pr_review_large_diff_loading(false);
+            ui.set_workflow_pr_review_large_diff_deferred(true);
+            if reset_scroll {
+                ui.set_workflow_pr_review_line_model_revision(
+                    ui.get_workflow_pr_review_line_model_revision()
+                        .wrapping_add(1),
+                );
+            }
+            self.log_memory_diagnostics("large_diff.deferred");
+            return;
+        }
+        ui.set_workflow_pr_review_large_diff_deferred(false);
         let sequence = self.highlight_sequence.fetch_add(1, Ordering::SeqCst) + 1;
         let cached = self
             .highlighted_files
@@ -1641,6 +1834,7 @@ impl WorkflowPrReviewController {
         if let Some(highlighted) = cached {
             apply_highlighted_file(ui, file, highlighted, reset_scroll);
             ui.set_workflow_pr_review_code_loading(false);
+            ui.set_workflow_pr_review_large_diff_loading(false);
             self.log_memory_diagnostics("file_highlight.cache_hit_applied");
             return;
         }
@@ -1675,6 +1869,7 @@ impl WorkflowPrReviewController {
                 }
                 let Ok(highlighted) = highlighted else {
                     ui.set_workflow_pr_review_code_loading(false);
+                    ui.set_workflow_pr_review_large_diff_loading(false);
                     ui.set_workflow_pr_review_error(
                         "Failed to render syntax highlighting for this file.".into(),
                     );
@@ -1686,6 +1881,7 @@ impl WorkflowPrReviewController {
                 }
                 apply_highlighted_file(&ui, file, highlighted, reset_scroll);
                 ui.set_workflow_pr_review_code_loading(false);
+                ui.set_workflow_pr_review_large_diff_loading(false);
                 controller.log_memory_diagnostics("file_highlight.generated_and_applied");
             });
         });
@@ -1719,12 +1915,13 @@ impl WorkflowPrReviewController {
         self.refresh_tree(ui);
     }
 
-    fn expand_hunk(&self, ui: &MainWindow, line_index: i32) {
+    fn expand_hunk(&self, ui: &MainWindow, line_index: i32, direction: HunkExpansionDirection) {
         let selected_index = ui.get_workflow_pr_review_selected_file_index().max(0) as usize;
         log::debug!(
-            "[Workflow][PR Review] Expand hunk requested: file_index={} line_index={}",
+            "[Workflow][PR Review] Expand hunk requested: file_index={} line_index={} direction={:?}",
             selected_index,
-            line_index
+            line_index,
+            direction
         );
         let selected = self.cache.lock().ok().and_then(|cache| {
             let cache = cache.as_ref()?;
@@ -1752,27 +1949,52 @@ impl WorkflowPrReviewController {
             return;
         }
 
-        let use_new_side = file.change_type != "deleted_file";
-        let path = if use_new_side {
+        let base_path = if file.old_path.is_empty() {
             file.path.clone()
         } else {
             file.old_path.clone()
         };
-        let reference = if use_new_side { head_sha } else { base_sha };
-        if path.is_empty() || reference.is_empty() {
+        let base_request = (file.change_type != "new_file")
+            .then_some((base_sha.clone(), base_path))
+            .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
+        let head_request = (file.change_type != "deleted_file")
+            .then_some((head_sha.clone(), file.path.clone()))
+            .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
+        if base_request.is_none() && head_request.is_none() {
             ui.set_workflow_pr_review_error(
                 "This diff has no immutable source reference for expanding context.".into(),
             );
             return;
         }
-        let source_key = format!("{reference}:{path}");
-        if let Some(source) = self
+
+        let base_key = base_request
+            .as_ref()
+            .map(|(reference, path)| format!("{reference}:{path}"));
+        let head_key = head_request
+            .as_ref()
+            .map(|(reference, path)| format!("{reference}:{path}"));
+        let (base_cached, head_cached) = self
             .source_files
             .lock()
             .ok()
-            .and_then(|mut sources| sources.get_cloned(source_key.as_str()))
+            .map(|mut sources| {
+                (
+                    base_key.as_deref().and_then(|key| sources.get_cloned(key)),
+                    head_key.as_deref().and_then(|key| sources.get_cloned(key)),
+                )
+            })
+            .unwrap_or_default();
+        if (base_request.is_none() || base_cached.is_some())
+            && (head_request.is_none() || head_cached.is_some())
         {
-            self.apply_hunk_expansion(ui, selected_index, line_index, source.as_str());
+            self.apply_hunk_expansion(
+                ui,
+                selected_index,
+                line_index,
+                direction,
+                base_cached.as_deref().unwrap_or(""),
+                head_cached.as_deref().unwrap_or(""),
+            );
             return;
         }
 
@@ -1780,14 +2002,40 @@ impl WorkflowPrReviewController {
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
-            let result = get_repository_file_text(
-                metadata.repo_type.as_str(),
-                metadata.repo_project_id.as_str(),
-                metadata.remote_repo.as_str(),
-                path.as_str(),
-                reference.as_str(),
-            )
-            .await;
+            let base_future = async {
+                if let Some(source) = base_cached {
+                    Ok(source)
+                } else if let Some((reference, path)) = base_request.as_ref() {
+                    get_repository_file_text(
+                        metadata.repo_type.as_str(),
+                        metadata.repo_project_id.as_str(),
+                        metadata.remote_repo.as_str(),
+                        path.as_str(),
+                        reference.as_str(),
+                    )
+                    .await
+                } else {
+                    Ok(String::new())
+                }
+            };
+            let head_future = async {
+                if let Some(source) = head_cached {
+                    Ok(source)
+                } else if let Some((reference, path)) = head_request.as_ref() {
+                    get_repository_file_text(
+                        metadata.repo_type.as_str(),
+                        metadata.repo_project_id.as_str(),
+                        metadata.remote_repo.as_str(),
+                        path.as_str(),
+                        reference.as_str(),
+                    )
+                    .await
+                } else {
+                    Ok(String::new())
+                }
+            };
+            let (base_result, head_result) = tokio::join!(base_future, head_future);
+            let result = base_result.and_then(|base| head_result.map(|head| (base, head)));
             let _ = slint::invoke_from_event_loop(move || {
                 if controller.expand_sequence.load(Ordering::SeqCst) != sequence {
                     return;
@@ -1799,15 +2047,22 @@ impl WorkflowPrReviewController {
                     return;
                 }
                 match result {
-                    Ok(source) => {
+                    Ok((base_source, head_source)) => {
                         if let Ok(mut sources) = controller.source_files.lock() {
-                            sources.insert(source_key, source.clone());
+                            if let Some(key) = base_key {
+                                sources.insert(key, base_source.clone());
+                            }
+                            if let Some(key) = head_key {
+                                sources.insert(key, head_source.clone());
+                            }
                         }
                         controller.apply_hunk_expansion(
                             &ui,
                             selected_index,
                             line_index,
-                            source.as_str(),
+                            direction,
+                            base_source.as_str(),
+                            head_source.as_str(),
                         );
                     }
                     Err(error) => {
@@ -1841,27 +2096,49 @@ impl WorkflowPrReviewController {
             return;
         }
 
-        let use_new_side = file.change_type != "deleted_file";
-        let path = if use_new_side {
+        let base_path = if file.old_path.is_empty() {
             file.path.clone()
         } else {
             file.old_path.clone()
         };
-        let reference = if use_new_side { head_sha } else { base_sha };
-        if path.is_empty() || reference.is_empty() {
+        let base_request = (file.change_type != "new_file")
+            .then_some((base_sha.clone(), base_path))
+            .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
+        let head_request = (file.change_type != "deleted_file")
+            .then_some((head_sha.clone(), file.path.clone()))
+            .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
+        if base_request.is_none() && head_request.is_none() {
             ui.set_workflow_pr_review_error(
                 "This diff has no immutable source reference for expanding context.".into(),
             );
             return;
         }
-        let source_key = format!("{reference}:{path}");
-        if let Some(source) = self
+        let base_key = base_request
+            .as_ref()
+            .map(|(reference, path)| format!("{reference}:{path}"));
+        let head_key = head_request
+            .as_ref()
+            .map(|(reference, path)| format!("{reference}:{path}"));
+        let (base_cached, head_cached) = self
             .source_files
             .lock()
             .ok()
-            .and_then(|mut sources| sources.get_cloned(source_key.as_str()))
+            .map(|mut sources| {
+                (
+                    base_key.as_deref().and_then(|key| sources.get_cloned(key)),
+                    head_key.as_deref().and_then(|key| sources.get_cloned(key)),
+                )
+            })
+            .unwrap_or_default();
+        if (base_request.is_none() || base_cached.is_some())
+            && (head_request.is_none() || head_cached.is_some())
         {
-            self.apply_all_hunk_expansion(ui, selected_index, source.as_str());
+            self.apply_all_hunk_expansion(
+                ui,
+                selected_index,
+                base_cached.as_deref().unwrap_or(""),
+                head_cached.as_deref().unwrap_or(""),
+            );
             return;
         }
 
@@ -1870,14 +2147,40 @@ impl WorkflowPrReviewController {
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
-            let result = get_repository_file_text(
-                metadata.repo_type.as_str(),
-                metadata.repo_project_id.as_str(),
-                metadata.remote_repo.as_str(),
-                path.as_str(),
-                reference.as_str(),
-            )
-            .await;
+            let base_future = async {
+                if let Some(source) = base_cached {
+                    Ok(source)
+                } else if let Some((reference, path)) = base_request.as_ref() {
+                    get_repository_file_text(
+                        metadata.repo_type.as_str(),
+                        metadata.repo_project_id.as_str(),
+                        metadata.remote_repo.as_str(),
+                        path.as_str(),
+                        reference.as_str(),
+                    )
+                    .await
+                } else {
+                    Ok(String::new())
+                }
+            };
+            let head_future = async {
+                if let Some(source) = head_cached {
+                    Ok(source)
+                } else if let Some((reference, path)) = head_request.as_ref() {
+                    get_repository_file_text(
+                        metadata.repo_type.as_str(),
+                        metadata.repo_project_id.as_str(),
+                        metadata.remote_repo.as_str(),
+                        path.as_str(),
+                        reference.as_str(),
+                    )
+                    .await
+                } else {
+                    Ok(String::new())
+                }
+            };
+            let (base_result, head_result) = tokio::join!(base_future, head_future);
+            let result = base_result.and_then(|base| head_result.map(|head| (base, head)));
             let _ = slint::invoke_from_event_loop(move || {
                 if controller.expand_sequence.load(Ordering::SeqCst) != sequence {
                     return;
@@ -1889,11 +2192,21 @@ impl WorkflowPrReviewController {
                     return;
                 }
                 match result {
-                    Ok(source) => {
+                    Ok((base_source, head_source)) => {
                         if let Ok(mut sources) = controller.source_files.lock() {
-                            sources.insert(source_key, source.clone());
+                            if let Some(key) = base_key {
+                                sources.insert(key, base_source.clone());
+                            }
+                            if let Some(key) = head_key {
+                                sources.insert(key, head_source.clone());
+                            }
                         }
-                        controller.apply_all_hunk_expansion(&ui, selected_index, source.as_str());
+                        controller.apply_all_hunk_expansion(
+                            &ui,
+                            selected_index,
+                            base_source.as_str(),
+                            head_source.as_str(),
+                        );
                     }
                     Err(error) => {
                         ui.set_workflow_pr_review_code_loading(false);
@@ -1904,11 +2217,18 @@ impl WorkflowPrReviewController {
         });
     }
 
-    fn apply_all_hunk_expansion(&self, ui: &MainWindow, file_index: usize, source: &str) {
+    fn apply_all_hunk_expansion(
+        &self,
+        ui: &MainWindow,
+        file_index: usize,
+        base_source: &str,
+        head_source: &str,
+    ) {
         let updated = self.cache.lock().ok().and_then(|mut cache| {
             let cache = cache.as_mut()?;
             let file = cache.file_mut_cow(file_index)?;
-            (expand_all_hunk_context(file, source) > 0).then(|| file.clone())
+            (expand_all_hunk_context_from_sources(file, base_source, head_source) > 0)
+                .then(|| file.clone())
         });
         let Some(file) = updated else {
             ui.set_workflow_pr_review_code_loading(false);
@@ -2082,12 +2402,27 @@ impl WorkflowPrReviewController {
         ui: &MainWindow,
         file_index: usize,
         line_index: usize,
-        source: &str,
+        direction: HunkExpansionDirection,
+        base_source: &str,
+        head_source: &str,
     ) {
         let updated_file = self.cache.lock().ok().and_then(|mut cache| {
             let cache = cache.as_mut()?;
             let file = cache.file_mut_cow(file_index)?;
-            expand_hunk_context(file, line_index, source, 20).then(|| file.clone())
+            let limit = if direction == HunkExpansionDirection::All {
+                i32::MAX as usize
+            } else {
+                HUNK_CONTEXT_PAGE_SIZE
+            };
+            expand_hunk_context_from_sources(
+                file,
+                line_index,
+                base_source,
+                head_source,
+                limit,
+                direction,
+            )
+            .then(|| file.clone())
         });
         let Some(file) = updated_file else {
             log::warn!(
@@ -2102,9 +2437,11 @@ impl WorkflowPrReviewController {
         }
         ui.set_workflow_pr_review_error("".into());
         log::info!(
-            "[Workflow][PR Review] Expanded hunk context: file={} line_index={} limit=20",
+            "[Workflow][PR Review] Expanded hunk context: file={} line_index={} direction={:?} limit={}",
             file.path,
-            line_index
+            line_index,
+            direction,
+            HUNK_CONTEXT_PAGE_SIZE
         );
         self.select_file(ui, file_index as i32);
     }
@@ -2395,6 +2732,8 @@ fn clear_selected_file(ui: &MainWindow) {
     ui.set_workflow_pr_review_longest_code_line("".into());
     ui.set_workflow_pr_review_lines(empty_line_model());
     ui.set_workflow_pr_review_code_loading(false);
+    ui.set_workflow_pr_review_large_diff_deferred(false);
+    ui.set_workflow_pr_review_large_diff_loading(false);
     ui.set_workflow_pr_review_context_expanded(false);
 }
 
@@ -2403,6 +2742,16 @@ fn apply_file_header(ui: &MainWindow, index: usize, file: &PullRequestDiffFile) 
     ui.set_workflow_pr_review_selected_file_path(file.path.clone().into());
     ui.set_workflow_pr_review_selected_file_added_lines(file.added_lines as i32);
     ui.set_workflow_pr_review_selected_file_removed_lines(file.removed_lines as i32);
+}
+
+fn is_large_diff(file: &PullRequestDiffFile) -> bool {
+    file.lines.len() >= LARGE_DIFF_LINE_THRESHOLD
+        || file
+            .lines
+            .iter()
+            .map(|line| line.content.len())
+            .sum::<usize>()
+            >= LARGE_DIFF_BYTE_THRESHOLD
 }
 
 fn apply_highlighted_file(
@@ -2431,6 +2780,7 @@ fn apply_highlighted_file(
     ui.set_workflow_pr_review_lines(ModelRc::new(LazyPrDiffLineModel::new(
         file.clone(),
         highlighted,
+        ui.get_workflow_pr_review_diff_view().as_str() == "split",
     )));
     ui.set_workflow_pr_review_has_expandable_hunks(
         !ui.get_workflow_pr_review_viewing_file()
@@ -2501,7 +2851,154 @@ fn to_slint_line(
             .into(),
         tokens: ModelRc::new(VecModel::from(tokens)),
         expandable: hunk_is_expandable(file, index),
+        expand_all: hunk_can_expand_all(file, index),
+        expand_up: hunk_is_expandable(file, index) && !hunk_can_expand_all(file, index),
+        expand_down: hunk_can_expand_down(file, index) && !hunk_can_expand_all(file, index),
+        source_index: index as i32,
+        left_line: 0,
+        // Reuse the projection's left column count for Unified wrapping.
+        left_columns: highlighted.columns as i32,
+        left_kind: "".into(),
+        left_content: "".into(),
+        left_tokens: empty_token_model(),
+        right_line: 0,
+        right_columns: 0,
+        right_kind: "".into(),
+        right_content: "".into(),
+        right_tokens: empty_token_model(),
     }
+}
+
+fn to_slint_split_line(
+    file: &PullRequestDiffFile,
+    left: Option<usize>,
+    right: Option<usize>,
+    source_index: usize,
+    spanning: bool,
+    highlighted: &[HighlightedLine],
+) -> WorkflowPrDiffLine {
+    let source = file.lines.get(source_index);
+    let (left_line, left_columns, left_kind, left_content, left_tokens) =
+        split_side(file, highlighted, left, false);
+    let (right_line, right_columns, right_kind, right_content, right_tokens) =
+        split_side(file, highlighted, right, true);
+    WorkflowPrDiffLine {
+        old_line: source.map(|line| line.old_line).unwrap_or(0),
+        new_line: source.map(|line| line.new_line).unwrap_or(0),
+        kind: if spanning {
+            source
+                .map(|line| line.kind.clone())
+                .unwrap_or_else(|| "meta".to_string())
+                .into()
+        } else {
+            "split".into()
+        },
+        content: if spanning {
+            source
+                .map(|line| sanitize_diff_content(line.content.as_str()))
+                .unwrap_or_default()
+                .into()
+        } else {
+            "".into()
+        },
+        tokens: empty_token_model(),
+        expandable: spanning && hunk_is_expandable(file, source_index),
+        expand_all: spanning && hunk_can_expand_all(file, source_index),
+        expand_up: spanning
+            && hunk_is_expandable(file, source_index)
+            && !hunk_can_expand_all(file, source_index),
+        expand_down: spanning
+            && hunk_can_expand_down(file, source_index)
+            && !hunk_can_expand_all(file, source_index),
+        source_index: source_index as i32,
+        left_line,
+        left_columns,
+        left_kind: left_kind.into(),
+        left_content: left_content.into(),
+        left_tokens,
+        right_line,
+        right_columns,
+        right_kind: right_kind.into(),
+        right_content: right_content.into(),
+        right_tokens,
+    }
+}
+
+fn split_side(
+    file: &PullRequestDiffFile,
+    highlighted: &[HighlightedLine],
+    index: Option<usize>,
+    right: bool,
+) -> (i32, i32, String, String, ModelRc<WorkflowPrDiffToken>) {
+    let Some(index) = index else {
+        return (
+            0,
+            0,
+            "empty".to_string(),
+            String::new(),
+            empty_token_model(),
+        );
+    };
+    let Some(line) = file.lines.get(index) else {
+        return (
+            0,
+            0,
+            "empty".to_string(),
+            String::new(),
+            empty_token_model(),
+        );
+    };
+    let line_number = if right { line.new_line } else { line.old_line };
+    let tokens = highlighted
+        .get(index)
+        .map(to_slint_tokens)
+        .unwrap_or_else(empty_token_model);
+    (
+        line_number,
+        highlighted
+            .get(index)
+            .map(|line| line.columns as i32)
+            .unwrap_or(0),
+        line.kind.clone(),
+        sanitize_diff_content(line.content.as_str()),
+        tokens,
+    )
+}
+
+fn to_slint_tokens(highlighted: &HighlightedLine) -> ModelRc<WorkflowPrDiffToken> {
+    let tokens = highlighted
+        .tokens
+        .iter()
+        .map(|token| WorkflowPrDiffToken {
+            text: token.text.clone().into(),
+            color: Color::from_argb_u8(
+                token.color[0],
+                token.color[1],
+                token.color[2],
+                token.color[3],
+            ),
+            dark_color: Color::from_argb_u8(
+                token.dark_color[0],
+                token.dark_color[1],
+                token.dark_color[2],
+                token.dark_color[3],
+            ),
+            bold: token.bold,
+            italic: token.italic,
+        })
+        .collect::<Vec<_>>();
+    ModelRc::new(VecModel::from(tokens))
+}
+
+fn empty_token_model() -> ModelRc<WorkflowPrDiffToken> {
+    ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffToken>::new()))
+}
+
+fn sanitize_diff_content(content: &str) -> String {
+    content
+        .chars()
+        .filter(|character| !matches!(character, '\r' | '\n'))
+        .collect()
 }
 
 fn hunk_is_expandable(file: &PullRequestDiffFile, hunk_index: usize) -> bool {
@@ -2523,6 +3020,49 @@ fn hunk_is_expandable(file: &PullRequestDiffFile, hunk_index: usize) -> bool {
     next.is_some_and(|next| next > previous.saturating_add(1))
 }
 
+fn hunk_can_expand_down(file: &PullRequestDiffFile, hunk_index: usize) -> bool {
+    if !hunk_is_expandable(file, hunk_index) {
+        return false;
+    }
+    let use_new_side = file.change_type != "deleted_file";
+    file.lines[..hunk_index]
+        .iter()
+        .rev()
+        .find_map(|line| side_line(line, use_new_side))
+        .is_some()
+}
+
+fn hunk_can_expand_all(file: &PullRequestDiffFile, hunk_index: usize) -> bool {
+    let Some((previous, next)) = hunk_hidden_bounds(file, hunk_index) else {
+        return false;
+    };
+    previous > 0 && next.saturating_sub(previous).saturating_sub(1) <= HUNK_CONTEXT_PAGE_SIZE as i32
+}
+
+fn hunk_hidden_bounds(file: &PullRequestDiffFile, hunk_index: usize) -> Option<(i32, i32)> {
+    let line = file.lines.get(hunk_index)?;
+    if line.kind != "hunk" {
+        return None;
+    }
+    let use_new_side = file.change_type != "deleted_file";
+    let previous = file.lines[..hunk_index]
+        .iter()
+        .rev()
+        .find_map(|line| side_line(line, use_new_side))
+        .unwrap_or(0);
+    let next = file.lines[hunk_index + 1..]
+        .iter()
+        .find_map(|line| side_line(line, use_new_side))?;
+    (next > previous.saturating_add(1)).then_some((previous, next))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HunkExpansionDirection {
+    Up,
+    Down,
+    All,
+}
+
 fn side_line(line: &PullRequestDiffLine, use_new_side: bool) -> Option<i32> {
     let number = if use_new_side {
         line.new_line
@@ -2532,11 +3072,219 @@ fn side_line(line: &PullRequestDiffLine, use_new_side: bool) -> Option<i32> {
     (number > 0).then_some(number)
 }
 
+fn hunk_side_bounds(
+    file: &PullRequestDiffFile,
+    hunk_index: usize,
+    use_new_side: bool,
+) -> Option<(i32, i32)> {
+    let previous = file.lines[..hunk_index]
+        .iter()
+        .rev()
+        .find_map(|line| side_line(line, use_new_side))
+        .unwrap_or(0);
+    let next = file.lines[hunk_index + 1..]
+        .iter()
+        .find_map(|line| side_line(line, use_new_side))?;
+    Some((previous, next))
+}
+
+fn bounded_source_range<'a>(
+    source_lines: &'a [&'a str],
+    previous: i32,
+    next: i32,
+    direction: HunkExpansionDirection,
+    limit: usize,
+) -> Vec<(i32, &'a str)> {
+    let start = previous.saturating_add(1).max(1) as usize;
+    let end = next.saturating_sub(1).max(0) as usize;
+    if start > end || start > source_lines.len() {
+        return Vec::new();
+    }
+    let end = end.min(source_lines.len());
+    let scan_limit = if limit == i32::MAX as usize {
+        1_024
+    } else {
+        limit.saturating_add(128).max(128)
+    };
+    let (start, end) = match direction {
+        HunkExpansionDirection::Down => (start, end.min(start.saturating_add(scan_limit - 1))),
+        HunkExpansionDirection::Up => (start.max(end.saturating_sub(scan_limit - 1)), end),
+        HunkExpansionDirection::All => (start, end),
+    };
+    (start..=end)
+        .map(|number| (number as i32, source_lines[number - 1]))
+        .collect()
+}
+
+fn align_source_ranges(
+    old_lines: &[(i32, &str)],
+    new_lines: &[(i32, &str)],
+) -> Vec<PullRequestDiffLine> {
+    let old_len = old_lines.len();
+    let new_len = new_lines.len();
+    let mut matches = vec![vec![0_u16; new_len + 1]; old_len + 1];
+    for old_index in (0..old_len).rev() {
+        for new_index in (0..new_len).rev() {
+            matches[old_index][new_index] = if old_lines[old_index].1 == new_lines[new_index].1 {
+                matches[old_index + 1][new_index + 1].saturating_add(1)
+            } else {
+                matches[old_index + 1][new_index].max(matches[old_index][new_index + 1])
+            };
+        }
+    }
+
+    let mut rows = Vec::with_capacity(old_len.max(new_len));
+    let (mut old_index, mut new_index) = (0, 0);
+    while old_index < old_len || new_index < new_len {
+        if old_index < old_len
+            && new_index < new_len
+            && old_lines[old_index].1 == new_lines[new_index].1
+        {
+            rows.push(PullRequestDiffLine {
+                old_line: old_lines[old_index].0,
+                new_line: new_lines[new_index].0,
+                kind: "context".to_string(),
+                content: sanitize_diff_content(old_lines[old_index].1),
+            });
+            old_index += 1;
+            new_index += 1;
+        } else if new_index >= new_len
+            || (old_index < old_len
+                && matches[old_index + 1][new_index] >= matches[old_index][new_index + 1])
+        {
+            rows.push(PullRequestDiffLine {
+                old_line: old_lines[old_index].0,
+                new_line: 0,
+                kind: "deletion".to_string(),
+                content: sanitize_diff_content(old_lines[old_index].1),
+            });
+            old_index += 1;
+        } else {
+            rows.push(PullRequestDiffLine {
+                old_line: 0,
+                new_line: new_lines[new_index].0,
+                kind: "addition".to_string(),
+                content: sanitize_diff_content(new_lines[new_index].1),
+            });
+            new_index += 1;
+        }
+    }
+    rows
+}
+
+fn bounded_aligned_rows(
+    rows: Vec<PullRequestDiffLine>,
+    use_new_side: bool,
+    limit: usize,
+    direction: HunkExpansionDirection,
+) -> Vec<PullRequestDiffLine> {
+    if direction == HunkExpansionDirection::All || limit == i32::MAX as usize {
+        return rows;
+    }
+    let primary_line = |line: &PullRequestDiffLine| {
+        if use_new_side {
+            line.new_line
+        } else {
+            line.old_line
+        }
+    };
+    match direction {
+        HunkExpansionDirection::Down => {
+            let mut count = 0;
+            rows.into_iter()
+                .take_while(|line| {
+                    if primary_line(line) > 0 {
+                        if count >= limit {
+                            return false;
+                        }
+                        count += 1;
+                    }
+                    true
+                })
+                .collect()
+        }
+        HunkExpansionDirection::Up => {
+            let mut count = 0;
+            let mut selected = rows
+                .into_iter()
+                .rev()
+                .take_while(|line| {
+                    if primary_line(line) > 0 {
+                        if count >= limit {
+                            return false;
+                        }
+                        count += 1;
+                    }
+                    true
+                })
+                .collect::<Vec<_>>();
+            selected.reverse();
+            selected
+        }
+        HunkExpansionDirection::All => rows,
+    }
+}
+
+fn expand_hunk_context_from_sources(
+    file: &mut PullRequestDiffFile,
+    hunk_index: usize,
+    base_source: &str,
+    head_source: &str,
+    limit: usize,
+    direction: HunkExpansionDirection,
+) -> bool {
+    if limit == 0 || !hunk_is_expandable(file, hunk_index) {
+        return false;
+    }
+    let old_bounds = hunk_side_bounds(file, hunk_index, false);
+    let new_bounds = hunk_side_bounds(file, hunk_index, true);
+    let base_lines = base_source.lines().collect::<Vec<_>>();
+    let head_lines = head_source.lines().collect::<Vec<_>>();
+    let old_range = old_bounds
+        .map(|(previous, next)| bounded_source_range(&base_lines, previous, next, direction, limit))
+        .unwrap_or_default();
+    let new_range = new_bounds
+        .map(|(previous, next)| bounded_source_range(&head_lines, previous, next, direction, limit))
+        .unwrap_or_default();
+    let use_new_side = file.change_type != "deleted_file";
+    let rows = bounded_aligned_rows(
+        align_source_ranges(old_range.as_slice(), new_range.as_slice()),
+        use_new_side,
+        limit,
+        direction,
+    );
+    if rows.is_empty() {
+        return false;
+    }
+    let insertion_index = match direction {
+        HunkExpansionDirection::Down => hunk_index,
+        HunkExpansionDirection::Up | HunkExpansionDirection::All => hunk_index + 1,
+    };
+    let inserted_len = rows.len();
+    file.lines.splice(insertion_index..insertion_index, rows);
+    let current_hunk_index = if direction == HunkExpansionDirection::Down {
+        hunk_index.saturating_add(inserted_len)
+    } else {
+        hunk_index
+    };
+    if file
+        .lines
+        .get(current_hunk_index)
+        .is_some_and(|line| line.kind == "hunk")
+        && !hunk_is_expandable(file, current_hunk_index)
+    {
+        file.lines.remove(current_hunk_index);
+    }
+    true
+}
+
+#[cfg(test)]
 fn expand_hunk_context(
     file: &mut PullRequestDiffFile,
     hunk_index: usize,
     source: &str,
     limit: usize,
+    direction: HunkExpansionDirection,
 ) -> bool {
     if limit == 0 || !hunk_is_expandable(file, hunk_index) {
         return false;
@@ -2555,9 +3303,21 @@ fn expand_hunk_context(
     };
     let hidden_end = next.saturating_sub(1);
     let hidden_start = previous.saturating_add(1);
-    let reveal_start = hidden_start.max(hidden_end.saturating_sub(limit as i32 - 1));
+    let (reveal_start, reveal_end, insertion_index) = match direction {
+        HunkExpansionDirection::Up => (
+            hidden_start.max(hidden_end.saturating_sub(limit as i32 - 1)),
+            hidden_end,
+            hunk_index + 1,
+        ),
+        HunkExpansionDirection::Down => (
+            hidden_start,
+            hidden_end.min(hidden_start.saturating_add(limit as i32 - 1)),
+            hunk_index,
+        ),
+        HunkExpansionDirection::All => (hidden_start, hidden_end, hunk_index + 1),
+    };
     let source_lines = source.lines().collect::<Vec<_>>();
-    if reveal_start <= 0 || reveal_start > hidden_end || hidden_end as usize > source_lines.len() {
+    if reveal_start <= 0 || reveal_start > reveal_end || reveal_end as usize > source_lines.len() {
         return false;
     }
 
@@ -2574,7 +3334,7 @@ fn expand_hunk_context(
         })
         .unwrap_or(0);
     let mut revealed = Vec::new();
-    for number in reveal_start..=hidden_end {
+    for number in reveal_start..=reveal_end {
         let counterpart = if counterpart_next > 0 {
             counterpart_next.saturating_sub(next.saturating_sub(number))
         } else {
@@ -2587,10 +3347,12 @@ fn expand_hunk_context(
             content: source_lines[number as usize - 1].to_string(),
         });
     }
-    file.lines.splice(hunk_index + 1..hunk_index + 1, revealed);
+    file.lines
+        .splice(insertion_index..insertion_index, revealed);
     true
 }
 
+#[cfg(test)]
 fn expand_all_hunk_context(file: &mut PullRequestDiffFile, source: &str) -> usize {
     let initial_len = file.lines.len();
     loop {
@@ -2602,7 +3364,46 @@ fn expand_all_hunk_context(file: &mut PullRequestDiffFile, source: &str) -> usiz
         else {
             break;
         };
-        if !expand_hunk_context(file, index, source, i32::MAX as usize) {
+        if !expand_hunk_context(
+            file,
+            index,
+            source,
+            i32::MAX as usize,
+            HunkExpansionDirection::Up,
+        ) {
+            break;
+        }
+    }
+    file.lines.len().saturating_sub(initial_len)
+}
+
+fn expand_all_hunk_context_from_sources(
+    file: &mut PullRequestDiffFile,
+    base_source: &str,
+    head_source: &str,
+) -> usize {
+    let initial_len = file.lines.len();
+    loop {
+        let Some(index) = file
+            .lines
+            .iter()
+            .enumerate()
+            .find_map(|(index, _)| hunk_is_expandable(file, index).then_some(index))
+        else {
+            break;
+        };
+        let bounds_before = hunk_hidden_bounds(file, index);
+        if !expand_hunk_context_from_sources(
+            file,
+            index,
+            base_source,
+            head_source,
+            HUNK_CONTEXT_PAGE_SIZE,
+            HunkExpansionDirection::Up,
+        ) {
+            break;
+        }
+        if hunk_hidden_bounds(file, index) == bounds_before {
             break;
         }
     }
@@ -3396,6 +4197,8 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_visible(false);
     ui.set_workflow_pr_review_loading(false);
     ui.set_workflow_pr_review_code_loading(false);
+    ui.set_workflow_pr_review_large_diff_deferred(false);
+    ui.set_workflow_pr_review_large_diff_loading(false);
     ui.set_workflow_pr_review_error("".into());
     ui.set_workflow_pr_review_files(empty_file_model());
     ui.set_workflow_pr_review_tree_items(empty_tree_model());
@@ -3447,13 +4250,17 @@ mod tests {
     use slint::Model;
 
     use super::{
-        BoundedCache, LazyPrDiffLineModel, RANGE_DIFF_CACHE_CAPACITY, ReviewCache, ReviewRequest,
-        VISIBLE_LINE_CACHE_CAPACITY, build_tree_items, chrono_commit_index_to_display,
-        commit_detail_source_tab, commit_index_by_sha, commit_message_body_height,
-        commit_range_label, commit_tab_expand_layout_extra, conversation_card_row_height,
-        conversation_content_height, conversation_items_connect, display_commit_range_to_chrono,
-        expand_all_hunk_context, expand_hunk_context, full_source_file, hunk_is_expandable,
-        range_covers_all_commits, refresh_commit_group_expand_extras, restore_original_diff,
+        BoundedCache, DiffRowProjection, HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection,
+        LARGE_DIFF_BYTE_THRESHOLD, LARGE_DIFF_LINE_THRESHOLD, LazyPrDiffLineModel,
+        RANGE_DIFF_CACHE_CAPACITY, ReviewCache, ReviewRequest, VISIBLE_LINE_CACHE_CAPACITY,
+        build_tree_items, chrono_commit_index_to_display, commit_detail_source_tab,
+        commit_index_by_sha, commit_message_body_height, commit_range_label,
+        commit_tab_expand_layout_extra, conversation_card_row_height, conversation_content_height,
+        conversation_items_connect, diff_row_projection, display_commit_range_to_chrono,
+        expand_all_hunk_context, expand_all_hunk_context_from_sources, expand_hunk_context,
+        expand_hunk_context_from_sources, full_source_file, hunk_can_expand_all,
+        hunk_can_expand_down, hunk_is_expandable, is_large_diff, range_covers_all_commits,
+        refresh_commit_group_expand_extras, restore_original_diff,
     };
     use crate::WorkflowPrCommit;
     use crate::git::{
@@ -3473,6 +4280,28 @@ mod tests {
             viewed: false,
             lines: Vec::new(),
         }
+    }
+
+    #[test]
+    fn large_diff_budget_accounts_for_line_count_and_payload_size() {
+        let line = |content: String| PullRequestDiffLine {
+            old_line: 0,
+            new_line: 1,
+            kind: "addition".to_string(),
+            content,
+        };
+
+        let mut by_lines = file("src/generated.rs");
+        by_lines.lines = vec![line("small".to_string()); LARGE_DIFF_LINE_THRESHOLD];
+        assert!(is_large_diff(&by_lines));
+
+        let mut by_bytes = file("src/minified.js");
+        by_bytes.lines = vec![line("x".repeat(LARGE_DIFF_BYTE_THRESHOLD))];
+        assert!(is_large_diff(&by_bytes));
+
+        let mut ordinary = file("src/lib.rs");
+        ordinary.lines = vec![line("small".to_string()); 32];
+        assert!(!is_large_diff(&ordinary));
     }
 
     #[test]
@@ -3678,6 +4507,7 @@ mod tests {
             base_detail: base_detail.clone(),
             range_diffs: BoundedCache::new(RANGE_DIFF_CACHE_CAPACITY),
             expanded_files: HashMap::new(),
+            loaded_large_diffs: HashSet::new(),
         };
 
         cache
@@ -3756,7 +4586,7 @@ mod tests {
     }
 
     #[test]
-    fn expands_hidden_context_in_twenty_line_pages() {
+    fn expands_hidden_context_up_in_improved_changes_page_sized_pages() {
         let mut file = file("src/lib.rs");
         file.lines = vec![
             PullRequestDiffLine {
@@ -3778,14 +4608,226 @@ mod tests {
             .join("\n");
 
         assert!(hunk_is_expandable(&file, 0));
-        assert!(expand_hunk_context(&mut file, 0, source.as_str(), 20));
-        assert_eq!(file.lines[1].new_line, 10);
-        assert_eq!(file.lines[20].new_line, 29);
+        assert!(expand_hunk_context(
+            &mut file,
+            0,
+            source.as_str(),
+            HUNK_CONTEXT_PAGE_SIZE,
+            HunkExpansionDirection::Up,
+        ));
+        assert_eq!(file.lines[1].new_line, 9);
+        assert_eq!(file.lines[21].new_line, 29);
         assert!(hunk_is_expandable(&file, 0));
 
-        assert!(expand_hunk_context(&mut file, 0, source.as_str(), 20));
+        assert!(expand_hunk_context(
+            &mut file,
+            0,
+            source.as_str(),
+            HUNK_CONTEXT_PAGE_SIZE,
+            HunkExpansionDirection::Up,
+        ));
         assert_eq!(file.lines[1].new_line, 1);
         assert!(!hunk_is_expandable(&file, 0));
+    }
+
+    #[test]
+    fn expands_hidden_context_down_from_the_previous_hunk() {
+        let mut file = file("src/lib.rs");
+        file.lines = vec![
+            PullRequestDiffLine {
+                old_line: 10,
+                new_line: 10,
+                kind: "context".to_string(),
+                content: "line 10".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -40,1 +40,1 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 40,
+                new_line: 40,
+                kind: "context".to_string(),
+                content: "line 40".to_string(),
+            },
+        ];
+        let source = (1..=40)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(hunk_can_expand_down(&file, 1));
+        assert!(expand_hunk_context(
+            &mut file,
+            1,
+            source.as_str(),
+            5,
+            HunkExpansionDirection::Down,
+        ));
+        assert_eq!(file.lines[1].new_line, 11);
+        assert_eq!(file.lines[5].new_line, 15);
+        assert_eq!(file.lines[6].kind, "hunk");
+        assert!(hunk_can_expand_down(&file, 6));
+    }
+
+    #[test]
+    fn github_improved_changes_page_reveals_twenty_one_rows_then_expands_the_remainder() {
+        let mut file = file("src/lib.rs");
+        file.lines = vec![
+            PullRequestDiffLine {
+                old_line: 17,
+                new_line: 17,
+                kind: "context".to_string(),
+                content: "line 17".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -51,1 +51,1 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 51,
+                new_line: 51,
+                kind: "context".to_string(),
+                content: "line 51".to_string(),
+            },
+        ];
+        let source = (1..=51)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(expand_hunk_context_from_sources(
+            &mut file,
+            1,
+            source.as_str(),
+            source.as_str(),
+            HUNK_CONTEXT_PAGE_SIZE,
+            HunkExpansionDirection::Down,
+        ));
+        assert!(
+            file.lines.iter().any(|line| {
+                line.old_line == 38 && line.new_line == 38 && line.kind == "context"
+            })
+        );
+        assert!(
+            !file
+                .lines
+                .iter()
+                .any(|line| line.old_line == 39 && line.kind == "context")
+        );
+        let hunk_index = file
+            .lines
+            .iter()
+            .position(|line| line.kind == "hunk")
+            .expect("partially expanded gap keeps its hunk control");
+        assert!(hunk_can_expand_all(&file, hunk_index));
+
+        assert!(expand_hunk_context_from_sources(
+            &mut file,
+            hunk_index,
+            source.as_str(),
+            source.as_str(),
+            i32::MAX as usize,
+            HunkExpansionDirection::All,
+        ));
+        assert!(!file.lines.iter().any(|line| line.kind == "hunk"));
+        assert!((17..=51).all(|number| {
+            file.lines
+                .iter()
+                .any(|line| line.old_line == number && line.new_line == number)
+        }));
+    }
+
+    #[test]
+    fn expanding_down_preserves_a_base_only_line_at_the_page_boundary() {
+        let mut file = file("src/lib.rs");
+        file.lines = vec![
+            PullRequestDiffLine {
+                old_line: 17,
+                new_line: 17,
+                kind: "context".to_string(),
+                content: "line 17".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -39,1 +38,1 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 39,
+                new_line: 38,
+                kind: "context".to_string(),
+                content: "line 39".to_string(),
+            },
+        ];
+        let base_source = (1..=39)
+            .map(|line| {
+                if line == 38 {
+                    "base-only line 38".to_string()
+                } else {
+                    format!("line {line}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let head_source = (1..=38)
+            .map(|line| {
+                if line < 38 {
+                    format!("line {line}")
+                } else {
+                    "line 39".to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(expand_hunk_context_from_sources(
+            &mut file,
+            1,
+            base_source.as_str(),
+            head_source.as_str(),
+            20,
+            HunkExpansionDirection::Down,
+        ));
+        assert!(file.lines.iter().any(|line| {
+            line.old_line == 38
+                && line.new_line == 0
+                && line.kind == "deletion"
+                && line.content == "base-only line 38"
+        }));
+    }
+
+    #[test]
+    fn small_between_hunk_gap_switches_to_one_unfold_action() {
+        let mut file = file("src/lib.rs");
+        file.lines = vec![
+            PullRequestDiffLine {
+                old_line: 57,
+                new_line: 57,
+                kind: "context".to_string(),
+                content: "line 57".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -62,1 +62,1 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 62,
+                new_line: 62,
+                kind: "context".to_string(),
+                content: "line 62".to_string(),
+            },
+        ];
+
+        assert!(hunk_is_expandable(&file, 1));
+        assert!(hunk_can_expand_all(&file, 1));
     }
 
     #[test]
@@ -3816,6 +4858,40 @@ mod tests {
     }
 
     #[test]
+    fn expand_all_preserves_one_sided_rows_from_both_revisions() {
+        let mut file = file("src/lib.rs");
+        file.lines = vec![
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -5,1 +4,1 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 5,
+                new_line: 4,
+                kind: "context".to_string(),
+                content: "shared tail".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            expand_all_hunk_context_from_sources(
+                &mut file,
+                "one\ntwo\nbase only\nthree\nshared tail",
+                "one\ntwo\nthree\nshared tail",
+            ),
+            3
+        );
+        assert!(
+            file.lines.iter().any(|line| {
+                line.old_line == 3 && line.new_line == 0 && line.kind == "deletion"
+            })
+        );
+        assert!(!file.lines.iter().any(|line| line.kind == "hunk"));
+    }
+
+    #[test]
     fn collapses_expanded_context_back_to_the_original_diff() {
         let mut original = file("src/lib.rs");
         original.lines = vec![
@@ -3838,6 +4914,7 @@ mod tests {
             0,
             "line 1\nline 2\nline 3\nline 4",
             20,
+            HunkExpansionDirection::Up,
         ));
 
         assert!(restore_original_diff(&mut expanded, &original));
@@ -3868,6 +4945,120 @@ mod tests {
     }
 
     #[test]
+    fn split_diff_projection_pairs_change_blocks_and_duplicates_context() {
+        let lines = vec![
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -1,3 +1,4 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 1,
+                new_line: 1,
+                kind: "context".to_string(),
+                content: "same".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 2,
+                new_line: 0,
+                kind: "deletion".to_string(),
+                content: "old one".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 3,
+                new_line: 0,
+                kind: "deletion".to_string(),
+                content: "old two".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 2,
+                kind: "addition".to_string(),
+                content: "new one".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            diff_row_projection(lines.as_slice(), true),
+            vec![
+                DiffRowProjection::Split {
+                    left: Some(0),
+                    right: None,
+                    source_index: 0,
+                    spanning: true,
+                },
+                DiffRowProjection::Split {
+                    left: Some(1),
+                    right: Some(1),
+                    source_index: 1,
+                    spanning: false,
+                },
+                DiffRowProjection::Split {
+                    left: Some(2),
+                    right: Some(4),
+                    source_index: 2,
+                    spanning: false,
+                },
+                DiffRowProjection::Split {
+                    left: Some(3),
+                    right: None,
+                    source_index: 3,
+                    spanning: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn split_diff_projection_keeps_pure_additions_on_the_right() {
+        let lines = vec![
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -0,0 +1,2 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 1,
+                kind: "addition".to_string(),
+                content: "first".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 2,
+                kind: "addition".to_string(),
+                content: "second".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            diff_row_projection(lines.as_slice(), true),
+            vec![
+                DiffRowProjection::Split {
+                    left: Some(0),
+                    right: None,
+                    source_index: 0,
+                    spanning: true,
+                },
+                DiffRowProjection::Split {
+                    left: None,
+                    right: Some(1),
+                    source_index: 1,
+                    spanning: false,
+                },
+                DiffRowProjection::Split {
+                    left: None,
+                    right: Some(2),
+                    source_index: 2,
+                    spanning: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn lazy_diff_model_materializes_only_a_bounded_row_window() {
         let mut file = file("src/lib.rs");
         file.lines = (0..128)
@@ -3890,7 +5081,7 @@ mod tests {
                 columns: 8,
             })
             .collect::<Vec<_>>();
-        let model = LazyPrDiffLineModel::new(Arc::new(file), Arc::new(highlighted));
+        let model = LazyPrDiffLineModel::new(Arc::new(file), Arc::new(highlighted), false);
 
         assert_eq!(model.row_count(), 128);
         assert_eq!(model.cached_row_count(), 0);
