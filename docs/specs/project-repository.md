@@ -2,7 +2,7 @@
 
 ## Scope / 范围
 
-This specification covers provider metadata resolved on the Project page and the repository-context precondition for the provider-neutral pull-request list in the existing Workflow PR tab. The complete list/review/recommendation behavior is specified in [Pull request workflow](pr-review.md). It does not change RAG Chat behavior.
+This specification covers provider metadata resolved on the Project page and the repository-context precondition for the provider-neutral pull-request list in the existing Workflow PR tab. The complete list/review behavior is specified in [Pull request workflow](pr-review.md). It does not change RAG Chat behavior.
 
 本文约束 Project 页面解析的 Provider 元数据，以及现有 Workflow PR Tab 中 Provider-neutral PR 列表所依赖的仓库上下文。完整的列表/审核/建议行为见 [Pull Request 工作流](pr-review.md)；不改变 RAG Chat 行为。
 

@@ -10,7 +10,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [AI Agent configuration](ai-agent.md) | Current / 当前 | `src/settings.rs`, `src/ai/agent.rs`, `ui/views/settings.slint` |
 | [Chat behavior](chat.md) | Current / 当前 | `src/chat/`, `ui/views/chat.slint`, `ui/main.slint` |
 | [Project repository metadata](project-repository.md) | Current / 当前 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
-| [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr.rs`, `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/git/`, `src/project/pr_stats.rs`, `ui/views/workflow/` |
+| [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/git/`, `src/project/pr_stats.rs`, `ui/views/workflow/` |
 | [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 
 The PR workflow specification includes the reversible GitHub-style expand-all/collapse-non-diff context toggle. / PR 工作流规格包含可逆的 GitHub 风格“展开全部/收起非 Diff 行”上下文切换。

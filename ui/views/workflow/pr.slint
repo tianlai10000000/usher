@@ -1,6 +1,5 @@
-import { FilledButton, MaterialPalette, MaterialText, Switch } from "@material";
+import { FilledButton, MaterialPalette, MaterialText } from "@material";
 import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
-import { CompactTextField } from "../../components/input/compact_text_field.slint";
 
 export struct WorkflowPullRequestItem {
     number: string,
@@ -158,30 +157,6 @@ component PrListStatePanel inherits Rectangle {
     }
 }
 
-component PrField inherits Rectangle {
-    in property <string> label;
-    in-out property <string> value;
-    in property <string> placeholder;
-    in property <length> field-width: 280px;
-    width: root.field-width;
-    height: 64px;
-    background: transparent;
-
-    VerticalLayout {
-        spacing: 6px;
-        MaterialText { text: root.label; height: 16px; font_size: 12px; color: MaterialPalette.on_surface_variant; }
-        CompactTextField {
-            width: root.field-width;
-            text <=> root.value;
-            placeholder: root.placeholder;
-            field-height: 42px;
-            border-radius-size: 10px;
-            input-font-size: 14px;
-            field-background: MaterialPalette.surface_container_highest;
-        }
-    }
-}
-
 export component PrFlow {
     in property <string> repo-project-id;
     in property <string> repo-type;
@@ -193,20 +168,10 @@ export component PrFlow {
     in property <string> pr-state: "open";
     in property <bool> pr-loading: false;
     in property <string> pr-error: "";
-    in property <string> ai-decision;
-    in property <string> ai-summary;
-    in property <string> manual-status;
     callback change-state(string);
     callback change-page(int);
     callback open-detail(string, string, string, string, string, string);
-    callback analyze(string, string, string, bool, bool);
-    callback confirm(bool);
 
-    private property <string> pr-number: "";
-    private property <string> pr-title: "";
-    private property <string> pr-summary: "";
-    private property <bool> ci-green: true;
-    private property <bool> reviewers-ready: false;
     private property <string> empty-title: root.pr-state == "open"
         ? "There aren’t any open pull requests."
         : (root.pr-state == "closed"
@@ -227,7 +192,6 @@ export component PrFlow {
         28px + 62px + 12px + root.title-column-min-width + 12px
             + root.branch-column-width + 12px + root.author-column-width
             + 12px + root.updated-column-width;
-    private property <length> dual-field-width: max(0px, (root.width - 12px) / 2);
 
     VerticalLayout {
         width: root.width;
@@ -434,45 +398,6 @@ export component PrFlow {
             MaterialText { width: 92px; text: "Page " + root.pr-page + " / " + root.pr-page-count; font-family: "Hiragino Sans GB"; horizontal_alignment: center; vertical_alignment: center; font_size: 12px; color: MaterialPalette.on_surface_variant; }
             PageButton { label: "Next"; button-enabled: root.pr-page < root.pr-page-count && !root.pr-loading; clicked => { root.change-page(root.pr-page + 1); } }
             Rectangle { horizontal-stretch: 1; }
-        }
-
-        Rectangle { width: parent.width; height: 1px; background: MaterialPalette.outline_variant; }
-        MaterialText { text: "AI review"; font_size: 17px; font_weight: 600; color: MaterialPalette.on_surface; }
-        MaterialText { text: "Select a pull request above, or enter its details for an AI-assisted review. Human confirmation remains required."; font_size: 13px; color: MaterialPalette.on_surface_variant; }
-
-        HorizontalLayout {
-            width: parent.width; spacing: 12px;
-            PrField { label: "PR number"; value <=> root.pr-number; placeholder: "1024"; field-width: root.dual-field-width; }
-            PrField { label: "PR title"; value <=> root.pr-title; placeholder: "Pull request title"; field-width: root.dual-field-width; }
-        }
-
-        Rectangle {
-            width: parent.width; height: 96px; border-radius: 10px; border-width: 1px;
-            border-color: MaterialPalette.outline_variant; background: MaterialPalette.surface_container_highest;
-            TextInput { x: 12px; y: 10px; width: parent.width - 24px; height: parent.height - 20px; text <=> root.pr-summary; color: MaterialPalette.on_surface; font-size: 14px; single-line: false; wrap: word-wrap; }
-        }
-
-        HorizontalLayout {
-            width: parent.width; spacing: 16px;
-            MaterialText { text: "CI green"; font-size: 13px; vertical_alignment: center; }
-            Switch { checked <=> root.ci-green; width: 48px; height: 28px; }
-            MaterialText { text: "Reviewers ready"; font-size: 13px; vertical_alignment: center; }
-            Switch { checked <=> root.reviewers-ready; width: 48px; height: 28px; }
-            Rectangle { horizontal-stretch: 1; }
-            FilledButton { text: "Analyze PR"; clicked => { root.analyze(root.pr-number, root.pr-title, root.pr-summary, root.ci-green, root.reviewers-ready); } }
-            FilledButton { text: "Approve"; clicked => { root.confirm(true); } }
-            FilledButton { text: "Reject"; clicked => { root.confirm(false); } }
-        }
-
-        Rectangle {
-            width: parent.width; min-height: 118px; border-radius: 12px; background: MaterialPalette.surface_container_high;
-            VerticalLayout {
-                padding: 14px; spacing: 7px;
-                MaterialText { text: "AI recommendation"; font_size: 12px; color: MaterialPalette.on_surface_variant; }
-                MaterialText { text: root.ai-decision; font_size: 17px; font_weight: 600; color: MaterialPalette.primary; }
-                Text { text: root.ai-summary; wrap: word-wrap; color: MaterialPalette.on_surface; font-size: 13px; }
-                Text { text: "Manual confirmation: " + root.manual-status; wrap: word-wrap; color: MaterialPalette.on_surface_variant; font-size: 12px; }
-            }
         }
     }
 }

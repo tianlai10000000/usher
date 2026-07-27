@@ -97,10 +97,6 @@ pub(crate) struct WorkflowViewState {
     pub(crate) tag_remove_request_seq: u64,
     pub(crate) tag_running: bool,
     pub(crate) tag_steps: Vec<StepItem>,
-    pub(crate) pr_ai_decision: String,
-    pub(crate) pr_ai_summary: String,
-    pub(crate) pr_manual_status: String,
-    pub(crate) last_pr_decision: String,
     pub(crate) cd: CdSnapshot,
 }
 
@@ -122,10 +118,6 @@ impl Default for WorkflowViewState {
             tag_remove_request_seq: 0,
             tag_running: false,
             tag_steps: default_tag_steps(),
-            pr_ai_decision: "Awaiting analysis".to_string(),
-            pr_ai_summary: "Run AI analysis to get a recommendation.".to_string(),
-            pr_manual_status: "Waiting for human confirmation.".to_string(),
-            last_pr_decision: String::new(),
             cd: default_cd_snapshot(),
         }
     }
@@ -207,9 +199,6 @@ pub(crate) fn initialize_ui(
     ui.set_workflow_tag_remove_initializing(state.tag_remove_initializing);
     ui.set_workflow_tag_running(state.tag_running);
     ui.set_workflow_tag_steps(ModelRc::new(VecModel::from(state.tag_steps.clone())));
-    ui.set_workflow_pr_ai_decision(state.pr_ai_decision.clone().into());
-    ui.set_workflow_pr_ai_summary(state.pr_ai_summary.clone().into());
-    ui.set_workflow_pr_manual_status(state.pr_manual_status.clone().into());
     apply_cd_snapshot(ui, &state.cd);
 }
 

@@ -179,9 +179,6 @@ export component MainWindow inherits Window {
     in-out property <bool> settings-ai-agent-testing: false;
     in-out property <int> settings-ai-agent-provider-index: -1;
     in property <bool> platform-is-macos: false;
-    in property <string> workflow-pr-ai-decision: "Awaiting analysis";
-    in property <string> workflow-pr-ai-summary: "Run AI analysis to get a recommendation.";
-    in property <string> workflow-pr-manual-status: "Waiting for human confirmation.";
     in property <string> workflow-pr-repo-project-id: "";
     in property <string> workflow-pr-repo-type: "";
     in property <[WorkflowPullRequestItem]> workflow-pr-list-items: [];
@@ -235,6 +232,9 @@ export component MainWindow inherits Window {
     in property <int> workflow-pr-review-max-code-columns: 0;
     in property <string> workflow-pr-review-longest-code-line;
     in property <int> workflow-pr-review-line-model-revision: 0;
+    in property <int> workflow-pr-review-hunk-scroll-anchor-source-index: -1;
+    in property <int> workflow-pr-review-hunk-scroll-restore-revision: 0;
+    in property <bool> workflow-pr-review-hunk-scroll-restore-pending: false;
     in property <string> workflow-pr-review-code-font-family: "Menlo";
     in property <string> workflow-pr-review-tree-font-family: ".SF NS";
     in-out property <length> workflow-pr-review-file-list-width: 286px;
@@ -311,8 +311,6 @@ export component MainWindow inherits Window {
     callback workflow-tag-open-add();
     callback workflow-tag-open-remove();
     callback workflow-tag-stop();
-    callback workflow-pr-analyze(string, string, string, bool, bool);
-    callback workflow-pr-confirm(bool);
     callback workflow-pr-list-state-change(string);
     callback workflow-pr-list-page-change(int);
     callback workflow-pr-review-open(string, string, string, string, string, string);
@@ -580,9 +578,6 @@ export component MainWindow inherits Window {
                             project-remote-repo: root.workflow-project-remote-repo;
                             project-logo: root.workflow-project-logo;
                             project-logo-image: root.workflow-project-logo-image;
-                            pr-ai-decision: root.workflow-pr-ai-decision;
-                            pr-ai-summary: root.workflow-pr-ai-summary;
-                            pr-manual-status: root.workflow-pr-manual-status;
                             pr-repo-project-id: root.workflow-pr-repo-project-id;
                             pr-repo-type: root.workflow-pr-repo-type;
                             pr-list-items: root.workflow-pr-list-items;
@@ -632,12 +627,6 @@ export component MainWindow inherits Window {
                             }
                             tag-stop => {
                                 root.workflow-tag-stop();
-                            }
-                            pr-analyze(pr-number, pr-title, pr-summary, ci-green, reviewers-ready) => {
-                                root.workflow-pr-analyze(pr-number, pr-title, pr-summary, ci-green, reviewers-ready);
-                            }
-                            pr-confirm(approved) => {
-                                root.workflow-pr-confirm(approved);
                             }
                             pr-list-state-change(state) => {
                                 root.workflow-pr-list-state-change(state);
@@ -980,6 +969,8 @@ export component MainWindow inherits Window {
         max-code-columns: root.workflow-pr-review-max-code-columns;
         longest-code-line: root.workflow-pr-review-longest-code-line;
         line-model-revision: root.workflow-pr-review-line-model-revision;
+        hunk-scroll-anchor-source-index: root.workflow-pr-review-hunk-scroll-anchor-source-index;
+        hunk-scroll-restore-revision: root.workflow-pr-review-hunk-scroll-restore-revision;
         code-font-family: root.workflow-pr-review-code-font-family;
         tree-font-family: root.workflow-pr-review-tree-font-family;
         file-list-preferred-width <=> root.workflow-pr-review-file-list-width;

@@ -1,7 +1,6 @@
 mod bindings;
 pub mod branch;
 pub mod cd;
-pub mod pr;
 mod pr_list;
 mod pr_review;
 pub mod state;
@@ -26,7 +25,6 @@ pub fn setup_workflow(ui: &MainWindow) {
     branch::bind_branch(ui, shared_state.clone());
     tag::bind_tag(ui, shared_state.clone());
     tag::refresh_tag_context(ui, &shared_state, false);
-    pr::bind_pr(ui, shared_state.clone());
     cd::bind_cd(ui, shared_state);
     log::info!("[Workflow] Workflow module initialized successfully");
 }

@@ -180,8 +180,6 @@ export component Workflow inherits PageView {
     callback tag-open-add();
     callback tag-open-remove();
     callback tag-stop();
-    callback pr-analyze(string, string, string, bool, bool);
-    callback pr-confirm(bool);
     callback pr-list-state-change(string);
     callback pr-list-page-change(int);
     callback pr-open-detail(string, string, string, string, string, string);
@@ -207,9 +205,6 @@ export component Workflow inherits PageView {
     in property <string> project-remote-repo: "";
     in property <string> project-logo: "";
     in property <image> project-logo-image: @image-url("../../../logo.png");
-    in property <string> pr-ai-decision: "Awaiting analysis";
-    in property <string> pr-ai-summary: "Run AI analysis to get a recommendation.";
-    in property <string> pr-manual-status: "Waiting for human confirmation.";
     in property <string> pr-repo-project-id: "";
     in property <string> pr-repo-type: "";
     in property <[WorkflowPullRequestItem]> pr-list-items: [];
@@ -500,7 +495,7 @@ export component Workflow inherits PageView {
             WorkflowTabButton {
                 card-width: root.workflow-tabs-quad-width;
                 label: "PR";
-                caption: "AI recommendation with human final approval.";
+                caption: "Browse and open pull requests.";
                 selected: root.selected-flow == 2;
                 clicked => {
                     root.selected-flow = 2;
@@ -562,7 +557,7 @@ export component Workflow inherits PageView {
                 WorkflowTabButton {
                     card-width: root.workflow-tabs-dual-width;
                     label: "PR";
-                    caption: "AI recommendation with human final approval.";
+                    caption: "Browse and open pull requests.";
                     selected: root.selected-flow == 2;
                     clicked => {
                         root.selected-flow = 2;
@@ -614,7 +609,7 @@ export component Workflow inherits PageView {
             WorkflowTabButton {
                 card-width: root.workflow-tabs-single-width;
                 label: "PR";
-                caption: "AI recommendation with human final approval.";
+                caption: "Browse and open pull requests.";
                 selected: root.selected-flow == 2;
                 clicked => {
                     root.selected-flow = 2;
@@ -673,15 +668,6 @@ export component Workflow inherits PageView {
         pr-state: root.pr-list-state;
         pr-loading: root.pr-list-loading;
         pr-error: root.pr-list-error;
-        ai-decision: root.pr-ai-decision;
-        ai-summary: root.pr-ai-summary;
-        manual-status: root.pr-manual-status;
-        analyze(pr-number, pr-title, pr-summary, ci-green, reviewers-ready) => {
-            root.pr-analyze(pr-number, pr-title, pr-summary, ci-green, reviewers-ready);
-        }
-        confirm(approved) => {
-            root.pr-confirm(approved);
-        }
         change-state(state) => {
             root.pr-list-state-change(state);
         }

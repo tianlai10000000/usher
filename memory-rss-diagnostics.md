@@ -757,16 +757,33 @@ B 组第 4 个文件高亮完成时，日志为 `base_files=200`、`base_lines=2
 4. 固定执行 Home → PR → 2,932 行文件 → 快速滚动 → 前 4 文件 → Home，并额外执行 PR 打开/关闭 5 轮。记录首次增量、稳定值和 warm-up 后每轮增长斜率。
 5. 除非目标 owner 至少下降 20%，或生产稳定 RSS/footprint 至少改善 1 MiB 且三次方向一致，否则不以噪声为由保留复杂实现。任何文本错误、滚动回退、明显 CPU 增长或功能缺失均直接判失败。
 
-### 12.2 第 13 批候选：选中文件零拷贝与 Diff 元数据紧凑化（优先级 P1）
+### 12.2 第 13 批：选中文件零拷贝与 Diff 元数据紧凑化（优先级 P1）
 
-当前惰性 model 为获得独立生命周期，仍会把 `cache.file(index)` 完整 clone 后放入新的 `Arc`。因此选中 2,932 行文件时，基础 diff 与当前 model 会短暂或长期各持有一份该文件的行字符串。每行的 `kind` 还是重复 `String`，对 `context`/`addition`/`deletion`/`hunk` 这类有限状态产生不必要的小分配。
+原惰性 model 为获得独立生命周期，会把 `cache.file(index)` 完整 clone 后放入新的 `Arc`。因此选中 2,932 行文件时，基础 diff 与当前 model 会短暂或长期各持有一份该文件的行字符串。每行的 `kind` 还是重复 `String`，对 `context`/`addition`/`deletion`/`hunk` 这类有限状态产生不必要的小分配。
 
-建议分成两个可单独回滚的子步骤：
+该批分成两个可单独回滚的子步骤：
 
-- 13A：基础文件表改为逐文件 `Arc<PullRequestDiffFile>`，惰性 model、文件树、完整文件查看和未展开状态共享同一文件；只有 hunk 展开继续创建该文件的 copy-on-write override。
+- 13A（2026-07-26 已实现）：基础文件表已改为逐文件 `Arc<PullRequestDiffFile>`。Provider 详情转换时移动文件内容，不深拷贝行；惰性 model、高亮任务、文件树、完整文件查看和未展开状态共享同一文件。只有 hunk 展开创建该文件的 copy-on-write override，收起后恢复基础 `Arc`。单元测试验证未展开选择与基础文件 `Arc::ptr_eq`，展开后才分离，收起后重新共享。`[Workflow][PR Review][Memory]` 同时新增按 `Arc` 去重的 `owned_detail_*` 字段，覆盖完整 PR、当前 range 和 4 项 range LRU；旧的 `base_*` 字段只表示当前激活详情，不能再被误当作全部 diff owner。
 - 13B：在 Provider 归一化边界之后，把行类型转换为紧凑 enum，避免为每行分配状态字符串；不要让 Slint 或 Provider adapter 重新承担字符串解析。
 
-A/B 重点看 2,932 行文件选中前后 live heap、malloc nodes、组内 RSS 增量，以及 hunk 展开/收起后的 owner 数量。必须验证基础文件、active model 和 override 的引用关系，确保关闭 PR 后全部归零。若 13A/13B 各自没有可测收益，应分别回滚，不因“结构更优雅”强行保留。
+13A 使用仓库内进程隔离基准完成了可重复 A/B。固定输入为 206 个文件、27,369 行、每行 112 bytes；A 组精确复现旧实现的“基础 detail + 选中文件深拷贝”，B 组执行当前逐文件 `Arc` 转换和选择。每个单元格启动 5 个独立测试进程，避免 allocator 高水位在 A/B 之间串扰；下表为中位数：
+
+| Selected file | Variant | Median RSS delta | Median physical-footprint delta | Owned heap |
+| ---: | --- | ---: | ---: | ---: |
+| 2,932 lines | baseline | 6.20 MiB | 5.67 MiB | 5.10 MiB |
+| 2,932 lines | candidate | 5.67 MiB | 5.12 MiB | 4.59 MiB |
+| 2,932 lines | saved | **0.53 MiB (8.6%)** | **0.55 MiB (9.6%)** | **0.51 MiB (10.0%)** |
+| 24,843 lines | baseline | 9.94 MiB | 9.41 MiB | 8.75 MiB |
+| 24,843 lines | candidate | 5.56 MiB | 5.02 MiB | 4.59 MiB |
+| 24,843 lines | saved | **4.38 MiB (44.0%)** | **4.39 MiB (46.7%)** | **4.17 MiB (47.6%)** |
+
+复现命令：
+
+```sh
+scripts/measure-pr-review-memory-ab.sh 5
+```
+
+5 轮原始数据中同一单元格的 RSS delta 离散不超过 32 KiB。RSS/footprint 的下降与确定性 owned-heap 下降方向和数量级一致，因此可以排除一次性内存压缩造成的假阳性。该基准证明 13A 的选中文件 owner 优化；它刻意不创建 Slint 窗口或 renderer，不能被用来声称 PR 整页总 RSS 同比例下降。真实 Provider/renderer 的端到端 A/B 仍应使用同一脱敏响应、固定窗口物理尺寸单独执行。必须继续验证关闭 PR 后全部 owner 归零。13B 只有在独立 A/B 有可测收益时才实施，不因“结构更优雅”强行保留。
 
 ### 12.3 第 14 批候选：高亮 token 改为源码区间（优先级 P1）
 

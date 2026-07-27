@@ -2771,6 +2771,8 @@ export component PrReviewWorkspace inherits Rectangle {
     in property <int> max-code-columns: 0;
     in property <string> longest-code-line;
     in property <int> line-model-revision: 0;
+    in property <int> hunk-scroll-anchor-source-index: -1;
+    in property <int> hunk-scroll-restore-revision: 0;
     in property <int> selected-file-index: -1;
     in property <string> selected-file-path;
     in property <int> selected-file-added-lines: 0;
@@ -2880,6 +2882,10 @@ export component PrReviewWorkspace inherits Rectangle {
     private property <string> diff-selection-focus-side: "";
     private property <bool> diff-selecting: false;
     private property <bool> diff-sel-select-all: false;
+    private property <bool> hunk-scroll-restore-pending: false;
+    private property <length> hunk-scroll-anchor-screen-y: 0px;
+    private property <length> hunk-scroll-anchor-content-y: 0px;
+    private property <bool> hunk-scroll-anchor-resolved: false;
     private property <bool> diff-sel-active: root.diff-sel-anchor-line >= 0 && root.diff-sel-focus-line >= 0;
     private property <bool> diff-sel-anchor-first:
         root.diff-sel-anchor-line < root.diff-sel-focus-line
@@ -5001,15 +5007,67 @@ export component PrReviewWorkspace inherits Rectangle {
                 retry => { root.reload(root.ignore-whitespace); }
             }
 
-            if !root.loading && root.error-text == "": Rectangle {
+            if !root.loading && root.error-text == "": diff-surface := Rectangle {
                 width: parent.width;
                 height: parent.height;
                 background: transparent;
                 private property <int> observed-line-model-revision: root.line-model-revision;
+                private property <int> observed-hunk-scroll-restore-revision:
+                    root.hunk-scroll-restore-revision;
+                // ListView finalizes its virtual row geometry after the model
+                // property changes. Re-apply the same visual anchor over a
+                // bounded number of layout frames so late viewport clamping
+                // cannot move the first revealed row away from the pointer.
+                private property <int> hunk-scroll-restore-attempts: 0;
+
+                function request-hunk-expansion(line-index: int, direction: string, content-y: length) {
+                    root.hunk-scroll-anchor-screen-y = content-y + diff-scroll.viewport-y;
+                    root.hunk-scroll-anchor-resolved = false;
+                    root.hunk-scroll-restore-pending = true;
+                    root.expand-hunk(line-index, direction);
+                }
 
                 changed observed-line-model-revision => {
+                    root.hunk-scroll-restore-pending = false;
+                    root.hunk-scroll-anchor-resolved = false;
                     diff-scroll.viewport-x = 0px;
                     diff-scroll.viewport-y = 0px;
+                }
+
+                changed observed-hunk-scroll-restore-revision => {
+                    if root.hunk-scroll-restore-pending {
+                        diff-surface.hunk-scroll-restore-attempts = 12;
+                    }
+                }
+
+                hunk-scroll-restore-timer := Timer {
+                    interval: 16ms;
+                    running: root.hunk-scroll-restore-pending
+                        && diff-surface.hunk-scroll-restore-attempts > 0;
+                    triggered => {
+                        if root.hunk-scroll-restore-pending
+                            && root.hunk-scroll-anchor-resolved {
+                            let minimum-y = min(
+                                0px,
+                                diff-scroll.visible-height - diff-scroll.viewport-height,
+                            );
+                            let target-y = root.hunk-scroll-anchor-screen-y
+                                - root.hunk-scroll-anchor-content-y;
+                            diff-scroll.viewport-y = max(minimum-y, min(0px, target-y));
+                            if diff-surface.hunk-scroll-restore-attempts <= 1 {
+                                diff-surface.hunk-scroll-restore-attempts = 0;
+                                root.hunk-scroll-restore-pending = false;
+                                root.hunk-scroll-anchor-resolved = false;
+                            } else {
+                                diff-surface.hunk-scroll-restore-attempts -= 1;
+                            }
+                        } else if root.hunk-scroll-restore-pending {
+                            diff-surface.hunk-scroll-restore-attempts -= 1;
+                            if diff-surface.hunk-scroll-restore-attempts <= 0 {
+                                root.hunk-scroll-restore-pending = false;
+                            }
+                        }
+                    }
                 }
 
                 if root.file-list-visible: Rectangle {
@@ -5343,6 +5401,26 @@ export component PrReviewWorkspace inherits Rectangle {
                             vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
 
                             for line[line-index] in root.lines: diff-line-row := Rectangle {
+                                private property <int> observed-hunk-scroll-restore-revision:
+                                    root.hunk-scroll-restore-revision;
+                                function report-hunk-scroll-anchor() {
+                                    if root.hunk-scroll-restore-pending
+                                        && line.source-index == root.hunk-scroll-anchor-source-index {
+                                        root.hunk-scroll-anchor-content-y = self.y;
+                                        root.hunk-scroll-anchor-resolved = true;
+                                    }
+                                }
+                                init => { self.report-hunk-scroll-anchor(); }
+                                changed y => { self.report-hunk-scroll-anchor(); }
+                                // ListView may recycle the delegate at the same
+                                // model index, so neither init nor y necessarily
+                                // changes when a hunk marker becomes line 58.
+                                // The Rust-side revision is emitted after the
+                                // replacement model is installed and provides a
+                                // deterministic post-update anchor report.
+                                changed observed-hunk-scroll-restore-revision => {
+                                    self.report-hunk-scroll-anchor();
+                                }
                                 private property <length> split-code-width:
                                     max(1px, (diff-scroll.visible_width - 1px) / 2 - 70px);
                                 private property <length> split-content-width:
@@ -5397,7 +5475,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                                 }
                                                 hunk-expand-all-touch := TouchArea {
                                                     mouse-cursor: pointer;
-                                                    clicked => { root.expand-hunk(line.source-index, "all"); }
+                                                    clicked => { diff-surface.request-hunk-expansion(line.source-index, "all", diff-line-row.y); }
                                                 }
                                             }
                                             if line.expand-down && !line.expand-all: Rectangle {
@@ -5417,7 +5495,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                                 }
                                                 hunk-expand-down-touch := TouchArea {
                                                     mouse-cursor: pointer;
-                                                    clicked => { root.expand-hunk(line.source-index, "down"); }
+                                                    clicked => { diff-surface.request-hunk-expansion(line.source-index, "down", diff-line-row.y); }
                                                 }
                                             }
                                             if line.expand-up && !line.expand-all: Rectangle {
@@ -5437,7 +5515,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                                 }
                                                 hunk-expand-up-touch := TouchArea {
                                                     mouse-cursor: pointer;
-                                                    clicked => { root.expand-hunk(line.source-index, "up"); }
+                                                    clicked => { diff-surface.request-hunk-expansion(line.source-index, "up", diff-line-row.y); }
                                                 }
                                             }
                                         }
@@ -5713,7 +5791,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                         }
                                         split-hunk-expand-all-touch := TouchArea {
                                             mouse-cursor: pointer;
-                                            clicked => { root.expand-hunk(line.source-index, "all"); }
+                                            clicked => { diff-surface.request-hunk-expansion(line.source-index, "all", diff-line-row.y); }
                                         }
                                     }
                                     split-hunk-expand-down-action := Rectangle {
@@ -5734,7 +5812,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                         }
                                         split-hunk-expand-down-touch := TouchArea {
                                             mouse-cursor: pointer;
-                                            clicked => { root.expand-hunk(line.source-index, "down"); }
+                                            clicked => { diff-surface.request-hunk-expansion(line.source-index, "down", diff-line-row.y); }
                                         }
                                     }
                                     split-hunk-expand-up-action := Rectangle {
@@ -5755,7 +5833,7 @@ export component PrReviewWorkspace inherits Rectangle {
                                         }
                                         split-hunk-expand-up-touch := TouchArea {
                                             mouse-cursor: pointer;
-                                            clicked => { root.expand-hunk(line.source-index, "up"); }
+                                            clicked => { diff-surface.request-hunk-expansion(line.source-index, "up", diff-line-row.y); }
                                         }
                                     }
                                 }

@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -96,18 +97,14 @@ struct OwnedMemoryStats {
 }
 
 struct LazyPrDiffLineModel {
-    file: Arc<PullRequestDiffFile>,
+    file: SharedDiffFile,
     highlighted: Arc<Vec<HighlightedLine>>,
     rows_projection: Vec<DiffRowProjection>,
     rows: RefCell<LazyLineCache>,
 }
 
 impl LazyPrDiffLineModel {
-    fn new(
-        file: Arc<PullRequestDiffFile>,
-        highlighted: Arc<Vec<HighlightedLine>>,
-        split: bool,
-    ) -> Self {
+    fn new(file: SharedDiffFile, highlighted: Arc<Vec<HighlightedLine>>, split: bool) -> Self {
         let rows_projection = diff_row_projection(file.lines.as_slice(), split);
         Self {
             file,
@@ -240,6 +237,31 @@ fn diff_row_projection(lines: &[PullRequestDiffLine], split: bool) -> Vec<DiffRo
     rows
 }
 
+fn hunk_scroll_anchor_source_index(
+    original: &PullRequestDiffFile,
+    updated: &PullRequestDiffFile,
+    original_hunk_index: usize,
+) -> i32 {
+    let Some(original_hunk) = original.lines.get(original_hunk_index) else {
+        return -1;
+    };
+    if original_hunk.kind != "hunk" {
+        return -1;
+    }
+    if original_hunk_index >= updated.lines.len() {
+        return -1;
+    }
+
+    // Keep the clicked model position stable rather than following the hunk
+    // marker itself. "Down" inserts rows before the marker, so the first
+    // revealed row takes this position. "Up" inserts after it, so the marker
+    // stays here. If the separator disappears, the first revealed row shifts
+    // into the same slot. This matches GitHub and, crucially, keeps the anchor
+    // inside the virtual ListView's visible delegate window during repeated
+    // expansions.
+    original_hunk_index as i32
+}
+
 struct LazyLineCache {
     capacity: usize,
     entries: HashMap<usize, WorkflowPrDiffLine>,
@@ -299,31 +321,68 @@ struct ReviewCache {
     project_alias: String,
     request: ReviewRequest,
     metadata: ProjectRepositoryMetadata,
-    all_detail: Arc<PullRequestDiffDetail>,
-    base_detail: Arc<PullRequestDiffDetail>,
-    range_diffs: BoundedCache<Arc<PullRequestDiffDetail>>,
-    expanded_files: HashMap<usize, PullRequestDiffFile>,
+    all_detail: Arc<SharedDiffDetail>,
+    base_detail: Arc<SharedDiffDetail>,
+    range_diffs: BoundedCache<Arc<SharedDiffDetail>>,
+    expanded_files: HashMap<usize, Arc<PullRequestDiffFile>>,
     loaded_large_diffs: HashSet<usize>,
 }
+
+#[derive(Debug)]
+struct SharedDiffDetail {
+    files: Vec<Arc<PullRequestDiffFile>>,
+    added_lines: u32,
+    removed_lines: u32,
+    commit_count: u32,
+    conversation_count: Option<u32>,
+    base_sha: String,
+    head_sha: String,
+    too_many_commits: bool,
+}
+
+impl From<PullRequestDiffDetail> for SharedDiffDetail {
+    fn from(detail: PullRequestDiffDetail) -> Self {
+        Self {
+            files: detail.files.into_iter().map(Arc::new).collect(),
+            added_lines: detail.added_lines,
+            removed_lines: detail.removed_lines,
+            commit_count: detail.commit_count,
+            conversation_count: detail.conversation_count,
+            base_sha: detail.base_sha,
+            head_sha: detail.head_sha,
+            too_many_commits: detail.too_many_commits,
+        }
+    }
+}
+
+type SharedDiffFile = Arc<PullRequestDiffFile>;
 
 impl ReviewCache {
     fn file(&self, index: usize) -> Option<&PullRequestDiffFile> {
         self.expanded_files
             .get(&index)
-            .or_else(|| self.base_detail.files.get(index))
+            .map(AsRef::as_ref)
+            .or_else(|| self.base_detail.files.get(index).map(AsRef::as_ref))
+    }
+
+    fn shared_file(&self, index: usize) -> Option<SharedDiffFile> {
+        if let Some(file) = self.expanded_files.get(&index) {
+            return Some(file.clone());
+        }
+        self.base_detail.files.get(index).cloned()
     }
 
     fn file_mut_cow(&mut self, index: usize) -> Option<&mut PullRequestDiffFile> {
         if !self.expanded_files.contains_key(&index) {
-            let original = self.base_detail.files.get(index)?.clone();
-            self.expanded_files.insert(index, original);
+            let original = self.base_detail.files.get(index)?.as_ref().clone();
+            self.expanded_files.insert(index, Arc::new(original));
         }
-        self.expanded_files.get_mut(&index)
+        self.expanded_files.get_mut(&index).map(Arc::make_mut)
     }
 
-    fn collapse_file(&mut self, index: usize) -> Option<PullRequestDiffFile> {
+    fn collapse_file(&mut self, index: usize) -> Option<SharedDiffFile> {
         self.expanded_files.remove(&index)?;
-        self.base_detail.files.get(index).cloned()
+        self.shared_file(index)
     }
 }
 
@@ -1103,7 +1162,7 @@ impl WorkflowPrReviewController {
                             detail.removed_lines,
                             request.ignore_whitespace,
                         );
-                        let detail = Arc::new(detail);
+                        let detail = Arc::new(SharedDiffDetail::from(detail));
                         if let Ok(mut cache) = controller.cache.lock() {
                             *cache = Some(ReviewCache {
                                 project_alias,
@@ -1511,7 +1570,7 @@ impl WorkflowPrReviewController {
                 ui.set_workflow_pr_review_loading(false);
                 match result {
                     Ok(detail) => {
-                        let detail = Arc::new(detail);
+                        let detail = Arc::new(SharedDiffDetail::from(detail));
                         if let Ok(mut cache) = controller.cache.lock()
                             && let Some(cache) = cache.as_mut()
                         {
@@ -1544,7 +1603,7 @@ impl WorkflowPrReviewController {
         });
     }
 
-    fn activate_commit_range(&self, ui: &MainWindow, detail: Arc<PullRequestDiffDetail>) {
+    fn activate_commit_range(&self, ui: &MainWindow, detail: Arc<SharedDiffDetail>) {
         self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
         self.expand_sequence.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
@@ -1842,7 +1901,7 @@ impl WorkflowPrReviewController {
         let selected = self.cache.lock().ok().and_then(|guard| {
             let cache = guard.as_ref()?;
             Some((
-                Arc::new(cache.file(index)?.clone()),
+                cache.shared_file(index)?,
                 cache.expanded_files.contains_key(&index),
                 cache.loaded_large_diffs.contains(&index),
             ))
@@ -1854,6 +1913,9 @@ impl WorkflowPrReviewController {
         ui.set_workflow_pr_review_has_expandable_hunks(false);
         ui.set_workflow_pr_review_context_expanded(context_expanded);
         let reset_scroll = ui.get_workflow_pr_review_selected_file_path().as_str() != file.path;
+        if reset_scroll {
+            ui.set_workflow_pr_review_hunk_scroll_restore_pending(false);
+        }
         apply_file_header(ui, index, &file);
         if is_large_diff(&file) && !large_diff_loaded {
             self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
@@ -1974,7 +2036,7 @@ impl WorkflowPrReviewController {
         let selected = self.cache.lock().ok().and_then(|cache| {
             let cache = cache.as_ref()?;
             Some((
-                cache.file(selected_index)?.clone(),
+                cache.shared_file(selected_index)?,
                 cache.base_detail.head_sha.clone(),
                 cache.base_detail.base_sha.clone(),
                 cache.metadata.clone(),
@@ -2126,7 +2188,7 @@ impl WorkflowPrReviewController {
         let selected = self.cache.lock().ok().and_then(|cache| {
             let cache = cache.as_ref()?;
             Some((
-                cache.file(selected_index)?.clone(),
+                cache.shared_file(selected_index)?,
                 cache.base_detail.head_sha.clone(),
                 cache.base_detail.base_sha.clone(),
                 cache.metadata.clone(),
@@ -2274,9 +2336,11 @@ impl WorkflowPrReviewController {
     ) {
         let updated = self.cache.lock().ok().and_then(|mut cache| {
             let cache = cache.as_mut()?;
-            let file = cache.file_mut_cow(file_index)?;
-            (expand_all_hunk_context_from_sources(file, base_source, head_source) > 0)
-                .then(|| file.clone())
+            let updated = {
+                let file = cache.file_mut_cow(file_index)?;
+                expand_all_hunk_context_from_sources(file, base_source, head_source) > 0
+            };
+            updated.then(|| cache.shared_file(file_index)).flatten()
         });
         let Some(file) = updated else {
             ui.set_workflow_pr_review_code_loading(false);
@@ -2320,7 +2384,7 @@ impl WorkflowPrReviewController {
         let selected = self.cache.lock().ok().and_then(|cache| {
             let cache = cache.as_ref()?;
             Some((
-                cache.file(selected_index)?.clone(),
+                cache.shared_file(selected_index)?,
                 cache.base_detail.head_sha.clone(),
                 cache.base_detail.base_sha.clone(),
                 cache.metadata.clone(),
@@ -2395,7 +2459,7 @@ impl WorkflowPrReviewController {
         &self,
         ui: &MainWindow,
         selected_index: usize,
-        file: PullRequestDiffFile,
+        file: SharedDiffFile,
         source: String,
     ) {
         let full_file = Arc::new(full_source_file(&file, source.as_str()));
@@ -2454,25 +2518,31 @@ impl WorkflowPrReviewController {
         base_source: &str,
         head_source: &str,
     ) {
-        let updated_file = self.cache.lock().ok().and_then(|mut cache| {
+        let updated = self.cache.lock().ok().and_then(|mut cache| {
             let cache = cache.as_mut()?;
-            let file = cache.file_mut_cow(file_index)?;
+            let original = cache.shared_file(file_index)?;
             let limit = if direction == HunkExpansionDirection::All {
                 i32::MAX as usize
             } else {
                 HUNK_CONTEXT_PAGE_SIZE
             };
-            expand_hunk_context_from_sources(
-                file,
-                line_index,
-                base_source,
-                head_source,
-                limit,
-                direction,
-            )
-            .then(|| file.clone())
+            let updated = {
+                let file = cache.file_mut_cow(file_index)?;
+                expand_hunk_context_from_sources(
+                    file,
+                    line_index,
+                    base_source,
+                    head_source,
+                    limit,
+                    direction,
+                )
+            };
+            let updated_file = updated.then(|| cache.shared_file(file_index)).flatten()?;
+            let anchor_source_index =
+                hunk_scroll_anchor_source_index(&original, &updated_file, line_index);
+            Some((updated_file, anchor_source_index))
         });
-        let Some(file) = updated_file else {
+        let Some((file, anchor_source_index)) = updated else {
             log::warn!(
                 "[Workflow][PR Review] Source loaded but hunk context could not be inserted: file_index={} line_index={}",
                 file_index,
@@ -2483,6 +2553,8 @@ impl WorkflowPrReviewController {
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.remove(file.path.as_str());
         }
+        ui.set_workflow_pr_review_hunk_scroll_anchor_source_index(anchor_source_index);
+        ui.set_workflow_pr_review_hunk_scroll_restore_pending(true);
         ui.set_workflow_pr_review_error("".into());
         log::info!(
             "[Workflow][PR Review] Expanded hunk context: file={} line_index={} direction={:?} limit={}",
@@ -2494,7 +2566,7 @@ impl WorkflowPrReviewController {
         self.select_file(ui, file_index as i32);
     }
 
-    fn apply_detail(&self, ui: &MainWindow, detail: &PullRequestDiffDetail) {
+    fn apply_detail(&self, ui: &MainWindow, detail: &SharedDiffDetail) {
         apply_detail_summary(ui, detail);
         if let Ok(mut selected) = self.selected_extensions.lock() {
             *selected = extension_counts(detail.files.as_slice())
@@ -2581,7 +2653,7 @@ impl WorkflowPrReviewController {
         if !crate::memory_diagnostics::diagnostics_enabled() {
             return;
         }
-        let (base_stats, override_stats) = self
+        let (base_stats, override_stats, owned_detail_entries, owned_detail_stats) = self
             .cache
             .lock()
             .ok()
@@ -2590,9 +2662,11 @@ impl WorkflowPrReviewController {
                     (
                         diff_storage_stats(&cache.base_detail.files),
                         diff_override_storage_stats(&cache.expanded_files),
+                        owned_diff_storage_stats(cache),
                     )
                 })
             })
+            .map(|(base, overrides, (entries, owned))| (base, overrides, entries, owned))
             .unwrap_or_default();
         let (highlight_entries, highlight_stats) = self
             .highlighted_files
@@ -2610,12 +2684,17 @@ impl WorkflowPrReviewController {
             .map(|resources| resources.is_some())
             .unwrap_or(false);
         log::info!(
-            "[Workflow][PR Review][Memory] reason={} base_files={} base_lines={} base_text_bytes={} base_heap_estimate_bytes={} override_files={} override_lines={} override_text_bytes={} override_heap_estimate_bytes={} highlight_resources_loaded={} highlight_cache_entries={} highlight_lines={} highlight_tokens={} highlight_text_bytes={} highlight_heap_estimate_bytes={} source_cache_entries={} source_text_bytes={} source_heap_estimate_bytes={}",
+            "[Workflow][PR Review][Memory] reason={} base_files={} base_lines={} base_text_bytes={} base_heap_estimate_bytes={} owned_detail_entries={} owned_detail_files={} owned_detail_lines={} owned_detail_text_bytes={} owned_detail_heap_estimate_bytes={} override_files={} override_lines={} override_text_bytes={} override_heap_estimate_bytes={} highlight_resources_loaded={} highlight_cache_entries={} highlight_lines={} highlight_tokens={} highlight_text_bytes={} highlight_heap_estimate_bytes={} source_cache_entries={} source_text_bytes={} source_heap_estimate_bytes={}",
             reason,
             base_stats.items,
             base_stats.children,
             base_stats.text_bytes,
             base_stats.estimated_heap_bytes,
+            owned_detail_entries,
+            owned_detail_stats.items,
+            owned_detail_stats.children,
+            owned_detail_stats.text_bytes,
+            owned_detail_stats.estimated_heap_bytes,
             override_stats.items,
             override_stats.children,
             override_stats.text_bytes,
@@ -2638,13 +2717,17 @@ fn commit_detail_source_tab(tab: i32) -> Option<i32> {
     matches!(tab, 0 | 1).then_some(tab)
 }
 
-fn diff_storage_stats(files: &[PullRequestDiffFile]) -> OwnedMemoryStats {
+fn diff_storage_stats<T>(files: &[T]) -> OwnedMemoryStats
+where
+    T: Borrow<PullRequestDiffFile>,
+{
     let mut stats = OwnedMemoryStats {
         items: files.len(),
         estimated_heap_bytes: std::mem::size_of_val(files),
         ..OwnedMemoryStats::default()
     };
     for file in files {
+        let file = file.borrow();
         stats.text_bytes = stats
             .text_bytes
             .saturating_add(file.path.len())
@@ -2675,10 +2758,12 @@ fn diff_storage_stats(files: &[PullRequestDiffFile]) -> OwnedMemoryStats {
     stats
 }
 
-fn diff_override_storage_stats(files: &HashMap<usize, PullRequestDiffFile>) -> OwnedMemoryStats {
+fn diff_override_storage_stats(
+    files: &HashMap<usize, Arc<PullRequestDiffFile>>,
+) -> OwnedMemoryStats {
     let mut stats = OwnedMemoryStats {
         estimated_heap_bytes: files.capacity().saturating_mul(
-            std::mem::size_of::<usize>() + std::mem::size_of::<PullRequestDiffFile>(),
+            std::mem::size_of::<usize>() + std::mem::size_of::<Arc<PullRequestDiffFile>>(),
         ),
         ..OwnedMemoryStats::default()
     };
@@ -2692,6 +2777,33 @@ fn diff_override_storage_stats(files: &HashMap<usize, PullRequestDiffFile>) -> O
             .saturating_add(file_stats.estimated_heap_bytes);
     }
     stats
+}
+
+fn owned_diff_storage_stats(cache: &ReviewCache) -> (usize, OwnedMemoryStats) {
+    let mut seen = HashSet::new();
+    let mut stats = OwnedMemoryStats::default();
+    let details = std::iter::once(&cache.all_detail)
+        .chain(std::iter::once(&cache.base_detail))
+        .chain(cache.range_diffs.entries.values());
+    for detail in details {
+        if !seen.insert(Arc::as_ptr(detail) as usize) {
+            continue;
+        }
+        let detail_stats = diff_storage_stats(&detail.files);
+        stats.items = stats.items.saturating_add(detail_stats.items);
+        stats.children = stats.children.saturating_add(detail_stats.children);
+        stats.text_bytes = stats
+            .text_bytes
+            .saturating_add(detail_stats.text_bytes)
+            .saturating_add(detail.base_sha.len())
+            .saturating_add(detail.head_sha.len());
+        stats.estimated_heap_bytes = stats
+            .estimated_heap_bytes
+            .saturating_add(detail_stats.estimated_heap_bytes)
+            .saturating_add(detail.base_sha.capacity())
+            .saturating_add(detail.head_sha.capacity());
+    }
+    (seen.len(), stats)
 }
 
 fn highlighted_cache_stats(cache: &BoundedCache<Arc<Vec<HighlightedLine>>>) -> OwnedMemoryStats {
@@ -2752,8 +2864,12 @@ fn apply_review_header(ui: &MainWindow, request: &ReviewRequest) {
     ui.set_workflow_pr_review_ignore_whitespace(request.ignore_whitespace);
 }
 
-fn apply_detail_summary(ui: &MainWindow, detail: &PullRequestDiffDetail) {
-    let files = detail.files.iter().map(to_slint_file).collect::<Vec<_>>();
+fn apply_detail_summary(ui: &MainWindow, detail: &SharedDiffDetail) {
+    let files = detail
+        .files
+        .iter()
+        .map(|file| to_slint_file(file))
+        .collect::<Vec<_>>();
     ui.set_workflow_pr_review_files(ModelRc::new(VecModel::from(files)));
     ui.set_workflow_pr_review_added_lines(detail.added_lines as i32);
     ui.set_workflow_pr_review_removed_lines(detail.removed_lines as i32);
@@ -2804,7 +2920,7 @@ fn is_large_diff(file: &PullRequestDiffFile) -> bool {
 
 fn apply_highlighted_file(
     ui: &MainWindow,
-    file: Arc<PullRequestDiffFile>,
+    file: SharedDiffFile,
     highlighted: Arc<Vec<HighlightedLine>>,
     reset_scroll: bool,
 ) {
@@ -2838,6 +2954,13 @@ fn apply_highlighted_file(
                 .enumerate()
                 .any(|(index, _)| hunk_is_expandable(&file, index)),
     );
+    if ui.get_workflow_pr_review_hunk_scroll_restore_pending() {
+        ui.set_workflow_pr_review_hunk_scroll_restore_pending(false);
+        ui.set_workflow_pr_review_hunk_scroll_restore_revision(
+            ui.get_workflow_pr_review_hunk_scroll_restore_revision()
+                .wrapping_add(1),
+        );
+    }
     if reset_scroll {
         ui.set_workflow_pr_review_line_model_revision(
             ui.get_workflow_pr_review_line_model_revision()
@@ -3755,17 +3878,21 @@ struct FileTreeNode {
     files: Vec<usize>,
 }
 
-fn build_tree_items(
-    files: &[PullRequestDiffFile],
+fn build_tree_items<T>(
+    files: &[T],
     query: &str,
     collapsed: &HashSet<String>,
     selected_extensions: &HashSet<String>,
     only_manifest_files: bool,
     show_viewed_files: bool,
-) -> Vec<WorkflowPrTreeItem> {
+) -> Vec<WorkflowPrTreeItem>
+where
+    T: Borrow<PullRequestDiffFile>,
+{
     let normalized_query = query.trim().to_ascii_lowercase();
     let mut root = FileTreeNode::default();
     for (index, file) in files.iter().enumerate() {
+        let file = file.borrow();
         if !selected_extensions.contains(file_extension(file.path.as_str()).as_str())
             || (only_manifest_files && !is_manifest_file(file.path.as_str()))
             || (!show_viewed_files && file.viewed)
@@ -3820,9 +3947,13 @@ fn file_extension(path: &str) -> String {
     "No extension".to_string()
 }
 
-fn extension_counts(files: &[PullRequestDiffFile]) -> BTreeMap<String, usize> {
+fn extension_counts<T>(files: &[T]) -> BTreeMap<String, usize>
+where
+    T: Borrow<PullRequestDiffFile>,
+{
     let mut counts = BTreeMap::new();
     for file in files {
+        let file = file.borrow();
         *counts
             .entry(file_extension(file.path.as_str()))
             .or_insert(0) += 1;
@@ -3873,15 +4004,17 @@ fn is_manifest_file(path: &str) -> bool {
         || lower.ends_with(".vbproj")
 }
 
-fn flatten_tree(
+fn flatten_tree<T>(
     node: &FileTreeNode,
     parent_path: &str,
     depth: i32,
-    files: &[PullRequestDiffFile],
+    files: &[T],
     collapsed: &HashSet<String>,
     force_expanded: bool,
     items: &mut Vec<WorkflowPrTreeItem>,
-) {
+) where
+    T: Borrow<PullRequestDiffFile>,
+{
     for (name, child) in &node.directories {
         let path = if parent_path.is_empty() {
             name.clone()
@@ -3915,9 +4048,10 @@ fn flatten_tree(
     }
 
     let mut file_indexes = node.files.clone();
-    file_indexes.sort_by(|left, right| files[*left].path.cmp(&files[*right].path));
+    file_indexes
+        .sort_by(|left, right| files[*left].borrow().path.cmp(&files[*right].borrow().path));
     for index in file_indexes {
-        let file = &files[index];
+        let file = files[index].borrow();
         let name = file.path.rsplit('/').next().unwrap_or(file.path.as_str());
         items.push(WorkflowPrTreeItem {
             kind: "file".into(),
@@ -4551,23 +4685,24 @@ fn reset_review_ui(ui: &MainWindow) {
 mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
+    use std::time::Duration;
 
     use slint::{Model, ModelRc, VecModel};
 
     use super::{
         BoundedCache, DiffRowProjection, HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection,
         LARGE_DIFF_BYTE_THRESHOLD, LARGE_DIFF_LINE_THRESHOLD, LazyPrDiffLineModel,
-        RANGE_DIFF_CACHE_CAPACITY, ReviewCache, ReviewRequest, VISIBLE_LINE_CACHE_CAPACITY,
-        build_tree_items, chrono_commit_index_to_display, commit_detail_source_tab,
-        commit_index_by_sha, commit_message_body_height, commit_range_label,
-        commit_tab_expand_layout_extra, conversation_card_row_height, conversation_content_height,
-        conversation_items_connect, diff_row_projection, diff_selection_text,
-        display_commit_range_to_chrono, empty_token_model, expand_all_hunk_context,
-        expand_all_hunk_context_from_sources, expand_hunk_context,
+        RANGE_DIFF_CACHE_CAPACITY, ReviewCache, ReviewRequest, SharedDiffDetail,
+        VISIBLE_LINE_CACHE_CAPACITY, build_tree_items, chrono_commit_index_to_display,
+        commit_detail_source_tab, commit_index_by_sha, commit_message_body_height,
+        commit_range_label, commit_tab_expand_layout_extra, conversation_card_row_height,
+        conversation_content_height, conversation_items_connect, diff_row_projection,
+        diff_selection_text, diff_storage_stats, display_commit_range_to_chrono, empty_token_model,
+        expand_all_hunk_context, expand_all_hunk_context_from_sources, expand_hunk_context,
         expand_hunk_context_from_sources, full_source_file, hunk_can_expand_all,
-        hunk_can_expand_down, hunk_is_expandable, is_large_diff, range_covers_all_commits,
-        refresh_commit_group_expand_extras, resolve_diff_selection_hit, restore_original_diff,
-        slice_display_columns,
+        hunk_can_expand_down, hunk_is_expandable, hunk_scroll_anchor_source_index, is_large_diff,
+        owned_diff_storage_stats, range_covers_all_commits, refresh_commit_group_expand_extras,
+        resolve_diff_selection_hit, restore_original_diff, slice_display_columns,
     };
     use crate::git::{
         PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail, PullRequestDiffFile,
@@ -4875,9 +5010,9 @@ mod tests {
     }
 
     #[test]
-    fn clones_only_the_file_that_receives_expanded_context() {
+    fn shares_selected_base_files_and_clones_only_expanded_context() {
         let original = file("src/lib.rs");
-        let base_detail = Arc::new(PullRequestDiffDetail {
+        let base_detail = Arc::new(SharedDiffDetail::from(PullRequestDiffDetail {
             files: vec![original.clone(), file("src/main.rs")],
             added_lines: 2,
             removed_lines: 0,
@@ -4887,7 +5022,7 @@ mod tests {
             head_sha: "head".to_string(),
             start_sha: "start".to_string(),
             too_many_commits: false,
-        });
+        }));
         let mut cache = ReviewCache {
             project_alias: "usher".to_string(),
             request: ReviewRequest {
@@ -4911,6 +5046,9 @@ mod tests {
             loaded_large_diffs: HashSet::new(),
         };
 
+        let selected = cache.shared_file(0).expect("selected base file");
+        assert!(Arc::ptr_eq(&selected, &base_detail.files[0]));
+
         cache
             .file_mut_cow(0)
             .expect("first file")
@@ -4924,9 +5062,225 @@ mod tests {
 
         assert_eq!(cache.expanded_files.len(), 1);
         assert!(base_detail.files[0].lines.is_empty());
-        assert_eq!(cache.file(1), base_detail.files.get(1));
-        assert_eq!(cache.collapse_file(0), Some(original));
+        let expanded = cache.shared_file(0).expect("expanded file");
+        assert!(!Arc::ptr_eq(&expanded, &base_detail.files[0]));
+        assert_eq!(expanded.lines.len(), 1);
+        assert_eq!(cache.file(1), base_detail.files.get(1).map(AsRef::as_ref));
+        let restored = cache.collapse_file(0).expect("restored base file");
+        assert_eq!(restored.as_ref(), &original);
+        assert!(Arc::ptr_eq(&restored, &base_detail.files[0]));
         assert!(cache.expanded_files.is_empty());
+    }
+
+    #[test]
+    fn memory_stats_count_unique_full_and_range_details() {
+        let full_detail = Arc::new(SharedDiffDetail::from(PullRequestDiffDetail {
+            files: vec![file("src/lib.rs")],
+            added_lines: 1,
+            removed_lines: 0,
+            commit_count: 2,
+            conversation_count: Some(0),
+            base_sha: "base".to_string(),
+            head_sha: "head".to_string(),
+            start_sha: "start".to_string(),
+            too_many_commits: false,
+        }));
+        let range_detail = Arc::new(SharedDiffDetail::from(PullRequestDiffDetail {
+            files: vec![file("src/range.rs")],
+            added_lines: 1,
+            removed_lines: 0,
+            commit_count: 1,
+            conversation_count: None,
+            base_sha: "range-base".to_string(),
+            head_sha: "range-head".to_string(),
+            start_sha: String::new(),
+            too_many_commits: false,
+        }));
+        let mut cache = ReviewCache {
+            project_alias: "usher".to_string(),
+            request: ReviewRequest {
+                number: "1".to_string(),
+                title: String::new(),
+                author: String::new(),
+                source_branch: String::new(),
+                target_branch: String::new(),
+                updated_at: String::new(),
+                ignore_whitespace: false,
+            },
+            metadata: ProjectRepositoryMetadata {
+                repo_project_id: "1".to_string(),
+                repo_type: "github".to_string(),
+                remote_repo: "https://github.com/example/usher".to_string(),
+            },
+            all_detail: full_detail,
+            base_detail: range_detail.clone(),
+            range_diffs: BoundedCache::new(RANGE_DIFF_CACHE_CAPACITY),
+            expanded_files: HashMap::new(),
+            loaded_large_diffs: HashSet::new(),
+        };
+        cache
+            .range_diffs
+            .insert("base:head".to_string(), range_detail);
+
+        let (entries, stats) = owned_diff_storage_stats(&cache);
+        assert_eq!(entries, 2);
+        assert_eq!(stats.items, 2);
+        assert!(stats.text_bytes >= "baseheadrange-baserange-head".len());
+    }
+
+    #[test]
+    #[ignore = "run through scripts/measure-pr-review-memory-ab.sh"]
+    fn selected_file_memory_ab_sample() {
+        const TOTAL_FILES: usize = 206;
+        const TOTAL_LINES: usize = 27_369;
+        const CONTENT_BYTES: usize = 112;
+
+        let mode = std::env::var("USHER_PR_MEMORY_AB_MODE")
+            .expect("set USHER_PR_MEMORY_AB_MODE=baseline or candidate");
+        let selected_lines = std::env::var("USHER_PR_MEMORY_AB_SELECTED_LINES")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(2_932);
+        assert!(selected_lines <= TOTAL_LINES);
+
+        let _ = crate::memory_diagnostics::process_memory_snapshot();
+        let before = crate::memory_diagnostics::process_memory_snapshot();
+        let detail = synthetic_diff_detail(TOTAL_FILES, TOTAL_LINES, selected_lines, CONTENT_BYTES);
+
+        let (after, owned_heap_bytes, checksum) = match mode.as_str() {
+            "baseline" => {
+                let detail = Arc::new(detail);
+                let selected =
+                    Arc::new(detail.files.first().expect("selected fixture file").clone());
+                let base_stats = diff_storage_stats(&detail.files);
+                let selected_stats = diff_storage_stats(std::slice::from_ref(selected.as_ref()));
+                let owned_heap_bytes = base_stats
+                    .estimated_heap_bytes
+                    .saturating_add(selected_stats.estimated_heap_bytes);
+                let checksum = touch_diff_files(&detail.files)
+                    .saturating_add(touch_diff_files(std::slice::from_ref(selected.as_ref())));
+                std::hint::black_box((&detail, &selected, checksum));
+                std::thread::sleep(Duration::from_millis(50));
+                (
+                    crate::memory_diagnostics::process_memory_snapshot(),
+                    owned_heap_bytes,
+                    checksum,
+                )
+            }
+            "candidate" => {
+                let detail = Arc::new(SharedDiffDetail::from(detail));
+                let selected = detail.files.first().expect("selected fixture file").clone();
+                let owned_heap_bytes = diff_storage_stats(&detail.files).estimated_heap_bytes;
+                let checksum = touch_diff_files(&detail.files);
+                std::hint::black_box((&detail, &selected, checksum));
+                std::thread::sleep(Duration::from_millis(50));
+                (
+                    crate::memory_diagnostics::process_memory_snapshot(),
+                    owned_heap_bytes,
+                    checksum,
+                )
+            }
+            other => panic!("unsupported USHER_PR_MEMORY_AB_MODE={other}"),
+        };
+
+        println!(
+            "PR_MEMORY_AB mode={} selected_lines={} total_files={} total_lines={} content_bytes={} rss_before_bytes={} rss_after_bytes={} rss_delta_bytes={} footprint_before_bytes={} footprint_after_bytes={} footprint_delta_bytes={} owned_heap_bytes={} checksum={}",
+            mode,
+            selected_lines,
+            TOTAL_FILES,
+            TOTAL_LINES,
+            CONTENT_BYTES,
+            before.rss_current_bytes,
+            after.rss_current_bytes,
+            signed_byte_delta(after.rss_current_bytes, before.rss_current_bytes),
+            before.phys_footprint_bytes,
+            after.phys_footprint_bytes,
+            signed_byte_delta(after.phys_footprint_bytes, before.phys_footprint_bytes),
+            owned_heap_bytes,
+            checksum,
+        );
+    }
+
+    fn synthetic_diff_detail(
+        total_files: usize,
+        total_lines: usize,
+        selected_lines: usize,
+        content_bytes: usize,
+    ) -> PullRequestDiffDetail {
+        let remaining_lines = total_lines.saturating_sub(selected_lines);
+        let remaining_files = total_files.saturating_sub(1);
+        let lines_per_file = remaining_lines / remaining_files.max(1);
+        let extra_lines = remaining_lines % remaining_files.max(1);
+        let files = (0..total_files)
+            .map(|file_index| {
+                let line_count = if file_index == 0 {
+                    selected_lines
+                } else {
+                    lines_per_file + usize::from(file_index <= extra_lines)
+                };
+                PullRequestDiffFile {
+                    path: format!("src/fixture/file-{file_index:03}.rs"),
+                    old_path: format!("src/fixture/file-{file_index:03}.rs"),
+                    change_type: "edit_file".to_string(),
+                    added_lines: line_count as u32,
+                    removed_lines: 0,
+                    viewed: false,
+                    lines: (0..line_count)
+                        .map(|line_index| {
+                            let prefix = format!("{file_index:03}:{line_index:05}:");
+                            let mut content = String::with_capacity(content_bytes);
+                            content.push_str(prefix.as_str());
+                            content.extend(std::iter::repeat_n(
+                                'x',
+                                content_bytes.saturating_sub(prefix.len()),
+                            ));
+                            PullRequestDiffLine {
+                                old_line: line_index as i32 + 1,
+                                new_line: line_index as i32 + 1,
+                                kind: "context".to_string(),
+                                content,
+                            }
+                        })
+                        .collect(),
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            files.iter().map(|file| file.lines.len()).sum::<usize>(),
+            total_lines
+        );
+        PullRequestDiffDetail {
+            files,
+            added_lines: total_lines as u32,
+            removed_lines: 0,
+            commit_count: 12,
+            conversation_count: Some(8),
+            base_sha: "base-fixture".to_string(),
+            head_sha: "head-fixture".to_string(),
+            start_sha: "start-fixture".to_string(),
+            too_many_commits: false,
+        }
+    }
+
+    fn touch_diff_files<T>(files: &[T]) -> u64
+    where
+        T: std::borrow::Borrow<PullRequestDiffFile>,
+    {
+        files
+            .iter()
+            .flat_map(|file| file.borrow().lines.iter())
+            .flat_map(|line| line.content.as_bytes().iter())
+            .fold(0_u64, |checksum, byte| {
+                checksum.wrapping_add(u64::from(*byte))
+            })
+    }
+
+    fn signed_byte_delta(after: u64, before: u64) -> i64 {
+        if after >= before {
+            after.saturating_sub(before).min(i64::MAX as u64) as i64
+        } else {
+            -(before.saturating_sub(after).min(i64::MAX as u64) as i64)
+        }
     }
 
     #[test]
@@ -5071,6 +5425,199 @@ mod tests {
         assert_eq!(file.lines[5].new_line, 15);
         assert_eq!(file.lines[6].kind, "hunk");
         assert!(hunk_can_expand_down(&file, 6));
+    }
+
+    #[test]
+    fn hunk_scroll_anchor_uses_the_first_revealed_row_for_down_expansion() {
+        let mut original = file("src/lib.rs");
+        original.lines = vec![
+            PullRequestDiffLine {
+                old_line: 10,
+                new_line: 10,
+                kind: "context".to_string(),
+                content: "line 10".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -40,1 +40,1 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 40,
+                new_line: 40,
+                kind: "context".to_string(),
+                content: "line 40".to_string(),
+            },
+        ];
+        let source = (1..=40)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut updated = original.clone();
+        assert!(expand_hunk_context(
+            &mut updated,
+            1,
+            source.as_str(),
+            5,
+            HunkExpansionDirection::Down,
+        ));
+
+        assert_eq!(
+            hunk_scroll_anchor_source_index(&original, &updated, 1),
+            1,
+            "the first row revealed downward must replace the clicked control"
+        );
+    }
+
+    #[test]
+    fn hunk_scroll_anchor_does_not_depend_on_wrapped_row_estimates() {
+        let mut original = file("src/lib.rs");
+        original.lines = vec![
+            PullRequestDiffLine {
+                old_line: 10,
+                new_line: 10,
+                kind: "context".to_string(),
+                content: "short".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -40,1 +40,1 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 40,
+                new_line: 40,
+                kind: "context".to_string(),
+                content: "short".to_string(),
+            },
+        ];
+        let source = (1..=40)
+            .map(|line| format!("{line:02}abcdefghijklmnopqr"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut updated = original.clone();
+        assert!(expand_hunk_context(
+            &mut updated,
+            1,
+            source.as_str(),
+            2,
+            HunkExpansionDirection::Down,
+        ));
+
+        assert_eq!(
+            hunk_scroll_anchor_source_index(&original, &updated, 1),
+            1,
+            "visual anchoring must use the stable insertion slot, not wrapped-row estimates"
+        );
+    }
+
+    #[test]
+    fn hunk_scroll_anchor_keeps_each_clicked_slot_during_repeated_down_expansion() {
+        let mut file = file("src/lib.rs");
+        file.lines = vec![
+            PullRequestDiffLine {
+                old_line: 10,
+                new_line: 10,
+                kind: "context".to_string(),
+                content: "line 10".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -80,1 +80,1 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 80,
+                new_line: 80,
+                kind: "context".to_string(),
+                content: "line 80".to_string(),
+            },
+        ];
+        let source = (1..=80)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let first_original = file.clone();
+        assert!(expand_hunk_context(
+            &mut file,
+            1,
+            source.as_str(),
+            5,
+            HunkExpansionDirection::Down,
+        ));
+        assert_eq!(
+            hunk_scroll_anchor_source_index(&first_original, &file, 1),
+            1
+        );
+        assert_eq!(file.lines[1].new_line, 11);
+
+        let second_hunk_index = file
+            .lines
+            .iter()
+            .position(|line| line.kind == "hunk")
+            .expect("separator should survive the first partial expansion");
+        let second_original = file.clone();
+        assert!(expand_hunk_context(
+            &mut file,
+            second_hunk_index,
+            source.as_str(),
+            5,
+            HunkExpansionDirection::Down,
+        ));
+        assert_eq!(
+            hunk_scroll_anchor_source_index(&second_original, &file, second_hunk_index),
+            second_hunk_index as i32
+        );
+        assert_eq!(file.lines[second_hunk_index].new_line, 16);
+    }
+
+    #[test]
+    fn hunk_scroll_anchor_stays_put_when_the_separator_is_removed() {
+        let mut original = file("src/lib.rs");
+        original.lines = vec![
+            PullRequestDiffLine {
+                old_line: 57,
+                new_line: 57,
+                kind: "context".to_string(),
+                content: "line 57".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -62,1 +62,1 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 62,
+                new_line: 62,
+                kind: "context".to_string(),
+                content: "line 62".to_string(),
+            },
+        ];
+        let source = (1..=62)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut updated = original.clone();
+        assert!(expand_hunk_context_from_sources(
+            &mut updated,
+            1,
+            source.as_str(),
+            source.as_str(),
+            i32::MAX as usize,
+            HunkExpansionDirection::All,
+        ));
+        assert!(!updated.lines.iter().any(|line| line.kind == "hunk"));
+        assert_eq!(
+            updated.lines.get(1).map(|line| line.new_line),
+            Some(58),
+            "the first revealed row must replace the line-57 hunk control"
+        );
+        assert_eq!(hunk_scroll_anchor_source_index(&original, &updated, 1), 1);
     }
 
     #[test]
