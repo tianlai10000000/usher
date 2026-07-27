@@ -1,6 +1,6 @@
 [package]
 name = "usher"
-version = "0.0.7-alpha.1"
+version = "0.0.7-alpha.2"
 edition = "2024"
 repository = "https://github.com/tianlai10000000/usher"
 authors = ["yuankai <tanlai10000000@gmail.com>"]
