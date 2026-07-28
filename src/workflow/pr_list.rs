@@ -1,6 +1,6 @@
 use chrono::{DateTime, Datelike, FixedOffset, Timelike};
 
-use crate::git::{PullRequestItem, PullRequestState, get_pull_requests};
+use crate::git::{PullRequestFilters, PullRequestItem, PullRequestState, get_pull_requests};
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{MainWindow, WorkflowPullRequestItem};
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -14,14 +14,22 @@ const PAGE_SIZE: u32 = 10;
 pub(crate) struct WorkflowPrListController {
     context: Arc<Mutex<Option<ProjectRepositoryMetadata>>>,
     visited_pages: Arc<Mutex<HashMap<u32, Vec<PullRequestItem>>>>,
+    filters: Arc<Mutex<PullRequestFilters>>,
     request_sequence: Arc<AtomicU64>,
+    count_sequence: Arc<AtomicU64>,
 }
 
 pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
     let controller = WorkflowPrListController {
         context: Arc::new(Mutex::new(None)),
         visited_pages: Arc::new(Mutex::new(HashMap::new())),
+        filters: Arc::new(Mutex::new(PullRequestFilters {
+            reviews: "all".to_string(),
+            assignee: "any".to_string(),
+            sort: "newest".to_string(),
+        })),
         request_sequence: Arc::new(AtomicU64::new(0)),
+        count_sequence: Arc::new(AtomicU64::new(0)),
     };
 
     let state_controller = controller.clone();
@@ -48,14 +56,70 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
         page_controller.load_page(&ui, state, page.max(1) as u32);
     });
 
+    let review_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_list_review_filter_change(move |value| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if let Ok(mut filters) = review_controller.filters.lock() {
+            filters.reviews = value.to_string();
+        }
+        ui.set_workflow_pr_list_review_filter(value);
+        let state = PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
+            .unwrap_or(PullRequestState::Open);
+        review_controller.clear_and_load_page(&ui, state, 1);
+        review_controller.refresh_state_totals(&ui);
+    });
+
+    let assignee_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_list_assignee_filter_change(move |value| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if let Ok(mut filters) = assignee_controller.filters.lock() {
+            filters.assignee = value.to_string();
+        }
+        ui.set_workflow_pr_list_assignee_filter(value);
+        let state = PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
+            .unwrap_or(PullRequestState::Open);
+        assignee_controller.clear_and_load_page(&ui, state, 1);
+        assignee_controller.refresh_state_totals(&ui);
+    });
+
+    let sort_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_list_sort_filter_change(move |value| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if let Ok(mut filters) = sort_controller.filters.lock() {
+            filters.sort = value.to_string();
+        }
+        ui.set_workflow_pr_list_sort_filter(value);
+        let state = PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
+            .unwrap_or(PullRequestState::Open);
+        sort_controller.clear_and_load_page(&ui, state, 1);
+        sort_controller.refresh_state_totals(&ui);
+    });
+
     controller
 }
 
 impl WorkflowPrListController {
     pub(crate) fn select_project(&self, ui: &MainWindow, project_alias: String) {
         let request = self.request_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        self.count_sequence.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut context) = self.context.lock() {
             *context = None;
+        }
+        if let Ok(mut filters) = self.filters.lock() {
+            *filters = PullRequestFilters {
+                reviews: "all".to_string(),
+                assignee: "any".to_string(),
+                sort: "newest".to_string(),
+            };
         }
         clear_pages(&self.visited_pages);
         reset_ui(ui);
@@ -91,6 +155,7 @@ impl WorkflowPrListController {
                         ui.set_workflow_pr_repo_project_id(metadata.repo_project_id.into());
                         ui.set_workflow_pr_repo_type(metadata.repo_type.into());
                         controller_for_ui.clear_and_load_page(&ui, PullRequestState::Open, 1);
+                        controller_for_ui.refresh_state_totals(&ui);
                     });
                 }
                 Err(error) => {
@@ -118,6 +183,69 @@ impl WorkflowPrListController {
         self.load_page(ui, state, page);
     }
 
+    fn refresh_state_totals(&self, ui: &MainWindow) {
+        let context = self.context.lock().ok().and_then(|guard| guard.clone());
+        let Some(context) = context else {
+            return;
+        };
+        let filters = self
+            .filters
+            .lock()
+            .map(|filters| filters.clone())
+            .unwrap_or_default();
+        let request = self.count_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        ui.set_workflow_pr_list_open_total(-1);
+        ui.set_workflow_pr_list_closed_total(-1);
+
+        let count_sequence = self.count_sequence.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let open_request = get_pull_requests(
+                context.repo_type.as_str(),
+                context.repo_project_id.as_str(),
+                context.remote_repo.as_str(),
+                Some(PullRequestState::Open),
+                &filters,
+                1,
+                1,
+            );
+            let closed_request = get_pull_requests(
+                context.repo_type.as_str(),
+                context.repo_project_id.as_str(),
+                context.remote_repo.as_str(),
+                Some(PullRequestState::Closed),
+                &filters,
+                1,
+                1,
+            );
+            let (open_result, closed_result) = tokio::join!(open_request, closed_request);
+            let _ = slint::invoke_from_event_loop(move || {
+                if count_sequence.load(Ordering::SeqCst) != request {
+                    return;
+                }
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                match open_result {
+                    Ok(page) => ui.set_workflow_pr_list_open_total(page.total as i32),
+                    Err(error) => {
+                        // Primer: hide unavailable counts; keep sentinel -1 so
+                        // the label renders without a placeholder number.
+                        log::warn!("[Workflow] Failed to load open pull request count: {error}");
+                        ui.set_workflow_pr_list_open_total(-1);
+                    }
+                }
+                match closed_result {
+                    Ok(page) => ui.set_workflow_pr_list_closed_total(page.total as i32),
+                    Err(error) => {
+                        log::warn!("[Workflow] Failed to load closed pull request count: {error}");
+                        ui.set_workflow_pr_list_closed_total(-1);
+                    }
+                }
+            });
+        });
+    }
+
     /// Fetch exactly the page chosen by the user. The internal endpoint has no
     /// total-count contract, so a full page means "there may be a next page".
     fn load_page(&self, ui: &MainWindow, state: PullRequestState, page: u32) {
@@ -135,6 +263,11 @@ impl WorkflowPrListController {
 
         let request_sequence = self.request_sequence.clone();
         let visited_pages = self.visited_pages.clone();
+        let filters = self
+            .filters
+            .lock()
+            .map(|filters| filters.clone())
+            .unwrap_or_default();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
             let result = get_pull_requests(
@@ -142,6 +275,7 @@ impl WorkflowPrListController {
                 context.repo_project_id.as_str(),
                 context.remote_repo.as_str(),
                 Some(state),
+                &filters,
                 page,
                 PAGE_SIZE,
             )
@@ -163,6 +297,7 @@ impl WorkflowPrListController {
                         render_remote_page(
                             &ui,
                             &visited_pages,
+                            state,
                             page,
                             result.items,
                             result.total,
@@ -184,6 +319,7 @@ impl WorkflowPrListController {
 fn render_remote_page(
     ui: &MainWindow,
     visited_pages: &Arc<Mutex<HashMap<u32, Vec<PullRequestItem>>>>,
+    state: PullRequestState,
     requested_page: u32,
     items: Vec<PullRequestItem>,
     response_total: u32,
@@ -203,7 +339,9 @@ fn render_remote_page(
             .unwrap_or_default();
         if !previous_items.is_empty() {
             apply_page_to_ui(ui, previous_page, previous_items, previous_page, true);
-            ui.set_workflow_pr_list_total((previous_page * PAGE_SIZE) as i32);
+            let total = previous_page * PAGE_SIZE;
+            ui.set_workflow_pr_list_total(total as i32);
+            set_state_total(ui, state, total);
             return;
         }
     }
@@ -234,6 +372,17 @@ fn render_remote_page(
         total_exact || is_final_page,
     );
     ui.set_workflow_pr_list_total(total as i32);
+    set_state_total(ui, state, total);
+}
+
+fn set_state_total(ui: &MainWindow, state: PullRequestState, total: u32) {
+    match state {
+        PullRequestState::Open => ui.set_workflow_pr_list_open_total(total as i32),
+        PullRequestState::Closed | PullRequestState::Merged => {
+            ui.set_workflow_pr_list_closed_total(total as i32);
+        }
+        PullRequestState::All => {}
+    }
 }
 
 fn apply_page_to_ui(
@@ -254,14 +403,18 @@ fn to_slint_item(item: &PullRequestItem) -> WorkflowPullRequestItem {
     WorkflowPullRequestItem {
         number: item.number.clone().into(),
         title: item.title.clone().into(),
+        state: item.state.clone().into(),
         author: item.author.clone().into(),
         source_branch: item.source_branch.clone().into(),
         target_branch: item.target_branch.clone().into(),
-        updated_at: format_updated_at_in_utc_plus_eight(item.updated_at.as_str()).into(),
+        updated_at: format_github_relative_time(item.updated_at.as_str()).into(),
+        updated_at_raw: item.updated_at.clone().into(),
+        updated_at_tooltip: format_github_absolute_tooltip(item.updated_at.as_str()).into(),
         web_url: item.web_url.clone().into(),
     }
 }
 
+#[cfg(test)]
 pub(super) fn format_updated_at_in_utc_plus_eight(value: &str) -> String {
     match parse_provider_timestamp(value) {
         Some(timestamp) => {
@@ -413,10 +566,15 @@ fn reset_ui(ui: &MainWindow) {
         Vec::<WorkflowPullRequestItem>::new(),
     )));
     ui.set_workflow_pr_list_total(0);
+    ui.set_workflow_pr_list_open_total(-1);
+    ui.set_workflow_pr_list_closed_total(-1);
     ui.set_workflow_pr_list_total_exact(false);
     ui.set_workflow_pr_list_page(1);
     ui.set_workflow_pr_list_page_count(1);
     ui.set_workflow_pr_list_state("open".into());
+    ui.set_workflow_pr_list_review_filter("all".into());
+    ui.set_workflow_pr_list_assignee_filter("any".into());
+    ui.set_workflow_pr_list_sort_filter("newest".into());
     ui.set_workflow_pr_list_error("".into());
 }
 

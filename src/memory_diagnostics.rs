@@ -2,6 +2,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::{MainWindow, Route};
+use slint::Model;
+
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -108,6 +111,141 @@ pub(crate) fn stop_periodic_logging() {
     }
     log_checkpoint("shutdown.before_memory_sampler_stop");
     SAMPLER_STOP.store(true, Ordering::SeqCst);
+}
+
+/// Report the bounded Slint models retained by the root window.
+///
+/// Process-level sampling and feature-owned model accounting live together in
+/// this module so the composition root only decides when diagnostics run.
+pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
+    if !diagnostics_enabled() {
+        return;
+    }
+
+    let chat = ui.get_chat_messages();
+    let mut chat_text_bytes = 0usize;
+    let mut chat_blocks = 0usize;
+    let mut chat_inline_lines = 0usize;
+    let mut chat_spans = 0usize;
+    for index in 0..chat.row_count() {
+        let Some(message) = chat.row_data(index) else {
+            continue;
+        };
+        chat_text_bytes = chat_text_bytes
+            .saturating_add(message.content.len())
+            .saturating_add(message.rendered_content.len())
+            .saturating_add(message.timestamp.len());
+        chat_blocks = chat_blocks.saturating_add(message.markdown_blocks.row_count());
+        for block_index in 0..message.markdown_blocks.row_count() {
+            let Some(block) = message.markdown_blocks.row_data(block_index) else {
+                continue;
+            };
+            chat_text_bytes = chat_text_bytes.saturating_add(block.text.len());
+            chat_inline_lines = chat_inline_lines.saturating_add(block.inline_lines.row_count());
+            for line_index in 0..block.inline_lines.row_count() {
+                let Some(line) = block.inline_lines.row_data(line_index) else {
+                    continue;
+                };
+                chat_spans = chat_spans.saturating_add(line.spans.row_count());
+                for span_index in 0..line.spans.row_count() {
+                    if let Some(span) = line.spans.row_data(span_index) {
+                        chat_text_bytes = chat_text_bytes
+                            .saturating_add(span.text.len())
+                            .saturating_add(span.href.len());
+                    }
+                }
+            }
+        }
+    }
+
+    let projects = ui.get_project_items();
+    let mut project_text_bytes = 0usize;
+    let mut project_tags = 0usize;
+    for index in 0..projects.row_count() {
+        let Some(project) = projects.row_data(index) else {
+            continue;
+        };
+        project_text_bytes = project_text_bytes
+            .saturating_add(project.project_name.len())
+            .saturating_add(project.project_alias.len())
+            .saturating_add(project.local_repo.len())
+            .saturating_add(project.remote_repo.len())
+            .saturating_add(project.logo.len())
+            .saturating_add(project.project_tags_text.len());
+        project_tags = project_tags.saturating_add(project.project_tags.row_count());
+        for tag_index in 0..project.project_tags.row_count() {
+            if let Some(tag) = project.project_tags.row_data(tag_index) {
+                project_text_bytes = project_text_bytes.saturating_add(tag.len());
+            }
+        }
+    }
+
+    let pull_requests = ui.get_workflow_pr_list_items();
+    let mut pull_request_text_bytes = 0usize;
+    for index in 0..pull_requests.row_count() {
+        if let Some(item) = pull_requests.row_data(index) {
+            pull_request_text_bytes = pull_request_text_bytes
+                .saturating_add(item.number.len())
+                .saturating_add(item.title.len())
+                .saturating_add(item.author.len())
+                .saturating_add(item.source_branch.len())
+                .saturating_add(item.target_branch.len())
+                .saturating_add(item.updated_at.len())
+                .saturating_add(item.web_url.len());
+        }
+    }
+
+    let tag_steps = ui.get_workflow_tag_steps();
+    let mut tag_step_text_bytes = 0usize;
+    for index in 0..tag_steps.row_count() {
+        if let Some(step) = tag_steps.row_data(index) {
+            tag_step_text_bytes = tag_step_text_bytes
+                .saturating_add(step.name.len())
+                .saturating_add(step.status.len())
+                .saturating_add(step.detail.len())
+                .saturating_add(step.log.len());
+        }
+    }
+
+    let terminal_lines = ui.get_shell_drawer_lines();
+    let mut terminal_spans = 0usize;
+    let mut terminal_text_bytes = 0usize;
+    for line_index in 0..terminal_lines.row_count() {
+        let Some(line) = terminal_lines.row_data(line_index) else {
+            continue;
+        };
+        terminal_spans = terminal_spans.saturating_add(line.spans.row_count());
+        for span_index in 0..line.spans.row_count() {
+            if let Some(span) = line.spans.row_data(span_index) {
+                terminal_text_bytes = terminal_text_bytes.saturating_add(span.text.len());
+            }
+        }
+    }
+
+    log::info!(
+        "[Memory][UI Models] route={:?} chat_rows={} chat_blocks={} chat_inline_lines={} chat_spans={} chat_text_bytes={} project_rows={} project_tags={} project_text_bytes={} pr_list_rows={} pr_list_text_bytes={} pr_review_files={} pr_review_tree_items={} pr_review_extension_filters={} pr_review_lines={} tag_steps={} tag_step_text_bytes={} terminal_lines={} terminal_spans={} terminal_text_bytes={} terminal_output_bytes={}",
+        route,
+        chat.row_count(),
+        chat_blocks,
+        chat_inline_lines,
+        chat_spans,
+        chat_text_bytes,
+        projects.row_count(),
+        project_tags,
+        project_text_bytes,
+        pull_requests.row_count(),
+        pull_request_text_bytes,
+        ui.get_workflow_pr_review_files().row_count(),
+        ui.get_workflow_pr_review_tree_items().row_count(),
+        ui.get_workflow_pr_review_extension_filters().row_count(),
+        ui.get_workflow_pr_review_lines().row_count(),
+        tag_steps.row_count(),
+        tag_step_text_bytes,
+        terminal_lines.row_count(),
+        terminal_spans,
+        terminal_text_bytes,
+        ui.get_shell_drawer_output().len(),
+    );
 }
 
 fn log_snapshot(reason: &str, snapshot: ProcessMemorySnapshot) {

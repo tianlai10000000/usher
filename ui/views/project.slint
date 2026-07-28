@@ -1,11 +1,10 @@
-import { MaterialText, FilledButton, Horizontal, Vertical, ElevatedCard, MaterialStyleMetrics,
-     MaterialPalette, Modal, HorizontalDivider, TextButton, IconButton, FilterChip, Switch } from "@material";
+import { AppState } from "../state/app_state.slint";
 import { Route } from "../route/routeMap.slint";
-import { ScrollView } from "../../material-1.7.1-fixed/ui/components/scroll_view.slint";
-import { Home } from "home.slint";
-import { StyleMetrics } from "std-widgets.slint";
-import { ProjectCardActions } from "../components/button/project_card_actions.slint";
-import { CompactTextField } from "../components/input/compact_text_field.slint";
+import {
+    GitHubButton,
+    GitHubTextField,
+    GitHubToggle
+} from "../components/settings/github_settings_controls.slint";
 
 export struct ProjectItem {
     project_name: string,
@@ -24,74 +23,632 @@ export struct ProjectItem {
     project_tags_text: string,
 }
 
-component ProjectField {
-    in property <string> label;
-    in-out property <string> value;
-    in property <string> placeholder;
-    callback edited(string);
+// Project uses Primer's Card/List collection, medium controls, Labels and
+// Dialog safe-area geometry. See docs/specs/ui-design.md.
+component ProjectIconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> tooltip: "";
+    // Prefer above when the control sits near a clipped bottom edge (grid cards).
+    in property <bool> tooltip-above: false;
+    // Prefer end alignment near a clipped trailing edge so long labels grow left.
+    in property <bool> tooltip-end: false;
+    in property <bool> danger: false;
+    in property <bool> selected: false;
+    callback clicked();
 
-    VerticalLayout {
-        spacing: 6px;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border-width: root.selected ? 1px : 0px;
+    border-color: AppState.effective-dark-mode ? #6e7681 : #8c959f;
+    background: root.selected
+        ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+        : (button-touch.pressed
+            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+            : (button-touch.has-hover
+                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
+                : transparent));
+    clip: false;
 
-        MaterialText {
-            text: root.label;
-            font_size: 12px;
-            color: MaterialPalette.on_surface_variant;
+    Image {
+        x: 8px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: root.icon;
+        colorize: root.danger
+            ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
+            : (AppState.effective-dark-mode ? #f0f6fc : #1f2328);
+    }
+
+    button-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    if button-touch.has-hover && root.tooltip != "": Rectangle {
+        x: root.tooltip-end ? parent.width - self.width : (parent.width - self.width) / 2;
+        y: root.tooltip-above ? -(24px + 4px) : parent.height + 4px;
+        width: tooltip-text.preferred-width + 12px;
+        height: 24px;
+        border-radius: 6px;
+        background: AppState.effective-dark-mode ? #f0f6fc : #24292f;
+        z: 40;
+
+        tooltip-text := Text {
+            x: 6px;
+            width: parent.width - 12px;
+            height: parent.height;
+            text: root.tooltip;
+            font-size: 11px;
+            color: AppState.effective-dark-mode ? #1f2328 : #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: no-wrap;
+        }
+    }
+}
+
+component ProjectSearchField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "Find a project…";
+    callback accepted(string);
+
+    width: 320px;
+    height: 32px;
+    border-radius: 6px;
+    border-width: search-input.has-focus ? 2px : 1px;
+    border-color: search-input.has-focus
+        ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
+        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
+    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    clip: true;
+
+    Image {
+        x: search-input.has-focus ? 9px : 10px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../assets/icons/octicon-search-16.svg");
+        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    }
+
+    search-input := TextInput {
+        x: search-input.has-focus ? 33px : 34px;
+        y: (parent.height - self.preferred-height) / 2;
+        width: parent.width - self.x - 12px;
+        text <=> root.text;
+        single-line: true;
+        font-size: 14px;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        selection-background-color: AppState.effective-dark-mode ? #264f78 : #b6d7ff;
+        selection-foreground-color: self.color;
+        accepted => { root.accepted(self.text); }
+    }
+
+    if root.text == "" && !search-input.has-focus: Text {
+        x: 34px;
+        width: parent.width - 46px;
+        height: parent.height;
+        text: root.placeholder;
+        font-size: 14px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// Primer's 32 px icon-only view controls, separated by the product-specified
+// 8 px gap so the two view choices remain visually distinct.
+component ProjectViewSwitcher inherits Rectangle {
+    in-out property <string> mode: "grid";
+
+    width: 72px;
+    height: 32px;
+    background: transparent;
+
+    list-segment := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+        background: root.mode == "list"
+            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+            : (list-touch.has-hover
+                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
+                : (AppState.effective-dark-mode ? #21262d : #f6f8fa));
+
+        Image {
+            x: 8px;
+            y: 8px;
+            width: 16px;
+            height: 16px;
+            source: @image-url("../assets/icons/octicon-list-unordered-16.svg");
+            colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
         }
 
-        CompactTextField {
+        list-touch := TouchArea {
             width: 100%;
-            text <=> root.value;
-            placeholder: root.placeholder;
-            field-height: 40px;
-            border-radius-size: 10px;
-            input-font-size: 14px;
-            input-font-family: "Hiragino Sans GB";
-            field-background: MaterialPalette.surface_container_highest;
+            height: 100%;
+            mouse-cursor: pointer;
+            clicked => { root.mode = "list"; }
+        }
 
-            edited => {
-                root.edited(self.text);
+        if list-touch.has-hover: Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: parent.height + 4px;
+            width: 60px;
+            height: 24px;
+            border-radius: 6px;
+            background: AppState.effective-dark-mode ? #f0f6fc : #24292f;
+            z: 40;
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "List view";
+                font-size: 11px;
+                color: AppState.effective-dark-mode ? #1f2328 : #ffffff;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    grid-segment := Rectangle {
+        x: 40px;
+        y: 0px;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+        background: root.mode == "grid"
+            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+            : (grid-touch.has-hover
+                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
+                : (AppState.effective-dark-mode ? #21262d : #f6f8fa));
+
+        Image {
+            x: 8px;
+            y: 8px;
+            width: 16px;
+            height: 16px;
+            source: @image-url("../assets/icons/octicon-table-16.svg");
+            colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        }
+
+        grid-touch := TouchArea {
+            width: 100%;
+            height: 100%;
+            mouse-cursor: pointer;
+            clicked => { root.mode = "grid"; }
+        }
+
+        if grid-touch.has-hover: Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: parent.height + 4px;
+            width: 60px;
+            height: 24px;
+            border-radius: 6px;
+            background: AppState.effective-dark-mode ? #f0f6fc : #24292f;
+            z: 40;
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "Grid view";
+                font-size: 11px;
+                color: AppState.effective-dark-mode ? #1f2328 : #ffffff;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
         }
     }
 }
 
-component SearchField {
-    in-out property <string> value;
-    in property <string> placeholder;
-    callback accepted(string);
+component ProjectLabel inherits Rectangle {
+    in property <string> text;
 
-    CompactTextField {
-        preferred-width: 240px;
-        text <=> root.value;
-        placeholder: root.placeholder;
-        field-height: 40px;
-        border-radius-size: 10px;
-        input-font-size: 14px;
-        input-font-family: "Hiragino Sans GB";
-        field-background: MaterialPalette.surface_container_low;
+    label-measure := Text {
+        visible: false;
+        text: root.text;
+        font-size: 12px;
+        font-weight: 500;
+        wrap: no-wrap;
+    }
 
-        accepted => {
-            root.accepted(self.text);
+    width: label-measure.preferred-width + 16px;
+    height: 20px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: transparent;
+
+    Text {
+        x: 8px;
+        width: parent.width - 16px;
+        height: parent.height;
+        text: root.text;
+        font-size: 12px;
+        font-weight: 500;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        wrap: no-wrap;
+    }
+}
+
+component PullRequestSummary inherits Rectangle {
+    in property <ProjectItem> project;
+
+    width: 228px;
+    height: 24px;
+    background: transparent;
+
+    if root.project.is_pr_auto_update: HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 8px;
+        alignment: end;
+
+        Text {
+            text: "Pull requests";
+            font-size: 12px;
+            color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            vertical-alignment: center;
+        }
+
+        if root.project.pr_count_loading: Image {
+            width: 14px;
+            height: 14px;
+            source: @image-url("../assets/icons/github-spinner-16.svg");
+            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            transform-rotation: mod(animation-tick(), 1s) / 1s * 360deg;
+            transform-origin: { x: self.width / 2, y: self.height / 2 };
+        }
+
+        if root.project.pr_count_failed: Image {
+            width: 14px;
+            height: 14px;
+            source: @image-url("../assets/icons/octicon-alert-16.svg");
+            colorize: AppState.effective-dark-mode ? #f85149 : #cf222e;
+        }
+
+        Text {
+            text: "FAT " + root.project.pr_fat_count_text;
+            font-size: 12px;
+            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+            vertical-alignment: center;
+        }
+        Text {
+            text: "UAT " + root.project.pr_uat_count_text;
+            font-size: 12px;
+            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+            vertical-alignment: center;
+        }
+        Text {
+            text: "PROD " + root.project.pr_prod_count_text;
+            font-size: 12px;
+            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+            vertical-alignment: center;
         }
     }
 }
 
-component RotatingStatusIcon {
-    in property <bool> rotating: false;
-    in property <image> source;
+component ProjectListRow inherits Rectangle {
+    in property <ProjectItem> project;
+    in property <bool> first: false;
+    callback open-requested();
+    callback terminal-requested();
+    callback edit-requested();
+    callback delete-requested();
 
-    width: 12px;
-    height: 12px;
+    height: 136px;
+    background: row-touch.has-hover
+        ? (AppState.effective-dark-mode ? #151b23 : #f6f8fa)
+        : transparent;
 
-    property <float> rotation-progress: root.rotating ? mod(animation-tick(), 1s) / 1s : 0;
-
-    Image {
+    // Separator above the row (not under the next row's hover fill), so the
+    // Box border and row dividers stay visible while hovering.
+    if !root.first: Rectangle {
+        x: 0px;
+        y: 0px;
         width: parent.width;
+        height: 1px;
+        z: 2;
+        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    }
+
+    Rectangle {
+        x: 16px;
+        y: 16px;
+        width: 40px;
+        height: 40px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+        background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+        clip: true;
+
+        Image {
+            x: 6px;
+            y: 6px;
+            width: 28px;
+            height: 28px;
+            source: root.project.logo_image;
+        }
+    }
+
+    title-line := HorizontalLayout {
+        x: 72px;
+        y: 14px;
+        width: max(40px, parent.width - 72px - 116px);
+        height: 24px;
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: root.project.project_name;
+            font-size: 16px;
+            font-weight: 600;
+            color: AppState.effective-dark-mode ? #4493f8 : #0969da;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        if root.project.project_alias != "": ProjectLabel {
+            text: root.project.project_alias;
+        }
+    }
+
+    Text {
+        x: 72px;
+        y: 42px;
+        width: max(40px, parent.width - 72px - 116px);
+        height: 20px;
+        text: root.project.remote_repo;
+        font-size: 12px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: 72px;
+        y: 64px;
+        width: max(40px, parent.width - 72px - 116px);
+        height: 20px;
+        text: root.project.local_repo;
+        font-size: 12px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    HorizontalLayout {
+        x: 72px;
+        y: 96px;
+        width: max(40px, parent.width - 72px - 252px);
+        height: 24px;
+        spacing: 6px;
+        alignment: start;
+
+        for project-tag in root.project.project_tags: ProjectLabel {
+            text: project-tag;
+        }
+    }
+
+    if root.project.is_pr_auto_update: PullRequestSummary {
+        x: parent.width - self.width - 16px;
+        y: 96px;
+        project: root.project;
+    }
+
+    actions := HorizontalLayout {
+        x: parent.width - 112px;
+        y: 12px;
+        width: 96px;
+        height: 32px;
+        spacing: 0px;
+        alignment: end;
+
+        ProjectIconButton {
+            icon: @image-url("../assets/icons/octicon-terminal-16.svg");
+            tooltip: "Open terminal";
+            tooltip-end: true;
+            clicked => { root.terminal-requested(); }
+        }
+        ProjectIconButton {
+            icon: @image-url("../assets/icons/octicon-pencil-16.svg");
+            tooltip: "Edit project";
+            tooltip-end: true;
+            clicked => { root.edit-requested(); }
+        }
+        ProjectIconButton {
+            icon: @image-url("../assets/icons/octicon-trash-16.svg");
+            tooltip: "Delete project";
+            tooltip-end: true;
+            danger: true;
+            clicked => { root.delete-requested(); }
+        }
+    }
+
+    row-touch := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: max(0px, parent.width - 120px);
         height: parent.height;
-        source: root.source;
-        transform-rotation: root.rotation-progress * 360deg;
-        transform-origin: { x: self.width / 2, y: self.height / 2 };
+        mouse-cursor: pointer;
+        clicked => { root.open-requested(); }
+    }
+}
+
+component ProjectGridCard inherits Rectangle {
+    in property <ProjectItem> project;
+    callback open-requested();
+    callback terminal-requested();
+    callback edit-requested();
+    callback delete-requested();
+
+    height: 204px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: card-touch.has-hover
+        ? (AppState.effective-dark-mode ? #151b23 : #f6f8fa)
+        : (AppState.effective-dark-mode ? #0d1117 : #ffffff);
+    clip: true;
+
+    Rectangle {
+        x: 16px;
+        y: 16px;
+        width: 40px;
+        height: 40px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+        background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+        clip: true;
+
+        Image {
+            x: 6px;
+            y: 6px;
+            width: 28px;
+            height: 28px;
+            source: root.project.logo_image;
+        }
+    }
+
+    Text {
+        x: 68px;
+        y: 14px;
+        width: max(32px, parent.width - 84px);
+        height: 24px;
+        text: root.project.project_name;
+        font-size: 16px;
+        font-weight: 600;
+        color: AppState.effective-dark-mode ? #4493f8 : #0969da;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.project.project_alias != "": ProjectLabel {
+        x: 68px;
+        y: 40px;
+        text: root.project.project_alias;
+    }
+
+    Text {
+        x: 16px;
+        y: 70px;
+        width: parent.width - 32px;
+        height: 20px;
+        text: root.project.remote_repo;
+        font-size: 12px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: 16px;
+        y: 94px;
+        width: parent.width - 32px;
+        height: 20px;
+        text: root.project.local_repo;
+        font-size: 12px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    HorizontalLayout {
+        x: 16px;
+        y: 126px;
+        width: parent.width - 32px;
+        height: 20px;
+        spacing: 6px;
+        alignment: start;
+
+        for project-tag in root.project.project_tags: ProjectLabel {
+            text: project-tag;
+        }
+    }
+
+    if root.project.is_pr_auto_update: Text {
+        x: 16px;
+        y: 168px;
+        width: max(24px, parent.width - 136px);
+        height: 20px;
+        text: root.project.pr_count_loading
+            ? "Pull requests loading"
+            : root.project.pr_count_failed
+                ? "Pull requests unavailable"
+                : "FAT " + root.project.pr_fat_count_text
+                    + " · UAT " + root.project.pr_uat_count_text
+                    + " · PROD " + root.project.pr_prod_count_text;
+        font-size: 12px;
+        color: root.project.pr_count_failed
+            ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
+            : (AppState.effective-dark-mode ? #9198a1 : #59636e);
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    card-touch := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 160px;
+        mouse-cursor: pointer;
+        clicked => { root.open-requested(); }
+    }
+
+    TouchArea {
+        x: 0px;
+        y: 160px;
+        width: max(0px, parent.width - 112px);
+        height: 44px;
+        mouse-cursor: pointer;
+        clicked => { root.open-requested(); }
+    }
+
+    HorizontalLayout {
+        x: parent.width - 112px;
+        y: 164px;
+        width: 96px;
+        height: 32px;
+        spacing: 0px;
+        alignment: end;
+
+        ProjectIconButton {
+            icon: @image-url("../assets/icons/octicon-terminal-16.svg");
+            tooltip: "Open terminal";
+            tooltip-above: true;
+            tooltip-end: true;
+            clicked => { root.terminal-requested(); }
+        }
+        ProjectIconButton {
+            icon: @image-url("../assets/icons/octicon-pencil-16.svg");
+            tooltip: "Edit project";
+            tooltip-above: true;
+            tooltip-end: true;
+            clicked => { root.edit-requested(); }
+        }
+        ProjectIconButton {
+            icon: @image-url("../assets/icons/octicon-trash-16.svg");
+            tooltip: "Delete project";
+            tooltip-above: true;
+            tooltip-end: true;
+            danger: true;
+            clicked => { root.delete-requested(); }
+        }
     }
 }
 
@@ -104,11 +661,8 @@ export component Project {
     callback search-projects(string);
     callback reload-projects();
 
-    // Input property for available viewport height
     in property <length> viewport-height;
     in property <length> viewport-width;
-
-    // Dynamic data source for cards (loaded from config in Rust).
     in property <[ProjectItem]> projects: [];
     in-out property <bool> show-add-modal: false;
     in-out property <string> new-project-name: "";
@@ -124,514 +678,274 @@ export component Project {
     in-out property <string> modal-mode: "add";
     in-out property <string> modal-original-alias: "";
     in-out property <string> search-query: "";
+    in-out property <string> view-mode: "grid";
 
-    // Responsive columns based on width
-    property <int> columns: root.width >= 1000px ? 5 :
-        root.width >= 800px ? 4 :
-        root.width >= 600px ? 3 :
-        root.width >= 400px ? 2 :
-        1;
+    private property <length> available-width: max(320px, root.width - 32px);
+    private property <length> content-width: min(1120px, root.available-width);
+    private property <int> grid-columns: root.width >= 1000px ? 4
+        : root.width >= 720px ? 3
+        : root.width >= 480px ? 2
+        : 1;
+    private property <int> grid-rows: Math.ceil(root.projects.length / root.grid-columns);
+    private property <length> grid-card-width:
+        (root.content-width - ((root.grid-columns - 1) * 16px)) / root.grid-columns;
 
-    // Calculate number of rows needed
-    property <int> item-count: projects.length + 1;
-    property <int> rows: Math.ceil(item-count / columns);
+    height: page-content.preferred-height;
 
-    // Layout constants
-    property <length> content-horizontal-padding: MaterialStyleMetrics.padding_8;
-    property <length> padding-size: MaterialStyleMetrics.padding_16;
-    property <length> row-spacing: MaterialStyleMetrics.padding_8;
-    property <length> col-spacing: MaterialStyleMetrics.padding_16;
+    page-host := Rectangle {
+        width: root.available-width;
+        height: page-content.preferred-height;
+        background: transparent;
 
-    // Calculate available dimensions
-    property <length> content-width: max(0px, root.width - (content-horizontal-padding * 2));
-    property <length> available-width: max(0px, content-width - (padding-size * 2));
-
-    // Calculate card dimensions
-    property <length> card-width: (available-width - ((columns - 1) * col-spacing)) / columns;
-    property <length> card-height: 188px;
-
-    Rectangle {
-        width: parent.width;
-
-        Vertical {
-            width: parent.width;
-            padding-left: root.content-horizontal-padding;
-            padding-right: root.content-horizontal-padding;
-            padding-top: 0;
-            padding-bottom: 0;
-            spacing: row-spacing;
+        page-content := VerticalLayout {
+            x: max(0px, (parent.width - root.content-width) / 2);
+            width: root.content-width;
+            spacing: 16px;
             alignment: start;
 
-            HorizontalLayout {
-                width: root.content-width;
-                height: 40px;
-                spacing: MaterialStyleMetrics.spacing_8;
-                alignment: center;
+            Rectangle {
+                width: parent.width;
+                height: 60px;
+                background: transparent;
 
-                SearchField {
-                    horizontal-stretch: 1;
-                    min-width: 200px;
-                    placeholder: "Search by name or alias";
-                    value <=> root.search-query;
-                    accepted(text) => {
-                        root.search-projects(text);
-                    }
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width - 136px;
+                    height: 30px;
+                    text: "Projects";
+                    font-size: 24px;
+                    font-weight: 600;
+                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                    vertical-alignment: center;
                 }
 
-                FilledButton {
-                    text: "Search";
-                    height: 36px;
+                Text {
+                    x: 0px;
+                    y: 34px;
+                    width: parent.width - 136px;
+                    height: 20px;
+                    text: "Manage local repositories and open their delivery workflows.";
+                    font-size: 14px;
+                    color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                GitHubButton {
+                    x: parent.width - self.width;
+                    y: 0px;
+                    text: "New project";
+                    primary: true;
                     clicked => {
-                        root.search-projects(root.search-query);
+                        root.modal-mode = "add";
+                        root.modal-original-alias = "";
+                        root.new-project-name = "";
+                        root.new-project-alias = "";
+                        root.new-project-local-repo = "";
+                        root.new-project-remote-repo = "";
+                        root.new-project-logo = "";
+                        root.new-project-tags = "";
+                        root.new-project-pr-auto-update = false;
+                        root.preview-logo("");
+                        root.add-error = "";
+                        root.show-add-modal = true;
                     }
                 }
+            }
 
-                Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                width: parent.width;
+                height: 48px;
+                background: transparent;
 
                 Rectangle {
-                    width: 28px;
-                    height: 40px;
-                    border-radius: 6px;
-                    background: reload_hover.has-hover ? MaterialPalette.surface_container_high : transparent;
-                    animate background { duration: 120ms; }
+                    y: parent.height - 1px;
+                    width: parent.width;
+                    height: 1px;
+                    background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                }
 
-                    reload_btn := IconButton {
-                        width: 28px;
-                        height: 28px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        icon: @image-url("../assets/icons/loading.svg");
-                        tooltip: "Reload";
-                        inline: true;
-                        clicked => {
-                            root.reload-projects();
-                        }
+                ProjectSearchField {
+                    x: 0px;
+                    y: 0px;
+                    width: min(360px, parent.width - 136px);
+                    text <=> root.search-query;
+                    accepted(query) => { root.search-projects(query); }
+                }
+
+                ProjectViewSwitcher {
+                    x: parent.width - 120px;
+                    y: 0px;
+                    mode <=> root.view-mode;
+                }
+
+                ProjectIconButton {
+                    x: parent.width - 32px;
+                    y: 0px;
+                    icon: @image-url("../assets/icons/octicon-sync-16.svg");
+                    tooltip: "Reload projects";
+                    // Trailing toolbar edge: grow the tip left so it is not clipped.
+                    tooltip-end: true;
+                    clicked => { root.reload-projects(); }
+                }
+            }
+
+            list-box := Rectangle {
+                width: parent.width;
+                height: root.projects.length == 0
+                    ? 176px
+                    : root.view-mode == "list"
+                        ? root.projects.length * 136px
+                        : root.grid-rows * 220px - 16px;
+                border-radius: 6px;
+                border-width: root.projects.length == 0 || root.view-mode == "list" ? 1px : 0px;
+                border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                background: root.projects.length == 0 || root.view-mode == "list"
+                    ? (AppState.effective-dark-mode ? #0d1117 : #ffffff)
+                    : transparent;
+                // Clip row hover fills inside the border so the Box edge stays visible.
+                clip: root.projects.length == 0 || root.view-mode == "list";
+
+                if root.projects.length == 0: Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    background: transparent;
+
+                    Image {
+                        x: (parent.width - 24px) / 2;
+                        y: 28px;
+                        width: 24px;
+                        height: 24px;
+                        source: @image-url("../assets/icons/octicon-repo-16.svg");
+                        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
                     }
 
-                    reload_hover := TouchArea {
-                        width: 100%;
-                        height: 100%;
-                        mouse-cursor: pointer;
-                        clicked => {
-                            reload_btn.clicked();
+                    Text {
+                        x: 16px;
+                        y: 64px;
+                        width: parent.width - 32px;
+                        height: 24px;
+                        text: root.search-query == "" ? "No projects yet" : "No matching projects";
+                        font-size: 16px;
+                        font-weight: 600;
+                        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        x: 16px;
+                        y: 92px;
+                        width: parent.width - 32px;
+                        height: 20px;
+                        text: root.search-query == ""
+                            ? "Add a local Git repository to get started."
+                            : "Try another name or alias.";
+                        font-size: 14px;
+                        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                for project[index] in root.projects: ProjectListRow {
+                    y: index * 136px;
+                    width: parent.width;
+                    visible: root.view-mode == "list";
+                    project: project;
+                    first: index == 0;
+                    open-requested => {
+                        root.open-project(project.project_name, project.project_alias, project.local_repo, project.remote_repo, project.logo, project.logo_image, project.is_pr_auto_update);
+                        root.navigate(Route.Workflow);
+                    }
+                    terminal-requested => {
+                        root.open-terminal(project.project_name, project.project_alias, project.local_repo);
+                    }
+                    edit-requested => {
+                        root.modal-mode = "edit";
+                        root.modal-original-alias = project.project_alias;
+                        root.new-project-name = project.project_name;
+                        root.new-project-alias = project.project_alias;
+                        root.new-project-local-repo = project.local_repo;
+                        root.new-project-remote-repo = project.remote_repo;
+                        root.new-project-logo = project.logo;
+                        root.new-project-tags = project.project_tags_text;
+                        root.new-project-pr-auto-update = project.is_pr_auto_update;
+                        root.preview-logo(project.logo);
+                        root.add-error = "";
+                        root.show-add-modal = true;
+                    }
+                    delete-requested => {
+                        root.modal-mode = "delete";
+                        root.modal-original-alias = project.project_alias;
+                        root.new-project-name = project.project_name;
+                        root.new-project-alias = project.project_alias;
+                        root.new-project-local-repo = project.local_repo;
+                        root.new-project-remote-repo = project.remote_repo;
+                        root.new-project-logo = project.logo;
+                        root.new-project-tags = project.project_tags_text;
+                        root.new-project-pr-auto-update = project.is_pr_auto_update;
+                        root.add-error = "";
+                        root.show-add-modal = true;
+                    }
+                }
+
+                for row-index in root.grid-rows: grid-row := HorizontalLayout {
+                    y: row-index * 220px;
+                    width: parent.width;
+                    height: 204px;
+                    spacing: 16px;
+                    alignment: start;
+                    visible: root.view-mode == "grid";
+
+                    private property <int> start-index: row-index * root.grid-columns;
+                    private property <int> end-index:
+                        Math.min(self.start-index + root.grid-columns, root.projects.length);
+                    private property <int> cards-in-row: self.end-index - self.start-index;
+
+                    for column-index in self.cards-in-row: ProjectGridCard {
+                        width: root.grid-card-width;
+                        project: root.projects[grid-row.start-index + column-index];
+                        open-requested => {
+                            root.open-project(self.project.project_name, self.project.project_alias, self.project.local_repo, self.project.remote_repo, self.project.logo, self.project.logo_image, self.project.is_pr_auto_update);
+                            root.navigate(Route.Workflow);
+                        }
+                        terminal-requested => {
+                            root.open-terminal(self.project.project_name, self.project.project_alias, self.project.local_repo);
+                        }
+                        edit-requested => {
+                            root.modal-mode = "edit";
+                            root.modal-original-alias = self.project.project_alias;
+                            root.new-project-name = self.project.project_name;
+                            root.new-project-alias = self.project.project_alias;
+                            root.new-project-local-repo = self.project.local_repo;
+                            root.new-project-remote-repo = self.project.remote_repo;
+                            root.new-project-logo = self.project.logo;
+                            root.new-project-tags = self.project.project_tags_text;
+                            root.new-project-pr-auto-update = self.project.is_pr_auto_update;
+                            root.preview-logo(self.project.logo);
+                            root.add-error = "";
+                            root.show-add-modal = true;
+                        }
+                        delete-requested => {
+                            root.modal-mode = "delete";
+                            root.modal-original-alias = self.project.project_alias;
+                            root.new-project-name = self.project.project_name;
+                            root.new-project-alias = self.project.project_alias;
+                            root.new-project-local-repo = self.project.local_repo;
+                            root.new-project-remote-repo = self.project.remote_repo;
+                            root.new-project-logo = self.project.logo;
+                            root.new-project-tags = self.project.project_tags_text;
+                            root.new-project-pr-auto-update = self.project.is_pr_auto_update;
+                            root.add-error = "";
+                            root.show-add-modal = true;
                         }
                     }
                 }
             }
-
-            // Create rows dynamically (same structure as Tools)
-            for row_index in rows : Horizontal {
-                width: root.content-width;
-                spacing: col-spacing;
-                alignment: start;
-
-                // Calculate start and end indices for this row
-                property <int> start_index: row_index * columns;
-                property <int> end_index: Math.min(start_index + columns, item-count);
-                property <int> cards_in_row: end_index - start_index;
-
-                // Display cards for this row
-                for col_index in cards_in_row : Rectangle {
-                    width: card-width;
-                    height: card-height;
-                    
-                    property <int> card_index: start_index + col_index;
-                        if card_index < projects.length: Rectangle {
-                            width: parent.width;
-                            height: parent.height;
-
-                            property <ProjectItem> card_data: projects[card_index];
-
-                            ElevatedCard {
-                                width: 100%;
-                                height: 100%;
-                                clickable: true;
-
-                                Rectangle {
-                                    width: 100%;
-                                    height: 100%;
-                                    border_radius: MaterialStyleMetrics.border_radius_12;
-                                    background: @linear-gradient(45deg, MaterialPalette.surface_container_highest 0%, MaterialPalette.surface_container_lowest 100%);
-                                }
-
-                                Rectangle {
-                                    width: 100%;
-                                    height: 100%;
-                                    border_radius: MaterialStyleMetrics.border_radius_12;
-                                    background: MaterialPalette.secondary_container;
-                                    opacity: hover-area_project.has-hover ? 1 : 0;
-                                    animate opacity { duration: 150ms; }
-                                }
-
-                                Rectangle {
-                                    width: 100%;
-                                    height: 100%;
-                                    border_radius: MaterialStyleMetrics.border_radius_12;
-                                    background: MaterialPalette.primary;
-                                    opacity: hover-area_project.has-hover ? 0.06 : 0;
-                                    animate opacity { duration: 120ms; }
-                                }
-
-                                VerticalLayout {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    padding: MaterialStyleMetrics.padding_16;
-                                    spacing: 8px;
-                                    alignment: start;
-
-                                    HorizontalLayout {
-                                        width: parent.width - 32px;
-                                        spacing: 12px;
-                                        alignment: center;
-
-                                        Rectangle {
-                                            width: 48px;
-                                            height: 48px;
-                                            border-radius: 16px;
-                                            background: MaterialPalette.surface_container_highest;
-                                            clip: true;
-
-                                            Image {
-                                                width: 32px;
-                                                height: 32px;
-                                                x: (parent.width - self.width) / 2;
-                                                y: (parent.height - self.height) / 2;
-                                                source: card_data.logo_image;
-                                            }
-                                        }
-
-                                        VerticalLayout {
-                                            width: parent.width - 60px;
-                                            spacing: 2px;
-                                            alignment: start;
-
-                                            MaterialText {
-                                                text: "Project";
-                                                color: MaterialPalette.primary;
-                                                font_size: 11px;
-                                                font_weight: 500;
-                                            }
-
-                                            MaterialText {
-                                                width: parent.width;
-                                                text: card_data.project_name;
-                                                font-size: 16px;
-                                                font_weight: 500;
-                                                color: MaterialPalette.on_surface;
-                                                font-family: "Hiragino Sans GB";
-                                                overflow: elide;
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        vertical-stretch: 1;
-                                        background: transparent;
-                                    }
-
-                                    Rectangle {
-                                        width: parent.width - 32px;
-                                        border-radius: 10px;
-
-                                        VerticalLayout {
-                                            alignment: center;
-
-                                            MaterialText {
-                                                text: "Alias";
-                                                color: MaterialPalette.primary;
-                                                font_size: 12px;
-                                                font_weight: 500;
-                                            }
-
-                                            MaterialText {
-                                                text: card_data.project_alias == "" ? "Not set" : card_data.project_alias;
-                                                font-size: 11px;
-                                                color: MaterialPalette.on_surface_variant;
-                                                font-family: "Hiragino Sans GB";
-                                                overflow: elide;
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        width: parent.width - 32px;
-                                        height: 28px;
-
-                                        if card_data.is_pr_auto_update: VerticalLayout {
-                                            spacing: 6px;
-
-                                            HorizontalLayout {
-                                                spacing: 4px;
-                                                alignment: start;
-
-                                                MaterialText {
-                                                    text: "PR";
-                                                    color: MaterialPalette.primary;
-                                                    font_size: 12px;
-                                                    font_weight: 500;
-                                                    vertical-alignment: center;
-                                                }
-
-                                                Rectangle {
-                                                    width: 12px;
-                                                    height: 12px;
-                                                    clip: true;
-
-                                                    if card_data.pr_count_loading: RotatingStatusIcon {
-                                                        width: 12px;
-                                                        height: 12px;
-                                                        rotating: true;
-                                                        source: @image-url("../assets/icons/loading.svg");
-                                                    }
-
-                                                    if card_data.pr_count_failed: RotatingStatusIcon {
-                                                        width: 12px;
-                                                        height: 12px;
-                                                        rotating: false;
-                                                        source: @image-url("../assets/icons/warning.svg");
-                                                    }
-                                                }
-                                            }
-
-                                            HorizontalLayout {
-                                                alignment: space-between;
-
-                                                HorizontalLayout {
-                                                    spacing: 8px;
-
-                                                    Text {
-                                                        text: "FAT";
-                                                        font-size: 10px;
-                                                        font-weight: 500;
-                                                        color: MaterialPalette.on_secondary_container;
-                                                        vertical-alignment: center;
-                                                    }
-    
-                                                    Text {
-                                                        text: card_data.pr_fat_count_text;
-                                                        color: MaterialPalette.primary;
-                                                        font_size: 10px;
-                                                        font_weight: 500;
-                                                        vertical-alignment: center;
-                                                    }
-                                                }
-    
-
-                                                HorizontalLayout {
-                                                    spacing: 8px;
-
-                                                    Text {
-                                                        text: "UAT";
-                                                        font-size: 10px;
-                                                        font-weight: 500;
-                                                        color: MaterialPalette.on_secondary_container;
-                                                        vertical-alignment: center;
-                                                    }
-    
-                                                    Text {
-                                                        text: card_data.pr_uat_count_text;
-                                                        color: MaterialPalette.primary;
-                                                        font_size: 10px;
-                                                        font_weight: 500;
-                                                        vertical-alignment: center;
-                                                    }
-                                                }
-
-                                                HorizontalLayout {
-                                                    spacing: 8px;
-
-                                                    Text {
-                                                        text: "PROD";
-                                                        font-size: 10px;
-                                                        font-weight: 500;
-                                                        color: MaterialPalette.on_secondary_container;
-                                                        vertical-alignment: center;
-                                                    }
-    
-                                                    Text {
-                                                        text: card_data.pr_prod_count_text;
-                                                        color: MaterialPalette.primary;
-                                                        font_size: 10px;
-                                                        font_weight: 500;
-                                                        vertical-alignment: center;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        width: parent.width - 32px;
-                                        border-radius: 10px;                
-
-                                        HorizontalLayout {
-                                            width: parent.width;
-                                            padding-top: 4px;
-                                            padding-bottom: 4px;
-                                            spacing: 6px;
-                                            alignment: end;
-
-                                            if card_data.project_tags.length == 0: MaterialText {
-                                                text: "";
-                                                font_size: 11px;
-                                                color: MaterialPalette.on_surface_variant;
-                                            }
-
-                                            for project_tag in card_data.project_tags: Rectangle {
-                                                height: 20px;
-                                                width: max(32px, tag-text.preferred-width + 18px);
-                                                border-radius: 4px;
-                                                background: MaterialPalette.secondary_container;
-                                                border-width: 1px;
-                                                border-color: MaterialPalette.outline_variant;
-
-                                                tag-text := Text {
-                                                    x: 9px;
-                                                    y: (parent.height - self.preferred-height) / 2;
-                                                    text: project_tag;
-                                                    font-size: 10px;
-                                                    font-weight: 500;
-                                                    color: MaterialPalette.on_secondary_container;
-                                                    font-family: "Hiragino Sans GB";
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            hover-area_project := TouchArea {
-                                width: 100%;
-                                height: 100%;
-                                mouse-cursor: pointer;
-                                clicked => {
-                                    root.open-project(card_data.project_name, card_data.project_alias, card_data.local_repo, card_data.remote_repo, card_data.logo, card_data.logo_image, card_data.is_pr_auto_update);
-                                    root.navigate(Route.Workflow);
-                                }
-                            }
-
-                            property <bool> actions_visible: hover-area_project.has-hover || card_actions.has-hover;
-
-                            card_actions := ProjectCardActions {
-                                x: parent.width - self.width - 8px;
-                                y: 8px;
-                                opacity: actions_visible ? 1 : 0;
-                                animate opacity { duration: 120ms; }
-                                request-open-terminal => {
-                                    root.open-terminal(card_data.project_name, card_data.project_alias, card_data.local_repo);
-                                }
-                                request-open-settings => {
-                                    root.modal-mode = "edit";
-                                    root.modal-original-alias = card_data.project_alias;
-                                    root.new-project-name = card_data.project_name;
-                                    root.new-project-alias = card_data.project_alias;
-                                    root.new-project-local-repo = card_data.local_repo;
-                                    root.new-project-remote-repo = card_data.remote_repo;
-                                    root.new-project-logo = card_data.logo;
-                                    root.new-project-tags = card_data.project_tags_text;
-                                    root.new-project-pr-auto-update = card_data.is_pr_auto_update;
-                                    root.preview-logo(root.new-project-logo);
-                                    root.add-error = "";
-                                    root.show-add-modal = true;
-                                }
-                                request-delete => {
-                                    root.modal-mode = "delete";
-                                    root.modal-original-alias = card_data.project_alias;
-                                    root.new-project-name = card_data.project_name;
-                                    root.new-project-alias = card_data.project_alias;
-                                    root.new-project-local-repo = card_data.local_repo;
-                                    root.new-project-remote-repo = card_data.remote_repo;
-                                    root.new-project-logo = card_data.logo;
-                                    root.new-project-tags = card_data.project_tags_text;
-                                    root.new-project-pr-auto-update = card_data.is_pr_auto_update;
-                                    root.preview-logo(root.new-project-logo);
-                                    root.add-error = "";
-                                    root.show-add-modal = true;
-                                }
-                            }
-                        }
-
-                    if card_index == projects.length: Rectangle {
-                        width: parent.width;
-                        height: parent.height;
-
-                            ElevatedCard {
-                                width: 100%;
-                                height: 100%;
-                                clickable: true;
-
-                                Rectangle {
-                                    width: 100%;
-                                    height: 100%;
-                                    border_radius: MaterialStyleMetrics.border_radius_12;
-                                    background: @linear-gradient(45deg, MaterialPalette.surface_container_highest 0%, MaterialPalette.surface_container_lowest 100%);
-                                }
-
-                                Rectangle {
-                                    width: 100%;
-                                    height: 100%;
-                                    border_radius: MaterialStyleMetrics.border_radius_12;
-                                    background: MaterialPalette.secondary_container;
-                                    opacity: hover-area_add.has-hover ? 1 : 0;
-                                    animate opacity { duration: 150ms; }
-                                }
-
-                                Rectangle {
-                                    width: 100%;
-                                    height: 100%;
-                                    border_radius: MaterialStyleMetrics.border_radius_12;
-                                    background: MaterialPalette.primary;
-                                    opacity: hover-area_add.has-hover ? 0.04 : 0.02;
-                                    animate opacity { duration: 120ms; }
-                                }
-
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 6px;
-
-                                    MaterialText {
-                                        text: "+";
-                                        font_size: 28px;
-                                        font_weight: 600;
-                                        color: MaterialPalette.on_surface_variant;
-                                        horizontal_alignment: center;
-                                    }
-
-                                    Text {
-                                        text: "New Project";
-                                        font-size: 12px;
-                                        color: MaterialPalette.on_surface_variant;
-                                        horizontal_alignment: center;
-                                    }
-                                }
-                            }
-
-                            hover-area_add := TouchArea {
-                                width: 100%;
-                                height: 100%;
-                                mouse-cursor: pointer;
-                                clicked => {
-                                    root.modal-mode = "add";
-                                    root.modal-original-alias = "";
-                                    root.new-project-name = "";
-                                    root.new-project-alias = "";
-                                    root.new-project-local-repo = "";
-                                    root.new-project-remote-repo = "";
-                                    root.new-project-logo = "";
-                                    root.new-project-tags = "";
-                                    root.new-project-pr-auto-update = false;
-                                    root.preview-logo(root.new-project-logo);
-                                    root.add-error = "";
-                                    root.show-add-modal = true;
-                                    // No-op: visual only.
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        }
     }
-
 }
 
 export component ProjectAddModal {
@@ -653,380 +967,361 @@ export component ProjectAddModal {
     callback confirm-delete(string);
     callback cancel();
 
-    private property <bool> logo-status-loading: root.logo-preview-status == "Remote URL, loading preview...";
-    private property <bool> logo-status-invalid: root.logo-preview-status == "Invalid input, using default logo";
-    private property <bool> logo-status-remote-ready: root.logo-preview-status == "Remote URL";
-    private property <bool> logo-status-local: root.logo-preview-status == "Local file";
-    private property <bool> logo-status-base64: root.logo-preview-status == "Base64 image";
-    private property <color> logo-status-color:
-        root.logo-status-invalid ? MaterialPalette.error :
-        (root.logo-status-loading || root.logo-status-remote-ready) ? MaterialPalette.primary :
-        (root.logo-status-local || root.logo-status-base64) ? MaterialPalette.tertiary :
-        MaterialPalette.on_surface_variant;
-    private property <brush> logo-status-chip-background:
-        root.logo-status-invalid ? MaterialPalette.error_container :
-        (root.logo-status-loading || root.logo-status-remote-ready) ? MaterialPalette.primary_container :
-        (root.logo-status-local || root.logo-status-base64) ? MaterialPalette.tertiary_container :
-        MaterialPalette.surface_container_high;
-    private property <length> dialog-header-height: root.mode == "delete" ? 46px : 60px;
-    private property <length> dialog-footer-height: 58px;
+    private property <bool> deleting: root.mode == "delete";
+    private property <length> dialog-width: root.deleting ? 320px : 480px;
+    private property <length> dialog-height: root.deleting
+        ? 248px
+        : min(680px, root.height - 32px);
+    private property <length> header-height: root.deleting ? 56px : 72px;
+    private property <length> footer-height: 64px;
 
     if root.modal-visible: Rectangle {
         width: parent.width;
         height: parent.height;
         z: 3000;
+        background: #00000066;
 
-        Modal {
-            width: parent.width;
-            height: parent.height;
+        TouchArea {
+            width: 100%;
+            height: 100%;
+        }
+
+        dialog := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(root.dialog-width, parent.width - 32px);
+            height: min(root.dialog-height, parent.height - 32px);
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+            background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+            clip: true;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000055;
+            drop-shadow-offset-y: 8px;
 
             TouchArea {
                 width: 100%;
                 height: 100%;
-                clicked => {
-                    root.cancel();
-                }
             }
 
-            dialog := Rectangle {
-                width: min(520px, parent.width - 32px);
-                height: min(parent.height - 32px, root.mode == "delete" ? 240px : 640px);
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                border-radius: 18px;
-                background: MaterialPalette.background;
-                clip: true;
-                border-color: MaterialPalette.outline_variant;
-                border-width: 1px;
+            dialog-layout := VerticalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                spacing: 0px;
 
-                TouchArea {
-                    width: 100%;
-                    height: 100%;
+                header := Rectangle {
+                    width: parent.width;
+                    height: root.header-height;
+                    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+
+                    Rectangle {
+                        x: 0px;
+                        y: parent.height - 1px;
+                        width: parent.width;
+                        height: 1px;
+                        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                    }
+
+                    Text {
+                        x: 16px;
+                        y: root.deleting ? 0px : 10px;
+                        width: parent.width - 64px;
+                        height: root.deleting ? parent.height : 28px;
+                        text: root.mode == "edit" ? "Edit project" : root.deleting ? "Delete project?" : "New project";
+                        font-size: root.deleting ? 16px : 20px;
+                        font-weight: 600;
+                        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    if !root.deleting: Text {
+                        x: 16px;
+                        y: 40px;
+                        width: parent.width - 64px;
+                        height: 20px;
+                        text: root.mode == "edit"
+                            ? "Update repository metadata and project options."
+                            : "Add a local Git repository to Usher.";
+                        font-size: 13px;
+                        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    ProjectIconButton {
+                        x: parent.width - 40px;
+                        y: 8px;
+                        icon: @image-url("../assets/icons/octicon-x-16.svg");
+                        tooltip: "Close";
+                        clicked => { root.cancel(); }
+                    }
                 }
 
-                header-section := Rectangle {
-                    x: 0;
-                    y: 0;
-                    z: 3;
+                body := Rectangle {
                     width: parent.width;
-                    height: root.dialog-header-height;
+                    vertical-stretch: 1;
+                    background: transparent;
                     clip: true;
-                    background: MaterialPalette.background;
 
-                    header-content := VerticalLayout {
-                        x: MaterialStyleMetrics.padding_16;
-                        y: MaterialStyleMetrics.padding_16;
-                        width: parent.width - MaterialStyleMetrics.padding_16 * 2;
-                        spacing: 4px;
-                        alignment: start;
+                    if root.deleting: Rectangle {
+                        x: 16px;
+                        y: 16px;
+                        width: parent.width - 32px;
+                        height: parent.height - 32px;
+                        background: transparent;
 
-                        MaterialText {
-                            text: root.mode == "edit" ? "Edit Project" : root.mode == "delete" ? "Delete Project" : "New Project";
-                            font_size: 18px;
-                            font_weight: 600;
-                            color: MaterialPalette.on_surface;
+                        Image {
+                            x: 0px;
+                            y: 2px;
+                            width: 16px;
+                            height: 16px;
+                            source: @image-url("../assets/icons/octicon-alert-16.svg");
+                            colorize: AppState.effective-dark-mode ? #f85149 : #cf222e;
                         }
 
-                        if root.mode != "delete": Text {
-                            width: parent.width;
-                            text: "Fill in project metadata. The content area scrolls when space is limited.";
-                            font-size: 12px;
-                            color: MaterialPalette.on_surface_variant;
+                        Text {
+                            x: 28px;
+                            y: 0px;
+                            width: parent.width - 28px;
+                            text: "This will permanently delete “" + root.name + "” from Usher. Repository files on disk will not be removed.";
+                            font-size: 14px;
+                            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
                             wrap: word-wrap;
                         }
                     }
-                }
 
-                HorizontalDivider {
-                    x: 0;
-                    y: header-section.height;
-                    z: 3;
-                    width: parent.width;
-                }
-
-                body-section := Rectangle {
-                    x: 0;
-                    y: header-section.height + 1px;
-                    z: 1;
-                    width: parent.width;
-                    height: max(0px, parent.height - root.dialog-header-height - root.dialog-footer-height - 2px);
-                    clip: true;
-
-                    HorizontalLayout {
+                    if !root.deleting: Flickable {
                         width: parent.width;
                         height: parent.height;
-                        alignment: center;
+                        interactive: true;
 
-                        content-scroll := Rectangle {
-                            width: parent.width - 16px;
-                            height: parent.height;
+                        form-content := Rectangle {
+                            width: parent.width;
+                            height: root.error-text == "" ? 648px : 700px;
+                            background: transparent;
 
-                            body-scroll := ScrollView {
-                                width: parent.width;
-                                height: parent.height;
-                                horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
-                                vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
+                        GitHubTextField {
+                            x: 16px;
+                            y: 16px;
+                            width: parent.width - 32px;
+                            label: "Project name";
+                            text <=> root.name;
+                            placeholder: "e.g. Atlas";
+                        }
+                        GitHubTextField {
+                            x: 16px;
+                            y: 86px;
+                            width: parent.width - 32px;
+                            label: "Project alias";
+                            text <=> root.alias;
+                            placeholder: "e.g. atlas";
+                        }
+                        GitHubTextField {
+                            x: 16px;
+                            y: 156px;
+                            width: parent.width - 32px;
+                            label: "Local repository";
+                            text <=> root.local-repo;
+                            placeholder: "/path/to/repository";
+                        }
+                        GitHubTextField {
+                            x: 16px;
+                            y: 226px;
+                            width: parent.width - 32px;
+                            label: "Remote repository";
+                            text <=> root.remote-repo;
+                            placeholder: "git@github.com:org/repo.git";
+                        }
+                        GitHubTextField {
+                            x: 16px;
+                            y: 296px;
+                            width: parent.width - 32px;
+                            label: "Logo";
+                            text <=> root.logo;
+                            placeholder: "Local path, HTTPS URL, or data URI";
+                            caption: "Optional. Used in the project list and workflow header.";
+                            edited(text) => { root.preview-logo(text); }
+                        }
+                        GitHubTextField {
+                            x: 16px;
+                            y: 386px;
+                            width: parent.width - 32px;
+                            label: "Project type tags";
+                            text <=> root.project-tags;
+                            placeholder: "H5, Web, RN";
+                            caption: "Optional. Separate multiple labels with commas.";
+                        }
 
-                                body-content := VerticalLayout {
-                                    width: body-scroll.visible_width;
-                                    padding: MaterialStyleMetrics.padding_16;
-                                    spacing: 12px;
-                                    alignment: start;
+                        Rectangle {
+                            x: 16px;
+                            y: 476px;
+                            width: parent.width - 32px;
+                            height: 68px;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                            background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
 
-                                    if root.mode != "delete": ProjectField {
-                                        label: "Project name";
-                                        value <=> root.name;
-                                        placeholder: "e.g. Atlas";
-                                    }
+                            Text {
+                                x: 12px;
+                                y: 8px;
+                                width: parent.width - 84px;
+                                height: 20px;
+                                text: "Auto-refresh pull request counts";
+                                font-size: 14px;
+                                font-weight: 600;
+                                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
 
-                                    if root.mode != "delete": ProjectField {
-                                        label: "Project alias";
-                                        value <=> root.alias;
-                                        placeholder: "e.g. atlas";
-                                    }
+                            Text {
+                                x: 12px;
+                                y: 32px;
+                                width: parent.width - 84px;
+                                height: 18px;
+                                text: "Fetch FAT, UAT, and PROD counts when this list loads.";
+                                font-size: 12px;
+                                color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
 
-                                    if root.mode != "delete": ProjectField {
-                                        label: "Local repo";
-                                        value <=> root.local-repo;
-                                        placeholder: "/path/to/repo";
-                                    }
-
-                                    if root.mode != "delete": ProjectField {
-                                        label: "Remote repo";
-                                        value <=> root.remote-repo;
-                                        placeholder: "git@github.com:org/repo.git";
-                                    }
-
-                                    if root.mode != "delete": ProjectField {
-                                        label: "Logo (optional)";
-                                        value <=> root.logo;
-                                        placeholder: "local path / https URL / data:image/...;base64,...";
-                                        edited(text) => {
-                                            root.preview-logo(text);
-                                        }
-                                    }
-
-                                    if root.mode != "delete": ProjectField {
-                                        label: "Project type tags (optional)";
-                                        value <=> root.project-tags;
-                                        placeholder: "comma-separated, e.g. H5, Web, RN";
-                                    }
-
-                                    if root.mode != "delete": Rectangle {
-                                        width: 100%;
-                                        height: 78px;
-                                        border-radius: 14px;
-                                        border-width: 1px;
-                                        border-color: MaterialPalette.outline_variant;
-                                        background: MaterialPalette.surface_container_low;
-
-                                        HorizontalLayout {
-                                            width: parent.width;
-                                            height: parent.height;
-                                            padding: MaterialStyleMetrics.padding_8;
-                                            spacing: MaterialStyleMetrics.padding_16;
-                                            alignment: start;
-
-                                            Rectangle {
-                                                width: parent.width / 2;
-                                                height: parent.height - 16px;
-
-                                                VerticalLayout {
-                                                    width: parent.width;
-                                                    alignment: space-around;
-
-                                                    MaterialText {
-                                                        text: "Auto refresh PR counts";
-                                                        font_size: 13px;
-                                                        font_weight: 600;
-                                                        color: MaterialPalette.on_surface;
-                                                    }
-
-                                                    Text {
-                                                        width: parent.width;
-                                                        text: "Fetch FAT/UAT/PROD pull request counts from the server when showing the project.";
-                                                        font-size: 11px;
-                                                        color: MaterialPalette.on_surface_variant;
-                                                        wrap: word-wrap;
-                                                    }
-                                                }
-                                            }
-
-                                            Rectangle {
-                                                Switch {
-                                                    checked <=> root.is-pr-auto-update;
-                                                    width: 48px;
-                                                    height: 28px;
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if root.mode != "delete": Rectangle {
-                                        width: 100%;
-                                        height: 96px;
-                                        border-radius: 14px;
-                                        border-width: 1px;
-                                        border-color: MaterialPalette.outline_variant;
-                                        background: MaterialPalette.surface_container_low;
-
-                                        Rectangle {
-                                            x: 14px;
-                                            y: (parent.height - self.height) / 2;
-                                            width: 56px;
-                                            height: 56px;
-                                            border-radius: 16px;
-                                            background: MaterialPalette.surface_container_highest;
-                                            clip: true;
-
-                                            Image {
-                                                width: 40px;
-                                                height: 40px;
-                                                x: (parent.width - self.width) / 2;
-                                                y: (parent.height - self.height) / 2;
-                                                source: root.logo-preview-image;
-                                            }
-                                        }
-
-                                        right-panel := Rectangle {
-                                            x: 82px;
-                                            y: 0;
-                                            width: parent.width - 96px;
-                                            height: parent.height;
-                                            background: transparent;
-
-                                            VerticalLayout {
-                                                y: (parent.height - self.preferred-height) / 2;
-                                                width: parent.width;
-                                                spacing: 3px;
-                                                alignment: start;
-
-                                                MaterialText {
-                                                    text: "Preview";
-                                                    font_size: 11px;
-                                                    font_weight: 500;
-                                                    color: MaterialPalette.primary;
-                                                }
-
-                                                HorizontalLayout {
-                                                    width: parent.width;
-                                                    spacing: 6px;
-                                                    alignment: center;
-
-                                                    MaterialText {
-                                                        text: "Logo preview";
-                                                        font_size: 13px;
-                                                        font_weight: 600;
-                                                        color: MaterialPalette.on_surface;
-                                                    }
-
-                                                    if root.logo-status-loading || root.logo-status-invalid || root.logo-status-remote-ready || root.logo-status-local || root.logo-status-base64: Rectangle {
-                                                        height: 18px;
-                                                        border-radius: 9px;
-                                                        background: root.logo-status-chip-background;
-
-                                                        MaterialText {
-                                                            x: 8px;
-                                                            y: (parent.height - self.preferred-height) / 2;
-                                                            text:
-                                                                root.logo-status-invalid ? "Fallback" :
-                                                                root.logo-status-loading ? "Loading" :
-                                                                root.logo-status-remote-ready ? "Remote" :
-                                                                root.logo-status-local ? "Local" :
-                                                                "Base64";
-                                                            font_size: 10px;
-                                                            color: root.logo-status-invalid ? MaterialPalette.on_error_container :
-                                                                (root.logo-status-loading || root.logo-status-remote-ready) ? MaterialPalette.on_primary_container :
-                                                                MaterialPalette.on_tertiary_container;
-                                                        }
-                                                    }
-                                                }
-
-                                                Text {
-                                                    width: parent.width;
-                                                    text: root.logo-preview-status;
-                                                    font-size: 12px;
-                                                    color: root.logo-status-color;
-                                                    wrap: word-wrap;
-                                                }
-
-                                                Text {
-                                                    width: parent.width;
-                                                    text: "Used on the project card and workflow header.";
-                                                    font-size: 11px;
-                                                    color: MaterialPalette.on_surface_variant;
-                                                    wrap: word-wrap;
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if root.mode == "delete": Text {
-                                        text: "Are you sure to delete " + root.name + " ?";
-                                        wrap: word-wrap;
-                                        font-size: 14px;
-                                        font-family: "Hiragino Sans GB";
-                                        color: MaterialPalette.on_surface;
-                                    }
-
-                                    if root.error-text != "": MaterialText {
-                                        text: root.error-text;
-                                        font_size: 12px;
-                                        color: MaterialPalette.error;
-                                    }
-                                }
-
-                                viewport_height: body-content.preferred-height;
+                            GitHubToggle {
+                                x: parent.width - 60px;
+                                y: 22px;
+                                checked <=> root.is-pr-auto-update;
                             }
                         }
+
+                        Rectangle {
+                            x: 16px;
+                            y: 556px;
+                            width: parent.width - 32px;
+                            height: 76px;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                            background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+
+                            Rectangle {
+                                x: 12px;
+                                y: 10px;
+                                width: 56px;
+                                height: 56px;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                                background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+                                clip: true;
+
+                                Image {
+                                    x: 8px;
+                                    y: 8px;
+                                    width: 40px;
+                                    height: 40px;
+                                    source: root.logo-preview-image;
+                                }
+                            }
+
+                            Text {
+                                x: 80px;
+                                y: 12px;
+                                width: parent.width - 92px;
+                                height: 20px;
+                                text: "Logo preview";
+                                font-size: 14px;
+                                font-weight: 600;
+                                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                x: 80px;
+                                y: 36px;
+                                width: parent.width - 92px;
+                                height: 20px;
+                                text: root.logo-preview-status;
+                                font-size: 12px;
+                                color: root.logo-preview-status == "Invalid input, using default logo"
+                                    ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
+                                    : (AppState.effective-dark-mode ? #9198a1 : #59636e);
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+
+                        if root.error-text != "": Rectangle {
+                            x: 16px;
+                            y: 644px;
+                            width: parent.width - 32px;
+                            height: 40px;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: AppState.effective-dark-mode ? #f8514966 : #cf222e66;
+                            background: AppState.effective-dark-mode ? #3d1117 : #ffebe9;
+
+                            Image {
+                                x: 12px;
+                                y: 12px;
+                                width: 16px;
+                                height: 16px;
+                                source: @image-url("../assets/icons/octicon-alert-16.svg");
+                                colorize: AppState.effective-dark-mode ? #f85149 : #cf222e;
+                            }
+
+                            Text {
+                                x: 36px;
+                                width: parent.width - 48px;
+                                height: parent.height;
+                                text: root.error-text;
+                                font-size: 12px;
+                                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        }
+
+                        viewport-height: form-content.height;
                     }
                 }
 
-                HorizontalDivider {
-                    x: 0;
-                    y: parent.height - root.dialog-footer-height - 1px;
-                    z: 3;
+                footer := Rectangle {
                     width: parent.width;
-                }
-
-                footer-section := Rectangle {
-                    x: 0;
-                    y: parent.height - self.height;
-                    z: 3;
-                    width: parent.width;
-                    height: root.dialog-footer-height;
-                    background: MaterialPalette.background;
+                    height: root.footer-height;
+                    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
 
                     HorizontalLayout {
-                        width: parent.width;
-                        height: parent.height;
-                        padding-left: MaterialStyleMetrics.padding_8;
-                        padding-right: MaterialStyleMetrics.padding_8;
-                        padding-top: 12px;
-                        padding-bottom: 4px;
+                        x: 16px;
+                        y: 16px;
+                        width: parent.width - 32px;
+                        height: 32px;
+                        spacing: 8px;
                         alignment: end;
-                        spacing: MaterialStyleMetrics.spacing_8;
 
                         Rectangle { horizontal-stretch: 1; }
 
-                        TextButton {
+                        GitHubButton {
                             text: "Cancel";
-                            height: 36px;
-                            clicked => {
-                                root.cancel();
-                            }
+                            clicked => { root.cancel(); }
                         }
 
-                        FilledButton {
-                            text: root.mode == "edit" ? "Save" : root.mode == "delete" ? "Confirm" : "OK";
-                            height: 36px;
+                        GitHubButton {
+                            text: root.mode == "edit" ? "Save changes" : root.deleting ? "Delete project" : "Add project";
+                            primary: !root.deleting;
+                            danger: root.deleting;
                             clicked => {
-                                if root.mode == "delete" {
+                                if root.deleting {
                                     root.confirm-delete(root.original-alias);
                                     return;
                                 }
                                 if root.name == "" || root.alias == "" || root.local-repo == "" || root.remote-repo == "" {
-                                    root.error-text = "Please fill in all fields.";
+                                    root.error-text = "Project name, alias, local repository, and remote repository are required.";
                                     return;
                                 }
                                 root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags, root.is-pr-auto-update);

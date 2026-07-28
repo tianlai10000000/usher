@@ -1,6 +1,14 @@
-import { FilledButton, MaterialPalette, MaterialText, CircularProgressIndicator } from "@material";
 import { StepItem, Steps } from "../../components/workflow/steps.slint";
-import { TagField, TagReadonlyField, TagModeChip } from "../../components/workflow/fields.slint";
+import { TagField, TagReadonlyField } from "../../components/workflow/fields.slint";
+import { AppState } from "../../state/app_state.slint";
+import {
+    TagActionButton,
+    TagStatusBanner,
+    TagStepsPlaceholder,
+    TagSegmentedControl,
+    TagSegmentItem,
+    TagSegmentDivider,
+} from "../../components/workflow/tag_controls.slint";
 
 export component TagAddPanel {
     in property <string> version-mode: "patch";
@@ -18,79 +26,54 @@ export component TagAddPanel {
     private property <string> description: "";
     private property <int> expanded-step-index: -1;
     private property <bool> stacked-fields: root.width < 1020px;
-    private property <bool> stacked-chip-row: root.width < 560px;
     private property <bool> show-steps:
         root.running || (root.steps.length > 0 && root.steps[0].status != "pending");
     width: 100%;
 
     VerticalLayout {
+        width: 100%;
         spacing: 16px;
         alignment: start;
         padding: 8px;
 
-        if !root.stacked-chip-row: HorizontalLayout {
+        // Primer SegmentedControl for bump size (replaces separate chips).
+        HorizontalLayout {
             width: parent.width;
-            spacing: 16px;
-            alignment: start;
-            padding-top: 8px;
-        
-
-            TagModeChip {
-                label: "Patch";
-                selected: root.version-mode == "patch";
-                enabled: !root.running && !root.initializing;
-                clicked => { root.select-version-mode("patch"); }
-            }
-
-            TagModeChip {
-                label: "Minor";
-                selected: root.version-mode == "minor";
-                enabled: !root.running && !root.initializing;
-                clicked => { root.select-version-mode("minor"); }
-            }
-
-            TagModeChip {
-                label: "Major";
-                selected: root.version-mode == "major";
-                enabled: !root.running && !root.initializing;
-                clicked => { root.select-version-mode("major"); }
-            }
-        }
-
-        if root.stacked-chip-row: VerticalLayout {
-            width: parent.width;
+            height: 28px;
             spacing: 8px;
             alignment: start;
+            cross-axis-alignment: center;
 
-            HorizontalLayout {
-                width: parent.width;
-                spacing: 10px;
-                alignment: start;
+            Text {
+                height: 28px;
+                text: "Bump";
+                font-size: 12px;
+                font-weight: 600;
+                color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                vertical-alignment: center;
+                vertical-stretch: 0;
+            }
 
-                TagModeChip {
-                    label: "Major";
-                    selected: root.version-mode == "major";
+            TagSegmentedControl {
+                TagSegmentItem {
+                    label: "Patch";
+                    selected: root.version-mode == "patch";
                     enabled: !root.running && !root.initializing;
-                    clicked => { root.select-version-mode("major"); }
+                    clicked => { root.select-version-mode("patch"); }
                 }
-                TagModeChip {
+                TagSegmentDivider { }
+                TagSegmentItem {
                     label: "Minor";
                     selected: root.version-mode == "minor";
                     enabled: !root.running && !root.initializing;
                     clicked => { root.select-version-mode("minor"); }
                 }
-            }
-
-            HorizontalLayout {
-                width: parent.width;
-                spacing: 10px;
-                alignment: start;
-
-                TagModeChip {
-                    label: "Patch";
-                    selected: root.version-mode == "patch";
+                TagSegmentDivider { }
+                TagSegmentItem {
+                    label: "Major";
+                    selected: root.version-mode == "major";
                     enabled: !root.running && !root.initializing;
-                    clicked => { root.select-version-mode("patch"); }
+                    clicked => { root.select-version-mode("major"); }
                 }
             }
         }
@@ -136,38 +119,27 @@ export component TagAddPanel {
         }
 
         TagField {
-            // width: parent.width;
+            width: 100%;
             label: "Tag description";
             value <=> root.description;
             placeholder: "";
             enabled: !root.running && !root.initializing;
         }
 
+        // alignment=start keeps the action on the left.
         HorizontalLayout {
+            width: 100%;
             spacing: 12px;
             alignment: start;
-            height: 40px;
+            cross-axis-alignment: center;
+            height: 32px;
 
-            FilledButton {
+            TagActionButton {
                 enabled: !root.running && !root.initializing;
-                height: 40px;
-                text: root.initializing ? "Loading..." : (root.running ? "Running..." : "Run");
+                loading: root.running || root.initializing;
+                label: root.initializing ? "Loading…" : (root.running ? "Creating…" : "Create tag");
                 clicked => {
                     root.run(root.next-version, root.description);
-                }
-            }
-
-            if root.running || root.initializing: Rectangle {
-                width: 24px;
-                height: parent.height;
-                background: transparent;
-                CircularProgressIndicator {
-                    width: 20px;
-                    height: 20px;
-                    indeterminate: root.loading-animated;
-                    progress: root.loading-animated ? 0 : 0.72;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
                 }
             }
 
@@ -177,45 +149,19 @@ export component TagAddPanel {
                 horizontal-stretch: 1;
             }
 
-            if root.running: FilledButton {
-                height: 40px;
-                text: "Stop";
+            if root.running: TagActionButton {
+                label: "Stop workflow";
+                danger: true;
                 clicked => {
                     root.stop();
                 }
             }
         }
 
-        Rectangle {
-            width: parent.width - 16px;
-            // height: max(22px, status-text.preferred-height);
-            clip: true;
-            background: MaterialPalette.surface_container;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            border-radius: 4px;
-
-            VerticalLayout {
-                width: parent.width;
-                padding: 8px;
-                spacing: 4px;
-
-                if root.initializing: MaterialText {
-                    text: "Loading latest local tag…";
-                    font-family: "Hiragino Sans GB";
-                    font_size: 10px;
-                    color: MaterialPalette.on_surface_variant;
-                }
-
-                status-text := Text {
-                    width: parent.width - 2px;
-                    text: root.result;
-                    wrap: word-wrap;
-                    color: MaterialPalette.on_background;
-                    font-size: 10px;
-                    font-family: "Hiragino Sans GB";
-                }
-            }
+        TagStatusBanner {
+            width: 100%;
+            message: root.result;
+            initializing: root.initializing;
         }
 
         if root.show-steps: Steps {
@@ -226,22 +172,9 @@ export component TagAddPanel {
             animations-enabled: root.loading-animated;
         }
 
-        if !root.show-steps: Rectangle {
-            width: parent.width - 16px;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            background: MaterialPalette.surface_container_low;
-            height: 44px;
-
-            Text {
-                x: 12px;
-                y: (parent.height - self.height) / 2;
-                width: parent.width - 24px;
-                text: "Workflow steps will appear after the tag process starts.";
-                color: MaterialPalette.on_surface_variant;
-                font-size: 12px;
-            }
+        if !root.show-steps: TagStepsPlaceholder {
+            width: 100%;
+            message: "Workflow steps will appear after the tag process starts.";
         }
     }
 }

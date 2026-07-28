@@ -14,7 +14,7 @@ export struct ToastOptions {
     overlay: bool,           // 是否显示遮罩层，默认为 false
     close-on-click: bool,   // 是否点击关闭，默认为 false
     loading-type: string,    // loading 类型，默认为 "circular"
-    width: string,          // 宽度设置：空字符串表示默认20%，"auto"表示内容宽度，"300px"或"50%"表示自定义值
+    width: string,          // 空字符串/"auto"使用 GitHub Toast 内容宽度（最大450px），也支持"300px"或"50%"
 }
 
 export global ToastManager {
@@ -29,7 +29,7 @@ export global ToastManager {
     in-out property <string> loading-type: "circular";
     in-out property <string> width: "";
     in-out property <length> width-value: 0px;   // 解析后的宽度值（px）
-    in-out property <float> width-percent: 20.0;  // 百分比值（0表示不使用百分比）
+    in-out property <float> width-percent: 0.0;  // 百分比值（0表示不使用百分比）
     in-out property <bool> width-is-auto: false;  // 是否为auto模式
 
     // 便捷方法 - 使用对象参数，类似 JavaScript
@@ -56,4 +56,3 @@ export global ToastManager {
     // 关闭当前 Toast
     callback dismiss();
 }
-

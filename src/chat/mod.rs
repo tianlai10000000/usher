@@ -4,6 +4,7 @@ pub mod markdown;
 pub mod persistence;
 pub mod renderer;
 pub mod session;
+mod virtual_layout;
 
 use crate::MainWindow;
 

@@ -1,30 +1,56 @@
-import { MaterialPalette, MaterialText, Switch } from "@material";
+import { MaterialText } from "@material";
+import { AppState } from "../../state/app_state.slint";
 import { TagAddPanel } from "./tag_add.slint";
 import { TagRemovePanel } from "./tag_remove.slint";
 import { StepItem } from "../../components/workflow/steps.slint";
+import {
+    TagSegmentedControl,
+    TagSegmentItem,
+    TagSegmentDivider,
+} from "../../components/workflow/tag_controls.slint";
 
+// GitHub UnderlineNav-style tab: hover wash + coral underline on the shared
+// bottom border (same treatment as PR Conversation/Commits/Files tabs).
 component TagTabChip inherits Rectangle {
     in property <string> label;
     in property <bool> selected: false;
     callback clicked();
 
-    width: 120px;
-    height: 30px;
-    background: root.selected ? MaterialPalette.background : MaterialPalette.surface_container;
+    width: max(120px, label-measure.preferred-width + 32px);
+    height: 100%;
+    background: tab-touch.has-hover
+        ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
+        : transparent;
 
-    TouchArea {
-        width: 100%;
-        height: 100%;
-        clicked => { root.clicked(); }
+    label-measure := Text {
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        text: root.label;
+        font-size: 14px;
+        font-weight: root.selected ? 600 : 400;
     }
 
     MaterialText {
         text: root.label;
-        font_size: 13px;
-        font_weight: root.selected ? 600 : 500;
-        color: root.selected ? MaterialPalette.on_primary_container : MaterialPalette.on_surface;
+        font_size: 14px;
+        font_weight: root.selected ? 600 : 400;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
+    }
+
+    Rectangle {
+        x: 0px;
+        y: parent.height - 2px;
+        width: parent.width;
+        height: 2px;
+        background: root.selected ? #fd8c73 : transparent;
+    }
+
+    tab-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
     }
 }
 
@@ -48,8 +74,10 @@ export component TagFlow {
     callback open-remove-tab();
     callback stop();
 
-    private property <bool> stacked-mode-row: root.width < 900px;
     private property <int> selected-tab: 0; // 0: Add, 1: Remove
+    private property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
     width: 100%;
     init => {
         root.open-add-tab();
@@ -57,206 +85,143 @@ export component TagFlow {
 
     content := VerticalLayout {
         width: root.width;
-        spacing: 14px;
+        spacing: 0px;
         alignment: start;
 
-        MaterialText {
-            text: "Create or remove release tags with local/remote mode switching and step-by-step workflow logs.";
-            font_size: 14px;
-            color: MaterialPalette.on_surface_variant;
-        }
+        // Scope is repository context, not an Add/Remove tab. Keep it on its
+        // own compact toolbar above the UnderlineNav, aligned to the left.
+        scope-row := Rectangle {
+            width: parent.width;
+            height: 36px;
+            background: root.canvas-default;
 
-        config-panel := Rectangle {
-            width: 100%;
-            height: config-content.preferred-height + 36px;
-            border-radius: 14px;
-            border-width: 1px;
-            border-color: MaterialPalette.surface_container_highest;
-            clip: true;
+            scope-group := HorizontalLayout {
+                x: 0px;
+                y: 4px;
+                height: 28px;
+                spacing: 8px;
+                alignment: start;
+                cross-axis-alignment: center;
 
-            config-content := VerticalLayout {
-                x: 16px;
-                y: 16px;
-                width: config-panel.width - 32px;
-                spacing: 12px;
-
-                if !root.stacked-mode-row: HorizontalLayout {
-                    width: parent.width;
-                    spacing: 12px;
-                    alignment: start;
-
-                    MaterialText {
-                        text: "Local mode";
-                        font_size: 14px;
-                        color: MaterialPalette.on_surface;
-                        vertical_alignment: center;
-                    }
-
-                    Switch {
-                        checked: root.mode == "remote";
-                        width: 48px;
-                        height: 28px;
-                        checked_state_changed(checked) => {
-                            root.change-mode(checked ? "remote" : "local");
-                        }
-                    }
-
-                    MaterialText {
-                        text: "Remote mode";
-                        font_size: 14px;
-                        color: MaterialPalette.on_surface;
-                        vertical_alignment: center;
-                    }
-
-                    Rectangle {
-                        height: 1px;
-                        background: transparent;
-                        horizontal-stretch: 1;
-                    }
-
-                    MaterialText {
-                        text: "Current mode: " + (root.mode == "remote" ? "remote" : "local");
-                        font_size: 13px;
-                        font_weight: 600;
-                        color: MaterialPalette.primary;
-                        vertical_alignment: center;
-                    }
+                Text {
+                    height: 28px;
+                    text: "Scope";
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: root.fg-muted;
+                    vertical-alignment: center;
                 }
 
-                if root.stacked-mode-row: VerticalLayout {
-                    width: parent.width;
-                    spacing: 8px;
-                    alignment: start;
-
-                    HorizontalLayout {
-                        width: parent.width;
-                        spacing: 12px;
-                        alignment: start;
-
-                        MaterialText {
-                            text: "Local mode";
-                            font_size: 14px;
-                            color: MaterialPalette.on_surface;
-                            vertical_alignment: center;
-                        }
-
-                        Switch {
-                            checked: root.mode == "remote";
-                            width: 48px;
-                            height: 28px;
-                            checked_state_changed(checked) => {
-                                root.change-mode(checked ? "remote" : "local");
-                            }
-                        }
-
-                        MaterialText {
-                            text: "Remote mode";
-                            font_size: 14px;
-                            color: MaterialPalette.on_surface;
-                            vertical_alignment: center;
-                        }
+                TagSegmentedControl {
+                    TagSegmentItem {
+                        label: "Local";
+                        selected: root.mode != "remote";
+                        enabled: !root.running;
+                        clicked => { root.change-mode("local"); }
                     }
-
-                    MaterialText {
-                        text: "Current mode: " + (root.mode == "remote" ? "remote" : "local");
-                        font_size: 13px;
-                        font_weight: 600;
-                        color: MaterialPalette.primary;
+                    TagSegmentDivider { }
+                    TagSegmentItem {
+                        label: "Remote";
+                        selected: root.mode == "remote";
+                        enabled: !root.running;
+                        clicked => { root.change-mode("remote"); }
                     }
                 }
             }
         }
 
-        // 自定义分段 Tabs（不再使用 TabWidget）
-        tabs-and-content := VerticalLayout {
-            width: root.width;
-            spacing: 0px;
+        // GitHub UnderlineNav for the actual tag operations.
+        tabs-row := Rectangle {
+            width: parent.width;
+            height: 48px;
+            background: root.canvas-default;
 
-            tabs-row := Rectangle {
+            // Shared nav border first; selected coral underline covers it.
+            Rectangle {
+                y: parent.height - 1px;
                 width: parent.width;
-                height: 34px;
-                border-top-left-radius: 17px;
-                border-top-right-radius: 17px;
-                border-width: 1px;
-                border-color: MaterialPalette.outline_variant;
-                background: MaterialPalette.surface_container;
-                clip: true;
-
-                HorizontalLayout {
-                    x: 2px;
-                    y: 2px;
-                    width: parent.width - 4px;
-                    height: parent.height - 4px;
-                    spacing: 0px;
-
-                    TagTabChip {
-                        label: "Add Tag";
-                        selected: root.selected-tab == 0;
-                        clicked => {
-                            root.selected-tab = 0;
-                            root.open-add-tab();
-                        }
-                    }
-
-                    TagTabChip {
-                        label: "Remove Tag";
-                        selected: root.selected-tab == 1;
-                        clicked => {
-                            root.selected-tab = 1;
-                            root.open-remove-tab();
-                        }
-                    }
-                }
+                height: 1px;
+                background: root.border-default;
             }
 
-            if root.selected-tab == 0: Rectangle {
-                border-width: 1px;
-                border-color: MaterialPalette.outline_variant;
-                border-bottom-left-radius: 14px;
-                border-bottom-right-radius: 14px;
+            HorizontalLayout {
+                width: parent.width;
+                height: parent.height;
+                spacing: 0px;
+                alignment: start;
+                cross-axis-alignment: center;
 
-                TagAddPanel {
-                    width: parent.width;
-                    initializing: root.add-initializing;
-                    version-mode: root.version-mode;
-                    current-version: root.current-version;
-                    next-version <=> root.next-version;
-                    running: root.running;
-                    loading-animated: root.loading-animated;
-                    result: root.result;
-                    steps: root.steps;
-                    select-version-mode(mode) => {
-                        root.select-version-mode(mode);
-                    }
-                    run(version, description) => {
-                        root.run(version, description);
-                    }
-                    stop => {
-                        root.stop();
+                TagTabChip {
+                    label: "Add Tag";
+                    selected: root.selected-tab == 0;
+                    clicked => {
+                        root.selected-tab = 0;
+                        root.open-add-tab();
                     }
                 }
+
+                TagTabChip {
+                    label: "Remove Tag";
+                    selected: root.selected-tab == 1;
+                    clicked => {
+                        root.selected-tab = 1;
+                        root.open-remove-tab();
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
             }
+        }
 
-            if root.selected-tab == 1: Rectangle {
-                border-width: 1px;
-                border-color: MaterialPalette.outline_variant;
-                border-bottom-left-radius: 14px;
-                border-bottom-right-radius: 14px;
+        Rectangle { width: parent.width; height: 12px; background: transparent; }
 
-                TagRemovePanel {
-                    width: parent.width;
-                    tag-to-remove <=> root.remove-target;
-                    initializing: root.remove-initializing;
-                    running: root.running;
-                    loading-animated: root.loading-animated;
-                    result: root.result;
-                    steps: root.steps;
-                    remove-tag(tag) => {
-                        root.remove-tag(tag);
-                    }
-                    stop => {
-                        root.stop();
-                    }
+        if root.selected-tab == 0: Rectangle {
+            border-width: 1px;
+            border-color: root.border-default;
+            border-radius: 6px;
+            background: root.canvas-default;
+
+            TagAddPanel {
+                width: parent.width;
+                initializing: root.add-initializing;
+                version-mode: root.version-mode;
+                current-version: root.current-version;
+                next-version <=> root.next-version;
+                running: root.running;
+                loading-animated: root.loading-animated;
+                result: root.result;
+                steps: root.steps;
+                select-version-mode(mode) => {
+                    root.select-version-mode(mode);
+                }
+                run(version, description) => {
+                    root.run(version, description);
+                }
+                stop => {
+                    root.stop();
+                }
+            }
+        }
+
+        if root.selected-tab == 1: Rectangle {
+            border-width: 1px;
+            border-color: root.border-default;
+            border-radius: 6px;
+            background: root.canvas-default;
+
+            TagRemovePanel {
+                width: parent.width;
+                tag-to-remove <=> root.remove-target;
+                initializing: root.remove-initializing;
+                running: root.running;
+                loading-animated: root.loading-animated;
+                result: root.result;
+                steps: root.steps;
+                remove-tag(tag) => {
+                    root.remove-tag(tag);
+                }
+                stop => {
+                    root.stop();
                 }
             }
         }

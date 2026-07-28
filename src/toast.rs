@@ -46,8 +46,8 @@ fn parse_width(width_str: &str) -> (bool, f32, f32) {
         }
     }
 
-    // Default value: 20%
-    (false, 0.0, 20.0)
+    // Default value: GitHub Primer content-sized toast.
+    (true, 0.0, 0.0)
 }
 
 // Helper function: create Toast configuration with default values
@@ -102,9 +102,9 @@ fn create_toast_with_defaults(
         options.loading_type.to_string()
     };
 
-    // width handling: if empty, use default value "20%"
+    // GitHub Primer Toast follows content width and caps the card at 450px.
     let final_width = if options.width.is_empty() {
-        "20%".to_string()
+        "auto".to_string()
     } else {
         options.width.to_string()
     };

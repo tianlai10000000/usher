@@ -1,9 +1,15 @@
+mod diagnostics;
+mod input;
+mod refresh;
 mod render;
 mod session;
 
 use crate::memory_diagnostics::process_memory_snapshot;
 use crate::{MainWindow, Route, TerminalLine, TerminalSpan};
 use arboard::Clipboard;
+use diagnostics::{format_bytes_for_log, route_label, sanitize_for_log, terminal_line_stats};
+use input::map_key_to_bytes;
+use refresh::next_refresh_delay;
 use render::{RenderedTerminalLine, TerminalCursorState, TerminalRenderState};
 use session::{PtySession, SessionEvent};
 use slint::{ComponentHandle, ModelRc, Timer, VecModel};
@@ -838,17 +844,11 @@ fn schedule_refresh(_ui_weak: slint::Weak<MainWindow>, shared_state: SharedTermi
         } else {
             guard.refresh_scheduled = true;
             let now = Instant::now();
-            let delay = guard
-                .last_refresh_applied_at
-                .and_then(|last| {
-                    let elapsed = now.saturating_duration_since(last);
-                    if elapsed >= TERMINAL_REFRESH_FRAME_INTERVAL {
-                        None
-                    } else {
-                        Some(TERMINAL_REFRESH_FRAME_INTERVAL - elapsed)
-                    }
-                })
-                .unwrap_or_default();
+            let delay = next_refresh_delay(
+                now,
+                guard.last_refresh_applied_at,
+                TERMINAL_REFRESH_FRAME_INTERVAL,
+            );
             Some(delay)
         }
     };
@@ -1008,20 +1008,6 @@ fn log_terminal_output_chunk(guard: &mut TerminalDrawerState, bytes: &[u8]) {
     );
 }
 
-fn terminal_line_stats(lines: &[RenderedTerminalLine]) -> (usize, usize) {
-    let mut span_count = 0usize;
-    let mut span_text_bytes = 0usize;
-
-    for line in lines {
-        span_count += line.spans.len();
-        for span in &line.spans {
-            span_text_bytes += span.text.len();
-        }
-    }
-
-    (span_count, span_text_bytes)
-}
-
 fn clear_selection_output(guard: &mut TerminalDrawerState) {
     guard.selection_output.clear();
     guard.selection_output_line_count = 0;
@@ -1079,100 +1065,8 @@ fn clipboard_get_text() -> Result<String, String> {
     }
 }
 
-fn map_key_to_bytes(text: &str, ctrl: bool, alt: bool, shift: bool, meta: bool) -> Option<Vec<u8>> {
-    if text.is_empty() && !ctrl {
-        return None;
-    }
-
-    let bytes = match text {
-        "__IGNORE__" => return None,
-        "__CTRL_C__" => vec![0x03],
-        "__CTRL_D__" => vec![0x04],
-        "__CTRL_L__" => vec![0x0c],
-        "__CTRL_Z__" => vec![0x1a],
-        "__RETURN__" => b"\r".to_vec(),
-        "__BACKSPACE__" => vec![0x7f],
-        "__DELETE__" => b"\x1b[3~".to_vec(),
-        "__TAB__" => b"\t".to_vec(),
-        "__ESCAPE__" => b"\x1b".to_vec(),
-        "__LEFT__" => b"\x1b[D".to_vec(),
-        "__RIGHT__" => b"\x1b[C".to_vec(),
-        "__UP__" => b"\x1b[A".to_vec(),
-        "__DOWN__" => b"\x1b[B".to_vec(),
-        "__HOME__" => b"\x1b[H".to_vec(),
-        "__END__" => b"\x1b[F".to_vec(),
-        _ => {
-            if ctrl && text.is_empty() {
-                return None;
-            }
-            if ctrl && text.chars().count() == 1 {
-                let ch = text.chars().next().unwrap_or_default();
-                if ch.is_ascii_control() {
-                    vec![ch as u8]
-                } else {
-                    let upper = ch.to_ascii_uppercase();
-                    if upper.is_ascii_alphabetic() {
-                        vec![(upper as u8) - b'@']
-                    } else {
-                        text.as_bytes().to_vec()
-                    }
-                }
-            } else if alt || meta {
-                let mut seq = vec![0x1b];
-                seq.extend_from_slice(text.as_bytes());
-                seq
-            } else if shift {
-                text.as_bytes().to_vec()
-            } else {
-                text.as_bytes().to_vec()
-            }
-        }
-    };
-
-    Some(bytes)
-}
-
-fn sanitize_for_log(text: &str) -> String {
-    text.chars()
-        .flat_map(|ch| ch.escape_default())
-        .collect::<String>()
-}
-
-fn format_bytes_for_log(bytes: &[u8]) -> String {
-    const MAX_PREVIEW: usize = 24;
-    let mut parts = bytes
-        .iter()
-        .take(MAX_PREVIEW)
-        .map(|byte| format!("{byte:#04x}"))
-        .collect::<Vec<_>>();
-    if bytes.len() > MAX_PREVIEW {
-        parts.push("...".to_string());
-    }
-    format!("[{}]", parts.join(", "))
-}
-
 fn current_route_label(ui: &MainWindow) -> &'static str {
     route_label(ui.get_current_route())
-}
-
-fn route_label(route: Route) -> &'static str {
-    match route {
-        Route::Login => "Login",
-        Route::Home => "Home",
-        Route::Search => "Search",
-        Route::Settings => "Settings",
-        Route::Notification => "Notification",
-        Route::Toast => "Toast",
-        Route::Dialog => "Dialog",
-        Route::Tools => "Tools",
-        Route::Project => "Project",
-        Route::Chat => "Chat",
-        Route::About => "About",
-        Route::List => "List",
-        Route::Detail => "Detail",
-        Route::Workflow => "Workflow",
-        Route::PrReview => "PrReview",
-    }
 }
 
 fn toggle_source_label(ui: &MainWindow) -> &'static str {

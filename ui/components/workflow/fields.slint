@@ -1,5 +1,6 @@
 import { MaterialPalette, MaterialText } from "@material";
 import { CompactTextField } from "../input/compact_text_field.slint";
+import { AppState } from "../../state/app_state.slint";
 
 export component TagField {
     in property <string> label;
@@ -21,7 +22,8 @@ export component TagField {
             height: root.label-height;
             vertical_alignment: center;
             font_size: 12px;
-            color: MaterialPalette.on_surface_variant;
+            font-weight: 600;
+            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
         }
 
         CompactTextField {
@@ -30,10 +32,9 @@ export component TagField {
             placeholder: root.placeholder;
             enabled: root.enabled;
             field-height: root.input-height;
-            border-radius-size: 10px;
+            border-radius-size: 6px;
             input-font-size: 14px;
-            input-font-family: "Hiragino Sans GB";
-            field-background: MaterialPalette.surface_container_highest;
+            field-background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
         }
     }
 }
@@ -55,24 +56,30 @@ export component TagReadonlyField {
             height: root.label-height;
             vertical_alignment: center;
             font_size: 12px;
-            color: MaterialPalette.on_surface_variant;
+            font-weight: 600;
+            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
         }
 
         Rectangle {
             width: root.width - 2px;
             height: root.input-height;
-            border-radius: 10px;
+            border-radius: 6px;
             border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            background: MaterialPalette.surface_container_highest;
+            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+            background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
 
-            MaterialText {
-                text: root.value;
-                font-family: "Hiragino Sans GB";
-                color: MaterialPalette.on_surface;
-                font_size: 14px;
+            // Use native Text + vertical-alignment (same as GitHubTextField /
+            // CompactTextField TextInput). MaterialText with manual y centering
+            // lands on fractional pixels and renders softer than the input below.
+            Text {
                 x: 12px;
-                y: (parent.height - self.height) / 2;
+                width: parent.width - 24px;
+                height: parent.height;
+                text: root.value;
+                font-size: 14px;
+                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                vertical-alignment: center;
+                overflow: elide;
             }
         }
     }
@@ -86,21 +93,26 @@ export component TagModeChip inherits Rectangle {
 
     width: 110px;
     height: 34px;
-    border-radius: 17px;
+    border-radius: 6px;
     border-width: 1px;
-    border-color: root.selected ? MaterialPalette.primary : MaterialPalette.outline_variant;
-    background: root.selected ? MaterialPalette.primary_container : MaterialPalette.surface_container_highest;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: root.selected
+        ? (AppState.effective-dark-mode ? #21262d : #eaeef2)
+        : (chip-touch.has-hover
+            ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
+            : (AppState.effective-dark-mode ? #0d1117 : #ffffff));
 
-    TouchArea {
+    chip-touch := TouchArea {
         width: 100%;
         height: 100%;
         enabled: root.enabled;
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 
     MaterialText {
         text: root.label;
-        color: root.selected ? MaterialPalette.on_primary_container : MaterialPalette.on_surface;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
         font_size: 13px;
         font_weight: root.selected ? 600 : 500;
         x: (parent.width - self.width) / 2;

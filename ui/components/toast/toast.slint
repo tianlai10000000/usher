@@ -1,5 +1,5 @@
-import { MaterialPalette, MaterialText, Horizontal, CircularProgressIndicator } from "@material";
-import { ColorsTheme } from "../../theme/color.slint";
+import { MaterialText } from "@material";
+import { AppState } from "../../state/app_state.slint";
 
 export component Toast inherits Rectangle {
     in property <string> message;
@@ -8,24 +8,41 @@ export component Toast inherits Rectangle {
     in property <bool> overlay: false;
     in property <bool> close-on-click: false;
     in property <bool> toast-visible: false;
-    in property <length> toast-width-value: 0px; // 解析后的宽度值（px，0表示不使用px）
-    in property <float> toast-width-percent: 20.0; // 百分比值（0表示不使用百分比）
-    in property <bool> toast-width-is-auto: false; // 是否为auto模式
+    in property <length> toast-width-value: 0px;
+    in property <float> toast-width-percent: 0.0;
+    in property <bool> toast-width-is-auto: false;
     callback dismiss();
+
+    private property <length> viewport-margin: root.width < 544px ? 8px : 16px;
+    private property <length> available-width: max(1px, root.width - root.viewport-margin * 2);
+    private property <length> natural-width: message-measure.preferred-width + 80px;
+    private property <length> automatic-width: min(root.available-width, max(200px, min(450px, root.natural-width)));
+    private property <length> resolved-width: root.toast-width-is-auto
+        ? root.automatic-width
+        : (root.toast-width-value > 0px
+            ? min(root.available-width, root.toast-width-value)
+            : (root.toast-width-percent > 0
+                ? min(root.available-width, root.width * root.toast-width-percent * 0.01)
+                : root.automatic-width));
+    private property <color> github-canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    private property <color> github-border-default: AppState.effective-dark-mode ? #3d444d : #d0d7de;
+    private property <color> github-fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    private property <color> github-accent-emphasis: AppState.effective-dark-mode ? #1f6feb : #0969da;
+    private property <color> github-success-emphasis: AppState.effective-dark-mode ? #238636 : #1f883d;
+    private property <color> github-danger-emphasis: AppState.effective-dark-mode ? #da3633 : #cf222e;
+    private property <color> github-neutral-emphasis: AppState.effective-dark-mode ? #6e7681 : #57606a;
 
     width: 100%;
     height: 100%;
     background: transparent;
     visible: toast-visible;
 
-    // Overlay 模式下，额外绘制整窗遮罩并接管背景点击。
     if overlay && toast-visible: Rectangle {
         width: 100%;
         height: 100%;
         background: #00000040;
         z: 0;
-        
-        // 只有 overlay 模式才拦截整窗点击，避免非 overlay Toast 阻挡底层交互。
+
         TouchArea {
             width: 100%;
             height: 100%;
@@ -33,54 +50,89 @@ export component Toast inherits Rectangle {
         }
     }
 
-    // Toast 内容区域始终由这个组件统一渲染。
-    // non-overlay 模式下，只有这块实际可见内容参与交互。
-    if toast-visible: Rectangle {
+    // GitHub Primer Toast: content-sized neutral card with a fixed 48px
+    // semantic icon rail. This intentionally reproduces Primer's canonical
+    // retired Toast rather than Material's full-color snackbar treatment.
+    message-measure := MaterialText {
+        visible: false;
+        text: root.message;
+        font-size: 14px;
+    }
+
+    if toast-visible: toast-card := Rectangle {
         z: 1;
-        width: root.toast-width-is-auto ? 
-            max(200px, min(parent.width * 0.8, 400px)) : // auto模式：使用内容宽度，限制在200px-80%之间
-            (root.toast-width-value > 0px ? root.toast-width-value : 
-             (root.toast-width-percent > 0 ? parent.width * root.toast-width-percent / 100 : parent.width * 0.2));
-        height: content-container.preferred-height;
+        width: root.resolved-width;
+        min-height: 48px;
+        height: max(48px, message-label.preferred-height + 32px);
+        // Toasts are horizontally centered for every vertical position.
         x: parent.width / 2 - self.width / 2;
-        y: position == "top" ? 32px :
-           position == "bottom" ? parent.height - self.height - 32px - 8px:
+        y: position == "top" ? root.viewport-margin :
+           position == "bottom" ? parent.height - self.height - root.viewport-margin :
            parent.height / 2 - self.height / 2;
-        background: root.type == "success" ? ColorsTheme.success :
-                    root.type == "error"    ? ColorsTheme.error :
-                    root.type == "loading" ? MaterialPalette.primary_container :
-                    MaterialPalette.surface_container_highest;
-        border-radius: 12px;
-        opacity: 1.0;
+        background: root.github-canvas-default;
+        border-width: 1px;
+        border-color: root.github-border-default;
+        border-radius: 6px;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: AppState.effective-dark-mode ? #00000066 : #1f232826;
+        drop-shadow-offset-y: 1px;
+        clip: true;
 
-        content-container := Horizontal {
-            spacing: 16px;
-            padding: 16px;
-            width: 100%;
-            min-height: 64px;
+        icon-rail := Rectangle {
+            x: 0px;
+            y: 0px;
+            width: 48px;
+            height: parent.height;
+            background: root.type == "success" ? root.github-success-emphasis :
+                        root.type == "error" ? root.github-danger-emphasis :
+                        root.type == "loading" ? root.github-neutral-emphasis :
+                        root.github-accent-emphasis;
 
-            // Icon support can be added later with a predefined set of icons
-
-            if root.type == "loading": CircularProgressIndicator {
-                width: 24px;
-                height: 24px;
-                indeterminate: true;
-                progress: 0;
+            if root.type != "loading": Image {
+                x: 16px;
+                y: (parent.height - self.height) / 2;
+                width: 16px;
+                height: 16px;
+                source: root.type == "success"
+                    ? @image-url("../../assets/icons/octicon-check-16.svg")
+                    : root.type == "error"
+                        ? @image-url("../../assets/icons/octicon-alert-16.svg")
+                        : @image-url("../../assets/icons/octicon-info-16.svg");
+                colorize: #ffffff;
             }
 
-            MaterialText {
-                text: root.message;
-                font-family: "Hiragino Sans GB";
-                color: root.type == "success" ? #ffffff :
-                       root.type == "error"    ? #ffffff :
-                       MaterialPalette.on_surface;
-                vertical-alignment: center;
-                wrap: word-wrap;
-                width: parent.width - (root.type == "loading" ? 40px : 0px) - 32px; // 减去loading图标宽度和padding
+            if root.type == "loading": Rectangle {
+                x: 14px;
+                y: (parent.height - self.height) / 2;
+                width: 20px;
+                height: 20px;
+                background: transparent;
+                private property <float> rotation-progress: mod(animation-tick(), 1000ms) / 1000ms;
+
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: @image-url("../../assets/icons/github-spinner-16.svg");
+                    image-fit: contain;
+                    colorize: #ffffff;
+                    transform-rotation: parent.rotation-progress * 360deg;
+                    transform-origin: { x: self.width / 2, y: self.height / 2 };
+                }
             }
         }
 
-        // 内容区自身可点击关闭；不需要把整窗都变成可点击区域。
+        message-label := MaterialText {
+            x: 64px;
+            y: 16px;
+            width: parent.width - 80px;
+            text: root.message;
+            font-size: 14px;
+            font-weight: 400;
+            color: root.github-fg-default;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+
         TouchArea {
             width: 100%;
             height: 100%;

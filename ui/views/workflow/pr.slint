@@ -1,42 +1,17 @@
-import { FilledButton, MaterialPalette, MaterialText } from "@material";
-import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
+import { MaterialText, ToolTip } from "@material";
+import { AppState } from "../../state/app_state.slint";
 
 export struct WorkflowPullRequestItem {
     number: string,
     title: string,
+    state: string,
     author: string,
     source-branch: string,
     target-branch: string,
     updated-at: string,
+    updated-at-raw: string,
+    updated-at-tooltip: string,
     web-url: string,
-}
-
-component StatusFilter inherits Rectangle {
-    in property <string> label;
-    in property <string> value;
-    in property <string> selected-value;
-    callback selected(string);
-
-    width: root.label == "All" ? 54px : 76px;
-    height: 32px;
-    border-radius: 16px;
-    border-width: 1px;
-    border-color: root.selected-value == root.value ? MaterialPalette.primary : MaterialPalette.outline_variant;
-    background: root.selected-value == root.value ? MaterialPalette.secondary_container : MaterialPalette.surface_container_lowest;
-
-    MaterialText {
-        width: parent.width;
-        height: parent.height;
-        text: root.label;
-        font-family: "Hiragino Sans GB";
-        horizontal_alignment: center;
-        vertical_alignment: center;
-        font_size: 12px;
-        font_weight: root.selected-value == root.value ? 600 : 400;
-        color: root.selected-value == root.value ? MaterialPalette.on_secondary_container : MaterialPalette.on_surface_variant;
-    }
-
-    TouchArea { clicked => { root.selected(root.value); } }
 }
 
 component PageButton inherits Rectangle {
@@ -44,29 +19,307 @@ component PageButton inherits Rectangle {
     in property <bool> button-enabled: true;
     callback clicked();
 
-    width: 76px;
+    width: 84px;
     height: 32px;
-    border-radius: 10px;
+    border-radius: 6px;
     border-width: 1px;
-    border-color: MaterialPalette.outline_variant;
-    background: MaterialPalette.surface_container_lowest;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: page-touch.has-hover && root.button-enabled
+        ? (AppState.effective-dark-mode ? #30363d : #f3f4f6)
+        : (AppState.effective-dark-mode ? #21262d : #f6f8fa);
     opacity: root.button-enabled ? 1 : 0.45;
 
     MaterialText {
         width: parent.width;
         height: parent.height;
         text: root.label;
-        font-family: "Hiragino Sans GB";
         horizontal_alignment: center;
         vertical_alignment: center;
         font_size: 12px;
-        color: MaterialPalette.on_surface;
+        font_weight: 600;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
     }
-    TouchArea { enabled: root.button-enabled; clicked => { root.clicked(); } }
+    page-touch := TouchArea {
+        enabled: root.button-enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
 }
 
-// Keep empty and error feedback in the same Vuetify-style visual hierarchy.
-// Both illustrations are bundled resources, so state changes perform no I/O.
+component PrStateButton inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <string> selected-value;
+    in property <int> count: 0;
+    callback selected(string);
+
+    private property <bool> active: root.selected-value == root.value
+        || (root.value == "closed" && root.selected-value == "merged");
+    // Primer degraded experiences: when a count is unavailable (loading or
+    // failed), hide the number and keep the interactive label.
+    // https://primer.style/product/ui-patterns/degraded-experiences/
+    private property <string> caption: root.count < 0
+        ? root.label
+        : (root.count + " " + root.label);
+    // Icon at 12px + 16px, 8px gap to text, then caption + 12px trailing pad.
+    private property <length> caption-width: max(24px, caption-measure.preferred-width);
+    width: 36px + root.caption-width + 12px;
+    height: 48px;
+    background: state-touch.has-hover
+        ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
+        : transparent;
+
+    caption-measure := Text {
+        visible: false;
+        text: root.caption;
+        font-size: 13px;
+        font-weight: root.active ? 600 : 400;
+        wrap: no-wrap;
+    }
+
+    Image {
+        x: 12px;
+        y: 16px;
+        width: 16px;
+        height: 16px;
+        source: root.value == "open"
+            ? @image-url("../../assets/icons/octicon-git-pull-request-16.svg")
+            : @image-url("../../assets/icons/octicon-check-16.svg");
+        colorize: root.active
+            ? (root.value == "open"
+                ? (AppState.effective-dark-mode ? #3fb950 : #1a7f37)
+                : (AppState.effective-dark-mode ? #f0f6fc : #1f2328))
+            : (AppState.effective-dark-mode ? #9198a1 : #59636e);
+    }
+
+    Text {
+        x: 36px;
+        width: root.caption-width;
+        height: parent.height;
+        text: root.caption;
+        font-size: 13px;
+        font-weight: root.active ? 600 : 400;
+        color: root.active
+            ? (AppState.effective-dark-mode ? #f0f6fc : #1f2328)
+            : (AppState.effective-dark-mode ? #9198a1 : #59636e);
+        vertical-alignment: center;
+    }
+
+    // Explain a missing count on the interactive control (Primer guidance).
+    if root.count < 0 && state-touch.has-hover: ToolTip {
+        x: 8px;
+        y: parent.height - 4px;
+        z: 20;
+        text: "Count unavailable";
+    }
+
+    state-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.selected(root.value); }
+    }
+}
+
+component PrFilterButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked();
+
+    // GitHub content-sized filter button: 8px pad + label + 4px gap + 16px caret.
+    private property <length> label-width: label-measure.preferred-width;
+    width: root.label-width + 28px;
+    height: 32px;
+    border-radius: 6px;
+    background: filter-touch.has-hover || root.selected
+        ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
+        : transparent;
+
+    label-measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: 12px;
+        wrap: no-wrap;
+    }
+
+    HorizontalLayout {
+        x: 8px;
+        width: root.label-width + 20px;
+        height: parent.height;
+        spacing: 4px;
+
+        Text {
+            width: root.label-width;
+            text: root.label;
+            font-size: 12px;
+            font-weight: 500;
+            color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 16px;
+            height: parent.height;
+            background: transparent;
+
+            Image {
+                // The Octicon path sits about 1px below the 16px view-box
+                // center. Apply the same optical centering as GitHub's
+                // vertically-middle aligned dropdown caret.
+                y: (parent.height - self.height) / 2 - 1px;
+                width: 16px;
+                height: 16px;
+                source: @image-url("../../assets/icons/octicon-triangle-down-16.svg");
+                image-fit: contain;
+                colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            }
+        }
+    }
+
+    filter-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component PrFilterMenuOption inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <string> selected-value;
+    callback selected(string);
+
+    height: 36px;
+    background: option-touch.has-hover
+        ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
+        : transparent;
+
+    Text {
+        x: 12px;
+        width: 18px;
+        height: parent.height;
+        text: root.selected-value == root.value ? "✓" : "";
+        font-size: 13px;
+        font-weight: 600;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    Text {
+        x: 38px;
+        width: parent.width - 50px;
+        height: parent.height;
+        text: root.label;
+        font-size: 12px;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    option-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.selected(root.value); }
+    }
+}
+
+component PrFilterMenu inherits Rectangle {
+    in property <string> menu-type;
+    in property <string> selected-value;
+    callback selected(string);
+    callback close();
+
+    width: 236px;
+    // Header 36px + one 36px row per option (assignee has 3; reviews/sort have 4).
+    height: root.menu-type == "assignee" ? 144px : 180px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: AppState.effective-dark-mode ? #161b22 : #ffffff;
+    drop-shadow-blur: 18px;
+    drop-shadow-color: AppState.effective-dark-mode ? #00000080 : #1f232826;
+    drop-shadow-offset-y: 6px;
+    clip: true;
+
+    // Own the full popover hit area so blank regions (title band) cannot fall
+    // through to the full-window dismiss scrim underneath.
+    TouchArea {
+        mouse-cursor: default;
+    }
+
+    Text {
+        x: 12px;
+        y: 0px;
+        width: parent.width - 24px;
+        height: 36px;
+        text: root.menu-type == "reviews"
+            ? "Filter by reviews"
+            : (root.menu-type == "assignee" ? "Filter by assignee" : "Sort by");
+        font-size: 12px;
+        font-weight: 600;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        vertical-alignment: center;
+    }
+
+    Rectangle {
+        x: parent.width - 32px;
+        y: 4px;
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        background: close-touch.has-hover
+            ? (AppState.effective-dark-mode ? #30363d : #f6f8fa)
+            : transparent;
+
+        Image {
+            x: 6px;
+            y: 6px;
+            width: 16px;
+            height: 16px;
+            source: @image-url("../../assets/icons/octicon-x-16.svg");
+            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        }
+
+        close-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.close(); }
+        }
+    }
+
+    Rectangle {
+        y: 35px;
+        width: parent.width;
+        height: 1px;
+        background: AppState.effective-dark-mode ? #3d444d : #d8dee4;
+    }
+
+    if root.menu-type == "reviews": VerticalLayout {
+        y: 36px;
+        width: parent.width;
+        height: parent.height - 36px;
+        PrFilterMenuOption { label: "All reviews"; value: "all"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        PrFilterMenuOption { label: "Review required"; value: "required"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        PrFilterMenuOption { label: "Approved review"; value: "approved"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        PrFilterMenuOption { label: "Changes requested"; value: "changes-requested"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+    }
+
+    if root.menu-type == "assignee": VerticalLayout {
+        y: 36px;
+        width: parent.width;
+        height: parent.height - 36px;
+        PrFilterMenuOption { label: "Anyone"; value: "any"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        PrFilterMenuOption { label: "Assigned to nobody"; value: "none"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        PrFilterMenuOption { label: "Assigned to me"; value: "me"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+    }
+
+    if root.menu-type == "sort": VerticalLayout {
+        y: 36px;
+        width: parent.width;
+        height: parent.height - 36px;
+        PrFilterMenuOption { label: "Newest"; value: "newest"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        PrFilterMenuOption { label: "Oldest"; value: "oldest"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        PrFilterMenuOption { label: "Recently updated"; value: "updated-desc"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        PrFilterMenuOption { label: "Least recently updated"; value: "updated-asc"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+    }
+}
+
 component PrListStatePanel inherits Rectangle {
     in property <bool> error-state: false;
     in property <string> title;
@@ -74,86 +327,69 @@ component PrListStatePanel inherits Rectangle {
     in property <bool> show-action: false;
     callback action();
 
-    height: 500px;
+    height: 320px;
     background: transparent;
 
-    VerticalLayout {
+    Image {
+        x: (parent.width - self.width) / 2;
+        y: 22px;
+        width: min(320px, parent.width - 96px);
+        height: 142px;
+        source: root.error-state
+            ? @image-url("../../assets/illustrations/vuetify-empty-state-connection.svg")
+            : @image-url("../../assets/illustrations/vuetify-empty-state-teamwork.png");
+        image-fit: contain;
+        opacity: AppState.effective-dark-mode ? 0.58 : 0.82;
+    }
+
+    MaterialText {
+        x: 24px;
+        y: 168px;
+        width: parent.width - 48px;
+        height: 32px;
+        text: root.title;
+        horizontal_alignment: center;
+        vertical_alignment: center;
+        font_size: 18px;
+        font_weight: 600;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    }
+
+    Text {
         x: 32px;
-        y: 28px;
+        y: 208px;
         width: parent.width - 64px;
-        height: parent.height - 56px;
-        spacing: 12px;
-        alignment: center;
+        height: 48px;
+        text: root.description;
+        wrap: word-wrap;
+        horizontal_alignment: center;
+        vertical_alignment: center;
+        font-size: 14px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    }
 
-        HorizontalLayout {
+    if root.show-action: Rectangle {
+        x: (parent.width - 148px) / 2;
+        y: 264px;
+        width: 148px;
+        height: 32px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: AppState.effective-dark-mode ? #2ea043 : #1a7f37;
+        background: retry-touch.has-hover
+            ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37)
+            : (AppState.effective-dark-mode ? #238636 : #1f883d);
+        Text {
             width: parent.width;
-            height: 220px;
-            spacing: 0px;
-
-            Rectangle { horizontal-stretch: 1; }
-            Rectangle {
-                width: min(320px, parent.width);
-                height: parent.height;
-                background: transparent;
-
-                if root.error-state: Image {
-                    width: parent.width;
-                    height: parent.height;
-                    source: @image-url("../../assets/illustrations/vuetify-empty-state-connection.svg");
-                    image-fit: contain;
-                }
-                if !root.error-state: Image {
-                    width: parent.width;
-                    height: parent.height;
-                    source: @image-url("../../assets/illustrations/vuetify-empty-state-teamwork.png");
-                    image-fit: contain;
-                }
-            }
-            Rectangle { horizontal-stretch: 1; }
+            height: parent.height;
+            text: "Retry request";
+            font-size: 12px;
+            font-weight: 600;
+            color: #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
-
-        MaterialText {
-            width: parent.width;
-            height: 36px;
-            text: root.title;
-            horizontal_alignment: center;
-            vertical_alignment: center;
-            font_size: 22px;
-            font_weight: 600;
-            color: MaterialPalette.on_surface;
-        }
-        HorizontalLayout {
-            width: parent.width;
-            height: 58px;
-            spacing: 0px;
-
-            Rectangle { horizontal-stretch: 1; }
-            Text {
-                width: min(620px, parent.width);
-                height: parent.height;
-                text: root.description;
-                wrap: word-wrap;
-                horizontal_alignment: center;
-                vertical_alignment: center;
-                font-size: 14px;
-                color: MaterialPalette.on_surface_variant;
-            }
-            Rectangle { horizontal-stretch: 1; }
-        }
-        if root.show-action: HorizontalLayout {
-            width: parent.width;
-            height: 42px;
-            spacing: 0px;
-
-            Rectangle { horizontal-stretch: 1; }
-            FilledButton {
-                width: 148px;
-                height: parent.height;
-                text: "Retry Request";
-                clicked => { root.action(); }
-            }
-            Rectangle { horizontal-stretch: 1; }
-        }
+        retry-touch := TouchArea { mouse-cursor: pointer; clicked => { root.action(); } }
     }
 }
 
@@ -163,241 +399,404 @@ export component PrFlow {
     in property <[WorkflowPullRequestItem]> pr-items: [];
     in property <int> pr-total: 0;
     in property <bool> pr-total-exact: false;
+    in property <int> pr-open-total: -1;
+    in property <int> pr-closed-total: -1;
     in property <int> pr-page: 1;
     in property <int> pr-page-count: 1;
     in property <string> pr-state: "open";
+    in property <string> pr-review-filter: "all";
+    in property <string> pr-assignee-filter: "any";
+    in property <string> pr-sort-filter: "newest";
     in property <bool> pr-loading: false;
     in property <string> pr-error: "";
     callback change-state(string);
     callback change-page(int);
+    callback change-review-filter(string);
+    callback change-assignee-filter(string);
+    callback change-sort-filter(string);
     callback open-detail(string, string, string, string, string, string);
 
+    private property <string> active-menu: "";
+    private property <int> hovered-time-index: -1;
+    private property <string> hovered-time-tooltip: "";
+    private property <bool> compact-filters: root.width < 620px;
+    private property <length> header-height: root.compact-filters ? 88px : 48px;
     private property <string> empty-title: root.pr-state == "open"
         ? "There aren’t any open pull requests."
-        : (root.pr-state == "closed"
-            ? "There aren’t any closed pull requests."
-            : (root.pr-state == "merged"
-                ? "There aren’t any merged pull requests."
-                : "There aren’t any pull requests."));
-    private property <string> empty-description: root.pr-state == "all"
-        ? "New pull requests will appear here when they’re created."
-        : "Try another status filter.";
-    // Fixed column geometry so Branch / Updated can wrap instead of eliding.
-    // When the card is narrower than this floor, the table scrolls horizontally.
-    private property <length> title-column-min-width: 220px;
-    private property <length> branch-column-width: 280px;
-    private property <length> author-column-width: 110px;
-    private property <length> updated-column-width: 168px;
-    private property <length> table-min-width:
-        28px + 62px + 12px + root.title-column-min-width + 12px
-            + root.branch-column-width + 12px + root.author-column-width
-            + 12px + root.updated-column-width;
+        : "There aren’t any closed pull requests.";
+    private property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    private property <color> canvas-subtle: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
+    private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    private property <length> list-height: root.pr-loading || root.pr-error != "" || root.pr-items.length == 0
+        ? root.header-height + 320px
+        : root.header-height + root.pr-items.length * 72px;
+    // Each popover follows GitHub's Overlay contract: its right edge is
+    // anchored to the right edge of the button that opened it.
+    private property <length> menu-anchor-right: root.active-menu == "reviews"
+        ? filter-bar-host.x + reviews-btn.x + reviews-btn.width
+        : (root.active-menu == "assignee"
+            ? filter-bar-host.x + assignee-btn.x + assignee-btn.width
+            : filter-bar-host.x + sort-btn.x + sort-btn.width);
+    private property <length> menu-x: max(8px, root.menu-anchor-right - 236px);
+    height: root.list-height
+        + ((!root.pr-loading && root.pr-error == "" && root.pr-items.length > 0 && root.pr-page-count > 1)
+            ? 56px
+            : 0px);
 
-    VerticalLayout {
+    pr-list := Rectangle {
         width: root.width;
-        spacing: 16px;
-        alignment: start;
-        Rectangle {
+        height: root.list-height;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: root.border-default;
+        background: root.canvas-default;
+        clip: true;
+
+        header := Rectangle {
+            x: 0px;
+            y: 0px;
             width: parent.width;
-            height: 48px;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            background: MaterialPalette.surface_container_low;
+            height: root.header-height;
+            z: 10;
+            background: root.canvas-subtle;
 
             HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                spacing: 8px;
-                alignment: center;
-                MaterialText { text: "Pull requests"; font-family: "Hiragino Sans GB"; font_size: 17px; font_weight: 600; color: MaterialPalette.on_surface; vertical_alignment: center; }
-                Rectangle { horizontal-stretch: 1; }
-                MaterialText { text: root.pr-state == "all" ? "All states" : root.pr-state; font-family: "Hiragino Sans GB"; font_size: 12px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-            }
-        }
-
-        HorizontalLayout {
-            width: parent.width;
-            height: 32px;
-            spacing: 8px;
-            StatusFilter { label: "Open"; value: "open"; selected-value: root.pr-state; selected(value) => { root.change-state(value); } }
-            StatusFilter { label: "Closed"; value: "closed"; selected-value: root.pr-state; selected(value) => { root.change-state(value); } }
-            StatusFilter { label: "Merged"; value: "merged"; selected-value: root.pr-state; selected(value) => { root.change-state(value); } }
-            StatusFilter { label: "All"; value: "all"; selected-value: root.pr-state; selected(value) => { root.change-state(value); } }
-            Rectangle { horizontal-stretch: 1; }
-            MaterialText {
-                text: root.pr-loading
-                    ? "Loading…"
-                    : (root.pr-error != ""
-                        ? "Total unavailable"
-                        : root.pr-total + (root.pr-total-exact ? " total" : "+ total"));
-                font_size: 12px;
-                font-family: "Hiragino Sans GB";
-                color: MaterialPalette.on_surface_variant;
-                vertical_alignment: center;
-            }
-        }
-
-        Rectangle {
-            width: parent.width;
-            // One page always reserves space for its header plus ten base rows.
-            // Wrapped Branch/Updated cells can grow taller; the enclosing Workflow
-            // page scrolls vertically. Narrow cards scroll this table horizontally.
-            min-height: 618px;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            background: MaterialPalette.surface_container_lowest;
-            clip: true;
-
-            if root.pr-loading: Rectangle {
-                height: 112px;
-                MaterialText { width: parent.width; height: parent.height; text: "Loading pull requests…"; horizontal_alignment: center; vertical_alignment: center; font-family: "Hiragino Sans GB"; font_size: 13px; color: MaterialPalette.on_surface_variant; }
+                x: 4px;
+                width: open-state-btn.width + closed-state-btn.width;
+                height: parent.height;
+                spacing: 0px;
+                open-state-btn := PrStateButton {
+                    label: "Open";
+                    value: "open";
+                    selected-value: root.pr-state;
+                    count: root.pr-open-total;
+                    selected(value) => { root.change-state(value); }
+                }
+                closed-state-btn := PrStateButton {
+                    label: "Closed";
+                    value: "closed";
+                    selected-value: root.pr-state;
+                    count: root.pr-closed-total;
+                    selected(value) => { root.change-state(value); }
+                }
             }
 
-            if !root.pr-loading && root.pr-error != "": PrListStatePanel {
-                error-state: true;
-                title: "Unable to load pull requests";
-                description: "Check your code hosting configuration or connection, then try again.";
-                show-action: true;
-                action => { root.change-page(root.pr-page); }
-            }
+            // Keep status and filters in the same card header. At narrow
+            // widths, filters move to a second compact row instead of
+            // floating above the card or overlapping the status controls.
+            filter-bar-host := Rectangle {
+                x: 4px;
+                y: root.compact-filters ? 52px : 8px;
+                width: parent.width - 8px;
+                height: 32px;
+                z: 95;
+                background: transparent;
 
-            if !root.pr-loading && root.pr-error == "" && root.pr-items.length == 0: PrListStatePanel {
-                title: root.empty-title;
-                description: root.empty-description;
-            }
-
-            if !root.pr-loading && root.pr-error == "" && root.pr-items.length > 0: pr-table-scroll := ScrollView {
-                width: parent.width;
-                // Grow with wrapped rows; Workflow owns vertical page scrolling.
-                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                horizontal-scrollbar-policy: ScrollBarPolicy.as-needed;
-                viewport-width: max(self.visible-width, root.table-min-width);
-                viewport-height: pr-table-body.preferred-height;
-
-                pr-table-body := VerticalLayout {
-                    width: max(pr-table-scroll.visible-width, root.table-min-width);
+                filter-bar := HorizontalLayout {
+                    width: parent.width;
+                    height: parent.height;
                     spacing: 0px;
+                    alignment: end;
 
-                    Rectangle {
-                        height: 38px;
-                        background: MaterialPalette.surface_container_low;
-                        HorizontalLayout {
-                            padding-left: 14px; padding-right: 14px; spacing: 12px;
-                            MaterialText { width: 62px; text: "PR"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                            MaterialText {
-                                horizontal-stretch: 1;
-                                min-width: root.title-column-min-width;
-                                text: "Title";
-                                font-family: "Hiragino Sans GB";
-                                font_size: 11px;
-                                font_weight: 600;
-                                color: MaterialPalette.on_surface_variant;
-                                vertical_alignment: center;
-                            }
-                            MaterialText { width: root.branch-column-width; text: "Branch"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                            MaterialText { width: root.author-column-width; text: "Author"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                            MaterialText { width: root.updated-column-width; text: "Updated"; font-family: "Hiragino Sans GB"; font_size: 11px; font_weight: 600; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        }
+                    reviews-btn := PrFilterButton {
+                        label: "Reviews";
+                        selected: root.active-menu == "reviews" || root.pr-review-filter != "all";
+                        clicked => { root.active-menu = root.active-menu == "reviews" ? "" : "reviews"; }
                     }
-
-                    for item[index] in root.pr-items: Rectangle {
-                        // Grow with wrapped Branch/Updated cells so multi-line
-                        // pairs are not clipped by the 58px floor height.
-                        height: max(
-                            58px,
-                            max(branch-cell.preferred-height, updated-cell.preferred-height) + 24px
-                        );
-                        background: row-hover.has-hover
-                            ? MaterialPalette.surface_container_high
-                            : (Math.mod(index, 2) == 0 ? MaterialPalette.surface_container_lowest : MaterialPalette.surface_container_low);
-                        border-width: 0px;
-                        HorizontalLayout {
-                            padding-left: 14px;
-                            padding-right: 14px;
-                            padding-top: 12px;
-                            padding-bottom: 12px;
-                            spacing: 12px;
-                            MaterialText {
-                                width: 62px;
-                                text: "#" + item.number;
-                                font-family: "Hiragino Sans GB";
-                                font_size: 12px;
-                                font_weight: 600;
-                                color: MaterialPalette.primary;
-                                vertical_alignment: center;
-                                overflow: elide;
-                            }
-                            MaterialText {
-                                horizontal-stretch: 1;
-                                min-width: root.title-column-min-width;
-                                text: item.title;
-                                font-family: "Hiragino Sans GB";
-                                font_size: 13px;
-                                color: MaterialPalette.on_surface;
-                                vertical_alignment: center;
-                                overflow: elide;
-                            }
-                            // Branch pair wraps fully — never elide into "...".
-                            branch-cell := Text {
-                                width: root.branch-column-width;
-                                text: item.source-branch + " → " + item.target-branch;
-                                font-family: "Hiragino Sans GB";
-                                font_size: 11px;
-                                color: MaterialPalette.on_surface_variant;
-                                vertical_alignment: center;
-                                wrap: word-wrap;
-                            }
-                            MaterialText {
-                                width: root.author-column-width;
-                                text: item.author;
-                                font-family: "Hiragino Sans GB";
-                                font_size: 11px;
-                                color: MaterialPalette.on_surface_variant;
-                                vertical_alignment: center;
-                                overflow: elide;
-                            }
-                            // Absolute UTC+08:00 timestamps wrap fully — never elide.
-                            updated-cell := Text {
-                                width: root.updated-column-width;
-                                text: item.updated-at;
-                                font-family: "Hiragino Sans GB";
-                                font_size: 11px;
-                                color: MaterialPalette.on_surface_variant;
-                                vertical_alignment: center;
-                                wrap: word-wrap;
-                            }
-                        }
-                        // Keep the hover target mounted so row feedback remains stable.
-                        row-hover := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => {
-                                root.open-detail(
-                                    item.number,
-                                    item.title,
-                                    item.author,
-                                    item.source-branch,
-                                    item.target-branch,
-                                    item.updated-at,
-                                );
-                            }
-                        }
+                    assignee-btn := PrFilterButton {
+                        label: "Assignee";
+                        selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
+                        clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
+                    }
+                    sort-btn := PrFilterButton {
+                        label: "Sort";
+                        selected: root.active-menu == "sort" || root.pr-sort-filter != "newest";
+                        clicked => { root.active-menu = root.active-menu == "sort" ? "" : "sort"; }
                     }
                 }
             }
         }
 
-        if !root.pr-loading && root.pr-error == "" && root.pr-items.length > 0: HorizontalLayout {
+        if root.pr-loading: Rectangle {
+            y: root.header-height;
             width: parent.width;
-            height: 32px;
-            alignment: center;
-            spacing: 12px;
-            Rectangle { horizontal-stretch: 1; }
-            PageButton { label: "Previous"; button-enabled: root.pr-page > 1 && !root.pr-loading; clicked => { root.change-page(root.pr-page - 1); } }
-            MaterialText { width: 92px; text: "Page " + root.pr-page + " / " + root.pr-page-count; font-family: "Hiragino Sans GB"; horizontal_alignment: center; vertical_alignment: center; font_size: 12px; color: MaterialPalette.on_surface_variant; }
-            PageButton { label: "Next"; button-enabled: root.pr-page < root.pr-page-count && !root.pr-loading; clicked => { root.change-page(root.pr-page + 1); } }
-            Rectangle { horizontal-stretch: 1; }
+            height: parent.height - root.header-height;
+
+            private property <float> rotation-progress: mod(animation-tick(), 1000ms) / 1000ms;
+
+            Image {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - 64px) / 2;
+                width: 32px;
+                height: 32px;
+                source: @image-url("../../assets/icons/github-spinner-16.svg");
+                image-fit: contain;
+                colorize: root.fg-muted;
+                transform-rotation: parent.rotation-progress * 360deg;
+                transform-origin: { x: self.width / 2, y: self.height / 2 };
+            }
+
+            MaterialText {
+                x: 24px;
+                y: (parent.height - 64px) / 2 + 42px;
+                width: parent.width - 48px;
+                height: 22px;
+                text: "Loading pull requests…";
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: 13px;
+                color: root.fg-muted;
+            }
         }
+
+        if !root.pr-loading && root.pr-error != "": PrListStatePanel {
+            y: root.header-height;
+            width: parent.width;
+            error-state: true;
+            title: "Unable to load pull requests";
+            description: "Check your code hosting configuration or connection, then try again.";
+            show-action: true;
+            action => { root.change-page(root.pr-page); }
+        }
+
+        if !root.pr-loading && root.pr-error == "" && root.pr-items.length == 0: PrListStatePanel {
+            y: root.header-height;
+            width: parent.width;
+            title: root.empty-title;
+            description: "Try another status filter.";
+        }
+
+        if !root.pr-loading && root.pr-error == "" && root.pr-items.length > 0: Rectangle {
+            y: root.header-height;
+            width: parent.width;
+            height: root.pr-items.length * 72px;
+            background: transparent;
+
+            for item[index] in root.pr-items: Rectangle {
+                y: index * 72px;
+                width: parent.width;
+                height: 72px;
+                // GitHub PR list rows stay on the default canvas. The title is an
+                // accent link; hover underlines the title instead of painting
+                // Box-row--hover-gray across the row.
+                background: transparent;
+                private property <length> title-max-width: parent.width - 58px;
+                private property <length> title-draw-width: min(title-measure.preferred-width, self.title-max-width);
+
+                if index > 0: Rectangle {
+                    y: 0px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.border-default;
+                }
+
+                Image {
+                    x: 16px;
+                    y: 17px;
+                    width: 16px;
+                    height: 16px;
+                    source: item.state == "merged"
+                        ? @image-url("../../assets/icons/octicon-git-merge-16.svg")
+                        : @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
+                    colorize: item.state == "merged"
+                        ? (AppState.effective-dark-mode ? #a371f7 : #8250df)
+                        : (item.state == "closed"
+                            ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
+                            : (AppState.effective-dark-mode ? #3fb950 : #1a7f37));
+                }
+
+                title-measure := Text {
+                    visible: false;
+                    text: item.title;
+                    font-size: 14px;
+                    font-weight: 600;
+                    wrap: no-wrap;
+                }
+
+                Text {
+                    x: 42px;
+                    y: 8px;
+                    width: parent.title-max-width;
+                    height: 26px;
+                    text: item.title;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: title-touch.has-hover
+                        ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
+                        : root.fg-default;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if title-touch.has-hover: Rectangle {
+                    x: 42px;
+                    y: 8px + 22px;
+                    width: parent.title-draw-width;
+                    height: 1px;
+                    background: AppState.effective-dark-mode ? #4493f8 : #0969da;
+                }
+
+                title-touch := TouchArea {
+                    x: 42px;
+                    y: 8px;
+                    width: parent.title-draw-width;
+                    height: 26px;
+                    z: 2;
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.open-detail(
+                            item.number,
+                            item.title,
+                            item.author,
+                            item.source-branch,
+                            item.target-branch,
+                            item.updated-at-raw,
+                        );
+                    }
+                }
+
+                meta := Text {
+                    x: 42px;
+                    y: 34px;
+                    width: parent.width - 58px;
+                    height: 22px;
+                    text: "#" + item.number + " by " + item.author
+                        + (item.state == "merged"
+                            ? " was merged "
+                            : (item.state == "closed" ? " was closed " : " was opened "))
+                        + item.updated-at;
+                    font-size: 12px;
+                    color: root.fg-muted;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                meta-touch := TouchArea {
+                    x: 42px;
+                    y: 34px;
+                    width: min(meta.preferred-width, parent.width - 58px);
+                    height: 22px;
+                    z: 2;
+                    mouse-cursor: pointer;
+                    changed has-hover => {
+                        if self.has-hover && item.updated-at-tooltip != "" {
+                            root.hovered-time-index = index;
+                            root.hovered-time-tooltip = item.updated-at-tooltip;
+                        } else if root.hovered-time-index == index {
+                            root.hovered-time-index = -1;
+                            root.hovered-time-tooltip = "";
+                        }
+                    }
+                    clicked => {
+                        root.open-detail(
+                            item.number,
+                            item.title,
+                            item.author,
+                            item.source-branch,
+                            item.target-branch,
+                            item.updated-at-raw,
+                        );
+                    }
+                }
+
+                row-touch := TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    z: 1;
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.open-detail(
+                            item.number,
+                            item.title,
+                            item.author,
+                            item.source-branch,
+                            item.target-branch,
+                            item.updated-at-raw,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Paint outside pr-list so the clipped, rounded list border cannot cut off
+    // the last row's absolute-time tooltip.
+    if root.hovered-time-index >= 0 && root.hovered-time-tooltip != "": ToolTip {
+        x: 42px;
+        y: root.header-height + root.hovered-time-index * 72px + 58px;
+        z: 200;
+        text: root.hovered-time-tooltip;
+    }
+
+    if !root.pr-loading && root.pr-error == "" && root.pr-items.length > 0 && root.pr-page-count > 1: Rectangle {
+        x: max(0px, (root.width - self.width) / 2);
+        y: root.list-height + 16px;
+        width: min(root.width, 284px);
+        height: 32px;
+
+        PageButton {
+            x: 0px;
+            label: "Previous";
+            button-enabled: root.pr-page > 1 && !root.pr-loading;
+            clicked => { root.change-page(root.pr-page - 1); }
+        }
+        MaterialText {
+            x: 96px;
+            width: max(0px, parent.width - 192px);
+            height: parent.height;
+            text: "Page " + root.pr-page + " / " + root.pr-page-count;
+            horizontal_alignment: center;
+            vertical_alignment: center;
+            font_size: 12px;
+            color: root.fg-muted;
+        }
+        PageButton {
+            x: parent.width - self.width;
+            label: "Next";
+            button-enabled: root.pr-page < root.pr-page-count && !root.pr-loading;
+            clicked => { root.change-page(root.pr-page + 1); }
+        }
+    }
+
+    // Full-window transparent dismiss layer (status-bar absolute-position pattern).
+    // Slint rectangles alone do not capture pointer input; the TouchArea must
+    // own the hit target so clicks outside the menu close it.
+    if root.active-menu != "": Rectangle {
+        x: -root.absolute-position.x;
+        y: -root.absolute-position.y;
+        width: 9999px;
+        height: 9999px;
+        z: 90;
+        background: transparent;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+            clicked => { root.active-menu = ""; }
+        }
+    }
+
+    if root.active-menu != "": PrFilterMenu {
+        x: root.menu-x;
+        y: root.header-height;
+        z: 100;
+        menu-type: root.active-menu;
+        selected-value: root.active-menu == "reviews"
+            ? root.pr-review-filter
+            : (root.active-menu == "assignee" ? root.pr-assignee-filter : root.pr-sort-filter);
+        selected(value) => {
+            if root.active-menu == "reviews" {
+                root.change-review-filter(value);
+            } else if root.active-menu == "assignee" {
+                root.change-assignee-filter(value);
+            } else {
+                root.change-sort-filter(value);
+            }
+            root.active-menu = "";
+        }
+        close => { root.active-menu = ""; }
     }
 }

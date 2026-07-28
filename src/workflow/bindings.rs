@@ -1,4 +1,5 @@
-use crate::project::pr_stats::{PullRequestStateFilter, fetch_standard_environment_pr_counts};
+use crate::git::get_standard_environment_pull_request_counts;
+use crate::project::load_repository_metadata;
 use crate::terminal::{reset_terminal_for_project, terminal_title_for_project};
 use crate::workflow::pr_list::WorkflowPrListController;
 use crate::workflow::pr_review::WorkflowPrReviewController;
@@ -83,13 +84,25 @@ pub(crate) fn bind_project_context(
             if is_pr_auto_update {
                 let ui_weak_task = ui.as_weak();
                 let project_id = context.id.clone();
-                let remote_repo = context.remote_repo.clone();
-                std::thread::spawn(move || {
-                    let result = fetch_standard_environment_pr_counts(
-                        &remote_repo,
-                        PullRequestStateFilter::Open,
-                        None,
-                    );
+                let project_alias = context.alias.clone();
+                crate::app_runtime::shared_runtime().spawn(async move {
+                    let metadata = tokio::task::spawn_blocking(move || {
+                        load_repository_metadata(project_alias.as_str())
+                    })
+                    .await
+                    .map_err(|error| format!("Failed to read project configuration: {error}"))
+                    .and_then(|result| result);
+                    let result = match metadata {
+                        Ok(metadata) => {
+                            get_standard_environment_pull_request_counts(
+                                metadata.repo_type.as_str(),
+                                metadata.repo_project_id.as_str(),
+                                metadata.remote_repo.as_str(),
+                            )
+                            .await
+                        }
+                        Err(error) => Err(error),
+                    };
                     let _ = slint::invoke_from_event_loop(move || {
                         let Some(ui) = ui_weak_task.upgrade() else {
                             return;
@@ -126,6 +139,27 @@ pub(crate) fn bind_project_context(
             );
         },
     );
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_copy_remote_repo(move |remote| {
+        let remote = remote.trim();
+        if remote.is_empty() {
+            return;
+        }
+        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(remote)) {
+            Ok(()) => {
+                if let Some(ui) = ui_weak.upgrade() {
+                    show_success(&ui, "Copied remote URL.");
+                }
+            }
+            Err(error) => {
+                log::warn!("[Workflow] Failed to copy remote URL: {error}");
+                if let Some(ui) = ui_weak.upgrade() {
+                    show_error(&ui, "Failed to copy the remote URL.");
+                }
+            }
+        }
+    });
 }
 
 pub(crate) fn show_success(ui: &MainWindow, message: &str) {

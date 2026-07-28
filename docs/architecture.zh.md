@@ -36,25 +36,27 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `src/lib.rs` | 导入并重新导出生成的 UI API，创建 `MainWindow`、初始化模块、绑定跨模块 callback，并管理窗口和关闭流程。 |
 | `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum。 |
 | `src/app_runtime.rs` | 进程级多线程 Tokio runtime，并为 runtime 线程安装 tracing dispatch。 |
-| `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、UI 尺寸关联，以及可取消的周期内存采样。 |
+| `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
+| `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观、标题栏附件、窗口交互通知和 macOS PR Review 字体注册；其他平台的显式 fallback 位于 `mod.rs`。 |
 | `src/shutdown.rs` | 按优先级协调关闭。 |
 | `src/single_instance.rs` | 单实例进程行为。 |
 | `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。 |
 
-`src/lib.rs` 是 composition root，不应继续堆积功能逻辑。新业务应放入对应模块，只向装配层暴露精简的 setup 或 service API。
+`src/lib.rs` 是 composition root，不应继续堆积功能逻辑。原生窗口行为归 `src/platform/`，诊断统计归 `src/memory_diagnostics.rs`；新业务应放入对应模块，只向装配层暴露精简的 setup 或 service API。
 
 ### 功能模块
 
 | 路径 | 职责 |
 | --- | --- |
-| `src/project/` | 项目列表、持久化、过滤、Logo、PR/MR 概览以及进入 Workflow/Terminal 的入口。 |
+| `src/project/` | 稳定 façade/controller，以及独立的持久化模型/存储、Logo、PR/MR overview 选择和 Workflow/Terminal 入口。 |
 | `src/codereview/api/` | Gitee、GitLab、GitHub 仓库接口的 URL 与路径模板；不包含请求执行、鉴权或响应解析。 |
-| `src/git/` | Provider 识别、仓库实际操作、鉴权 header，以及将各 Provider 响应归一化为应用模型。 |
-| `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行。 |
-| `src/terminal/` | PTY 生命周期、viewport 同步、渲染、输入、选择和项目切换。 |
-| `src/chat/` | 聊天请求、会话、JSONL 持久化、Markdown、渲染缓存、分页和 UI 绑定。 |
+| `src/git/` | Provider-neutral façade，以及独立的领域模型、remote 定位、unified-diff 解析、PR 概览计数和 Provider adapter。Gitee 的传输、解码、Conversation/Commit 归一化、readiness 与 revert 语义位于专用子模块。 |
+| `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行。Tag 与 PR Review 通过稳定文件 façade 暴露内部 controller 和纯逻辑模块。 |
+| `src/terminal/` | PTY 生命周期、viewport 同步、渲染、选择和项目切换；纯输入映射、诊断与刷新节流使用独立模块。 |
+| `src/chat/` | 聊天请求、会话、JSONL 持久化、Markdown、渲染缓存、分页、UI 绑定和纯有界虚拟布局。 |
 | `src/update/` | Release 检查、流式下载、进度、取消、安装和重启。 |
-| `src/router/` | 路由到导航项的映射，以及各路由的可见性状态。 |
+| `src/router/` | 路由映射、历史、可见性和可达性 transition；不执行 feature 清理。 |
+| `src/app_lifecycle.rs` | composition 层 route lifecycle hook，在 transition 后协调跨 feature 清理。 |
 | `src/settings.rs` | TOML 设置模型和持久化，包含 AI Agent 凭据。 |
 | `src/ai/` | 独立的 OpenAI-compatible AI Agent 集成；`agent.rs` 负责连通性测试，不负责 RAG Chat。 |
 | `src/network.rs` | 后台网络探测和 `AppState.network-online`。 |
@@ -76,13 +78,23 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/route/routeMap.slint` | 完整 `Route` 枚举；主导航只开放其中一部分。 |
 | `ui/state/` | Slint 全局状态适配。 |
 | `ui/views/` | 页面级视图。 |
-| `ui/views/workflow/` | Branch、Tag、PR、CD 视图。 |
+| `ui/views/workflow/` | Tag、PR 工作流视图；Branch 与 CD Tab 当前显示 Coming soon 占位。 |
 | `ui/components/` | 应用复用组件。 |
+| `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在工作区视图。 |
 | `ui/theme/` | 应用主题色映射。 |
 | `material-1.7.1-fixed/` | 与 Slint v1.17.1 对齐的 Material 源码。 |
 | `vendor/i-slint-live-preview/` | 仅由显式 `live-preview` feature 选择的临时 Slint 1.17.1 override；其中有文档记录的 `mtime` 保护避免 macOS 文件监听误报引发无限重编译。 |
 
-应用 UI 原则上通过 `@material` 导入 Material。只有确实需要访问未导出组件时才允许直接引用内置路径。修改任一 vendored dependency 前必须与上游对比并记录原因；上游提供等价文件监听保护后，应删除 live-preview override。
+应用 UI 必须通过 `@material` 导入 Material；新代码禁止直接引用 vendored 实现路径。绝对禁止为应用行为或外观修改 `material-1.7.1-fixed/` 或其他 vendored Slint Material UI 源码。所有适配必须放在项目自有代码中，确保依赖升级时可以直接替换 Material UI 目录而无需迁移补丁。
+
+所有产品页面和复用视觉组件均遵循 [GitHub/Primer 页面设计规范](specs/ui-design.md)。GitHub 当前产品界面以及 Primer 官方文档/源码是视觉事实来源；遇到不熟悉的模式必须先查证，禁止自行创造近似样式。Material 可继续作为实现库使用，但不定义 Usher 的产品外观。
+
+`src/platform/` 在启动时按平台选择一套清晰且支持中日韩文字的应用字体：
+macOS 使用 `Hiragino Sans GB`，Windows 使用 `Microsoft YaHei UI`，其他
+平台使用 `Noto Sans`。`ui/main.slint` 将该选择作为完整普通 UI 树的默认
+字体，页面和共享组件统一继承，不再自行选择其他字体。Terminal 内容完全
+保持独立，避免改变既有单元格和工具栏度量；PR Review 中仅 Diff 源码与
+文件树内容保留几何所需的平台专用字体，其余控件和正文继承应用字体。
 
 UI 源码继续保留在仓库根目录的 `ui/` 下，但生成的 Rust 只由 `usher-ui` workspace crate 编译。应用 crate 重新导出这套公开 API，使现有功能模块仍可通过 `crate::{MainWindow, Route, ...}` 引用类型，而不再拥有生成模块。这个边界保证普通 Rust 功能逻辑变化不会迫使 Slint 生成 crate 重编；UI 源码变化则先重编 `usher-ui`，再检查应用绑定。
 
@@ -146,17 +158,24 @@ Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_
 
 ### Workflow
 
+Workflow 在所有支持的宽度下统一使用 GitHub 仓库页的 UnderlineNav 交互；窄屏只保留内容间距调整，不再切换成四等分的 ActionList 风格导航。PR 列表只保留 Open/Closed 状态以及 Reviews、Assignee、Sort 菜单；GitHub 仓库会把这些菜单映射为原生 Search qualifier 和排序参数，并在切换后重置分页重新请求，其他 Provider 会忽略不支持的 GitHub qualifier。项目或筛选条件变化时独立获取 Open 与 Closed 总数，页头不再复用当前选中分页的临时数量。总数仍在加载或计数请求失败时，页头按 Primer 降级体验隐藏数字并保留 Open/Closed 标签，而不是长期停留在加载占位。列表时间使用相对时间，并提供东八区绝对时间 Tooltip。
+
 `WorkflowStore` 保存当前项目和各项目的 `WorkflowViewState`。切换项目必须重新绑定 UI，避免日志、步骤和 running 标记串到其他项目。`Route.Workflow` 与 `Route.PrReview` 构成同一生命周期域：两者之间切换保留 Workflow 列表/model 状态；临时进入域外路由时，只要仍可通过 Back 返回任一 Workflow 路由，也继续保留这些状态。
 
-跨页面返回由 `src/router/` 统一维护 LIFO 路由历史栈；Slint 只渲染当前路由并委托 Back，不再自行改写单槽位的 `previous-route`。不改变 Route 的页内下钻返回点由对应 feature controller 管理。Back 先消费 feature 页内返回点，再弹出全局路由历史。只要历史栈中仍保留 Workflow 路由，它就是可返回的活动目标，因此从 PR 详情临时打开设置、关于或其他页面时不得清理审核状态；只有 Workflow 域既不是当前路由、也无法通过 Back 返回时，才释放重状态。
+跨页面返回由 `src/router/` 统一维护 LIFO 路由历史栈；Slint 只渲染当前路由并委托 Back，不再自行改写单槽位的 `previous-route`。不改变 Route 的页内下钻返回点由对应 feature controller 管理。Back 先消费 feature 页内返回点，再弹出全局路由历史。只要历史栈中仍保留 Workflow 路由，它就是可返回的活动目标，因此从 PR 详情临时打开设置、关于或其他页面时不得清理审核状态；只有 Workflow 域既不是当前路由、也无法通过 Back 返回时，才释放重状态。Router 通过注入 hook 报告该可达性 transition；后续跨 feature 清理由 `src/app_lifecycle.rs` 而不是 Router 负责。
 
-Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。所有列表、详情/diff、仓库文件、review state、review submit 和 merge 请求都根据当前项目持久化的 `repo_type` 选择实现，并在执行前校验其与 `remote_repo` 一致。审核控制器只持有一份共享且不可变的归一化 diff，并用独立 action 序列防止迟到的 review/merge 响应更新其他项目或 PR。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 在 adapter 边界解码，每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性 model 暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写都使用序列号防止迟到响应污染当前项目或 PR。
+Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。所有列表、详情/diff、仓库文件、review state、review submit 和 merge 请求都根据当前项目持久化的 `repo_type` 选择实现，并在执行前校验其与 `remote_repo` 一致。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，并用独立 action 序列防止迟到的 review/merge 响应更新其他项目或 PR。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 在 adapter 边界解码，每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写都使用序列号防止迟到响应污染当前项目或 PR。
 
-Revert 命令与 review/merge 命令共用 Provider-neutral façade 和 action 序列，迟到响应不得影响其他项目或 PR。已合并请求隐藏 review/merge 控件；只有 adapter 返回 `can_revert` 时，页头才在就绪徽标同一行显示明确可见的 Primer 风格次级回退按钮（Usher 不用 GitHub 页头 kebab ActionMenu，以保证完整标签可读）。GitHub GraphQL 创建独立的反向 PR；Gitee 企业版重新读取 MR，要求 merge/squash commit 的 `/repository/commits/:sha/refs` 响应同时返回 `merge_commit_by_pr` 与 `can_revert`，随后对目标分支调用文档定义的 commit revert endpoint。rebase/fast-forward、Gitee 公有版与 GitLab 均保持不支持；Provider 专属确认说明必须明确 Gitee 会直接修改目标分支。
+Tag 工作流采用相同的 façade 模式：`workflow/tag.rs` 暴露绑定和刷新，
+`tag/controller.rs` 负责项目状态、UI 序列、取消和命令执行，`tag/version.rs` 与
+`tag/commands.rs` 保存可直接单测的纯规则。Git 命令保持 argv 形式，仓库路径、
+Tag 名称和描述不经过 shell 插值。
+
+Revert 命令与 review/merge 命令共用 Provider-neutral façade 和 action 序列，迟到响应不得影响其他项目或 PR。已合并或已关闭请求隐藏页头 review/merge 控件；在已配置凭据时 Conversation 评论框保持可用（GitHub Conversation 评论按 issue comment 写入，因此合并后仍可留言）。只有 adapter 返回 `can_revert` 时，已合并请求的页头才在就绪徽标同一行显示明确可见的 Primer 风格次级回退按钮（Usher 不用 GitHub 页头 kebab ActionMenu，以保证完整标签可读）。GitHub GraphQL 创建独立的反向 PR；Gitee 企业版重新读取 MR，要求 merge/squash commit 的 `/repository/commits/:sha/refs` 响应同时返回 `merge_commit_by_pr` 与 `can_revert`，随后对目标分支调用文档定义的 commit revert endpoint。rebase/fast-forward、Gitee 公有版与 GitLab 均保持不支持；Provider 专属确认说明必须明确 Gitee 会直接修改目标分支。
 
 Gitee 企业版 Commit 角标只把 MR detail/diff 中的正数摘要视为可信总数。部分部署在读取 commits 集合前会报告零，因此零值或缺失时必须在激活 Commits Tab 前执行轻量计数探测；完整 Commits 内容 model 仍保持懒加载。
 
-Files changed 的 `Diff view` 弹层统一持有与 Provider 无关的 Unified/Split 偏好，以及按能力开放的 Hide whitespace 草稿。`workflow/pr_review.rs` 从缓存的归一化行生成 Unified 或 Split 投影；Split 将每个连续删除/新增块按行配对，并把上下文同时映射到左右两侧。只应用视图选择时在本地替换当前懒加载行 model，应用受支持的空白字符变化时才重新加载 Provider 数据。Slint 负责渲染投影，并让不支持的空白字符复选框保持可见但禁用。弹层完整表面持有指针拦截层，因此空白区域不会把 hover 穿透到下面的文件树。弹层挂在整行 Files changed 工具栏上，Primer 向上三角箭头的尖端跟随设置齿轮，即使面板被边缘夹紧也保持对准。
+Files changed 的 `Diff view` 弹层统一持有与 Provider 无关的 Unified/Split 偏好，以及按能力开放的 Hide whitespace 草稿。`workflow/pr_review/diff_projection.rs` 从缓存的归一化行生成 Unified 或 Split 投影；Split 将每个连续删除/新增块按行配对，并把上下文同时映射到左右两侧。只应用视图选择时在本地替换当前懒加载行 model，应用受支持的空白字符变化时才重新加载 Provider 数据。Slint 负责渲染投影，并让不支持的空白字符复选框保持可见但禁用。弹层完整表面持有指针拦截层，因此空白区域不会把 hover 穿透到下面的文件树。弹层挂在整行 Files changed 工具栏上，Primer 向上三角箭头的尖端跟随设置齿轮，即使面板被边缘夹紧也保持对准。
 
 大文件按与 Provider 无关的变更行数或载荷体积预算判定。正常文件头保持可用，但语法高亮和 Slint 行 model 延迟到用户对该文件点击 `Load diff` 后才创建。原位加载状态仅属于当前完整 Diff/commit range，切换范围时重置。
 
@@ -215,7 +234,7 @@ Terminal 状态感知项目；同一项目重新打开时复用，切换项目�
 2. `workflow/bindings.rs` 构建 `WorkflowProjectContext`。
 3. `WorkflowStore` 选择项目级状态。
 4. 各 Workflow 模块初始化对应 Slint property。
-5. PR 数量在线程中加载，再通过 event loop 回写。
+5. PR 数量通过共享 runtime 和 Provider-neutral Git façade 加载，再经 event loop 回写。
 6. PR 列表控制器读取持久化仓库元数据，经共享 runtime 懒加载当前选中的 open 远端分页；每次翻页只请求对应页。
 
 ### PR 列表到审核

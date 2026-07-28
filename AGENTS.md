@@ -107,14 +107,14 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 ### Vendored Material / 内置 Material
 
 - Prefer `@material` imports.
-- Before editing `material-1.7.1-fixed/`, compare the target file with the matching Slint upstream tag.
-- Keep a local patch only when upstream does not provide the required behavior, and document why.
-- Validate vendored changes by compiling all Slint through `cargo check --locked`.
+- Never edit `material-1.7.1-fixed/` or any other vendored Slint Material UI source.
+- Implement every application behavior and visual adaptation in application-owned `ui/` code so Material UI can be upgraded by replacement.
+- New code must not import private files from the vendored implementation path; use `@material` and project-owned wrappers.
 
 - 优先通过 `@material` 导入。
-- 修改 `material-1.7.1-fixed/` 前必须和对应 Slint tag 的上游文件对比。
-- 只有上游不具备所需行为时才保留本地补丁，并记录原因。
-- 内置库改动必须通过 `cargo check --locked` 编译全部 Slint。
+- 绝对禁止修改 `material-1.7.1-fixed/` 或任何其他 vendored Slint Material UI 源码。
+- 所有应用行为和视觉适配都必须在项目自有 `ui/` 代码中实现，保证 Material UI 可直接替换升级。
+- 新代码禁止引用 vendored 实现路径中的私有文件；必须使用 `@material` 和项目自有包装组件。
 
 ## Documentation discipline / 文档同步
 

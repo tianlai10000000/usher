@@ -11,8 +11,8 @@ use crate::http::{self, RequestOptions};
 
 use super::{
     PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
-    PullRequestDiffFile, PullRequestItem, PullRequestMergeMethod, PullRequestPage,
-    PullRequestReadiness, PullRequestReadinessKind, PullRequestRevertResult,
+    PullRequestDiffFile, PullRequestFilters, PullRequestItem, PullRequestMergeMethod,
+    PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestRevertResult,
     PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
     configured_api_base_url, configured_token, conversation_commit_batch_items,
     conversation_count_from_detail, conversation_merged_item, conversation_system_event_item,
@@ -53,6 +53,7 @@ pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, Str
 pub(super) async fn get_pull_requests(
     locator: &RepoLocator,
     state: Option<PullRequestState>,
+    filters: &PullRequestFilters,
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
@@ -65,6 +66,23 @@ pub(super) async fn get_pull_requests(
             query.push_str(state_query);
         }
     }
+    match filters.reviews.as_str() {
+        "required" => query.push_str(" review:required"),
+        "approved" => query.push_str(" review:approved"),
+        "changes-requested" => query.push_str(" review:changes_requested"),
+        _ => {}
+    }
+    match filters.assignee.as_str() {
+        "none" => query.push_str(" no:assignee"),
+        "me" => query.push_str(" assignee:@me"),
+        _ => {}
+    }
+    let (sort, order) = match filters.sort.as_str() {
+        "oldest" => ("created", "asc"),
+        "updated-desc" => ("updated", "desc"),
+        "updated-asc" => ("updated", "asc"),
+        _ => ("created", "desc"),
+    };
     let endpoint = endpoints::SEARCH_PULL_REQUESTS_URL
         .replace("{api_base_url}", api_base_url(locator).as_str());
     let mut request = http::get(endpoint)
@@ -74,6 +92,8 @@ pub(super) async fn get_pull_requests(
             ("q", query.as_str()),
             ("per_page", &per_page.to_string()),
             ("page", &page.max(1).to_string()),
+            ("sort", sort),
+            ("order", order),
         ]);
     if let Some(token) = configured_token(RepoType::GitHub) {
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
@@ -96,6 +116,14 @@ pub(super) async fn get_pull_requests(
             number: string_field(value, "number").unwrap_or_else(|| "—".to_string()),
             title: string_field(value, "title")
                 .unwrap_or_else(|| "Untitled pull request".to_string()),
+            state: if value
+                .pointer("/pull_request/merged_at")
+                .is_some_and(|merged_at| !merged_at.is_null())
+            {
+                "merged".to_string()
+            } else {
+                string_field(value, "state").unwrap_or_else(|| "open".to_string())
+            },
             author: nested_string(value, "user", "login")
                 .unwrap_or_else(|| "Unknown author".to_string()),
             source_branch: "—".to_string(),
@@ -105,13 +133,56 @@ pub(super) async fn get_pull_requests(
             web_url: string_field(value, "html_url").unwrap_or_default(),
         })
         .collect::<Vec<_>>();
-    let items = hydrate_pull_request_branches(locator, items).await;
+    // Count probes request one row only and never render it. Avoid an extra PR
+    // detail request when only Search's exact `total_count` is needed.
+    let items = if per_page == 1 {
+        items
+    } else {
+        hydrate_pull_request_branches(locator, items).await
+    };
     Ok(PullRequestPage {
         items,
         total,
         total_exact: true,
         page_count: Some(total.div_ceil(per_page)),
     })
+}
+
+pub(super) async fn get_open_pull_request_count(
+    locator: &RepoLocator,
+    target_branch: &str,
+) -> Result<u32, String> {
+    let query = open_pull_request_count_query(locator, target_branch);
+    let endpoint = endpoints::SEARCH_PULL_REQUESTS_URL
+        .replace("{api_base_url}", api_base_url(locator).as_str());
+    let mut request = http::get(endpoint)
+        .header(ACCEPT, "application/vnd.github+json")
+        .header(USER_AGENT, "usher-project-overview")
+        .query(&[("q", query.as_str()), ("per_page", "1"), ("page", "1")]);
+    if let Some(token) = configured_token(RepoType::GitHub) {
+        request = request.header(AUTHORIZATION, format!("Bearer {token}"));
+    }
+
+    let payload: Value = http::send_json(
+        request,
+        RequestOptions::new("Load GitHub pull request overview"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    payload
+        .get("total_count")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| "GitHub pull request overview has no valid total count.".to_string())
+}
+
+fn open_pull_request_count_query(locator: &RepoLocator, target_branch: &str) -> String {
+    format!(
+        "repo:{}/{} is:pr is:open base:{}",
+        locator.namespace,
+        locator.repo,
+        target_branch.trim()
+    )
 }
 
 /// GitHub's issue-search response provides the exact PR count, but not the
@@ -411,7 +482,9 @@ pub(super) async fn get_pull_request_action_state(
     }
 
     Ok(PullRequestActionState {
-        can_comment: has_token && !terminal,
+        // GitHub keeps the Conversation composer writable on closed/merged PRs
+        // (issue comments). Approve / request-changes stay open-PR only.
+        can_comment: has_token,
         can_approve: has_token && !terminal,
         can_request_changes: has_token && !terminal,
         can_merge,
@@ -828,6 +901,31 @@ pub(super) async fn submit_pull_request_review(
     if action != PullRequestReviewAction::Approve && body.trim().is_empty() {
         return Err("A review comment is required for this action.".into());
     }
+
+    // Conversation / Comment matches GitHub's timeline composer: an issue
+    // comment that works on open, closed, and merged pull requests. Approve
+    // and request-changes still use the reviews endpoint.
+    if action == PullRequestReviewAction::Comment {
+        let endpoint = repository_endpoint(
+            endpoints::PULL_REQUEST_ISSUE_COMMENTS_URL,
+            locator,
+            Some(pull_request_number),
+            None,
+        );
+        let request = authenticated_builder(
+            http::post(endpoint),
+            configured_token(RepoType::GitHub).as_deref(),
+        )
+        .json(&serde_json::json!({ "body": body.trim() }));
+        let _: Value = http::send_json(
+            request,
+            RequestOptions::new("Submit GitHub pull request comment"),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
     let endpoint = repository_endpoint(
         endpoints::PULL_REQUEST_REVIEWS_URL,
         locator,
@@ -835,9 +933,10 @@ pub(super) async fn submit_pull_request_review(
         None,
     );
     let event = match action {
-        PullRequestReviewAction::Comment => "COMMENT",
         PullRequestReviewAction::Approve => "APPROVE",
         PullRequestReviewAction::RequestChanges => "REQUEST_CHANGES",
+        // Handled above via issue comments; keep the arm exhaustive.
+        PullRequestReviewAction::Comment => return Ok(()),
     };
     let request = authenticated_builder(
         http::post(endpoint),
@@ -1239,10 +1338,19 @@ mod tests {
     use super::{
         aggregate_review_state, decode_commit, decode_github_timeline_activity,
         decode_revert_pull_request_result, github_merge_readiness, github_review_action,
-        graphql_url_from_rest_base, link_rel_last_page, pull_request_branches,
-        revert_pull_request_payload, single_item_page_total,
+        graphql_url_from_rest_base, link_rel_last_page, open_pull_request_count_query,
+        pull_request_branches, revert_pull_request_payload, single_item_page_total,
     };
-    use crate::git::PullRequestReadinessKind;
+    use crate::git::{PullRequestReadinessKind, parse_repo_locator};
+
+    #[test]
+    fn scopes_overview_count_to_repository_state_and_target_branch() {
+        let locator = parse_repo_locator("https://github.com/acme/widget.git").unwrap();
+        assert_eq!(
+            open_pull_request_count_query(&locator, "fat"),
+            "repo:acme/widget is:pr is:open base:fat"
+        );
+    }
 
     #[test]
     fn parses_github_link_rel_last_page_for_commit_badge_counts() {

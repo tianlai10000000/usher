@@ -11,7 +11,12 @@ This is the stable contract for persisted Chat history, message presentation, vi
 - Persistence and session state: `src/chat/persistence.rs`, `src/chat/session.rs`.
 - UI payload rendering and bounded markdown cache: `src/chat/renderer.rs`.
 - Async request and route interaction: `src/chat/interactive.rs`.
+- Bounded height estimation, prefix cache, and virtual-window selection:
+  `src/chat/virtual_layout.rs`.
 - Presentation: `ui/views/chat.slint`, bridged through `ui/main.slint`.
+
+- 异步请求与路由交互：`src/chat/interactive.rs`。
+- 有界高度估算、prefix cache 与虚拟窗口选择：`src/chat/virtual_layout.rs`。
 
 ## Invariants / 不变量
 

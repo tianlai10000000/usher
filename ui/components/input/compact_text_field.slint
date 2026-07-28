@@ -9,7 +9,6 @@ export component CompactTextField inherits Rectangle {
     in property <length> field-height: 40px;
     in property <length> border-radius-size: 10px;
     in property <length> input-font-size: 14px;
-    in property <string> input-font-family: "Hiragino Sans GB";
     in property <brush> field-background: MaterialPalette.surface_container_highest;
     in property <color> field-border-color: MaterialPalette.outline_variant;
     callback edited(string);
@@ -36,7 +35,6 @@ export component CompactTextField inherits Rectangle {
         input-type: root.input-type;
         color: MaterialPalette.on_surface;
         font-size: root.input-font-size;
-        font-family: root.input-font-family;
         text-cursor-width: 2px;
         single-line: true;
         selection-background-color: MaterialPalette.primary.with-alpha(0.35);
@@ -64,7 +62,6 @@ export component CompactTextField inherits Rectangle {
         y: (parent.height - self.preferred-height) / 2;
         text: root.placeholder;
         font_size: root.input-font-size;
-        font-family: root.input-font-family;
         color: MaterialPalette.on_surface_variant;
     }
 }

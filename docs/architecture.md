@@ -36,25 +36,27 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/lib.rs` | Imports and re-exports the generated UI API, creates `MainWindow`, initializes modules, wires cross-cutting callbacks, and manages window lifecycle and shutdown. |
 | `crates/usher-ui/` | Owns the Slint build script and generated Rust API. Compiles the repository-level `ui/main.slint` tree and exports its window, globals, models, structs, and enums. |
 | `src/app_runtime.rs` | Process-wide multi-thread Tokio runtime. Runtime threads install the tracing dispatch. |
-| `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots, startup checkpoints, UI-size correlation, and the cancellable periodic memory sampler. |
+| `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots, startup checkpoints, bounded Slint-model accounting, UI-size correlation, and the cancellable periodic memory sampler. |
+| `src/platform/` | Cross-platform native integration boundary. `macos.rs` owns AppKit appearance, title-bar accessories, window-interaction notifications, and macOS PR-review font registration; other targets expose explicit fallbacks from `mod.rs`. |
 | `src/shutdown.rs` | Ordered shutdown coordination. |
 | `src/single_instance.rs` | Single-instance process behavior. |
 | `src/tray.rs` | Desktop tray integration and tray-driven lifecycle actions. |
 
-`src/lib.rs` is a composition root, not the preferred home for feature logic. New business behavior belongs in a feature module and should expose a small setup or service API.
+`src/lib.rs` is a composition root, not the preferred home for feature logic. Native-window behavior belongs in `src/platform/`, diagnostics accounting belongs in `src/memory_diagnostics.rs`, and new business behavior belongs in a feature module that exposes a small setup or service API.
 
 ### Feature modules
 
 | Path | Responsibility |
 | --- | --- |
-| `src/project/` | Project registry, persistence, filtering, logos, PR/MR summaries, and project-to-workflow/terminal entry points. |
+| `src/project/` | Stable façade/controller plus separated persistence models/storage, logo handling, PR/MR overview selection, and project-to-workflow/terminal entry points. |
 | `src/codereview/api/` | URL and path templates for Gitee, GitLab, and GitHub repository APIs. It contains no request execution, authentication, or response decoding. |
-| `src/git/` | Provider detection, repository operations, authentication headers, and normalization of provider responses into application models. |
-| `src/workflow/` | Per-project Branch, Tag, PR, and CD view state and command execution. |
-| `src/terminal/` | PTY lifecycle, viewport synchronization, rendering, input, selection, and project switching. |
-| `src/chat/` | Chat transport, sessions, JSONL persistence, Markdown conversion, rendering cache, pagination, and interaction binding. |
+| `src/git/` | Provider-neutral façade plus separated domain models, remote locator, unified-diff parsing, PR overview counting, and provider adapters. Gitee keeps transport, decoding, conversation/commit normalization, readiness, and revert semantics in dedicated submodules. |
+| `src/workflow/` | Per-project Branch, Tag, PR, and CD state and command execution. Tag and PR Review expose stable file façades with internal controller and pure-logic modules. |
+| `src/terminal/` | PTY lifecycle, viewport synchronization, rendering, selection, and project switching; pure input mapping, diagnostics, and refresh throttling use dedicated modules. |
+| `src/chat/` | Chat transport, sessions, JSONL persistence, Markdown conversion, rendering cache, pagination, interaction binding, and pure bounded virtual layout. |
 | `src/update/` | Release checks, streamed downloads, progress, cancellation, installation, and restart. |
-| `src/router/` | Route-to-navigation mapping and route-specific visibility state. |
+| `src/router/` | Route mapping, history, visibility, and reachability transitions; it does not perform feature cleanup. |
+| `src/app_lifecycle.rs` | Composition-level route lifecycle hook for cross-feature cleanup after transitions. |
 | `src/settings.rs` | TOML settings model and persistence, including AI Agent credentials. |
 | `src/ai/` | Standalone OpenAI-compatible AI Agent integration; `agent.rs` owns the connection test. It does not own RAG Chat. |
 | `src/network.rs` | Background connectivity probe and `AppState.network-online`. |
@@ -76,13 +78,25 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `ui/route/routeMap.slint` | Complete `Route` enum. Only a subset is exposed in main navigation. |
 | `ui/state/` | Slint global state adapters. |
 | `ui/views/` | Page-level views. |
-| `ui/views/workflow/` | Branch, Tag, PR, and CD workflow views. |
+| `ui/views/workflow/` | Tag and PR workflow views; Branch and CD tabs currently show Coming soon placeholders. |
 | `ui/components/` | Reusable application components. |
+| `ui/components/pr_review/` | PR Review public UI structs plus reusable shell, file-tree, and diff controls; cross-region state stays in the workspace view. |
 | `ui/theme/` | Application palette mapping. |
 | `material-1.7.1-fixed/` | Vendored Material source aligned with Slint v1.17.1. |
 | `vendor/i-slint-live-preview/` | Temporary Slint 1.17.1 override selected only by the opt-in `live-preview` feature. Its documented `mtime` guard prevents spurious macOS watcher events from causing an endless recompile loop. |
 
-Application UI must import Material through `@material` unless direct access to a non-exported vendored component is required. Changes to either vendored dependency require an upstream comparison and a documented reason. The live-preview override must be removed when upstream provides an equivalent watcher guard.
+Application UI must import Material through `@material`; direct imports from vendored implementation paths are not allowed for new code. Never modify `material-1.7.1-fixed/` or other vendored Slint Material UI source for application behavior or appearance. Keep every adaptation in application-owned code so a dependency upgrade can replace the Material UI tree without carrying patches.
+
+All product pages and reusable visual components follow the [GitHub/Primer UI design specification](specs/ui-design.md). GitHub's current product UI and official Primer documentation/source are the visual source of truth; contributors must verify unfamiliar patterns instead of inventing approximate styles. Material remains an implementation library where useful, but it does not define Usher's product appearance.
+
+`src/platform/` selects one clear CJK-capable application font at startup:
+`Hiragino Sans GB` on macOS, `Microsoft YaHei UI` on Windows, and `Noto Sans`
+elsewhere. `ui/main.slint` exposes that choice as the default for the complete
+ordinary UI tree; page and shared-component code inherit it instead of selecting
+independent faces. Terminal content remains fully independent so its existing
+cell and toolbar metrics do not change. Within PR Review, only diff source code
+and file-tree content keep the platform-selected specialized faces required by
+their geometry; all other review controls and prose inherit the application font.
 
 The UI source remains under the repository-level `ui/` directory, but generated Rust is compiled only by the `usher-ui` workspace crate. The application crate re-exports that public API so existing feature modules can continue to import `crate::{MainWindow, Route, ...}` without owning the generated module. This is a compile boundary: changing Rust feature logic must not force the Slint-generated crate to rebuild, while a UI source change rebuilds `usher-ui` before the application bindings are checked.
 
@@ -153,17 +167,25 @@ Debug builds enable process memory diagnostics automatically; release builds ena
 
 ### Workflow
 
+The Workflow shell follows GitHub repository UnderlineNav behavior at every supported width; compact content spacing no longer substitutes an equal-width ActionList-style tab bar. The PR list uses Open/Closed state controls and Reviews, Assignee, and Sort menus; for GitHub repositories these map to native Search qualifiers and sort parameters and reset pagination before reloading, while other providers ignore unsupported GitHub qualifiers. Open and Closed totals are fetched independently when the project or filters change, so the header does not reuse the selected page's transient count. When a total is still loading or the count request fails, the header hides the number and keeps the Open/Closed label (Primer degraded-experience rule) instead of a perpetual loading placeholder. List timestamps use relative labels with UTC+08:00 absolute tooltips.
+
 `WorkflowStore` keeps a current project plus per-project `WorkflowViewState`. Switching projects must rebind UI state and prevent logs, steps, or running flags from leaking between projects. `Route.Workflow` and `Route.PrReview` form one lifecycle domain: moving between them retains the Workflow list/model state, and a temporary route outside the domain retains it while either workflow route remains reachable through Back.
 
-Cross-page Back navigation is owned by `src/router/` as a LIFO route history; Slint renders the current route and delegates Back instead of mutating a one-slot `previous-route` value. Feature controllers own drill-down checkpoints that do not change the route. Back first consumes such a feature-local checkpoint, then pops the global route history. A workflow route retained in that history remains a live return target, so temporarily opening Settings, About, or another page does not discard the PR review; heavy workflow state is released only when the workflow domain is no longer current or reachable through Back.
+Cross-page Back navigation is owned by `src/router/` as a LIFO route history; Slint renders the current route and delegates Back instead of mutating a one-slot `previous-route` value. Feature controllers own drill-down checkpoints that do not change the route. Back first consumes such a feature-local checkpoint, then pops the global route history. A workflow route retained in that history remains a live return target, so temporarily opening Settings, About, or another page does not discard the PR review; heavy workflow state is released only when the workflow domain is no longer current or reachable through Back. Router reports that reachability transition through an injected hook; `src/app_lifecycle.rs`, not Router, owns the resulting cross-feature cleanup.
 
-The Workflow PR list and full-window review workspace use a single provider-neutral façade in `src/git/`. Every list, detail/diff, repository-file, review-state, review-submit, and merge request is selected from the current project's persisted `repo_type`, then checked against `remote_repo` before the provider implementation runs. The review controller owns one shared immutable normalized diff and a separate action sequence that prevents stale review or merge responses from updating another project or PR. The normalized detail moves each base file into an `Arc`, so the selected-file lazy model and highlighting task share that allocation instead of cloning every line; only a hunk expansion creates a per-file copy-on-write override. Provider HTML is decoded at the adapter boundary, and each diff record is normalized to one visual source line without CR/LF controls before fixed-height Slint rendering. Collapsing an expanded file drops its override and exposes the shared base file again. Immutable head/base file content is fetched lazily for hunk expansion or in-app full-file viewing; edited-file expansion aligns both fixed revisions locally so one-sided lines are retained. Per-file highlighted diffs use a four-entry LRU and immutable source text uses a three-entry LRU; the full-file highlighted model is transient UI state. The active diff is exposed to Slint through a read-only lazy model that materializes at most 64 converted rows, while the complete highlighted result remains Rust-owned for arbitrary-language support and fast scrolling. All late async responses are sequence-guarded.
+The Workflow PR list and full-window review workspace use a single provider-neutral façade in `src/git/`. Every list, detail/diff, repository-file, review-state, review-submit, and merge request is selected from the current project's persisted `repo_type`, then checked against `remote_repo` before the provider implementation runs. `workflow/pr_review.rs` is the stable façade and `workflow/pr_review/controller.rs` owns asynchronous orchestration and UI writes; shared cache/diff ownership and avatar I/O live in `cache.rs` and `avatar.rs`. Pure immutable-source alignment and hunk expansion live in `workflow/pr_review/hunk.rs`, local tree construction and file classification live in `workflow/pr_review/file_tree.rs`, Unified/Split row mapping lives in `workflow/pr_review/diff_projection.rs`, the Slint lazy row adapter lives in `workflow/pr_review/diff_model.rs`, selection geometry plus clipboard projection live in `workflow/pr_review/selection.rs`, and Conversation/Commit presentation plus range mapping live in `workflow/pr_review/timeline.rs`. The review controller owns one shared immutable normalized diff and a separate action sequence that prevents stale review or merge responses from updating another project or PR. The normalized detail moves each base file into an `Arc`, so the selected-file lazy model and highlighting task share that allocation instead of cloning every line; only a hunk expansion creates a per-file copy-on-write override. Provider HTML is decoded at the adapter boundary, and each diff record is normalized to one visual source line without CR/LF controls before fixed-height Slint rendering. Collapsing an expanded file drops its override and exposes the shared base file again. Immutable head/base file content is fetched lazily for hunk expansion or in-app full-file viewing; edited-file expansion aligns both fixed revisions locally so one-sided lines are retained. Per-file highlighted diffs use a four-entry LRU and immutable source text uses a three-entry LRU; the full-file highlighted model is transient UI state. The active diff is exposed to Slint through the read-only lazy adapter, which materializes at most 64 converted rows, while the complete highlighted result remains Rust-owned for arbitrary-language support and fast scrolling. All late async responses are sequence-guarded.
 
-Revert commands use the same provider-neutral façade and action sequence as review/merge commands, so stale results cannot affect another project or PR. A merged request hides review/merge controls and may expose a visible same-row Primer-style secondary header revert button only when the adapter returns `can_revert` (Usher prefers that over GitHub's kebab ActionMenu so the full label stays readable). GitHub GraphQL creates a separate reverse PR. Gitee Enterprise reloads the MR, requires a merge/squash commit whose `/repository/commits/:sha/refs` response reports both `merge_commit_by_pr` and `can_revert`, then calls the documented commit-revert endpoint against the target branch; rebase/fast-forward, public Gitee, and GitLab remain unsupported. Provider-specific confirmation text makes the direct Gitee branch mutation explicit.
+The Tag workflow follows the same façade pattern: `workflow/tag.rs` exposes binding and refresh,
+`tag/controller.rs` owns project state, UI sequencing, cancellation, and command execution,
+while `tag/version.rs` and `tag/commands.rs` are pure, directly tested rules. Git commands remain
+argument vectors so repository paths, tag names, and descriptions never pass through shell
+interpolation.
+
+Revert commands use the same provider-neutral façade and action sequence as review/merge commands, so stale results cannot affect another project or PR. A merged or closed request hides header review/merge controls while the Conversation composer stays available when credentials are configured (GitHub posts Conversation comments as issue comments so they work after merge). A merged request may expose a visible same-row Primer-style secondary header revert button only when the adapter returns `can_revert` (Usher prefers that over GitHub's kebab ActionMenu so the full label stays readable). GitHub GraphQL creates a separate reverse PR. Gitee Enterprise reloads the MR, requires a merge/squash commit whose `/repository/commits/:sha/refs` response reports both `merge_commit_by_pr` and `can_revert`, then calls the documented commit-revert endpoint against the target branch; rebase/fast-forward, public Gitee, and GitLab remain unsupported. Provider-specific confirmation text makes the direct Gitee branch mutation explicit.
 
 Gitee Enterprise commit badges treat only positive MR detail/diff summaries as authoritative. A zero or missing summary triggers the lightweight commits count probe before the Commits tab is activated, because some deployments advertise zero until that collection is read; the full Commits content model remains lazy.
 
-The Files changed `Diff view` popover owns a provider-neutral Unified/Split preference and the capability-gated Hide whitespace draft. `workflow/pr_review.rs` projects cached normalized lines for Unified or Split rendering; Split pairs each contiguous deletion/addition block and duplicates context across both sides. Applying only the view choice replaces the current lazy line model locally, while applying a supported whitespace change reloads provider data. Slint renders that projection and keeps unsupported whitespace checkboxes visible but disabled. The complete popover surface owns a pointer shield, so blank overlay areas cannot leak hover to the file tree below. It is hosted on the full Files changed toolbar row with a Primer upward caret whose tip tracks the settings gear even when the panel is edge-clamped.
+The Files changed `Diff view` popover owns a provider-neutral Unified/Split preference and the capability-gated Hide whitespace draft. `workflow/pr_review/diff_projection.rs` projects cached normalized lines for Unified or Split rendering; Split pairs each contiguous deletion/addition block and duplicates context across both sides. Applying only the view choice replaces the current lazy line model locally, while applying a supported whitespace change reloads provider data. Slint renders that projection and keeps unsupported whitespace checkboxes visible but disabled. The complete popover surface owns a pointer shield, so blank overlay areas cannot leak hover to the file tree below. It is hosted on the full Files changed toolbar row with a Primer upward caret whose tip tracks the settings gear even when the panel is edge-clamped.
 
 Large files are classified by a provider-neutral changed-line or payload-size budget. Their normal file header remains available, but syntax highlighting and the Slint line model are deferred until that file's `Load diff` action is invoked. The in-place loading decision is scoped to the active complete/range diff and resets when the commit range changes.
 
@@ -222,7 +244,7 @@ Terminal state is project-aware and persists while reopening the same project. S
 2. `workflow/bindings.rs` creates a `WorkflowProjectContext`.
 3. `WorkflowStore` selects the project-scoped state.
 4. Workflow modules initialize their Slint properties.
-5. PR counts are loaded on a worker thread and applied through the event loop.
+5. PR counts are loaded through the shared runtime and provider-neutral Git façade, then applied through the event loop.
 6. The PR-list controller reads persisted repository metadata and lazily loads the selected remote open page through the shared runtime; every page change requests that page only.
 
 ### Pull request list to review

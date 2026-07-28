@@ -1,4 +1,5 @@
-import { MaterialPalette, MaterialText } from "@material";
+import { MaterialText } from "@material";
+import { AppState } from "../../state/app_state.slint";
 
 export struct StepItem {
     name: string,
@@ -26,14 +27,12 @@ export component StepCard inherits Rectangle {
     width: 100%;
     height: content.preferred-height + 16px;
     clip: true;
-    border-radius: 12px;
-    background: MaterialPalette.surface_container_high;
+    border-radius: 6px;
+    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
     border-width: 1px;
-    border-color: step.status == "success" ? #4CAF50 :
-                  step.status == "error" ? #F44336 :
-                  step.status == "paused" ? #D97706 :
-                  step.status == "running" ? MaterialPalette.primary :
-                  MaterialPalette.outline_variant;
+    border-color: step.status == "error"
+        ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
+        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
 
     content := VerticalLayout {
         x: 12px;
@@ -53,7 +52,7 @@ export component StepCard inherits Rectangle {
                 y: (header.height - self.height) / 2;
                 border-radius: 15px;
                 border-width: 2px;
-                border-color: #2196F3;
+                border-color: AppState.effective-dark-mode ? #58a6ff : #0969da;
                 background: transparent;
                 opacity: root.animations-enabled ? (root.pulse-on ? 0.5 : 0.2) : 0.2;
             }
@@ -64,17 +63,19 @@ export component StepCard inherits Rectangle {
                 x: 0px;
                 y: (header.height - self.height) / 2;
                 border-radius: 12px;
-                background: step.status == "success" ? #4CAF50 :
-                            step.status == "error" ? #F44336 :
-                            step.status == "paused" ? #D97706 :
-                            step.status == "running" ? #2196F3 :
-                            MaterialPalette.surface_container_highest;
+                background: step.status == "success" ? (AppState.effective-dark-mode ? #238636 : #1f883d) :
+                            step.status == "error" ? (AppState.effective-dark-mode ? #da3633 : #cf222e) :
+                            step.status == "paused" ? (AppState.effective-dark-mode ? #9e6a03 : #bf8700) :
+                            step.status == "running" ? (AppState.effective-dark-mode ? #1f6feb : #0969da) :
+                            (AppState.effective-dark-mode ? #21262d : #eaeef2);
                 border-width: step.status == "pending" ? 1px : 0px;
-                border-color: MaterialPalette.outline_variant;
+                border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
 
                 MaterialText {
                     text: root.step-index + 1;
-                    color: step.status == "pending" ? MaterialPalette.on_surface_variant : #ffffff;
+                    color: step.status == "pending"
+                        ? (AppState.effective-dark-mode ? #9198a1 : #59636e)
+                        : #ffffff;
                     font_size: 12px;
                     font_weight: 700;
                     x: (parent.width - self.width) / 2;
@@ -98,28 +99,28 @@ export component StepCard inherits Rectangle {
                         text: step.name;
                         font_size: 14px;
                         font_weight: 600;
-                        color: MaterialPalette.on_surface;
+                        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
                     }
 
                     if step.status == "running": MaterialText {
                         text: "Running...";
                         font_size: 11px;
                         font_weight: 600;
-                        color: #1D4ED8;
+                        color: AppState.effective-dark-mode ? #58a6ff : #0969da;
                     }
 
                     if step.status == "paused": MaterialText {
                         text: "Paused";
                         font_size: 11px;
                         font_weight: 600;
-                        color: #B45309;
+                        color: AppState.effective-dark-mode ? #d29922 : #9a6700;
                     }
 
                     Text {
                         width: parent.width;
                         text: step.detail;
                         wrap: word-wrap;
-                        color: MaterialPalette.on_surface_variant;
+                        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
                         font-size: 12px;
                     }
                 }
@@ -140,7 +141,7 @@ export component StepCard inherits Rectangle {
 
                 MaterialText {
                     text: root.expanded ? "Hide" : "Logs";
-                    color: MaterialPalette.primary;
+                    color: AppState.effective-dark-mode ? #58a6ff : #0969da;
                     font_size: 12px;
                     vertical_alignment: center;
                     x: (parent.width - self.width) / 2;
@@ -151,8 +152,10 @@ export component StepCard inherits Rectangle {
 
         if root.expanded: Rectangle {
             width: parent.width;
-            border-radius: 10px;
-            background: MaterialPalette.surface_container_highest;
+            border-radius: 6px;
+            background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
+            border-width: 1px;
+            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
             height: max(60px, log-text.preferred-height + 20px);
 
             log-text := Text {
@@ -161,8 +164,7 @@ export component StepCard inherits Rectangle {
                 y: 10px;
                 text: step.log == "" ? "No logs yet." : step.log;
                 wrap: word-wrap;
-                color: MaterialPalette.on_surface;
-                font-family: "Menlo";
+                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
                 font-size: 12px;
             }
         }
@@ -180,49 +182,61 @@ export component Steps inherits Rectangle {
 
     width: 100%;
     height: max(140px, steps-content.preferred-height + 28px);
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    clip: true;
 
     steps-content := VerticalLayout {
-        x: 14px;
-        y: 14px;
-        width: root.width - 28px;
+        x: 1px;
+        y: 1px;
+        width: root.width - 2px;
         spacing: 0px;
 
         Rectangle {
             width: parent.width;
-            height: 16px;
+            height: 40px;
+            background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
 
             MaterialText {
+                x: 12px;
+                width: parent.width - 24px;
+                height: parent.height;
                 text: root.title;
                 vertical_alignment: center;
                 font_size: 13px;
-                color: MaterialPalette.on_surface_variant;
+                font-weight: 600;
+                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
             }
         }
 
         Rectangle {
-            width: 1px;
-            height: 6px;
-            background: transparent;
+            width: parent.width;
+            height: 1px;
+            background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
         }
 
         if root.steps.length == 0: Text {
-            width: parent.width;
+            width: parent.width - 24px;
+            x: 12px;
+            height: 44px;
             text: root.empty-text;
-            color: MaterialPalette.on_surface_variant;
-            font-size: 13px;
+            vertical-alignment: center;
+            color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            font-size: 12px;
         }
 
         if root.steps.length > 0: VerticalLayout {
             width: parent.width;
-            spacing: 8px;
+            spacing: 0px;
 
             for step[index] in root.steps: VerticalLayout {
                 width: parent.width;
-                spacing: 6px;
+                spacing: 0px;
 
                 StepCard {
-                    width: min(parent.width, max(320px, parent.width / 2));
-                    x: (parent.width - self.width) / 2;
+                    width: parent.width;
                     step: step;
                     step-index: index;
                     expanded: root.expanded-step-index == index;
@@ -235,35 +249,8 @@ export component Steps inherits Rectangle {
 
                 if index < root.steps.length - 1: Rectangle {
                     width: parent.width;
-                    height: 26px;
-                    background: transparent;
-                    private property <color> connector-color:
-                        root.current-step-index == index + 1 ? MaterialPalette.primary :
-                        MaterialPalette.on_surface_variant;
-
-                    MaterialText {
-                        x: (parent.width - self.width) / 2;
-                        y: 0px;
-                        text: "|";
-                        font_size: 12px;
-                        color: parent.connector-color;
-                    }
-
-                    MaterialText {
-                        x: (parent.width - self.width) / 2;
-                        y: 8px;
-                        text: "|";
-                        font_size: 12px;
-                        color: parent.connector-color;
-                    }
-
-                    MaterialText {
-                        x: (parent.width - self.width) / 2;
-                        y: 16px;
-                        text: "↓";
-                        font_size: 12px;
-                        color: parent.connector-color;
-                    }
+                    height: 1px;
+                    background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
                 }
             }
         }

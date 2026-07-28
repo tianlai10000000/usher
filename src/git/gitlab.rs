@@ -87,6 +87,7 @@ pub(super) async fn get_pull_requests(
             number: string_field(value, "iid").unwrap_or_else(|| "—".to_string()),
             title: string_field(value, "title")
                 .unwrap_or_else(|| "Untitled merge request".to_string()),
+            state: string_field(value, "state").unwrap_or_else(|| "open".to_string()),
             author: nested_string(value, "author", "name")
                 .or_else(|| nested_string(value, "author", "username"))
                 .unwrap_or_else(|| "Unknown author".to_string()),

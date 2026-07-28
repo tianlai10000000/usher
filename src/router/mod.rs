@@ -1,5 +1,6 @@
 use crate::{MainWindow, Route};
-use slint::{ModelRc, VecModel, Weak};
+use slint::Weak;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 const BREADCRUMB_HIDDEN_ROUTES: &[Route] = &[Route::Chat, Route::Login, Route::PrReview];
@@ -62,6 +63,14 @@ pub fn route_for_navigation_index(index: i32) -> Option<Route> {
 pub struct Router {
     window: Weak<MainWindow>,
     history: Arc<Mutex<NavigationHistory>>,
+    lifecycle_hook: Rc<dyn Fn(&MainWindow, RouteLifecycleEvent)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RouteLifecycleEvent {
+    pub(crate) previous: Route,
+    pub(crate) current: Route,
+    pub(crate) workflow_became_unreachable: bool,
 }
 
 #[derive(Debug, Default)]
@@ -96,10 +105,14 @@ impl NavigationHistory {
 }
 
 impl Router {
-    pub fn new(window: Weak<MainWindow>) -> Self {
+    pub fn new(
+        window: Weak<MainWindow>,
+        lifecycle_hook: Rc<dyn Fn(&MainWindow, RouteLifecycleEvent)>,
+    ) -> Self {
         Self {
             window,
             history: Arc::new(Mutex::new(NavigationHistory::default())),
+            lifecycle_hook,
         }
     }
 
@@ -158,24 +171,14 @@ impl Router {
                 .lock()
                 .map(|history| history.contains_workflow_route())
                 .unwrap_or(false);
-        if is_workflow_route(previous) && !workflow_reachable {
-            crate::workflow::state::clear_current_project_heavy_state();
-            win.set_workflow_project_logo("".into());
-            win.set_workflow_project_logo_image(crate::project::resolve_project_logo_image(""));
-            win.set_workflow_pr_count_auto_update(false);
-            win.set_workflow_pr_count_loading(false);
-            win.set_workflow_pr_count_failed(false);
-            win.set_workflow_pr_fat_count("".into());
-            win.set_workflow_pr_uat_count("".into());
-            win.set_workflow_pr_prod_count("".into());
-            win.set_workflow_tag_result("".into());
-            win.set_workflow_tag_steps(ModelRc::new(VecModel::from(Vec::new())));
-            win.set_workflow_cd_summary("".into());
-            win.set_workflow_cd_build_detail("".into());
-            win.set_workflow_cd_test_detail("".into());
-            win.set_workflow_cd_deploy_detail("".into());
-            win.set_workflow_cd_verify_detail("".into());
-        }
+        (self.lifecycle_hook)(
+            win,
+            RouteLifecycleEvent {
+                previous,
+                current: route,
+                workflow_became_unreachable: is_workflow_route(previous) && !workflow_reachable,
+            },
+        );
         log::debug!("→ Navigate to: {:?}", route);
         state
     }

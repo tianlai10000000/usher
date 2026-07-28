@@ -1,173 +1,449 @@
 /// Workflow main entrance page and sub-flow workspace.
-import { FilledButton, MaterialPalette, MaterialText } from "@material";
+import { MaterialPalette, MaterialText, ToolTip } from "@material";
 import { AppState } from "../../state/app_state.slint";
 import { PageView } from "../../components/page/page_view.slint";
 import { Route } from "../../route/routeMap.slint";
-import { BranchFlow } from "./branch.slint";
-import { CdFlow } from "./cd.slint";
 import { PrFlow, WorkflowPullRequestItem } from "./pr.slint";
 import { TagFlow } from "./tag.slint";
 import { StepItem } from "../../components/workflow/steps.slint";
 
-component WorkflowTabButton inherits Rectangle {
-    in property <string> label;
-    in property <string> caption;
-    in property <bool> selected: false;
-    in property <length> card-width: 180px;
-    callback clicked();
+component WorkflowComingSoon inherits Rectangle {
+    in property <string> feature-name: "";
 
-    width: root.card-width;
-    height: 64px;
-    border-radius: 16px;
+    width: 100%;
+    min-height: 460px;
+    border-radius: 6px;
     border-width: 1px;
-    border-color: MaterialPalette.outline_variant;
-    background: root.selected ? MaterialPalette.secondary_container : @linear-gradient(45deg, MaterialPalette.surface_container_highest 0%, MaterialPalette.surface_container_lowest 100%);
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
 
-    touch := TouchArea {
-        width: 100%;
-        height: 100%;
-        clicked => {
-            root.clicked();
+    // GitHub blankslate: one centered column (icon → title → description).
+    private property <length> blankslate-height: 48px + 16px + 28px + 8px + 20px;
+    private property <length> blankslate-top: max(48px, (root.height - root.blankslate-height) / 2);
+
+    Rectangle {
+        x: (root.width - 48px) / 2;
+        y: root.blankslate-top;
+        width: 48px;
+        height: 48px;
+        border-radius: 24px;
+        background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+
+        Image {
+            x: 12px;
+            y: 12px;
+            width: 24px;
+            height: 24px;
+            source: @image-url("../../assets/icons/octicon-repo-push-16.svg");
+            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
         }
     }
 
-    VerticalLayout {
-        width: parent.width;
-        height: parent.height;
-        padding: 14px;
-        spacing: 6px;
-        alignment: start;
+    MaterialText {
+        x: 32px;
+        y: root.blankslate-top + 64px;
+        width: root.width - 64px;
+        height: 28px;
+        text: root.feature-name + " workflow";
+        font_size: 20px;
+        font_weight: 600;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        horizontal_alignment: center;
+        vertical_alignment: center;
+    }
 
-        MaterialText {
-            text: root.label;
-            font_size: 18px;
-            font_weight: 600;
-            color: root.selected ? MaterialPalette.on_secondary_container : MaterialPalette.on_surface;
-        }
-
-        Text {
-            width: parent.width - 28px;
-            text: root.caption;
-            wrap: word-wrap;
-            font-size: 12px;
-            color: root.selected ? MaterialPalette.on_secondary_container : MaterialPalette.on_surface_variant;
-        }
+    MaterialText {
+        x: 32px;
+        y: root.blankslate-top + 100px;
+        width: root.width - 64px;
+        height: 20px;
+        text: "This workflow is not available yet.";
+        font_size: 14px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        horizontal_alignment: center;
+        vertical_alignment: center;
     }
 }
 
-component WorkflowPrOverview inherits Rectangle {
+// GitHub repository UnderlineNav shared by all Workflow widths. The labels
+// remain content-sized at compact widths instead of switching to ActionList.
+component WorkflowWideTab inherits Rectangle {
+    in property <string> label;
+    in property <image> icon;
+    in property <bool> selected: false;
+    in property <bool> available: true;
+    callback clicked();
+
+    private property <length> label-width: max(24px, label-measure.preferred-width);
+    width: root.label-width + 48px;
+    height: 48px;
+    background: transparent;
+
+    // Keep the hover fill square and one pixel above the shared divider.
+    // This preserves the continuous repository-nav baseline across tabs.
+    if tab-touch.has-hover: Rectangle {
+        width: 100%;
+        height: parent.height - 1px;
+        background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+    }
+
+    label-measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: 14px;
+        font-weight: root.selected ? 600 : 400;
+        wrap: no-wrap;
+    }
+
+    Image {
+        x: 12px;
+        y: 16px;
+        width: 16px;
+        height: 16px;
+        source: root.icon;
+        colorize: root.available
+            ? (AppState.effective-dark-mode ? #9198a1 : #59636e)
+            : (AppState.effective-dark-mode ? #6e7681 : #8c959f);
+    }
+
+    Text {
+        x: 36px;
+        width: root.label-width;
+        height: parent.height;
+        text: root.label;
+        font-size: 14px;
+        font-weight: root.selected ? 600 : 400;
+        color: root.available
+            ? (AppState.effective-dark-mode ? #f0f6fc : #1f2328)
+            : (AppState.effective-dark-mode ? #6e7681 : #8c959f);
+        vertical-alignment: center;
+    }
+
+    if root.selected: Rectangle {
+        x: 0px;
+        y: parent.height - 2px;
+        width: parent.width;
+        height: 2px;
+        border-radius: 1px;
+        background: AppState.effective-dark-mode ? #f78166 : #fd8c73;
+    }
+
+    tab-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component WorkflowPrOverview inherits Rectangle {
     in property <bool> enabled: false;
     in property <bool> loading: false;
     in property <bool> failed: false;
     in property <string> fat-count: "-";
     in property <string> uat-count: "-";
     in property <string> prod-count: "-";
-    height: root.enabled ? 30px : 0px;
-    private property <length> row-height: 30px;
+    height: root.enabled ? 74px : 0px;
 
     if root.enabled: Rectangle {
         width: parent.width;
-        height: root.row-height;
-        border-radius: 12px;
-        background: MaterialPalette.surface_container_high;
+        height: 74px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+        background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
 
-        HorizontalLayout {
-            width: parent.width;
-            height: parent.height;
-            padding-left: 10px;
-            padding-right: 10px;
-            spacing: 10px;
-            alignment: center;
+        VerticalLayout {
+            x: 12px;
+            y: 10px;
+            width: parent.width - 24px;
+            spacing: 8px;
 
             MaterialText {
-                height: root.row-height;
-                text: "PR";
-                font_size: 11px;
+                text: root.loading ? "Loading pull request counts…" : (root.failed ? "Counts unavailable" : "Open pull requests");
+                font_size: 12px;
                 font_weight: 600;
-                color: MaterialPalette.primary;
-                vertical_alignment: center;
+                color: root.failed
+                    ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
+                    : (AppState.effective-dark-mode ? #f0f6fc : #1f2328);
             }
 
-            Rectangle {
-                width: 12px;
-                height: root.row-height;
-                background: transparent;
-
-                Image {
-                    width: 12px;
-                    height: 12px;
-                    x: 0px;
-                    y: (parent.height - self.height) / 2;
-                    source: root.loading
-                        ? @image-url("../../assets/icons/loading.svg")
-                        : (root.failed
-                            ? @image-url("../../assets/icons/warning.svg")
-                            : @image-url("../../assets/icons/done.svg"));
-                }
-            }
-
-            MaterialText {
-                height: root.row-height;
-                text: root.loading ? "Loading" : (root.failed ? "Unknown" : "Ready");
-                font-size: 11px;
-                color: root.failed ? MaterialPalette.error : MaterialPalette.on_surface_variant;
-                vertical_alignment: center;
-            }
-
-            Rectangle { horizontal-stretch: 1; }
-
-            MaterialText {
-                height: root.row-height;
-                text: "FAT " + root.fat-count;
-                font-size: 11px;
-                font-weight: 500;
-                color: MaterialPalette.on_surface_variant;
-                vertical_alignment: center;
-            }
-
-            MaterialText {
-                height: root.row-height;
-                text: "UAT " + root.uat-count;
-                font-size: 11px;
-                font-weight: 500;
-                color: MaterialPalette.on_surface_variant;
-                vertical_alignment: center;
-            }
-
-            MaterialText {
-                height: root.row-height;
-                text: "PROD " + root.prod-count;
-                font-size: 11px;
-                font-weight: 500;
-                color: MaterialPalette.on_surface_variant;
-                vertical_alignment: center;
+            HorizontalLayout {
+                spacing: 14px;
             }
         }
     }
 }
 
-component ProjectRepositoryMetadataRow inherits Rectangle {
-    in property <string> repo-type: "";
-    in property <string> repo-project-id: "";
+// Primer-style Label chip for Provider / Repository ID (GitHub Label look).
+component WorkflowMetaLabel inherits Rectangle {
+    in property <string> text: "";
+    private property <length> chip-width: max(28px, label-measure.preferred-width + 14px);
 
-    height: 28px;
+    width: root.chip-width;
+    height: 20px;
     border-radius: 10px;
     border-width: 1px;
-    border-color: MaterialPalette.outline_variant;
-    background: MaterialPalette.surface_container_lowest;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d0d7de;
+    background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+    vertical-stretch: 0;
 
-    HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        spacing: 8px;
-        alignment: center;
+    label-measure := Text {
+        visible: false;
+        text: root.text;
+        font-size: 12px;
+        font-weight: 500;
+        wrap: no-wrap;
+    }
 
-        MaterialText { text: "Provider"; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-        MaterialText { text: root.repo-type == "" ? "—" : root.repo-type; font-size: 12px; font-weight: 600; color: MaterialPalette.primary; vertical_alignment: center; }
-        Rectangle { width: 1px; height: 16px; background: MaterialPalette.outline_variant; }
-        MaterialText { text: "Repository ID"; font-size: 11px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-        MaterialText { text: root.repo-project-id == "" ? "—" : root.repo-project-id; font-size: 12px; font-weight: 600; color: MaterialPalette.on_surface; vertical_alignment: center; }
-        Rectangle { horizontal-stretch: 1; }
+    // Keep the compact label optically centered within its nominal line box.
+    Text {
+        x: 0px;
+        y: (parent.height - self.height) / 2 + 1px;
+        width: parent.width;
+        height: 18px;
+        text: root.text;
+        font-size: 12px;
+        font-weight: 500;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// GitHub repo-header style identity: title + alias + labels, then clone URL.
+component WorkflowProjectDetails inherits Rectangle {
+    in property <string> project-name: "";
+    in property <string> project-alias: "";
+    in property <string> project-remote-repo: "";
+    in property <string> repo-type: "";
+    in property <string> repo-project-id: "";
+    in property <image> project-logo-image;
+    callback copy-remote(string);
+
+    private property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    private property <color> canvas-subtle: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
+    private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    private property <string> display-name: root.project-name == "" ? "Untitled project" : root.project-name;
+    private property <bool> has-alias: root.project-alias != "";
+    private property <bool> has-remote: root.project-remote-repo != "";
+    private property <string> display-remote: root.has-remote
+        ? root.project-remote-repo
+        : "Local repository";
+    private property <string> provider-label:
+        root.repo-type == "github" ? "GitHub"
+            : (root.repo-type == "gitlab" ? "GitLab"
+                : (root.repo-type == "gitee" ? "Gitee"
+                    : (root.repo-type == "" ? "Not configured" : root.repo-type)));
+    private property <bool> has-repo-id: root.repo-project-id != "";
+    private property <string> id-label: root.has-repo-id ? ("ID " + root.repo-project-id) : "ID —";
+
+    // Content metrics for a compact first-line identity and auto-sized URL.
+    name-measure := Text {
+        visible: false;
+        text: root.display-name;
+        font-size: 20px;
+        font-weight: 600;
+        wrap: no-wrap;
+    }
+    alias-measure := Text {
+        visible: false;
+        text: root.project-alias;
+        font-size: 16px;
+        wrap: no-wrap;
+    }
+    provider-measure := Text {
+        visible: false;
+        text: root.provider-label;
+        font-size: 12px;
+        font-weight: 500;
+        wrap: no-wrap;
+    }
+    id-measure := Text {
+        visible: false;
+        text: root.id-label;
+        font-size: 12px;
+        font-weight: 500;
+        wrap: no-wrap;
+    }
+    remote-measure := Text {
+        visible: false;
+        text: root.display-remote;
+        font-size: 12px;
+        wrap: no-wrap;
+    }
+    private property <length> alias-width: root.has-alias
+        ? max(40px, alias-measure.preferred-width)
+        : 0px;
+    private property <length> remote-ideal-width: remote-measure.preferred-width
+        + (root.has-remote ? 36px : 0px);
+    private property <length> remote-min-width: 80px;
+    private property <length> meta-left: 16px + 32px + 12px;
+    private property <length> first-line-width: max(0px, root.width - root.meta-left - 16px);
+    private property <length> provider-label-width: max(28px, provider-measure.preferred-width + 14px);
+    private property <length> id-label-width: max(28px, id-measure.preferred-width + 14px);
+    private property <length> labels-width: root.provider-label-width + 8px + root.id-label-width;
+    private property <length> alias-gap: root.has-alias ? 8px : 0px;
+    private property <length> labels-gap: 12px;
+    // Preserve the complete alias whenever the row can fit by shrinking the
+    // project name first. Only very narrow windows elide the alias.
+    private property <length> name-width: min(
+        name-measure.preferred-width,
+        max(80px, root.first-line-width - root.alias-gap - root.alias-width - root.labels-gap - root.labels-width),
+    );
+    private property <length> alias-display-width: root.has-alias
+        ? min(
+            root.alias-width,
+            max(0px, root.first-line-width - root.name-width - root.alias-gap - root.labels-gap - root.labels-width),
+        )
+        : 0px;
+    private property <length> labels-left: root.meta-left + root.name-width
+        + (root.alias-display-width > 0px ? root.alias-gap + root.alias-display-width : 0px)
+        + root.labels-gap;
+    private property <length> remote-available: max(0px, root.width - root.meta-left - 16px);
+    private property <length> remote-width: min(
+        root.remote-available,
+        max(root.remote-min-width, root.remote-ideal-width),
+    );
+    private property <length> row2-y: 8px + 32px + 6px;
+
+    height: 86px;
+    background: root.canvas-default;
+    clip: false;
+    z: 20;
+
+    // Logo
+    Rectangle {
+        x: 16px;
+        y: 8px;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: root.border-default;
+        background: root.canvas-default;
+        clip: true;
+
+        Image {
+            x: 4px;
+            y: 4px;
+            width: 24px;
+            height: 24px;
+            source: root.project-logo-image;
+            image-fit: contain;
+        }
+    }
+
+    // Title + alias stay adjacent on the left; provider and id stay on the
+    // right. Explicit geometry prevents narrow layouts from overlapping them.
+    name-text := Text {
+        x: root.meta-left;
+        y: 8px;
+        width: root.name-width;
+        height: 32px;
+        text: root.display-name;
+        font-size: 20px;
+        font-weight: 600;
+        color: root.fg-default;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.alias-display-width > 0px: Text {
+        x: name-text.x + name-text.width + 8px;
+        y: 8px;
+        width: root.alias-display-width;
+        height: 32px;
+        text: root.project-alias;
+        font-size: 16px;
+        color: root.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    WorkflowMetaLabel {
+        x: root.labels-left;
+        y: 14px;
+        text: root.provider-label;
+    }
+
+    WorkflowMetaLabel {
+        x: root.labels-left + root.provider-label-width + 8px;
+        y: 14px;
+        text: root.id-label;
+    }
+
+    // Clone URL: plain text with a copy action, without input-like chrome.
+    remote-field := Rectangle {
+        x: root.meta-left;
+        y: root.row2-y;
+        width: root.remote-width;
+        height: 32px;
+        border-width: 0px;
+        background: transparent;
+        clip: false;
+
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width - (root.has-remote ? 36px : 0px);
+            height: parent.height;
+            text: root.display-remote;
+            font-size: 12px;
+            color: root.has-remote ? root.fg-default : root.fg-muted;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        if root.has-remote: Rectangle {
+            x: parent.width - 28px;
+            y: 2px;
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: copy-touch.has-hover
+                ? (AppState.effective-dark-mode ? #30363d : #eaeef2)
+                : transparent;
+            clip: false;
+
+            Image {
+                x: 6px;
+                y: 6px;
+                width: 16px;
+                height: 16px;
+                source: @image-url("../../assets/icons/octicon-copy-16.svg");
+                image-fit: contain;
+                colorize: root.fg-muted;
+            }
+
+            copy-touch := TouchArea {
+                width: 100%;
+                height: 100%;
+                mouse-cursor: pointer;
+                clicked => {
+                    root.copy-remote(root.project-remote-repo);
+                }
+            }
+
+            // Open upward so the tip stays inside the header layout box and is
+            // not clipped by the page ScrollView under the header edge.
+            if copy-touch.has-hover: ToolTip {
+                x: parent.width - self.width;
+                y: -self.height - 4px;
+                z: 10000;
+                text: "Copy remote URL";
+            }
+        }
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: root.border-default;
     }
 }
 
@@ -182,7 +458,11 @@ export component Workflow inherits PageView {
     callback tag-stop();
     callback pr-list-state-change(string);
     callback pr-list-page-change(int);
+    callback pr-list-review-filter-change(string);
+    callback pr-list-assignee-filter-change(string);
+    callback pr-list-sort-filter-change(string);
     callback pr-open-detail(string, string, string, string, string, string);
+    callback copy-remote-repo(string);
     callback cd-start(string, string, string);
     callback cd-rollback(string);
 
@@ -210,9 +490,14 @@ export component Workflow inherits PageView {
     in property <[WorkflowPullRequestItem]> pr-list-items: [];
     in property <int> pr-list-total: 0;
     in property <bool> pr-list-total-exact: false;
+    in property <int> pr-list-open-total: -1;
+    in property <int> pr-list-closed-total: -1;
     in property <int> pr-list-page: 1;
     in property <int> pr-list-page-count: 1;
     in property <string> pr-list-state: "open";
+    in property <string> pr-list-review-filter: "all";
+    in property <string> pr-list-assignee-filter: "any";
+    in property <string> pr-list-sort-filter: "newest";
     in property <bool> pr-list-loading: false;
     in property <string> pr-list-error: "";
     in property <bool> pr-count-auto-update: false;
@@ -234,488 +519,180 @@ export component Workflow inherits PageView {
 
     // MainWindow retains this navigation state while the full-window PR review
     // workspace temporarily unmounts the Workflow component tree.
-    in-out property <int> selected-flow: 0;
-    private property <length> tabs-spacing: 12px;
+    in-out property <int> selected-flow: 2;
     private property <length> workflow-content-width: root.width - 32px;
-    private property <bool> workflow-header-stacked: root.workflow-content-width < 980px;
-    private property <bool> workflow-tabs-single-column: root.workflow-content-width < 480px;
-    private property <bool> workflow-tabs-two-columns: root.workflow-content-width >= 480px && root.workflow-content-width < 1160px;
-    private property <length> workflow-tabs-quad-width: (root.workflow-content-width - 3 * tabs-spacing) / 4;
-    private property <length> workflow-tabs-dual-width: (root.workflow-content-width - tabs-spacing) / 2;
-    private property <length> workflow-tabs-single-width: root.workflow-content-width;
+    private property <bool> compact-workflow-layout: root.workflow-content-width < 860px;
+    private property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    private property <color> canvas-subtle: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
+    private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    // GitHub-style full-width repo header stays mounted on both breakpoints.
+    private property <length> project-header-height: 86px;
+    private property <length> workflow-nav-height: 48px;
+    private property <length> pr-flow-width: root.workflow-content-width
+        - (root.compact-workflow-layout ? 32px : 48px);
+    private property <length> pr-list-header-height: root.pr-flow-width < 620px ? 88px : 48px;
+    private property <length> pr-list-content-height: root.pr-list-loading || root.pr-list-error != "" || root.pr-list-items.length == 0
+        ? root.pr-list-header-height + 320px
+        : root.pr-list-header-height + root.pr-list-items.length * 72px;
+    private property <length> pr-flow-content-height: root.pr-list-content-height
+        + ((!root.pr-list-loading
+            && root.pr-list-error == ""
+            && root.pr-list-items.length > 0
+            && root.pr-list-page-count > 1)
+            ? 56px
+            : 0px);
+    private property <length> selected-panel-height: root.selected-flow == 2
+        ? max(620px, 16px + root.pr-flow-content-height)
+        : (root.selected-flow == 3 ? 920px : 620px);
+    private property <length> body-top: root.project-header-height + root.workflow-nav-height;
 
-    if !root.workflow-header-stacked: HorizontalLayout {
-        spacing: 16px;
-        alignment: start;
-
-        Rectangle {
-            width: 80px;
-            height: 80px;
-            border-radius: 40px;
-            background: MaterialPalette.surface_container_high;
-            clip: true;
-
-            Image {
-                width: 56px;
-                height: 56px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                source: root.project-logo-image;
-            }
-        }
-
-        VerticalLayout {
-            width: root.workflow-content-width - 96px;
-            spacing: 6px;
-            alignment: start;
-
-            MaterialText {
-                text: root.project-name + (root.project-alias == "" ? "" : "  (" + root.project-alias + ")");
-                font-family: "Hiragino Sans GB";
-                font_size: 24px;
-                font_weight: 600;
-                color: MaterialPalette.on_surface;
-            }
-
-            // Rectangle {
-            //     width: parent.width;
-            //     height: 24px;
-            //     border-radius: 12px;
-            //     background: MaterialPalette.secondary_container;
-
-            //     HorizontalLayout {
-            //         width: parent.width;
-            //         height: 24px;
-            //         padding-left: 10px;
-            //         padding-right: 10px;
-            //         alignment: center;
-
-            //         MaterialText {
-            //             text: "Project: " + root.project-name + (root.project-alias == "" ? "" : "  (" + root.project-alias + ")");
-            //             font-family: "Hiragino Sans GB";
-            //             font_size: 12px;
-            //             color: MaterialPalette.on_secondary_container;
-            //             vertical_alignment: center;
-            //         }
-            //     }
-            // }
-
-            Text {
-                width: parent.width;
-                text: "Manage branch recreation, tag operations, PR decisions, and interactive CD rollout from one workspace.";
-                wrap: word-wrap;
-                font-size: 14px;
-                color: MaterialPalette.on_surface_variant;
-            }
-
-            Rectangle {
-                width: parent.width;
-                height: 24px;
-                border-radius: 12px;
-                background: MaterialPalette.surface_container_high;
-
-                HorizontalLayout {
-                    width: parent.width;
-                    height: 24px;
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    alignment: center;
-
-                    MaterialText {
-                        text: "Local: " + (root.project-local-repo == "" ? "-" : root.project-local-repo) + "  |  Remote: " + (root.project-remote-repo == "" ? "-" : root.project-remote-repo);
-                        font-family: "Hiragino Sans GB";
-                        font_size: 11px;
-                        color: MaterialPalette.on_surface_variant;
-                        vertical_alignment: center;
-                    }
-                }
-            }
-
-            ProjectRepositoryMetadataRow {
-                width: parent.width;
-                repo-type: root.pr-repo-type;
-                repo-project-id: root.pr-repo-project-id;
-            }
-
-            WorkflowPrOverview {
-                width: parent.width;
-                enabled: root.pr-count-auto-update;
-                loading: root.pr-count-loading;
-                failed: root.pr-count-failed;
-                fat-count: root.pr-fat-count;
-                uat-count: root.pr-uat-count;
-                prod-count: root.pr-prod-count;
-            }
-        }
-    }
-
-    if root.workflow-header-stacked: VerticalLayout {
+    workflow-shell := Rectangle {
         width: root.workflow-content-width;
-        spacing: 12px;
-        alignment: start;
+        height: max(
+            (root.viewport-height > 0px ? root.viewport-height : 720px) - 32px,
+            root.body-top + root.selected-panel-height,
+        );
+        background: root.canvas-default;
 
-        HorizontalLayout {
+        // Full-width identity header (GitHub repo page pattern).
+        WorkflowProjectDetails {
+            y: 0px;
             width: parent.width;
-            height: 80px;
-            spacing: 12px;
-            alignment: start;
-
-            Rectangle {
-                width: 80px;
-                height: 80px;
-                border-radius: 40px;
-                background: MaterialPalette.surface_container_high;
-                clip: true;
-
-                Image {
-                    width: 56px;
-                    height: 56px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    source: root.project-logo-image;
-                }
-            }
-
-            MaterialText {
-                text: root.project-name + (root.project-alias == "" ? "" : "  (" + root.project-alias + ")");
-                font-family: "Hiragino Sans GB";
-                font_size: 24px;
-                font_weight: 600;
-                color: MaterialPalette.on_surface;
-                vertical_alignment: center;
-            }
-        }
-
-
-        // Rectangle {
-        //     width: parent.width;
-        //     height: 24px;
-        //     border-radius: 12px;
-        //     background: MaterialPalette.secondary_container;
-
-        //     HorizontalLayout {
-        //         width: parent.width;
-        //         height: 24px;
-        //         padding-left: 10px;
-        //         padding-right: 10px;
-        //         alignment: center;
-
-        //         MaterialText {
-        //             text: "Project: " + root.project-name + (root.project-alias == "" ? "" : "  (" + root.project-alias + ")");
-        //             font-family: "Hiragino Sans GB";
-        //             font_size: 12px;
-        //             color: MaterialPalette.on_secondary_container;
-        //             vertical_alignment: center;
-        //         }
-        //     }
-        // }
-
-        Text {
-            width: parent.width;
-            text: "Manage branch recreation, tag operations, PR decisions, and interactive CD rollout from one workspace.";
-            wrap: word-wrap;
-            font-size: 14px;
-            color: MaterialPalette.on_surface_variant;
-        }
-
-        Rectangle {
-            width: parent.width;
-            height: 24px;
-            border-radius: 12px;
-            background: MaterialPalette.surface_container_high;
-
-            HorizontalLayout {
-                width: parent.width;
-                height: 24px;
-                padding-left: 10px;
-                padding-right: 10px;
-                alignment: center;
-
-                MaterialText {
-                    text: "Local: " + (root.project-local-repo == "" ? "-" : root.project-local-repo) + "  |  Remote: " + (root.project-remote-repo == "" ? "-" : root.project-remote-repo);
-                    font-family: "Hiragino Sans GB";
-                    font_size: 11px;
-                    color: MaterialPalette.on_surface_variant;
-                    vertical_alignment: center;
-                }
-            }
-        }
-
-        ProjectRepositoryMetadataRow {
-            width: parent.width;
+            project-name: root.project-name;
+            project-alias: root.project-alias;
+            project-remote-repo: root.project-remote-repo;
             repo-type: root.pr-repo-type;
             repo-project-id: root.pr-repo-project-id;
-        }
-
-        WorkflowPrOverview {
-            width: parent.width;
-            enabled: root.pr-count-auto-update;
-            loading: root.pr-count-loading;
-            failed: root.pr-count-failed;
-            fat-count: root.pr-fat-count;
-            uat-count: root.pr-uat-count;
-            prod-count: root.pr-prod-count;
-        }
-    }
-
-    Rectangle {
-        height: 1px;
-        background: MaterialPalette.outline_variant;
-    }
-
-    if !root.workflow-tabs-single-column && !root.workflow-tabs-two-columns: Rectangle {
-        width: root.workflow-content-width;
-        height: 64px;
-
-        HorizontalLayout {
-            width: parent.width;
-            spacing: root.tabs-spacing;
-            alignment: start;
-
-            WorkflowTabButton {
-                card-width: root.workflow-tabs-quad-width;
-                label: "Branch";
-                caption: "Recreate or reset delivery branches.";
-                selected: root.selected-flow == 0;
-                clicked => {
-                    root.selected-flow = 0;
-                }
-            }
-
-            WorkflowTabButton {
-                card-width: root.workflow-tabs-quad-width;
-                label: "CD";
-                caption: "Run staged deployment and rollback.";
-                selected: root.selected-flow == 1;
-                clicked => {
-                    root.selected-flow = 1;
-                }
-            }
-
-            WorkflowTabButton {
-                card-width: root.workflow-tabs-quad-width;
-                label: "PR";
-                caption: "Browse and open pull requests.";
-                selected: root.selected-flow == 2;
-                clicked => {
-                    root.selected-flow = 2;
-                }
-            }
-
-            WorkflowTabButton {
-                card-width: root.workflow-tabs-quad-width;
-                label: "Tag";
-                caption: "Add or remove repository tags.";
-                selected: root.selected-flow == 3;
-                clicked => {
-                    root.selected-flow = 3;
-                }
+            project-logo-image: root.project-logo-image;
+            copy-remote(url) => {
+                root.copy-remote-repo(url);
             }
         }
-    }
 
-    if root.workflow-tabs-two-columns: Rectangle {
-        width: root.workflow-content-width;
-        height: 140px;
-
-        VerticalLayout {
+        Rectangle {
+            y: root.project-header-height;
             width: parent.width;
-            spacing: root.tabs-spacing;
-            alignment: start;
+            height: root.workflow-nav-height;
+            background: root.canvas-default;
 
-            HorizontalLayout {
+            Rectangle {
+                y: parent.height - 1px;
                 width: parent.width;
-                spacing: root.tabs-spacing;
-                alignment: start;
-
-                WorkflowTabButton {
-                    card-width: root.workflow-tabs-dual-width;
-                    label: "Branch";
-                    caption: "Recreate or reset delivery branches.";
-                    selected: root.selected-flow == 0;
-                    clicked => {
-                        root.selected-flow = 0;
-                    }
-                }
-
-                WorkflowTabButton {
-                    card-width: root.workflow-tabs-dual-width;
-                    label: "CD";
-                    caption: "Run staged deployment and rollback.";
-                    selected: root.selected-flow == 1;
-                    clicked => {
-                        root.selected-flow = 1;
-                    }
-                }
+                height: 1px;
+                background: root.border-default;
             }
 
             HorizontalLayout {
+                x: 0px;
                 width: parent.width;
-                spacing: root.tabs-spacing;
+                height: parent.height;
+                spacing: 4px;
                 alignment: start;
 
-                WorkflowTabButton {
-                    card-width: root.workflow-tabs-dual-width;
-                    label: "PR";
-                    caption: "Browse and open pull requests.";
+                WorkflowWideTab {
+                    label: "Pull requests";
+                    icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
                     selected: root.selected-flow == 2;
-                    clicked => {
-                        root.selected-flow = 2;
-                    }
+                    clicked => { root.selected-flow = 2; }
                 }
-
-                WorkflowTabButton {
-                    card-width: root.workflow-tabs-dual-width;
-                    label: "Tag";
-                    caption: "Add or remove repository tags.";
+                WorkflowWideTab {
+                    label: "Tags";
+                    icon: @image-url("../../assets/icons/octicon-stack-16.svg");
                     selected: root.selected-flow == 3;
-                    clicked => {
-                        root.selected-flow = 3;
-                    }
+                    clicked => { root.selected-flow = 3; }
+                }
+                WorkflowWideTab {
+                    label: "Branch";
+                    icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
+                    selected: root.selected-flow == 0;
+                    available: false;
+                    clicked => { root.selected-flow = 0; }
+                }
+                WorkflowWideTab {
+                    label: "CD";
+                    icon: @image-url("../../assets/icons/octicon-repo-push-16.svg");
+                    selected: root.selected-flow == 1;
+                    available: false;
+                    clicked => { root.selected-flow = 1; }
                 }
             }
         }
-    }
 
-    if root.workflow-tabs-single-column: Rectangle {
-        width: root.workflow-content-width;
-        height: 292px;
-
-        VerticalLayout {
+        main-panel := Rectangle {
+            x: 0px;
+            y: root.body-top;
             width: parent.width;
-            spacing: root.tabs-spacing;
-            alignment: start;
+            height: root.selected-panel-height;
+            background: root.canvas-default;
 
-            WorkflowTabButton {
-                card-width: root.workflow-tabs-single-width;
-                label: "Branch";
-                caption: "Recreate or reset delivery branches.";
-                selected: root.selected-flow == 0;
-                clicked => {
-                    root.selected-flow = 0;
+            if root.selected-flow == 0: WorkflowComingSoon {
+                x: root.compact-workflow-layout ? 16px : 24px;
+                y: 16px;
+                width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
+                height: parent.height - 40px;
+                feature-name: "Branch";
+            }
+            if root.selected-flow == 1: WorkflowComingSoon {
+                x: root.compact-workflow-layout ? 16px : 24px;
+                y: 16px;
+                width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
+                height: parent.height - 40px;
+                feature-name: "CD";
+            }
+
+            if root.selected-flow == 2: PrFlow {
+                x: root.compact-workflow-layout ? 16px : 24px;
+                y: 16px;
+                width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
+                repo-project-id: root.pr-repo-project-id;
+                repo-type: root.pr-repo-type;
+                pr-items: root.pr-list-items;
+                pr-total: root.pr-list-total;
+                pr-total-exact: root.pr-list-total-exact;
+                pr-open-total: root.pr-list-open-total;
+                pr-closed-total: root.pr-list-closed-total;
+                pr-page: root.pr-list-page;
+                pr-page-count: root.pr-list-page-count;
+                pr-state: root.pr-list-state;
+                pr-review-filter: root.pr-list-review-filter;
+                pr-assignee-filter: root.pr-list-assignee-filter;
+                pr-sort-filter: root.pr-list-sort-filter;
+                pr-loading: root.pr-list-loading;
+                pr-error: root.pr-list-error;
+                change-state(state) => { root.pr-list-state-change(state); }
+                change-page(page) => { root.pr-list-page-change(page); }
+                change-review-filter(value) => { root.pr-list-review-filter-change(value); }
+                change-assignee-filter(value) => { root.pr-list-assignee-filter-change(value); }
+                change-sort-filter(value) => { root.pr-list-sort-filter-change(value); }
+                open-detail(number, title, author, source-branch, target-branch, updated-at) => {
+                    root.pr-open-detail(number, title, author, source-branch, target-branch, updated-at);
                 }
             }
 
-            WorkflowTabButton {
-                card-width: root.workflow-tabs-single-width;
-                label: "CD";
-                caption: "Run staged deployment and rollback.";
-                selected: root.selected-flow == 1;
-                clicked => {
-                    root.selected-flow = 1;
-                }
-            }
-
-            WorkflowTabButton {
-                card-width: root.workflow-tabs-single-width;
-                label: "PR";
-                caption: "Browse and open pull requests.";
-                selected: root.selected-flow == 2;
-                clicked => {
-                    root.selected-flow = 2;
-                }
-            }
-
-            WorkflowTabButton {
-                card-width: root.workflow-tabs-single-width;
-                label: "Tag";
-                caption: "Add or remove repository tags.";
-                selected: root.selected-flow == 3;
-                clicked => {
-                    root.selected-flow = 3;
-                }
-            }
-        }
-    }
-
-    if root.selected-flow == 0: BranchFlow {
-        width: root.workflow-content-width;
-        result: root.branch-result;
-        submit(source, target, recreate-remote) => {
-            root.branch-submit(source, target, recreate-remote);
-        }
-    }
-
-    if root.selected-flow == 1: CdFlow {
-        width: root.workflow-content-width;
-        running: root.cd-running;
-        summary: root.cd-summary;
-        build-status: root.cd-build-status;
-        build-detail: root.cd-build-detail;
-        test-status: root.cd-test-status;
-        test-detail: root.cd-test-detail;
-        deploy-status: root.cd-deploy-status;
-        deploy-detail: root.cd-deploy-detail;
-        verify-status: root.cd-verify-status;
-        verify-detail: root.cd-verify-detail;
-        start-deploy(environment-name, release-name, commit-hash) => {
-            root.cd-start(environment-name, release-name, commit-hash);
-        }
-        request-rollback(commit-hash) => {
-            root.cd-rollback(commit-hash);
-        }
-    }
-
-    if root.selected-flow == 2: PrFlow {
-        width: root.workflow-content-width;
-        repo-project-id: root.pr-repo-project-id;
-        repo-type: root.pr-repo-type;
-        pr-items: root.pr-list-items;
-        pr-total: root.pr-list-total;
-        pr-total-exact: root.pr-list-total-exact;
-        pr-page: root.pr-list-page;
-        pr-page-count: root.pr-list-page-count;
-        pr-state: root.pr-list-state;
-        pr-loading: root.pr-list-loading;
-        pr-error: root.pr-list-error;
-        change-state(state) => {
-            root.pr-list-state-change(state);
-        }
-        change-page(page) => {
-            root.pr-list-page-change(page);
-        }
-        open-detail(number, title, author, source-branch, target-branch, updated-at) => {
-            root.pr-open-detail(number, title, author, source-branch, target-branch, updated-at);
-        }
-    }
-
-    if root.selected-flow == 3: Rectangle {
-        width: root.workflow-content-width;
-        background: transparent;
-
-        TagFlow {
-            width: parent.width;
-            mode: root.tag-mode;
-            version-mode: root.tag-version-mode;
-            current-version: root.tag-current-version;
-            next-version <=> root.tag-next-version;
-            remove-target <=> root.tag-remove-target;
-            add-initializing: root.tag-add-initializing;
-            remove-initializing: root.tag-remove-initializing;
-            running: root.tag-running;
-            loading-animated: root.tag-loading-animated;
-            result: root.tag-result;
-            steps: root.tag-steps;
-            change-mode(mode) => {
-                root.tag-change-mode(mode);
-            }
-            select-version-mode(mode) => {
-                root.tag-select-version-mode(mode);
-            }
-            run(version, description) => {
-                root.tag-run(version, description);
-            }
-            remove-tag(tag) => {
-                root.tag-remove(tag);
-            }
-            open-add-tab => {
-                root.tag-open-add();
-            }
-            open-remove-tab => {
-                root.tag-open-remove();
-            }
-            stop => {
-                root.tag-stop();
+            if root.selected-flow == 3: TagFlow {
+                x: root.compact-workflow-layout ? 16px : 24px;
+                y: 16px;
+                width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
+                mode: root.tag-mode;
+                version-mode: root.tag-version-mode;
+                current-version: root.tag-current-version;
+                next-version <=> root.tag-next-version;
+                remove-target <=> root.tag-remove-target;
+                add-initializing: root.tag-add-initializing;
+                remove-initializing: root.tag-remove-initializing;
+                running: root.tag-running;
+                loading-animated: root.tag-loading-animated;
+                result: root.tag-result;
+                steps: root.tag-steps;
+                change-mode(mode) => { root.tag-change-mode(mode); }
+                select-version-mode(mode) => { root.tag-select-version-mode(mode); }
+                run(version, description) => { root.tag-run(version, description); }
+                remove-tag(tag) => { root.tag-remove(tag); }
+                open-add-tab => { root.tag-open-add(); }
+                open-remove-tab => { root.tag-open-remove(); }
+                stop => { root.tag-stop(); }
             }
         }
     }

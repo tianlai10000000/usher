@@ -1,4 +1,4 @@
-import { HorizontalDivider, MaterialPalette } from "@material";
+import { AppState } from "../../state/app_state.slint";
 
 export struct TerminalSpan {
     start_col: int,
@@ -13,6 +13,64 @@ export struct TerminalSpan {
 
 export struct TerminalLine {
     spans: [TerminalSpan],
+}
+
+component TerminalHeaderButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> tooltip;
+    in property <bool> selected: false;
+    callback clicked();
+
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border-width: root.selected ? 1px : 0px;
+    border-color: AppState.effective-dark-mode ? #6e7681 : #8c959f;
+    background: root.selected
+        ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+        : (button-touch.pressed
+            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+            : (button-touch.has-hover
+                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
+                : transparent));
+
+    Image {
+        x: 8px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: root.icon;
+        colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    }
+
+    button-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    if button-touch.has-hover: Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height + 4px;
+        width: tooltip-text.preferred-width + 12px;
+        height: 24px;
+        border-radius: 6px;
+        background: AppState.effective-dark-mode ? #f0f6fc : #24292f;
+        z: 50;
+
+        tooltip-text := Text {
+            x: 6px;
+            width: parent.width - 12px;
+            height: parent.height;
+            text: root.tooltip;
+            font-size: 11px;
+            color: AppState.effective-dark-mode ? #1f2328 : #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: no-wrap;
+        }
+    }
 }
 
 export component TerminalDrawer inherits Rectangle {
@@ -82,6 +140,12 @@ export component TerminalDrawer inherits Rectangle {
     private property <int> selection-end-col: 0;
     private property <bool> has-selection: false;
     private property <bool> is-macos: Platform.os == OperatingSystemType.macos;
+    private property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    private property <color> canvas-subtle: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
+    private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    private property <color> accent-fg: AppState.effective-dark-mode ? #4493f8 : #0969da;
 
     callback update-selection(length, length, bool);
     update-selection(mouse_x, mouse_y, reset) => {
@@ -198,16 +262,20 @@ export component TerminalDrawer inherits Rectangle {
     background: transparent;
 
     drawer := Rectangle {
-        // x: root.docked ? 0px : max(root.side-margin, (parent.width - self.width) / 2);
-        x: -12px;
+        x: root.docked ? 0px : max(root.side-margin, (parent.width - self.width) / 2);
         y: root.docked ? 0px : (root.drawer-open
             ? parent.height - self.height - root.bottom-margin
             : parent.height + 8px);
-        width: (root.docked ? parent.width : root.resolved-drawer-width) + 17px;
+        width: root.docked ? parent.width : root.resolved-drawer-width;
         height: root.docked ? parent.height : root.resolved-drawer-height;
+        border-radius: root.docked ? 6px : 12px;
         border-width: 1px;
-        border-color: MaterialPalette.outline_variant;
-        background: MaterialPalette.surface_container_high;
+        border-color: root.border-default;
+        background: root.canvas-default;
+        clip: true;
+        drop-shadow-blur: root.docked ? 0px : 20px;
+        drop-shadow-color: root.docked ? transparent : #00000044;
+        drop-shadow-offset-y: root.docked ? 0px : 6px;
         opacity: root.docked ? 1 : (root.drawer-open ? 1 : 0);
         animate opacity { duration: 220ms; }
 
@@ -218,26 +286,27 @@ export component TerminalDrawer inherits Rectangle {
 
             Rectangle {
                 width: parent.width;
-                height: 30px;
-                background: transparent;
+                height: 40px;
+                background: root.canvas-subtle;
 
-                drag-indicator := Rectangle {
-                    width: 44px;
-                    height: 4px;
+                drag-icon := Image {
+                    width: 16px;
+                    height: 16px;
                     x: (parent.width - self.width) / 2;
-                    y: 8px;
-                    border-radius: 2px;
-                    background: resize-handle.has-hover || resize-handle.pressed
-                        ? MaterialPalette.outline
-                        : MaterialPalette.outline_variant;
-                    opacity: 0.75;
+                    y: -4px;
+                    source: @image-url("../../assets/icons/octicon-grabber-16.svg");
+                    colorize: resize-handle.has-hover || resize-handle.pressed
+                        ? root.fg-default
+                        : root.fg-muted;
+                    transform-rotation: 90deg;
+                    transform-origin: { x: self.width / 2, y: self.height / 2 };
                 }
 
                 resize-handle := TouchArea {
                     x: (parent.width - 64px) / 2;
                     y: 0px;
                     width: 64px;
-                    height: 18px;
+                    height: 12px;
                     enabled: root.drawer-open;
                     mouse-cursor: n-resize;
                     moved => {
@@ -252,168 +321,151 @@ export component TerminalDrawer inherits Rectangle {
                     }
                 }
 
-                Text {
-                    x: 10px;
-                    y: 8px;
-                    width: parent.width - 178px;
-                    text: root.title;
-                    font-size: 10px;
-                    font-weight: 600;
-                    color: MaterialPalette.on_surface;
-                    overflow: elide;
-                    font-family: "Hiragino Sans GB";
+                Image {
+                    x: 12px;
+                    y: 12px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/octicon-terminal-16.svg");
+                    colorize: root.fg-muted;
                 }
 
-                Rectangle {
-                    x: parent.width - self.width - 16px;
-                    y: 2px;
-                    width: 122px;
+                Text {
+                    x: 36px;
+                    y: 0px;
+                    width: min(180px, max(40px, parent.width - 190px));
+                    height: parent.height;
+                    text: root.title;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: root.fg-default;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if parent.width >= 720px: Text {
+                    x: 224px;
+                    y: 0px;
+                    width: parent.width - 492px;
+                    height: parent.height;
+                    text: root.cwd;
+                    font-family: "SF Mono";
+                    font-size: 11px;
+                    color: root.fg-muted;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if parent.width >= 520px: HorizontalLayout {
+                    x: parent.width - 252px;
+                    y: (parent.height - 28px) / 2;
+                    width: 172px;
                     height: 28px;
-                    background: transparent;
+                    spacing: 8px;
+                    alignment: start;
+                    cross-axis-alignment: center;
 
-                    Rectangle {
-                        width: 44px;
-                        height: 24px;
-                        x: 0px;
-                        y: 2px;
-                        border-radius: 6px;
-                        background: select_hover.has-hover || root.selection-mode
-                            ? MaterialPalette.surface_container_highest
-                            : transparent;
-                        animate background { duration: 120ms; }
+                    // Status: pin the 6px dot to the geometric mid-line; nudge
+                    // the SF Pro label down so optical mid-lines match.
+                    status-cluster := Rectangle {
+                        width: 90px;
+                        height: 28px;
+                        background: transparent;
+                        vertical-stretch: 0;
 
-                        Text {
+                        Rectangle {
                             x: 0px;
-                            y: (parent.height - self.preferred-height) / 2;
+                            y: (parent.height - 6px) / 2;
+                            width: 6px;
+                            height: 6px;
+                            border-radius: 3px;
+                            background: root.connected
+                                ? (AppState.effective-dark-mode ? #3fb950 : #1a7f37)
+                                : (root.running
+                                    ? (AppState.effective-dark-mode ? #d29922 : #9a6700)
+                                    : root.fg-muted);
+                        }
+
+                        // SF Pro sits high in the line box — shift the label
+                        // down 1px so its optical mid-line meets the 6px dot.
+                        Text {
+                            x: 12px;
+                            y: 1px;
+                            width: parent.width - 12px;
+                            height: parent.height - 1px;
+                            text: root.connected ? "Connected" : root.running ? "Starting" : "Idle";
+                            font-size: 12px;
+                            color: root.fg-muted;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    // Primer btn-sm toggle: always bordered, selected uses muted
+                    // canvas + default fg (not accent), ~28px tall.
+                    Rectangle {
+                        width: 56px;
+                        height: 28px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                        background: root.selection-mode
+                            ? (AppState.effective-dark-mode ? #21262d : #eaeef2)
+                            : (select-hover.has-hover
+                                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
+                                : (AppState.effective-dark-mode ? #21262d : #f6f8fa));
+                        vertical-stretch: 0;
+
+                        // Full-height center + 1px down: SF Pro looks high in a
+                        // bordered 28px control when purely geometrically centered.
+                        Text {
+                            y: 1px;
                             width: parent.width;
+                            height: parent.height - 1px;
                             text: "Select";
-                            font-size: 9px;
-                            font-weight: 600;
-                            color: root.selection-mode
-                                ? MaterialPalette.primary
-                                : MaterialPalette.on_surface_variant;
+                            font-size: 12px;
+                            font-weight: 500;
+                            color: root.fg-default;
                             horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
 
-                        select_hover := TouchArea {
-                            width: 100%;
-                            height: 100%;
+                        select-hover := TouchArea {
                             mouse-cursor: pointer;
-                            clicked => {
-                                root.selection-mode = !root.selection-mode;
-                            }
+                            clicked => { root.selection-mode = !root.selection-mode; }
                         }
                     }
+                }
 
-                    Rectangle {
-                        width: 24px;
-                        height: 24px;
-                        x: 54px;
-                        y: 2px;
-                        border-radius: 4px;
-                        background: fullscreen_hover.has-hover
-                            ? MaterialPalette.surface_container_highest
-                            : transparent;
-                        animate background { duration: 120ms; }
+                TerminalHeaderButton {
+                    x: parent.width - 72px;
+                    y: 4px;
+                    icon: root.fullscreen
+                        ? @image-url("../../assets/icons/octicon-screen-normal-16.svg")
+                        : @image-url("../../assets/icons/octicon-screen-full-16.svg");
+                    tooltip: root.fullscreen ? "Exit fullscreen" : "Fullscreen";
+                    selected: root.fullscreen;
+                    clicked => { root.fullscreen = !root.fullscreen; }
+                }
 
-                        Image {
-                            width: 16px;
-                            height: 16px;
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            source: root.fullscreen
-                                ? @image-url("../../assets/icons/close_fullscreen.svg")
-                                : @image-url("../../assets/icons/fullscreen.svg");
-                            colorize: MaterialPalette.on_surface_variant;
-                        }
-
-                        fullscreen_hover := TouchArea {
-                            width: 100%;
-                            height: 100%;
-                            mouse-cursor: pointer;
-                            clicked => {
-                                root.fullscreen = !root.fullscreen;
-                            }
-                        }
-
-                        if fullscreen_hover.has-hover: Rectangle {
-                            x: -30px;
-                            y: -28px;
-                            width: 88px;
-                            height: 24px;
-                            border-radius: 8px;
-                            background: MaterialPalette.inverse_surface;
-
-                            Text {
-                                x: 8px;
-                                y: (parent.height - self.preferred-height) / 2;
-                                width: parent.width - 16px;
-                                text: root.fullscreen ? "Exit fullscreen" : "Fullscreen";
-                                font-size: 10px;
-                                color: MaterialPalette.inverse_on_surface;
-                                horizontal-alignment: center;
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: 24px;
-                        height: 24px;
-                        x: 96px;
-                        y: 2px;
-                        border-radius: 4px;
-                        background: close_hover.has-hover
-                            ? MaterialPalette.surface_container_highest
-                            : transparent;
-                        animate background { duration: 120ms; }
-
-                        Image {
-                            width: 18px;
-                            height: 18px;
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            source: @image-url("../../assets/icons/close.svg");
-                            colorize: MaterialPalette.on_surface_variant;
-                        }
-
-                        close_hover := TouchArea {
-                            width: 100%;
-                            height: 100%;
-                            mouse-cursor: pointer;
-                            clicked => {
-                                root.close-requested();
-                            }
-                        }
-
-                        if close_hover.has-hover: Rectangle {
-                            x: -12px;
-                            y: -28px;
-                            width: 52px;
-                            height: 24px;
-                            border-radius: 8px;
-                            background: MaterialPalette.inverse_surface;
-
-                            Text {
-                                x: 8px;
-                                y: (parent.height - self.preferred-height) / 2;
-                                width: parent.width - 16px;
-                                text: "Close";
-                                font-size: 10px;
-                                color: MaterialPalette.inverse_on_surface;
-                                horizontal-alignment: center;
-                            }
-                        }
-                    }
+                TerminalHeaderButton {
+                    x: parent.width - 36px;
+                    y: 4px;
+                    icon: @image-url("../../assets/icons/octicon-x-16.svg");
+                    tooltip: "Close terminal";
+                    clicked => { root.close-requested(); }
                 }
             }
 
-            HorizontalDivider {
+            Rectangle {
                 width: 100%;
+                height: 1px;
+                background: root.border-default;
             }
 
             Rectangle {
                 width: parent.width;
-                height: parent.height - 31px;
+                height: parent.height - 41px;
 
                 VerticalLayout {
                     width: parent.width;
@@ -423,7 +475,7 @@ export component TerminalDrawer inherits Rectangle {
                         width: parent.width;
                         vertical-stretch: 1;
                         min-height: 120px;
-                        background: MaterialPalette.surface_container_low;
+                        background: root.canvas-default;
                         clip: true;
 
                         terminal-body := Rectangle {
@@ -540,7 +592,7 @@ export component TerminalDrawer inherits Rectangle {
                                         y: 0px;
                                         width: max(root.terminal-cell-width, (parent.line-selection-end - parent.line-selection-start) * root.terminal-cell-width);
                                         height: parent.height;
-                                        background: MaterialPalette.primary.with-alpha(0.22);
+                                        background: root.accent-fg.with-alpha(0.22);
                                     }
 
                                     for span[span_index] in line.spans: Rectangle {
@@ -583,7 +635,7 @@ export component TerminalDrawer inherits Rectangle {
                                 wrap: no-wrap;
                                 font-size: root.terminal-font-size;
                                 font-family: "Menlo";
-                                color: MaterialPalette.on_surface_variant;
+                                color: root.fg-muted;
                             }
 
                             selection-overlay := TextInput {
@@ -598,9 +650,9 @@ export component TerminalDrawer inherits Rectangle {
                                 wrap: no-wrap;
                                 font-size: root.terminal-font-size;
                                 font-family: "Menlo";
-                                color: MaterialPalette.on_surface_variant;
-                                selection-background-color: MaterialPalette.primary.with-alpha(0.22);
-                                selection-foreground-color: MaterialPalette.on_surface;
+                                color: root.fg-muted;
+                                selection-background-color: root.accent-fg.with-alpha(0.22);
+                                selection-foreground-color: root.fg-default;
 
                                 key_pressed(event) => {
                                     let shortcut_modifier = event.modifiers.control;
@@ -630,7 +682,7 @@ export component TerminalDrawer inherits Rectangle {
                                     + (root.terminal-line-height - root.terminal-cursor-height) / 2;
                                 width: 2px;
                                 height: root.terminal-cursor-height;
-                                background: MaterialPalette.primary;
+                                background: root.accent-fg;
                             }
 
                             char-measure := Text {
@@ -647,7 +699,7 @@ export component TerminalDrawer inherits Rectangle {
                                 width: 4px;
                                 height: parent.height - 16px;
                                 border-radius: 2px;
-                                background: MaterialPalette.surface_container_highest;
+                                background: root.canvas-subtle;
 
                                 property <length> thumb-height: max(
                                     24px,
@@ -690,7 +742,7 @@ export component TerminalDrawer inherits Rectangle {
                                     width: parent.width;
                                     height: parent.thumb-height;
                                     border-radius: 2px;
-                                    background: MaterialPalette.outline;
+                                    background: AppState.effective-dark-mode ? #6e7681 : #8c959f;
                                 }
                             }
                         }

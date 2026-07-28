@@ -1,0 +1,1331 @@
+import { MaterialPalette, MaterialText, ToolTip } from "@material";
+import { ListView } from "../../../material-1.7.1-fixed/ui/components/list_view.slint";
+import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
+import { AppState } from "../../state/app_state.slint";
+
+export struct WorkflowPrDiffFile {
+    path: string,
+    old-path: string,
+    change-type: string,
+    added-lines: int,
+    removed-lines: int,
+    viewed: bool,
+    line-count: int,
+}
+
+export struct WorkflowPrDiffToken {
+    text: string,
+    color: color,
+    dark-color: color,
+    bold: bool,
+    italic: bool,
+}
+
+export struct WorkflowPrDiffSelectionHit {
+    line: int,
+    column: int,
+}
+
+export struct WorkflowPrDiffLine {
+    old-line: int,
+    new-line: int,
+    kind: string,
+    content: string,
+    tokens: [WorkflowPrDiffToken],
+    expandable: bool,
+    expand-all: bool,
+    expand-up: bool,
+    expand-down: bool,
+    source-index: int,
+    left-line: int,
+    left-columns: int,
+    left-kind: string,
+    left-content: string,
+    left-tokens: [WorkflowPrDiffToken],
+    right-line: int,
+    right-columns: int,
+    right-kind: string,
+    right-content: string,
+    right-tokens: [WorkflowPrDiffToken],
+}
+
+export struct WorkflowPrTreeItem {
+    kind: string,
+    name: string,
+    path: string,
+    depth: int,
+    file-index: int,
+    expanded: bool,
+    added-lines: int,
+    removed-lines: int,
+    change-type: string,
+    file-count: int,
+}
+
+export struct WorkflowPrFileExtensionFilter {
+    extension: string,
+    count: int,
+    selected: bool,
+}
+
+export struct WorkflowPrConversationItem {
+    id: string,
+    kind: string,
+    author: string,
+    avatar: image,
+    avatar-label: string,
+    author-association: string,
+    body: string,
+    // Commit rows only: body lines after the title for ellipsis expansion.
+    message-body: string,
+    message-body-height: int,
+    // Independent of other rows; multiple commits may stay expanded.
+    message-expanded: bool,
+    created-at: string,
+    created-at-tooltip: string,
+    state: string,
+    connect-before: bool,
+    connect-after: bool,
+    // Precomputed ListView row height from Rust so cards can hug short bodies
+    // without relying on Slint string length APIs.
+    row-height: int,
+}
+
+export component ConversationAvatar inherits Rectangle {
+    in property <image> avatar;
+    in property <string> fallback-label;
+    in property <length> avatar-size: 40px;
+    in property <length> label-size: 13px;
+
+    width: root.avatar-size;
+    height: root.avatar-size;
+    border-radius: root.avatar-size / 2;
+    border-width: 1px;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: root.avatar.width > 0
+        ? transparent
+        : (AppState.effective-dark-mode ? #21262d : #f6f8fa);
+    clip: true;
+
+    if root.avatar.width > 0: Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.avatar;
+        image-fit: cover;
+    }
+
+    if root.avatar.width <= 0: MaterialText {
+        width: parent.width;
+        height: parent.height;
+        text: root.fallback-label;
+        font-size: root.label-size;
+        font-weight: 600;
+        color: MaterialPalette.on_surface_variant;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export struct WorkflowPrCommit {
+    sha: string,
+    short-sha: string,
+    title: string,
+    message: string,
+    message-body: string,
+    message-body-height: int,
+    // Independent of other rows; multiple commits may stay expanded.
+    message-expanded: bool,
+    // Sum of expand layout extras for this UTC+08:00 date group (group-start only).
+    group-expand-extra: int,
+    author: string,
+    avatar: image,
+    avatar-label: string,
+    authored-at: string,
+    date-label: string,
+    short-date-label: string,
+    group-start: bool,
+    group-end: bool,
+    group-size: int,
+    verified: bool,
+}
+
+export component ReviewActionButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    in property <bool> success: false;
+    in property <bool> danger: false;
+    in property <bool> button-enabled: true;
+    in property <bool> show-chevron: false;
+    // When true, width follows Primer Button medium inline padding (12px×2)
+    // plus the label, matching GitHub's content-sized secondary actions.
+    in property <bool> hug-content: false;
+    // Parents that paint later siblings over this control (PR title under the
+    // compact header actions) host the tip themselves. Nested tips still lose.
+    in property <bool> embed-tooltip: true;
+    // Compact leading-edge headers left-align tips so a long tip cannot flush
+    // past the window's left gutter. Trailing-edge strips keep end alignment.
+    in property <bool> tooltip-align-start: false;
+    in property <string> tooltip-text: "";
+    out property <bool> has-hover: action-touch.has-hover;
+    callback clicked();
+
+    // Primer default Button tokens (not Material surfaces) so header actions
+    // like "Create revert PR" match GitHub's secondary btn.
+    private property <color> default-fg: AppState.effective-dark-mode ? #f0f6fc : #25292e;
+    private property <color> default-border: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    private property <color> default-bg: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+    private property <color> default-bg-hover: AppState.effective-dark-mode ? #292e36 : #eff2f5;
+
+    width: root.hug-content
+        ? (label-text.preferred-width + (root.show-chevron ? 40px : 24px))
+        : 96px;
+    height: 36px;
+    background: transparent;
+
+    // Dim only the button surface when disabled. Tooltips stay full-opacity
+    // children of this root so they do not inherit the disabled fade.
+    button-surface := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: root.danger
+            ? (AppState.effective-dark-mode ? #da3633 : #cf222e)
+            : (root.success
+                ? (AppState.effective-dark-mode ? #238636 : #1f883d)
+                : (root.primary ? MaterialPalette.primary : root.default-border));
+        background: root.success
+            ? (action-touch.has-hover && root.button-enabled ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37) : (AppState.effective-dark-mode ? #238636 : #1f883d))
+            : root.danger
+            ? (action-touch.has-hover && root.button-enabled
+                ? (AppState.effective-dark-mode ? #f85149 : #a40e26)
+                : (AppState.effective-dark-mode ? #da3633 : #cf222e))
+            : root.primary
+            ? (action-touch.has-hover ? MaterialPalette.primary.darker(8%) : MaterialPalette.primary)
+            : (action-touch.has-hover && root.button-enabled ? root.default-bg-hover : root.default-bg);
+        opacity: root.button-enabled ? 1 : 0.5;
+
+        label-text := MaterialText {
+            // Keep an unconstrained preferred-width when hugging so the root
+            // width binding cannot circularly clamp the measured label.
+            x: root.hug-content ? (parent.width - self.preferred-width) / 2 : 0px;
+            width: root.hug-content ? self.preferred-width : parent.width;
+            height: parent.height;
+            text: root.text;
+            horizontal_alignment: center;
+            vertical_alignment: center;
+            font_size: 12px;
+            font_weight: 600;
+            color: root.primary || root.success || root.danger ? #ffffff : root.default-fg;
+        }
+
+        if root.show-chevron: Image {
+            x: parent.width - 25px;
+            y: (parent.height - self.height) / 2;
+            width: 14px;
+            height: 14px;
+            source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
+            image-fit: contain;
+            colorize: #ffffff;
+        }
+    }
+
+    action-touch := TouchArea {
+        mouse-cursor: root.button-enabled ? pointer : default;
+        clicked => { if (root.button-enabled) { root.clicked(); } }
+    }
+    if root.embed-tooltip && action-touch.has-hover && root.tooltip-text != "": ToolTip {
+        x: root.tooltip-align-start ? 0px : root.width - self.width;
+        y: root.height + 4px;
+        text: root.tooltip-text;
+    }
+}
+
+// Primer-like primary green button used by the Conversation comment composer.
+export component GithubCommentButton inherits Rectangle {
+    in property <string> text: "Comment";
+    in property <bool> button-enabled: true;
+    in property <string> tooltip-text: "";
+    callback clicked();
+
+    width: 96px;
+    height: 32px;
+    background: transparent;
+
+    button-surface := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: AppState.effective-dark-mode ? #238636 : #1f883d;
+        background: root.button-enabled
+            ? (action-touch.has-hover
+                ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37)
+                : (AppState.effective-dark-mode ? #238636 : #1f883d))
+            : (AppState.effective-dark-mode ? #23863666 : #94d3a2);
+        label := MaterialText {
+            width: parent.width;
+            height: parent.height;
+            text: root.text;
+            font-size: 14px;
+            font-weight: 600;
+            color: #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    action-touch := TouchArea {
+        mouse-cursor: root.button-enabled ? pointer : default;
+        clicked => { if (root.button-enabled) { root.clicked(); } }
+    }
+    if action-touch.has-hover && root.tooltip-text != "": ToolTip {
+        // Composer card clips descendants; keep the tip above the footer button.
+        x: root.width - self.width;
+        y: -self.height - 4px;
+        text: root.tooltip-text;
+    }
+}
+
+export component PullRequestStateBadge inherits Rectangle {
+    in property <string> kind;
+    in property <color> success-color;
+    in property <color> danger-color;
+    in property <color> done-color;
+    private property <string> state-label: root.kind == "merged"
+        ? "Merged"
+        : (root.kind == "closed" ? "Closed" : "Open");
+    private property <color> state-color: root.kind == "merged"
+        ? root.done-color
+        : (root.kind == "closed" ? root.danger-color : root.success-color);
+
+    width: state-label-text.preferred-width + 40px;
+    height: 28px;
+    border-radius: 14px;
+    background: root.state-color;
+
+    Image {
+        x: 10px;
+        y: 7px;
+        width: 14px;
+        height: 14px;
+        source: @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
+        image-fit: contain;
+        colorize: #ffffff;
+    }
+    state-label-text := MaterialText {
+        x: 30px;
+        width: self.preferred-width;
+        height: parent.height;
+        text: root.state-label;
+        vertical-alignment: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: #ffffff;
+    }
+}
+
+export component BranchLabel inherits Rectangle {
+    in property <string> text;
+    in property <color> background-color;
+    in property <color> foreground-color;
+
+    // GitHub keeps the full branch name visible; never elide into "...".
+    width: branch-label-text.preferred-width + 16px;
+    height: 26px;
+    border-radius: 6px;
+    background: root.background-color;
+
+    branch-label-text := MaterialText {
+        x: 8px;
+        width: self.preferred-width;
+        height: parent.height;
+        text: root.text;
+        vertical-alignment: center;
+        font-size: 13px;
+        color: root.foreground-color;
+    }
+}
+
+// GitHub-style relative timestamp: muted label with absolute datetime tooltip.
+// Prefer Material ToolTip (no mouse grab). Avoid PopupWindow on hover — it
+// steals input and flickers as has-hover toggles.
+export component RelativeTimestamp inherits Rectangle {
+    in property <string> text;
+    in property <string> tooltip-text;
+    in property <color> foreground-color;
+    in property <length> label-font-size: 13px;
+    // Match the surrounding author/meta row; 26px is for header chips.
+    in property <length> label-height: 26px;
+    in property <bool> tooltip-align-right: false;
+    in property <bool> tooltip-above: false;
+    // Place the tip to the left of the label (stays inside clipped headers).
+    in property <bool> tooltip-beside: false;
+    // Place the tip to the right of the label (into trailing free space).
+    in property <bool> tooltip-after: false;
+    out property <bool> has-hover: time-touch.has-hover;
+
+    width: max(1px, time-label.preferred-width);
+    height: root.label-height;
+    background: transparent;
+    clip: false;
+
+    time-label := MaterialText {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        font-size: root.label-font-size;
+        color: root.foreground-color;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    time-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: default;
+    }
+    if time-touch.has-hover && root.tooltip-text != "" && (root.tooltip-after || root.tooltip-beside): Rectangle {
+        z: 10000;
+        x: root.tooltip-after ? root.width + 4px : -self.width - 4px;
+        y: (root.height - self.height) / 2;
+        width: tip-label.preferred-width + 16px;
+        height: tip-label.preferred-height + 8px;
+        border-radius: 4px;
+        background: MaterialPalette.inverse_surface;
+        tip-label := MaterialText {
+            x: 8px;
+            y: 4px;
+            width: self.preferred-width;
+            height: self.preferred-height;
+            text: root.tooltip-text;
+            font-size: 12px;
+            color: MaterialPalette.inverse_on_surface;
+            wrap: no-wrap;
+        }
+    }
+    if time-touch.has-hover && root.tooltip-text != "" && !root.tooltip-after && !root.tooltip-beside: ToolTip {
+        // above/below: pin trailing edge when tooltip-align-right.
+        x: root.tooltip-align-right ? root.width - self.width : 0px;
+        y: root.tooltip-above ? -self.height - 4px : root.height + 4px;
+        text: root.tooltip-text;
+    }
+}
+
+export component PullRequestSummaryMetrics inherits Rectangle {
+    in property <string> state-kind;
+    in property <string> author;
+    in property <int> commit-count: 0;
+    in property <string> target-branch;
+    in property <string> source-branch;
+    in property <string> updated-at;
+    private property <string> state-label: root.state-kind == "merged"
+        ? "Merged"
+        : (root.state-kind == "closed" ? "Closed" : "Open");
+    out property <length> inline-width:
+        state-measure.preferred-width + 40px
+        + min(120px, author-measure.preferred-width)
+        + summary-measure.preferred-width
+        + target-measure.preferred-width + 16px
+        + from-measure.preferred-width
+        + source-measure.preferred-width + 16px
+        + 28px
+        + max(0px, updated-measure.preferred-width)
+        + 48px;
+
+    visible: false;
+    width: 0px;
+    height: 0px;
+
+    state-measure := Text {
+        text: root.state-label;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    author-measure := Text {
+        text: root.author;
+        font-size: 13px;
+        font-weight: 600;
+    }
+    summary-measure := Text {
+        text: "wants to merge " + root.commit-count + (root.commit-count == 1 ? " commit into" : " commits into");
+        font-size: 13px;
+    }
+    target-measure := Text {
+        text: root.target-branch;
+        font-size: 13px;
+    }
+    from-measure := Text {
+        text: "from";
+        font-size: 13px;
+    }
+    source-measure := Text {
+        text: root.source-branch;
+        font-size: 13px;
+    }
+    updated-measure := Text {
+        text: root.updated-at;
+        font-size: 13px;
+    }
+}
+
+export component PullRequestSummaryRow inherits Rectangle {
+    in property <string> state-kind;
+    in property <string> author;
+    in property <int> commit-count: 0;
+    in property <string> target-branch;
+    in property <string> source-branch;
+    in property <string> updated-at;
+    in property <string> updated-at-tooltip;
+    in property <bool> compact: false;
+    in property <color> success-color;
+    in property <color> danger-color;
+    in property <color> done-color;
+    in property <color> muted-color;
+    in property <color> muted-background;
+    in property <color> branch-background;
+    in property <color> branch-foreground;
+    // Keep branch names fully visible like GitHub: one row when they fit,
+    // otherwise move the branch segment to a second row (never elide).
+    out property <bool> wraps: root.width < metrics.inline-width;
+    callback copy-source-branch(string);
+
+    height: root.wraps ? 64px : 32px;
+    // Tooltips must escape this one-line layout; clipping turns the hovered
+    // timestamp tooltip into a dark underline.
+    clip: false;
+
+    metrics := PullRequestSummaryMetrics {
+        state-kind: root.state-kind;
+        author: root.author;
+        commit-count: root.commit-count;
+        target-branch: root.target-branch;
+        source-branch: root.source-branch;
+        updated-at: root.updated-at;
+    }
+
+    if !root.wraps: HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 8px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        PullRequestStateBadge {
+            kind: root.state-kind;
+            success-color: root.success-color;
+            danger-color: root.danger-color;
+            done-color: root.done-color;
+        }
+        Rectangle {
+            width: min(root.compact ? 120px : 150px, author-label.preferred-width);
+            height: 24px;
+            author-label := MaterialText {
+                width: parent.width;
+                height: parent.height;
+                text: root.author;
+                font-size: 13px;
+                font-weight: 600;
+                color: root.muted-color;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                y: parent.height - 3px;
+                width: parent.width;
+                height: 1px;
+                background: root.muted-color;
+            }
+        }
+        merge-summary-label := MaterialText {
+            width: self.preferred-width;
+            height: 26px;
+            text: "wants to merge " + root.commit-count + (root.commit-count == 1 ? " commit into" : " commits into");
+            font-size: 13px;
+            color: root.muted-color;
+            vertical-alignment: center;
+        }
+        BranchLabel {
+            text: root.target-branch;
+            background-color: root.branch-background;
+            foreground-color: root.branch-foreground;
+        }
+        from-label := MaterialText {
+            width: self.preferred-width;
+            height: 26px;
+            text: "from";
+            font-size: 13px;
+            color: root.muted-color;
+            vertical-alignment: center;
+        }
+        BranchLabel {
+            text: root.source-branch;
+            background-color: root.branch-background;
+            foreground-color: root.branch-foreground;
+        }
+        Rectangle {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: copy-touch.has-hover ? root.muted-background : transparent;
+            Image {
+                x: 6px;
+                y: 6px;
+                width: 16px;
+                height: 16px;
+                source: @image-url("../../assets/icons/octicon-copy-16.svg");
+                image-fit: contain;
+                colorize: root.muted-color;
+            }
+            copy-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.copy-source-branch(root.source-branch); }
+            }
+            if copy-touch.has-hover: ToolTip {
+                x: root.width - self.width;
+                y: root.height + 4px;
+                text: "Copy source branch";
+            }
+        }
+        if root.updated-at != "": RelativeTimestamp {
+            text: root.updated-at;
+            tooltip-text: root.updated-at-tooltip;
+            tooltip-align-right: true;
+            foreground-color: root.muted-color;
+            label-font-size: 13px;
+        }
+    }
+
+    if root.wraps: HorizontalLayout {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 28px;
+        spacing: 8px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        PullRequestStateBadge {
+            kind: root.state-kind;
+            success-color: root.success-color;
+            danger-color: root.danger-color;
+            done-color: root.done-color;
+        }
+        Rectangle {
+            width: min(root.compact ? 120px : 150px, compact-author-label.preferred-width);
+            height: 24px;
+            compact-author-label := MaterialText {
+                width: parent.width;
+                height: parent.height;
+                text: root.author;
+                font-size: 13px;
+                font-weight: 600;
+                color: root.muted-color;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                y: parent.height - 3px;
+                width: parent.width;
+                height: 1px;
+                background: root.muted-color;
+            }
+        }
+        compact-summary-label := MaterialText {
+            width: self.preferred-width;
+            height: 26px;
+            text: "wants to merge " + root.commit-count + (root.commit-count == 1 ? " commit into" : " commits into");
+            font-size: 13px;
+            color: root.muted-color;
+            vertical-alignment: center;
+        }
+    }
+
+    if root.wraps: HorizontalLayout {
+        x: 0px;
+        y: 34px;
+        width: parent.width;
+        height: 28px;
+        spacing: 8px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        BranchLabel {
+            text: root.target-branch;
+            background-color: root.branch-background;
+            foreground-color: root.branch-foreground;
+        }
+        compact-from-label := MaterialText {
+            width: self.preferred-width;
+            height: 26px;
+            text: "from";
+            font-size: 13px;
+            color: root.muted-color;
+            vertical-alignment: center;
+        }
+        BranchLabel {
+            text: root.source-branch;
+            background-color: root.branch-background;
+            foreground-color: root.branch-foreground;
+        }
+        Rectangle {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: compact-copy-touch.has-hover ? root.muted-background : transparent;
+            Image {
+                x: 6px;
+                y: 6px;
+                width: 16px;
+                height: 16px;
+                source: @image-url("../../assets/icons/octicon-copy-16.svg");
+                image-fit: contain;
+                colorize: root.muted-color;
+            }
+            compact-copy-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.copy-source-branch(root.source-branch); }
+            }
+            if compact-copy-touch.has-hover: ToolTip {
+                x: root.width - self.width;
+                y: root.height + 4px;
+                text: "Copy source branch";
+            }
+        }
+        if root.updated-at != "": RelativeTimestamp {
+            text: root.updated-at;
+            tooltip-text: root.updated-at-tooltip;
+            tooltip-align-right: true;
+            foreground-color: root.muted-color;
+            label-font-size: 13px;
+        }
+    }
+}
+
+export component CenteredErrorState inherits Rectangle {
+    in property <string> title: "Uh oh!";
+    in property <string> detail: "There was an error while loading. Please reload this page.";
+    in property <color> background-color;
+    in property <color> outline-color;
+    in property <color> foreground-color;
+    in property <color> muted-color;
+    callback retry();
+
+    private property <length> content-top: max(16px, (root.height - 142px) / 2);
+
+    background: root.background-color;
+
+    Image {
+        x: (parent.width - self.width) / 2;
+        y: root.content-top;
+        width: 28px;
+        height: 28px;
+        source: @image-url("../../assets/icons/octicon-alert-16.svg");
+        image-fit: contain;
+        colorize: root.muted-color;
+    }
+    MaterialText {
+        x: 24px;
+        y: root.content-top + 36px;
+        width: parent.width - 48px;
+        height: 24px;
+        text: root.title;
+        font-size: 16px;
+        font-weight: 600;
+        color: root.foreground-color;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    Text {
+        x: 24px;
+        y: root.content-top + 66px;
+        width: parent.width - 48px;
+        height: 34px;
+        text: root.detail;
+        font-size: 12px;
+        color: root.muted-color;
+        wrap: word-wrap;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: root.content-top + 108px;
+        width: 92px;
+        height: 32px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: root.outline-color;
+        background: retry-touch.has-hover
+            ? (AppState.effective-dark-mode ? #21262d : #f3f4f6)
+            : (AppState.effective-dark-mode ? #21262d : #f6f8fa);
+        MaterialText {
+            width: parent.width;
+            height: parent.height;
+            text: "Try again";
+            font-size: 12px;
+            font-weight: 600;
+            color: root.foreground-color;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        retry-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.retry(); }
+        }
+    }
+}
+
+export component PrTabButton inherits Rectangle {
+    in property <string> label;
+    in property <int> count: 0;
+    in property <image> icon;
+    in property <bool> selected: false;
+    in property <length> tab-width: 160px;
+    callback clicked();
+
+    width: root.tab-width;
+    height: 48px;
+    background: tab-touch.has-hover ? (AppState.effective-dark-mode ? #21262d : #f6f8fa) : transparent;
+    border-width: 0px;
+
+    // Keep Usher's underline selection treatment, but use GitHub's 16 px
+    // Octicons and inline icon/label/count geometry. Center the content group
+    // inside the fixed tab width so left/right padding stays balanced.
+    private property <length> count-badge-width: max(22px, count-label.preferred-width + 12px);
+    private property <length> content-width: 16px + 10px + tab-label.preferred-width + 10px + root.count-badge-width;
+    private property <length> content-x: max(0px, (root.width - root.content-width) / 2);
+
+    Image {
+        x: root.content-x;
+        y: 16px;
+        width: 16px;
+        height: 16px;
+        source: root.icon;
+        image-fit: contain;
+        colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    }
+    tab-label := MaterialText {
+        x: root.content-x + 26px;
+        y: 0px;
+        width: self.preferred-width;
+        height: parent.height;
+        text: root.label;
+        font-size: 14px;
+        font-weight: root.selected ? 600 : 400;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        x: tab-label.x + tab-label.width + 10px;
+        y: 14px;
+        width: root.count-badge-width;
+        height: 20px;
+        border-radius: 10px;
+        background: AppState.effective-dark-mode ? #6e768166 : #afb8c133;
+        count-label := MaterialText {
+            width: parent.width;
+            height: parent.height;
+            text: root.count;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        }
+    }
+    Rectangle {
+        x: 0px;
+        y: parent.height - 2px;
+        width: parent.width;
+        height: 2px;
+        background: root.selected ? #fd8c73 : transparent;
+    }
+    tab-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component CommitRangeButton inherits Rectangle {
+    in property <string> text: "All commits";
+    callback clicked();
+
+    width: max(132px, range-label.preferred-width + 66px);
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    background: range-touch.has-hover
+        ? (AppState.effective-dark-mode ? #21262d : #f3f4f6)
+        : (AppState.effective-dark-mode ? #151b23 : #f6f8fa);
+
+    Image {
+        x: 12px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../../assets/icons/octicon-stack-16.svg");
+        image-fit: contain;
+        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    }
+    range-label := MaterialText {
+        x: 36px;
+        y: 0px;
+        width: min(self.preferred-width, parent.width - 62px);
+        height: parent.height;
+        text: root.text;
+        font-size: 13px;
+        font-weight: 500;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Image {
+        x: parent.width - 24px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
+        image-fit: contain;
+        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    }
+    range-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component MergeReadinessBadge inherits Rectangle {
+    in property <string> kind;
+    in property <string> label;
+    in property <string> detail;
+    // Trailing-edge badges open with ActionMenu `align: end`. Leading-edge
+    // compact headers use `align: start` so a wide overlay does not flush the
+    // window's left margin.
+    in property <bool> popup-align-end: true;
+    // Workspace modals disable the badge and close any open detail so the
+    // in-window popover cannot outlive the scrim.
+    in property <bool> interactions-enabled: true;
+    in property <bool> popup-open: false;
+    in property <color> background-color;
+    in property <color> badge-border-color;
+    in property <color> foreground-color;
+    in property <color> muted-color;
+    in property <color> success-color;
+    in property <color> attention-color;
+    in property <color> danger-color;
+    in property <color> done-color;
+    private property <color> state-color: root.kind == "ready"
+        ? root.success-color
+        : (root.kind == "merged"
+            ? root.done-color
+            : ((root.kind == "conflicts" || root.kind == "changes_requested" || root.kind == "checks_failed" || root.kind == "closed")
+                ? root.danger-color
+                : ((root.kind == "review_required" || root.kind == "checks_pending" || root.kind == "branch_out_of_date" || root.kind == "discussions_unresolved" || root.kind == "blocked")
+                    ? root.attention-color
+                    : root.muted-color)));
+    private property <string> state-symbol: root.kind == "ready" || root.kind == "merged"
+        ? "✓"
+        : ((root.kind == "conflicts" || root.kind == "changes_requested" || root.kind == "checks_failed" || root.kind == "closed")
+            ? "×"
+            : ((root.kind == "checking" || root.kind == "unavailable") ? "…" : "!"));
+
+    // Primer Button medium + leadingVisual geometry: 12px inline padding, 16px
+    // icon, 8px gap. Do not floor the width — GitHub hugs the label ("Merged").
+    width: min(320px, label-text.preferred-width + 48px);
+    height: 36px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.badge-border-color;
+    background: badge-touch.has-hover ? (AppState.effective-dark-mode ? #656c7633 : #818b981f) : root.background-color;
+
+    Rectangle {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: root.state-color;
+        MaterialText {
+            width: parent.width;
+            height: parent.height;
+            text: root.state-symbol;
+            horizontal_alignment: center;
+            vertical_alignment: center;
+            font_size: 12px;
+            font_weight: 700;
+            color: #ffffff;
+        }
+    }
+    // SF/Segoe's rendered glyph box sits slightly above its nominal line box.
+    // Apply this once here so every readiness label (ready, conflicts, merged,
+    // checks, and review states) shares the same visual centerline.
+    label-text := Text {
+        x: 36px;
+        y: (parent.height - self.height) / 2 + 1px;
+        width: min(self.preferred-width, parent.width - self.x - 12px);
+        height: 20px;
+        text: root.label;
+        vertical-alignment: center;
+        font-size: 13px;
+        font-weight: 600;
+        color: root.foreground-color;
+        overflow: elide;
+    }
+    badge-touch := TouchArea {
+        enabled: root.interactions-enabled;
+        mouse-cursor: root.interactions-enabled ? pointer : default;
+        clicked => { root.toggle-popup(); }
+    }
+    callback toggle-popup();
+
+    // Primer Overlay/ActionMenu metrics: spacer-3 (16px) padding, large radius
+    // (12px), max width ~320px.
+    popup-measure-title := Text {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        text: root.label;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    popup-measure-detail := Text {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        opacity: 0;
+        text: root.detail;
+        font-size: 12px;
+    }
+    private property <length> popup-width: min(
+        320px,
+        max(
+            popup-measure-title.preferred-width + 52px,
+            popup-measure-detail.preferred-width + 32px
+        )
+    );
+    popup-measure-detail-wrapped := Text {
+        x: 0px;
+        y: 0px;
+        width: root.popup-width - 32px;
+        height: self.preferred-height;
+        opacity: 0;
+        text: root.detail;
+        wrap: word-wrap;
+        font-size: 12px;
+    }
+    private property <length> popup-height: 16px + 28px + 8px + max(20px, popup-measure-detail-wrapped.preferred-height) + 16px;
+
+    readiness-popup := Rectangle {
+        // Compact headers sit near the left edge: open start-aligned so the
+        // overlay grows rightward with the usual page gutter. Wide headers pin
+        // the badge to the trailing edge: open end-aligned like Primer ActionMenu.
+        x: root.popup-align-end ? root.width - root.popup-width : 0px;
+        y: root.height + 4px;
+        width: root.popup-width;
+        height: root.popup-height;
+        visible: root.popup-open && root.interactions-enabled;
+        z: 10000;
+
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: root.badge-border-color;
+            background: root.background-color;
+            drop-shadow-blur: 18px;
+            drop-shadow-color: #00000030;
+            drop-shadow-offset-y: 6px;
+
+            Rectangle {
+                x: 16px;
+                y: 18px;
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                background: root.state-color;
+                MaterialText {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.state-symbol;
+                    horizontal_alignment: center;
+                    vertical_alignment: center;
+                    font_size: 13px;
+                    font_weight: 700;
+                    color: #ffffff;
+                }
+            }
+            MaterialText {
+                x: 44px;
+                y: 12px;
+                width: parent.width - 60px;
+                height: 28px;
+                text: root.label;
+                vertical_alignment: center;
+                font_size: 14px;
+                font_weight: 600;
+                color: root.foreground-color;
+            }
+            MaterialText {
+                x: 16px;
+                y: 48px;
+                width: parent.width - 32px;
+                height: parent.height - 64px;
+                text: root.detail;
+                vertical_alignment: top;
+                wrap: word-wrap;
+                font_size: 12px;
+                color: root.muted-color;
+            }
+        }
+    }
+}
+
+export component PrReviewBackButton inherits Rectangle {
+    // Parents host the tip as a later, high-z sibling. A nested tip still loses
+    // to following header chrome (summary Open badge, readiness strip) even when
+    // this root has a higher z—overflow is not elevated with the button box.
+    in property <bool> embed-tooltip: true;
+    in property <string> tooltip-text: "Back to pull requests";
+    out property <bool> has-hover: back-touch.has-hover;
+    callback clicked();
+
+    z: 2;
+    width: 36px;
+    height: 36px;
+    background: transparent;
+    clip: false;
+
+    button-surface := Rectangle {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        background: back-touch.has-hover
+            ? MaterialPalette.surface_container_high
+            : transparent;
+
+        Image {
+            x: 10px;
+            y: 10px;
+            width: 16px;
+            height: 16px;
+            source: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
+            colorize: MaterialPalette.on_surface;
+        }
+    }
+
+    back-touch := TouchArea {
+        width: button-surface.width;
+        height: button-surface.height;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    // Optional embedded tip for callers that already elevate their own host.
+    if root.embed-tooltip && back-touch.has-hover: ToolTip {
+        x: 0px;
+        y: root.height + 4px;
+        text: root.tooltip-text;
+    }
+}
+
+export component HeaderActionStrip inherits Rectangle {
+    in property <string> readiness-kind;
+    in property <string> readiness-label;
+    in property <string> readiness-detail;
+    in property <string> remote-review-state;
+    in property <bool> show-readiness: true;
+    // Wide headers pin actions to the trailing edge; narrow headers keep them
+    // left-aligned beside the back link like GitHub's compact PR header.
+    in property <bool> align-start: false;
+    in property <bool> action-loading: false;
+    in property <bool> can-comment: false;
+    in property <bool> can-approve: false;
+    in property <bool> can-request-changes: false;
+    in property <bool> can-merge: false;
+    in property <bool> can-revert: false;
+    // When a workspace modal is open, freeze header actions so popovers and
+    // hover tips cannot outlive the scrim.
+    in property <bool> actions-enabled: true;
+    in property <bool> readiness-popup-open: false;
+    in property <string> revert-action-label: "Revert pull request";
+    in property <string> merge-block-reason;
+    in property <color> background-color;
+    in property <color> outline-color;
+    in property <color> foreground-color;
+    in property <color> muted-color;
+    in property <color> success-color;
+    in property <color> attention-color;
+    in property <color> danger-color;
+    in property <color> done-color;
+    callback review();
+    callback merge();
+    callback revert();
+    callback toggle-readiness-popup();
+
+    private property <bool> terminal-state:
+        root.readiness-kind == "merged" || root.readiness-kind == "closed";
+
+    height: 36px;
+
+    HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 12px;
+        // Wide strips need stretch so the leading spacer pushes all actions
+        // against the trailing edge. Compact strips intentionally retain
+        // start alignment beside the back link.
+        alignment: root.align-start ? start : stretch;
+        if !root.align-start: Rectangle { horizontal-stretch: 1; }
+        if root.show-readiness && root.readiness-label != "": Rectangle {
+            width: readiness-badge.width;
+            height: parent.height;
+            readiness-badge := MergeReadinessBadge {
+                y: (parent.height - self.height) / 2;
+                kind: root.readiness-kind;
+                label: root.readiness-label;
+                detail: root.readiness-detail;
+                // Compact (align-start) headers keep the badge near the left
+                // gutter; open the overlay start-aligned so it cannot flush the
+                // window edge. Wide strips keep ActionMenu end alignment.
+                popup-align-end: !root.align-start;
+                interactions-enabled: root.actions-enabled;
+                popup-open: root.readiness-popup-open;
+                background-color: root.background-color;
+                badge-border-color: root.outline-color;
+                foreground-color: root.foreground-color;
+                muted-color: root.muted-color;
+                success-color: root.success-color;
+                attention-color: root.attention-color;
+                danger-color: root.danger-color;
+                done-color: root.done-color;
+                toggle-popup => { root.toggle-readiness-popup(); }
+            }
+        }
+        if !root.terminal-state && (root.remote-review-state == "review_approved" || root.remote-review-state == "approved"): Rectangle {
+            width: 88px;
+            height: parent.height;
+            MaterialText {
+                width: parent.width;
+                height: parent.height;
+                text: "✓  Approved";
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: 12px;
+                font-weight: 600;
+                color: root.success-color;
+            }
+        }
+        if !root.terminal-state: Rectangle {
+            width: 120px;
+            height: parent.height;
+            ReviewActionButton {
+                y: (parent.height - self.height) / 2;
+                width: parent.width;
+                text: "Review changes";
+                tooltip-align-start: root.align-start;
+                button-enabled: root.actions-enabled && !root.action-loading && (root.can-comment || root.can-approve || root.can-request-changes);
+                tooltip-text: root.can-comment || root.can-approve || root.can-request-changes
+                    ? "Comment, approve, or request changes"
+                    : "Configure provider credentials to submit a review";
+                clicked => { root.review(); }
+            }
+        }
+        if !root.terminal-state: Rectangle {
+            width: 172px;
+            height: parent.height;
+            ReviewActionButton {
+                y: (parent.height - self.height) / 2;
+                width: parent.width;
+                text: root.action-loading ? "Working…" : "Merge pull request";
+                success: true;
+                show-chevron: true;
+                tooltip-align-start: root.align-start;
+                button-enabled: root.actions-enabled && !root.action-loading && root.can-merge;
+                tooltip-text: root.can-merge ? "Choose a merge method" : root.merge-block-reason;
+                clicked => { root.merge(); }
+            }
+        }
+        if root.readiness-kind == "merged" && root.can-revert: Rectangle {
+            // Prefer a visible Primer-style secondary button on the same row as
+            // the readiness control over GitHub's kebab ActionMenu, so the full
+            // provider label stays readable without a truncated overflow item.
+            width: revert-action.width;
+            height: parent.height;
+            revert-action := ReviewActionButton {
+                y: (parent.height - self.height) / 2;
+                hug-content: true;
+                tooltip-align-start: root.align-start;
+                text: root.action-loading ? "Working…" : root.revert-action-label;
+                button-enabled: root.actions-enabled && !root.action-loading;
+                tooltip-text: "Reverse the changes from this merged pull request";
+                clicked => { root.revert(); }
+            }
+        }
+    }
+}
+
+export component ReviewChoice inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in property <bool> selected: false;
+    in property <bool> choice-enabled: true;
+    callback chosen();
+
+    height: 58px;
+    border-radius: 6px;
+    background: choice-touch.has-hover && root.choice-enabled
+        ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
+        : transparent;
+    opacity: root.choice-enabled ? 1 : 0.48;
+
+    Rectangle {
+        x: 12px;
+        y: 14px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.selected ? #0969da : (AppState.effective-dark-mode ? #6e7681 : #8c959f);
+        background: root.selected ? #0969da : transparent;
+        if root.selected: Rectangle {
+            x: 5px;
+            y: 5px;
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: #ffffff;
+        }
+    }
+    MaterialText {
+        x: 40px;
+        y: 8px;
+        width: parent.width - 52px;
+        height: 22px;
+        text: root.title;
+        font_size: 13px;
+        font_weight: 600;
+        color: MaterialPalette.on_surface;
+        vertical_alignment: center;
+    }
+    MaterialText {
+        x: 40px;
+        y: 30px;
+        width: parent.width - 52px;
+        height: 20px;
+        text: root.description;
+        font_size: 11px;
+        color: MaterialPalette.on_surface_variant;
+        vertical_alignment: center;
+        overflow: elide;
+    }
+    choice-touch := TouchArea {
+        enabled: root.choice-enabled;
+        mouse-cursor: pointer;
+        clicked => { root.chosen(); }
+    }
+}
+

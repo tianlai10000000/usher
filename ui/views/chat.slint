@@ -123,7 +123,6 @@ component MessageBubble inherits Rectangle {
                     color: MaterialPalette.on_primary;
                     wrap: word-wrap;
                     font-size: 14px;
-                    font-family: "Hiragino Sans GB";
                 }
                 
                 Text {
@@ -131,7 +130,6 @@ component MessageBubble inherits Rectangle {
                     color: MaterialPalette.on_primary.with_alpha(0.7);
                     font-size: 11px;
                     horizontal-alignment: right;
-                    font-family: "Hiragino Sans GB";
                 }
             }
             
@@ -251,14 +249,12 @@ component MessageBubble inherits Rectangle {
                         text: "●";
                         color: MaterialPalette.primary;
                         font-size: 12px;
-                        font-family: "Hiragino Sans GB";
                     }
 
                     Text {
                         text: "Thinking";
                         color: MaterialPalette.on_surface_variant;
                         font-size: 14px;
-                        font-family: "Hiragino Sans GB";
                     }
 
                     Text {
@@ -266,7 +262,6 @@ component MessageBubble inherits Rectangle {
                               root.loading-phase == 1 ? ".." : "...";
                         color: MaterialPalette.on_surface_variant;
                         font-size: 14px;
-                        font-family: "Hiragino Sans GB";
                     }
                 }
                 
@@ -318,9 +313,6 @@ component MessageBubble inherits Rectangle {
                                                       block.kind == MarkdownBlockKind.Heading3 ||
                                                       span.kind == MarkdownInlineKind.Strong) ? 700 : 400;
                                         font-italic: span.kind == MarkdownInlineKind.Emphasis;
-                                        font-family: (block.kind == MarkdownBlockKind.CodeBlock || span.kind == MarkdownInlineKind.Code)
-                                            ? "Menlo, Hiragino Sans GB"
-                                            : "Hiragino Sans GB";
                                     }
                                 }
                             }
@@ -339,7 +331,6 @@ component MessageBubble inherits Rectangle {
                             font-weight: (block.kind == MarkdownBlockKind.Heading1 ||
                                           block.kind == MarkdownBlockKind.Heading2 ||
                                           block.kind == MarkdownBlockKind.Heading3) ? 700 : 400;
-                            font-family: block.kind == MarkdownBlockKind.CodeBlock ? "Hiragino Sans GB" : "Hiragino Sans GB";
                         }
                     }
                 }
@@ -368,7 +359,6 @@ component MessageBubble inherits Rectangle {
                         color: MaterialPalette.on_surface;
                         wrap: word-wrap;
                         font-size: 14px;
-                        font-family: "Hiragino Sans GB";
                     }
                 }
                 
@@ -380,7 +370,6 @@ component MessageBubble inherits Rectangle {
                     color: MaterialPalette.on_surface_variant.with_alpha(0.7);
                     font-size: 11px;
                     horizontal-alignment: left;
-                    font-family: "Hiragino Sans GB";
                 }
             }
             
@@ -840,7 +829,6 @@ export component Chat inherits Rectangle {
                                             text-input := TextInput {
                                                 width: parent.viewport-width;
                                                 font-size: 14px;
-                                                font-family: "Hiragino Sans GB";
                                                 color: MaterialPalette.on_surface;
                                                 text <=> root.input-text;
                                                 single-line: false;  // 多行输入

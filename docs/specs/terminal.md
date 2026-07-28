@@ -8,11 +8,17 @@ This is the stable contract for the project-aware terminal drawer. Historical ex
 
 ## Ownership / 所有权
 
-- Rust session and PTY state: `src/terminal/`.
+- Rust controller, session, and PTY state: `src/terminal/mod.rs`, `session.rs`, and `render.rs`.
+- Pure keyboard mapping, diagnostic formatting, and refresh throttling policy:
+  `src/terminal/input.rs`, `diagnostics.rs`, and `refresh.rs`.
 - Root bridge and docking: `ui/main.slint`.
 - Drawer presentation: `ui/components/drawer/terminal_drawer.slint`.
 - Project entry point: `src/project/mod.rs`.
 - Workflow entry point: root shell-drawer callback and `PageScrollActions`.
+
+- Rust controller、Session 与 PTY 状态：`src/terminal/mod.rs`、`session.rs`、`render.rs`。
+- 纯键盘映射、诊断格式和刷新节流策略：`src/terminal/input.rs`、
+  `diagnostics.rs`、`refresh.rs`。
 
 ## Invariants / 不变量
 

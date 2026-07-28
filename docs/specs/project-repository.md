@@ -8,15 +8,21 @@ This specification covers provider metadata resolved on the Project page and the
 
 ## Ownership / 职责
 
-- `src/project/mod.rs` validates form data, starts the asynchronous save flow, and persists `projects.json`.
+- `src/project/mod.rs` is the stable feature façade. `controller.rs` validates form data and
+  coordinates asynchronous saves; `model.rs`, `storage.rs`, `logo.rs`, and `overview.rs` own
+  persistence records, `projects.json`, logo handling, and PR-overview task selection.
 - `src/codereview/api/` owns provider URL/path constants only.
 - `src/git/` parses remotes and owns provider-specific operations, authentication headers, and response decoding.
+- `src/git/overview.rs` aggregates normalized open PR/MR pages into `fat`, `uat`, and `prod` counts; Project and Workflow do not implement provider requests.
 - `src/http/mod.rs` owns request execution, interception, timeout/status handling, and safe logging.
 - `src/workflow/pr_list.rs` owns selected-project list state, request sequencing, status filters, and pagination.
 
-- `src/project/mod.rs` 校验表单、启动异步保存流程并持久化 `projects.json`。
+- `src/project/mod.rs` 是稳定 feature façade。`controller.rs` 校验表单并编排异步保存；
+  `model.rs`、`storage.rs`、`logo.rs`、`overview.rs` 分别负责持久化记录、
+  `projects.json`、Logo 处理和 PR overview 任务选择。
 - `src/codereview/api/` 只负责 Provider URL/路径常量。
 - `src/git/` 解析 remote，负责 Provider 实际操作、鉴权 header 和响应解码。
+- `src/git/overview.rs` 将归一化的 open PR/MR 分页聚合为 `fat`、`uat`、`prod` 数量；Project 与 Workflow 不实现 Provider 请求。
 - `src/http/mod.rs` 负责请求执行、拦截、超时/状态处理及安全日志。
 - `src/workflow/pr_list.rs` 负责当前项目的 PR 列表状态、请求序号、状态筛选和分页。
 
@@ -33,6 +39,7 @@ This specification covers provider metadata resolved on the Project page and the
 9. Opening Workflow loads `repo_project_id` and `repo_type` from `projects.json`, then requests open PRs by default. Open, closed, merged, and all are explicit caller-selected filters; provider APIs do not inject a default state query.
 10. The PR tab displays 10 records per page and bottom-centered pagination. It must lazily request only the page selected by the user. GitHub may issue one detail request for each visible row to enrich its search response with source and target branch names; these requests remain scoped to that selected page. All parseable provider `updated_at` timestamps are displayed in UTC+08:00. Branch pairs and Updated timestamps wrap to additional lines instead of eliding; when the list card is narrower than the table floor width, the table scrolls horizontally rather than dropping columns. The documented response `meta.total_count` and `meta.total_pages` determine the exact total and total pages where available. Stale responses must not overwrite the current project/filter/page.
 11. `src/codereview/api/` must remain constants-only. It must not execute requests or own provider response models; endpoint changes must not require changing operation call sites.
+12. Project-card and Workflow environment counts use the persisted provider type/id and the same Git façade as the PR list. They run on the shared runtime, count only open requests whose normalized target branch is exactly `fat`, `uat`, or `prod`, and write UI state only from the Slint event loop.
 
 1. `remote_repo` 决定 Provider，支持 `gitee`、`gitlab`、`github`。
 2. 支持 HTTPS 或 SSH Git URL，且必须包含 owner/group 与仓库路径。
@@ -45,6 +52,7 @@ This specification covers provider metadata resolved on the Project page and the
 9. 进入 Workflow 时从 `projects.json` 读取 `repo_project_id`、`repo_type`，默认查询 open PR。open、closed、merged、all 均由调用场景显式选择，Provider API 不自行注入默认状态 query。
 10. PR Tab 每页显示 10 条以及底部水平居中的分页，并且必须只懒加载用户选中的页。GitHub 可以为当前可见的每一行补充发起一个详情请求，以从搜索响应中补齐源分支和目标分支；这些请求必须始终限定在已选中的页面内。所有可解析的 Provider `updated_at` 时间戳均按东八区（UTC+08:00）显示。Branch 与 Updated 列换行完整显示，不得省略号截断；列表卡片窄于表宽下限时横向滚动，而不是丢列。可用时使用接口响应中定义的 `meta.total_count`、`meta.total_pages` 显示准确总条数和总页数；旧项目、旧筛选或旧页码响应不得覆盖当前视图。
 11. `src/codereview/api/` 必须保持仅包含常量，不得执行请求或持有 Provider 响应模型；修改接口地址时不应要求修改业务调用点。
+12. Project 卡片和 Workflow 环境计数使用持久化的 Provider 类型/id，并与 PR 列表共用 Git façade。任务运行在共享 runtime，只统计归一化目标分支严格为 `fat`、`uat`、`prod` 的 open 请求，且只能在 Slint event loop 回写 UI。
 
 ## Provider requests / Provider 请求
 

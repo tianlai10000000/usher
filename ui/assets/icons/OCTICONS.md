@@ -28,13 +28,24 @@ navigation tabs.
 `octicon-git-pull-request-16.svg` is the upstream-style 16 px pull-request
 status icon used by the PR review summary badge.
 `octicon-arrow-left-16.svg` is the unchanged Primer back-navigation icon used
-by the PR review header.
+by the PR review header and the breadcrumb IconButton.
 `octicon-repo-push-16.svg` is downloaded unchanged from Primer Octicons and is
 used by the Conversation timeline's `added N commits` batch record.
 `octicon-stack-16.svg` and `octicon-x-16.svg` are the upstream controls used
 by the PR commit-range selector.
+`octicon-triangle-down-16.svg` is the upstream TriangleDown Octicon used by
+GitHub PR-list filter triggers.
 `octicon-alert-16.svg` is the upstream warning mark used by GitHub-style
 embedded loading errors.
+`octicon-info-16.svg` is the upstream info mark used by Tag status banners.
+`octicon-terminal-16.svg`, `octicon-pencil-16.svg`, `octicon-trash-16.svg`,
+`octicon-sync-16.svg`, `octicon-plus-16.svg`, and `octicon-repo-16.svg` are the
+unchanged upstream controls used by the Project list and its actions.
+`octicon-list-unordered-16.svg` and `octicon-table-16.svg` are the unchanged
+upstream controls used by the Project page's list/grid SegmentedControl.
+`octicon-screen-full-16.svg`, `octicon-screen-normal-16.svg`, and
+`octicon-grabber-16.svg` are the unchanged upstream controls used by the global
+terminal drawer.
 
 ## GitHub diffstat blocks
 

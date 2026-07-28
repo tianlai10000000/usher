@@ -1,367 +1,284 @@
-import { MaterialText, Horizontal, MaterialStyleMetrics, MaterialPalette, Icon } from "@material";
+import { ToolTip } from "@material";
 import { Route } from "../route/routeMap.slint";
+import { AppState } from "../state/app_state.slint";
 
-// 面包屑项组件
+// Primer Breadcrumbs "normal" variant:
+// 14 px link text, accent-colored ancestors, default-colored current page,
+// hover underline, and the official compact slanted divider geometry.
 component BreadcrumbItem {
     in property <image> icon;
     in property <string> text;
-    in property <bool> is-current: false;  // 是否是当前页面
+    in property <bool> is-current: false;
     in property <bool> clickable: true;
-    
+
     callback clicked();
-    
+
+    private property <color> default-foreground: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    private property <color> link-foreground: AppState.effective-dark-mode ? #4493f8 : #0969da;
     private property <bool> has-icon: icon.width > 0 && icon.height > 0;
-    private property <color> item-color: is-current ? MaterialPalette.primary : MaterialPalette.on-surface-variant;
-    private property <color> hover-color: MaterialPalette.primary;
-    
-    height: 28px;
-    width: item-layout.preferred-width;
-    
-    Rectangle {
-        width: 100%;
-        height: 100%;
-        border-radius: 6px;
-        background: touch.has-hover && clickable && !is-current ? MaterialPalette.surface-container-high : transparent;
+    private property <length> label-x: root.has-icon ? 22px : 0px;
 
-        touch := TouchArea {
-            mouse-cursor: clickable && !is-current ? pointer : default;
-            
-            clicked => {
-                if clickable && !is-current {
-                    root.clicked();
-                }
-            }
-        }
-        
-        item-layout := HorizontalLayout {
-            padding-left: 8px;
-            padding-right: 8px;
-            spacing: 6px;
-            alignment: start;
-            
-            if has-icon: VerticalLayout {
-                alignment: center;
-                
-                Icon {
-                    width: 16px;
-                    height: 16px;
-                    source: icon;
-                    colorize: touch.has-hover && clickable && !is-current ? hover-color : item-color;
-                }
-            }
-            
-            VerticalLayout {
-                alignment: center;
-                
-                MaterialText {
-                    text: root.text;
-                    font-size: 14px;
-                    font-weight: is-current ? 600 : 400;
-                    color: touch.has-hover && clickable && !is-current ? hover-color : item-color;
-                    vertical-alignment: center;
-                }
-            }
-        }
-    }
-}
+    width: root.label-x + item-label.preferred-width;
+    height: 32px;
 
-// 面包屑分隔符
-component BreadcrumbSeparator {
-    width: 20px;
-    height: 28px;
-    
-    VerticalLayout {
-        alignment: center;
-        
-        HorizontalLayout {
-            alignment: center;
-            
-            MaterialText {
-                text: "/";
-                font-size: 14px;
-                color: MaterialPalette.outline;
-                vertical-alignment: center;
-            }
-        }
-    }
-}
-
-component BreadcrumbBackButton {
-    callback clicked();
-
-    min-width: 76px;
-    height: 28px;
-
-    border := Rectangle {
-        width: 100%;
-        height: 100%;
-        border-radius: 4px;
-        border-width: 1px;
-        border-color: MaterialPalette.outline.with-alpha(0.22);
-        background: MaterialPalette.surface;
+    if root.has-icon: Image {
+        x: 0px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: root.icon;
+        colorize: root.is-current ? root.default-foreground : root.link-foreground;
     }
 
-    touch-area := TouchArea {
-        width: 100%;
-        height: 100%;
-        mouse-cursor: pointer;
+    item-label := Text {
+        x: root.label-x;
+        width: self.preferred-width;
+        height: parent.height;
+        text: root.text;
+        font-size: 14px;
+        font-weight: 400;
+        color: root.is-current ? root.default-foreground : root.link-foreground;
+        vertical-alignment: center;
+    }
+
+    // Slint Text has no text-decoration property, so draw Primer's link
+    // underline only beneath the glyph run.
+    if item-touch.has-hover && root.clickable && !root.is-current: Rectangle {
+        x: root.label-x;
+        y: 24px;
+        width: item-label.width;
+        height: 1px;
+        background: root.link-foreground;
+    }
+
+    item-touch := TouchArea {
+        mouse-cursor: root.clickable && !root.is-current ? pointer : default;
 
         clicked => {
-            root.clicked();
-        }
-    }
-
-    state-layer := Rectangle {
-        width: 100%;
-        height: 100%;
-        border-radius: border.border-radius;
-        background: MaterialPalette.primary;
-        opacity: touch-area.pressed
-            ? MaterialPalette.state_layer_opacity_press
-            : touch-area.has-hover
-                ? MaterialPalette.state_layer_opacity_hover
-                : 0%;
-    }
-
-    content := HorizontalLayout {
-        width: 100%;
-        height: 100%;
-        padding-left: 6px;
-        padding-right: 8px;
-        spacing: 8px;
-        alignment: center;
-
-        VerticalLayout {
-            alignment: center;
-
-            Icon {
-                width: 18px;
-                height: 18px;
-                source: @image-url("../assets/icons/arrow_back.svg");
-                colorize: MaterialPalette.on-surface-variant;
-            }
-        }
-
-        VerticalLayout {
-            alignment: center;
-
-            MaterialText {
-                text: "Back";
-                font-size: 14px;
-                font-weight: 500;
-                color: MaterialPalette.on-surface-variant;
-                vertical-alignment: center;
+            if root.clickable && !root.is-current {
+                root.clicked();
             }
         }
     }
 }
 
-export component Breadcrumb {
+component BreadcrumbSeparator {
+    width: 15px;
+    height: 32px;
+
+    // Primer React uses a 0.8 em line rotated 15 degrees with 0.5 em inline
+    // margins. At the 14 px body size that maps to an 11 px divider.
+    Rectangle {
+        x: 7px;
+        y: 10px;
+        width: 1px;
+        height: 11px;
+        background: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        transform-rotation: 15deg;
+        transform-origin: { x: 0.5px, y: 5.5px };
+    }
+}
+
+// PageHeader trailing action: an invisible Primer IconButton with the standard
+// 32 px control size, 6 px radius, and semantic transparent hover/press fills.
+component BreadcrumbBackButton inherits Rectangle {
+    callback clicked();
+
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: back-touch.pressed
+        ? (AppState.effective-dark-mode ? #6e768166 : #818b9833)
+        : (back-touch.has-hover
+            ? (AppState.effective-dark-mode ? #6e768133 : #818b981f)
+            : transparent);
+    clip: false;
+
+    Image {
+        x: 8px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../assets/icons/octicon-arrow-left-16.svg");
+        colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    }
+
+    back-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    if back-touch.has-hover: ToolTip {
+        z: 100;
+        x: -4px;
+        y: root.height + 4px;
+        text: "Back";
+    }
+}
+
+export component Breadcrumb inherits Rectangle {
     in property <Route> current-route: Route.Home;
     in property <Route> previous-route: Route.Home;
-    
+
     callback navigate(Route);
     callback back();
-    
-    // 判断是否是子页面（需要显示父级路径）
+
     private property <bool> is-about-page: current-route == Route.About;
     private property <bool> is-detail-page: current-route == Route.Detail;
     private property <bool> is-settings-page: current-route == Route.Settings;
-    
-    // 判断当前页面是否是首页
     private property <bool> is-home: current-route == Route.Home;
     private property <bool> can-go-back: !is-home && previous-route != current-route;
-    
-    // 获取当前页面名称
-    function get-page-name(route: Route) -> string {
-        if route == Route.Login { return "Login"; }
-        if route == Route.Home { return "Home"; }
-        if route == Route.Search { return "Search"; }
-        if route == Route.Settings { return "Settings"; }
-        if route == Route.Notification { return "Notify"; }
-        if route == Route.Toast { return "Toast"; }
-        if route == Route.Dialog { return "Dialog"; }
-        if route == Route.About { return "About"; }
-        if route == Route.Tools { return "Tools"; }
-        if route == Route.Project { return "Project"; }
-        if route == Route.Chat { return "Chat"; }
-        if route == Route.List { return "List"; }
-        if route == Route.Detail { return "Detail"; }
-        return "Home";
-    }
-    
-    Rectangle {
+
+    height: 40px;
+    // Alpha ≈ 0.35 on fill only (not root.opacity) so crumb text stays opaque.
+    // Real translucency needs page content scrolling underneath this bar.
+    background: AppState.effective-dark-mode ? #0d1117df : #ffffffdf;
+    clip: false;
+//    drop-shadow-blur: 5px;
+//    drop-shadow-offset-x: 0px;
+//    drop-shadow-offset-y: 1px;
+//    drop-shadow-color: AppState.effective-dark-mode ? #0000002a : #1f232814;
+
+    HorizontalLayout {
         width: parent.width;
-        height: 42px;
+        height: parent.height;
+        // The page ScrollView contributes a 4 px outer gutter before each
+        // page's 24 px content inset. Add the same offset so breadcrumbs and
+        // page headings share one left edge.
+        padding-left: 20px;
+        padding-right: 16px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 8px;
 
-        HorizontalLayout {
-            width: parent.width;
+        breadcrumb-region := Rectangle {
+            horizontal-stretch: 1;
             height: parent.height;
-            padding-left: 4px;
-            padding-right: 4px;
-            padding-top: MaterialStyleMetrics.padding_4;
-            padding-bottom: 0px;
-            spacing: 8px;
+            background: transparent;
+            clip: true;
 
-            left-content := Rectangle {
-                horizontal-stretch: 1;
+            HorizontalLayout {
+                x: 0px;
+                width: self.preferred-width;
                 height: parent.height;
-                 background: transparent;
+                alignment: start;
+                spacing: 0px;
 
-                Horizontal {
-                    x: 0px;
-                    width: self.preferred-width;
-                    padding-left: 0px;
-                    padding-right: 0px;
-                    padding-bottom: 0px;
-                    padding-top: 6px;
-                    vertical-stretch: 1;
-                    alignment: start;
-                    spacing: 0px;
-                    
-                    // 首页项（始终显示）
-                    BreadcrumbItem {
-                        icon: @image-url("../assets/icons/home.svg");
-                        text: "Home";
-                        is-current: is-home;
-                        clickable: !is-home;
-                        
-                        clicked => {
-                            root.navigate(Route.Home);
-                        }
-                    }
-                    
-                    // About 页面：Home > About
-                    if is-about-page: BreadcrumbSeparator {}
-                    if is-about-page: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/about.svg");
-                        text: "About";
-                        is-current: true;
-                    }
-                    
-                    // Settings 页面：Home > Settings
-                    if is-settings-page: BreadcrumbSeparator {}
-                    if is-settings-page: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/settings.svg");
-                        text: "Settings";
-                        is-current: true;
-                    }
-                    
-                    // Detail 页面：Home > List > Detail
-                    if is-detail-page: BreadcrumbSeparator {}
-                    if is-detail-page: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/list.svg");
-                        text: "List";
-                        is-current: false;
-                        
-                        clicked => {
-                            root.navigate(Route.List);
-                        }
-                    }
-                    if is-detail-page: BreadcrumbSeparator {}
-                    if is-detail-page: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/detail.svg");
-                        text: "Detail";
-                        is-current: true;
-                    }
-                    
-                    // Search 页面：Home > Search
-                    if current-route == Route.Search: BreadcrumbSeparator {}
-                    if current-route == Route.Search: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/search.svg");
-                        text: "Search";
-                        is-current: true;
-                    }
-                    
-                    // Notification 页面：Home > Notify
-                    if current-route == Route.Notification: BreadcrumbSeparator {}
-                    if current-route == Route.Notification: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/settings.svg");
-                        text: "Notify";
-                        is-current: true;
-                    }
-                    
-                    // Toast 页面：Home > Toast
-                    if current-route == Route.Toast: BreadcrumbSeparator {}
-                    if current-route == Route.Toast: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/settings.svg");
-                        text: "Toast";
-                        is-current: true;
-                    }
-                    
-                    // Dialog 页面：Home > Dialog
-                    if current-route == Route.Dialog: BreadcrumbSeparator {}
-                    if current-route == Route.Dialog: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/settings.svg");
-                        text: "Dialog";
-                        is-current: true;
-                    }
-                    
-                    // Tools 页面：Home > Tools
-                    if current-route == Route.Tools: BreadcrumbSeparator {}
-                    if current-route == Route.Tools: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/tools.svg");
-                        text: "Tools";
-                        is-current: true;
-                    }
-
-                    // Project 页面：Home > Project
-                    if current-route == Route.Project: BreadcrumbSeparator {}
-                    if current-route == Route.Project: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/project.svg");
-                        text: "Project";
-                        is-current: true;
-                    }
-
-                    // Workflow 页面：Home > Project > Workflow
-                    if current-route == Route.Workflow: BreadcrumbSeparator {}
-                    if current-route == Route.Workflow: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/project.svg");
-                        text: "Project";
-                        is-current: false;
-                        clicked => {
-                            root.navigate(Route.Project);
-                        }
-                    }
-                    if current-route == Route.Workflow: BreadcrumbSeparator {}
-                    if current-route == Route.Workflow: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/commit.svg");
-                        text: "Workflow";
-                        is-current: true;
-                    }
-                    
-                    // Chat 页面：Home > Chat
-                    if current-route == Route.Chat: BreadcrumbSeparator {}
-                    if current-route == Route.Chat: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/chat.svg");
-                        text: "Chat";
-                        is-current: true;
-                    }
-                    
-                    // List 页面：Home > List
-                    if current-route == Route.List: BreadcrumbSeparator {}
-                    if current-route == Route.List: BreadcrumbItem {
-                        icon: @image-url("../assets/icons/list.svg");
-                        text: "List";
-                        is-current: true;
-                    }
+                BreadcrumbItem {
+                    icon: @image-url("../assets/icons/home.svg");
+                    text: "Home";
+                    is-current: root.is-home;
+                    clickable: !root.is-home;
+                    clicked => { root.navigate(Route.Home); }
                 }
-            }
 
-            right-action := Rectangle {
-                width: back-button.min-width;
-                height: parent.height;
-                visible: root.can-go-back;
+                if root.is-about-page: BreadcrumbSeparator {}
+                if root.is-about-page: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/about.svg");
+                    text: "About";
+                    is-current: true;
+                }
 
-                back-button := BreadcrumbBackButton {
-                    width: self.min-width;
-                    x: -6px;
-                    y: (parent.height - self.height) / 2;
-                    clicked => {
-                        root.back();
-                    }
+                if root.is-settings-page: BreadcrumbSeparator {}
+                if root.is-settings-page: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/settings.svg");
+                    text: "Settings";
+                    is-current: true;
+                }
+
+                if root.is-detail-page: BreadcrumbSeparator {}
+                if root.is-detail-page: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/list.svg");
+                    text: "List";
+                    clicked => { root.navigate(Route.List); }
+                }
+                if root.is-detail-page: BreadcrumbSeparator {}
+                if root.is-detail-page: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/detail.svg");
+                    text: "Detail";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Search: BreadcrumbSeparator {}
+                if root.current-route == Route.Search: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/search.svg");
+                    text: "Search";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Notification: BreadcrumbSeparator {}
+                if root.current-route == Route.Notification: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/settings.svg");
+                    text: "Notify";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Toast: BreadcrumbSeparator {}
+                if root.current-route == Route.Toast: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/info.svg");
+                    text: "Toast";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Dialog: BreadcrumbSeparator {}
+                if root.current-route == Route.Dialog: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/chat.svg");
+                    text: "Dialog";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Tools: BreadcrumbSeparator {}
+                if root.current-route == Route.Tools: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/tools.svg");
+                    text: "Tools";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Project: BreadcrumbSeparator {}
+                if root.current-route == Route.Project: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/project.svg");
+                    text: "Projects";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Workflow: BreadcrumbSeparator {}
+                if root.current-route == Route.Workflow: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/project.svg");
+                    text: "Projects";
+                    clicked => { root.navigate(Route.Project); }
+                }
+                if root.current-route == Route.Workflow: BreadcrumbSeparator {}
+                if root.current-route == Route.Workflow: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/commit.svg");
+                    text: "Workflow";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Chat: BreadcrumbSeparator {}
+                if root.current-route == Route.Chat: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/chat.svg");
+                    text: "Chat";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.List: BreadcrumbSeparator {}
+                if root.current-route == Route.List: BreadcrumbItem {
+                    icon: @image-url("../assets/icons/list.svg");
+                    text: "List";
+                    is-current: true;
                 }
             }
         }
+
+        if root.can-go-back: BreadcrumbBackButton {
+            clicked => { root.back(); }
+        }
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
     }
 }

@@ -1,98 +1,702 @@
-import { MaterialText, Vertical, Horizontal, RadioButtonTile, TonalButton, Switch, DropDownMenu, MenuItem, MaterialPalette } from "@material";
 import { AppState } from "../state/app_state.slint";
 import { UpdateLogic } from "../components/update/update.slint";
-import { LoadingIconOutlineButton } from "../components/button/loading_icon_outline_button.slint";
 import { PageView } from "../components/page/page_view.slint";
-import { CompactTextField } from "../components/input/compact_text_field.slint";
+import {
+    GitHubButton,
+    GitHubSegment,
+    GitHubSettingsNavItem,
+    GitHubTextField,
+    GitHubToggle
+} from "../components/settings/github_settings_controls.slint";
 
-component TokenField {
-    in property <string> label;
-    in-out property <string> value;
-    in property <string> placeholder;
-    in property <bool> reveal: false;
-    callback edited(string);
+component SectionHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> description: "";
 
-    VerticalLayout {
+    width: 100%;
+    height: root.description == "" ? 45px : 65px;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
         width: parent.width;
-        spacing: 6px;
+        height: 26px;
+        text: root.title;
+        font-size: 20px;
+        font-weight: 600;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        vertical-alignment: center;
+    }
 
-        MaterialText {
-            text: root.label;
-            font-size: 12px;
-            color: MaterialPalette.on_surface_variant;
-        }
+    if root.description != "": Text {
+        x: 0px;
+        y: 28px;
+        width: parent.width;
+        height: 20px;
+        text: root.description;
+        font-size: 14px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        vertical-alignment: center;
+        overflow: elide;
+    }
 
-        CompactTextField {
-            width: parent.width;
-            text <=> root.value;
-            placeholder: root.placeholder;
-            input-type: root.reveal ? InputType.text : InputType.password;
-            field-height: 38px;
-            border-radius-size: 10px;
-            input-font-size: 13px;
-            input-font-family: "Hiragino Sans GB";
-            field-background: MaterialPalette.surface_container_lowest;
-
-            edited => { root.edited(self.text); }
-        }
+    Rectangle {
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
     }
 }
 
-component SettingsTextField {
-    in property <string> label;
-    in-out property <string> value;
-    in property <string> placeholder;
-    callback edited(string);
+component SettingToggleRow inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in-out property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback toggled(bool);
 
-    VerticalLayout {
-        width: parent.width;
-        spacing: 6px;
+    width: 100%;
+    height: 64px;
+    background: transparent;
 
-        MaterialText {
-            text: root.label;
-            font-size: 12px;
-            color: MaterialPalette.on_surface_variant;
-        }
-
-        CompactTextField {
-            width: parent.width;
-            text <=> root.value;
-            placeholder: root.placeholder;
-            input-type: InputType.text;
-            field-height: 38px;
-            border-radius-size: 10px;
-            input-font-size: 13px;
-            input-font-family: "Hiragino Sans GB";
-            field-background: MaterialPalette.surface_container_lowest;
-
-            edited => { root.edited(self.text); }
-        }
+    Text {
+        x: 0px;
+        y: 10px;
+        width: parent.width - 72px;
+        height: 20px;
+        text: root.title;
+        font-size: 14px;
+        font-weight: 600;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        vertical-alignment: center;
+        overflow: elide;
     }
-}
 
-component HostingProviderTab inherits Rectangle {
-    in property <string> label;
-    in property <bool> selected: false;
-    callback clicked();
-
-    width: 86px;
-    height: 32px;
-    border-radius: 16px;
-    border-width: 1px;
-    border-color: root.selected ? MaterialPalette.primary : MaterialPalette.outline_variant;
-    background: root.selected ? MaterialPalette.secondary_container : MaterialPalette.surface_container_lowest;
-
-    MaterialText {
-        width: parent.width;
-        height: parent.height;
-        text: root.label;
-        horizontal_alignment: center;
-        vertical_alignment: center;
+    Text {
+        x: 0px;
+        y: 32px;
+        width: parent.width - 72px;
+        height: 18px;
+        text: root.description;
         font-size: 12px;
-        font-weight: root.selected ? 600 : 400;
-        color: root.selected ? MaterialPalette.on_secondary_container : MaterialPalette.on_surface_variant;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        vertical-alignment: center;
+        overflow: elide;
     }
-    TouchArea { clicked => { root.clicked(); } }
+
+    GitHubToggle {
+        x: parent.width - self.width;
+        y: 20px;
+        checked <=> root.checked;
+        enabled: root.enabled;
+        toggled(value) => { root.toggled(value); }
+    }
+}
+
+component ProviderNavigation inherits Rectangle {
+    in property <int> selected: 0;
+    callback changed(int);
+
+    width: 100%;
+    height: 32px;
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+
+        GitHubSegment {
+            text: "Gitee";
+            selected: root.selected == 0;
+            clicked => { root.changed(0); }
+        }
+        GitHubSegment {
+            text: "GitHub";
+            selected: root.selected == 1;
+            clicked => { root.changed(1); }
+        }
+        GitHubSegment {
+            text: "GitLab";
+            selected: root.selected == 2;
+            clicked => { root.changed(2); }
+        }
+    }
+}
+
+component SettingsPane inherits Rectangle {
+    in property <int> selected-section: 0;
+    in-out property <bool> simulate-crash-active: false;
+    in-out property <bool> reveal-git-tokens: false;
+    in-out property <bool> git-tokens-saved: false;
+    in-out property <bool> git-hosting-config-saved: false;
+    in-out property <bool> reveal-ai-agent-api-key: false;
+    in-out property <bool> ai-agent-saved: false;
+    in-out property <bool> ai-agent-testing: false;
+    in-out property <int> ai-agent-provider-index: -1;
+    in-out property <int> hosting-config-tab: 0;
+    callback check-update();
+    callback simulate-crash();
+
+    height: pane-content.preferred-height;
+    background: transparent;
+
+    pane-content := VerticalLayout {
+        width: root.width;
+        spacing: 24px;
+        alignment: start;
+
+        if root.selected-section == 0: VerticalLayout {
+            width: parent.width;
+            spacing: 24px;
+            alignment: start;
+
+            SectionHeader {
+                title: "General";
+                description: "Manage appearance and update preferences.";
+            }
+
+            VerticalLayout {
+                width: parent.width;
+                spacing: 12px;
+                alignment: start;
+
+                Text {
+                    text: "Appearance";
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                }
+                Text {
+                    width: parent.width;
+                    text: "Choose how Usher looks. Auto follows your system appearance.";
+                    font-size: 14px;
+                    color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: 32px;
+                    spacing: 8px;
+                    alignment: start;
+
+                    GitHubSegment {
+                        text: "Light";
+                        selected: AppState.theme-mode == 0;
+                        clicked => { AppState.toggle-theme(0); }
+                    }
+                    GitHubSegment {
+                        text: "Dark";
+                        selected: AppState.theme-mode == 1;
+                        clicked => { AppState.toggle-theme(1); }
+                    }
+                    GitHubSegment {
+                        text: "Auto";
+                        selected: AppState.theme-mode == 2;
+                        clicked => { AppState.toggle-theme(2); }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+            }
+
+            VerticalLayout {
+                width: parent.width;
+                spacing: 8px;
+                alignment: start;
+
+                Text {
+                    text: "Updates";
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                }
+
+                Rectangle {
+                    width: parent.width;
+                    height: 48px;
+                    background: transparent;
+
+                    Text {
+                        x: 0px;
+                        width: parent.width - 180px;
+                        height: parent.height;
+                        text: "Current version  v" + AppState.version;
+                        font-size: 14px;
+                        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    GitHubButton {
+                        x: parent.width - self.width;
+                        y: 8px;
+                        text: UpdateLogic.checking-update ? "Checking…" : "Check for updates";
+                        busy: UpdateLogic.checking-update;
+                        clicked => {
+                            UpdateLogic.checking-update = true;
+                            root.check-update();
+                        }
+                    }
+                }
+
+                SettingToggleRow {
+                    title: "Automatic updates";
+                    description: "Download and install new versions automatically.";
+                    checked: AppState.auto-update;
+                    toggled(value) => {
+                        AppState.auto-update = value;
+                        AppState.toggle-auto-update(value);
+                    }
+                }
+            }
+        }
+
+        if root.selected-section == 1: VerticalLayout {
+            width: parent.width;
+            spacing: 24px;
+            alignment: start;
+
+            SectionHeader {
+                title: "Code hosting";
+                description: "Configure credentials and enterprise API endpoints.";
+            }
+
+            VerticalLayout {
+                width: parent.width;
+                spacing: 12px;
+                alignment: start;
+
+                Text {
+                    text: "Personal access tokens";
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                }
+                Text {
+                    width: parent.width;
+                    text: "Tokens are stored locally and used for pull request summaries and workflows.";
+                    font-size: 14px;
+                    color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    wrap: word-wrap;
+                }
+
+                GitHubTextField {
+                    label: "GitHub token";
+                    text <=> AppState.git-github-token;
+                    placeholder: "ghp_xxx";
+                    secret: true;
+                    reveal: root.reveal-git-tokens;
+                    edited(_) => { root.git-tokens-saved = false; }
+                }
+                GitHubTextField {
+                    label: "GitLab token";
+                    text <=> AppState.git-gitlab-token;
+                    placeholder: "glpat-xxx";
+                    secret: true;
+                    reveal: root.reveal-git-tokens;
+                    edited(_) => { root.git-tokens-saved = false; }
+                }
+                GitHubTextField {
+                    label: "Gitee public token";
+                    text <=> AppState.git-gitee-token;
+                    placeholder: "token";
+                    secret: true;
+                    reveal: root.reveal-git-tokens;
+                    edited(_) => { root.git-tokens-saved = false; }
+                }
+                GitHubTextField {
+                    label: "Gitee Enterprise token";
+                    text <=> AppState.git-gitee-enterprise-token;
+                    placeholder: "private-token";
+                    secret: true;
+                    reveal: root.reveal-git-tokens;
+                    edited(_) => { root.git-tokens-saved = false; }
+                }
+
+                Rectangle {
+                    width: parent.width;
+                    height: 40px;
+                    background: transparent;
+
+                    GitHubToggle {
+                        x: 0px;
+                        y: 8px;
+                        checked <=> root.reveal-git-tokens;
+                    }
+                    Text {
+                        x: 60px;
+                        width: parent.width - 220px;
+                        height: parent.height;
+                        text: root.reveal-git-tokens ? "Tokens are visible" : "Show tokens";
+                        font-size: 13px;
+                        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    GitHubButton {
+                        x: parent.width - self.width;
+                        y: 4px;
+                        text: root.git-tokens-saved ? "Saved" : "Save tokens";
+                        primary: true;
+                        clicked => {
+                            AppState.save-git-tokens(
+                                AppState.git-github-token,
+                                AppState.git-gitlab-token,
+                                AppState.git-gitee-token,
+                                AppState.git-gitee-enterprise-token
+                            );
+                            root.git-tokens-saved = true;
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+            }
+
+            VerticalLayout {
+                width: parent.width;
+                spacing: 12px;
+                alignment: start;
+
+                Text {
+                    text: "Enterprise API configuration";
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                }
+                Text {
+                    width: parent.width;
+                    text: "Enter a service host or a complete REST API root. Provider version paths are added when omitted.";
+                    font-size: 14px;
+                    color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    wrap: word-wrap;
+                }
+
+                ProviderNavigation {
+                    selected: root.hosting-config-tab;
+                    changed(value) => {
+                        root.hosting-config-tab = value;
+                        root.git-hosting-config-saved = false;
+                    }
+                }
+
+                if root.hosting-config-tab == 0: VerticalLayout {
+                    width: parent.width;
+                    spacing: 12px;
+                    GitHubTextField {
+                        label: "Gitee API base URL";
+                        text <=> AppState.git-gitee-api-base-url;
+                        placeholder: "https://code.example.com/api/v8";
+                        edited(_) => { root.git-hosting-config-saved = false; }
+                    }
+                    GitHubTextField {
+                        label: "Gitee Enterprise";
+                        text <=> AppState.git-gitee-enterprise;
+                        placeholder: "enterprise-name";
+                        edited(_) => { root.git-hosting-config-saved = false; }
+                    }
+                }
+                if root.hosting-config-tab == 1: VerticalLayout {
+                    width: parent.width;
+                    spacing: 12px;
+                    GitHubTextField {
+                        label: "GitHub API base URL";
+                        text <=> AppState.git-github-api-base-url;
+                        placeholder: "https://github.example.com/api/v3";
+                        edited(_) => { root.git-hosting-config-saved = false; }
+                    }
+                    GitHubTextField {
+                        label: "GitHub Enterprise";
+                        text <=> AppState.git-github-enterprise;
+                        placeholder: "enterprise-name";
+                        edited(_) => { root.git-hosting-config-saved = false; }
+                    }
+                }
+                if root.hosting-config-tab == 2: VerticalLayout {
+                    width: parent.width;
+                    spacing: 12px;
+                    GitHubTextField {
+                        label: "GitLab API base URL";
+                        text <=> AppState.git-gitlab-api-base-url;
+                        placeholder: "https://gitlab.example.com/api/v4";
+                        edited(_) => { root.git-hosting-config-saved = false; }
+                    }
+                    GitHubTextField {
+                        label: "GitLab Enterprise";
+                        text <=> AppState.git-gitlab-enterprise;
+                        placeholder: "enterprise-name";
+                        edited(_) => { root.git-hosting-config-saved = false; }
+                    }
+                }
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: 32px;
+                    alignment: end;
+                    GitHubButton {
+                        text: root.git-hosting-config-saved ? "Saved" : "Save API configuration";
+                        primary: true;
+                        clicked => {
+                            AppState.save-git-hosting-config(
+                                AppState.git-github-api-base-url,
+                                AppState.git-github-enterprise,
+                                AppState.git-gitlab-api-base-url,
+                                AppState.git-gitlab-enterprise,
+                                AppState.git-gitee-api-base-url,
+                                AppState.git-gitee-enterprise
+                            );
+                            root.git-hosting-config-saved = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.selected-section == 2: VerticalLayout {
+            width: parent.width;
+            spacing: 24px;
+            alignment: start;
+
+            SectionHeader {
+                title: "AI Agent";
+                description: "Connect an OpenAI-compatible provider for workflow assistance.";
+            }
+
+            VerticalLayout {
+                width: parent.width;
+                spacing: 12px;
+                alignment: start;
+
+                Text {
+                    text: "Provider";
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                }
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: 32px;
+                    spacing: 8px;
+                    alignment: start;
+
+                    GitHubSegment {
+                        text: "Custom";
+                        selected: AppState.ai-agent-provider == "custom";
+                        clicked => {
+                            root.ai-agent-provider-index = 0;
+                            AppState.ai-agent-provider = "custom";
+                            root.ai-agent-saved = false;
+                        }
+                    }
+                    GitHubSegment {
+                        text: "DeepSeek";
+                        selected: AppState.ai-agent-provider == "deepseek";
+                        clicked => {
+                            root.ai-agent-provider-index = 1;
+                            AppState.ai-agent-provider = "deepseek";
+                            AppState.ai-agent-base-url = "https://api.deepseek.com";
+                            AppState.ai-agent-model = "deepseek-v4-flash";
+                            root.ai-agent-saved = false;
+                        }
+                    }
+                    GitHubSegment {
+                        text: "OpenAI";
+                        selected: AppState.ai-agent-provider == "openai";
+                        clicked => {
+                            root.ai-agent-provider-index = 2;
+                            AppState.ai-agent-provider = "openai";
+                            AppState.ai-agent-base-url = "https://api.openai.com/v1";
+                            AppState.ai-agent-model = "gpt-4o-mini";
+                            root.ai-agent-saved = false;
+                        }
+                    }
+                }
+
+                GitHubTextField {
+                    label: "Base URL";
+                    text <=> AppState.ai-agent-base-url;
+                    placeholder: "https://api.example.com/v1";
+                    caption: "The provider's OpenAI-compatible API root.";
+                    edited(_) => {
+                        AppState.ai-agent-provider = "custom";
+                        root.ai-agent-provider-index = 0;
+                        root.ai-agent-saved = false;
+                    }
+                }
+                GitHubTextField {
+                    label: "API key";
+                    text <=> AppState.ai-agent-api-key;
+                    placeholder: "sk-...";
+                    secret: true;
+                    reveal: root.reveal-ai-agent-api-key;
+                    edited(_) => { root.ai-agent-saved = false; }
+                }
+                GitHubTextField {
+                    label: "Model";
+                    text <=> AppState.ai-agent-model;
+                    placeholder: "Model name";
+                    caption: "For example: deepseek-v4-flash or gpt-4o-mini.";
+                    edited(_) => {
+                        AppState.ai-agent-provider = "custom";
+                        root.ai-agent-provider-index = 0;
+                        root.ai-agent-saved = false;
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width;
+                    height: 40px;
+                    background: transparent;
+
+                    GitHubToggle {
+                        x: 0px;
+                        y: 8px;
+                        checked <=> root.reveal-ai-agent-api-key;
+                    }
+                    Text {
+                        x: 60px;
+                        width: parent.width - 330px;
+                        height: parent.height;
+                        text: root.reveal-ai-agent-api-key ? "API key is visible" : "Show API key";
+                        font-size: 13px;
+                        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    save-agent := GitHubButton {
+                        x: parent.width - self.width;
+                        y: 4px;
+                        text: root.ai-agent-saved ? "Saved" : "Save";
+                        primary: true;
+                        clicked => {
+                            AppState.save-ai-agent-settings(
+                                AppState.ai-agent-provider,
+                                AppState.ai-agent-base-url,
+                                AppState.ai-agent-api-key,
+                                AppState.ai-agent-model
+                            );
+                            root.ai-agent-saved = true;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: 32px;
+                    alignment: end;
+                    GitHubButton {
+                        text: root.ai-agent-testing ? "Testing…" : "Test connection";
+                        busy: root.ai-agent-testing;
+                        clicked => {
+                            if (!root.ai-agent-testing) {
+                                root.ai-agent-testing = true;
+                                AppState.test-ai-agent-connection(
+                                    AppState.ai-agent-base-url,
+                                    AppState.ai-agent-api-key,
+                                    AppState.ai-agent-model
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.selected-section == 3: VerticalLayout {
+            width: parent.width;
+            spacing: 8px;
+            alignment: start;
+
+            SectionHeader {
+                title: "Diagnostics";
+                description: "Control local diagnostic output and failure testing.";
+            }
+
+            SettingToggleRow {
+                title: "Tracing file logs";
+                description: "Write detailed application traces to the local log directory.";
+                checked: AppState.tracing-logger-active;
+                toggled(value) => {
+                    AppState.tracing-logger-active = value;
+                    AppState.toggle-tracing-logger-active(value);
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+            }
+
+            SettingToggleRow {
+                title: "Terminal verbose logs";
+                description: "Include verbose terminal session diagnostics in local logs.";
+                checked: AppState.terminal-verbose-logging;
+                toggled(value) => {
+                    AppState.terminal-verbose-logging = value;
+                    AppState.toggle-terminal-verbose-logging(value);
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 84px;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: AppState.effective-dark-mode ? #f85149 : #cf222e;
+                background: AppState.effective-dark-mode ? #151b23 : #ffffff;
+
+                Text {
+                    x: 16px;
+                    y: 12px;
+                    width: parent.width - 104px;
+                    height: 20px;
+                    text: "Simulate a crash";
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                    vertical-alignment: center;
+                }
+                Text {
+                    x: 16px;
+                    y: 34px;
+                    width: parent.width - 104px;
+                    height: 34px;
+                    text: "Verify crash reporting. This immediately terminates the application.";
+                    font-size: 12px;
+                    color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    wrap: word-wrap;
+                }
+                GitHubToggle {
+                    x: parent.width - self.width - 16px;
+                    y: 30px;
+                    checked: root.simulate-crash-active;
+                    toggled(value) => {
+                        if (value) {
+                            root.simulate-crash();
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 export component Settings inherits PageView {
@@ -106,620 +710,184 @@ export component Settings inherits PageView {
     in-out property <bool> reveal-ai-agent-api-key: false;
     in-out property <bool> ai-agent-saved: false;
     in-out property <bool> ai-agent-testing: false;
-    // Driven by the root window after SettingsPage is instantiated so the
-    // native DropDownMenu receives an actual current-index transition.
     in-out property <int> ai-agent-provider-index: -1;
-    private property <int> hosting-config-tab: 0;
     in property <length> viewport-width: 0px;
-    private property <length> host-width: root.viewport-width > 0px ? root.viewport-width : root.width;
-    private property <length> content-width: max(320px, min(920px, root.host-width - 24px));
-    private property <bool> compact-layout: root.content-width < 720px;
 
-    Rectangle {
-        width: parent.width - 32px;
-        height: content-column.preferred-height + 12px;
+    private property <int> selected-section: 0;
+    private property <int> hosting-config-tab: 0;
+    private property <bool> compact-navigation-open: false;
+    // PageView already contributes a thin outer pad. On wide windows use a
+    // larger Settings gutter so the form column keeps clearer right spacing.
+    private property <length> page-gutter: root.width >= 1000px ? 48px : 16px;
+    private property <length> available-width: max(0px, root.width - root.page-gutter * 2);
+    private property <length> page-width: min(1120px, root.available-width);
+    private property <bool> compact-layout: root.page-width < 768px;
+    // Compact NavList: labels are short; keep the pane tighter than 224px.
+    private property <length> nav-width: 180px;
+    private property <length> nav-content-gap: 32px;
 
-        content-column := VerticalLayout {
-            width: root.content-width;
-            spacing: 16px;
+    page-host := Rectangle {
+        width: root.available-width;
+        height: page-column.preferred-height;
+        background: transparent;
+
+        page-column := VerticalLayout {
+            x: max(0px, (parent.width - root.page-width) / 2);
+            width: root.page-width;
+            spacing: 24px;
             alignment: start;
 
-            appearance-card := Rectangle {
-                width: root.content-width;
-                height: appearance-content.preferred-height + 32px;
-                border-radius: 16px;
-                border-width: 1px;
-                border-color: MaterialPalette.outline_variant;
-                background: MaterialPalette.surface_container_low;
-
-                appearance-content := VerticalLayout {
-                    x: 16px;
-                    y: 16px;
-                    width: parent.width - 32px;
-                    spacing: 12px;
-                    alignment: start;
-
-                    MaterialText {
-                        text: "Appearance";
-                        font_size: 16px;
-                        font_weight: 600;
-                        color: MaterialPalette.on_surface;
-                    }
-
-                    if !root.compact-layout: HorizontalLayout {
-                        width: parent.width;
-                        spacing: 14px;
-                        alignment: start;
-
-                        MaterialText {
-                            text: "Theme";
-                            font-size: 14px;
-                            color: MaterialPalette.on_surface;
-                            vertical_alignment: center;
-                        }
-                        RadioButtonTile { text: "Light"; checked: AppState.theme_mode == 0; radio_button_clicked => { AppState.toggle-theme(0); } }
-                        RadioButtonTile { text: "Dark"; checked: AppState.theme_mode == 1; radio_button_clicked => { AppState.toggle-theme(1); } }
-                        RadioButtonTile { text: "Auto"; checked: AppState.theme_mode == 2; radio_button_clicked => { AppState.toggle-theme(2); } }
-                    }
-
-                    if root.compact-layout: VerticalLayout {
-                        width: parent.width;
-                        spacing: 8px;
-                        alignment: start;
-
-                        MaterialText {
-                            text: "Theme";
-                            font-size: 14px;
-                            color: MaterialPalette.on_surface;
-                        }
-                        HorizontalLayout {
-                            width: parent.width;
-                            spacing: 10px;
-                            alignment: start;
-                            RadioButtonTile { text: "Light"; checked: AppState.theme_mode == 0; radio_button_clicked => { AppState.toggle-theme(0); } }
-                            RadioButtonTile { text: "Dark"; checked: AppState.theme_mode == 1; radio_button_clicked => { AppState.toggle-theme(1); } }
-                            RadioButtonTile { text: "Auto"; checked: AppState.theme_mode == 2; radio_button_clicked => { AppState.toggle-theme(2); } }
-                        }
-                    }
-                }
+            Text {
+                width: parent.width;
+                text: "Settings";
+                font-size: 24px;
+                font-weight: 600;
+                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
             }
 
-            updates-card := Rectangle {
-                width: root.content-width;
-                height: updates-content.preferred-height + 32px;
-                border-radius: 16px;
-                border-width: 1px;
-                border-color: MaterialPalette.outline_variant;
-                background: MaterialPalette.surface_container_low;
+            if !root.compact-layout: HorizontalLayout {
+                width: parent.width;
+                spacing: root.nav-content-gap;
+                alignment: start;
 
-                updates-content := VerticalLayout {
-                    x: 16px;
-                    y: 16px;
-                    width: parent.width - 32px;
-                    spacing: 12px;
+                VerticalLayout {
+                    width: root.nav-width;
+                    spacing: 4px;
                     alignment: start;
 
-                    MaterialText {
-                        text: "Updates";
-                        font_size: 16px;
-                        font_weight: 600;
-                        color: MaterialPalette.on_surface;
+                    GitHubSettingsNavItem {
+                        text: "General";
+                        selected: root.selected-section == 0;
+                        clicked => { root.selected-section = 0; }
                     }
-
-                    if !root.compact-layout: HorizontalLayout {
-                        width: parent.width;
-                        spacing: 12px;
-                        alignment: center;
-
-                        MaterialText { text: "Current Version"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
-                        MaterialText { text: "v" + AppState.version; font-size: 14px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        LoadingIconOutlineButton {
-                            loading: UpdateLogic.checking-update;
-                            text: "Check for Updates";
-                            min-height: 36px;
-                            clicked => {
-                                UpdateLogic.checking-update = true;
-                                root.check-update();
-                            }
-                        }
+                    GitHubSettingsNavItem {
+                        text: "Code hosting";
+                        selected: root.selected-section == 1;
+                        clicked => { root.selected-section = 1; }
                     }
-
-                    if root.compact-layout: VerticalLayout {
-                        width: parent.width;
-                        spacing: 8px;
-                        alignment: start;
-
-                        HorizontalLayout {
-                            width: parent.width;
-                            spacing: 10px;
-                            alignment: start;
-                            MaterialText { text: "Current Version"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
-                            MaterialText { text: "v" + AppState.version; font-size: 14px; color: MaterialPalette.on_surface_variant; vertical_alignment: center; }
-                        }
-                        LoadingIconOutlineButton {
-                            loading: UpdateLogic.checking-update;
-                            text: "Check for Updates";
-                            min-height: 36px;
-                            clicked => {
-                                UpdateLogic.checking-update = true;
-                                root.check-update();
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        width: parent.width;
-                        spacing: 12px;
-                        alignment: center;
-                        MaterialText { text: "Auto Update"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        Switch {
-                            checked: AppState.auto-update;
-                            width: 48px;
-                            height: 28px;
-                            checked_state_changed(checked) => {
-                                AppState.auto-update = checked;
-                                AppState.toggle-auto-update(checked);
-                            }
-                        }
-                    }
-                }
-            }
-
-            tokens-card := Rectangle {
-                width: root.content-width;
-                height: tokens-content.preferred-height + 32px;
-                border-radius: 16px;
-                border-width: 1px;
-                border-color: MaterialPalette.outline_variant;
-                background: MaterialPalette.surface_container_low;
-
-                tokens-content := VerticalLayout {
-                    x: 16px;
-                    y: 16px;
-                    width: parent.width - 32px;
-                    spacing: 10px;
-                    alignment: start;
-
-                    MaterialText {
-                        text: "Git Platform Tokens";
-                        font_size: 16px;
-                        font_weight: 600;
-                        color: MaterialPalette.on_surface;
-                    }
-                    Text {
-                        width: parent.width;
-                        text: "Used for PR count requests in Project and Workflow pages.";
-                        font-size: 12px;
-                        color: MaterialPalette.on_surface_variant;
-                        wrap: word-wrap;
-                    }
-
-                    TokenField {
-                        label: "GitHub Token";
-                        value <=> AppState.git-github-token;
-                        placeholder: "ghp_xxx";
-                        reveal: root.reveal-git-tokens;
-                        edited(_) => { root.git-tokens-saved = false; }
-                    }
-                    TokenField {
-                        label: "GitLab Token";
-                        value <=> AppState.git-gitlab-token;
-                        placeholder: "glpat-xxx";
-                        reveal: root.reveal-git-tokens;
-                        edited(_) => { root.git-tokens-saved = false; }
-                    }
-                    TokenField {
-                        label: "Gitee Public Token";
-                        value <=> AppState.git-gitee-token;
-                        placeholder: "token";
-                        reveal: root.reveal-git-tokens;
-                        edited(_) => { root.git-tokens-saved = false; }
-                    }
-                    TokenField {
-                        label: "Gitee Enterprise Token";
-                        value <=> AppState.git-gitee-enterprise-token;
-                        placeholder: "private-token";
-                        reveal: root.reveal-git-tokens;
-                        edited(_) => { root.git-tokens-saved = false; }
-                    }
-
-                    HorizontalLayout {
-                        width: parent.width;
-                        height: 36px;
-                        alignment: space-between;
-
-                        Rectangle {
-                            width: 180px;
-                            height: parent.height;
-                            background: transparent;
-
-                            Text {
-                                x: 0;
-                                y: (parent.height - self.preferred-height) / 2;
-                                text: root.reveal-git-tokens ? "Hide Tokens" : "Show Tokens";
-                                font-size: 12px;
-                                color: MaterialPalette.on_surface_variant;
-                                vertical_alignment: center;
-                            }
-
-                            Switch {
-                                x: 82px;
-                                y: (parent.height - self.height) / 2;
-                                checked <=> root.reveal-git-tokens;
-                                width: 48px;
-                                height: 28px;
-                            }
-                        }
-
-                        TonalButton {
-                            height: parent.height;
-                            text: root.git-tokens-saved ? "Saved" : "Save Git Tokens";
-                            clicked => {
-                                AppState.save-git-tokens(
-                                    AppState.git-github-token,
-                                    AppState.git-gitlab-token,
-                                    AppState.git-gitee-token,
-                                    AppState.git-gitee-enterprise-token
-                                );
-                                root.git-tokens-saved = true;
-                            }
-                        }
-                    }
-                }
-            }
-
-            hosting-config-card := Rectangle {
-                width: root.content-width;
-                height: hosting-config-content.preferred-height + 32px;
-                border-radius: 16px;
-                border-width: 1px;
-                border-color: MaterialPalette.outline_variant;
-                background: MaterialPalette.surface_container_low;
-
-                hosting-config-content := VerticalLayout {
-                    x: 16px;
-                    y: 16px;
-                    width: parent.width - 32px;
-                    spacing: 10px;
-                    alignment: start;
-
-                    MaterialText {
-                        text: "Code Hosting API Configuration";
-                        font-size: 16px;
-                        font-weight: 600;
-                        color: MaterialPalette.on_surface;
-                    }
-                    Text {
-                        width: parent.width;
-                        text: "Optional enterprise API URLs. Enter the service host or complete REST API root; the provider version path is added when omitted.";
-                        font-size: 12px;
-                        color: MaterialPalette.on_surface_variant;
-                        wrap: word-wrap;
-                    }
-
-                    HorizontalLayout {
-                        width: parent.width;
-                        height: 32px;
-                        spacing: 8px;
-                        HostingProviderTab { label: "Gitee"; selected: root.hosting-config-tab == 0; clicked => { root.hosting-config-tab = 0; } }
-                        HostingProviderTab { label: "GitHub"; selected: root.hosting-config-tab == 1; clicked => { root.hosting-config-tab = 1; } }
-                        HostingProviderTab { label: "GitLab"; selected: root.hosting-config-tab == 2; clicked => { root.hosting-config-tab = 2; } }
-                    }
-
-                    if root.hosting-config-tab == 0: VerticalLayout {
-                        width: parent.width;
-                        spacing: 10px;
-                        SettingsTextField {
-                            label: "Gitee API Base URL";
-                            value <=> AppState.git-gitee-api-base-url;
-                            placeholder: "https://code.example.com or https://code.example.com/api/v8";
-                            edited(_) => { root.git-hosting-config-saved = false; }
-                        }
-                        SettingsTextField {
-                            label: "Gitee Enterprise";
-                            value <=> AppState.git-gitee-enterprise;
-                            placeholder: "enterprise-name";
-                            edited(_) => { root.git-hosting-config-saved = false; }
-                        }
-                    }
-                    if root.hosting-config-tab == 1: VerticalLayout {
-                        width: parent.width;
-                        spacing: 10px;
-                        SettingsTextField {
-                            label: "GitHub API Base URL";
-                            value <=> AppState.git-github-api-base-url;
-                            placeholder: "https://github.example.com/api/v3";
-                            edited(_) => { root.git-hosting-config-saved = false; }
-                        }
-                        SettingsTextField {
-                            label: "GitHub Enterprise";
-                            value <=> AppState.git-github-enterprise;
-                            placeholder: "enterprise-name";
-                            edited(_) => { root.git-hosting-config-saved = false; }
-                        }
-                    }
-                    if root.hosting-config-tab == 2: VerticalLayout {
-                        width: parent.width;
-                        spacing: 10px;
-                        SettingsTextField {
-                            label: "GitLab API Base URL";
-                            value <=> AppState.git-gitlab-api-base-url;
-                            placeholder: "https://gitlab.example.com/api/v4";
-                            edited(_) => { root.git-hosting-config-saved = false; }
-                        }
-                        SettingsTextField {
-                            label: "GitLab Enterprise";
-                            value <=> AppState.git-gitlab-enterprise;
-                            placeholder: "enterprise-name";
-                            edited(_) => { root.git-hosting-config-saved = false; }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        width: parent.width;
-                        height: 36px;
-                        alignment: end;
-                        TonalButton {
-                            height: parent.height;
-                            text: root.git-hosting-config-saved ? "Saved" : "Save API Configuration";
-                            clicked => {
-                                AppState.save-git-hosting-config(
-                                    AppState.git-github-api-base-url,
-                                    AppState.git-github-enterprise,
-                                    AppState.git-gitlab-api-base-url,
-                                    AppState.git-gitlab-enterprise,
-                                    AppState.git-gitee-api-base-url,
-                                    AppState.git-gitee-enterprise
-                                );
-                                root.git-hosting-config-saved = true;
-                            }
-                        }
-                    }
-                }
-            }
-
-            ai-agent-card := Rectangle {
-                width: root.content-width;
-                height: ai-agent-content.preferred-height + 32px;
-                border-radius: 16px;
-                border-width: 1px;
-                border-color: MaterialPalette.outline_variant;
-                background: MaterialPalette.surface_container_low;
-
-                ai-agent-content := VerticalLayout {
-                    x: 16px;
-                    y: 16px;
-                    width: parent.width - 32px;
-                    spacing: 10px;
-                    alignment: start;
-
-                    MaterialText {
+                    GitHubSettingsNavItem {
                         text: "AI Agent";
-                        font_size: 16px;
-                        font_weight: 600;
-                        color: MaterialPalette.on_surface;
+                        selected: root.selected-section == 2;
+                        clicked => { root.selected-section = 2; }
                     }
-                    Text {
-                        width: parent.width;
-                        text: "Connect an OpenAI-compatible provider such as DeepSeek. Set the provider URL, API key, and model name.";
-                        font-size: 12px;
-                        color: MaterialPalette.on_surface_variant;
-                        wrap: word-wrap;
+                    GitHubSettingsNavItem {
+                        text: "Diagnostics";
+                        selected: root.selected-section == 3;
+                        clicked => { root.selected-section = 3; }
                     }
+                }
 
-                    provider-select := Rectangle {
-                        width: parent.width;
-                        // Material's supported compact minimum. Do not use its
-                        // preferred height here: it can expand to two rows.
-                        height: 56px;
-                        background: transparent;
-
-                        provider-dropdown := DropDownMenu {
-                            width: parent.width;
-                            height: parent.height;
-                            label: "";
-                            items: [
-                                { text: "Custom", enabled: true },
-                                { text: "DeepSeek", enabled: true },
-                                { text: "OpenAI", enabled: true },
-                            ];
-                            current-index <=> root.ai-agent-provider-index;
-                            selected(index) => {
-                                root.ai-agent-provider-index = index;
-                                if (index == 0) {
-                                    AppState.ai-agent-provider = "custom";
-                                } else if (index == 1) {
-                                    AppState.ai-agent-provider = "deepseek";
-                                    AppState.ai-agent-base-url = "https://api.deepseek.com";
-                                    AppState.ai-agent-model = "deepseek-v4-flash";
-                                    root.ai-agent-saved = false;
-                                } else if (index == 2) {
-                                    AppState.ai-agent-provider = "openai";
-                                    AppState.ai-agent-base-url = "https://api.openai.com/v1";
-                                    AppState.ai-agent-model = "gpt-4o-mini";
-                                    root.ai-agent-saved = false;
-                                }
-                            }
-                        }
-
-                        // Cover DropDownMenu's uninitialized internal text while
-                        // retaining its native touch target and popup behavior.
-                        Rectangle {
-                            x: 1px;
-                            y: 1px;
-                            width: parent.width - 48px;
-                            height: parent.height - 2px;
-                            background: MaterialPalette.surface_container_highest;
-                        }
-                        MaterialText {
-                            x: 16px;
-                            y: (parent.height - self.preferred-height) / 2 + 8px;
-                            width: parent.width - 68px;
-                            text: AppState.ai-agent-provider == "deepseek" ? "DeepSeek" :
-                                AppState.ai-agent-provider == "openai" ? "OpenAI" : "Custom";
-                            font-size: 16px;
-                            color: MaterialPalette.on_surface;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    SettingsTextField {
-                        label: "OpenAI Base URL";
-                        value <=> AppState.ai-agent-base-url;
-                        placeholder: "https://api.deepseek.com or https://api.openai.com/v1";
-                        edited(_) => { AppState.ai-agent-provider = "custom"; root.ai-agent-saved = false; }
-                    }
-                    TokenField {
-                        label: "OpenAI API Key";
-                        value <=> AppState.ai-agent-api-key;
-                        placeholder: "sk-...";
-                        reveal: root.reveal-ai-agent-api-key;
-                        edited(_) => { root.ai-agent-saved = false; }
-                    }
-                    SettingsTextField {
-                        label: "Model Name (for example: deepseek-v4-flash or deepseek-v4-pro)";
-                        value <=> AppState.ai-agent-model;
-                        placeholder: "deepseek-v4-flash";
-                        edited(_) => { AppState.ai-agent-provider = "custom"; root.ai-agent-saved = false; }
-                    }
-
-                    HorizontalLayout {
-                        width: parent.width;
-                        height: 36px;
-                        alignment: space-between;
-
-                        Rectangle {
-                            width: 145px;
-                            height: parent.height;
-                            background: transparent;
-                            Text {
-                                x: 0;
-                                y: (parent.height - self.preferred-height) / 2;
-                                text: root.reveal-ai-agent-api-key ? "Hide API Key" : "Show API Key";
-                                font-size: 12px;
-                                color: MaterialPalette.on_surface_variant;
-                            }
-                            Switch {
-                                x: 88px;
-                                y: (parent.height - self.height) / 2;
-                                checked <=> root.reveal-ai-agent-api-key;
-                                width: 48px;
-                                height: 28px;
-                            }
-                        }
-                        right-actions := HorizontalLayout {
-                            height: parent.height;
-                            spacing: 10px;
-                            alignment: end;
-
-                            LoadingIconOutlineButton {
-                                loading: root.ai-agent-testing;
-                                text: "Test Connection";
-                                min-height: parent.height;
-                                clicked => {
-                                    if (!root.ai-agent-testing) {
-                                        root.ai-agent-testing = true;
-                                        AppState.test-ai-agent-connection(
-                                            AppState.ai-agent-base-url,
-                                            AppState.ai-agent-api-key,
-                                            AppState.ai-agent-model
-                                        );
-                                    }
-                                }
-                            }
-                            TonalButton {
-                                height: parent.height;
-                                text: root.ai-agent-saved ? "Saved" : "Save AI Agent";
-                                clicked => {
-                                    AppState.save-ai-agent-settings(
-                                        AppState.ai-agent-provider,
-                                        AppState.ai-agent-base-url,
-                                        AppState.ai-agent-api-key,
-                                        AppState.ai-agent-model
-                                    );
-                                    root.ai-agent-saved = true;
-                                }
-                            }
-                        }
-                    }
+                SettingsPane {
+                    width: root.page-width - root.nav-width - root.nav-content-gap;
+                    selected-section: root.selected-section;
+                    simulate-crash-active <=> root.simulate-crash-active;
+                    reveal-git-tokens <=> root.reveal-git-tokens;
+                    git-tokens-saved <=> root.git-tokens-saved;
+                    git-hosting-config-saved <=> root.git-hosting-config-saved;
+                    reveal-ai-agent-api-key <=> root.reveal-ai-agent-api-key;
+                    ai-agent-saved <=> root.ai-agent-saved;
+                    ai-agent-testing <=> root.ai-agent-testing;
+                    ai-agent-provider-index <=> root.ai-agent-provider-index;
+                    hosting-config-tab <=> root.hosting-config-tab;
+                    check-update => { root.check-update(); }
+                    simulate-crash => { root.simulate-crash(); }
                 }
             }
 
-            diagnostics-card := Rectangle {
-                width: root.content-width;
-                height: diagnostics-content.preferred-height + 32px;
-                border-radius: 16px;
-                border-width: 1px;
-                border-color: MaterialPalette.outline_variant;
-                background: MaterialPalette.surface_container_low;
+            if root.compact-layout: VerticalLayout {
+                width: parent.width;
+                spacing: 16px;
+                alignment: start;
 
-                diagnostics-content := VerticalLayout {
-                    x: 16px;
-                    y: 16px;
-                    width: parent.width - 32px;
-                    spacing: 12px;
-                    alignment: start;
+                Rectangle {
+                    width: parent.width;
+                    height: 40px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                    background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
 
-                    MaterialText {
-                        text: "Diagnostics";
-                        font_size: 16px;
-                        font_weight: 600;
-                        color: MaterialPalette.on_surface;
+                    Text {
+                        x: 12px;
+                        width: parent.width - 48px;
+                        height: parent.height;
+                        text: root.selected-section == 0 ? "General"
+                            : (root.selected-section == 1 ? "Code hosting"
+                                : (root.selected-section == 2 ? "AI Agent" : "Diagnostics"));
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                        vertical-alignment: center;
                     }
+                    Image {
+                        x: parent.width - 28px;
+                        y: 12px;
+                        width: 16px;
+                        height: 16px;
+                        source: @image-url("../assets/icons/octicon-chevron-down-16.svg");
+                        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                        transform-rotation: root.compact-navigation-open ? 180deg : 0deg;
+                        transform-origin: { x: self.width / 2, y: self.height / 2 };
+                    }
+                    TouchArea {
+                        width: 100%;
+                        height: 100%;
+                        mouse-cursor: pointer;
+                        clicked => { root.compact-navigation-open = !root.compact-navigation-open; }
+                    }
+                }
 
-                    HorizontalLayout {
-                        width: parent.width;
-                        spacing: 12px;
-                        alignment: center;
-                        MaterialText { text: "Tracing File Logs"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        Switch {
-                            checked: AppState.tracing-logger-active;
-                            width: 48px;
-                            height: 28px;
-                            checked_state_changed(checked) => {
-                                AppState.tracing-logger-active = checked;
-                                AppState.toggle-tracing-logger-active(checked);
-                            }
+                if root.compact-navigation-open: Rectangle {
+                    width: parent.width;
+                    height: 136px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+
+                    VerticalLayout {
+                        x: 4px;
+                        y: 4px;
+                        width: parent.width - 8px;
+                        spacing: 0px;
+
+                        GitHubSettingsNavItem {
+                            text: "General";
+                            selected: root.selected-section == 0;
+                            clicked => { root.selected-section = 0; root.compact-navigation-open = false; }
+                        }
+                        GitHubSettingsNavItem {
+                            text: "Code hosting";
+                            selected: root.selected-section == 1;
+                            clicked => { root.selected-section = 1; root.compact-navigation-open = false; }
+                        }
+                        GitHubSettingsNavItem {
+                            text: "AI Agent";
+                            selected: root.selected-section == 2;
+                            clicked => { root.selected-section = 2; root.compact-navigation-open = false; }
+                        }
+                        GitHubSettingsNavItem {
+                            text: "Diagnostics";
+                            selected: root.selected-section == 3;
+                            clicked => { root.selected-section = 3; root.compact-navigation-open = false; }
                         }
                     }
+                }
 
-                    HorizontalLayout {
-                        width: parent.width;
-                        spacing: 12px;
-                        alignment: center;
-                        MaterialText { text: "Terminal Verbose Logs"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        Switch {
-                            checked: AppState.terminal-verbose-logging;
-                            width: 48px;
-                            height: 28px;
-                            checked_state_changed(checked) => {
-                                AppState.terminal-verbose-logging = checked;
-                                AppState.toggle-terminal-verbose-logging(checked);
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        width: parent.width;
-                        spacing: 12px;
-                        alignment: center;
-                        MaterialText { text: "Simulate Crash"; font-size: 14px; color: MaterialPalette.on_surface; vertical_alignment: center; }
-                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                        Switch {
-                            checked: root.simulate-crash-active;
-                            width: 48px;
-                            height: 28px;
-                            checked_state_changed(checked) => {
-                                if (checked) {
-                                    root.simulate-crash();
-                                }
-                            }
-                        }
-                    }
+                SettingsPane {
+                    width: root.page-width;
+                    selected-section: root.selected-section;
+                    simulate-crash-active <=> root.simulate-crash-active;
+                    reveal-git-tokens <=> root.reveal-git-tokens;
+                    git-tokens-saved <=> root.git-tokens-saved;
+                    git-hosting-config-saved <=> root.git-hosting-config-saved;
+                    reveal-ai-agent-api-key <=> root.reveal-ai-agent-api-key;
+                    ai-agent-saved <=> root.ai-agent-saved;
+                    ai-agent-testing <=> root.ai-agent-testing;
+                    ai-agent-provider-index <=> root.ai-agent-provider-index;
+                    hosting-config-tab <=> root.hosting-config-tab;
+                    check-update => { root.check-update(); }
+                    simulate-crash => { root.simulate-crash(); }
                 }
             }
         }

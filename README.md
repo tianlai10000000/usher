@@ -8,7 +8,7 @@ Usher is an alpha-stage desktop workspace for managing local Git projects and re
 
 - Manage local repositories, aliases, tags, logos, and remote repository URLs.
 - Inspect open PR/MR counts for `fat`, `uat`, and `prod` across GitHub, GitLab, and Gitee-compatible servers.
-- Run guided Branch, Tag, PR, and CD workflows with per-project state.
+- Run guided Tag and PR workflows with per-project state. Branch and CD tabs are temporarily Coming soon.
 - Open a project-aware terminal drawer without leaving the current page.
 - Configure an independent OpenAI-compatible AI Agent provider (such as DeepSeek); the existing RAG chat view remains separate.
 - Receive update, toast, notification, tray, and network-status feedback.
@@ -131,6 +131,7 @@ src/main.rs
            -> ui/components/   reusable application components
      -> src/app_runtime.rs     shared Tokio runtime
      -> src/http/mod.rs        shared HTTP clients and interceptors
+     -> src/platform/          native appearance, title bar, window interaction, fonts
      -> src/project/           project registry, logos, PR summaries
      -> src/workflow/          Branch / Tag / PR / CD state and execution
      -> src/terminal/          PTY session and terminal rendering
@@ -174,6 +175,7 @@ The GitHub release workflow produces macOS archives/DMGs and Windows ZIP bundles
 
 - [English architecture](docs/architecture.md)
 - [中文架构文档](docs/architecture.zh.md)
+- [Project structure audit and refactoring roadmap (中文)](docs/architecture-structure-audit.md)
 - [Coding-agent instructions](AGENTS.md)
 - [Specification index](docs/specs/README.md)
 - [Pull request workflow specification](docs/specs/pr-review.md)

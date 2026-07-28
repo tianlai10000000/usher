@@ -3,7 +3,6 @@
 //! `project_name` is always the repository name extracted from `remote_repo`
 //! (the final path segment before `.git`), never the editable project alias.
 
-use base64::Engine as _;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap};
 use serde_json::Value;
 
@@ -12,13 +11,29 @@ use crate::http::{self, RequestOptions};
 
 use super::{
     GiteeApiProfile, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
-    PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine, PullRequestItem,
-    PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
-    PullRequestRevertResult, PullRequestReviewAction, PullRequestState, RepoLocator, RepoType,
-    commit_count_from_detail, configured_api_base_url, configured_enterprise,
-    configured_gitee_token, conversation_commit_batch_items, conversation_count_from_detail,
-    conversation_merged_item, finalize_conversation_timeline, gitee_api_profile,
-    is_redundant_commit_system_note, is_redundant_merge_system_note, percent_encode_path,
+    PullRequestDiffDetail, PullRequestDiffFile, PullRequestItem, PullRequestMergeMethod,
+    PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestRevertResult,
+    PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
+    configured_api_base_url, configured_enterprise, configured_gitee_token,
+    conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
+    finalize_conversation_timeline, gitee_api_profile, is_redundant_commit_system_note,
+    is_redundant_merge_system_note, percent_encode_path,
+};
+
+mod conversation;
+mod decode;
+mod readiness;
+mod revert;
+mod transport;
+
+use conversation::*;
+use decode::*;
+use readiness::{gitee_enterprise_merge_readiness, gitee_public_merge_readiness};
+use revert::{enterprise_commit_refs_can_revert, enterprise_data_object};
+use transport::{
+    enterprise_authenticated_builder, enterprise_pull_request_endpoint,
+    enterprise_repository_commit_endpoint, parse_gitee_merge_method, public_authenticated_builder,
+    public_authenticated_request, public_repo_endpoint,
 };
 
 /// Fetch the stable provider project id for a remote repository.
@@ -702,7 +717,9 @@ async fn get_enterprise_pull_request_action_state(
     };
 
     Ok(PullRequestActionState {
-        can_comment: has_token && !terminal,
+        // Ordinary Conversation notes remain available after merge/close, matching
+        // GitHub's timeline composer. Review decisions stay open-MR only.
+        can_comment: has_token,
         can_approve: has_token && !terminal,
         can_request_changes: has_token && !terminal,
         can_merge,
@@ -737,10 +754,6 @@ async fn get_public_pull_request_action_state(
     .map_err(|error| error.to_string())?;
     let has_token = configured_gitee_token(GiteeApiProfile::PublicV5).is_some();
     let readiness = gitee_public_merge_readiness(&detail);
-    let terminal = matches!(
-        readiness.kind,
-        PullRequestReadinessKind::Merged | PullRequestReadinessKind::Closed
-    );
     let can_merge = has_token && readiness.kind == PullRequestReadinessKind::Ready;
     let merge_block_reason = if !has_token {
         "Configure a Gitee Public Token in Settings to comment or merge this pull request."
@@ -749,7 +762,7 @@ async fn get_public_pull_request_action_state(
         readiness.detail.clone()
     };
     Ok(PullRequestActionState {
-        can_comment: has_token && !terminal,
+        can_comment: has_token,
         // Gitee public v5 exposes PR comments but has no approve/request-change review endpoint.
         can_approve: false,
         can_request_changes: false,
@@ -769,150 +782,6 @@ async fn get_public_pull_request_action_state(
             PullRequestMergeMethod::Squash,
         ],
     })
-}
-
-fn gitee_enterprise_merge_readiness(
-    current: &Value,
-    detail: &Value,
-    review_state: &str,
-) -> PullRequestReadiness {
-    let state = string_field(current, "state")
-        .or_else(|| string_field(detail, "state"))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if state == "merged" {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::Merged,
-            "Gitee Enterprise reports that this pull request has been merged.",
-        );
-    }
-    if state == "closed" {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::Closed,
-            "Gitee Enterprise reports that this pull request is closed.",
-        );
-    }
-    if state == "drafted"
-        || detail.get("draft").and_then(Value::as_bool) == Some(true)
-        || detail.get("is_draft").and_then(Value::as_bool) == Some(true)
-    {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::Draft,
-            "Mark the Gitee Enterprise pull request as ready before merging.",
-        );
-    }
-
-    // The enterprise v8 document defines conflict_result=true as “no
-    // conflict”; false is the conflicting state.
-    if current.get("conflict_result").and_then(Value::as_bool) == Some(false) {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::Conflicts,
-            "Gitee Enterprise reports merge conflicts between the source and target branches.",
-        );
-    }
-    if review_state == "review_rejected" {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::ChangesRequested,
-            "A Gitee Enterprise reviewer requested changes.",
-        );
-    }
-    if current.get("scan_quality_state").and_then(Value::as_bool) == Some(false) {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::ChecksFailed,
-            "The Gitee Enterprise quality gate has not passed.",
-        );
-    }
-    let note = current.get("note").unwrap_or(&Value::Null);
-    let unresolved_notes = note
-        .get("resolve_note_enabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-        && note.get("resolve").and_then(Value::as_u64).unwrap_or(0)
-            < note.get("total").and_then(Value::as_u64).unwrap_or(0);
-    if unresolved_notes {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::DiscussionsUnresolved,
-            "Resolve all required Gitee Enterprise review comments before merging.",
-        );
-    }
-    let review_requirement_unmet = ["primary_review", "general_review"].iter().any(|key| {
-        current
-            .get(key)
-            .and_then(|review| review.get("meet_merger_conditions"))
-            .and_then(Value::as_bool)
-            == Some(false)
-    });
-    if review_state == "review_pending" || review_requirement_unmet {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::ReviewRequired,
-            "Required Gitee Enterprise reviews have not been completed.",
-        );
-    }
-    if current.get("strategy_result").and_then(Value::as_bool) == Some(false) {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::Blocked,
-            "A Gitee Enterprise merge strategy or repository rule is blocking this merge.",
-        );
-    }
-    if current
-        .get("can_merge")
-        .and_then(Value::as_bool)
-        .or_else(|| current.get("can_be_merge").and_then(Value::as_bool))
-        == Some(true)
-    {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::Ready,
-            "All merge conditions reported by Gitee Enterprise are satisfied.",
-        );
-    }
-    PullRequestReadiness::new(
-        PullRequestReadinessKind::Blocked,
-        "Gitee Enterprise reports that this pull request does not currently meet the merge conditions.",
-    )
-}
-
-fn gitee_public_merge_readiness(detail: &Value) -> PullRequestReadiness {
-    let state = string_field(detail, "state")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if state == "merged" {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::Merged,
-            "Gitee public v5 reports that this pull request has been merged.",
-        );
-    }
-    if state == "closed" {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::Closed,
-            "Gitee public v5 reports that this pull request is closed.",
-        );
-    }
-    if detail.get("draft").and_then(Value::as_bool) == Some(true)
-        || detail.get("is_draft").and_then(Value::as_bool) == Some(true)
-    {
-        return PullRequestReadiness::new(
-            PullRequestReadinessKind::Draft,
-            "Mark the Gitee pull request as ready before merging.",
-        );
-    }
-    match detail
-        .get("mergeable")
-        .and_then(Value::as_bool)
-        .or_else(|| detail.get("can_merge").and_then(Value::as_bool))
-    {
-        Some(true) if state == "open" || state == "opened" => PullRequestReadiness::new(
-            PullRequestReadinessKind::Ready,
-            "Gitee public v5 reports that this pull request can be merged.",
-        ),
-        Some(false) => PullRequestReadiness::new(
-            PullRequestReadinessKind::Blocked,
-            "Gitee public v5 reports that this pull request cannot currently be merged.",
-        ),
-        _ => PullRequestReadiness::new(
-            PullRequestReadinessKind::Unavailable,
-            "Gitee public v5 did not return a mergeable state for this pull request.",
-        ),
-    }
 }
 
 pub(super) async fn get_pull_request_conversation(
@@ -1113,124 +982,6 @@ pub(super) async fn get_pull_request_conversation(
     Ok(finalize_conversation_timeline(description, activity))
 }
 
-fn expand_enterprise_conversation_notes(values: &[Value]) -> Vec<PullRequestConversationItem> {
-    let mut items = Vec::new();
-    for value in values {
-        let mut nodes = Vec::new();
-        collect_enterprise_note_nodes(value, &mut nodes);
-        items.extend(nodes.into_iter().map(decode_conversation_comment));
-    }
-    items
-}
-
-fn collect_enterprise_note_nodes<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
-    if let Some(notes) = value.get("notes").and_then(Value::as_array) {
-        if !notes.is_empty() {
-            for note in notes {
-                out.push(note);
-                // Enterprise comments are two levels: root + children replies.
-                if let Some(children) = note.get("children").and_then(Value::as_array) {
-                    out.extend(children.iter());
-                }
-            }
-            return;
-        }
-    }
-    // Theme / ordinary comments may appear as a flat `note` on the data item.
-    // Skip thread shells that only carry diff-context `content` and no body.
-    if conversation_note_body(value).is_empty() {
-        return;
-    }
-    out.push(value);
-}
-
-fn decode_conversation_comment(value: &Value) -> PullRequestConversationItem {
-    PullRequestConversationItem {
-        id: string_field(value, "id").unwrap_or_default(),
-        kind: if value
-            .get("system")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            "event".to_string()
-        } else {
-            "comment".to_string()
-        },
-        author: nested_string(value, "author", "name")
-            .or_else(|| nested_string(value, "author", "username"))
-            .or_else(|| nested_string(value, "user", "name"))
-            .or_else(|| nested_string(value, "user", "login"))
-            .unwrap_or_else(|| "Unknown author".to_string()),
-        avatar_url: nested_string(value, "author", "avatar_url")
-            .or_else(|| nested_string(value, "author", "avatar"))
-            .or_else(|| nested_string(value, "user", "avatar_url"))
-            .or_else(|| nested_string(value, "user", "avatar"))
-            .unwrap_or_default(),
-        author_association: String::new(),
-        // Nested enterprise discussion threads use `note`. Official enterprise
-        // notes use markdown string `content` (objects are diff context only).
-        // Public v5 uses `body`; review payloads may use `comment`.
-        body: conversation_note_body(value),
-        created_at: string_field(value, "created_at")
-            .or_else(|| string_field(value, "createdAt"))
-            .unwrap_or_default(),
-        state: string_field(value, "state").unwrap_or_default(),
-    }
-}
-
-fn decode_conversation_review(value: &Value) -> Option<PullRequestConversationItem> {
-    let state = string_field(value, "state")
-        .or_else(|| string_field(value, "result"))
-        .unwrap_or_default();
-    let body = conversation_note_body(value);
-    if body.trim().is_empty() && state.trim().is_empty() {
-        return None;
-    }
-    Some(PullRequestConversationItem {
-        id: string_field(value, "id")
-            .map(|id| format!("review-{id}"))
-            .unwrap_or_else(|| format!("review-{}", body.len())),
-        kind: "review".to_string(),
-        author: nested_string(value, "author", "name")
-            .or_else(|| nested_string(value, "author", "username"))
-            .or_else(|| nested_string(value, "user", "name"))
-            .or_else(|| nested_string(value, "user", "login"))
-            .or_else(|| nested_string(value, "reviewer", "name"))
-            .or_else(|| nested_string(value, "reviewer", "username"))
-            .unwrap_or_else(|| "Unknown reviewer".to_string()),
-        avatar_url: nested_string(value, "author", "avatar_url")
-            .or_else(|| nested_string(value, "author", "avatar"))
-            .or_else(|| nested_string(value, "user", "avatar_url"))
-            .or_else(|| nested_string(value, "user", "avatar"))
-            .or_else(|| nested_string(value, "reviewer", "avatar_url"))
-            .or_else(|| nested_string(value, "reviewer", "avatar"))
-            .unwrap_or_default(),
-        author_association: String::new(),
-        body,
-        created_at: string_field(value, "created_at")
-            .or_else(|| string_field(value, "createdAt"))
-            .or_else(|| string_field(value, "updated_at"))
-            .or_else(|| string_field(value, "updatedAt"))
-            .unwrap_or_default(),
-        state,
-    })
-}
-
-fn conversation_note_body(value: &Value) -> String {
-    // Gitee-only body resolution (GitHub/GitLab keep their own adapters).
-    // Internal enterprise notes docs: top-level / notes[].note is the markdown
-    // body; top-level content is diff context and must stay ignored as an object.
-    // Review submit responses nest the same text at note.note. Public v5 uses body.
-    string_field(value, "note")
-        .filter(|text| !text.trim().is_empty())
-        .or_else(|| nested_string(value, "note", "note").filter(|text| !text.trim().is_empty()))
-        .or_else(|| string_field(value, "body").filter(|text| !text.trim().is_empty()))
-        .or_else(|| string_field(value, "comment").filter(|text| !text.trim().is_empty()))
-        .or_else(|| string_field(value, "content").filter(|text| !text.trim().is_empty()))
-        .map(|text| text.trim().to_string())
-        .unwrap_or_default()
-}
-
 pub(super) async fn get_pull_request_commits(
     locator: &RepoLocator,
     repo_project_id: &str,
@@ -1275,24 +1026,6 @@ pub(super) async fn get_pull_request_commits(
 /// Commit range selection expects the provider-neutral list to run from the
 /// oldest PR commit to the newest. Enterprise deployments commonly return the
 /// MR collection newest-first, while other Gitee profiles return oldest-first.
-fn normalize_enterprise_commit_order(commits: &mut [PullRequestCommit]) {
-    let parse_time = |commit: &PullRequestCommit| {
-        chrono::DateTime::parse_from_rfc3339(commit.authored_at.trim()).ok()
-    };
-    let Some(first_time) = commits.iter().find_map(parse_time) else {
-        return;
-    };
-    let Some(last_time) = commits.iter().rev().find_map(parse_time) else {
-        return;
-    };
-    if first_time > last_time {
-        commits.reverse();
-    }
-}
-
-/// Bounded commit probe for the Commits tab badge. Never loads/caches the full list.
-///
-/// Enterprise v8 defaults `with_page=false` and returns every commit as a bare
 /// array; badge probes must force `with_page=true` and read `meta.total_count`.
 async fn count_pull_request_commits(
     locator: &RepoLocator,
@@ -1410,57 +1143,6 @@ async fn count_pull_request_comments(
     let payload: Value = response.json().await.ok()?;
     conversation_count_from_detail(&payload)
         .or_else(|| bounded_list_total(&headers, &payload, per_page))
-}
-
-fn decode_commit(value: &Value) -> PullRequestCommit {
-    let message = string_field(value, "message")
-        .or_else(|| {
-            value
-                .get("commit")
-                .and_then(|commit| string_field(commit, "message"))
-        })
-        .unwrap_or_default();
-    PullRequestCommit {
-        sha: string_field(value, "sha")
-            .or_else(|| string_field(value, "id"))
-            .unwrap_or_default(),
-        title: string_field(value, "title")
-            .unwrap_or_else(|| message.lines().next().unwrap_or_default().to_string()),
-        message,
-        author: string_field(value, "author_name")
-            .or_else(|| nested_string(value, "author", "name"))
-            .or_else(|| nested_string(value, "author", "login"))
-            .or_else(|| {
-                value
-                    .get("commit")
-                    .and_then(|commit| nested_string(commit, "author", "name"))
-            })
-            .unwrap_or_else(|| "Unknown author".to_string()),
-        avatar_url: nested_string(value, "author", "avatar_url")
-            .or_else(|| nested_string(value, "author", "avatar"))
-            .or_else(|| nested_string(value, "committer", "avatar_url"))
-            .or_else(|| nested_string(value, "committer", "avatar"))
-            .unwrap_or_default(),
-        // Internal enterprise MR commits document `created_at`; repository
-        // commits still use authored_date/committed_date. Keep both profiles.
-        authored_at: string_field(value, "authored_date")
-            .or_else(|| string_field(value, "authoredDate"))
-            .or_else(|| string_field(value, "committed_date"))
-            .or_else(|| string_field(value, "committedDate"))
-            .or_else(|| string_field(value, "created_at"))
-            .or_else(|| string_field(value, "createdAt"))
-            .or_else(|| {
-                value
-                    .get("commit")
-                    .and_then(|commit| nested_string(commit, "author", "date"))
-            })
-            .unwrap_or_default(),
-        verified: value
-            .get("verification")
-            .and_then(|verification| verification.get("verified"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-    }
 }
 
 pub(super) async fn submit_pull_request_review(
@@ -1738,360 +1420,8 @@ async fn enterprise_revert_context_from_detail(
     Ok((commit_sha, target_branch))
 }
 
-fn enterprise_commit_refs_can_revert(refs: &Value, pull_request_iid: &str) -> bool {
-    let pull_request_matches = refs
-        .get("pull_request")
-        .filter(|pull_request| pull_request.is_object())
-        .and_then(|pull_request| string_field(pull_request, "iid"))
-        .map(|value| value == pull_request_iid)
-        // Some enterprise versions document the association but omit the PR
-        // object. The two explicit capability flags remain authoritative.
-        .unwrap_or(true);
-    pull_request_matches
-        && refs
-            .get("merge_commit_by_pr")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        && refs
-            .get("can_revert")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-}
-
-fn enterprise_data_object(payload: &Value) -> &Value {
-    payload
-        .get("data")
-        .filter(|value| value.is_object())
-        .unwrap_or(payload)
-}
-
-fn enterprise_repository_commit_endpoint(
-    template: &str,
-    repo_project_id: &str,
-    commit_sha: &str,
-) -> Result<String, String> {
-    if repo_project_id.trim().is_empty() || commit_sha.trim().is_empty() {
-        return Err("Gitee project id or commit SHA is empty.".to_string());
-    }
-    Ok(template
-        .replace("{api_base_url}", enterprise_api_base_url()?.as_str())
-        .replace(
-            "{project_id}",
-            percent_encode_path(repo_project_id.trim()).as_str(),
-        )
-        .replace(
-            "{commit_sha}",
-            percent_encode_path(commit_sha.trim()).as_str(),
-        ))
-}
-
 fn short_sha(sha: &str) -> &str {
     sha.get(..7).unwrap_or(sha)
-}
-
-fn enterprise_pull_request_endpoint(
-    template: &str,
-    repo_project_id: &str,
-    pull_request_iid: &str,
-) -> Result<String, String> {
-    if repo_project_id.trim().is_empty() || pull_request_iid.trim().is_empty() {
-        return Err("Gitee project id or pull request number is empty.".to_string());
-    }
-    Ok(template
-        .replace("{api_base_url}", enterprise_api_base_url()?.as_str())
-        .replace(
-            "{project_id}",
-            percent_encode_path(repo_project_id.trim()).as_str(),
-        )
-        .replace(
-            "{merge_request_iid}",
-            percent_encode_path(pull_request_iid.trim()).as_str(),
-        ))
-}
-
-fn enterprise_authenticated_builder(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    let mut request = request
-        .header("OAUTH", "enabled")
-        .header(ACCEPT, "application/json");
-    if let Some(enterprise) = configured_enterprise(RepoType::Gitee) {
-        request = request.header("enterprise", enterprise);
-    }
-    if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
-        request = request.header("PRIVATE-TOKEN", token);
-    }
-    request
-}
-
-fn public_authenticated_builder(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    let mut request = request.header(ACCEPT, "application/json");
-    if let Some(token) = configured_gitee_token(GiteeApiProfile::PublicV5) {
-        request = request.header("Authorization", format!("token {token}"));
-    }
-    request
-}
-
-fn parse_gitee_merge_method(value: &str) -> Option<PullRequestMergeMethod> {
-    PullRequestMergeMethod::parse(value)
-}
-
-fn public_authenticated_request(endpoint: String) -> reqwest::RequestBuilder {
-    public_authenticated_builder(http::get(endpoint))
-}
-
-fn public_repo_endpoint(
-    template: &str,
-    locator: &RepoLocator,
-    pull_request_iid: Option<&str>,
-    file_path: Option<&str>,
-) -> String {
-    let mut endpoint = template
-        .replace("{scheme}", locator.scheme.as_str())
-        .replace("{authority}", locator.authority.as_str())
-        .replace(
-            "{namespace}",
-            percent_encode_path(locator.namespace.as_str()).as_str(),
-        )
-        .replace(
-            "{repository}",
-            percent_encode_path(locator.repo.as_str()).as_str(),
-        );
-    if let Some(iid) = pull_request_iid {
-        endpoint = endpoint.replace(
-            "{pull_request_number}",
-            percent_encode_path(iid.trim()).as_str(),
-        );
-    }
-    if let Some(path) = file_path {
-        endpoint = endpoint.replace("{file_path}", percent_encode_path(path).as_str());
-    }
-    endpoint
-}
-
-fn decode_base64_content(payload: &Value) -> Result<String, String> {
-    let content = payload
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "Gitee repository file response has no content.".to_string())?
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect::<String>();
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(content.as_bytes())
-        .map_err(|error| format!("Gitee repository file base64 decode failed: {error}"))?;
-    String::from_utf8(bytes)
-        .map_err(|error| format!("Gitee repository file is not UTF-8 text: {error}"))
-}
-
-fn decode_pull_request_diff(payload: &Value) -> Result<PullRequestDiffDetail, String> {
-    let diffs = payload
-        .get("diffs")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "Gitee pull request diff response has no diff list.".to_string())?;
-    let files = diffs.iter().map(decode_diff_file).collect::<Vec<_>>();
-    let refs = payload.get("diff_refs").unwrap_or(&Value::Null);
-    Ok(PullRequestDiffDetail {
-        added_lines: value_u32(payload, "added_lines")
-            .unwrap_or_else(|| files.iter().map(|file| file.added_lines).sum()),
-        removed_lines: value_u32(payload, "removed_lines")
-            .unwrap_or_else(|| files.iter().map(|file| file.removed_lines).sum()),
-        // Enterprise diffs document `commits_size` (not `commits_count`). Do not
-        // use top-level `count`: that is the changed-file total.
-        commit_count: commit_count_from_diff_payload(payload).unwrap_or(0),
-        // Enterprise diffs omit comment totals; callers overlay MR detail when available.
-        conversation_count: None,
-        base_sha: string_field(refs, "base_sha").unwrap_or_default(),
-        head_sha: string_field(refs, "head_sha").unwrap_or_default(),
-        start_sha: string_field(refs, "start_sha").unwrap_or_default(),
-        too_many_commits: payload
-            .get("too_more_commits")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        files,
-    })
-}
-
-/// Enterprise MR diffs expose `commits_size`; some deployments also use
-/// `commits_count` / `commit_count`. Never treat payload `count` as commits.
-fn commit_count_from_diff_payload(payload: &Value) -> Option<u32> {
-    value_u32(payload, "commits_size")
-        .or_else(|| value_u32(payload, "commits_count"))
-        .or_else(|| value_u32(payload, "commit_count"))
-        // Numeric `commits` for provider variants that expose a scalar count.
-        .or_else(|| value_u32(payload, "commits"))
-        // Some enterprise deployments omit every scalar but embed the complete
-        // commit list in the diff response. A non-empty, non-truncated array is
-        // exact and avoids a second request. Empty arrays remain "unknown".
-        .or_else(|| {
-            if payload.get("too_more_commits").and_then(Value::as_bool) != Some(false) {
-                return None;
-            }
-            let commits = payload.get("commits")?.as_array()?;
-            (!commits.is_empty())
-                .then(|| u32::try_from(commits.len()).ok())
-                .flatten()
-        })
-}
-
-fn trusted_enterprise_commit_count(detail: Option<&Value>, diff: &Value) -> Option<u32> {
-    detail
-        .and_then(commit_count_from_detail)
-        .filter(|count| *count > 0)
-        .or_else(|| commit_count_from_diff_payload(diff).filter(|count| *count > 0))
-}
-
-fn decode_diff_file(value: &Value) -> PullRequestDiffFile {
-    let statistic = value.get("statistic").unwrap_or(&Value::Null);
-    let path = string_field(statistic, "new_path")
-        .or_else(|| string_field(statistic, "path"))
-        .unwrap_or_else(|| "Unknown file".to_string());
-    let old_path = string_field(statistic, "old_path").unwrap_or_else(|| path.clone());
-    let mut lines = value
-        .get("content")
-        .and_then(|content| content.get("text"))
-        .and_then(Value::as_array)
-        .map(|values| values.iter().map(decode_diff_line).collect::<Vec<_>>())
-        .unwrap_or_default();
-    if lines.is_empty() {
-        lines.push(PullRequestDiffLine {
-            old_line: 0,
-            new_line: 0,
-            kind: "meta".to_string(),
-            content: "Binary, image, or oversized diff content is not available.".to_string(),
-        });
-    }
-
-    PullRequestDiffFile {
-        path,
-        old_path,
-        change_type: string_field(statistic, "type").unwrap_or_else(|| {
-            if value
-                .get("new_file")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                "new_file".to_string()
-            } else if value
-                .get("deleted_file")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                "deleted_file".to_string()
-            } else if value
-                .get("renamed_file")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                "renamed_file".to_string()
-            } else {
-                "edit_file".to_string()
-            }
-        }),
-        added_lines: value_u32(value, "added_lines").unwrap_or(0),
-        removed_lines: value_u32(value, "removed_lines").unwrap_or(0),
-        // Gitee documents statistic.viewed as file read permission, not the
-        // current reviewer's viewed/unviewed progress used by GitHub's filter.
-        viewed: false,
-        lines,
-    }
-}
-
-fn decode_diff_line(value: &Value) -> PullRequestDiffLine {
-    let raw_kind = string_field(value, "type").unwrap_or_default();
-    PullRequestDiffLine {
-        old_line: nested_line_number(value, "old_line"),
-        new_line: nested_line_number(value, "new_line"),
-        kind: match raw_kind.as_str() {
-            "new" => "addition",
-            "old" => "deletion",
-            "match" => "hunk",
-            _ => "context",
-        }
-        .to_string(),
-        content: html_diff_line_to_text(
-            string_field(value, "line_content")
-                .unwrap_or_default()
-                .as_str(),
-        ),
-    }
-}
-
-fn nested_line_number(value: &Value, key: &str) -> i32 {
-    value
-        .get(key)
-        .and_then(|line| line.get("line_num"))
-        .and_then(|number| {
-            number
-                .as_i64()
-                .or_else(|| number.as_str().and_then(|value| value.parse().ok()))
-        })
-        .and_then(|number| i32::try_from(number).ok())
-        .unwrap_or(0)
-}
-
-fn html_line_to_text(value: &str) -> String {
-    let mut text = String::with_capacity(value.len());
-    let mut inside_tag = false;
-    for character in value.chars() {
-        match character {
-            '<' => inside_tag = true,
-            '>' => inside_tag = false,
-            _ if !inside_tag => text.push(character),
-            _ => {}
-        }
-    }
-    decode_html_entities(text.as_str())
-}
-
-fn html_diff_line_to_text(value: &str) -> String {
-    // The enterprise diff endpoint sometimes pretty-prints its syntax HTML
-    // with literal CR/LF characters between spans. A PullRequestDiffLine is
-    // one source line, so retaining those separators makes Slint lay out one
-    // fixed-height diff row as multiple text lines. Remove only line-ending
-    // controls after decoding; ordinary spaces and tabs remain source data.
-    html_line_to_text(value)
-        .chars()
-        .filter(|character| !matches!(character, '\r' | '\n'))
-        .collect()
-}
-
-fn decode_html_entities(value: &str) -> String {
-    let mut decoded = String::with_capacity(value.len());
-    let mut remaining = value;
-    while let Some(entity_start) = remaining.find('&') {
-        decoded.push_str(&remaining[..entity_start]);
-        remaining = &remaining[entity_start..];
-        let Some(entity_end) = remaining.find(';').filter(|end| *end <= 12) else {
-            decoded.push('&');
-            remaining = &remaining[1..];
-            continue;
-        };
-        let entity = &remaining[1..entity_end];
-        let replacement = match entity {
-            "lt" => Some('<'),
-            "gt" => Some('>'),
-            "quot" => Some('"'),
-            "apos" => Some('\''),
-            "nbsp" => Some(' '),
-            "amp" => Some('&'),
-            numeric if numeric.starts_with("#x") || numeric.starts_with("#X") => {
-                u32::from_str_radix(&numeric[2..], 16)
-                    .ok()
-                    .and_then(char::from_u32)
-            }
-            numeric if numeric.starts_with('#') => {
-                numeric[1..].parse::<u32>().ok().and_then(char::from_u32)
-            }
-            _ => None,
-        };
-        if let Some(replacement) = replacement {
-            decoded.push(replacement);
-        } else {
-            decoded.push_str(&remaining[..=entity_end]);
-        }
-        remaining = &remaining[entity_end + 1..];
-    }
-    decoded.push_str(remaining);
-    decoded
 }
 
 async fn get_public_pull_requests(
@@ -2317,6 +1647,7 @@ fn to_pull_request_item(value: &Value) -> PullRequestItem {
             .or_else(|| string_field(value, "number"))
             .unwrap_or_else(|| "—".to_string()),
         title: string_field(value, "title").unwrap_or_else(|| "Untitled pull request".to_string()),
+        state: string_field(value, "state").unwrap_or_else(|| "open".to_string()),
         author: nested_string(value, "author", "name")
             .or_else(|| nested_string(value, "author", "username"))
             .or_else(|| nested_string(value, "user", "login"))

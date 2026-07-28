@@ -11,7 +11,8 @@ import { Settings as SettingsPage } from "./views/settings.slint";
 import { About as AboutPage } from "./views/about.slint";
 import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
 import { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
-import { PrReviewWorkspace, WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./views/workflow/pr_review_workspace.slint";
+import { PrReviewWorkspace } from "./views/workflow/pr_review_workspace.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 import { StepItem } from "./components/workflow/steps.slint";
 
 import { List as ListPage } from "./views/list.slint";
@@ -51,9 +52,7 @@ export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
 export { StepItem } from "./components/workflow/steps.slint";
 export { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
-export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./views/workflow/pr_review_workspace.slint";
-
-// import "./assets/fonts/Noto_Sans_SC/static/NotoSansSC-Regular.ttf";
+export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 
 export component MainWindow inherits Window {
     // Keep below Primer `$width-md` (768px) so the PR file tree can auto-collapse
@@ -67,7 +66,10 @@ export component MainWindow inherits Window {
     in-out property <bool> window-live-resizing: false;
     out property <length> chat-layout-window-width: self.width;
     out property <length> chat-layout-window-height: self.height;
-    // default-font-family: "Noto Sans SC";
+    // Rust selects a clear CJK-capable family for each desktop platform.
+    // Terminal content plus PR diff code/file-tree content keep their own fonts.
+    in property <string> application-font-family: "Hiragino Sans GB";
+    default-font-family: root.application-font-family;
 
     // 路由状态 - 对外暴露
     in-out property <Route> current-route: Route.Home;
@@ -97,6 +99,7 @@ export component MainWindow inherits Window {
             : min(root.shell-drawer-height > 0px ? root.shell-drawer-height : 280px, root.workflow-terminal-max-height))
         : 0px;
     private property <bool> page-memory-diag-pending: false;
+    private property <bool> page-scroll-reset-pending: false;
     private property <string> sidebar-hovered-tooltip-text: "";
     private property <int> sidebar-hovered-tooltip-index: -1;
 
@@ -140,7 +143,7 @@ export component MainWindow inherits Window {
     // Workflow state and callbacks
     in property <string> workflow-branch-result: "Ready to recreate branches.";
     in property <string> workflow-tag-result: "Ready to add or remove a tag.";
-    in-out property <int> workflow-selected-flow: 0;
+    in-out property <int> workflow-selected-flow: 2;
     in-out property <string> workflow-tag-mode: "local";
     in-out property <string> workflow-tag-version-mode: "patch";
     in property <string> workflow-tag-current-version: "v0.0.0";
@@ -173,6 +176,7 @@ export component MainWindow inherits Window {
     in-out property <string> project-modal-mode: "add";
     in-out property <string> project-modal-original-alias: "";
     in-out property <string> project-search-query: "";
+    in-out property <string> project-view-mode: "grid";
     in-out property <bool> settings-git-tokens-saved: false;
     in-out property <bool> settings-git-hosting-config-saved: false;
     in-out property <bool> settings-ai-agent-saved: false;
@@ -184,9 +188,14 @@ export component MainWindow inherits Window {
     in property <[WorkflowPullRequestItem]> workflow-pr-list-items: [];
     in property <int> workflow-pr-list-total: 0;
     in property <bool> workflow-pr-list-total-exact: false;
+    in property <int> workflow-pr-list-open-total: -1;
+    in property <int> workflow-pr-list-closed-total: -1;
     in property <int> workflow-pr-list-page: 1;
     in property <int> workflow-pr-list-page-count: 1;
     in property <string> workflow-pr-list-state: "open";
+    in property <string> workflow-pr-list-review-filter: "all";
+    in property <string> workflow-pr-list-assignee-filter: "any";
+    in property <string> workflow-pr-list-sort-filter: "newest";
     in property <bool> workflow-pr-list-loading: false;
     in property <string> workflow-pr-list-error: "";
     in-out property <bool> workflow-pr-review-visible: false;
@@ -313,6 +322,10 @@ export component MainWindow inherits Window {
     callback workflow-tag-stop();
     callback workflow-pr-list-state-change(string);
     callback workflow-pr-list-page-change(int);
+    callback workflow-pr-list-review-filter-change(string);
+    callback workflow-pr-list-assignee-filter-change(string);
+    callback workflow-pr-list-sort-filter-change(string);
+    callback workflow-copy-remote-repo(string);
     callback workflow-pr-review-open(string, string, string, string, string, string);
     callback workflow-pr-review-back();
     callback workflow-pr-review-select-tab(int);
@@ -377,6 +390,18 @@ export component MainWindow inherits Window {
         }
     }
 
+    page-scroll-reset-timer := Timer {
+        interval: 24ms;
+        running: root.page-scroll-reset-pending;
+        triggered => {
+            if root.current-route == Route.Settings {
+                page-scroll-view.viewport_x = 0px;
+            }
+            page-scroll-view.viewport_y = 0px;
+            root.page-scroll-reset-pending = false;
+        }
+    }
+
     changed width => {
         root.page-memory-diag-pending = true;
     }
@@ -387,6 +412,18 @@ export component MainWindow inherits Window {
 
     changed current-route => {
         root.page-memory-diag-pending = true;
+        if root.current-route == Route.Settings {
+            page-scroll-view.viewport_x = 0px;
+        }
+        page-scroll-view.viewport_y = 0px;
+        root.page-scroll-reset-pending = true;
+    }
+
+    changed workflow-selected-flow => {
+        if root.current-route == Route.Workflow {
+            page-scroll-view.viewport_y = 0px;
+            root.page-scroll-reset-pending = true;
+        }
     }
 
     changed shell-drawer-visible => {
@@ -471,43 +508,39 @@ export component MainWindow inherits Window {
                 height: parent.height;
                 padding: 0px;
                 
-                // Breadcrumb (hidden for configured routes)
-                breadcrumb-host := Rectangle {
+                // Page region: scroll fills the stack; breadcrumb overlays so a
+                // translucent bar can reveal scrolled content underneath.
+                page-stack := Rectangle {
                     horizontal-stretch: 1;
-                    height: root.show-breadcrumb ? 34px : 0px;
+                    height: parent.height - terminal-dock-host.height - 4px;
                     background: transparent;
+                    clip: false;
 
-                    if root.show-breadcrumb: Breadcrumb {
+                    // Page Views
+                    page-scroll-view := ScrollView {
+                        visible: root.show-page-scroll-view
+                            && !(root.shell-drawer-docked-route
+                                && root.shell-drawer-visible
+                                && root.shell-drawer-fullscreen);
+                        x: 0px;
+                        y: 0px;
                         width: parent.width;
                         height: parent.height;
-                        current-route: root.current-route;
-                        previous-route: root.previous-route;
-                        navigate(route) => {
-                            root.navigate(route);
-                        }
-                        back => { root.navigate-back(); }
-                    }
-                }
+                        horizontal_scrollbar_policy: root.current-route == Route.Settings
+                            ? ScrollBarPolicy.always_off
+                            : ScrollBarPolicy.as_needed;
+                        vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
 
-                // Page Views
-                page-scroll-view := ScrollView {
-                    visible: root.show-page-scroll-view
-                        && !(root.shell-drawer-docked-route
-                            && root.shell-drawer-visible
-                            && root.shell-drawer-fullscreen);
-                    horizontal-stretch: 1;
-                    height: parent.height - breadcrumb-host.height - terminal-dock-host.height - 4px;
-                    horizontal_scrollbar_policy: ScrollBarPolicy.as_needed;
-                    vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
-
-                    Vertical {
-                        width: page-scroll-view.visible_width;
-                        spacing: 0px;
-                        alignment: start;
-                        padding-left: MaterialStyleMetrics.padding_4;
-                        padding-right: MaterialStyleMetrics.padding_4;
-                        padding-top: 0;
-                        padding-bottom: 1px;
+                        Vertical {
+                            width: page-scroll-view.visible_width;
+                            spacing: 0px;
+                            alignment: start;
+                            padding-left: MaterialStyleMetrics.padding_4;
+                            padding-right: MaterialStyleMetrics.padding_4;
+                            // Breadcrumb bar is 40px; keep an extra 16px gap so
+                            // page titles don't sit flush under the overlay.
+                            padding-top: root.show-breadcrumb ? 56px : 0px;
+                            padding-bottom: 1px;
 
                         if root.current-route == Route.Login: LoginPage {
                             navigate(route) => {
@@ -522,9 +555,12 @@ export component MainWindow inherits Window {
                             viewport-height: page-scroll-view.visible-height - 2px;
                         }
                         if root.current-route == Route.Settings: SettingsPage {
-                            // width: page-scroll-view.visible_width;
+                            // The surrounding Vertical already contributes 4px
+                            // padding on each side. Subtract it here so Settings
+                            // does not make the ScrollView content 8px too wide.
+                            width: max(0px, page-scroll-view.visible_width - 8px);
                             viewport-height: page-scroll-view.visible-height - 2px;
-                            // viewport-width: page-scroll-view.visible_width;
+                            viewport-width: self.width;
                             git-tokens-saved <=> root.settings-git-tokens-saved;
                             git-hosting-config-saved <=> root.settings-git-hosting-config-saved;
                             ai-agent-saved <=> root.settings-ai-agent-saved;
@@ -583,9 +619,14 @@ export component MainWindow inherits Window {
                             pr-list-items: root.workflow-pr-list-items;
                             pr-list-total: root.workflow-pr-list-total;
                             pr-list-total-exact: root.workflow-pr-list-total-exact;
+                            pr-list-open-total: root.workflow-pr-list-open-total;
+                            pr-list-closed-total: root.workflow-pr-list-closed-total;
                             pr-list-page: root.workflow-pr-list-page;
                             pr-list-page-count: root.workflow-pr-list-page-count;
                             pr-list-state: root.workflow-pr-list-state;
+                            pr-list-review-filter: root.workflow-pr-list-review-filter;
+                            pr-list-assignee-filter: root.workflow-pr-list-assignee-filter;
+                            pr-list-sort-filter: root.workflow-pr-list-sort-filter;
                             pr-list-loading: root.workflow-pr-list-loading;
                             pr-list-error: root.workflow-pr-list-error;
                             pr-count-auto-update: root.workflow-pr-count-auto-update;
@@ -634,6 +675,18 @@ export component MainWindow inherits Window {
                             pr-list-page-change(page) => {
                                 root.workflow-pr-list-page-change(page);
                             }
+                            pr-list-review-filter-change(value) => {
+                                root.workflow-pr-list-review-filter-change(value);
+                            }
+                            pr-list-assignee-filter-change(value) => {
+                                root.workflow-pr-list-assignee-filter-change(value);
+                            }
+                            pr-list-sort-filter-change(value) => {
+                                root.workflow-pr-list-sort-filter-change(value);
+                            }
+                            copy-remote-repo(url) => {
+                                root.workflow-copy-remote-repo(url);
+                            }
                             pr-open-detail(number, title, author, source-branch, target-branch, updated-at) => {
                                 root.workflow-pr-review-open(number, title, author, source-branch, target-branch, updated-at);
                             }
@@ -654,6 +707,7 @@ export component MainWindow inherits Window {
                             }
                             projects: root.project-items;
                             search-query <=> root.project-search-query;
+                            view-mode <=> root.project-view-mode;
                             show-add-modal <=> root.project-show-add-modal;
                             new-project-name <=> root.project-new-name;
                             new-project-alias <=> root.project-new-alias;
@@ -690,6 +744,28 @@ export component MainWindow inherits Window {
                             navigate(route) => {
                                 root.navigate(route);
                             }
+                        }
+                    }
+                    }
+
+                    breadcrumb-host := Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: root.show-breadcrumb ? 40px : 0px;
+                        background: transparent;
+                        clip: false;
+                        z: 10;
+
+                        if root.show-breadcrumb: Breadcrumb {
+                            width: parent.width;
+                            height: parent.height;
+                            current-route: root.current-route;
+                            previous-route: root.previous-route;
+                            navigate(route) => {
+                                root.navigate(route);
+                            }
+                            back => { root.navigate-back(); }
                         }
                     }
                 }

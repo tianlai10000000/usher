@@ -1,0 +1,309 @@
+import { AppState } from "../../state/app_state.slint";
+
+// Shared controls for Settings and About.
+//
+// Geometry follows the current Primer Product UI medium controls: 32px control
+// height, 6px medium radius, 1px border, 12px horizontal button padding, and
+// SplitPageLayout/NavList navigation at the 768px regular breakpoint.
+export component GitHubSettingsNavItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    callback clicked();
+
+    width: 100%;
+    height: 32px;
+    border-radius: 6px;
+    background: root.selected
+        ? (AppState.effective-dark-mode ? #21262d : #eaeef2)
+        : (nav-touch.has-hover
+            ? (AppState.effective-dark-mode ? #292e36 : #f6f8fa)
+            : transparent);
+
+    if root.selected: Rectangle {
+        x: 0px;
+        y: 4px;
+        width: 4px;
+        height: 24px;
+        border-radius: 2px;
+        background: AppState.effective-dark-mode ? #4493f8 : #0969da;
+    }
+
+    Text {
+        x: 16px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.text;
+        font-size: 14px;
+        font-weight: root.selected ? 600 : 400;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    nav-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component GitHubButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> disabled: false;
+    in property <bool> busy: false;
+    callback clicked();
+
+    label-measure := Text {
+        visible: false;
+        text: root.text;
+        font-size: 14px;
+        font-weight: 500;
+        wrap: no-wrap;
+    }
+
+    width: max(72px, label-measure.preferred-width + 24px + (root.busy ? 24px : 0px));
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.primary
+        ? (AppState.effective-dark-mode ? #238636 : #1f883d)
+        : root.danger
+            ? (button-touch.has-hover
+                ? (AppState.effective-dark-mode ? #da3633 : #cf222e)
+                : (AppState.effective-dark-mode ? #3d444d : #d1d9e0))
+        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
+    background: root.primary
+        ? (button-touch.pressed
+            ? (AppState.effective-dark-mode ? #1f6f32 : #176f2c)
+            : (button-touch.has-hover
+                ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37)
+                : (AppState.effective-dark-mode ? #238636 : #1f883d)))
+        : root.danger
+            ? (button-touch.pressed
+                ? (AppState.effective-dark-mode ? #b62324 : #a40e26)
+                : (button-touch.has-hover
+                    ? (AppState.effective-dark-mode ? #da3633 : #cf222e)
+                    : (AppState.effective-dark-mode ? #21262d : #f6f8fa)))
+            : (button-touch.pressed
+                ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+                : (button-touch.has-hover
+                    ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
+                    : (AppState.effective-dark-mode ? #21262d : #f6f8fa)));
+    opacity: root.disabled || root.busy ? 0.6 : 1;
+
+    if root.busy: Image {
+        x: 10px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../../assets/icons/github-spinner-16.svg");
+        colorize: root.primary || (root.danger && button-touch.has-hover)
+            ? #ffffff
+            : root.danger
+                ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
+                : (AppState.effective-dark-mode ? #f0f6fc : #1f2328);
+        transform-rotation: mod(animation-tick(), 1s) / 1s * 360deg;
+        transform-origin: { x: self.width / 2, y: self.height / 2 };
+    }
+
+    Text {
+        x: root.busy ? 32px : 12px;
+        width: parent.width - self.x - 12px;
+        height: parent.height;
+        text: root.text;
+        font-size: 14px;
+        font-weight: 500;
+        color: root.primary || (root.danger && button-touch.has-hover)
+            ? #ffffff
+            : root.danger
+                ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
+                : (AppState.effective-dark-mode ? #f0f6fc : #1f2328);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    button-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: !root.disabled && !root.busy;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component GitHubToggle inherits Rectangle {
+    in-out property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    width: 48px;
+    height: 24px;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: root.checked
+        ? (AppState.effective-dark-mode ? #238636 : #1f883d)
+        : (AppState.effective-dark-mode ? #6e7681 : #8c959f);
+    background: root.checked
+        ? (AppState.effective-dark-mode ? #238636 : #1f883d)
+        : (AppState.effective-dark-mode ? #21262d : #ffffff);
+    opacity: root.enabled ? 1 : 0.5;
+
+    Text {
+        x: root.checked ? 5px : 21px;
+        width: 20px;
+        height: parent.height;
+        text: root.checked ? "On" : "Off";
+        font-size: 9px;
+        font-weight: 600;
+        color: root.checked ? #ffffff : (AppState.effective-dark-mode ? #9198a1 : #59636e);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    Rectangle {
+        x: root.checked ? 27px : 3px;
+        y: 3px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: root.checked ? #ffffff : (AppState.effective-dark-mode ? #9198a1 : #59636e);
+        animate x { duration: 120ms; easing: ease-out; }
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+export component GitHubTextField inherits Rectangle {
+    in property <string> label;
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <string> caption: "";
+    in property <bool> secret: false;
+    in property <bool> reveal: false;
+    callback edited(string);
+
+    width: 100%;
+    height: root.caption == "" ? 58px : 78px;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 20px;
+        text: root.label;
+        font-size: 14px;
+        font-weight: 600;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        vertical-alignment: center;
+    }
+
+    field := Rectangle {
+        x: 0px;
+        y: 26px;
+        width: parent.width;
+        height: 32px;
+        border-radius: 6px;
+        border-width: field-input.has-focus ? 2px : 1px;
+        border-color: field-input.has-focus
+            ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
+            : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
+        background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+        clip: true;
+
+        field-input := TextInput {
+            x: field-input.has-focus ? 11px : 12px;
+            y: (parent.height - self.preferred-height) / 2;
+            width: parent.width - (field-input.has-focus ? 22px : 24px);
+            text <=> root.text;
+            input-type: root.secret && !root.reveal ? InputType.password : InputType.text;
+            single-line: true;
+            font-size: 14px;
+            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+            selection-background-color: AppState.effective-dark-mode ? #264f78 : #b6d7ff;
+            selection-foreground-color: self.color;
+            edited => { root.edited(self.text); }
+        }
+
+        if root.text == "" && !field-input.has-focus: Text {
+            x: 12px;
+            width: parent.width - 24px;
+            height: parent.height;
+            text: root.placeholder;
+            font-size: 14px;
+            color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    if root.caption != "": Text {
+        x: 0px;
+        y: 62px;
+        width: parent.width;
+        height: 16px;
+        text: root.caption;
+        font-size: 12px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+export component GitHubSegment inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    callback clicked();
+
+    label-measure := Text {
+        visible: false;
+        text: root.text;
+        font-size: 14px;
+        font-weight: root.selected ? 600 : 400;
+        wrap: no-wrap;
+    }
+
+    width: max(72px, label-measure.preferred-width + 24px);
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.selected
+        ? (AppState.effective-dark-mode ? #6e7681 : #8c959f)
+        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
+    background: root.selected
+        ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+        : (segment-touch.has-hover
+            ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
+            : (AppState.effective-dark-mode ? #21262d : #f6f8fa));
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        font-size: 14px;
+        font-weight: root.selected ? 600 : 400;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    segment-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

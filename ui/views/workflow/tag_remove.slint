@@ -1,6 +1,6 @@
-import { FilledButton, MaterialPalette, MaterialText, CircularProgressIndicator } from "@material";
 import { StepItem, Steps } from "../../components/workflow/steps.slint";
 import { TagField } from "../../components/workflow/fields.slint";
+import { TagActionButton, TagStatusBanner, TagStepsPlaceholder } from "../../components/workflow/tag_controls.slint";
 
 export component TagRemovePanel {
     in property <bool> running: false;
@@ -18,14 +18,14 @@ export component TagRemovePanel {
     width: 100%;
 
     VerticalLayout {
-        width: root.width;
+        width: 100%;
         spacing: 16px;
         alignment: start;
         padding: 8px;
         padding-top: 16px;
 
         TagField {
-            // width: parent.width;
+            width: 100%;
             label: "Tag to remove";
             value <=> root.tag-to-remove;
             placeholder: "v1.2.3";
@@ -33,30 +33,19 @@ export component TagRemovePanel {
         }
 
         HorizontalLayout {
+            width: 100%;
             spacing: 12px;
             alignment: start;
-            height: 40px;
+            cross-axis-alignment: center;
+            height: 32px;
 
-            FilledButton {
+            TagActionButton {
                 enabled: !root.running && !root.initializing;
-                height: 40px;
-                text: root.initializing ? "Loading..." : (root.running ? "Removing..." : "Remove");
+                loading: root.running || root.initializing;
+                label: root.initializing ? "Loading…" : (root.running ? "Removing…" : "Remove tag");
+                danger: true;
                 clicked => {
                     root.remove-tag(root.tag-to-remove);
-                }
-            }
-
-            if root.running || root.initializing: Rectangle {
-                width: 24px;
-                height: parent.height;
-                background: transparent;
-                CircularProgressIndicator {
-                    width: 20px;
-                    height: 20px;
-                    indeterminate: root.loading-animated;
-                    progress: root.loading-animated ? 0 : 0.72;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
                 }
             }
 
@@ -66,45 +55,19 @@ export component TagRemovePanel {
                 horizontal-stretch: 1;
             }
 
-            if root.running: FilledButton {
-                height: 40px;
-                text: "Stop";
+            if root.running: TagActionButton {
+                label: "Stop workflow";
+                danger: true;
                 clicked => {
                     root.stop();
                 }
             }
         }
 
-        Rectangle {
-            width: parent.width - 16px;
-            // height: max(22px, status-text.preferred-height);
-            clip: true;
-            background: MaterialPalette.surface_container;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            border-radius: 4px;
-
-            VerticalLayout {
-                width: parent.width;
-                padding: 8px;
-                spacing: 4px;
-
-                if root.initializing: MaterialText {
-                    text: "Loading latest remote tag…";
-                    font-family: "Hiragino Sans GB";
-                    font_size: 10px;
-                    color: MaterialPalette.on_surface_variant;
-                }
-
-                status-text := Text {
-                    width: parent.width - 2px;
-                    text: root.result;
-                    wrap: word-wrap;
-                    color: MaterialPalette.on_background;
-                    font-size: 10px;
-                    font-family: "Hiragino Sans GB";
-                }
-            }
+        TagStatusBanner {
+            width: 100%;
+            message: root.result;
+            initializing: root.initializing;
         }
 
         if root.show-steps: Steps {
@@ -115,22 +78,9 @@ export component TagRemovePanel {
             animations-enabled: root.loading-animated;
         }
 
-        if !root.show-steps: Rectangle {
-            width: parent.width - 16px;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: MaterialPalette.outline_variant;
-            background: MaterialPalette.surface_container_low;
-            height: 44px;
-
-            Text {
-                x: 12px;
-                y: (parent.height - self.height) / 2;
-                width: parent.width - 24px;
-                text: "Workflow steps will appear after the remove process starts.";
-                color: MaterialPalette.on_surface_variant;
-                font-size: 12px;
-            }
+        if !root.show-steps: TagStepsPlaceholder {
+            width: 100%;
+            message: "Workflow steps will appear after the remove process starts.";
         }
     }
 }
