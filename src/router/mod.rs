@@ -5,20 +5,19 @@ use std::sync::{Arc, Mutex};
 
 const BREADCRUMB_HIDDEN_ROUTES: &[Route] = &[Route::Chat, Route::Login, Route::PrReview];
 const MAX_ROUTE_HISTORY: usize = 64;
+// Order must match `CustomNavDrawer` items in `ui/main.slint`.
+// Demo/dev routes are intentionally listed for local testing.
 const NAVIGATION_ROUTES: &[Route] = &[
     Route::Home,
-    // Route::Search,
-    // Route::Notification,
-    // Route::Toast,
-    // Route::Dialog,
-    // Route::Tools,
     Route::Chat,
     Route::Project,
-    // Route::Workflow,
-    // Route::List,
-    // Route::Detail,
-    // Route::Settings,
-    // Route::About,
+    Route::Search,
+    Route::Notification,
+    Route::Toast,
+    Route::Dialog,
+    Route::Tools,
+    Route::List,
+    Route::Detail,
 ];
 
 #[derive(Debug, Clone, Copy)]

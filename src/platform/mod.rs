@@ -4,6 +4,9 @@
 //! Platform-specific title-bar, appearance, interaction and font behavior is
 //! kept here so `src/lib.rs` remains the application composition root.
 
+use std::path::Path;
+use std::process::Command;
+
 use crate::MainWindow;
 
 #[cfg(target_os = "macos")]
@@ -14,7 +17,7 @@ pub use macos::is_window_interacting;
 
 #[cfg(target_os = "macos")]
 pub(crate) use macos::{
-    detect_system_dark_mode, install_titlebar_settings_button, set_app_appearance,
+    detect_system_dark_mode, install_titlebar_settings_button, play_ui_click, set_app_appearance,
     set_title_bar_color, setup_pr_review_fonts,
 };
 
@@ -37,6 +40,11 @@ pub(crate) fn set_title_bar_color(_window: &MainWindow, _is_dark: bool) {}
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn install_titlebar_settings_button(_window: &MainWindow) {}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn play_ui_click() {
+    // System click sounds are only wired on macOS for the first pass.
+}
 
 pub(crate) fn setup_application_font(app: &MainWindow) {
     #[cfg(target_os = "macos")]
@@ -72,9 +80,66 @@ pub(crate) fn effective_dark_mode(theme_mode: i32) -> bool {
     }
 }
 
+/// GitHub Desktop wording for revealing a folder in the OS file manager.
+pub(crate) fn open_directory_tooltip() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Show in Finder"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "Show in Explorer"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        "Show in file manager"
+    }
+}
+
+/// Open `path` in the platform file manager without blocking for completion.
+pub(crate) fn open_directory_in_file_manager(path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("Local path is empty.".to_string());
+    }
+    if !path.exists() {
+        return Err(format!("Path does not exist: {}", path.display()));
+    }
+    if !path.is_dir() {
+        return Err(format!("Path is not a directory: {}", path.display()));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Failed to open Finder: {error}"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // `explorer` returns a non-zero status even on success; only spawn matters.
+        Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Failed to open Explorer: {error}"))
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Failed to open file manager: {error}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::effective_dark_mode;
+    use super::{effective_dark_mode, open_directory_tooltip};
 
     #[test]
     fn resolves_explicit_theme_modes_without_platform_state() {
@@ -82,5 +147,10 @@ mod tests {
         assert!(effective_dark_mode(1));
         assert!(!effective_dark_mode(-1));
         assert!(!effective_dark_mode(99));
+    }
+
+    #[test]
+    fn open_directory_tooltip_is_non_empty() {
+        assert!(!open_directory_tooltip().is_empty());
     }
 }

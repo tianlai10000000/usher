@@ -12,7 +12,7 @@ import { About as AboutPage } from "./views/about.slint";
 import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
 import { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
 import { PrReviewWorkspace } from "./views/workflow/pr_review_workspace.slint";
-import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 import { StepItem } from "./components/workflow/steps.slint";
 
 import { List as ListPage } from "./views/list.slint";
@@ -52,7 +52,7 @@ export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
 export { StepItem } from "./components/workflow/steps.slint";
 export { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
-export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
+export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 
 export component MainWindow inherits Window {
     // Keep below Primer `$width-md` (768px) so the PR file tree can auto-collapse
@@ -159,6 +159,7 @@ export component MainWindow inherits Window {
     in property <string> workflow-project-alias: "";
     in property <string> workflow-project-local-repo: "";
     in property <string> workflow-project-remote-repo: "";
+    in property <string> workflow-open-local-folder-tooltip: "Show in file manager";
     in property <string> workflow-project-logo: "";
     in property <image> workflow-project-logo-image: @image-url("../logo.png");
     in property <[ProjectItem]> project-items: [];
@@ -326,6 +327,7 @@ export component MainWindow inherits Window {
     callback workflow-pr-list-assignee-filter-change(string);
     callback workflow-pr-list-sort-filter-change(string);
     callback workflow-copy-remote-repo(string);
+    callback workflow-open-local-repo(string);
     callback workflow-pr-review-open(string, string, string, string, string, string);
     callback workflow-pr-review-back();
     callback workflow-pr-review-select-tab(int);
@@ -349,7 +351,12 @@ export component MainWindow inherits Window {
     callback workflow-pr-review-copy-commit-sha(string);
     callback workflow-pr-review-copy-source-branch(string);
     callback workflow-pr-review-copy-diff-selection(int, int, int, int, string);
-    callback workflow-pr-review-resolve-diff-selection(int, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
+    callback workflow-pr-review-resolve-diff-selection(int, float, float, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
+    pure callback workflow-pr-review-resolve-diff-selection-slice(int, string, int, int) -> WorkflowPrDiffTextSlice;
+    pure callback workflow-pr-review-resolve-diff-wrap-line-start(int, string, int, int) -> int;
+    callback workflow-pr-review-resolve-diff-click-range(int, int, string, int) -> WorkflowPrDiffSelectionRange;
+    callback workflow-pr-review-find-diff-matches(string, bool) -> [WorkflowPrDiffFindMatch];
+    callback workflow-pr-review-estimate-diff-line-y(int, float, float, string) -> float;
     callback workflow-pr-review-view-file();
     callback workflow-pr-review-toggle-commit-message(string);
     callback workflow-pr-submit-review(string, string);
@@ -482,10 +489,18 @@ export component MainWindow inherits Window {
                             // 当前菜单选中索引由路由策略统一计算
                             current_index: root.navigation-current-index;
 
+                            // Order must match `NAVIGATION_ROUTES` in `src/router/mod.rs`.
                             items: [
                                 { icon: @image-url("./assets/icons/home.svg"), text: "Home" },
                                 { icon: @image-url("./assets/icons/chat.svg"), text: "Chat" },
                                 { icon: @image-url("./assets/icons/project.svg"), text: "Project" },
+                                { icon: @image-url("./assets/icons/search.svg"), text: "Search" },
+                                { icon: @image-url("./assets/icons/info.svg"), text: "Notification" },
+                                { icon: @image-url("./assets/icons/success.svg"), text: "Toast" },
+                                { icon: @image-url("./assets/icons/warning.svg"), text: "Dialog" },
+                                { icon: @image-url("./assets/icons/tools.svg"), text: "Tools" },
+                                { icon: @image-url("./assets/icons/list.svg"), text: "List" },
+                                { icon: @image-url("./assets/icons/detail.svg"), text: "Detail" },
                             ];
 
                             selected(item_index) => {
@@ -612,6 +627,7 @@ export component MainWindow inherits Window {
                             project-alias: root.workflow-project-alias;
                             project-local-repo: root.workflow-project-local-repo;
                             project-remote-repo: root.workflow-project-remote-repo;
+                            open-local-folder-tooltip: root.workflow-open-local-folder-tooltip;
                             project-logo: root.workflow-project-logo;
                             project-logo-image: root.workflow-project-logo-image;
                             pr-repo-project-id: root.workflow-pr-repo-project-id;
@@ -686,6 +702,9 @@ export component MainWindow inherits Window {
                             }
                             copy-remote-repo(url) => {
                                 root.workflow-copy-remote-repo(url);
+                            }
+                            open-local-repo(path) => {
+                                root.workflow-open-local-repo(path);
                             }
                             pr-open-detail(number, title, author, source-branch, target-branch, updated-at) => {
                                 root.workflow-pr-review-open(number, title, author, source-branch, target-branch, updated-at);
@@ -1115,8 +1134,23 @@ export component MainWindow inherits Window {
         copy-diff-selection(start-line, start-col, end-line, end-col, side) => {
             root.workflow-pr-review-copy-diff-selection(start-line, start-col, end-line, end-col, side);
         }
-        resolve-diff-selection(line, x, y, row-height, code-width, cell-width, side) => {
-            root.workflow-pr-review-resolve-diff-selection(line, x, y, row-height, code-width, cell-width, side)
+        resolve-diff-selection(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side) => {
+            root.workflow-pr-review-resolve-diff-selection(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side)
+        }
+        resolve-diff-selection-slice(line, side, start-col, end-col) => {
+            root.workflow-pr-review-resolve-diff-selection-slice(line, side, start-col, end-col)
+        }
+        resolve-diff-wrap-line-start(line, side, caret, max-cols) => {
+            root.workflow-pr-review-resolve-diff-wrap-line-start(line, side, caret, max-cols)
+        }
+        resolve-diff-click-range(line, column, side, mode) => {
+            root.workflow-pr-review-resolve-diff-click-range(line, column, side, mode)
+        }
+        find-diff-matches(query, split) => {
+            root.workflow-pr-review-find-diff-matches(query, split)
+        }
+        estimate-diff-line-y(line, code-width, cell-width, side) => {
+            root.workflow-pr-review-estimate-diff-line-y(line, code-width, cell-width, side)
         }
         view-file => { root.workflow-pr-review-view-file(); }
         toggle-commit-message(sha) => { root.workflow-pr-review-toggle-commit-message(sha); }

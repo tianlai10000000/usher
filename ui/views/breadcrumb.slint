@@ -134,10 +134,20 @@ export component Breadcrumb inherits Rectangle {
     // Real translucency needs page content scrolling underneath this bar.
     background: AppState.effective-dark-mode ? #0d1117df : #ffffffdf;
     clip: false;
-//    drop-shadow-blur: 5px;
-//    drop-shadow-offset-x: 0px;
-//    drop-shadow-offset-y: 1px;
-//    drop-shadow-color: AppState.effective-dark-mode ? #0000002a : #1f232814;
+    drop-shadow-blur: 5px;
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: AppState.effective-dark-mode ? #0000002a : #1f232814;
+
+    // Slint rectangles do not capture pointer input. Without this shield,
+    // clicks fall through the translucent bar onto scrolled page controls
+    // (e.g. Project "New project" under the overlay). Later crumb/back
+    // TouchAreas still win hit-testing on their own geometry.
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: default;
+    }
 
     HorizontalLayout {
         width: parent.width;

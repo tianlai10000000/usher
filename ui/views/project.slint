@@ -254,6 +254,9 @@ component ProjectViewSwitcher inherits Rectangle {
 
 component ProjectLabel inherits Rectangle {
     in property <string> text;
+    // 0px keeps content-sized chips (tags). Alias pills pass a max so long
+    // names elide instead of stretching the title row or card header.
+    in property <length> max-label-width: 0px;
 
     label-measure := Text {
         visible: false;
@@ -263,7 +266,10 @@ component ProjectLabel inherits Rectangle {
         wrap: no-wrap;
     }
 
-    width: label-measure.preferred-width + 16px;
+    private property <length> natural-width: label-measure.preferred-width + 16px;
+    width: root.max-label-width > 0px
+        ? min(root.natural-width, root.max-label-width)
+        : root.natural-width;
     height: 20px;
     border-radius: 10px;
     border-width: 1px;
@@ -278,9 +284,10 @@ component ProjectLabel inherits Rectangle {
         font-size: 12px;
         font-weight: 500;
         color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        horizontal-alignment: center;
+        horizontal-alignment: left;
         vertical-alignment: center;
         wrap: no-wrap;
+        overflow: elide;
     }
 }
 
@@ -349,6 +356,7 @@ component ProjectListRow inherits Rectangle {
     callback edit-requested();
     callback delete-requested();
 
+    // Identity + path metadata + topics (GitHub repo-row density with paths).
     height: 136px;
     background: row-touch.has-hover
         ? (AppState.effective-dark-mode ? #151b23 : #f6f8fa)
@@ -403,6 +411,8 @@ component ProjectListRow inherits Rectangle {
         }
 
         if root.project.project_alias != "": ProjectLabel {
+            // ~24 Latin chars / ~12 CJK at 12px before ellipsis.
+            max-label-width: 168px;
             text: root.project.project_alias;
         }
     }
@@ -496,6 +506,7 @@ component ProjectGridCard inherits Rectangle {
     callback edit-requested();
     callback delete-requested();
 
+    // Primer repo card with path metadata filling the middle band.
     height: 204px;
     border-radius: 6px;
     border-width: 1px;
@@ -541,6 +552,7 @@ component ProjectGridCard inherits Rectangle {
     if root.project.project_alias != "": ProjectLabel {
         x: 68px;
         y: 40px;
+        max-label-width: min(168px, max(48px, parent.width - 84px));
         text: root.project.project_alias;
     }
 

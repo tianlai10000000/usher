@@ -327,7 +327,9 @@ fn github_dark_color(color: [u8; 4]) -> [u8; 4] {
     [alpha, mapped[0], mapped[1], mapped[2]]
 }
 
-fn expand_tabs(value: &str, tab_width: u32) -> String {
+/// Expand tabs to spaces using the same stops as GitHub/syntax highlighting.
+/// Diff selection, find, and clipboard must share this expansion with tokens.
+pub(super) fn expand_tabs(value: &str, tab_width: u32) -> String {
     let mut expanded = String::with_capacity(value.len());
     let mut column = 0;
     for character in value.chars() {

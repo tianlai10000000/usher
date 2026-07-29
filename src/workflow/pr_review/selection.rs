@@ -1,15 +1,21 @@
 //! Diff selection geometry and clipboard projection.
 //!
-//! The controller supplies the current display model and pointer coordinates;
-//! this module deterministically resolves logical endpoints and copied text.
+//! Selection endpoints are Unicode character indices into the displayed
+//! (tab-expanded) line text. Hit-testing maps pointer X through the measured
+//! preferred width so CJK glyphs match token Text layout; East-Asian display
+//! columns alone drift on Menlo fallbacks and used to copy the wrong slice
+//! (e.g. selecting "安全" copied "t-lo").
 
-use slint::{Model, ModelRc};
+use slint::{Model, ModelRc, SharedString};
 
 use crate::workflow::syntax_highlight::character_columns;
-use crate::{WorkflowPrDiffLine, WorkflowPrDiffSelectionHit};
+use crate::{
+    WorkflowPrDiffLine, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange,
+    WorkflowPrDiffTextSlice,
+};
 
 /// Resolve a drag position from the grabbed delegate into an exact logical
-/// diff row and wrapped display column. Unlike a fixed-height approximation,
+/// diff row and character index. Unlike a fixed-height approximation,
 /// this accounts for every crossed row's own wrap count.
 pub(super) fn resolve_diff_selection_hit(
     lines: &ModelRc<WorkflowPrDiffLine>,
@@ -19,6 +25,8 @@ pub(super) fn resolve_diff_selection_hit(
     start_height: f32,
     code_width: f32,
     cell_width: f32,
+    content_width: f32,
+    line_pitch: f32,
     side: &str,
 ) -> WorkflowPrDiffSelectionHit {
     const CODE_LINE_HEIGHT: f32 = 22.0;
@@ -33,6 +41,12 @@ pub(super) fn resolve_diff_selection_hit(
     let start = start_line.clamp(0, row_count.saturating_sub(1) as i32) as usize;
     let safe_code_width = code_width.max(1.0);
     let safe_cell_width = cell_width.max(0.1);
+    // Match SelectableDiffCode wrap-line-pitch when painting soft-wrapped rows.
+    let wrap_pitch = if line_pitch > 0.5 {
+        line_pitch
+    } else {
+        CODE_LINE_HEIGHT
+    };
     let row_height = |index: usize| {
         if index == start {
             return start_height.max(1.0);
@@ -56,7 +70,13 @@ pub(super) fn resolve_diff_selection_hit(
         let visual_lines = ((columns * safe_cell_width) / safe_code_width)
             .ceil()
             .max(1.0);
-        CODE_LINE_HEIGHT * visual_lines
+        // Soft-wrapped rows use font line pitch; single-line rows stay on the
+        // nominal 22px code line height used by unwrapped delegates.
+        if visual_lines > 1.0 {
+            wrap_pitch * visual_lines
+        } else {
+            CODE_LINE_HEIGHT
+        }
     };
 
     let (target, local_y) = if pointer_y >= 0.0 {
@@ -112,7 +132,7 @@ pub(super) fn resolve_diff_selection_hit(
                     if is_copyable_diff_line(&candidate) {
                         return WorkflowPrDiffSelectionHit {
                             line: index as i32,
-                            column: side_display_columns(&candidate, side),
+                            column: side_char_count(&candidate, side),
                         };
                     }
                 }
@@ -123,7 +143,7 @@ pub(super) fn resolve_diff_selection_hit(
                     if is_copyable_diff_line(&candidate) {
                         return WorkflowPrDiffSelectionHit {
                             line: index as i32,
-                            column: side_display_columns(&candidate, side),
+                            column: side_char_count(&candidate, side),
                         };
                     }
                 }
@@ -144,16 +164,34 @@ pub(super) fn resolve_diff_selection_hit(
             column: 0,
         };
     }
-    let columns = side_display_columns(&line, side);
-    let visible_columns = (safe_code_width / safe_cell_width).floor().max(1.0) as i32;
-    let visual_line = (local_y / CODE_LINE_HEIGHT).floor().max(0.0) as i32;
-    // Match SelectableDiffCode::col-at: round to the nearest caret boundary.
-    let column_in_line =
-        ((pointer_x.max(0.0) + safe_cell_width * 0.5) / safe_cell_width).floor() as i32;
+
+    let content = side_content(&line, side);
+    let char_count = content.chars().count() as i32;
+    let visible_chars = (safe_code_width / safe_cell_width).floor().max(1.0) as i32;
+    let wraps =
+        content_width > safe_code_width + 0.5 || (char_count as f32) > visible_chars as f32 + 0.5;
+    let pitch = if wraps { wrap_pitch } else { CODE_LINE_HEIGHT };
+    let local_x = pointer_x.max(0.0);
+    let column = if wraps {
+        // Match Text.word-wrap breaks — fixed-column indexing selected too far
+        // right on continuation lines.
+        soft_wrap_caret_at(
+            content,
+            visible_chars,
+            local_x,
+            local_y,
+            safe_cell_width,
+            pitch,
+        )
+    } else if content_width > 0.5 {
+        char_index_at_preferred_x(content, local_x, content_width)
+    } else {
+        ((local_x + safe_cell_width * 0.5) / safe_cell_width).floor() as i32
+    };
 
     WorkflowPrDiffSelectionHit {
         line: target as i32,
-        column: (visual_line * visible_columns + column_in_line).clamp(0, columns),
+        column: column.clamp(0, char_count),
     }
 }
 
@@ -163,18 +201,293 @@ fn is_copyable_diff_line(line: &WorkflowPrDiffLine) -> bool {
     !matches!(line.kind.as_str(), "hunk" | "meta")
 }
 
-fn side_display_columns(line: &WorkflowPrDiffLine, side: &str) -> i32 {
+fn side_char_count(line: &WorkflowPrDiffLine, side: &str) -> i32 {
+    side_content(line, side).chars().count() as i32
+}
+
+fn side_content<'a>(line: &'a WorkflowPrDiffLine, side: &str) -> &'a str {
     match side {
-        "left" => line.left_columns,
-        "right" => line.right_columns,
-        _ => line.left_columns,
+        "left" => line.left_content.as_str(),
+        "right" => line.right_content.as_str(),
+        _ => line.content.as_str(),
     }
-    .max(0)
+}
+
+/// Character index where the soft-wrapped visual line containing `caret` begins.
+///
+/// Uses a greedy display-column fill with breaks at the last whitespace when
+/// possible — close to Skia's word-wrap fallback for `Text.char-wrap`, so
+/// selection X on continuation lines lines up with the auto-wrapped Text.
+pub(super) fn soft_wrap_line_start(content: &str, caret: i32, max_cells: i32) -> i32 {
+    soft_wrap_line_range_at_caret(content, caret, max_cells).0
+}
+
+/// Inclusive-start / exclusive-end character range of the soft-wrapped visual
+/// line that contains `caret`.
+fn soft_wrap_line_range_at_caret(content: &str, caret: i32, max_cells: i32) -> (i32, i32) {
+    let chars: Vec<char> = content.chars().collect();
+    if chars.is_empty() {
+        return (0, 0);
+    }
+    let caret = caret.clamp(0, chars.len() as i32) as usize;
+    let max_cells = max_cells.max(1) as u32;
+
+    let mut line_start = 0usize;
+    while line_start < chars.len() {
+        let line_end = soft_wrap_next_line_end(&chars, line_start, max_cells);
+        if caret < line_end {
+            return (line_start as i32, line_end as i32);
+        }
+        line_start = line_end;
+    }
+    let len = chars.len() as i32;
+    (len, len)
+}
+
+fn soft_wrap_next_line_end(chars: &[char], line_start: usize, max_cells: u32) -> usize {
+    let mut cells = 0u32;
+    let mut last_ws_break = line_start;
+    let mut saw_break = false;
+    let mut index = line_start;
+    while index < chars.len() {
+        let weight = character_columns(chars[index]).max(1);
+        if cells + weight > max_cells && cells > 0 {
+            break;
+        }
+        cells += weight;
+        index += 1;
+        if chars[index - 1].is_whitespace() {
+            last_ws_break = index;
+            saw_break = true;
+        }
+    }
+    if index >= chars.len() {
+        chars.len()
+    } else if saw_break && last_ws_break > line_start {
+        last_ws_break
+    } else {
+        index.max(line_start + 1)
+    }
+}
+
+/// Start/end character indices for the `visual_line`-th soft-wrapped row
+/// (0-based). Returns `(len, len)` when the visual line is past the end.
+fn soft_wrap_visual_line_range(content: &str, visual_line: i32, max_cells: i32) -> (i32, i32) {
+    let chars: Vec<char> = content.chars().collect();
+    if chars.is_empty() || visual_line < 0 {
+        return (0, 0);
+    }
+    let max_cells = max_cells.max(1) as u32;
+    let mut line_start = 0usize;
+    let mut remaining = visual_line;
+    while line_start < chars.len() {
+        let line_end = soft_wrap_next_line_end(&chars, line_start, max_cells);
+        if remaining == 0 {
+            return (line_start as i32, line_end as i32);
+        }
+        remaining -= 1;
+        line_start = line_end;
+    }
+    let len = chars.len() as i32;
+    (len, len)
+}
+
+/// Map a pointer inside a soft-wrapped code cell to a character index using the
+/// same greedy word/column breaks as selection painting.
+pub(super) fn soft_wrap_caret_at(
+    content: &str,
+    max_cells: i32,
+    pointer_x: f32,
+    pointer_y: f32,
+    cell_width: f32,
+    line_pitch: f32,
+) -> i32 {
+    let char_count = content.chars().count() as i32;
+    if char_count == 0 {
+        return 0;
+    }
+    let pitch = line_pitch.max(1.0);
+    let cell = cell_width.max(0.1);
+    let mut line_count = 0i32;
+    {
+        let mut start = 0i32;
+        while start < char_count {
+            let (_, end) = soft_wrap_visual_line_range(content, line_count, max_cells);
+            if end <= start {
+                break;
+            }
+            line_count += 1;
+            start = end;
+        }
+    }
+    let max_visual = line_count.max(1) - 1;
+    let visual_line = (pointer_y / pitch).floor().max(0.0).min(max_visual as f32) as i32;
+    let (line_start, line_end) = soft_wrap_visual_line_range(content, visual_line, max_cells);
+    if line_start >= line_end {
+        return line_start.clamp(0, char_count);
+    }
+    let target_cells = ((pointer_x.max(0.0) + cell * 0.5) / cell).floor().max(0.0) as i32;
+    let mut cells = 0i32;
+    for (offset, character) in content
+        .chars()
+        .skip(line_start as usize)
+        .take((line_end - line_start) as usize)
+        .enumerate()
+    {
+        let weight = character_columns(character).max(1) as i32;
+        if target_cells < cells + weight {
+            return if target_cells >= cells + (weight + 1) / 2 {
+                (line_start + offset as i32 + 1).clamp(line_start, line_end)
+            } else {
+                (line_start + offset as i32).clamp(line_start, line_end)
+            };
+        }
+        cells += weight;
+    }
+    line_end.clamp(0, char_count)
+}
+
+/// Map pointer X through the measured line preferred-width onto a character
+/// caret, weighting steps by East-Asian display columns as a glyph proxy.
+fn char_index_at_preferred_x(content: &str, pointer_x: f32, content_width: f32) -> i32 {
+    let chars: Vec<char> = content.chars().collect();
+    if chars.is_empty() {
+        return 0;
+    }
+    if content_width <= 0.0 {
+        return 0;
+    }
+    let weights: Vec<f32> = chars
+        .iter()
+        .map(|character| character_columns(*character).max(1) as f32)
+        .collect();
+    let total: f32 = weights.iter().sum::<f32>().max(1.0);
+    let target = ((pointer_x / content_width) * total).clamp(0.0, total);
+    let mut acc = 0.0_f32;
+    for (index, weight) in weights.iter().enumerate() {
+        let next = acc + weight;
+        if target + 0.0001 < next {
+            // Round to the nearest caret boundary inside this glyph.
+            return if target + 0.0001 >= acc + weight * 0.5 {
+                (index as i32) + 1
+            } else {
+                index as i32
+            };
+        }
+        acc = next;
+    }
+    chars.len() as i32
+}
+
+/// Resolve a GitHub-style double-click (word) or triple-click (line) range.
+/// `mode` is `1` for word and `2` for line; other values return a collapsed
+/// caret at `column` so the caller can fall back to drag selection.
+/// `column` is a character index into the displayed line text.
+pub(super) fn resolve_diff_click_range(
+    lines: &ModelRc<WorkflowPrDiffLine>,
+    line: i32,
+    column: i32,
+    side: &str,
+    mode: i32,
+) -> WorkflowPrDiffSelectionRange {
+    let row_count = lines.row_count();
+    if row_count == 0 || line < 0 || line as usize >= row_count {
+        return WorkflowPrDiffSelectionRange {
+            start_line: 0,
+            start_column: 0,
+            end_line: 0,
+            end_column: 0,
+        };
+    }
+    let Some(row) = lines.row_data(line as usize) else {
+        return WorkflowPrDiffSelectionRange {
+            start_line: line,
+            start_column: column.max(0),
+            end_line: line,
+            end_column: column.max(0),
+        };
+    };
+    if !is_copyable_diff_line(&row) {
+        return WorkflowPrDiffSelectionRange {
+            start_line: line,
+            start_column: 0,
+            end_line: line,
+            end_column: 0,
+        };
+    }
+
+    let content = side_content(&row, side);
+    let char_count = content.chars().count() as i32;
+    let caret = column.clamp(0, char_count);
+
+    match mode {
+        1 => {
+            let (start_column, end_column) = word_range_character_indices(content, caret as u32);
+            WorkflowPrDiffSelectionRange {
+                start_line: line,
+                start_column: start_column as i32,
+                end_line: line,
+                end_column: end_column as i32,
+            }
+        }
+        2 => WorkflowPrDiffSelectionRange {
+            start_line: line,
+            start_column: 0,
+            end_line: line,
+            // Empty lines still need a one-cell highlight so the gesture is
+            // visible and survives end-diff-selection's zero-width clear.
+            end_column: char_count.max(1),
+        },
+        _ => WorkflowPrDiffSelectionRange {
+            start_line: line,
+            start_column: caret,
+            end_line: line,
+            end_column: caret,
+        },
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CharClass {
+    Word,
+    Whitespace,
+    Other,
+}
+
+fn char_class(character: char) -> CharClass {
+    if character.is_alphanumeric() || character == '_' {
+        CharClass::Word
+    } else if character.is_whitespace() {
+        CharClass::Whitespace
+    } else {
+        CharClass::Other
+    }
+}
+
+/// Expand the caret to the contiguous same-class run (code-editor word select).
+fn word_range_character_indices(value: &str, caret: u32) -> (u32, u32) {
+    if value.is_empty() {
+        return (0, 0);
+    }
+
+    let chars: Vec<char> = value.chars().collect();
+    let total = chars.len() as u32;
+    let probe = caret.min(total.saturating_sub(1)) as usize;
+    let class = char_class(chars[probe]);
+    let mut left = probe;
+    while left > 0 && char_class(chars[left - 1]) == class {
+        left -= 1;
+    }
+    let mut right = probe;
+    while right + 1 < chars.len() && char_class(chars[right + 1]) == class {
+        right += 1;
+    }
+    (left as u32, (right + 1) as u32)
 }
 
 /// Build clipboard text for a GitHub-style code-column selection.
-/// `start_col` / `end_col` are rendered monospace columns. This preserves tabs
-/// and handles wide glyphs while matching the selection geometry used by Slint.
+/// `start_col` / `end_col` are Unicode character indices into the displayed
+/// (tab-expanded) line text, matching Slint hit-testing and highlights.
 /// Hunk/meta rows inside the range are omitted, matching GitHub copy.
 pub(super) fn diff_selection_text(
     lines: &ModelRc<WorkflowPrDiffLine>,
@@ -218,7 +531,7 @@ pub(super) fn diff_selection_text(
         if emitted > 0 {
             out.push('\n');
         }
-        out.push_str(slice_display_columns(content.as_str(), from, to));
+        out.push_str(&slice_character_range(content.as_str(), from, to));
         emitted += 1;
     }
     if emitted == 0 {
@@ -227,6 +540,75 @@ pub(super) fn diff_selection_text(
     Some(out)
 }
 
+/// Prefix + selected slice for preferred-width selection painting.
+pub(super) fn diff_selection_slice(
+    lines: &ModelRc<WorkflowPrDiffLine>,
+    line: i32,
+    side: &str,
+    start_col: i32,
+    end_col: i32,
+) -> WorkflowPrDiffTextSlice {
+    let empty = WorkflowPrDiffTextSlice {
+        prefix: SharedString::new(),
+        text: SharedString::new(),
+        prefix_bytes: 0,
+        text_bytes: 0,
+    };
+    if line < 0 || line as usize >= lines.row_count() {
+        return empty;
+    }
+    let Some(row) = lines.row_data(line as usize) else {
+        return empty;
+    };
+    if !is_copyable_diff_line(&row) {
+        return empty;
+    }
+    let content = side_content(&row, side);
+    let char_count = content.chars().count() as i32;
+    let from = start_col.clamp(0, char_count) as u32;
+    let to = end_col.clamp(from as i32, char_count) as u32;
+    let prefix = slice_character_range(content, 0, from);
+    let text = slice_character_range(content, from, to);
+    WorkflowPrDiffTextSlice {
+        prefix_bytes: prefix.len() as i32,
+        text_bytes: text.len() as i32,
+        prefix: SharedString::from(prefix),
+        text: SharedString::from(text),
+    }
+}
+
+/// Soft-wrap visual-line start for a caret, used by wrap selection X geometry.
+pub(super) fn diff_wrap_line_start(
+    lines: &ModelRc<WorkflowPrDiffLine>,
+    line: i32,
+    side: &str,
+    caret: i32,
+    max_cells: i32,
+) -> i32 {
+    if line < 0 || line as usize >= lines.row_count() {
+        return 0;
+    }
+    let Some(row) = lines.row_data(line as usize) else {
+        return 0;
+    };
+    if !is_copyable_diff_line(&row) {
+        return 0;
+    }
+    soft_wrap_line_start(side_content(&row, side), caret, max_cells)
+}
+
+fn slice_character_range(value: &str, from: u32, to: u32) -> String {
+    if from >= to {
+        return String::new();
+    }
+    value
+        .chars()
+        .skip(from as usize)
+        .take(to.saturating_sub(from) as usize)
+        .collect()
+}
+
+/// Legacy display-column slicer kept for find/wrap helpers and unit coverage.
 pub(super) fn slice_display_columns(value: &str, from: u32, to: u32) -> &str {
     if from >= to {
         return "";
@@ -269,7 +651,12 @@ pub(super) fn slice_display_columns(value: &str, from: u32, to: u32) -> &str {
 mod tests {
     use slint::{ModelRc, VecModel};
 
-    use super::{diff_selection_text, resolve_diff_selection_hit, slice_display_columns};
+    use super::{
+        char_index_at_preferred_x, diff_selection_text, resolve_diff_click_range,
+        resolve_diff_selection_hit, slice_character_range, slice_display_columns,
+        soft_wrap_caret_at, soft_wrap_line_start, word_range_character_indices,
+    };
+    use crate::workflow::syntax_highlight::character_columns;
     use crate::{WorkflowPrDiffLine, WorkflowPrDiffToken};
 
     fn line(content: &str, left: &str, right: &str) -> WorkflowPrDiffLine {
@@ -321,6 +708,45 @@ mod tests {
     }
 
     #[test]
+    fn copy_matches_cjk_character_selection_not_display_columns() {
+        // Regression: selecting "安全" used to copy "t-lo" because hit-testing
+        // produced monospaced cell indices that slice_display_columns treated
+        // as East-Asian display columns.
+        let content = "保持 Usher 的桌面响应速度、清晰模块边界、event-loop 安全 UI 更新、项目级状态隔离，以及统一的横切基础设施。";
+        let lines = ModelRc::new(VecModel::from(vec![line(content, content, content)]));
+        let start = content.find("安全").expect("fixture") as u32;
+        let chars_before = content[..content.find("安全").unwrap()].chars().count() as i32;
+        let _ = start;
+        assert_eq!(
+            diff_selection_text(&lines, 0, chars_before, 0, chars_before + 2, "").as_deref(),
+            Some("安全")
+        );
+        assert_ne!(
+            slice_display_columns(content, chars_before as u32, (chars_before + 2) as u32),
+            "安全"
+        );
+    }
+
+    #[test]
+    fn copy_matches_tab_expanded_display_text() {
+        let expanded = "    let answer = 1;";
+        let lines = ModelRc::new(VecModel::from(vec![line(expanded, expanded, expanded)]));
+
+        assert_eq!(
+            diff_selection_text(&lines, 0, 0, 0, 4, "").as_deref(),
+            Some("    ")
+        );
+        assert_eq!(
+            diff_selection_text(&lines, 0, 2, 0, 7, "").as_deref(),
+            Some("  let")
+        );
+        assert_eq!(
+            diff_selection_text(&lines, 0, 4, 0, 7, "").as_deref(),
+            Some("let")
+        );
+    }
+
+    #[test]
     fn copy_skips_hunk_and_meta_rows() {
         let mut hunk = line("@@ -1,2 +1,2 @@", "", "");
         hunk.kind = "hunk".into();
@@ -346,6 +772,64 @@ mod tests {
         assert_eq!(slice_display_columns("\t中x", 4, 6), "中");
         assert_eq!(slice_display_columns("\t中x", 6, 7), "x");
         assert_eq!(slice_display_columns("\t中x", 3, 5), "\t中");
+        assert_eq!(slice_character_range("安全UI", 0, 2), "安全");
+    }
+
+    #[test]
+    fn soft_wrap_caret_uses_line_start_not_fixed_columns() {
+        let text = "Keep Usher a responsive desktop application with explicit module ownership";
+        // 40 cells forces a wrap well before char 40 if counting fixed columns.
+        let second_line_start = soft_wrap_line_start(text, 45, 40);
+        assert!(second_line_start > 0);
+        assert!(second_line_start < 45);
+        // Click near the start of the second visual line (x≈0, y≈pitch).
+        let hit = soft_wrap_caret_at(text, 40, 2.0, 18.0, 7.2, 16.0);
+        assert!(
+            (hit - second_line_start).abs() <= 2,
+            "hit={hit} second_line_start={second_line_start}"
+        );
+        // Fixed-column math would land near 40+0 and be far to the right.
+        assert!(
+            hit < 40,
+            "hit={hit} should not use fixed-column second segment"
+        );
+    }
+
+    #[test]
+    fn soft_wrap_breaks_at_whitespace_before_overflow() {
+        let text = "This file applies to the entire repository. It is intentionally bilingual";
+        // Narrow width forces a wrap around the first sentence.
+        let start = soft_wrap_line_start(text, 50, 40);
+        assert!(start > 0);
+        assert!(start <= 50);
+        assert_eq!(soft_wrap_line_start(text, 0, 40), 0);
+        assert_eq!(soft_wrap_line_start(text, start, 40), start);
+    }
+
+    #[test]
+    fn preferred_width_hit_maps_into_cjk_run() {
+        let content = "保持 Usher 的桌面响应速度、清晰模块边界、event-loop 安全 UI 更新、项目级状态隔离，以及统一的横切基础设施。";
+        let start = content.find("安全").unwrap();
+        let chars_before = content[..start].chars().count() as i32;
+        // Preferred-width hit testing scales by the same display-column weights
+        // as char_index_at_preferred_x (CJK = 2), not a Menlo 1.5 approximation.
+        let mut width = 0.0_f32;
+        for character in content.chars() {
+            width += character_columns(character).max(1) as f32;
+        }
+        let mut prefix = 0.0_f32;
+        for character in content[..start].chars() {
+            prefix += character_columns(character).max(1) as f32;
+        }
+        let hit = char_index_at_preferred_x(content, prefix + 0.01, width);
+        assert!(
+            (chars_before..chars_before + 2).contains(&hit),
+            "expected caret in 安全, got {hit} (start {chars_before})"
+        );
+        assert_eq!(
+            slice_character_range(content, chars_before as u32, (chars_before + 2) as u32),
+            "安全"
+        );
     }
 
     #[test]
@@ -356,13 +840,84 @@ mod tests {
             line(wrapped, wrapped, wrapped),
         ]));
 
-        let forward = resolve_diff_selection_hit(&lines, 0, 40.0, 74.0, 44.0, 100.0, 10.0, "");
+        let forward =
+            resolve_diff_selection_hit(&lines, 0, 40.0, 74.0, 44.0, 100.0, 10.0, 0.0, 22.0, "");
         assert_eq!((forward.line, forward.column), (1, 14));
 
-        let reverse = resolve_diff_selection_hit(&lines, 1, 40.0, -10.0, 44.0, 100.0, 10.0, "");
+        let reverse =
+            resolve_diff_selection_hit(&lines, 1, 40.0, -10.0, 44.0, 100.0, 10.0, 0.0, 22.0, "");
         assert_eq!((reverse.line, reverse.column), (0, 14));
 
-        let rounded = resolve_diff_selection_hit(&lines, 0, 45.0, 10.0, 44.0, 100.0, 10.0, "");
+        let rounded =
+            resolve_diff_selection_hit(&lines, 0, 45.0, 10.0, 44.0, 100.0, 10.0, 0.0, 22.0, "");
         assert_eq!((rounded.line, rounded.column), (0, 5));
+    }
+
+    #[test]
+    fn word_range_expands_same_character_class() {
+        assert_eq!(word_range_character_indices("foo_bar.baz", 2), (0, 7));
+        assert_eq!(word_range_character_indices("foo_bar.baz", 7), (7, 8));
+        assert_eq!(word_range_character_indices("foo_bar.baz", 9), (8, 11));
+        assert_eq!(word_range_character_indices("a  b", 1), (1, 3));
+        assert_eq!(word_range_character_indices("==>", 1), (0, 3));
+        assert_eq!(
+            word_range_character_indices("event-loop 安全 UI", 12),
+            (11, 13)
+        );
+    }
+
+    #[test]
+    fn click_range_selects_word_or_line() {
+        let lines = ModelRc::new(VecModel::from(vec![line(
+            "alpha beta",
+            "L-alpha beta",
+            "R-alpha beta",
+        )]));
+
+        let word = resolve_diff_click_range(&lines, 0, 2, "", 1);
+        assert_eq!(
+            (
+                word.start_line,
+                word.start_column,
+                word.end_line,
+                word.end_column
+            ),
+            (0, 0, 0, 5)
+        );
+        assert_eq!(
+            diff_selection_text(
+                &lines,
+                word.start_line,
+                word.start_column,
+                word.end_line,
+                word.end_column,
+                ""
+            )
+            .as_deref(),
+            Some("alpha")
+        );
+
+        let full = resolve_diff_click_range(&lines, 0, 2, "left", 2);
+        assert_eq!(
+            (
+                full.start_line,
+                full.start_column,
+                full.end_line,
+                full.end_column
+            ),
+            (0, 0, 0, 12)
+        );
+        assert_eq!(
+            diff_selection_text(
+                &lines,
+                full.start_line,
+                full.start_column,
+                full.end_line,
+                full.end_column,
+                "left"
+            )
+            .as_deref(),
+            Some("L-alpha beta")
+        );
     }
 }

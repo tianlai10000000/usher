@@ -54,7 +54,8 @@ mod memory_diagnostics;
 mod platform;
 use platform::{
     effective_dark_mode as get_effective_dark_mode, install_titlebar_settings_button,
-    set_app_appearance, set_title_bar_color, setup_application_font, setup_pr_review_fonts,
+    play_ui_click, set_app_appearance, set_title_bar_color, setup_application_font,
+    setup_pr_review_fonts,
 };
 mod terminal;
 
@@ -179,6 +180,12 @@ fn ui() -> Result<MainWindow> {
             "[Settings] Terminal verbose logging changed to: {}",
             enabled
         );
+    });
+
+    // ========= UI Sound Effects ========= //
+    AppState::get(&app).on_toggle_ui_sound_effects(move |enabled| {
+        settings::save_ui_sound_effects(enabled);
+        log::info!("[Settings] UI sound effects changed to: {}", enabled);
     });
 
     // ========= Git Tokens ========= //
@@ -398,8 +405,11 @@ fn ui() -> Result<MainWindow> {
     let router_for_back = router.clone();
     let app_for_back = app.as_weak();
     app.on_navigate_back(move || {
-        if let Some(state) = router_for_back.back() {
-            if let Some(ui) = app_for_back.upgrade() {
+        if let Some(ui) = app_for_back.upgrade() {
+            if AppState::get(&ui).get_ui_sound_effects() {
+                play_ui_click();
+            }
+            if let Some(state) = router_for_back.back() {
                 ui.invoke_chat_route_visible_changed(state.chat_route_visible);
             }
         }

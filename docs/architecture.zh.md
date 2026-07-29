@@ -37,7 +37,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum。 |
 | `src/app_runtime.rs` | 进程级多线程 Tokio runtime，并为 runtime 线程安装 tracing dispatch。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
-| `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观、标题栏附件、窗口交互通知和 macOS PR Review 字体注册；其他平台的显式 fallback 位于 `mod.rs`。 |
+| `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观、标题栏附件、窗口交互通知和 macOS PR Review 字体注册；`mod.rs` 提供其他平台的显式 fallback，以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
 | `src/shutdown.rs` | 按优先级协调关闭。 |
 | `src/single_instance.rs` | 单实例进程行为。 |
 | `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。 |
@@ -150,7 +150,7 @@ Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_
 
 ### 设置
 
-`AppSettings` 以 TOML 保存到平台配置目录，包括主题、自动更新、日志开关、Terminal 诊断、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称，以及位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。
+`AppSettings` 以 TOML 保存到平台配置目录，包括主题、自动更新、日志开关、Terminal 诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称，以及位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。开启 UI 声效后，面包屑返回目前通过 `platform::play_ui_click` 播放 macOS 系统 `Tink`；其他平台暂为 no-op，待补原生点击声。
 
 ### 项目
 
@@ -158,7 +158,7 @@ Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_
 
 ### Workflow
 
-Workflow 在所有支持的宽度下统一使用 GitHub 仓库页的 UnderlineNav 交互；窄屏只保留内容间距调整，不再切换成四等分的 ActionList 风格导航。PR 列表只保留 Open/Closed 状态以及 Reviews、Assignee、Sort 菜单；GitHub 仓库会把这些菜单映射为原生 Search qualifier 和排序参数，并在切换后重置分页重新请求，其他 Provider 会忽略不支持的 GitHub qualifier。项目或筛选条件变化时独立获取 Open 与 Closed 总数，页头不再复用当前选中分页的临时数量。总数仍在加载或计数请求失败时，页头按 Primer 降级体验隐藏数字并保留 Open/Closed 标签，而不是长期停留在加载占位。列表时间使用相对时间，并提供东八区绝对时间 Tooltip。
+Workflow 在所有支持的宽度下统一使用 GitHub 仓库页的 UnderlineNav 交互；低于 720px 时，仓库路径与操作从身份页头移入尾部 kebab 浮层。PR 列表严格复刻 GitHub 响应式筛选工具栏：Open/Closed 与筛选保持同一行；低于 620px 时直接保留 Assignee，把 Reviews 与 Sort 合并进一个分组 kebab ActionMenu。所有菜单互斥，第一次点击即可切换。GitHub 仓库会把这些菜单映射为原生 Search qualifier 和排序参数，并在切换后重置分页重新请求，其他 Provider 会忽略不支持的 GitHub qualifier。项目或筛选条件变化时独立获取 Open 与 Closed 总数，页头不再复用当前选中分页的临时数量。总数仍在加载或计数请求失败时，页头按 Primer 降级体验隐藏数字并保留 Open/Closed 标签，而不是长期停留在加载占位。列表时间使用相对时间，并提供东八区绝对时间 Tooltip。
 
 `WorkflowStore` 保存当前项目和各项目的 `WorkflowViewState`。切换项目必须重新绑定 UI，避免日志、步骤和 running 标记串到其他项目。`Route.Workflow` 与 `Route.PrReview` 构成同一生命周期域：两者之间切换保留 Workflow 列表/model 状态；临时进入域外路由时，只要仍可通过 Back 返回任一 Workflow 路由，也继续保留这些状态。
 
@@ -191,7 +191,7 @@ Conversation adapter 归一化 GitHub、GitLab、Gitee 公有 v5 与 Gitee 企�
 
 Conversation 提交批次使用 Primer 官方 `repo-push` Octicon；相对时间紧跟 `added N commits`，共享的绝对时间 Tooltip 保留 Provider 的准确时间。GitHub Review 会展开为不可拆分的活动摘要与可选正文卡片；review state 决定话术，相对时间采用 GitHub 自动单位，merged 活动抑制冗余 closed 事件。连接线按事件语义边界分段，但连续 Review 对之间必须从前一张卡片到下一条 summary 标记保持连续轨道。Gitee 企业版普通评论使用 MR `/notes`，并固定发送 `noteable_type: PullRequest`；`/reviews` 只用于 Review 决策。commit 计数探测若没有 total 且响应恰好填满请求页，即使是裸数组也视为不确定，随后统计并丢弃文档约定的完整非分页集合，不挂载懒加载 Commits model。
 
-Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度，从而避免最右侧露出未绘制区域，并保持 Tab/双宽字符对齐。代码栏支持 GitHub 风格的跨 ListView 行拖拽选中（不含行号栏；hunk/meta 行不可选且不进入剪贴板）；review controller 的同步命中测试按投影 model 中每个逻辑行的实际换行高度遍历，因此正向或反向拖入软换行终点时都能精确落到字符。⌘/Ctrl+C 静默写入剪贴板。选中状态只保存两个端点，选区矩形只由已选且可见的 delegate 创建，因此保留有界懒加载 model 与普通 token-only 滚动路径。
+Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度，从而避免最右侧露出未绘制区域，并保持 Tab/双宽字符对齐。代码栏支持 GitHub 风格的跨 ListView 行拖拽选中（不含行号栏；hunk/meta 行不可选且不进入剪贴板）；双击按相同字符类扩展为单词选区（字母数字/`_`、空白、其余标点各自成组），三击选中整行代码列，连击状态由审核工作区持有以免 ListView 回收打断手势；软换行继续使用 Slint `TextInput.word-wrap` 自动换行，并采用它的原生 UTF-8 选区几何，因此续行双击会高亮完整逻辑单词，不再近似换行偏移。Unified 换行行的行号与 `+`/`-` 使用字体自然首行行盒，未换行行仍使用名义 22px 行槽。仅需 preferred-width 的探测 Text 保持零尺寸。⌘/Ctrl+F 在选中文件工具栏停靠紧凑的编辑器式查找栏（GitHub PR Files changed 无应用内查找；栏体对齐 CodeMirror/GitHub 文件编辑器：查询、序号/总数、上一个/下一个、关闭），对可复制代码列做不区分大小写匹配、滚动定位，并只高亮当前命中；review controller 的同步命中测试按投影 model 中每个逻辑行的实际换行高度遍历，因此正向或反向拖入软换行终点时都能精确落到字符。⌘/Ctrl+C 静默写入剪贴板。选中状态只保存两个端点，选区渲染只由已选且可见的 delegate 创建，因此保留有界懒加载 model 与普通 token-only 滚动路径。
 
 Conversation 与 Commits 的 commit 链接会按 SHA 定位并复用 Files changed 工作区，把当前 commit 应用为单项范围。审核控制器会把来源 Conversation 或 Commits Tab 记录为 feature 页内下钻返回点，因此页头 Back 会先恢复来源 Tab，下一次 Back 才返回 Workflow 的 PR 列表；如果 commits 尚未加载，控制器会在加载完成后应用待处理选择，复制 SHA 保持独立。
 
@@ -322,6 +322,6 @@ Terminal viewport/session、更新取消、托盘关闭和路由布局需要做�
 ## 已知技术债
 
 - `src/logger/debug_logger.rs` 有一个无法编译的 doctest。
-- `Route` 中部分页面是开发/演示界面，没有进入主导航。
-- 根项目许可证仍需明确。
+- `Route` 中部分页面是开发/演示界面；左侧导航可临时暴露它们便于本地测试，不代表最终产品信息架构。
+- 应用为专有/非开源软件，见根目录 `LICENSE.txt`；第三方 vendored 组件仍保留各自许可证。
 - `docs/terminal_viewport_iteration_notes.md` 是历史证据，不是当前规格。

@@ -180,23 +180,54 @@ component PrFilterButton inherits Rectangle {
     }
 }
 
+component PrFilterMoreButton inherits Rectangle {
+    in property <bool> selected: false;
+    callback clicked();
+
+    // GitHub list-header overflow control: invisible IconButton — no border,
+    // muted hover/selected fill only.
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border-width: 0px;
+    background: more-touch.has-hover || root.selected
+        ? (AppState.effective-dark-mode ? #21262d : #f3f4f6)
+        : transparent;
+
+    Image {
+        x: 8px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
+        image-fit: contain;
+        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    }
+
+    more-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 component PrFilterMenuOption inherits Rectangle {
     in property <string> label;
     in property <string> value;
     in property <string> selected-value;
     callback selected(string);
 
-    height: 36px;
+    // Primer ActionList medium row (~32px), matching GitHub SelectPanel density.
+    height: 32px;
     background: option-touch.has-hover
         ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
         : transparent;
 
     Text {
-        x: 12px;
-        width: 18px;
+        x: 8px;
+        width: 16px;
         height: parent.height;
         text: root.selected-value == root.value ? "✓" : "";
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 600;
         color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
         horizontal-alignment: center;
@@ -204,8 +235,8 @@ component PrFilterMenuOption inherits Rectangle {
     }
 
     Text {
-        x: 38px;
-        width: parent.width - 50px;
+        x: 28px;
+        width: parent.width - 36px;
         height: parent.height;
         text: root.label;
         font-size: 12px;
@@ -222,14 +253,21 @@ component PrFilterMenuOption inherits Rectangle {
 
 component PrFilterMenu inherits Rectangle {
     in property <string> menu-type;
-    in property <string> selected-value;
-    callback selected(string);
+    in property <string> review-selected-value;
+    in property <string> assignee-selected-value;
+    in property <string> sort-selected-value;
+    callback selected(string, string);
     callback close();
 
-    width: 236px;
-    // Header 36px + one 36px row per option (assignee has 3; reviews/sort have 4).
-    height: root.menu-type == "assignee" ? 144px : 180px;
-    border-radius: 6px;
+    // GitHub ActionMenu / SelectPanel compact width (~200px), not the older
+    // 236px overlay that looked oversized beside the list header.
+    width: 200px;
+    // Header 32px + 32px rows. "more" = two section titles + 8 review/sort rows
+    // + one divider (28+128+1+28+128).
+    height: root.menu-type == "assignee"
+        ? 128px
+        : (root.menu-type == "more" ? 313px : 160px);
+    border-radius: 12px;
     border-width: 1px;
     border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
     background: AppState.effective-dark-mode ? #161b22 : #ffffff;
@@ -244,11 +282,11 @@ component PrFilterMenu inherits Rectangle {
         mouse-cursor: default;
     }
 
-    Text {
+    if root.menu-type != "more": Text {
         x: 12px;
         y: 0px;
-        width: parent.width - 24px;
-        height: 36px;
+        width: parent.width - 40px;
+        height: 32px;
         text: root.menu-type == "reviews"
             ? "Filter by reviews"
             : (root.menu-type == "assignee" ? "Filter by assignee" : "Sort by");
@@ -258,19 +296,19 @@ component PrFilterMenu inherits Rectangle {
         vertical-alignment: center;
     }
 
-    Rectangle {
-        x: parent.width - 32px;
+    if root.menu-type != "more": Rectangle {
+        x: parent.width - 28px;
         y: 4px;
-        width: 28px;
-        height: 28px;
+        width: 24px;
+        height: 24px;
         border-radius: 6px;
         background: close-touch.has-hover
             ? (AppState.effective-dark-mode ? #30363d : #f6f8fa)
             : transparent;
 
         Image {
-            x: 6px;
-            y: 6px;
+            x: 4px;
+            y: 4px;
             width: 16px;
             height: 16px;
             source: @image-url("../../assets/icons/octicon-x-16.svg");
@@ -283,40 +321,85 @@ component PrFilterMenu inherits Rectangle {
         }
     }
 
-    Rectangle {
-        y: 35px;
+    if root.menu-type != "more": Rectangle {
+        y: 31px;
         width: parent.width;
         height: 1px;
         background: AppState.effective-dark-mode ? #3d444d : #d8dee4;
     }
 
     if root.menu-type == "reviews": VerticalLayout {
-        y: 36px;
+        y: 32px;
         width: parent.width;
-        height: parent.height - 36px;
-        PrFilterMenuOption { label: "All reviews"; value: "all"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
-        PrFilterMenuOption { label: "Review required"; value: "required"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
-        PrFilterMenuOption { label: "Approved review"; value: "approved"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
-        PrFilterMenuOption { label: "Changes requested"; value: "changes-requested"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        height: parent.height - 32px;
+        PrFilterMenuOption { label: "All reviews"; value: "all"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
+        PrFilterMenuOption { label: "Review required"; value: "required"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
+        PrFilterMenuOption { label: "Approved review"; value: "approved"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
+        PrFilterMenuOption { label: "Changes requested"; value: "changes-requested"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
     }
 
     if root.menu-type == "assignee": VerticalLayout {
-        y: 36px;
+        y: 32px;
         width: parent.width;
-        height: parent.height - 36px;
-        PrFilterMenuOption { label: "Anyone"; value: "any"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
-        PrFilterMenuOption { label: "Assigned to nobody"; value: "none"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
-        PrFilterMenuOption { label: "Assigned to me"; value: "me"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        height: parent.height - 32px;
+        PrFilterMenuOption { label: "Anyone"; value: "any"; selected-value: root.assignee-selected-value; selected(value) => { root.selected("assignee", value); } }
+        PrFilterMenuOption { label: "Assigned to nobody"; value: "none"; selected-value: root.assignee-selected-value; selected(value) => { root.selected("assignee", value); } }
+        PrFilterMenuOption { label: "Assigned to me"; value: "me"; selected-value: root.assignee-selected-value; selected(value) => { root.selected("assignee", value); } }
     }
 
     if root.menu-type == "sort": VerticalLayout {
-        y: 36px;
+        y: 32px;
         width: parent.width;
-        height: parent.height - 36px;
-        PrFilterMenuOption { label: "Newest"; value: "newest"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
-        PrFilterMenuOption { label: "Oldest"; value: "oldest"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
-        PrFilterMenuOption { label: "Recently updated"; value: "updated-desc"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
-        PrFilterMenuOption { label: "Least recently updated"; value: "updated-asc"; selected-value: root.selected-value; selected(value) => { root.selected(value); } }
+        height: parent.height - 32px;
+        PrFilterMenuOption { label: "Newest"; value: "newest"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
+        PrFilterMenuOption { label: "Oldest"; value: "oldest"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
+        PrFilterMenuOption { label: "Recently updated"; value: "updated-desc"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
+        PrFilterMenuOption { label: "Least recently updated"; value: "updated-asc"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
+    }
+
+    if root.menu-type == "more": Rectangle {
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+
+        // GitHub overflow ActionMenu: muted section labels, then compact rows.
+        Text {
+            x: 12px;
+            y: 0px;
+            width: parent.width - 24px;
+            height: 28px;
+            text: "Filter by reviews";
+            font-size: 12px;
+            font-weight: 600;
+            color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            vertical-alignment: center;
+        }
+        PrFilterMenuOption { y: 28px; width: parent.width; label: "All reviews"; value: "all"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
+        PrFilterMenuOption { y: 60px; width: parent.width; label: "Review required"; value: "required"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
+        PrFilterMenuOption { y: 92px; width: parent.width; label: "Approved review"; value: "approved"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
+        PrFilterMenuOption { y: 124px; width: parent.width; label: "Changes requested"; value: "changes-requested"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
+
+        Rectangle {
+            y: 156px;
+            width: parent.width;
+            height: 1px;
+            background: AppState.effective-dark-mode ? #3d444d : #d8dee4;
+        }
+        Text {
+            x: 12px;
+            y: 157px;
+            width: parent.width - 24px;
+            height: 28px;
+            text: "Sort by";
+            font-size: 12px;
+            font-weight: 600;
+            color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            vertical-alignment: center;
+        }
+        PrFilterMenuOption { y: 185px; width: parent.width; label: "Newest"; value: "newest"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
+        PrFilterMenuOption { y: 217px; width: parent.width; label: "Oldest"; value: "oldest"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
+        PrFilterMenuOption { y: 249px; width: parent.width; label: "Recently updated"; value: "updated-desc"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
+        PrFilterMenuOption { y: 281px; width: parent.width; label: "Least recently updated"; value: "updated-asc"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
     }
 }
 
@@ -420,7 +503,8 @@ export component PrFlow {
     private property <int> hovered-time-index: -1;
     private property <string> hovered-time-tooltip: "";
     private property <bool> compact-filters: root.width < 620px;
-    private property <length> header-height: root.compact-filters ? 88px : 48px;
+    // GitHub keeps state and filter actions on one compact toolbar row.
+    private property <length> header-height: 48px;
     private property <string> empty-title: root.pr-state == "open"
         ? "There aren’t any open pull requests."
         : "There aren’t any closed pull requests.";
@@ -432,22 +516,53 @@ export component PrFlow {
     private property <length> list-height: root.pr-loading || root.pr-error != "" || root.pr-items.length == 0
         ? root.header-height + 320px
         : root.header-height + root.pr-items.length * 72px;
+    private property <bool> show-pagination: !root.pr-loading
+        && root.pr-error == ""
+        && root.pr-items.length > 0
+        && root.pr-page-count > 1;
+    // Footer is 16px gap + 32px controls + 8px trailing inset below the card.
+    private property <length> pagination-block-height: root.show-pagination ? 56px : 0px;
     // Each popover follows GitHub's Overlay contract: its right edge is
     // anchored to the right edge of the button that opened it.
-    private property <length> menu-anchor-right: root.active-menu == "reviews"
-        ? filter-bar-host.x + reviews-btn.x + reviews-btn.width
-        : (root.active-menu == "assignee"
-            ? filter-bar-host.x + assignee-btn.x + assignee-btn.width
-            : filter-bar-host.x + sort-btn.x + sort-btn.width);
-    private property <length> menu-x: max(8px, root.menu-anchor-right - 236px);
-    height: root.list-height
-        + ((!root.pr-loading && root.pr-error == "" && root.pr-items.length > 0 && root.pr-page-count > 1)
-            ? 56px
-            : 0px);
+    private property <length> menu-anchor-right: root.compact-filters
+        ? filter-bar-host.x + filter-bar-host.width
+            - (root.active-menu == "assignee" ? 32px : 0px)
+        : filter-bar-host.x + filter-bar-host.width
+            - (root.active-menu == "reviews"
+                ? 130px
+                : (root.active-menu == "assignee" ? 52px : 0px));
+    private property <length> menu-x: max(8px, root.menu-anchor-right - 200px);
+    // Lock geometry so a taller Workflow panel cannot stretch the list card
+    // and pull the pagination footer inside its border.
+    height: root.list-height + root.pagination-block-height;
+    vertical-stretch: 0;
+
+    // Same stacking contract as the review-workspace Diff view / file-filter /
+    // readiness popovers: dismiss is mounted under the interactive chrome so
+    // the first click on another filter switches menus instead of only closing.
+    // Slint rectangles alone do not capture pointer input; the TouchArea must
+    // own the hit target. Full-window absolute positioning matches the
+    // status-bar outside-click pattern for clicks outside the list card.
+    if root.active-menu != "": Rectangle {
+        x: -root.absolute-position.x;
+        y: -root.absolute-position.y;
+        width: 9999px;
+        height: 9999px;
+        z: 0;
+        background: transparent;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+            clicked => { root.active-menu = ""; }
+        }
+    }
 
     pr-list := Rectangle {
         width: root.width;
         height: root.list-height;
+        vertical-stretch: 0;
         border-radius: 6px;
         border-width: 1px;
         border-color: root.border-default;
@@ -483,12 +598,13 @@ export component PrFlow {
                 }
             }
 
-            // Keep status and filters in the same card header. At narrow
-            // widths, filters move to a second compact row instead of
-            // floating above the card or overlapping the status controls.
+            // Keep status and filters on one GitHub-style toolbar row.
+            // Same stacking contract as Diff view / file-filter / readiness
+            // on the review workspace: triggers stay above the dismiss layer
+            // so the first click switches menus.
             filter-bar-host := Rectangle {
                 x: 4px;
-                y: root.compact-filters ? 52px : 8px;
+                y: 8px;
                 width: parent.width - 8px;
                 height: 32px;
                 z: 95;
@@ -500,20 +616,31 @@ export component PrFlow {
                     spacing: 0px;
                     alignment: end;
 
-                    reviews-btn := PrFilterButton {
+                    if !root.compact-filters: reviews-btn := PrFilterButton {
                         label: "Reviews";
                         selected: root.active-menu == "reviews" || root.pr-review-filter != "all";
                         clicked => { root.active-menu = root.active-menu == "reviews" ? "" : "reviews"; }
                     }
-                    assignee-btn := PrFilterButton {
+                    if !root.compact-filters: assignee-btn := PrFilterButton {
                         label: "Assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
                     }
-                    sort-btn := PrFilterButton {
+                    if !root.compact-filters: sort-btn := PrFilterButton {
                         label: "Sort";
                         selected: root.active-menu == "sort" || root.pr-sort-filter != "newest";
                         clicked => { root.active-menu = root.active-menu == "sort" ? "" : "sort"; }
+                    }
+                    if root.compact-filters: PrFilterButton {
+                        label: "Assignee";
+                        selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
+                        clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
+                    }
+                    if root.compact-filters: PrFilterMoreButton {
+                        selected: root.active-menu == "more"
+                            || root.pr-review-filter != "all"
+                            || root.pr-sort-filter != "newest";
+                        clicked => { root.active-menu = root.active-menu == "more" ? "" : "more"; }
                     }
                 }
             }
@@ -730,11 +857,15 @@ export component PrFlow {
         text: root.hovered-time-tooltip;
     }
 
-    if !root.pr-loading && root.pr-error == "" && root.pr-items.length > 0 && root.pr-page-count > 1: Rectangle {
+    // Keep pagination outside the list card (16px gap). Never parent it under
+    // pr-list or let the card stretch over this band — that pulls Previous/Next
+    // inside the last row's border.
+    if root.show-pagination: Rectangle {
         x: max(0px, (root.width - self.width) / 2);
         y: root.list-height + 16px;
         width: min(root.width, 284px);
         height: 32px;
+        vertical-stretch: 0;
 
         PageButton {
             x: 0px;
@@ -760,37 +891,18 @@ export component PrFlow {
         }
     }
 
-    // Full-window transparent dismiss layer (status-bar absolute-position pattern).
-    // Slint rectangles alone do not capture pointer input; the TouchArea must
-    // own the hit target so clicks outside the menu close it.
-    if root.active-menu != "": Rectangle {
-        x: -root.absolute-position.x;
-        y: -root.absolute-position.y;
-        width: 9999px;
-        height: 9999px;
-        z: 90;
-        background: transparent;
-
-        TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: default;
-            clicked => { root.active-menu = ""; }
-        }
-    }
-
     if root.active-menu != "": PrFilterMenu {
         x: root.menu-x;
         y: root.header-height;
         z: 100;
         menu-type: root.active-menu;
-        selected-value: root.active-menu == "reviews"
-            ? root.pr-review-filter
-            : (root.active-menu == "assignee" ? root.pr-assignee-filter : root.pr-sort-filter);
-        selected(value) => {
-            if root.active-menu == "reviews" {
+        review-selected-value: root.pr-review-filter;
+        assignee-selected-value: root.pr-assignee-filter;
+        sort-selected-value: root.pr-sort-filter;
+        selected(kind, value) => {
+            if kind == "reviews" {
                 root.change-review-filter(value);
-            } else if root.active-menu == "assignee" {
+            } else if kind == "assignee" {
                 root.change-assignee-filter(value);
             } else {
                 root.change-sort-filter(value);

@@ -146,7 +146,9 @@ border, the 16 px PageHeader inset plus the shell's 4 px content gutter on its
 leading edge, and a compact 40 px total height with its 32 px content vertically
 centered. Route-history navigation remains available as a 32 px trailing
 ArrowLeft IconButton with a tooltip; it must not compete with the breadcrumb as
-a large text action.
+a large text action. The bar may use a translucent canvas so scrolled page
+content shows through, but it must mount a full-bar TouchArea shield so clicks
+cannot reach controls underneath; crumb and Back hit targets remain interactive.
 
 全局路由面包屑采用 Primer Breadcrumbs 的 normal 变体，并放入紧凑的
 PageHeader 上下文行。父级使用 14px 强调色链接，Hover 时显示下划线；
@@ -156,7 +158,8 @@ PageHeader 上下文行。父级使用 14px 强调色链接，Hover 时显示下
 PageHeader 内边距叠加 Shell 的 4px 内容边距，保证与页面标题对齐；总高度
 为 40px，内部 32px 内容须严格垂直居中。路由历史返回操作保留为右侧
 32px ArrowLeft IconButton 并提供 Tooltip，不得再以大号文字操作与面包屑
-争夺视觉层级。
+争夺视觉层级。顶栏可使用半透明画布以透出滚动内容，但必须挂载整栏
+TouchArea 屏蔽层，阻止点击穿透到下方控件；面包屑项与 Back 仍可交互。
 
 References: [Primer Breadcrumbs](https://primer.style/product/components/breadcrumbs/),
 [Breadcrumbs guidelines](https://primer.style/product/components/breadcrumbs/guidelines/),
@@ -166,13 +169,15 @@ References: [Primer Breadcrumbs](https://primer.style/product/components/breadcr
 ## Workflow repository navigation / Workflow 仓库导航
 
 The Workflow repository identity keeps project name, optional alias, provider,
-and repository ID on the first line in that order. The remote repository URL
-uses plain text with a copy action on the second line; it must not resemble an
-editable input with a filled background or border.
+and repository ID on the first line in that order. At 720 px and above, remote
+and local paths share a plain-text metadata row with copy/reveal actions. Below
+720 px, matching GitHub compact repository navigation, paths disappear from the
+header and move into the trailing kebab overlay.
 
 Workflow 仓库身份区第一行按“项目名称、可选别名、Provider、仓库 ID”的
-顺序展示。第二行仓库地址使用纯文本和复制操作，不得使用类似可编辑输入框
-的填充背景或边框。
+顺序展示。720px 及以上时，远程与本地路径在同一纯文本元数据行显示复制/
+打开操作；低于 720px 时对齐 GitHub 紧凑仓库导航，从页头隐藏路径并收进
+尾部 kebab 浮层。
 
 Workflow uses one content-sized UnderlineNav at every supported width. The
 selected underline spans the complete tab hit target. Hover uses a square muted
@@ -185,8 +190,18 @@ Workflow 在所有支持的宽度下统一使用内容宽度型 UnderlineNav。�
 
 ## Workflow pull request list / Workflow PR 列表
 
-Workflow PR filter controls use GitHub's content-sized filter-button geometry.
-The dropdown TriangleDown Octicon is optically centered with the text. PR rows
+Workflow PR filter controls reproduce GitHub's responsive list header. Open /
+Closed and filters stay on one 48 px row. At 620 px and above, Reviews,
+Assignee, and Sort use content-sized buttons; below it, Assignee remains visible
+beside a borderless kebab IconButton (invisible variant: muted hover/selected
+fill only). The kebab ActionMenu is a compact 200 px panel that groups review
+filters and sort choices with checkmarks and separators. Individual filter
+menus use the same 200 px width and 32 px ActionList rows. The dropdown
+TriangleDown Octicon is optically centered with the text. Menus are mutually
+exclusive and switching opens the target on the first click. Pagination is a sibling
+footer below the list card (16px gap), not inside the card border; PrFlow height
+is pinned to list + footer so a taller Workflow panel cannot stretch the card
+over the pager. PR rows
 keep the default canvas with no `Box-row--hover-gray` fill; the title is a
 Primer accent link (`#0969da` / `#4493f8`) that underlines on title hover.
 Relative-time tooltip hover stays on the metadata hit target only.
@@ -196,14 +211,21 @@ degraded-experience rules: when a count is still loading or the count request
 failed, hide the number and keep the label (optional “Count unavailable”
 tooltip); never leave a perpetual `…` placeholder.
 
-Workflow PR 筛选控件采用 GitHub 的内容宽度按钮几何。下拉 TriangleDown
-Octicon 必须与文字进行光学垂直居中。PR 行保持默认画布，不使用
-`Box-row--hover-gray` 整行底色；标题为 Primer 强调色链接（`#0969da` /
-`#4493f8`），仅在标题 hover 时显示下划线。相对时间 Tooltip 仅绑定元数据
-命中区域。每条分隔线固定在后一个 72px 行的顶部，不得穿过标题或元信息。
-Open/Closed 状态标签遵循 Primer 降级体验：计数仍在加载或请求失败时隐藏
-数字、保留标签（可选 “Count unavailable” Tooltip），不得长期停留在 `…`
-占位。
+Workflow PR 筛选严格复刻 GitHub 响应式列表页头：Open/Closed 与筛选保持
+在同一个 48px 行。620px 及以上使用 Reviews、Assignee、Sort 内容宽度按钮；
+低于该宽度时只直接保留 Assignee，旁边使用无边框 kebab IconButton（invisible
+变体，仅 muted hover/选中底色）。kebab ActionMenu 为紧凑的 200px 面板，
+以勾选项和分隔线分组展示 Review 筛选与排序；独立筛选菜单同样使用 200px
+宽度与 32px ActionList 行。TriangleDown Octicon 与文字光学居中；菜单互斥，
+第一次点击即可切换目标。分页是列表
+卡片下方的兄弟页脚（间隔 16px），不得落在卡片边框内；PrFlow 高度钉在
+列表+页脚，避免更高的 Workflow 面板把卡片撑过分页条。PR 行保持
+默认画布，不使用 `Box-row--hover-gray` 整行底色；标题为 Primer 强调色链接
+（`#0969da` / `#4493f8`），仅在标题 hover 时显示下划线。相对时间 Tooltip
+仅绑定元数据命中区域。每条分隔线固定在后一个 72px 行的顶部，不得穿过标题
+或元信息。Open/Closed 状态标签遵循 Primer 降级体验：计数仍在加载或请求
+失败时隐藏数字、保留标签（可选 “Count unavailable” Tooltip），不得长期
+停留在 `…` 占位。
 
 References: [GitHub pull request list](https://github.com/openai/openai-python/pulls),
 [Primer CSS Box component](https://primer.style/css/components/box), and
@@ -216,26 +238,26 @@ and two Primer icon-only controls for switching between list and grid views.
 The controls are 32 px square with an 8 px product-specified gap and a 16 px
 gap before Reload. The list is one bordered collection of repository rows.
 The responsive grid uses 1/2/3/4 columns at 480/720/1000 px and flat
-bordered Primer Cards; windows at or above 1000 px stay on four columns so
-aliases and paths keep usable width inside the 1120 px content cap.
-Both views present a distinct project
-heading, remote and local repository metadata, optional Labels, pull-request
-counts, and permanently mounted terminal/edit/delete hit targets. Rows and
-cards use the default canvas with a subtle hover canvas; they do not use
-gradients, elevated Material cards, or a synthetic “add card”. The content is
-centered, capped at 1120 px, and the primary `New project` action remains in
-the page header.
+bordered Primer Cards (condensed repo-card density); windows at or above
+1000 px stay on four columns inside the 1120 px content cap.
+Both views present a distinct project heading, an optional alias Label capped
+at 168 px with ellipsis when longer, remote and local repository paths (elided),
+optional topic Labels, pull-request counts, and permanently mounted
+terminal/edit/delete hit targets. Rows and cards use the default canvas
+with a subtle hover canvas; they do not use gradients, elevated Material cards,
+or a synthetic “add card”. The content is centered, capped at 1120 px, and the
+primary `New project` action remains in the page header.
 
 项目页面采用 Primer 全页 `PageHeader`、中号搜索输入框及两个图标型视图按钮，
 用于切换列表与网格视图。按钮为 32px 方形，按照产品决定彼此间隔 8px，并在
 刷新按钮前保留 16px。列表是一个带边框的仓库行集合；响应式网格按
-480/720/1000px 切换 1/2/3/4 列；达到 1000px 后保持四列，以便在 1120px
-内容上限内给别名和路径留下可用宽度，并采用
-扁平带边框的 Primer Card。两种视图都包含明确的项目标题、远程与本地仓库元数据、
-可选 Label、Pull Request 计数，以及常驻的终端/编辑/删除命中区域。列表和
-卡片使用默认画布与轻量 Hover 画布；禁止渐变、Material Elevated Card 或
-虚构的“新增卡片”。内容居中且最大宽度为 1120px，主操作 `New project`
-固定在页头。
+480/720/1000px 切换 1/2/3/4 列；达到 1000px 后保持四列，并在 1120px
+内容上限内采用扁平带边框的 Primer Card（紧凑仓库卡片密度）。两种视图都包
+含明确的项目标题、可选别名 Label（最长 168px，超出省略）、远程与本地仓库
+路径（过长省略）、可选 Topic Label、Pull Request 计数，以及常驻的终端/
+编辑/删除命中区域。列表和卡片使用默认画布与轻量 Hover 画布；禁止渐变、
+Material Elevated Card 或虚构的“新增卡片”。内容居中且最大宽度为 1120px，
+主操作 `New project` 固定在页头。
 
 New and Edit use Primer Dialog's 480 px large width, 16 px header/body/footer
 safe area, 32 px medium controls, 6 px field radius, and a single scrolling
@@ -257,6 +279,18 @@ References: [Primer Card](https://primer.style/product/components/card/),
 and [Primer delete pattern](https://primer.style/product/scenario-patterns/delete/).
 
 ## Global terminal drawer / 全局终端抽屉
+
+Page-corner scroll and terminal actions use Primer medium IconButtons (32×32,
+6 px radius, 16 px Octicons), not Material circular FABs. Back to top is the
+default variant with `octicon-arrow-up-16`; the terminal control is primary
+(green) with `octicon-terminal-16`. Both use Primer tooltip labels and a small
+floating shadow because they sit above scrolling content.
+
+页面右下角的返回顶部与终端入口采用 Primer medium IconButton（32×32、
+6px 圆角、16px Octicon），禁止 Material 圆形 FAB。返回顶部为 default 变体
+并使用 `octicon-arrow-up-16`；终端入口为 primary（绿色）并使用
+`octicon-terminal-16`。二者均带 Primer Tooltip；因悬浮于滚动内容之上，
+使用小尺寸 floating 阴影。
 
 The global Terminal drawer uses a Primer bordered surface: 6 px radius while
 docked, 12 px radius plus medium shadow while floating, a 40 px subtle header,

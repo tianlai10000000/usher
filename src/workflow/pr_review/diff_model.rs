@@ -173,14 +173,9 @@ fn to_slint_line(
         old_line: line.old_line,
         new_line: line.new_line,
         kind: line.kind.clone().into(),
-        // Keep one sanitized plain-text copy for the live-resize fast path.
-        // Normal rendering still uses the token model for syntax colors.
-        content: line
-            .content
-            .chars()
-            .filter(|character| !matches!(character, '\r' | '\n'))
-            .collect::<String>()
-            .into(),
+        // Keep one sanitized plain-text copy for the live-resize/wrap path and
+        // clipboard. Tabs are expanded here to match highlighted tokens.
+        content: sanitize_diff_content(line.content.as_str()).into(),
         tokens: ModelRc::new(VecModel::from(tokens)),
         expandable: hunk_is_expandable(file, index),
         expand_all: hunk_can_expand_all(file, index),

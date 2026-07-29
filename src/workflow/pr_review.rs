@@ -6,6 +6,7 @@ mod controller;
 mod diff_model;
 mod diff_projection;
 mod file_tree;
+mod find;
 mod hunk;
 mod selection;
 mod timeline;

@@ -1,4 +1,5 @@
 use crate::git::get_standard_environment_pull_request_counts;
+use crate::platform::{open_directory_in_file_manager, open_directory_tooltip};
 use crate::project::load_repository_metadata;
 use crate::terminal::{reset_terminal_for_project, terminal_title_for_project};
 use crate::workflow::pr_list::WorkflowPrListController;
@@ -10,6 +11,7 @@ use crate::workflow::state::{
 use crate::workflow::tag::refresh_tag_context;
 use crate::{MainWindow, ToastManager, ToastOptions};
 use slint::{ComponentHandle, Global};
+use std::path::Path;
 
 pub(crate) fn bind_project_context(
     ui: &MainWindow,
@@ -17,6 +19,8 @@ pub(crate) fn bind_project_context(
     pr_list_controller: WorkflowPrListController,
     pr_review_controller: WorkflowPrReviewController,
 ) {
+    ui.set_workflow_open_local_folder_tooltip(open_directory_tooltip().into());
+
     let ui_weak = ui.as_weak();
     ui.on_workflow_open_project(
         move |project_name,
@@ -133,10 +137,6 @@ pub(crate) fn bind_project_context(
                     });
                 });
             }
-            show_success(
-                &ui,
-                &format!("Switched workflow context to '{}'.", context.name),
-            );
         },
     );
 
@@ -156,6 +156,23 @@ pub(crate) fn bind_project_context(
                 log::warn!("[Workflow] Failed to copy remote URL: {error}");
                 if let Some(ui) = ui_weak.upgrade() {
                     show_error(&ui, "Failed to copy the remote URL.");
+                }
+            }
+        }
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_open_local_repo(move |local_repo| {
+        let local_repo = local_repo.trim();
+        if local_repo.is_empty() {
+            return;
+        }
+        match open_directory_in_file_manager(Path::new(local_repo)) {
+            Ok(()) => {}
+            Err(error) => {
+                log::warn!("[Workflow] Failed to open local repository: {error}");
+                if let Some(ui) = ui_weak.upgrade() {
+                    show_error(&ui, &error);
                 }
             }
         }

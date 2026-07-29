@@ -185,4 +185,6 @@ The GitHub release workflow produces macOS archives/DMGs and Windows ZIP bundles
 
 ## License
 
-No root project license file is currently present. The vendored Material component library retains its own license in `material-1.7.1-fixed/LICENSE.md`.
+Usher is **proprietary, non-open-source** software. See [`LICENSE.txt`](LICENSE.txt): all rights reserved; use requires explicit permission from the copyright holder.
+
+Third-party components keep their own licenses (for example Material in `material-1.7.1-fixed/LICENSE.md`).

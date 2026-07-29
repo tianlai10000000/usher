@@ -507,3 +507,23 @@ pub(crate) fn setup_pr_review_fonts(app: &MainWindow) {
         log::warn!("[PR Review] macOS system UI font unavailable; falling back to Helvetica Neue");
     }
 }
+
+/// Play a short system UI click via AppKit `NSSound`.
+///
+/// `Tink` is the lightest built-in alert; suitable for a breadcrumb Back press.
+pub(crate) fn play_ui_click() {
+    let Some(sound_class) = Class::get("NSSound") else {
+        return;
+    };
+    let Some(name) = nsstring("Tink") else {
+        return;
+    };
+    let sound: *mut Object = unsafe { msg_send![sound_class, soundNamed: name] };
+    if sound.is_null() {
+        return;
+    }
+    let played: bool = unsafe { msg_send![sound, play] };
+    if !played {
+        log::debug!("[Sound] NSSound play returned false for Tink");
+    }
+}

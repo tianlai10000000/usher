@@ -1,5 +1,4 @@
-import { MaterialPalette } from "@material";
-import { FloatingCircleButton } from "./floating_circle_button.slint";
+import { FloatingIconButton } from "./floating_icon_button.slint";
 
 export component TerminalFab inherits Rectangle {
     in property <length> container-width: 0px;
@@ -17,34 +16,16 @@ export component TerminalFab inherits Rectangle {
     height: root.container-height;
     background: transparent;
 
-    terminal-fab-button := FloatingCircleButton {
+    FloatingIconButton {
         x: parent.width - self.width - root.right-offset;
         y: parent.height - self.height - root.bottom-offset;
-        icon: @image-url("../../assets/icons/terminal.svg");
-        emphasized: true;
-        opacity: root.active ? 0.92 : 1;
+        icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
+        primary: true;
+        selected: root.active;
+        tooltip: root.active ? "Close terminal" : root.tooltip-text;
         interactive: root.interactive;
         clicked => {
             root.request-open-terminal();
-        }
-    }
-
-    if terminal-fab-button.has-hover: Rectangle {
-        width: 84px;
-        height: 24px;
-        x: terminal-fab-button.x - self.width - 8px;
-        y: terminal-fab-button.y + self.height / 2 - 2px;
-        border-radius: 8px;
-        background: MaterialPalette.inverse_surface;
-
-        Text {
-            x: 8px;
-            y: (parent.height - self.preferred-height) / 2;
-            width: parent.width - 16px;
-            text: root.tooltip-text;
-            font-size: 10px;
-            color: MaterialPalette.inverse_on_surface;
-            horizontal-alignment: center;
         }
     }
 }

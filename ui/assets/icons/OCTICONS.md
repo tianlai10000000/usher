@@ -8,6 +8,8 @@ Files named `octicon-*.svg` are derived from GitHub's open-source Primer Octicon
 
 The SVG geometry remains upstream. Theme- and status-dependent colors are applied
 by Slint with GitHub Primer semantic foreground tokens rather than embedded fills.
+`octicon-file-directory-16.svg` is the Primer Octicons `file-directory-16`
+outline icon used by the Workflow header “Show in Finder/Explorer” control.
 `octicon-file-directory-open-fill-16.svg` is the Primer Octicons `file-directory-open-fill-16` icon.
 `octicon-copy-16.svg` is the Primer Octicons `copy-16` icon.
 `octicon-fold-16.svg` is the Primer Octicons `fold-16` icon.
@@ -33,6 +35,8 @@ by the PR review header and the breadcrumb IconButton.
 used by the Conversation timeline's `added N commits` batch record.
 `octicon-stack-16.svg` and `octicon-x-16.svg` are the upstream controls used
 by the PR commit-range selector.
+`octicon-chevron-up-16.svg` is the upstream ChevronUp Octicon used with
+ChevronDown by the Files changed in-diff find bar (previous / next match).
 `octicon-triangle-down-16.svg` is the upstream TriangleDown Octicon used by
 GitHub PR-list filter triggers.
 `octicon-alert-16.svg` is the upstream warning mark used by GitHub-style
@@ -41,6 +45,8 @@ embedded loading errors.
 `octicon-terminal-16.svg`, `octicon-pencil-16.svg`, `octicon-trash-16.svg`,
 `octicon-sync-16.svg`, `octicon-plus-16.svg`, and `octicon-repo-16.svg` are the
 unchanged upstream controls used by the Project list and its actions.
+`octicon-arrow-up-16.svg` is the upstream ArrowUp Octicon used by the page
+Back-to-top IconButton.
 `octicon-list-unordered-16.svg` and `octicon-table-16.svg` are the unchanged
 upstream controls used by the Project page's list/grid SegmentedControl.
 `octicon-screen-full-16.svg`, `octicon-screen-normal-16.svg`, and

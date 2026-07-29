@@ -1,4 +1,4 @@
-import { FloatingCircleButton } from "./floating_circle_button.slint";
+import { FloatingIconButton } from "./floating_icon_button.slint";
 
 export component BackToTopFab inherits Rectangle {
     in property <length> container-width: 0px;
@@ -17,12 +17,13 @@ export component BackToTopFab inherits Rectangle {
     height: root.container-height;
     background: transparent;
 
-    FloatingCircleButton {
+    FloatingIconButton {
         x: parent.width - self.width - root.right-offset;
         y: root.visible-state
             ? parent.height - self.height - root.bottom-offset
             : parent.height - self.height - root.bottom-offset + 28px;
-        icon: @image-url("../../assets/icons/arrow_upward.svg");
+        icon: @image-url("../../assets/icons/octicon-arrow-up-16.svg");
+        tooltip: "Back to top";
         opacity: root.visible-state ? 1 : 0;
         interactive: root.visible-state;
         clicked => {

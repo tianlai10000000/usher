@@ -5,6 +5,7 @@
 //! validation.
 
 use crate::git::{PullRequestDiffFile, PullRequestDiffLine};
+use crate::workflow::syntax_highlight::expand_tabs;
 
 // Match GitHub's signed-in improved `/changes/{commit}` Files changed view.
 pub(super) const HUNK_CONTEXT_PAGE_SIZE: usize = 21;
@@ -16,11 +17,14 @@ pub(super) enum HunkExpansionDirection {
     All,
 }
 
+/// Plain text shown/copied in the review UI. Tabs are expanded to match the
+/// highlighted token stream so selection geometry and ⌘/Ctrl+C agree.
 pub(super) fn sanitize_diff_content(content: &str) -> String {
-    content
+    let stripped: String = content
         .chars()
         .filter(|character| !matches!(character, '\r' | '\n'))
-        .collect()
+        .collect();
+    expand_tabs(stripped.as_str(), 4)
 }
 
 pub(super) fn hunk_is_expandable(file: &PullRequestDiffFile, hunk_index: usize) -> bool {

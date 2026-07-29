@@ -33,6 +33,9 @@ export global AppState {
     // terminal verbose logging
     in-out property <bool> terminal-verbose-logging: false;
 
+    // UI click sound effects (system sound; currently breadcrumb Back only)
+    in-out property <bool> ui-sound-effects: false;
+
     // git platform tokens
     in-out property <string> git-github-token: "";
     in-out property <string> git-gitlab-token: "";
@@ -69,6 +72,9 @@ export global AppState {
 
     // terminal verbose logging
     callback toggle-terminal-verbose-logging(enabled: bool);
+
+    // UI click sound effects
+    callback toggle-ui-sound-effects(enabled: bool);
 
     // git token settings
     callback save-git-tokens(github-token: string, gitlab-token: string, gitee-token: string, gitee-enterprise-token: string);

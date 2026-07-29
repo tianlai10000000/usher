@@ -23,7 +23,39 @@ export struct WorkflowPrDiffToken {
 
 export struct WorkflowPrDiffSelectionHit {
     line: int,
+    // Unicode character index into the displayed (tab-expanded) line text.
     column: int,
+}
+
+// Document-ordered code-column range from a multi-click (word/line) gesture.
+// Columns are Unicode character indices into the displayed (tab-expanded) text.
+export struct WorkflowPrDiffSelectionRange {
+    start-line: int,
+    start-column: int,
+    end-line: int,
+    end-column: int,
+}
+
+// Preferred-width selection paint: prefix before the range + selected text.
+export struct WorkflowPrDiffTextSlice {
+    prefix: string,
+    text: string,
+    prefix-bytes: int,
+    text-bytes: int,
+}
+
+// One in-diff find hit. `side` is empty for Unified, or `left` / `right` for Split.
+// `prefix` / `text` are the exact slices used for preferred-width highlight
+// geometry so CJK matches the token Text layout (not East-Asian display columns).
+export struct WorkflowPrDiffFindMatch {
+    line: int,
+    start-column: int,
+    end-column: int,
+    start-char: int,
+    end-char: int,
+    side: string,
+    prefix: string,
+    text: string,
 }
 
 export struct WorkflowPrDiffLine {
@@ -951,21 +983,21 @@ export component MergeReadinessBadge inherits Rectangle {
             text: root.state-symbol;
             horizontal_alignment: center;
             vertical_alignment: center;
-            font_size: 12px;
+            font_size: 11px;
             font_weight: 700;
             color: #ffffff;
         }
     }
-    // SF/Segoe's rendered glyph box sits slightly above its nominal line box.
-    // Apply this once here so every readiness label (ready, conflicts, merged,
-    // checks, and review states) shares the same visual centerline.
+    // Match ReviewActionButton: fill the badge height and center the glyph
+    // box. A fixed 20px line plus +1px optical nudge left the label off-midline.
     label-text := Text {
         x: 36px;
-        y: (parent.height - self.height) / 2 + 1px;
+        y: 0px;
         width: min(self.preferred-width, parent.width - self.x - 12px);
-        height: 20px;
+        height: parent.height;
         text: root.label;
         vertical-alignment: center;
+        font-family: "SF Pro Text";
         font-size: 13px;
         font-weight: 600;
         color: root.foreground-color;

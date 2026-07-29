@@ -14,7 +14,8 @@ use crate::git::{
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{
-    MainWindow, Route, WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffSelectionHit,
+    MainWindow, Route, WorkflowPrDiffFile, WorkflowPrDiffFindMatch, WorkflowPrDiffLine,
+    WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice,
     WorkflowPrFileExtensionFilter, WorkflowPrTreeItem,
 };
 
@@ -30,6 +31,7 @@ use super::cache::{
 use super::diff_model::{LazyPrDiffLineModel, to_slint_file};
 use super::diff_projection::hunk_scroll_anchor_source_index;
 use super::file_tree::{build_tree_items, extension_counts};
+use super::find::{collect_diff_find_matches, estimate_diff_line_offset_y};
 use super::hunk::{
     HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection, expand_all_hunk_context_from_sources,
     expand_hunk_context_from_sources, full_source_file, hunk_is_expandable,
@@ -39,7 +41,10 @@ use super::hunk::{
     expand_all_hunk_context, expand_hunk_context, hunk_can_expand_all, hunk_can_expand_down,
     restore_original_diff,
 };
-use super::selection::{diff_selection_text, resolve_diff_selection_hit};
+use super::selection::{
+    diff_selection_slice, diff_selection_text, diff_wrap_line_start, resolve_diff_click_range,
+    resolve_diff_selection_hit,
+};
 use super::timeline::{
     chrono_commit_index_to_display, commit_index_by_sha, commit_model, commit_range_label,
     conversation_content_height, conversation_model, display_commit_range_to_chrono,
@@ -491,7 +496,15 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
 
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_review_resolve_diff_selection(
-        move |start_line, pointer_x, pointer_y, start_height, code_width, cell_width, side| {
+        move |start_line,
+              pointer_x,
+              pointer_y,
+              start_height,
+              code_width,
+              cell_width,
+              content_width,
+              line_pitch,
+              side| {
             let Some(ui) = ui_weak.upgrade() else {
                 return WorkflowPrDiffSelectionHit::default();
             };
@@ -503,10 +516,76 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
                 start_height,
                 code_width,
                 cell_width,
+                content_width,
+                line_pitch,
                 side.as_str(),
             )
         },
     );
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_resolve_diff_selection_slice(move |line, side, start_col, end_col| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return WorkflowPrDiffTextSlice::default();
+        };
+        diff_selection_slice(
+            &ui.get_workflow_pr_review_lines(),
+            line,
+            side.as_str(),
+            start_col,
+            end_col,
+        )
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_resolve_diff_wrap_line_start(move |line, side, caret, max_cols| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return 0;
+        };
+        diff_wrap_line_start(
+            &ui.get_workflow_pr_review_lines(),
+            line,
+            side.as_str(),
+            caret,
+            max_cols,
+        )
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_resolve_diff_click_range(move |line, column, side, mode| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return WorkflowPrDiffSelectionRange::default();
+        };
+        resolve_diff_click_range(
+            &ui.get_workflow_pr_review_lines(),
+            line,
+            column,
+            side.as_str(),
+            mode,
+        )
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_find_diff_matches(move |query, split| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
+        };
+        collect_diff_find_matches(&ui.get_workflow_pr_review_lines(), query.as_str(), split)
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_estimate_diff_line_y(move |line, code_width, cell_width, side| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return 0.0;
+        };
+        estimate_diff_line_offset_y(
+            &ui.get_workflow_pr_review_lines(),
+            line,
+            code_width,
+            cell_width,
+            side.as_str(),
+        )
+    });
 
     let submit_controller = controller.clone();
     let ui_weak = ui.as_weak();

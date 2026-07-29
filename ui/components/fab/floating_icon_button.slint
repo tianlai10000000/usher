@@ -1,0 +1,88 @@
+import { AppState } from "../../state/app_state.slint";
+
+// Floating page actions use Primer IconButton geometry, not Material FAB.
+// Medium size: 32×32, 6px radius, 16px Octicon. Default/primary colors match
+// GitHubButton. Placement is floating, so apply Primer shadow-floating-small.
+// Reference: https://primer.style/product/components/icon-button/
+export component FloatingIconButton inherits Rectangle {
+    in property <image> icon;
+    in property <bool> primary: false;
+    in property <bool> selected: false;
+    in property <bool> interactive: true;
+    in property <string> tooltip: "";
+    out property <bool> has-hover: touch.has-hover;
+    callback clicked();
+
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.primary
+        ? (AppState.effective-dark-mode ? #238636 : #1f883d)
+        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
+    background: root.primary
+        ? (touch.pressed
+            ? (AppState.effective-dark-mode ? #1f6f32 : #197935)
+            : (touch.has-hover
+                ? (AppState.effective-dark-mode ? #2ea043 : #1c8139)
+                : (AppState.effective-dark-mode ? #238636 : #1f883d)))
+        : root.selected
+            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+            : (touch.pressed
+                ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+                : (touch.has-hover
+                    ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
+                    : (AppState.effective-dark-mode ? #21262d : #f6f8fa)));
+    drop-shadow-blur: 12px;
+    drop-shadow-color: AppState.effective-dark-mode ? #00000066 : #25292e1f;
+    drop-shadow-offset-y: 6px;
+    clip: false;
+
+    Image {
+        x: 8px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: root.icon;
+        colorize: root.primary
+            ? #ffffff
+            : (AppState.effective-dark-mode ? #f0f6fc : #1f2328);
+    }
+
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.interactive;
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    // Primer IconButton shows a tooltip for the action label.
+    if touch.has-hover && root.tooltip != "": Rectangle {
+        x: -self.width - 8px;
+        y: (parent.height - self.height) / 2;
+        width: tooltip-text.preferred-width + 12px;
+        height: 24px;
+        border-radius: 6px;
+        background: AppState.effective-dark-mode ? #f0f6fc : #24292f;
+        z: 40;
+
+        tooltip-text := Text {
+            x: 6px;
+            width: parent.width - 12px;
+            height: parent.height;
+            text: root.tooltip;
+            font-size: 11px;
+            color: AppState.effective-dark-mode ? #1f2328 : #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: no-wrap;
+        }
+    }
+
+    animate background { duration: 120ms; }
+    animate opacity { duration: 220ms; }
+    animate y { duration: 240ms; }
+}

@@ -180,4 +180,6 @@ GitHub Release 工作流会生成 macOS 压缩包/DMG 和 Windows ZIP Bundle。
 
 ## 许可证
 
-项目根目录当前没有独立的许可证文件。内置 Material 组件库的许可证位于 `material-1.7.1-fixed/LICENSE.md`。
+Usher 为**专有、非开源**软件。详见 [`LICENSE.txt`](LICENSE.txt)：版权所有，未经版权方书面许可不得使用、复制、修改或分发。
+
+第三方组件仍保留各自许可证（例如 Material 见 `material-1.7.1-fixed/LICENSE.md`）。
