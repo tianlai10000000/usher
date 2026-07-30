@@ -1,169 +1,60 @@
-import { MaterialText, MaterialPalette, MaterialStyleMetrics, TextButton, FilledButton, HorizontalDivider } from "@material";
-import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
+import { ScrollView } from "@material";
 import { DialogManager } from "./dialog_manager.slint";
+import { GitHubDialog } from "./github_dialog.slint";
+import { AppState } from "../../state/app_state.slint";
 
+// Imperative DialogManager adapter. All visible chrome is owned by the same
+// GitHubDialog used by project, PR review, and update surfaces.
 export component DialogEnhance inherits Rectangle {
-    // 回调函数：用于调用页面组件的回调
-    callback on-default-action-clicked(/* id */ string);
-    callback on-action-clicked(/* id */ string, /* index */ int);
-    
-    // 根容器透明，不阻挡点击
-    background: transparent;
-    
-    // Dialog 使用条件渲染（不使用 PopupWindow，便于状态管理）
-    if DialogManager.visible: Rectangle {
-        width: 100%;
-        height: 100%;
-        z: 2000;  // 确保在最上层
-        
-        // 背景层（根据 overlay 属性决定是否显示遮罩）
-        background-layer := Rectangle {
-            width: 100%;
-            height: 100%;
-            background: DialogManager.overlay ? #00000066 : transparent;
-            
-            // 点击背景区域
-            TouchArea {
-                width: 100%;
-                height: 100%;
-                clicked => {
-                    // 非模态时，点击背景关闭对话框
-                    if !DialogManager.modal {
-                        DialogManager.close();
-                    }
-                }
-            }
+    callback on-default-action-clicked(string);
+    callback on-action-clicked(string, int);
+
+    private property <length> requested-width: DialogManager.width-is-percent
+        ? root.width * DialogManager.width-percent / 100
+        : DialogManager.width-px;
+    private property <length> requested-height: DialogManager.height-is-percent
+        ? root.height * DialogManager.height-percent / 100
+        : DialogManager.height-px;
+
+    dialog-frame := GitHubDialog {
+        dialog-visible: DialogManager.visible;
+        show-backdrop: DialogManager.overlay;
+        title: DialogManager.title;
+        dialog-width: max(296px, root.requested-width);
+        dialog-height: max(200px, root.requested-height);
+        body-padding: 16px;
+        dismiss-on-backdrop: !DialogManager.modal;
+        secondary-actions: DialogManager.actions;
+        show-cancel: false;
+        primary-label: DialogManager.default-action;
+        primary-success: true;
+        close-requested => { DialogManager.close(); }
+        secondary-action-clicked(index) => {
+            root.on-action-clicked(DialogManager.id, index);
         }
-        
-        // 对话框内容容器
-        dialog-container := Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            // 宽度：根据 is-percent 属性选择像素值或百分比计算
-            width: DialogManager.width-is-percent 
-                ? parent.width * DialogManager.width-percent / 100 
-                : max(320px, DialogManager.width-px);  // 最小宽度 320px
-            // 高度：根据 is-percent 属性选择像素值或百分比计算
-            height: DialogManager.height-is-percent 
-                ? parent.height * DialogManager.height-percent / 100 
-                : max(200px, DialogManager.height-px);  // 最小高度 200px
-            background: MaterialPalette.surface_container_high;
-            border-radius: MaterialStyleMetrics.border_radius_28;
-            
-            // 阻止点击穿透到背景
-            TouchArea {
-                width: 100%;
-                height: 100%;
-            }
-            
-            VerticalLayout {
-                width: 100%;
-                height: 100%;
-                spacing: 0px;
-                
-                // 标题区域（固定，不可滚动）
-                title-area := VerticalLayout {
-                    width: 100%;
-                    padding-top: MaterialStyleMetrics.padding_24;
-                    padding-bottom: MaterialStyleMetrics.padding_16;
-                    padding-left: MaterialStyleMetrics.padding_16;
-                    padding-right: MaterialStyleMetrics.padding_16;
-                    spacing: 0;
-                    vertical-stretch: 0;
-                    
-                    if DialogManager.title != "": MaterialText {
-                        text: DialogManager.title;
-                        font-size: 24px;
-                        font-weight: 500;
-                        color: MaterialPalette.on_surface;
-                    }
-                }
-                
-                // 内容区域（只有 content 文本可滚动）
-                HorizontalLayout {
-                    width: 100%;
-                    alignment: center;
-                    vertical-stretch: 1;  // 占据剩余空间
-
-                    content-scroll := Rectangle {
-                        width: parent.width - 16px;
-    
-                        content-scroll-view := ScrollView {
-                            horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
-                            vertical_scrollbar_policy: ScrollBarPolicy.as_needed;  // 只在需要时显示滚动条
-                            
-                            content-text := VerticalLayout {
-                                width: content-scroll-view.visible_width;
-                                padding-left: MaterialStyleMetrics.padding_8;
-                                padding-right: MaterialStyleMetrics.padding_8;
-                                padding-bottom: MaterialStyleMetrics.padding_16;
-                                
-                                if DialogManager.content != "": MaterialText {
-                                    text: DialogManager.content;
-                                    wrap: word-wrap;
-                                    color: MaterialPalette.on_surface;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 分隔线（贯穿整个 dialog 宽度）
-                HorizontalDivider {
-                    width: 100%;
-                }
-                
-                // 按钮区域
-                button-area := VerticalLayout {
-                    width: 100%;
-                    height: 56px;
-                    padding-left: MaterialStyleMetrics.padding_8;
-                    padding-right: MaterialStyleMetrics.padding_8;
-                    padding-top: MaterialStyleMetrics.padding_16;
-                    padding-bottom: MaterialStyleMetrics.padding_16;
-                    spacing: 0px;
-                    vertical-stretch: 0;
-                    
-                    HorizontalLayout {
-                        spacing: MaterialStyleMetrics.spacing_8;
-                        vertical-stretch: 0;  // 不垂直拉伸，只占用必要高度
-                        
-                        // 占位符，让按钮靠右
-                        Rectangle { 
-                            horizontal-stretch: 1;
-                            vertical-stretch: 0;
-                        }
-                        
-                        // 自定义操作按钮
-                        for action[index] in DialogManager.actions: Rectangle {
-                            min-width: 80px;  // 最小宽度，与默认按钮一致
-                            vertical-stretch: 0;  // 不垂直拉伸
-                            TextButton {
-                                width: 100%;
-                                text: action;
-                                clicked => {
-                                    // 只触发 Rust 回调，由 Rust 端决定后续操作（包括是否关闭对话框）
-                                    DialogManager.action-clicked(DialogManager.id, index);
-                                }
-                            }
-                        }
-                        
-                        // 默认操作按钮
-                        if DialogManager.default-action != "": Rectangle {
-                            min-width: 80px;  // 最小宽度，与其他按钮一致
-                            vertical-stretch: 0;  // 不垂直拉伸
-                            FilledButton {
-                                width: 100%;
-                                text: DialogManager.default-action;
-                                clicked => {
-                                    // 只触发 Rust 回调，由 Rust 端决定后续操作（包括是否关闭对话框）
-                                    DialogManager.default-action-clicked(DialogManager.id);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        primary-clicked => {
+            root.on-default-action-clicked(DialogManager.id);
         }
     }
+
+        if DialogManager.visible: ScrollView {
+            x: dialog-frame.content-x;
+            y: dialog-frame.content-y;
+            width: dialog-frame.content-width;
+            height: dialog-frame.content-height;
+            z: 3100;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+            vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+            viewport-height: content-text.preferred-height;
+
+            content-text := Text {
+                width: parent.visible-width;
+                min-height: parent.visible-height;
+                text: DialogManager.content;
+                font-size: 14px;
+                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                wrap: word-wrap;
+                vertical-alignment: top;
+            }
+        }
 }

@@ -1,6 +1,9 @@
-import { MaterialText, TextButton, FilledButton, Horizontal, Vertical } from "@material";
+import { AppState } from "../../state/app_state.slint";
 import { NotificationType } from "notification.slint";
 
+// Floating application notifications reproduce Primer React Banner's compact
+// geometry: 8px outer padding, 1px semantic border, 6px radius, 16px status
+// Octicon, 14px text, and stacked actions below complex content.
 export component ActionsNotify inherits Rectangle {
     in property <int> notification-id;
     in property <string> title;
@@ -8,131 +11,160 @@ export component ActionsNotify inherits Rectangle {
     in property <image> icon;
     in property <[string]> actions: [];
     in property <NotificationType> notification-type: NotificationType.Info;
-    
-    // 关闭按钮图标
-    private property <image> close-icon: @image-url("../../assets/icons/error.svg");
-    
-    // 回调事件
+
     callback close-clicked();
     callback action-clicked(/* action-index */ int);
 
-    // 根据通知类型设置背景颜色
-    background: notification-type == NotificationType.Success ? #4CAF50 :
-                notification-type == NotificationType.Info ? #2196F3 :
-                notification-type == NotificationType.Warning ? #FB8C00 :
-                #F44336;  // Error
-    border-radius: 4px;
-    min-height: 80px;
+    private property <bool> dark: AppState.effective-dark-mode;
+    private property <color> foreground: root.dark ? #f0f6fc : #1f2328;
+    private property <color> muted-foreground: root.dark ? #b7bdc8 : #59636e;
+    private property <color> canvas: root.dark ? #0d1117 : #ffffff;
+    private property <color> border: root.dark ? #3d444d : #d1d9e0;
+    private property <color> semantic-foreground:
+        root.notification-type == NotificationType.Success ? (root.dark ? #3fb950 : #1a7f37) :
+        root.notification-type == NotificationType.Info ? (root.dark ? #4493f8 : #0969da) :
+        root.notification-type == NotificationType.Warning ? (root.dark ? #d29922 : #9a6700) :
+        (root.dark ? #f85149 : #cf222e);
 
-    VerticalLayout {
+    height: max(48px, banner-content.preferred-height);
+    background: root.canvas;
+    border-width: 1px;
+    border-color: root.border;
+    border-radius: 6px;
+    drop-shadow-blur: 8px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: root.dark ? #00000066 : #1f232826;
+
+    banner-content := VerticalLayout {
         width: parent.width;
-        spacing: 8px;
-        padding: 12px;
-        padding-right: 40px;  // 为关闭按钮留出空间
+        spacing: 4px;
+        padding: 8px;
 
-        // 标题和图标行
         HorizontalLayout {
-            width: parent.width;
-            spacing: 12px;
+            min-height: 32px;
+            spacing: 0px;
+            padding-right: 32px;
             alignment: start;
 
-            // 图标
-            Image {
-                source: root.icon;
-                width: 24px;
-                height: 24px;
-                colorize: #ffffff;
+            Rectangle {
+                width: 32px;
+                min-height: 32px;
+                background: transparent;
+
+                Image {
+                    x: 8px;
+                    y: 8px;
+                    width: 16px;
+                    height: 16px;
+                    source: root.icon;
+                    colorize: root.semantic-foreground;
+                }
             }
 
-            // 标题（如果有）
-            if root.title != "" : Text {
-                text: root.title;
-                color: #ffffff;
-                font-size: 16px;
-                font-weight: 700;
-                wrap: word-wrap;
-                horizontal-alignment: left;
+            VerticalLayout {
                 horizontal-stretch: 1;
+                spacing: 4px;
+                padding-top: 6px;
+                padding-bottom: 6px;
+
+                if root.title != "": Text {
+                    text: root.title;
+                    color: root.foreground;
+                    font-size: 14px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                    horizontal-alignment: left;
+                    vertical-alignment: top;
+                }
+
+                if root.message != "": Text {
+                    text: root.message;
+                    color: root.title == "" ? root.foreground : root.muted-foreground;
+                    font-size: 14px;
+                    font-weight: 400;
+                    wrap: word-wrap;
+                    horizontal-alignment: left;
+                    vertical-alignment: top;
+                }
             }
         }
 
-        // 消息内容
-        if root.message != "" : Text {
-            text: root.message;
-            color: #ffffffcc;
-            font-size: 14px;
-            font-weight: 400;
-            wrap: word-wrap;
-            horizontal-alignment: left;
-        }
-
-        // 底部操作按钮区域（仅当 actions 不为空时显示）
-        if root.actions.length > 0 : HorizontalLayout {
-            width: parent.width;
-            min-height: 36px;
-            spacing: 8px;
-            alignment: end;
+        if root.actions.length > 0: HorizontalLayout {
+            height: 36px;
+            spacing: 12px;
             padding-top: 4px;
-            padding-left: 24px;
-            padding-right: 24px;
+            alignment: end;
 
-            for action[index] in root.actions : Rectangle {
-                min-width: 60px;
+            // Keep the card-level action group pinned to the trailing edge,
+            // secondary first and primary last.
+            Rectangle { horizontal-stretch: 1; }
+
+            for action[index] in root.actions: Rectangle {
+                private property <bool> primary:
+                    root.actions.length > 1 && index == root.actions.length - 1;
+
+                action-label-measure := Text {
+                    visible: false;
+                    text: action;
+                    font-size: 14px;
+                    font-weight: 600;
+                    wrap: no-wrap;
+                }
+
+                width: max(64px, action-label-measure.preferred-width + 24px);
+                horizontal-stretch: 0;
                 height: 32px;
-                background: action-touch.has-hover ? #ffffff30 : #ffffff20;
-                border-radius: 4px;
+                border-radius: 6px;
+                border-width: primary ? 0px : 1px;
+                border-color: root.dark ? #3d444d : #d1d9e0;
+                background: primary
+                    ? (action-touch.has-hover ? (root.dark ? #2ea043 : #1a7f37) : (root.dark ? #238636 : #1f883d))
+                    : (action-touch.has-hover ? (root.dark ? #30363d : #f3f4f6) : (root.dark ? #21262d : #f6f8fa));
 
                 HorizontalLayout {
-                    alignment: center;
                     padding-left: 12px;
                     padding-right: 12px;
-                    
+
                     Text {
                         text: action;
-                        color: #ffffff;
-                        font-size: 13px;
-                        font-weight: 500;
+                        color: primary ? #ffffff : root.foreground;
+                        font-size: 14px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
                         vertical-alignment: center;
                     }
                 }
 
                 action-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
                     mouse-cursor: pointer;
-                    clicked => {
-                        root.action-clicked(index);
-                    }
+                    clicked => { root.action-clicked(index); }
                 }
             }
         }
     }
 
-    // 右上角关闭按钮
-    Rectangle {
-        x: parent.width - 32px;
-        y: 4px;
-        width: 28px;
-        height: 28px;
-        background: close-btn-touch.has-hover ? #ffffff20 : transparent;
-        border-radius: 14px;
+    close-button := Rectangle {
+        x: parent.width - 40px;
+        y: 8px;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        background: close-touch.has-hover
+            ? (root.dark ? #ffffff14 : #1f23280f)
+            : transparent;
 
         Image {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            source: root.close-icon;
-            width: 18px;
-            height: 18px;
-            colorize: #ffffff;
+            x: 8px;
+            y: 8px;
+            width: 16px;
+            height: 16px;
+            source: @image-url("../../assets/icons/octicon-x-16.svg");
+            colorize: root.muted-foreground;
         }
 
-        close-btn-touch := TouchArea {
-            width: parent.width;
-            height: parent.height;
+        close-touch := TouchArea {
             mouse-cursor: pointer;
-            clicked => {
-                root.close-clicked();
-            }
+            clicked => { root.close-clicked(); }
         }
     }
 }

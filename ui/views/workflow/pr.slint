@@ -503,6 +503,9 @@ export component PrFlow {
     private property <int> hovered-time-index: -1;
     private property <string> hovered-time-tooltip: "";
     private property <bool> compact-filters: root.width < 620px;
+    private property <bool> supports-review-filter: root.repo-type == "github";
+    private property <bool> supports-assignee-filter: root.repo-type == "github"
+        || root.repo-type == "gitlab";
     // GitHub keeps state and filter actions on one compact toolbar row.
     private property <length> header-height: 48px;
     private property <string> empty-title: root.pr-state == "open"
@@ -559,23 +562,32 @@ export component PrFlow {
         }
     }
 
-    pr-list := Rectangle {
+    // Keep the card and pager in one explicit layout. Absolute y coordinates
+    // can still be compressed by an ancestor's layout constraints; a real
+    // sibling layout preserves the 16px gap even on a tall Closed page.
+    content-layout := VerticalLayout {
         width: root.width;
-        height: root.list-height;
-        vertical-stretch: 0;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: root.border-default;
-        background: root.canvas-default;
-        clip: true;
+        height: root.height;
+        spacing: root.show-pagination ? 16px : 0px;
+        alignment: start;
 
-        header := Rectangle {
-            x: 0px;
-            y: 0px;
+        pr-list := Rectangle {
             width: parent.width;
-            height: root.header-height;
-            z: 10;
-            background: root.canvas-subtle;
+            height: root.list-height;
+            vertical-stretch: 0;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: root.border-default;
+            background: root.canvas-default;
+            clip: true;
+
+            header := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: root.header-height;
+                z: 10;
+                background: root.canvas-subtle;
 
             HorizontalLayout {
                 x: 4px;
@@ -616,12 +628,12 @@ export component PrFlow {
                     spacing: 0px;
                     alignment: end;
 
-                    if !root.compact-filters: reviews-btn := PrFilterButton {
+                    if !root.compact-filters && root.supports-review-filter: reviews-btn := PrFilterButton {
                         label: "Reviews";
                         selected: root.active-menu == "reviews" || root.pr-review-filter != "all";
                         clicked => { root.active-menu = root.active-menu == "reviews" ? "" : "reviews"; }
                     }
-                    if !root.compact-filters: assignee-btn := PrFilterButton {
+                    if !root.compact-filters && root.supports-assignee-filter: assignee-btn := PrFilterButton {
                         label: "Assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
@@ -631,16 +643,21 @@ export component PrFlow {
                         selected: root.active-menu == "sort" || root.pr-sort-filter != "newest";
                         clicked => { root.active-menu = root.active-menu == "sort" ? "" : "sort"; }
                     }
-                    if root.compact-filters: PrFilterButton {
+                    if root.compact-filters && root.supports-assignee-filter: PrFilterButton {
                         label: "Assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
                     }
                     if root.compact-filters: PrFilterMoreButton {
-                        selected: root.active-menu == "more"
-                            || root.pr-review-filter != "all"
+                        selected: root.active-menu == (root.supports-review-filter ? "more" : "sort")
+                            || (root.supports-review-filter && root.pr-review-filter != "all")
                             || root.pr-sort-filter != "newest";
-                        clicked => { root.active-menu = root.active-menu == "more" ? "" : "more"; }
+                        clicked => {
+                            root.active-menu = root.active-menu
+                                == (root.supports-review-filter ? "more" : "sort")
+                                ? ""
+                                : (root.supports-review-filter ? "more" : "sort");
+                        }
                     }
                 }
             }
@@ -846,6 +863,44 @@ export component PrFlow {
                 }
             }
         }
+        }
+
+        // Pagination is a full-width footer sibling. The compact control group
+        // is centered inside it instead of positioning the footer itself.
+        if root.show-pagination: Rectangle {
+            width: parent.width;
+            height: 32px;
+            vertical-stretch: 0;
+
+            pager-controls := Rectangle {
+                x: max(0px, (parent.width - self.width) / 2);
+                width: min(parent.width, 284px);
+                height: parent.height;
+
+                PageButton {
+                    x: 0px;
+                    label: "Previous";
+                    button-enabled: root.pr-page > 1 && !root.pr-loading;
+                    clicked => { root.change-page(root.pr-page - 1); }
+                }
+                MaterialText {
+                    x: 96px;
+                    width: max(0px, parent.width - 192px);
+                    height: parent.height;
+                    text: "Page " + root.pr-page + " / " + root.pr-page-count;
+                    horizontal_alignment: center;
+                    vertical_alignment: center;
+                    font_size: 12px;
+                    color: root.fg-muted;
+                }
+                PageButton {
+                    x: parent.width - self.width;
+                    label: "Next";
+                    button-enabled: root.pr-page < root.pr-page-count && !root.pr-loading;
+                    clicked => { root.change-page(root.pr-page + 1); }
+                }
+            }
+        }
     }
 
     // Paint outside pr-list so the clipped, rounded list border cannot cut off
@@ -855,40 +910,6 @@ export component PrFlow {
         y: root.header-height + root.hovered-time-index * 72px + 58px;
         z: 200;
         text: root.hovered-time-tooltip;
-    }
-
-    // Keep pagination outside the list card (16px gap). Never parent it under
-    // pr-list or let the card stretch over this band — that pulls Previous/Next
-    // inside the last row's border.
-    if root.show-pagination: Rectangle {
-        x: max(0px, (root.width - self.width) / 2);
-        y: root.list-height + 16px;
-        width: min(root.width, 284px);
-        height: 32px;
-        vertical-stretch: 0;
-
-        PageButton {
-            x: 0px;
-            label: "Previous";
-            button-enabled: root.pr-page > 1 && !root.pr-loading;
-            clicked => { root.change-page(root.pr-page - 1); }
-        }
-        MaterialText {
-            x: 96px;
-            width: max(0px, parent.width - 192px);
-            height: parent.height;
-            text: "Page " + root.pr-page + " / " + root.pr-page-count;
-            horizontal_alignment: center;
-            vertical_alignment: center;
-            font_size: 12px;
-            color: root.fg-muted;
-        }
-        PageButton {
-            x: parent.width - self.width;
-            label: "Next";
-            button-enabled: root.pr-page < root.pr-page-count && !root.pr-loading;
-            clicked => { root.change-page(root.pr-page + 1); }
-        }
     }
 
     if root.active-menu != "": PrFilterMenu {

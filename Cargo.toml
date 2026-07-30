@@ -76,6 +76,11 @@ libc = "0.2"
 raw-window-handle = "0.6"
 objc = "0.2"
 
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+# Native system-theme detection. On Linux this uses the XDG Desktop Portal,
+# which also works inside Flatpak sandboxes; Windows reads the per-user app theme.
+dark-light = "2.0.0"
+
 # [target.'cfg(target_arch = "wasm32")'.dependencies]
 # wasm-bindgen = { version = "0.2" }
 # console_error_panic_hook = "0.1.5"

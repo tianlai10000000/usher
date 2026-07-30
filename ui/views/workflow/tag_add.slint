@@ -1,10 +1,8 @@
-import { StepItem, Steps } from "../../components/workflow/steps.slint";
+import { Job, JobStepItem } from "../../components/jobs/job.slint";
 import { TagField, TagReadonlyField } from "../../components/workflow/fields.slint";
 import { AppState } from "../../state/app_state.slint";
 import {
     TagActionButton,
-    TagStatusBanner,
-    TagStepsPlaceholder,
     TagSegmentedControl,
     TagSegmentItem,
     TagSegmentDivider,
@@ -12,25 +10,35 @@ import {
 
 export component TagAddPanel {
     in property <string> version-mode: "patch";
+    in property <string> scope-mode: "local";
     in property <string> current-version: "v0.0.0";
     in-out property <string> next-version: "v0.0.1";
     in property <bool> initializing: false;
     in property <bool> running: false;
+    in property <string> job-status: "queued";
+    in property <string> job-conclusion: "";
+    in property <string> job-total-duration: "";
     in property <bool> loading-animated: true;
     in property <string> result: "Ready to create a tag.";
-    in property <[StepItem]> steps: [];
+    in property <[JobStepItem]> steps: [];
     callback select-version-mode(string);
     callback run(string, string);
     callback stop();
 
     private property <string> description: "";
-    private property <int> expanded-step-index: -1;
+    private property <int> expanded-step-overrides: 0;
     private property <bool> stacked-fields: root.width < 1020px;
-    private property <bool> show-steps:
-        root.running || (root.steps.length > 0 && root.steps[0].status != "pending");
     width: 100%;
+    height: panel-content.preferred-height;
+    vertical-stretch: 0;
 
-    VerticalLayout {
+    // Local/Remote keeps this panel mounted; drop disclosure overrides when the
+    // scope plan is replaced underneath.
+    changed scope-mode => {
+        root.expanded-step-overrides = 0;
+    }
+
+    panel-content := VerticalLayout {
         width: 100%;
         spacing: 16px;
         alignment: start;
@@ -59,21 +67,30 @@ export component TagAddPanel {
                     label: "Patch";
                     selected: root.version-mode == "patch";
                     enabled: !root.running && !root.initializing;
-                    clicked => { root.select-version-mode("patch"); }
+                    clicked => {
+                        root.expanded-step-overrides = 0;
+                        root.select-version-mode("patch");
+                    }
                 }
                 TagSegmentDivider { }
                 TagSegmentItem {
                     label: "Minor";
                     selected: root.version-mode == "minor";
                     enabled: !root.running && !root.initializing;
-                    clicked => { root.select-version-mode("minor"); }
+                    clicked => {
+                        root.expanded-step-overrides = 0;
+                        root.select-version-mode("minor");
+                    }
                 }
                 TagSegmentDivider { }
                 TagSegmentItem {
                     label: "Major";
                     selected: root.version-mode == "major";
                     enabled: !root.running && !root.initializing;
-                    clicked => { root.select-version-mode("major"); }
+                    clicked => {
+                        root.expanded-step-overrides = 0;
+                        root.select-version-mode("major");
+                    }
                 }
             }
         }
@@ -126,7 +143,8 @@ export component TagAddPanel {
             enabled: !root.running && !root.initializing;
         }
 
-        // alignment=start keeps the action on the left.
+        // alignment=start keeps Create on the left; Stop sits beside it while
+        // the run is latched so it does not jump to the trailing edge.
         HorizontalLayout {
             width: 100%;
             spacing: 12px;
@@ -139,14 +157,9 @@ export component TagAddPanel {
                 loading: root.running || root.initializing;
                 label: root.initializing ? "Loading…" : (root.running ? "Creating…" : "Create tag");
                 clicked => {
+                    root.expanded-step-overrides = 0;
                     root.run(root.next-version, root.description);
                 }
-            }
-
-            Rectangle {
-                height: 1px;
-                background: transparent;
-                horizontal-stretch: 1;
             }
 
             if root.running: TagActionButton {
@@ -158,23 +171,17 @@ export component TagAddPanel {
             }
         }
 
-        TagStatusBanner {
+        Job {
             width: 100%;
-            message: root.result;
-            initializing: root.initializing;
-        }
-
-        if root.show-steps: Steps {
-            width: 100%;
-            title: "Tag workflow steps";
+            vertical-stretch: 0;
+            title: "Tag workflow";
+            summary: root.initializing ? "Loading repository tags…" : root.result;
+            execution-status: root.job-status;
+            conclusion: root.job-conclusion;
+            total-duration: root.job-total-duration;
             steps: root.steps;
-            expanded-step-index <=> root.expanded-step-index;
+            expanded-step-overrides <=> root.expanded-step-overrides;
             animations-enabled: root.loading-animated;
-        }
-
-        if !root.show-steps: TagStepsPlaceholder {
-            width: 100%;
-            message: "Workflow steps will appear after the tag process starts.";
         }
     }
 }

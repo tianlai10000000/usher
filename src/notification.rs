@@ -61,10 +61,10 @@ fn get_default_icon(notification_type: NotificationType) -> slint::Image {
 
     // If unable to get embedded icon, try loading from file system (fallback for development mode)
     let icon_path_str = match notification_type {
-        NotificationType::Info => "ui/assets/icons/info.svg",
-        NotificationType::Success => "ui/assets/icons/success.svg",
-        NotificationType::Warning => "ui/assets/icons/warning.svg",
-        NotificationType::Error => "ui/assets/icons/error.svg",
+        NotificationType::Info => "ui/assets/icons/octicon-info-16.svg",
+        NotificationType::Success => "ui/assets/icons/octicon-check-circle-16.svg",
+        NotificationType::Warning => "ui/assets/icons/octicon-alert-16.svg",
+        NotificationType::Error => "ui/assets/icons/octicon-stop-16.svg",
     };
 
     let icon_path = Path::new(icon_path_str);
@@ -849,6 +849,14 @@ pub fn setup_notifications(
                                 new_version.into(),
                                 current_version.into(),
                             );
+                        }
+                    }
+                }
+                "manual-update" => {
+                    if action_index == 1 {
+                        log::info!("[Notification] Manual update: starting update...");
+                        if let Some(ui) = ui_weak_for_action.upgrade() {
+                            ui.invoke_install();
                         }
                     }
                 }

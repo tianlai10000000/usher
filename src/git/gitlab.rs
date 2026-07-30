@@ -9,12 +9,13 @@ use crate::http::{self, RequestOptions};
 
 use super::{
     PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
-    PullRequestDiffFile, PullRequestItem, PullRequestPage, PullRequestReadiness,
-    PullRequestReadinessKind, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
-    configured_api_base_url, configured_token, conversation_commit_batch_items,
-    conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
-    is_configured_enterprise_host, is_redundant_commit_system_note, is_redundant_merge_system_note,
-    parse_unified_diff, percent_encode_path, unavailable_diff_file,
+    PullRequestDiffFile, PullRequestFilters, PullRequestItem, PullRequestMergeMethod,
+    PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestReviewAction,
+    PullRequestState, RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url,
+    configured_token, conversation_commit_batch_items, conversation_count_from_detail,
+    conversation_merged_item, finalize_conversation_timeline, is_configured_enterprise_host,
+    is_redundant_commit_system_note, is_redundant_merge_system_note, parse_unified_diff,
+    percent_encode_path, unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -46,6 +47,7 @@ pub(super) async fn get_pull_requests(
     locator: &RepoLocator,
     repo_project_id: &str,
     state: Option<PullRequestState>,
+    filters: &PullRequestFilters,
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
@@ -60,15 +62,27 @@ pub(super) async fn get_pull_requests(
             "{project_id}",
             percent_encode_path(repo_project_id).as_str(),
         );
+    let (order_by, sort) = gitlab_list_sort(filters.sort.as_str());
+    let per_page_query = per_page.to_string();
+    let page_query = page.max(1).to_string();
     let mut request = http::get(endpoint)
         .header(ACCEPT, "application/json")
         .query(&[
-            ("per_page", &per_page.to_string()),
-            ("page", &page.max(1).to_string()),
+            ("per_page", per_page_query.as_str()),
+            ("page", page_query.as_str()),
+            ("order_by", order_by),
+            ("sort", sort),
         ]);
     if let Some(state) = state {
         request = request.query(&[("state", state.gitlab_query())]);
     }
+    request = match filters.assignee.as_str() {
+        "none" => request
+            .query(&[("scope", "all")])
+            .query(&[("assignee_id", "None")]),
+        "me" => request.query(&[("scope", "assigned_to_me")]),
+        _ => request.query(&[("scope", "all")]),
+    };
     if let Some(token) = configured_token(RepoType::GitLab) {
         request = request.header("PRIVATE-TOKEN", token);
     }
@@ -105,6 +119,15 @@ pub(super) async fn get_pull_requests(
         page_count: header_u32(&headers, "x-total-pages"),
         items,
     })
+}
+
+fn gitlab_list_sort(value: &str) -> (&'static str, &'static str) {
+    match value {
+        "oldest" => ("created_at", "asc"),
+        "updated-desc" => ("updated_at", "desc"),
+        "updated-asc" => ("updated_at", "asc"),
+        _ => ("created_at", "desc"),
+    }
 }
 
 pub(super) async fn get_pull_request_diff(
@@ -274,36 +297,125 @@ pub(super) async fn get_pull_request_action_state(
     )
     .await
     .map_err(|error| error.to_string())?;
-    let readiness = gitlab_merge_readiness(&detail);
-    let review_state = match string_field(&detail, "detailed_merge_status").as_deref() {
-        Some("requested_changes") => "rejected",
-        Some("not_approved") | Some("approvals_syncing") => "pending",
-        _ => "",
+    let project = load_project_settings(locator, repo_project_id).await;
+    Ok(gitlab_action_state(
+        &detail,
+        project.as_ref(),
+        configured_token(RepoType::GitLab).is_some(),
+    ))
+}
+
+pub(super) async fn submit_pull_request_review(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+    action: PullRequestReviewAction,
+    body: &str,
+) -> Result<(), String> {
+    if configured_token(RepoType::GitLab).is_none() {
+        return Err("Configure a GitLab Token in Settings before submitting a review.".into());
     }
-    .to_string();
-    let merge_block_reason = if readiness.kind == PullRequestReadinessKind::Ready {
-        "GitLab reports this merge request as ready, but remote review and merge actions are not implemented in Usher yet."
-            .to_string()
-    } else {
-        readiness.detail.clone()
-    };
-    Ok(PullRequestActionState {
-        can_comment: false,
-        can_approve: false,
-        can_request_changes: false,
-        can_merge: false,
-        can_revert: false,
-        review_state,
-        readiness,
-        merge_block_reason,
-        revert_block_reason: "Automated merge-request revert is not implemented for GitLab yet."
-            .to_string(),
-        revert_action_label: "Revert changes".to_string(),
-        revert_confirmation:
-            "This provider does not currently expose a supported automatic revert operation."
-                .to_string(),
-        allowed_merge_methods: Vec::new(),
+    if action != PullRequestReviewAction::Approve && body.trim().is_empty() {
+        return Err("A review comment is required for this action.".into());
+    }
+    if action == PullRequestReviewAction::RequestChanges {
+        return Err(
+            "GitLab does not expose Request changes through its stable REST API; add a comment instead."
+                .into(),
+        );
+    }
+
+    if action == PullRequestReviewAction::Comment {
+        return post_merge_request_note(locator, repo_project_id, pull_request_iid, body).await;
+    }
+
+    // GitLab's approval endpoint has no review-summary field. Preserve a
+    // non-empty summary as a normal MR note before recording the approval.
+    let posted_summary = !body.trim().is_empty();
+    if posted_summary {
+        post_merge_request_note(locator, repo_project_id, pull_request_iid, body).await?;
+    }
+
+    let detail = load_merge_request_detail(locator, repo_project_id, pull_request_iid).await?;
+    let sha = string_field(&detail, "sha")
+        .ok_or_else(|| "GitLab did not return the merge request HEAD SHA.".to_string())?;
+    let endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_APPROVE_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    let request = gitlab_authenticated(http::post(endpoint)).json(&serde_json::json!({
+        "sha": sha,
+    }));
+    let result: Result<Value, String> =
+        http::send_json(request, RequestOptions::new("Approve GitLab merge request"))
+            .await
+            .map_err(|error| error.to_string());
+    result.map(|_| ()).map_err(|error| {
+        if posted_summary {
+            format!("GitLab posted the review summary, but approval failed: {error}")
+        } else {
+            error
+        }
     })
+}
+
+pub(super) async fn merge_pull_request(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+    method: PullRequestMergeMethod,
+    remove_source_branch: bool,
+) -> Result<(), String> {
+    if configured_token(RepoType::GitLab).is_none() {
+        return Err("Configure a GitLab Token in Settings before merging.".into());
+    }
+    if !matches!(
+        method,
+        PullRequestMergeMethod::Merge | PullRequestMergeMethod::Squash
+    ) {
+        return Err("GitLab supports merge and squash through the merge request API.".into());
+    }
+
+    // Re-read immediately before the write so the SHA guard prevents merging
+    // commits that were not represented by the reviewed state.
+    let detail = load_merge_request_detail(locator, repo_project_id, pull_request_iid).await?;
+    let readiness = gitlab_merge_readiness(&detail);
+    if readiness.kind != PullRequestReadinessKind::Ready {
+        return Err(readiness.detail);
+    }
+    if detail
+        .get("user")
+        .and_then(|user| user.get("can_merge"))
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Err("The configured GitLab user cannot merge this merge request.".into());
+    }
+    let sha = string_field(&detail, "sha")
+        .ok_or_else(|| "GitLab did not return the merge request HEAD SHA.".to_string())?;
+    let endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_MERGE_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    let request = gitlab_authenticated(http::put(endpoint)).json(&gitlab_merge_payload(
+        method,
+        remove_source_branch,
+        sha.as_str(),
+    ));
+    let payload: Value =
+        http::send_json(request, RequestOptions::new("Merge GitLab merge request"))
+            .await
+            .map_err(|error| error.to_string())?;
+    if string_field(&payload, "state").as_deref() != Some("merged") {
+        return Err(string_field(&payload, "merge_error")
+            .filter(|message| !message.trim().is_empty())
+            .unwrap_or_else(|| "GitLab did not merge this merge request.".to_string()));
+    }
+    Ok(())
 }
 
 pub(super) async fn get_pull_request_conversation(
@@ -523,6 +635,70 @@ async fn count_merge_request_commits(
     pagination_total(&headers)
 }
 
+async fn load_merge_request_detail(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+) -> Result<Value, String> {
+    let endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    http::send_json(
+        gitlab_request(endpoint).query(&[("with_merge_status_recheck", "true")]),
+        RequestOptions::new("Reload GitLab merge request before remote action"),
+    )
+    .await
+    .map_err(|error| error.to_string())
+}
+
+async fn load_project_settings(locator: &RepoLocator, repo_project_id: &str) -> Option<Value> {
+    let endpoint = endpoints::PROJECT_URL
+        .replace("{api_base_url}", api_base_url(locator).as_str())
+        .replace(
+            "{project_id_or_path}",
+            percent_encode_path(repo_project_id.trim()).as_str(),
+        );
+    http::send_json(
+        gitlab_request(endpoint),
+        RequestOptions::new("Load GitLab project merge settings"),
+    )
+    .await
+    .map_err(|error| {
+        log::debug!("[CodeReview][GitLab] Project merge settings unavailable: {error}");
+    })
+    .ok()
+}
+
+async fn post_merge_request_note(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+    body: &str,
+) -> Result<(), String> {
+    let body = body.trim();
+    if body.is_empty() {
+        return Err("A review comment is required for this action.".into());
+    }
+    let endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_NOTES_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    let request =
+        gitlab_authenticated(http::post(endpoint)).json(&serde_json::json!({ "body": body }));
+    let _: Value = http::send_json(
+        request,
+        RequestOptions::new("Submit GitLab merge request comment"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn merge_request_endpoint(
     template: &str,
     locator: &RepoLocator,
@@ -542,11 +718,97 @@ fn merge_request_endpoint(
 }
 
 fn gitlab_request(endpoint: String) -> reqwest::RequestBuilder {
-    let mut request = http::get(endpoint).header(ACCEPT, "application/json");
+    gitlab_authenticated(http::get(endpoint))
+}
+
+fn gitlab_authenticated(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    let mut request = request.header(ACCEPT, "application/json");
     if let Some(token) = configured_token(RepoType::GitLab) {
         request = request.header("PRIVATE-TOKEN", token);
     }
     request
+}
+
+fn gitlab_action_state(
+    detail: &Value,
+    project: Option<&Value>,
+    has_token: bool,
+) -> PullRequestActionState {
+    let readiness = gitlab_merge_readiness(detail);
+    let review_state = match string_field(detail, "detailed_merge_status").as_deref() {
+        Some("requested_changes") => "rejected",
+        Some("not_approved") | Some("approvals_syncing") => "pending",
+        _ => "",
+    }
+    .to_string();
+    let terminal = matches!(
+        readiness.kind,
+        PullRequestReadinessKind::Merged | PullRequestReadinessKind::Closed
+    );
+    let user_can_merge = detail
+        .get("user")
+        .and_then(|user| user.get("can_merge"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let can_merge =
+        has_token && user_can_merge && readiness.kind == PullRequestReadinessKind::Ready;
+    let merge_block_reason = if !has_token {
+        "Configure a GitLab Token in Settings to review or merge this merge request.".to_string()
+    } else if readiness.kind != PullRequestReadinessKind::Ready {
+        readiness.detail.clone()
+    } else if !user_can_merge {
+        "The configured GitLab user cannot merge this merge request.".to_string()
+    } else {
+        String::new()
+    };
+
+    PullRequestActionState {
+        // GitLab notes remain available on terminal merge requests when the
+        // authenticated user is allowed to participate in the discussion.
+        can_comment: has_token,
+        can_approve: has_token && !terminal,
+        // GitLab exposes this review decision in its UI, but not through the
+        // stable REST API used by the provider adapter.
+        can_request_changes: false,
+        can_merge,
+        can_revert: false,
+        review_state,
+        readiness,
+        merge_block_reason,
+        revert_block_reason: "Automated merge-request revert is not implemented for GitLab yet."
+            .to_string(),
+        revert_action_label: "Revert changes".to_string(),
+        revert_confirmation:
+            "This provider does not currently expose a supported automatic revert operation."
+                .to_string(),
+        allowed_merge_methods: gitlab_merge_methods(project),
+    }
+}
+
+fn gitlab_merge_methods(project: Option<&Value>) -> Vec<PullRequestMergeMethod> {
+    match project
+        .and_then(|value| value.get("squash_option"))
+        .and_then(Value::as_str)
+    {
+        Some("never") => vec![PullRequestMergeMethod::Merge],
+        Some("always") => vec![PullRequestMergeMethod::Squash],
+        _ => vec![
+            PullRequestMergeMethod::Merge,
+            PullRequestMergeMethod::Squash,
+        ],
+    }
+}
+
+fn gitlab_merge_payload(
+    method: PullRequestMergeMethod,
+    remove_source_branch: bool,
+    sha: &str,
+) -> Value {
+    serde_json::json!({
+        "sha": sha,
+        "squash": method == PullRequestMergeMethod::Squash,
+        "should_remove_source_branch": remove_source_branch,
+    })
 }
 
 fn gitlab_merge_readiness(detail: &Value) -> PullRequestReadiness {
@@ -800,8 +1062,11 @@ fn fallback_total(page: u32, per_page: u32, item_count: usize) -> u32 {
 mod tests {
     use serde_json::json;
 
-    use super::gitlab_merge_readiness;
-    use crate::git::PullRequestReadinessKind;
+    use super::{
+        gitlab_action_state, gitlab_list_sort, gitlab_merge_methods, gitlab_merge_payload,
+        gitlab_merge_readiness,
+    };
+    use crate::git::{PullRequestMergeMethod, PullRequestReadinessKind};
 
     #[test]
     fn maps_gitlab_mergeable_status_to_ready() {
@@ -843,5 +1108,80 @@ mod tests {
         }));
 
         assert_eq!(readiness.kind, PullRequestReadinessKind::ReviewRequired);
+    }
+
+    #[test]
+    fn enables_gitlab_comment_approve_and_merge_for_authorized_ready_user() {
+        let state = gitlab_action_state(
+            &json!({
+                "state": "opened",
+                "detailed_merge_status": "mergeable",
+                "user": { "can_merge": true }
+            }),
+            Some(&json!({ "squash_option": "default_on" })),
+            true,
+        );
+
+        assert!(state.can_comment);
+        assert!(state.can_approve);
+        assert!(!state.can_request_changes);
+        assert!(state.can_merge);
+        assert_eq!(
+            state.allowed_merge_methods,
+            vec![
+                PullRequestMergeMethod::Merge,
+                PullRequestMergeMethod::Squash
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_gitlab_remote_actions_disabled_without_token() {
+        let state = gitlab_action_state(
+            &json!({
+                "state": "opened",
+                "detailed_merge_status": "mergeable",
+                "user": { "can_merge": true }
+            }),
+            None,
+            false,
+        );
+
+        assert!(!state.can_comment);
+        assert!(!state.can_approve);
+        assert!(!state.can_merge);
+        assert!(state.merge_block_reason.contains("GitLab Token"));
+    }
+
+    #[test]
+    fn respects_gitlab_project_squash_policy() {
+        assert_eq!(
+            gitlab_merge_methods(Some(&json!({ "squash_option": "never" }))),
+            vec![PullRequestMergeMethod::Merge]
+        );
+        assert_eq!(
+            gitlab_merge_methods(Some(&json!({ "squash_option": "always" }))),
+            vec![PullRequestMergeMethod::Squash]
+        );
+    }
+
+    #[test]
+    fn builds_gitlab_merge_payload_with_sha_guard_and_user_choices() {
+        assert_eq!(
+            gitlab_merge_payload(PullRequestMergeMethod::Squash, true, "abc123"),
+            json!({
+                "sha": "abc123",
+                "squash": true,
+                "should_remove_source_branch": true
+            })
+        );
+    }
+
+    #[test]
+    fn maps_every_pr_list_sort_to_gitlab_parameters() {
+        assert_eq!(gitlab_list_sort("newest"), ("created_at", "desc"));
+        assert_eq!(gitlab_list_sort("oldest"), ("created_at", "asc"));
+        assert_eq!(gitlab_list_sort("updated-desc"), ("updated_at", "desc"));
+        assert_eq!(gitlab_list_sort("updated-asc"), ("updated_at", "asc"));
     }
 }

@@ -12,6 +12,12 @@ use crate::MainWindow;
 #[cfg(target_os = "macos")]
 mod macos;
 
+#[cfg(target_os = "windows")]
+mod windows;
+
+#[cfg(target_os = "linux")]
+mod linux;
+
 #[cfg(target_os = "macos")]
 pub use macos::is_window_interacting;
 
@@ -21,14 +27,19 @@ pub(crate) use macos::{
     set_title_bar_color, setup_pr_review_fonts,
 };
 
-#[cfg(not(target_os = "macos"))]
-pub fn is_window_interacting() -> bool {
+#[cfg(target_os = "windows")]
+pub(crate) use windows::{detect_system_dark_mode, play_ui_click};
+
+#[cfg(target_os = "linux")]
+pub(crate) use linux::{detect_system_dark_mode, play_ui_click};
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+pub(crate) fn detect_system_dark_mode() -> bool {
     false
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn detect_system_dark_mode() -> bool {
-    // TODO: Implement native system-theme detection for Windows and Linux.
+pub fn is_window_interacting() -> bool {
     false
 }
 
@@ -41,9 +52,9 @@ pub(crate) fn set_title_bar_color(_window: &MainWindow, _is_dark: bool) {}
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn install_titlebar_settings_button(_window: &MainWindow) {}
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub(crate) fn play_ui_click() {
-    // System click sounds are only wired on macOS for the first pass.
+    log::debug!("[Sound] UI click is unavailable on this platform");
 }
 
 pub(crate) fn setup_application_font(app: &MainWindow) {

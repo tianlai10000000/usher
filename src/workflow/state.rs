@@ -1,5 +1,6 @@
 use crate::workflow::cd::{CdSnapshot, apply_cd_snapshot, default_cd_snapshot};
-use crate::{MainWindow, StepItem};
+use crate::workflow::jobs::{JobConclusion, JobSnapshot, JobStepData, JobStepDefinition};
+use crate::{JobStepItem, MainWindow};
 use slint::{ModelRc, VecModel};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -84,6 +85,7 @@ impl Default for WorkflowProjectContext {
 pub(crate) struct WorkflowViewState {
     pub(crate) branch_result: String,
     pub(crate) tag_result: String,
+    pub(crate) tag_selected_tab: i32,
     pub(crate) tag_mode: String,
     pub(crate) tag_version_mode: String,
     pub(crate) tag_current_version: String,
@@ -96,7 +98,7 @@ pub(crate) struct WorkflowViewState {
     pub(crate) tag_add_request_seq: u64,
     pub(crate) tag_remove_request_seq: u64,
     pub(crate) tag_running: bool,
-    pub(crate) tag_steps: Vec<StepItem>,
+    pub(crate) tag_job: JobSnapshot,
     pub(crate) cd: CdSnapshot,
 }
 
@@ -105,6 +107,7 @@ impl Default for WorkflowViewState {
         Self {
             branch_result: "Ready to recreate branches.".to_string(),
             tag_result: "Ready to add or remove a tag.".to_string(),
+            tag_selected_tab: 0,
             tag_mode: "local".to_string(),
             tag_version_mode: "patch".to_string(),
             tag_current_version: "v0.0.0".to_string(),
@@ -117,7 +120,7 @@ impl Default for WorkflowViewState {
             tag_add_request_seq: 0,
             tag_remove_request_seq: 0,
             tag_running: false,
-            tag_steps: default_tag_steps(),
+            tag_job: JobSnapshot::queued(default_tag_steps()),
             cd: default_cd_snapshot(),
         }
     }
@@ -149,21 +152,17 @@ pub(crate) fn clear_current_project_heavy_state() {
         return;
     };
 
-    guard.upsert_current(|view| {
-        view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
-        view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-        for step in &mut view.tag_steps {
-            step.log = "".into();
-        }
-        view.cd.summary = "Workflow state cleared after leaving the page.".to_string();
-        view.cd.build_detail =
-            "Re-open Workflow to inspect the latest CD step details.".to_string();
-        view.cd.test_detail = "Re-open Workflow to inspect the latest CD step details.".to_string();
-        view.cd.deploy_detail =
-            "Re-open Workflow to inspect the latest CD step details.".to_string();
-        view.cd.verify_detail =
-            "Re-open Workflow to inspect the latest CD step details.".to_string();
-    });
+    guard.upsert_current(clear_heavy_view_state);
+}
+
+fn clear_heavy_view_state(view: &mut WorkflowViewState) {
+    // Tag execution history is user-visible workflow state, not a disposable
+    // cache. Only release reconstructable CD details here.
+    view.cd.summary = "Workflow state cleared after leaving the page.".to_string();
+    view.cd.build_detail = "Re-open Workflow to inspect the latest CD step details.".to_string();
+    view.cd.test_detail = "Re-open Workflow to inspect the latest CD step details.".to_string();
+    view.cd.deploy_detail = "Re-open Workflow to inspect the latest CD step details.".to_string();
+    view.cd.verify_detail = "Re-open Workflow to inspect the latest CD step details.".to_string();
 }
 
 pub(crate) fn initialize_current_ui(ui: &MainWindow, shared_state: &SharedWorkflowState) {
@@ -190,6 +189,7 @@ pub(crate) fn initialize_ui(
     ui.set_workflow_project_logo(context.logo.clone().into());
     ui.set_workflow_branch_result(state.branch_result.clone().into());
     ui.set_workflow_tag_result(state.tag_result.clone().into());
+    ui.set_workflow_tag_selected_tab(state.tag_selected_tab);
     ui.set_workflow_tag_mode(state.tag_mode.clone().into());
     ui.set_workflow_tag_version_mode(state.tag_version_mode.clone().into());
     ui.set_workflow_tag_current_version(state.tag_current_version.clone().into());
@@ -198,7 +198,17 @@ pub(crate) fn initialize_ui(
     ui.set_workflow_tag_add_initializing(state.tag_add_initializing);
     ui.set_workflow_tag_remove_initializing(state.tag_remove_initializing);
     ui.set_workflow_tag_running(state.tag_running);
-    ui.set_workflow_tag_steps(ModelRc::new(VecModel::from(state.tag_steps.clone())));
+    let job = &state.tag_job;
+    ui.set_workflow_tag_job_status(job.status.as_str().into());
+    ui.set_workflow_tag_job_conclusion(
+        job.conclusion
+            .map(JobConclusion::as_str)
+            .unwrap_or_default()
+            .into(),
+    );
+    ui.set_workflow_tag_job_total_duration(job.total_duration.clone().into());
+    let steps: Vec<JobStepItem> = job.steps.iter().map(JobStepData::to_slint).collect();
+    ui.set_workflow_tag_steps(ModelRc::new(VecModel::from(steps)));
     apply_cd_snapshot(ui, &state.cd);
 }
 
@@ -228,61 +238,87 @@ pub(crate) fn normalize_project_alias(value: &str) -> String {
     value.trim().to_string()
 }
 
-pub(crate) fn default_tag_steps() -> Vec<StepItem> {
+pub(crate) fn default_tag_steps() -> Vec<JobStepData> {
     vec![
-        StepItem {
-            name: "Enter local repository".into(),
-            status: "pending".into(),
-            detail: "Resolve the configured local repository path.".into(),
-            log: "".into(),
-        },
-        StepItem {
-            name: "Checkout release".into(),
-            status: "pending".into(),
-            detail: "Switch to the release branch.".into(),
-            log: "".into(),
-        },
-        StepItem {
-            name: "Pull release".into(),
-            status: "pending".into(),
-            detail: "Pull the latest release branch changes.".into(),
-            log: "".into(),
-        },
-        StepItem {
-            name: "Checkout main".into(),
-            status: "pending".into(),
-            detail: "Switch back to the main branch.".into(),
-            log: "".into(),
-        },
-        StepItem {
-            name: "Rebase main on release".into(),
-            status: "pending".into(),
-            detail: "Rebase main onto release.".into(),
-            log: "".into(),
-        },
-        StepItem {
-            name: "Push main".into(),
-            status: "pending".into(),
-            detail: "Push rebased main to the remote.".into(),
-            log: "".into(),
-        },
-        StepItem {
-            name: "Create annotated tag".into(),
-            status: "pending".into(),
-            detail: "Create the new annotated semantic version tag.".into(),
-            log: "".into(),
-        },
-        StepItem {
-            name: "Push tag".into(),
-            status: "pending".into(),
-            detail: "Push the new tag to the remote.".into(),
-            log: "".into(),
-        },
-        StepItem {
-            name: "Complete".into(),
-            status: "pending".into(),
-            detail: "Finish the local tag workflow.".into(),
-            log: "".into(),
-        },
+        queued_step(
+            "Enter local repository",
+            &["git", "rev-parse", "--show-toplevel"],
+            "Resolve the configured local repository path.",
+        ),
+        queued_step(
+            "Checkout release",
+            &["git", "checkout", "release"],
+            "Switch to the release branch.",
+        ),
+        queued_step(
+            "Pull release",
+            &["git", "pull", "origin", "release"],
+            "Pull the latest release branch changes.",
+        ),
+        queued_step(
+            "Checkout main",
+            &["git", "checkout", "main"],
+            "Switch back to the main branch.",
+        ),
+        queued_step(
+            "Rebase main on release",
+            &["git", "rebase", "release"],
+            "Rebase main onto release.",
+        ),
+        queued_step(
+            "Push main",
+            &["git", "push", "origin", "main"],
+            "Push rebased main to the remote.",
+        ),
+        queued_step(
+            "Create annotated tag",
+            &["git", "tag", "-a", "<version>"],
+            "Create the new annotated semantic version tag.",
+        ),
+        queued_step(
+            "Push tag",
+            &["git", "push", "origin", "<version>"],
+            "Push the new tag to the remote.",
+        ),
+        queued_step("Complete", &["complete"], "Finish the local tag workflow."),
     ]
+}
+
+fn queued_step(name: &str, command: &[&str], detail: &str) -> JobStepData {
+    JobStepData::queued(
+        JobStepDefinition::new(
+            name,
+            command.iter().map(|part| (*part).to_string()).collect(),
+        ),
+        detail,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WorkflowViewState, clear_heavy_view_state};
+    use crate::workflow::jobs::{JobConclusion, JobStepStatus};
+
+    #[test]
+    fn route_cleanup_preserves_tag_execution_history() {
+        let mut view = WorkflowViewState::default();
+        view.tag_selected_tab = 1;
+        view.tag_result = "Tag workflow failed at step 2.".to_string();
+        view.tag_job.steps[0].status = JobStepStatus::Completed;
+        view.tag_job.steps[0].conclusion = Some(JobConclusion::Success);
+        view.tag_job.steps[0].log = "preserved log".into();
+        view.tag_job.steps[0].duration = "1s".into();
+
+        clear_heavy_view_state(&mut view);
+
+        assert_eq!(view.tag_selected_tab, 1);
+        assert_eq!(view.tag_result, "Tag workflow failed at step 2.");
+        assert_eq!(view.tag_job.steps[0].status, JobStepStatus::Completed);
+        assert_eq!(
+            view.tag_job.steps[0].conclusion,
+            Some(JobConclusion::Success)
+        );
+        assert_eq!(view.tag_job.steps[0].log.as_str(), "preserved log");
+        assert_eq!(view.tag_job.steps[0].duration.as_str(), "1s");
+    }
 }

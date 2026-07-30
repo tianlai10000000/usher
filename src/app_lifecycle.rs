@@ -1,7 +1,5 @@
 //! Cross-feature cleanup triggered by completed route transitions.
 
-use slint::{ModelRc, VecModel};
-
 use crate::MainWindow;
 use crate::router::RouteLifecycleEvent;
 
@@ -24,8 +22,6 @@ pub(crate) fn handle_route_transition(window: &MainWindow, event: RouteLifecycle
     window.set_workflow_pr_fat_count("".into());
     window.set_workflow_pr_uat_count("".into());
     window.set_workflow_pr_prod_count("".into());
-    window.set_workflow_tag_result("".into());
-    window.set_workflow_tag_steps(ModelRc::new(VecModel::from(Vec::new())));
     window.set_workflow_cd_summary("".into());
     window.set_workflow_cd_build_detail("".into());
     window.set_workflow_cd_test_detail("".into());

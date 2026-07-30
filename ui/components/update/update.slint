@@ -1,4 +1,6 @@
-import { FilledButton, TextButton, LinearProgressIndicator, MaterialText, Modal, MaterialPalette, MaterialStyleMetrics } from "@material";
+import { LinearProgressIndicator } from "@material";
+import { AppState } from "../../state/app_state.slint";
+import { GitHubDialog } from "../dialog/github_dialog.slint";
 
 export global UpdateLogic {
     in-out property <bool> update-available: false;
@@ -22,7 +24,7 @@ export global UpdateLogic {
     callback start-download();
 }
 
-// 下载进度模态框组件
+// Download progress uses the same Primer Dialog shell as every other modal.
 export component DownloadProgressModal inherits Rectangle {
     in-out property <bool> show-modal: UpdateLogic.is-downloading;
     in-out property <float> progress: UpdateLogic.download-progress;
@@ -31,107 +33,59 @@ export component DownloadProgressModal inherits Rectangle {
     
     callback cancel-clicked();
     
-    // 只有在下载时才显示
-    if show-modal: Rectangle {
-        width: 100%;
-        height: 100%;
-        
-        Modal {
-            width: 100%;
-            height: 100%;
-            
-            clicked => {
-                // 点击模态框背景不关闭，只能通过取消按钮关闭
+    dialog-frame := GitHubDialog {
+        dialog-visible: root.show-modal;
+        title: "Downloading update";
+        subtitle: "Downloading version " + root.version + "…";
+        dialog-width: 480px;
+        dialog-height: 296px;
+        body-padding: 16px;
+        show-close: false;
+        primary-label: "";
+        cancel-label: "Cancel download";
+        close-requested => { root.cancel-clicked(); }
+        cancel-clicked => { root.cancel-clicked(); }
+    }
+
+        if root.show-modal: Rectangle {
+            x: dialog-frame.content-x;
+            y: dialog-frame.content-y;
+            width: dialog-frame.content-width;
+            height: dialog-frame.content-height;
+            z: 3100;
+            clip: true;
+
+            Text {
+                x: 0px;
+                y: 8px;
+                width: parent.width;
+                height: 20px;
+                text: root.status == "" ? "Preparing download…" : root.status;
+                font-size: 14px;
+                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                vertical-alignment: center;
+                overflow: elide;
             }
-            
-            // 对话框内容
-            dialog-container := Rectangle {
-                width: min(450px, parent.width * 0.9);
-                height: 220px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                background: MaterialPalette.surface_container_high;
-                border-radius: MaterialStyleMetrics.border_radius_28;
-                drop-shadow-blur: 16px;
-                drop-shadow-color: #00000040;
-                
-                VerticalLayout {
-                    spacing: 16px;
-                    padding: 24px;
-                    
-                    // 标题
-                    MaterialText {
-                        text: "Downloading Update";
-                        font-size: 22px;
-                        font-weight: 500;
-                        color: MaterialPalette.on_surface;
-                    }
-                    
-                    // 版本信息
-                    MaterialText {
-                        text: "Downloading version " + root.version + "...";
-                        font-size: 14px;
-                        color: MaterialPalette.on_surface_variant;
-                    }
-                    
-                    // 进度条区域
-                    VerticalLayout {
-                        spacing: 8px;
-                        
-                        // 进度条
-                        LinearProgressIndicator {
-                            width: 100%;
-                            height: 8px;
-                            progress: root.progress;
-                            indeterminate: root.progress <= 0;
-                        }
-                        
-                        // 进度文字
-                        HorizontalLayout {
-                            alignment: space-between;
-                            
-                            MaterialText {
-                                text: root.status;
-                                font-size: 12px;
-                                color: MaterialPalette.on_surface_variant;
-                            }
-                            
-                            MaterialText {
-                                text: root.progress > 0 ? Math.round(root.progress * 100) + "%" : "";
-                                font-size: 12px;
-                                color: MaterialPalette.on_surface_variant;
-                            }
-                        }
-                    }
-                    
-                    // 底部按钮区域
-                    HorizontalLayout {
-                        alignment: end;
-                        spacing: 8px;
-                        
-                        TextButton {
-                            text: "Cancel";
-                            clicked => {
-                                root.cancel-clicked();
-                            }
-                        }
-                    }
-                }
+
+            LinearProgressIndicator {
+                x: 0px;
+                y: 44px;
+                width: parent.width;
+                height: 8px;
+                progress: root.progress;
+                indeterminate: root.progress <= 0;
+            }
+
+            Text {
+                x: 0px;
+                y: 64px;
+                width: parent.width;
+                height: 20px;
+                text: root.progress > 0 ? Math.round(root.progress * 100) + "%" : "";
+                font-size: 12px;
+                color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                horizontal-alignment: right;
+                vertical-alignment: center;
             }
         }
-    }
-}
-
-export component UpdateDialog inherits PopupWindow {
-    in-out property <string> version;
-    in-out property <float> progress;
-
-    close-on-click: false;
-    width: 600px;
-    height: 400px;
-
-    Modal {
-        width: parent.width;
-        height: parent.height;
-    }
 }

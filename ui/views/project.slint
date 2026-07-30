@@ -5,6 +5,7 @@ import {
     GitHubTextField,
     GitHubToggle
 } from "../components/settings/github_settings_controls.slint";
+import { GitHubDialog } from "../components/dialog/github_dialog.slint";
 
 export struct ProjectItem {
     project_name: string,
@@ -960,7 +961,7 @@ export component Project {
     }
 }
 
-export component ProjectAddModal {
+export component ProjectDialog {
     in property <bool> modal-visible: false;
     in property <string> mode: "add";
     in property <string> original-alias: "";
@@ -984,100 +985,44 @@ export component ProjectAddModal {
     private property <length> dialog-height: root.deleting
         ? 248px
         : min(680px, root.height - 32px);
-    private property <length> header-height: root.deleting ? 56px : 72px;
-    private property <length> footer-height: 64px;
 
-    if root.modal-visible: Rectangle {
-        width: parent.width;
-        height: parent.height;
-        z: 3000;
-        background: #00000066;
-
-        TouchArea {
-            width: 100%;
-            height: 100%;
-        }
-
-        dialog := Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(root.dialog-width, parent.width - 32px);
-            height: min(root.dialog-height, parent.height - 32px);
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-            background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-            clip: true;
-            drop-shadow-blur: 24px;
-            drop-shadow-color: #00000055;
-            drop-shadow-offset-y: 8px;
-
-            TouchArea {
-                width: 100%;
-                height: 100%;
+    dialog-frame := GitHubDialog {
+        dialog-visible: root.modal-visible;
+        title: root.mode == "edit" ? "Edit project" : root.deleting ? "Delete project?" : "New project";
+        subtitle: root.deleting
+            ? ""
+            : (root.mode == "edit"
+                ? "Update repository metadata and project options."
+                : "Add a local Git repository to Usher.");
+        dialog-width: root.dialog-width;
+        dialog-height: root.dialog-height;
+        body-padding: 0px;
+        primary-label: root.mode == "edit" ? "Save changes" : root.deleting ? "Delete project" : "Add project";
+        primary-success: !root.deleting;
+        primary-danger: root.deleting;
+        close-requested => { root.cancel(); }
+        cancel-clicked => { root.cancel(); }
+        primary-clicked => {
+            if root.deleting {
+                root.confirm-delete(root.original-alias);
+                return;
             }
+            if root.name == "" || root.alias == "" || root.local-repo == "" || root.remote-repo == "" {
+                root.error-text = "Project name, alias, local repository, and remote repository are required.";
+                return;
+            }
+            root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags, root.is-pr-auto-update);
+        }
+    }
 
-            dialog-layout := VerticalLayout {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: parent.height;
-                spacing: 0px;
-
-                header := Rectangle {
-                    width: parent.width;
-                    height: root.header-height;
-                    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-
-                    Rectangle {
-                        x: 0px;
-                        y: parent.height - 1px;
-                        width: parent.width;
-                        height: 1px;
-                        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-                    }
-
-                    Text {
-                        x: 16px;
-                        y: root.deleting ? 0px : 10px;
-                        width: parent.width - 64px;
-                        height: root.deleting ? parent.height : 28px;
-                        text: root.mode == "edit" ? "Edit project" : root.deleting ? "Delete project?" : "New project";
-                        font-size: root.deleting ? 16px : 20px;
-                        font-weight: 600;
-                        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-
-                    if !root.deleting: Text {
-                        x: 16px;
-                        y: 40px;
-                        width: parent.width - 64px;
-                        height: 20px;
-                        text: root.mode == "edit"
-                            ? "Update repository metadata and project options."
-                            : "Add a local Git repository to Usher.";
-                        font-size: 13px;
-                        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-
-                    ProjectIconButton {
-                        x: parent.width - 40px;
-                        y: 8px;
-                        icon: @image-url("../assets/icons/octicon-x-16.svg");
-                        tooltip: "Close";
-                        clicked => { root.cancel(); }
-                    }
-                }
-
-                body := Rectangle {
-                    width: parent.width;
-                    vertical-stretch: 1;
-                    background: transparent;
-                    clip: true;
+        if root.modal-visible: Rectangle {
+            x: dialog-frame.content-x;
+            y: dialog-frame.content-y;
+            width: dialog-frame.content-width;
+            height: dialog-frame.content-height;
+            z: 3100;
+            background: transparent;
+            clip: true;
 
                     if root.deleting: Rectangle {
                         x: 16px;
@@ -1301,47 +1246,5 @@ export component ProjectAddModal {
 
                         viewport-height: form-content.height;
                     }
-                }
-
-                footer := Rectangle {
-                    width: parent.width;
-                    height: root.footer-height;
-                    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-
-                    HorizontalLayout {
-                        x: 16px;
-                        y: 16px;
-                        width: parent.width - 32px;
-                        height: 32px;
-                        spacing: 8px;
-                        alignment: end;
-
-                        Rectangle { horizontal-stretch: 1; }
-
-                        GitHubButton {
-                            text: "Cancel";
-                            clicked => { root.cancel(); }
-                        }
-
-                        GitHubButton {
-                            text: root.mode == "edit" ? "Save changes" : root.deleting ? "Delete project" : "Add project";
-                            primary: !root.deleting;
-                            danger: root.deleting;
-                            clicked => {
-                                if root.deleting {
-                                    root.confirm-delete(root.original-alias);
-                                    return;
-                                }
-                                if root.name == "" || root.alias == "" || root.local-repo == "" || root.remote-repo == "" {
-                                    root.error-text = "Project name, alias, local repository, and remote repository are required.";
-                                    return;
-                                }
-                                root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags, root.is-pr-auto-update);
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
-}

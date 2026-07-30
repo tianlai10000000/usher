@@ -1,10 +1,8 @@
-import { Horizontal, Vertical, MaterialText, MaterialPalette, MaterialStyleMetrics, LinearProgressIndicator } from "@material";
-import { ToolTip } from "@material";
+import { Horizontal, Vertical, MaterialText, ToolTip } from "@material";
 import { UpdateLogic } from "./update/update.slint";
 import { NotificationManager } from "./notify/notification.slint";
 import { AppState } from "../state/app_state.slint";
 import { LayoutConstants } from "../layout_constants.slint";
-import { ColorsTheme } from "../theme/color.slint";
 
 // Enum to identify which popup is active
 enum ActivePopup {
@@ -24,7 +22,10 @@ component StatusBarItem inherits Rectangle {
     in property <bool> active: false;
     in property <bool> show-icon: false;
     in property <image> icon;
-    in property <color> icon-color: MaterialPalette.on_surface_variant;
+    in property <color> icon-color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    property <color> control-hover: AppState.effective-dark-mode ? #ffffff1a : #818b981f;
+    property <color> control-active: AppState.effective-dark-mode ? #ffffff29 : #818b9833;
     
     // Output: item's absolute x position and width for popup positioning
     out property <length> item-x: self.absolute-position.x;
@@ -33,9 +34,10 @@ component StatusBarItem inherits Rectangle {
     callback clicked();
     
     height: LayoutConstants.status-bar-height - 1px;
-    min-width: 24px;
-    background: hover-area.pressed ? MaterialPalette.surface_container_highest : 
-                hover-area.has-hover ? MaterialPalette.surface_container_high : transparent;
+    min-width: 28px;
+    border-radius: 6px;
+    background: hover-area.pressed ? root.control-active :
+                hover-area.has-hover ? root.control-hover : transparent;
     
     hover-area := TouchArea {
         width: 100%;
@@ -74,7 +76,7 @@ component StatusBarItem inherits Rectangle {
         if root.label != "" : MaterialText {
             text: root.label;
             font-size: 12px;
-            color: root.active ? MaterialPalette.on_surface_variant : MaterialPalette.on_surface_variant;
+            color: root.fg-muted;
             vertical_alignment: center;
         }
     }
@@ -86,7 +88,8 @@ component StatusBarItem inherits Rectangle {
     }
 }
 
-// Main status bar component
+// GitHub has no persistent web status bar equivalent. This desktop utility
+// surface composes Primer canvas, border, typography, control and overlay tokens.
 export component StatusBar inherits Rectangle {
     // Internal popup state - using enum to track which popup is active
     property <ActivePopup> active-popup: ActivePopup.None;
@@ -95,6 +98,16 @@ export component StatusBar inherits Rectangle {
     
     // Popup dimensions
     property <length> popup-width: 220px;
+    property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+    property <color> canvas-subtle: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
+    property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    property <color> accent-fg: AppState.effective-dark-mode ? #4493f8 : #0969da;
+    property <color> success-fg: AppState.effective-dark-mode ? #3fb950 : #1a7f37;
+    property <color> danger-fg: AppState.effective-dark-mode ? #f85149 : #cf222e;
+    property <color> control-hover: AppState.effective-dark-mode ? #ffffff1a : #818b981f;
+    property <color> control-active: AppState.effective-dark-mode ? #ffffff29 : #818b9833;
     
     // Dynamic anchor position - binds to the currently active item's real-time position
     property <length> popup-anchor-x: 
@@ -127,7 +140,7 @@ export component StatusBar inherits Rectangle {
         (popup-center-x > popup-max-x ? popup-max-x : popup-center-x);
     
     height: LayoutConstants.status-bar-height;
-    background: MaterialPalette.surface_container_low;
+    background: root.canvas-subtle;
 
     Vertical {
         width: 100%;
@@ -139,17 +152,19 @@ export component StatusBar inherits Rectangle {
         Rectangle {
             width: 100%;
             height: 1px;
-            background: MaterialPalette.outline_variant;
+            background: root.border-default;
         }
         
         HorizontalLayout {
             width: 100%;
             vertical-stretch: 1;
             spacing: 0px;
-            padding: 0px;
+            padding-left: 8px;
+            padding-right: 8px;
                 
             // Left status item container
             status-items-left := HorizontalLayout {
+                horizontal-stretch: 0;
                 spacing: 0px;
                 alignment: start;
                 
@@ -178,8 +193,9 @@ export component StatusBar inherits Rectangle {
                     
                     height: LayoutConstants.status-bar-height - 1px;
                     visible: UpdateLogic.is-downloading;
-                    background: hover-area.pressed ? MaterialPalette.surface_container_highest : 
-                                hover-area.has-hover ? MaterialPalette.surface_container_high : transparent;
+                    border-radius: 6px;
+                    background: hover-area.pressed ? root.control-active :
+                                hover-area.has-hover ? root.control-hover : transparent;
                     
                     hover-area := TouchArea {
                         width: 100%;
@@ -206,20 +222,20 @@ export component StatusBar inherits Rectangle {
                         MaterialText {
                             text: "Downloading " + Math.round(UpdateLogic.download-progress * 100) + "%";
                             font-size: 12px;
-                            color: MaterialPalette.primary;
+                            color: root.accent-fg;
                             vertical_alignment: center;
                         }
                         
                         Rectangle {
                             width: 60px;
                             height: 4px;
-                            background: MaterialPalette.surface_container_highest;
+                            background: root.border-default;
                             border-radius: 2px;
                             
                             Rectangle {
                                 width: parent.width * UpdateLogic.download-progress;
                                 height: 100%;
-                                background: MaterialPalette.primary;
+                                background: root.accent-fg;
                                 border-radius: 2px;
                             }
                         }
@@ -264,6 +280,7 @@ export component StatusBar inherits Rectangle {
             
             // Right status item container
             status-items-right := HorizontalLayout {
+                horizontal-stretch: 0;
                 spacing: 0px;
                 alignment: end;
                 
@@ -275,7 +292,7 @@ export component StatusBar inherits Rectangle {
                     visible: true;
                     show-icon: true;
                     icon: AppState.network-online ? @image-url("../assets/icons/wifi.svg") : @image-url("../assets/icons/wifi_off.svg");
-                    icon-color: AppState.network-online ? ColorsTheme.success : ColorsTheme.error;
+                    icon-color: AppState.network-online ? root.success-fg : root.danger-fg;
                     
                     clicked => {
                         if (root.active-popup == ActivePopup.Network) {
@@ -333,10 +350,13 @@ export component StatusBar inherits Rectangle {
         y: -popup-content-layout.preferred-height - 2px;
         width: root.popup-width;
         height: popup-content-layout.preferred-height;
-        background: MaterialPalette.surface_container_high;
-        border-radius: 8px;
-        drop-shadow-blur: 12px;
-        drop-shadow-color: #00000050;
+        background: root.canvas-default;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: root.border-default;
+        drop-shadow-blur: 16px;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: AppState.effective-dark-mode ? #010409cc : #1f232826;
         
         // Popup content - height auto-expands based on content (flex-like)
         popup-content-layout := VerticalLayout {
@@ -349,7 +369,7 @@ export component StatusBar inherits Rectangle {
                 text: root.popup-title;
                 font-size: 14px;
                 font-weight: 600;
-                color: MaterialPalette.on_surface;
+                color: root.fg-default;
                 overflow: elide;
             }
             
@@ -357,7 +377,7 @@ export component StatusBar inherits Rectangle {
                 width: root.popup-width - 24px;
                 text: root.popup-content;
                 font-size: 12px;
-                color: MaterialPalette.on_surface_variant;
+                color: root.fg-muted;
                 wrap: word-wrap;
             }
         }

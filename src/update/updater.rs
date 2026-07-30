@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use self_update::cargo_crate_version;
 use semver::Version;
-use slint::{ComponentHandle, Global, Timer};
+use slint::{ComponentHandle, Global, ModelRc, SharedString, Timer, VecModel};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -727,10 +728,13 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                                 {
                                     let manager = NotificationManager::get(&ui);
                                     manager.invoke_success(NotificationOptions {
-                                        message: "Current version is up to date."
-                                            .into(),
-                                        title: "".into(),
-                                        duration: 3000,
+                                        message: format!(
+                                            "Usher {} is the latest version.",
+                                            cargo_crate_version!()
+                                        )
+                                        .into(),
+                                        title: "You're up to date".into(),
+                                        duration: 4000,
                                         icon: "".into(),
                                         component: CustomComponentType::None,
                                         actions: Default::default(),
@@ -795,24 +799,32 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                         })
                         .ok();
 
-                        // Delay showing dialog to avoid RefCell borrow conflict
-                        // Use tokio sleep instead of Slint Timer (Slint Timer cannot trigger correctly in async tasks)
-                        log::debug!(" Preparing to delay showing dialog...");
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        log::debug!(" Delay completed, showing dialog");
-
-                        let ui_weak_for_dialog = ui_weak_for_all.clone();
+                        // Manual checks report every outcome through the shared
+                        // Primer Notify instead of opening a separate modal.
+                        let ui_weak_for_notification = ui_weak_for_all.clone();
                         slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = ui_weak_for_dialog.upgrade() {
-                                log::debug!(" Calling MainWindow.invoke_show_update_dialog()");
+                            if let Some(ui) = ui_weak_for_notification.upgrade() {
                                 let current_version = cargo_crate_version!();
-                                ui.invoke_show_update_dialog(
-                                    version_for_all.clone().into(),
-                                    current_version.into(),
-                                );
-                                log::debug!(" MainWindow.invoke_show_update_dialog() called");
+                                let actions: ModelRc<SharedString> =
+                                    ModelRc::new(Rc::new(VecModel::from(vec![
+                                        SharedString::from("Later"),
+                                        SharedString::from("Update now"),
+                                    ])));
+                                NotificationManager::get(&ui).invoke_info(NotificationOptions {
+                                    title: "Update available".into(),
+                                    message: format!(
+                                        "Usher {} is available. You’re currently using {}.",
+                                        version_for_all, current_version
+                                    )
+                                    .into(),
+                                    duration: 0,
+                                    icon: "".into(),
+                                    component: CustomComponentType::ActionsNotify,
+                                    actions,
+                                    tag: "manual-update".into(),
+                                });
                             } else {
-                                log::debug!(" ui_weak_for_dialog.upgrade() failed");
+                                log::debug!(" ui_weak_for_notification.upgrade() failed");
                             }
                         })
                         .ok();
@@ -821,19 +833,20 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                 Err(e) => {
                     let error_msg = e.to_string();
                     log::debug!(" Update check error: {}", error_msg);
-                    // Provide more user-friendly error message
+                    // Keep technical details in the log. The Notify uses a
+                    // concise, provider-neutral recovery message.
                     let friendly_msg = if error_msg.contains("404")
                         || error_msg.contains("Not Found")
                     {
-                        format!("Repository not found or no available release versions. Please check if the repository exists and has created releases, failure reason: {}", error_msg)
+                        "No release information was found for this repository.".to_string()
                     } else if error_msg.contains("NetworkError")
                         || error_msg.contains("network")
                         || error_msg.contains("ReqwestError")
                         || error_msg.contains("error sending request")
                     {
-                        format!("Network connection failed, please check your network connection and retry, failure reason: {}", error_msg)
+                        "We couldn’t connect to the update service. Check your network connection and try again.".to_string()
                     } else {
-                        format!("Unknown error, error reason: {}", error_msg)
+                        "We couldn’t check for updates. Try again in a moment.".to_string()
                     };
                     let ui_weak_for_error = ui_weak.clone();
                     let ui_weak_for_logic = ui_weak.clone();
@@ -846,8 +859,8 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                                 let manager = NotificationManager::get(&ui);
                                 manager.invoke_error(NotificationOptions {
                                     message: friendly_msg.clone().into(),
-                                    title: "Update check failed".into(),
-                                    duration: 5000,
+                                    title: "Couldn’t check for updates".into(),
+                                    duration: 8000,
                                     icon: "".into(),
                                     component: CustomComponentType::None,
                                     actions: Default::default(),

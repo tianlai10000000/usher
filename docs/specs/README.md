@@ -11,6 +11,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Chat behavior](chat.md) | Current / 当前 | `src/chat/`, `ui/views/chat.slint`, `ui/main.slint` |
 | [Project repository metadata](project-repository.md) | Current / 当前 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/views/workflow/` |
+| [Reusable workflow jobs](jobs.md) | Current / 当前 | `src/workflow/jobs/`, `ui/components/jobs/`, workflow feature controllers |
 | [Tag workflow](tag.md) | Current / 当前 | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `ui/views/workflow/` |
 | [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 | [GitHub/Primer UI design](ui-design.md) | Current / 当前 | `ui/`, `ui/assets/icons/`, all UI contributors |

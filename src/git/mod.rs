@@ -54,10 +54,12 @@ pub(crate) async fn get_pull_requests(
 
     match locator.repo_type {
         RepoType::Gitee => {
-            gitee::get_pull_requests(&locator, repo_project_id, state, page, per_page).await
+            gitee::get_pull_requests(&locator, repo_project_id, state, filters, page, per_page)
+                .await
         }
         RepoType::GitLab => {
-            gitlab::get_pull_requests(&locator, repo_project_id, state, page, per_page).await
+            gitlab::get_pull_requests(&locator, repo_project_id, state, filters, page, per_page)
+                .await
         }
         RepoType::GitHub => {
             github::get_pull_requests(&locator, state, filters, page, per_page).await
@@ -86,11 +88,13 @@ pub(crate) async fn get_standard_environment_pull_request_counts(
             Ok(EnvironmentPullRequestCounts { fat, uat, prod })
         }
         RepoType::GitLab => {
+            let filters = PullRequestFilters::default();
             overview::count_standard_environment_pages(|page, per_page| {
                 gitlab::get_pull_requests(
                     &locator,
                     repo_project_id,
                     Some(PullRequestState::Open),
+                    &filters,
                     page,
                     per_page,
                 )
@@ -98,11 +102,13 @@ pub(crate) async fn get_standard_environment_pull_request_counts(
             .await
         }
         RepoType::Gitee => {
+            let filters = PullRequestFilters::default();
             overview::count_standard_environment_pages(|page, per_page| {
                 gitee::get_pull_requests(
                     &locator,
                     repo_project_id,
                     Some(PullRequestState::Open),
+                    &filters,
                     page,
                     per_page,
                 )
@@ -347,7 +353,14 @@ pub(crate) async fn submit_pull_request_review(
             github::submit_pull_request_review(&locator, pull_request_iid, action, body).await
         }
         RepoType::GitLab => {
-            Err("Remote review actions are not implemented for GitLab yet.".to_string())
+            gitlab::submit_pull_request_review(
+                &locator,
+                repo_project_id,
+                pull_request_iid,
+                action,
+                body,
+            )
+            .await
         }
     }
 }
@@ -384,7 +397,14 @@ pub(crate) async fn merge_pull_request(
             github::merge_pull_request(&locator, pull_request_iid, method).await
         }
         RepoType::GitLab => {
-            Err("Remote merge actions are not implemented for GitLab yet.".to_string())
+            gitlab::merge_pull_request(
+                &locator,
+                repo_project_id,
+                pull_request_iid,
+                method,
+                remove_source_branch,
+            )
+            .await
         }
     }
 }

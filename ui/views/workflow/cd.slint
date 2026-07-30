@@ -1,5 +1,5 @@
 import { FilledButton, MaterialPalette, MaterialText } from "@material";
-import { StepItem, Steps } from "../../components/workflow/steps.slint";
+import { Job, JobStepItem } from "../../components/jobs/job.slint";
 import { TagField } from "../../components/workflow/fields.slint";
 
 export component CdFlow {
@@ -20,7 +20,7 @@ export component CdFlow {
     private property <string> release-name: "2026.03.09";
     private property <string> commit-hash: "HEAD";
     private property <string> rollback-commit: "";
-    private property <int> expanded-step-index: -1;
+    private property <int> expanded-step-overrides: 0;
     private property <bool> stacked-deploy-row: root.width < 760px;
     private property <bool> stacked-rollback-row: root.width < 720px;
     private property <bool> show-steps:
@@ -45,39 +45,62 @@ export component CdFlow {
         root.verify-status == "failed" ? "error" :
         root.verify-status == "rolled_back" ? "paused" :
         root.verify-status;
-    private property <int> current-step-index:
-        root.build-status == "running" ? 0 :
-        root.test-status == "running" ? 1 :
-        root.deploy-status == "running" ? 2 :
-        root.verify-status == "running" ? 3 :
-        (root.build-status == "success" && root.test-status == "pending") ? 1 :
-        (root.test-status == "success" && root.deploy-status == "pending") ? 2 :
-        (root.deploy-status == "success" && root.verify-status == "pending") ? 3 :
-        -1;
-    private property <[StepItem]> cd-steps: [
+    private property <[JobStepItem]> cd-steps: [
         {
             name: "Build",
-            status: root.build-step-status,
+            command: "build",
+            status: root.build-step-status == "pending" ? "queued"
+                : (root.build-step-status == "running" ? "in_progress" : "completed"),
+            conclusion: root.build-step-status == "success" ? "success"
+                : (root.build-step-status == "error" ? "failure"
+                : (root.build-step-status == "paused" ? "cancelled" : "")),
             detail: root.build-detail,
             log: root.build-detail,
+            log-lines: [root.build-detail],
+            duration: "—",
+            default-expanded: false,
         },
         {
             name: "Test",
-            status: root.test-step-status,
+            command: "test",
+            status: root.test-step-status == "pending" ? "queued"
+                : (root.test-step-status == "running" ? "in_progress" : "completed"),
+            conclusion: root.test-step-status == "success" ? "success"
+                : (root.test-step-status == "error" ? "failure"
+                : (root.test-step-status == "paused" ? "cancelled" : "")),
             detail: root.test-detail,
             log: root.test-detail,
+            log-lines: [root.test-detail],
+            duration: "—",
+            default-expanded: false,
         },
         {
             name: "Deploy",
-            status: root.deploy-step-status,
+            command: "deploy",
+            status: root.deploy-step-status == "pending" ? "queued"
+                : (root.deploy-step-status == "running" ? "in_progress" : "completed"),
+            conclusion: root.deploy-step-status == "success" ? "success"
+                : (root.deploy-step-status == "error" ? "failure"
+                : (root.deploy-step-status == "paused" ? "cancelled" : "")),
             detail: root.deploy-detail,
             log: root.deploy-detail,
+            log-lines: [root.deploy-detail],
+            duration: "—",
+            default-expanded: false,
         },
         {
             name: "Verify",
-            status: root.verify-step-status,
+            command: "verify",
+            status: root.verify-step-status == "pending" ? "queued"
+                : (root.verify-step-status == "running" ? "in_progress" : "completed"),
+            conclusion: root.verify-step-status == "success" ? "success"
+                : (root.verify-step-status == "error" ? "failure"
+                : (root.verify-step-status == "paused" ? "cancelled" : "")),
             detail: root.verify-detail,
             log: root.verify-detail,
+            log-lines: [root.verify-detail],
+            duration: "—",
+            default-expanded: false,
         }
     ];
 
@@ -221,12 +244,11 @@ export component CdFlow {
             }
         }
 
-        if root.show-steps: Steps {
+        if root.show-steps: Job {
             width: 100%;
             title: "CD workflow steps";
             steps: root.cd-steps;
-            current-step-index: root.current-step-index;
-            expanded-step-index <=> root.expanded-step-index;
+            expanded-step-overrides <=> root.expanded-step-overrides;
             animations-enabled: root.running;
         }
 

@@ -11,6 +11,10 @@ pub(crate) const MERGE_REQUEST_NOTES_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/notes";
 pub(crate) const MERGE_REQUEST_COMMITS_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/commits";
+pub(crate) const MERGE_REQUEST_APPROVE_URL: &str =
+    "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/approve";
+pub(crate) const MERGE_REQUEST_MERGE_URL: &str =
+    "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/merge";
 pub(crate) const REPOSITORY_FILE_RAW_URL: &str =
     "{api_base_url}/projects/{project_id}/repository/files/{file_path}/raw";
 pub(crate) const REPOSITORY_COMPARE_URL: &str =

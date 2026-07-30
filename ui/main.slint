@@ -13,11 +13,11 @@ import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
 import { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
 import { PrReviewWorkspace } from "./views/workflow/pr_review_workspace.slint";
 import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
-import { StepItem } from "./components/workflow/steps.slint";
+import { JobStepItem } from "./components/jobs/job.slint";
 
 import { List as ListPage } from "./views/list.slint";
 import { Detail as DetailPage } from "./views/detail.slint";
-import { Project as ProjectPage, ProjectItem, ProjectAddModal } from "./views/project.slint";
+import { Project as ProjectPage, ProjectItem, ProjectDialog } from "./views/project.slint";
 import { Tools as ToolsPage } from "./views/tools.slint";
 import { Chat as ChatPage, ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
 import { Notification as NotificationPage } from "./views/notification.slint";
@@ -34,7 +34,7 @@ import { Toast } from "./components/toast/toast.slint";
 import { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
 import { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
 import { DialogEnhance } from "./components/dialog/dialog_enhance.slint";
-import { UpdateDialog, UpdateLogic, DownloadProgressModal } from "./components/update/update.slint";
+import { UpdateLogic, DownloadProgressModal } from "./components/update/update.slint";
 import { StatusBar } from "./components/status_bar.slint";
 import { LayoutConstants } from "./layout_constants.slint";
 import { PageScrollActions } from "./components/fab/page_scroll_actions.slint";
@@ -50,7 +50,7 @@ export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_
 export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
 export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
-export { StepItem } from "./components/workflow/steps.slint";
+export { JobStepItem } from "./components/jobs/job.slint";
 export { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 
@@ -102,6 +102,7 @@ export component MainWindow inherits Window {
     private property <bool> page-scroll-reset-pending: false;
     private property <string> sidebar-hovered-tooltip-text: "";
     private property <int> sidebar-hovered-tooltip-index: -1;
+    private property <length> sidebar-scroll-offset-y: 0px;
 
     // 导航信号（方便 Rust 端调用）
     callback navigate(Route);
@@ -143,6 +144,7 @@ export component MainWindow inherits Window {
     // Workflow state and callbacks
     in property <string> workflow-branch-result: "Ready to recreate branches.";
     in property <string> workflow-tag-result: "Ready to add or remove a tag.";
+    in-out property <int> workflow-tag-selected-tab: 0;
     in-out property <int> workflow-selected-flow: 2;
     in-out property <string> workflow-tag-mode: "local";
     in-out property <string> workflow-tag-version-mode: "patch";
@@ -153,7 +155,10 @@ export component MainWindow inherits Window {
     in property <bool> workflow-tag-remove-initializing: false;
     in property <bool> workflow-tag-running: false;
     in property <bool> workflow-tag-loading-animated: true;
-    in property <[StepItem]> workflow-tag-steps: [];
+    in property <string> workflow-tag-job-status: "queued";
+    in property <string> workflow-tag-job-conclusion: "";
+    in property <string> workflow-tag-job-total-duration: "";
+    in property <[JobStepItem]> workflow-tag-steps: [];
     in property <string> workflow-project-id: "default";
     in property <string> workflow-project-name: "Default Project";
     in property <string> workflow-project-alias: "";
@@ -448,8 +453,8 @@ export component MainWindow inherits Window {
             default-action: "Update",
             overlay: true,
             modal: true,
-            width: "40%",
-            height: "50%",
+            width: "480px",
+            height: "296px",
         });
 
     }
@@ -460,31 +465,47 @@ export component MainWindow inherits Window {
         y: 0;
         width: root.width;
         height: root.height - LayoutConstants.status-bar-height;
+        // Material Horizontal defaults to padding_8 + spacing_8; zero both so
+        // the nav rail sits flush against the main content (no white gutter).
         padding: 0px;
+        spacing: 0px;
         
         if root.show-navigation-drawer: Vertical {
-            width: 40px;
+            width: 48px;
             height: parent.height;
             padding: 0px;
+            spacing: 0px;
             
             // 容器：包含 navigation_drawer 和 toggle_button，背景色与 NavigationDrawer 一致
             drawer_container := Rectangle {
                 width: parent.width;
                 height: parent.height;
-                background: MaterialPalette.surface_container_low;
+                background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
                 clip: false;
                 z: 20;
+
+                    Rectangle {
+                        x: parent.width - 1px;
+                        width: 1px;
+                        height: parent.height;
+                        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                    }
                     
                     Vertical {
                         width: parent.width;
+                        height: parent.height;
                         vertical-stretch: 1;
                         padding: 0px;
+                        spacing: 0px;
 
-                        // 使用固定布局，避免滚动区域裁剪 tooltip 并保证图标以侧栏宽度居中。
+                        // Scroll inside the rail when items overflow. Tooltips
+                        // mount on MainWindow and follow scroll-offset-y.
                         custom_nav := CustomNavDrawer {
                             width: parent.width;
+                            height: parent.height;
                             hovered-tooltip-text <=> root.sidebar-hovered-tooltip-text;
                             hovered-tooltip-index <=> root.sidebar-hovered-tooltip-index;
+                            scroll-offset-y <=> root.sidebar-scroll-offset-y;
 
                             // 当前菜单选中索引由路由策略统一计算
                             current_index: root.navigation-current-index;
@@ -612,6 +633,7 @@ export component MainWindow inherits Window {
                             }
                             branch-result: root.workflow-branch-result;
                             tag-result: root.workflow-tag-result;
+                            tag-selected-tab <=> root.workflow-tag-selected-tab;
                             tag-mode <=> root.workflow-tag-mode;
                             tag-version-mode <=> root.workflow-tag-version-mode;
                             tag-current-version: root.workflow-tag-current-version;
@@ -620,6 +642,9 @@ export component MainWindow inherits Window {
                             tag-add-initializing: root.workflow-tag-add-initializing;
                             tag-remove-initializing: root.workflow-tag-remove-initializing;
                             tag-running: root.workflow-tag-running;
+                            tag-job-status: root.workflow-tag-job-status;
+                            tag-job-conclusion: root.workflow-tag-job-conclusion;
+                            tag-job-total-duration: root.workflow-tag-job-total-duration;
                             tag-loading-animated: root.workflow-tag-loading-animated;
                             tag-steps: root.workflow-tag-steps;
                             project-id: root.workflow-project-id;
@@ -909,8 +934,11 @@ export component MainWindow inherits Window {
     }
 
     if show-navigation-drawer && root.sidebar-hovered-tooltip-text != "": Rectangle {
-        x: 50px;
-        y: 8px + root.sidebar-hovered-tooltip-index * 44px + 16px - self.height / 2;
+        x: 54px;
+        // 8px list padding + 44px item pitch; add Flickable viewport_y so the
+        // tip tracks the icon after the rail scrolls.
+        y: 8px + root.sidebar-hovered-tooltip-index * 44px + 20px - self.height / 2
+            + root.sidebar-scroll-offset-y;
         width: tooltip-label.preferred-width + 12px;
         height: tooltip-label.preferred-height + 6px;
         background: MaterialPalette.inverse_surface;
@@ -925,7 +953,7 @@ export component MainWindow inherits Window {
             color: MaterialPalette.inverse_on_surface;
         }
     }
-    // 底部状态栏 - 固定在窗口底部，高度 40px
+    // Compact Primer utility status bar fixed to the bottom edge.
     StatusBar {
         x: 0;
         y: root.height - LayoutConstants.status-bar-height;
@@ -965,7 +993,7 @@ export component MainWindow inherits Window {
         }
     }
 
-    ProjectAddModal {
+    ProjectDialog {
         x: 0;
         y: 0;
         width: root.width;
@@ -1159,14 +1187,16 @@ export component MainWindow inherits Window {
         revert => { root.workflow-pr-revert(); }
     }
     
-    // 通知显示区域 - 固定在右上角，距离右边界 16px
-    // 只在有通知时才创建，避免空队列时占用空间和阻挡点击
+    // Primer Banner-style application notifications stay in one bounded
+    // top-right stack. The 360px content width keeps titles, descriptions,
+    // dismiss controls, and stacked actions readable without a wide overlay.
     if NotificationManager.queue.length > 0: Rectangle {
-        x: root.width - 256px;  // 240px (宽度) + 16px (右边距)
-        y: 20px;
-        width: 240px;
+        x: root.width - self.width - 16px;
+        y: 16px;
+        width: min(368px, root.width - 32px);
+        z: 900;
         // 最大可用高度
-        private property <length> max-available-height: root.height - 40px;
+        private property <length> max-available-height: root.height - 32px;
         // 内容高度（通过隐藏的内容计算器获取）
         private property <length> content-total-height: content-height-calculator.preferred-height;
         // 高度自适应：取内容高度和最大可用高度的较小值
@@ -1182,7 +1212,7 @@ export component MainWindow inherits Window {
         // 滚动条预留宽度（与 Material ScrollView 内部一致：scroll_bar_size=8px）
         private property <length> scrollbar-width: 8px;
         // 内容固定宽度（始终固定，不受滚动条影响）
-        private property <length> content-fixed-width: 240px - scrollbar-width;
+        private property <length> content-fixed-width: self.width - scrollbar-width;
         
         // 隐藏的内容高度计算器（不可见，仅用于计算高度）
         content-height-calculator := VerticalLayout {
@@ -1246,7 +1276,7 @@ export component MainWindow inherits Window {
             Rectangle {
                 width: parent.width;
                 height: parent.height;
-                background: #00000020;
+                background: AppState.effective-dark-mode ? #ffffff14 : #1f232814;
                 opacity: any-item-hovered ? 1 : 0;
                 animate opacity { duration: 150ms; }
                 border-radius: 4px;
@@ -1257,7 +1287,7 @@ export component MainWindow inherits Window {
                     y: max(0px, abs(notification-flickable.viewport-y) * (parent.height - self.height) / max(1px, notification-flickable.viewport-height - notification-flickable.height));
                     width: 4px;
                     height: max(32px, parent.height * notification-flickable.height / max(1px, notification-flickable.viewport-height));
-                    background: #00000080;
+                    background: AppState.effective-dark-mode ? #8c959f : #6e7781;
                     border-radius: 2px;
                     opacity: any-item-hovered ? 1 : 0.5;
                     animate opacity { duration: 150ms; }

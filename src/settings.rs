@@ -414,14 +414,15 @@ pub fn save_ui_sound_effects(enabled: bool) {
     });
 }
 
-/// Save git platform tokens asynchronously
-pub fn save_git_platform_tokens(github: &str, gitlab: &str, gitee: &str, gitee_enterprise: &str) {
+/// Update and persist Git platform tokens.
+pub fn save_git_platform_tokens(
+    github: &str,
+    gitlab: &str,
+    gitee: &str,
+    gitee_enterprise: &str,
+) -> Result<(), String> {
     get_settings_manager().set_git_platform_tokens(github, gitlab, gitee, gitee_enterprise);
-    Timer::single_shot(std::time::Duration::from_millis(100), || {
-        if let Err(e) = get_settings_manager().save() {
-            log::error!("[Settings] Failed to save settings: {}", e);
-        }
-    });
+    get_settings_manager().save()
 }
 
 pub fn save_git_hosted_repository_configs(
@@ -431,7 +432,7 @@ pub fn save_git_hosted_repository_configs(
     gitlab_enterprise: &str,
     gitee_api_base_url: &str,
     gitee_enterprise: &str,
-) {
+) -> Result<(), String> {
     get_settings_manager().set_git_hosted_repository_configs(
         github_api_base_url,
         github_enterprise,
@@ -440,21 +441,18 @@ pub fn save_git_hosted_repository_configs(
         gitee_api_base_url,
         gitee_enterprise,
     );
-    Timer::single_shot(std::time::Duration::from_millis(100), || {
-        if let Err(error) = get_settings_manager().save() {
-            log::error!("[Settings] Failed to save hosted repository configuration: {error}");
-        }
-    });
+    get_settings_manager().save()
 }
 
-/// Save OpenAI-compatible AI Agent settings asynchronously.
-pub fn save_ai_agent_settings(provider: &str, base_url: &str, api_key: &str, model: &str) {
+/// Update and persist OpenAI-compatible AI Agent settings.
+pub fn save_ai_agent_settings(
+    provider: &str,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+) -> Result<(), String> {
     get_settings_manager().set_ai_agent_settings(provider, base_url, api_key, model);
-    Timer::single_shot(std::time::Duration::from_millis(100), || {
-        if let Err(e) = get_settings_manager().save() {
-            log::error!("[Settings] Failed to save AI Agent settings: {}", e);
-        }
-    });
+    get_settings_manager().save()
 }
 
 /// Load settings from file (can be called before MainWindow is created)

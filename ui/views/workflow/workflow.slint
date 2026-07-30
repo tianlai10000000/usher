@@ -5,7 +5,7 @@ import { PageView } from "../../components/page/page_view.slint";
 import { Route } from "../../route/routeMap.slint";
 import { PrFlow, WorkflowPullRequestItem } from "./pr.slint";
 import { TagFlow } from "./tag.slint";
-import { StepItem } from "../../components/workflow/steps.slint";
+import { JobStepItem } from "../../components/jobs/job.slint";
 
 component WorkflowComingSoon inherits Rectangle {
     in property <string> feature-name: "";
@@ -65,8 +65,8 @@ component WorkflowComingSoon inherits Rectangle {
     }
 }
 
-// GitHub repository UnderlineNav shared by all Workflow widths. The labels
-// remain content-sized at compact widths instead of switching to ActionList.
+// GitHub repository UnderlineNav item. Durable contract:
+// docs/specs/ui-design.md “UnderlineNav tabs”.
 component WorkflowWideTab inherits Rectangle {
     in property <string> label;
     in property <image> icon;
@@ -78,13 +78,16 @@ component WorkflowWideTab inherits Rectangle {
     width: root.label-width + 48px;
     height: 48px;
     background: transparent;
+    clip: false;
 
-    // Keep the hover fill square and one pixel above the shared divider.
-    // This preserves the continuous repository-nav baseline across tabs.
+    // Rounded hover wash on the 32px control only — never covers the baseline.
     if tab-touch.has-hover: Rectangle {
-        width: 100%;
-        height: parent.height - 1px;
-        background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+        x: 0px;
+        y: 8px;
+        width: parent.width;
+        height: 32px;
+        border-radius: 6px;
+        background: AppState.effective-dark-mode ? #656c7633 : #eaedf0;
     }
 
     label-measure := Text {
@@ -108,8 +111,9 @@ component WorkflowWideTab inherits Rectangle {
 
     Text {
         x: 36px;
+        y: 8px;
         width: root.label-width;
-        height: parent.height;
+        height: 32px;
         text: root.label;
         font-size: 14px;
         font-weight: root.selected ? 600 : 400;
@@ -629,6 +633,7 @@ export component Workflow inherits PageView {
 
     in property <string> branch-result: "Ready to recreate branches.";
     in property <string> tag-result: "Ready to add or remove a tag.";
+    in-out property <int> tag-selected-tab: 0;
     in-out property <string> tag-mode: "local";
     in-out property <string> tag-version-mode: "patch";
     in property <string> tag-current-version: "v0.0.0";
@@ -637,8 +642,11 @@ export component Workflow inherits PageView {
     in property <bool> tag-add-initializing: false;
     in property <bool> tag-remove-initializing: false;
     in property <bool> tag-running: false;
+    in property <string> tag-job-status: "queued";
+    in property <string> tag-job-conclusion: "";
+    in property <string> tag-job-total-duration: "";
     in property <bool> tag-loading-animated: true;
-    in property <[StepItem]> tag-steps: [];
+    in property <[JobStepItem]> tag-steps: [];
     in property <string> project-id: "default";
     in property <string> project-name: "Default Project";
     in property <string> project-alias: "";
@@ -719,7 +727,9 @@ export component Workflow inherits PageView {
             : 0px);
     private property <length> selected-panel-height: root.selected-flow == 2
         ? max(620px, 16px + root.pr-flow-content-height)
-        : (root.selected-flow == 3 ? 920px : 620px);
+        : (root.selected-flow == 3
+            ? max(620px, 16px + tag-flow.height + 24px)
+            : 620px);
     private property <length> body-top: root.project-header-height + root.workflow-nav-height;
 
     workflow-shell := Rectangle {
@@ -857,10 +867,13 @@ export component Workflow inherits PageView {
                 }
             }
 
-            if root.selected-flow == 3: TagFlow {
+            tag-flow := TagFlow {
+                visible: root.selected-flow == 3;
                 x: root.compact-workflow-layout ? 16px : 24px;
                 y: 16px;
                 width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
+                active: root.selected-flow == 3;
+                selected-tab <=> root.tag-selected-tab;
                 mode: root.tag-mode;
                 version-mode: root.tag-version-mode;
                 current-version: root.tag-current-version;
@@ -869,6 +882,9 @@ export component Workflow inherits PageView {
                 add-initializing: root.tag-add-initializing;
                 remove-initializing: root.tag-remove-initializing;
                 running: root.tag-running;
+                job-status: root.tag-job-status;
+                job-conclusion: root.tag-job-conclusion;
+                job-total-duration: root.tag-job-total-duration;
                 loading-animated: root.tag-loading-animated;
                 result: root.tag-result;
                 steps: root.tag-steps;

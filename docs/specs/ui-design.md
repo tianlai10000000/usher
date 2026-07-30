@@ -33,7 +33,7 @@ When an older Primer component is intentionally reproduced because it exactly ma
 - Implement all observable states present in the reference: default, hover, active/pressed, focus-visible, selected, disabled, loading, error, empty, and expanded/collapsed as applicable.
 - Keep interactive hit targets mounted and change visual state instead of conditionally creating hover targets.
 - Use GitHub wording, capitalization, density, information hierarchy, and content placement where the product concept maps directly. Do not copy GitHub trademarks or irrelevant product content.
-- A reusable pattern belongs in `ui/components/`; page composition belongs in `ui/views/`. A page must reuse the shared pattern rather than locally recreating a visually similar variant.
+- A reusable pattern belongs in `ui/components/`; page composition belongs in `ui/views/`. A page must reuse the shared pattern rather than locally recreating a visually similar variant. Page and section tabs must follow the [UnderlineNav tabs](#underlinenav-tabs--underlinenav-页签) contract; do not invent alternate tab chrome.
 - Full-window overlays remain mounted at the root layer in `ui/main.slint`.
 - Never edit `material-1.7.1-fixed/` or any other vendored Slint Material UI source to achieve product behavior or visuals. Adapt or wrap the dependency only in application-owned `ui/` code so framework upgrades remain replaceable.
 - Ordinary application UI inherits one platform-selected CJK-capable family
@@ -50,7 +50,7 @@ When an older Primer component is intentionally reproduced because it exactly ma
 - 按参考实现覆盖所有可见状态：默认、Hover、按下、键盘焦点、选中、禁用、加载、错误、空状态及展开/折叠（如适用）。
 - 交互命中区域应常驻，通过视觉状态变化实现 Hover 等反馈，不得条件创建命中节点。
 - 产品概念一致时，应采用 GitHub 的文案风格、大小写、信息密度、层级和内容位置；不得复制 GitHub 商标或无关产品内容。
-- 复用模式放入 `ui/components/`，页面装配放入 `ui/views/`；页面不得重复实现已有共享模式的近似变体。
+- 复用模式放入 `ui/components/`，页面装配放入 `ui/views/`；页面不得重复实现已有共享模式的近似变体。页面级与分区级 Tab 必须遵循 [UnderlineNav 页签](#underlinenav-tabs--underlinenav-页签) 契约，禁止另起一套 Tab 外观。
 - 全窗口遮罩继续挂载在 `ui/main.slint` 根层。
 - 为实现产品行为或视觉，绝对禁止修改 `material-1.7.1-fixed/` 或任何其他 vendored Slint Material UI 源码。只能在项目自有 `ui/` 代码中适配或包装依赖，确保框架升级时可以直接替换。
 - 普通应用 UI 统一继承 `MainWindow` 按平台选择的中日韩兼容字体：
@@ -95,6 +95,18 @@ The shared Toast in `ui/components/toast/toast.slint` follows the official Prime
 
 Reference: [Primer CSS deprecated Toast documentation](https://primer.style/css/storybook/?path=/docs/deprecated-toast--docs) and [GitHub's current guidance on accessible notifications and toasts](https://primer.style/accessibility/toasts/).
 
+## Notify reference / Notify 参考
+
+The shared floating Notify follows Primer Banner's compact structure and messaging guidance while using the neutral canvas treatment appropriate for a transient overlay. Notifications form a top-right stack with a 16 px viewport inset, 8 px item gap, bounded scrolling, and a 360 px content width. Each notification uses an 8 px outer padding, 1 px neutral border, 6 px radius, 16 px semantic Octicon, 14 px text, and a 32 px dismiss target. Long text wraps. Standard and actionable notifications use the same renderer; actionable notifications expose no more than two actions below the message. The action group follows `GitHubDialog` footer alignment: it is pinned to the trailing edge, with secondary actions first and the primary action last. Only the recommended final action in a multi-action notification is primary; a single dismissive action remains secondary. Light and dark modes use their neutral canvas and border tokens, with status communicated by the Octicon color rather than a tinted card.
+
+共享浮层 Notify 遵循 Primer Banner 的紧凑结构和消息规范，同时采用更适合临时浮层的中性画布。通知以右上角队列展示，距视口 16px、条目间距 8px、超高时在限定区域滚动，内容宽度为 360px。每条通知使用 8px 外层内边距、1px 中性边框、6px 圆角、16px 语义 Octicon、14px 文本和 32px 关闭热区；长文本自动换行。普通通知和带操作通知使用同一渲染器；带操作通知最多展示两个位于正文下方的操作。操作组与 `GitHubDialog` 底部一致，整体靠右，次操作在前、主操作在后。只有多操作通知中最后一个推荐操作使用主按钮，单个取消类操作保持次按钮。明暗主题均采用中性画布和边框，状态只由 Octicon 颜色表达，不再给整张卡片染色。
+
+Settings-triggered update checks report every terminal result through Notify: current version, available update, or failure. Update availability may offer `Later` and `Update now`; failure messages remain concise and never expose raw transport errors.
+
+设置页主动检查更新的所有终态都通过 Notify 反馈：已是最新版、发现新版本或检查失败。发现新版本时可以提供 `Later` 和 `Update now`；失败消息保持简洁，不向用户暴露原始网络错误。
+
+References: [Primer Banner](https://primer.style/product/components/banner/), [Banner guidelines](https://primer.style/product/components/banner/guidelines/), [notification messaging](https://primer.style/product/ui-patterns/notification-messaging/), and the [Primer React Banner implementation](https://github.com/primer/react/tree/main/packages/react/src/Banner).
+
 ## Settings and About references / 设置与关于页面参考
 
 Settings uses Primer's Settings Page composition: a `SplitPageLayout` with a
@@ -127,6 +139,17 @@ It is a product-information page rather than a Material profile card.
 关于页面采用同一套全页 `PageHeader` 层级、Primer 元数据 `Label`、带边框
 `Box` 信息行、语义弱化文本及受控的可读内容宽度；它是产品信息页，不是
 Material 风格的个人资料卡。
+
+Manual Settings saves report completion only after the settings file has been
+persisted. Saving code-hosting tokens, enterprise API configuration, or AI
+Agent settings shows one bottom success Toast; persistence failures show one
+bottom error Toast. AI Agent connection-test success and failure use the same
+bottom placement.
+
+设置页手工保存操作仅在配置文件实际持久化后报告完成。保存代码托管 Token、
+企业 API 配置或 AI Agent 配置成功时显示一个底部成功 Toast；持久化失败时
+显示一个底部错误 Toast。AI Agent 连接测试的成功与失败也使用相同的底部
+位置。
 
 References: [Primer SplitPageLayout settings example](https://primer.style/product/components/split-page-layout/),
 [Primer PageLayout](https://primer.style/product/components/page-layout/),
@@ -166,6 +189,131 @@ References: [Primer Breadcrumbs](https://primer.style/product/components/breadcr
 [Primer PageHeader](https://primer.style/product/components/page-header/), and
 [Primer layout foundations](https://primer.style/product/getting-started/foundations/layout/).
 
+## Application navigation and utility status / 应用导航与状态栏
+
+The persistent application rail follows Primer NavList and ActionList semantics
+in an icon-only desktop form. It is 48 px wide on a subtle canvas with a
+one-pixel trailing default border. Every route uses a consistent 20 px leading
+visual inside a mounted 32 px, 6 px-radius target. Items are separated by 4 px;
+default, hover, pressed, and current-route states use semantic muted foreground
+and transparent-control colors in both themes. The current route is identified
+by the selected control surface rather than an unrelated brand color. Tooltips
+remain available for every icon-only destination.
+
+固定应用导航栏以仅图标桌面形态遵循 Primer NavList 和 ActionList 语义。
+导航栏宽 48px，使用 subtle 画布并在尾侧绘制 1px 默认边框。所有路由统一
+使用 20px leading visual，放在常驻的 32px、6px 圆角命中面内；项目间距
+为 4px。默认、Hover、按下和当前路由状态在明暗主题下均使用语义化的弱化
+前景色与透明控件状态色；当前路由通过 selected control surface 表达，
+不再使用无关的品牌色。每个仅图标入口必须保留 Tooltip。
+
+GitHub's web App Footer is not a match for Usher's persistent desktop runtime
+status. The bottom surface is therefore a compact Primer utility bar: 28 px
+high, subtle canvas, one-pixel default top border, 12 px muted labels, and
+mounted hover/pressed targets. Transient update and notification state stays
+left-aligned; connection and version metadata stay right-aligned. Popovers use
+the default canvas, default border, 6 px radius, and Primer floating shadow.
+Status color is reserved for connection or error meaning.
+
+GitHub 网页 App Footer 不对应 Usher 常驻的桌面运行状态，因此底部采用紧凑
+Primer utility bar：高度 28px、subtle 画布、1px 默认顶边框、12px 弱化
+标签及常驻 Hover/按下命中区。更新与通知等临时状态左对齐，网络连接和版本
+元信息右对齐；Popover 使用默认画布、默认边框、6px 圆角和 Primer floating
+阴影。状态色仅用于表达连接或错误语义。
+
+References: [Primer navigation patterns](https://primer.style/product/ui-patterns/navigation/),
+[Primer NavList guidelines](https://primer.style/product/components/nav-list/guidlines/),
+[Primer ActionList](https://primer.style/product/components/action-list/),
+[Primer layout foundations](https://primer.style/product/getting-started/foundations/layout/),
+and [Primer color usage](https://primer.style/product/getting-started/foundations/color-usage/).
+
+## UnderlineNav tabs / UnderlineNav 页签
+
+Every page or section tab strip in Usher must reproduce GitHub Primer
+**UnderlineNav** (repository page tabs such as Actions / Projects). Do not
+invent square full-height hover washes, Material tabs, or SegmentedControl
+substitutes for primary view switching. Scope toggles that are not page tabs
+(for example Tag Local/Remote) keep using SegmentedControl.
+
+项目内所有页面级或分区级 Tab 条都必须复刻 GitHub Primer **UnderlineNav**
+（仓库页 Actions / Projects 一类页签）。禁止自创铺满整高的方形 Hover 底、
+Material Tabs，或用 SegmentedControl 代替主视图切换。非页签的范围切换
+（如 Tag 的 Local/Remote）继续使用 SegmentedControl。
+
+### Canonical geometry / 标准几何
+
+| Element | Value | Notes |
+| --- | --- | --- |
+| Row height | 48 px | 8 px top inset + 32 px item + 8 px gap above the baseline |
+| Item control height | 32 px | Primer `--base-size-32` / `--control` medium |
+| Item border-radius | 6 px | Primer medium radius on the hover wash only |
+| Item gap | 8 px | Primer condensed stack gap between items |
+| Label | 14 px | Semibold (600) when selected, regular (400) otherwise |
+| Leading Octicon | 16 px | Optional; muted foreground when present |
+| Shared baseline | 1 px | Full-width muted border under the row |
+| Selected underline | 2 px coral | Light `#fd8c73` / dark `#f78166`; spans the item width and sits on the baseline |
+
+Hover fills only the 32×N rounded control with neutral-muted wash (light
+`#eaedf0`, dark `#656c7633`). The wash must never cover or interrupt the
+shared 1 px baseline. Selected state keeps a transparent control surface and
+shows only the coral underline on the baseline (bold label). Idle remains
+transparent.
+
+Hover 只填在 32×N 圆角控件上，使用中性弱化底色（浅色 `#eaedf0`，深色
+`#656c7633`），不得遮挡或打断整行 1px 基线。选中态控件背景仍透明，仅在
+基线上显示珊瑚色下划线，标签加粗。默认态保持透明。
+
+### Row composition / 行结构
+
+```text
+[ 8px top ]
+[ 32px UnderlineItem ][ 8px gap ][ 32px UnderlineItem ] …
+[ 8px gap above baseline ]
+[ 1px shared border; selected 2px coral underline overlays it ]
+```
+
+Mount the shared border in the row first (or ensure items leave the bottom
+8 px clear). Place the selected underline on the baseline (`y = rowHeight - 2`
+for a 48 px row host, or `y = controlHeight + 6` when the control itself is
+only 32 px tall inside that row).
+
+先绘制整行共享底边（或保证 item 底部留出 8px）。选中下划线落在基线上：
+48px 行宿主使用 `y = rowHeight - 2`；若控件本身只有 32px 高，则使用
+`y = controlHeight + 6`。
+
+### Ownership / 现有实现
+
+| Surface | Component |
+| --- | --- |
+| Workflow repository nav (Pull requests / Tags / …) | `WorkflowWideTab` in `ui/views/workflow/workflow.slint` |
+| Tag Add / Remove | `TagTabChip` in `ui/views/workflow/tag.slint` |
+| PR review Conversation / Commits / Files changed | `PrTabButton` in `ui/components/pr_review/shell.slint` |
+
+New tab strips must reuse or extract a shared UnderlineNav item rather than
+forking another hover/underline variant. Record Primer-derived numbers in a
+short source comment; keep the durable contract in this section.
+
+新建 Tab 条必须复用或抽成共享 UnderlineNav item，不得再分叉另一套
+Hover/下划线变体。Primer 派生数值用简短源码注释记录；稳定契约以本节为准。
+
+### Regression checklist / 回归清单
+
+- Selected: bold label + coral underline on the shared baseline; no hover-sized gray fill required.
+- Hover (unselected): 6 px rounded wash, 32 px tall, baseline fully visible underneath.
+- Neighboring tabs do not clip or paint over the continuous 1 px baseline.
+- Light and dark tokens match the table above.
+- Icon + label (+ optional counter) stay vertically centered in the 32 px control.
+
+- 选中：加粗标签 + 基线上的珊瑚色下划线；不要求出现 Hover 尺寸的灰底。
+- Hover（未选中）：6px 圆角、32px 高的弱化底，基线完整可见。
+- 相邻 Tab 不得裁切或盖住连续的 1px 基线。
+- 明暗色值与上表一致。
+- 图标 + 标签（及可选计数）在 32px 控件内垂直居中。
+
+References: [Primer UnderlineNav](https://primer.style/product/components/underline-nav/),
+[primer/react `UnderlineTabbedInterface.module.css`](https://github.com/primer/react/blob/main/packages/react/src/internal/components/UnderlineTabbedInterface.module.css),
+and github.com repository navigation (Actions / Projects tabs).
+
 ## Workflow repository navigation / Workflow 仓库导航
 
 The Workflow repository identity keeps project name, optional alias, provider,
@@ -179,14 +327,84 @@ Workflow 仓库身份区第一行按“项目名称、可选别名、Provider、
 打开操作；低于 720px 时对齐 GitHub 紧凑仓库导航，从页头隐藏路径并收进
 尾部 kebab 浮层。
 
-Workflow uses one content-sized UnderlineNav at every supported width. The
-selected underline spans the complete tab hit target. Hover uses a square muted
-background that stops one pixel above the shared bottom divider, so neighboring
-tabs never interrupt or cover the continuous navigation baseline.
+Workflow repository view switching uses the shared UnderlineNav contract in
+[UnderlineNav tabs](#underlinenav-tabs--underlinenav-页签) at every supported
+width (content-sized items with optional leading Octicons).
 
-Workflow 在所有支持的宽度下统一使用内容宽度型 UnderlineNav。选中下划线
-覆盖完整 Tab 命中宽度；Hover 使用无圆角的 muted 背景，并在公共底部分隔线
-上方保留 1px，避免相邻 Tab 遮挡或打断连续导航基线。
+Workflow 仓库视图切换在所有支持宽度下统一使用
+[UnderlineNav 页签](#underlinenav-tabs--underlinenav-页签) 契约（内容宽度
+item，可选 leading Octicon）。
+
+## Workflow execution steps / Workflow 执行步骤
+
+Workflow execution steps reproduce GitHub Actions job logs as one disclosure
+list below the job heading, muted result summary, and divider. The surface uses
+GitHub/Primer default, subtle, border, and foreground tokens for the active
+light or dark application theme. Each collapsed row is 40 px high and
+uses, from left to right, a 16 px ChevronRight/ChevronDown Octicon, a 20 px
+status slot, one 14 px step name, and a right-aligned 12 px duration. Pending
+steps show an empty duration cell, running steps show an ellipsis, and completed, failed,
+or cancelled steps retain their measured elapsed time. Completed success marks
+follow GitHub Actions emphasis: muted CheckCircleFill when collapsed, default
+foreground when expanded. Failed steps use the matching 16 px XCircleFill
+(danger colorize), not a larger painted disc behind a plain X. Running, paused,
+and cancelled states keep their semantic Octicons and colors. Rows never become independent
+cards, never show numbered badges, and never add a trailing `Logs` text link.
+The full row is the disclosure target. Collapsed idle rows stay on the bare log
+canvas (no header wash). Hover on an expandable collapsed row shows a lighter
+inset 6 px-radius wash than the expanded header
+(light hover `#f3f4f6` / expanded `#eaeef2`; dark hover `#161b22` / expanded
+`#21262d`). Expanded output stays directly under its
+step and reproduces GitHub's muted line-number column on the shared canvas.
+Each logical log line owns one row and one source line number. Long text wraps
+within that row; continuation lines stay aligned under the message and do not
+repeat the source line number. The nominal line box is 28 px with 12 px
+monospace text measured-box centered in that wash (not Text
+`vertical-alignment: center`, which reads optically high); wrapped rows grow
+with 7 px vertical padding. No invented gutter fill or divider separates
+the columns. Command output
+uses GitHub's continuous `Run …` log format without invented stdout/stderr
+headings or blank sections. Each disclosure is independent, so opening one step
+does not close another; failed steps start expanded and may still be collapsed
+by the user. Pending pre-run plans remain visible in Usher because their
+steps are deterministic, but rows without logs do not expose disclosure
+chevrons. The outer Workflow
+page height follows the disclosure list's measured height so the page
+ScrollView can always reach the last step above the persistent status bar.
+This presentation is owned by `ui/components/jobs/job.slint`; workflow views
+must pass normalized Job snapshots instead of copying the rows.
+
+Workflow 执行步骤严格复刻 GitHub Actions Job logs，在当前应用明暗主题
+对应的 Primer default/subtle 画布上显示 Job 标题、弱化结果摘要、分隔线和
+统一 disclosure list。折叠行高固定为 40px，从左到右依次为 16px
+ChevronRight/ChevronDown Octicon、20px 状态位、一行 14px 步骤名称以及
+右对齐的 12px 耗时；pending 耗时单元格为空、running 显示省略号，完成、失败或
+取消后保留实际测量的执行耗时。成功状态与 GitHub Actions 一致：折叠为 muted
+CheckCircleFill，展开为 default 前景色；失败使用同尺寸的 16px XCircleFill
+（danger 着色），不得用更大的实心底圆叠白 X；运行、暂停和取消状态
+使用对应语义 Octicon 与颜色。步骤不得拆成独立卡片，不得使用数字徽标，也
+不得在尾部添加 `Logs` 文字链接。整行都是展开命中区。折叠且未 Hover 的行
+保持日志画布底色、无 header 底；可展开折叠行 Hover 时使用比展开头更浅的
+6px 圆角内缩底（浅色 Hover `#f3f4f6` / 展开 `#eaeef2`；深色 Hover `#161b22` /
+展开 `#21262d`）。展开内容直接接在对应
+步骤下方，使用 GitHub 式共享画布上的弱化行号列。每个逻辑日志行只占一个源行号；
+长文本在本行内换行，续行继续对齐消息列且不重复行号。名义行盒为 28px、12px
+等宽字按实测文字盒在 Hover 底内垂直居中（不用 Text `vertical-alignment:
+center`，否则会光学偏上）；换行时上下各留 7px。行号列不得自行添加底色或分隔线。命令输出采用 GitHub 连续的
+`Run …` 格式，不自行添加
+stdout/stderr 标题或空白区。每个 disclosure 独立展开，打开一个步骤不得关闭
+其他步骤；失败步骤默认展开，但用户仍可将其折叠。Usher 的执行前计划
+因为步骤确定而保持可见，但没有日志的 pending 行不显示展开箭头。Workflow
+外层高度必须
+跟随 disclosure list 的实测高度，使页面 ScrollView 始终能把最后一步滚到
+常驻状态栏上方。
+该展示统一归 `ui/components/jobs/job.slint` 所有；Workflow 页面必须传入
+归一化 Job 快照，不得复制 Step 行。
+
+References: [GitHub Actions workflow-run logs](https://docs.github.com/en/actions/how-tos/monitor-workflows/use-workflow-run-logs),
+[GitHub Actions quickstart job-log screenshot](https://docs.github.com/assets/cb-95207/images/help/repository/actions-quickstart-logs.png),
+[GitHub Actions expanded job-log screenshot](https://docs.github.com/assets/cb-53977/images/help/repository/actions-quickstart-log-detail.png),
+and [Primer Octicons](https://primer.style/product/foundations/icons/).
 
 ## Workflow pull request list / Workflow PR 列表
 
@@ -266,11 +484,23 @@ name the affected project, explain that only the Usher record is removed, and
 label the danger action `Delete project`. Do not use generic wording such as
 “Are you sure?” or `Confirm`.
 
+Every application-owned modal uses the shared
+`ui/components/dialog/github_dialog.slint` shell. `DialogManager` is only an
+imperative state/action adapter; project forms, PR review/merge/revert and
+commit-range content, update prompts, and download progress must not recreate
+backdrop, surface, header, close button, footer, or action-state chrome locally.
+
 新增和编辑采用 Primer Dialog 的 480px large 宽度、Header/Body/Footer 的
 16px 安全边距、32px 中号控件、6px 输入框圆角及单列滚动表单。删除采用
 320px 的专用 ConfirmationDialog 结构：明确项目名称、说明仅删除 Usher
 记录，并将危险操作命名为 `Delete project`；禁止使用“Are you sure?”或
 `Confirm` 等含糊文案。
+
+所有应用自有 Modal 都必须使用共享
+`ui/components/dialog/github_dialog.slint` 外壳。`DialogManager` 只负责
+命令式状态与操作适配；项目表单、PR Review/Merge/Revert、Commit Range、
+更新提示和下载进度不得在页面内重复实现遮罩、Surface、Header、关闭按钮、
+Footer 或操作状态样式。
 
 References: [Primer Card](https://primer.style/product/components/card/),
 [Primer SegmentedControl](https://primer.style/product/components/segmented-control/),

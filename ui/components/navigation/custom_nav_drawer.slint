@@ -2,9 +2,9 @@
 // 主要改进：去除顶部标题，减小菜单项高度和图标大小
 
 import {
-    MaterialPalette, MaterialStyleMetrics, MaterialAnimations,
-    Icon
+    MaterialAnimations, Icon
 } from "@material";
+import { AppState } from "../../state/app_state.slint";
 
 // 导航菜单项数据结构
 export struct NavItem {
@@ -13,6 +13,8 @@ export struct NavItem {
 }
 
 // 自定义导航菜单项模板
+// Primer ActionList/NavList compact geometry: 32px control, 6px radius,
+// 16–20px leading visual, semantic transparent-control interaction colors.
 component NavItemTemplate {
     in property <image> icon;
     in property <string> text;
@@ -22,38 +24,45 @@ component NavItemTemplate {
     callback clicked();
     callback hovered(string, int, bool);
     
-    property <bool> has_icon: root.icon.width > 0 && root.icon.height > 0;
-    property <color> item_color: selected ? MaterialPalette.primary : MaterialPalette.on_surface_variant;
+    property <bool> has-icon: root.icon.width > 0 && root.icon.height > 0;
+    property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    property <color> control-hover: AppState.effective-dark-mode ? #ffffff1a : #818b981f;
+    property <color> control-selected: AppState.effective-dark-mode ? #ffffff1f : #818b9826;
+    property <color> control-active: AppState.effective-dark-mode ? #ffffff29 : #818b9833;
+    property <color> item-color: selected ? root.fg-default : root.fg-muted;
     
-    property <length> icon_size: 20px;
-    property <length> item_height: 32px;
+    property <length> icon-size: 20px;
+    property <length> item-height: 40px;
 
-    height: item_height;
+    height: item-height;
     
     Rectangle {
         width: root.width;
-        height: root.item_height;
+        height: root.item-height;
         background: transparent;
 
         hover-bg := Rectangle {
-            width: 28px;
-            height: 28px;
+            width: 32px;
+            height: 32px;
             x: (root.width - self.width) / 2;
             y: (root.height - self.height) / 2;
             border-radius: 6px;
-            background: hover-area.has-hover
-                ? MaterialPalette.surface_container_high
-                : transparent;
+            background: hover-area.pressed
+                ? root.control-active
+                : root.selected
+                    ? root.control-selected
+                    : hover-area.has-hover ? root.control-hover : transparent;
             animate background { duration: MaterialAnimations.opacity_duration; easing: MaterialAnimations.opacity_easing; }
         }
 
-        if root.has_icon : Icon {
+        if root.has-icon : Icon {
             x: (root.width - self.width) / 2;
             y: (root.height - self.height) / 2;
-            width: root.icon_size;
-            height: root.icon_size;
+            width: root.icon-size;
+            height: root.icon-size;
             source: root.icon;
-            colorize: root.item_color;
+            colorize: root.item-color;
         }
 
         hover-area := TouchArea {
@@ -71,7 +80,7 @@ component NavItemTemplate {
         }
     }
     
-    animate item_color { duration: MaterialAnimations.opacity_duration; easing: MaterialAnimations.opacity_easing; }
+    animate item-color { duration: MaterialAnimations.opacity_duration; easing: MaterialAnimations.opacity_easing; }
 }
 
 // 自定义导航抽屉组件
@@ -80,37 +89,50 @@ export component CustomNavDrawer {
     in property <int> current_index: -1;  // -1 表示无选中项
     in-out property <string> hovered-tooltip-text: "";
     in-out property <int> hovered-tooltip-index: -1;
-    
+    // Negative when scrolled down; MainWindow tooltip Y must add this offset.
+    in-out property <length> scroll-offset-y <=> nav-scroll.viewport-y;
+
     callback selected(item_index: int);
     width: 100%;
-    
-    VerticalLayout {
-        width: parent.width;
-        alignment: start;
-        spacing: 12px;
-        padding-left: 0;
-        padding-right: 0;
-        padding-top: MaterialStyleMetrics.padding_8;
-        padding-bottom: MaterialStyleMetrics.padding_8;
-        
-        for item[index] in root.items : NavItemTemplate {
-            width: parent.width;
-            icon: item.icon;
-            text: item.text;
-            selected: index == root.current_index;
-            index: index;
-            
-            clicked => {
-                root.selected(index);
-            }
+    // Fill the rail so Flickable can clip and scroll when items overflow.
+    height: 100%;
 
-            hovered(text, item-index, visible) => {
-                if visible {
-                    root.hovered-tooltip-text = text;
-                    root.hovered-tooltip-index = item-index;
-                } else if root.hovered-tooltip-text == text {
-                    root.hovered-tooltip-text = "";
-                    root.hovered-tooltip-index = -1;
+    // Wheel/trackpad scroll only — no scrollbar chrome in the 48px rail.
+    // Tooltips stay on MainWindow (outside this clip) and use scroll-offset-y.
+    nav-scroll := Flickable {
+        width: parent.width;
+        height: parent.height;
+        viewport-width: parent.width;
+        interactive: true;
+
+        VerticalLayout {
+            width: parent.width;
+            alignment: start;
+            spacing: 4px;
+            padding-left: 0px;
+            padding-right: 0px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+
+            for item[index] in root.items : NavItemTemplate {
+                width: parent.width;
+                icon: item.icon;
+                text: item.text;
+                selected: index == root.current_index;
+                index: index;
+
+                clicked => {
+                    root.selected(index);
+                }
+
+                hovered(text, item-index, visible) => {
+                    if visible {
+                        root.hovered-tooltip-text = text;
+                        root.hovered-tooltip-index = item-index;
+                    } else if root.hovered-tooltip-text == text {
+                        root.hovered-tooltip-text = "";
+                        root.hovered-tooltip-index = -1;
+                    }
                 }
             }
         }

@@ -79,6 +79,74 @@ use terminal::{set_dark_mode as set_terminal_dark_mode, setup_terminal, shutdown
 
 pub use platform::is_window_interacting;
 
+#[derive(Clone, Copy)]
+enum SettingsSaveTarget {
+    GitTokens,
+    GitHosting,
+    AiAgent,
+}
+
+fn set_settings_saved(ui: &MainWindow, target: SettingsSaveTarget, saved: bool) {
+    match target {
+        SettingsSaveTarget::GitTokens => ui.set_settings_git_tokens_saved(saved),
+        SettingsSaveTarget::GitHosting => ui.set_settings_git_hosting_config_saved(saved),
+        SettingsSaveTarget::AiAgent => ui.set_settings_ai_agent_saved(saved),
+    }
+}
+
+fn settings_toast(message: &str) -> ToastOptions {
+    ToastOptions {
+        message: message.into(),
+        duration: 3_000,
+        position: "bottom".into(),
+        icon: "".into(),
+        overlay: false,
+        close_on_click: true,
+        loading_type: "".into(),
+        width: "auto".into(),
+    }
+}
+
+fn save_settings_with_feedback<F>(
+    ui_weak: slint::Weak<MainWindow>,
+    target: SettingsSaveTarget,
+    operation: &'static str,
+    success_message: &'static str,
+    save: F,
+) where
+    F: FnOnce() -> std::result::Result<(), String> + Send + 'static,
+{
+    app_runtime::shared_runtime().spawn(async move {
+        let result = tokio::task::spawn_blocking(save)
+            .await
+            .unwrap_or_else(|error| Err(format!("settings worker failed: {error}")));
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            match result {
+                Ok(()) => {
+                    set_settings_saved(&ui, target, true);
+                    ToastManager::get(&ui).invoke_success(settings_toast(success_message));
+                    let reset_weak = ui.as_weak();
+                    Timer::single_shot(std::time::Duration::from_secs(2), move || {
+                        if let Some(ui) = reset_weak.upgrade() {
+                            set_settings_saved(&ui, target, false);
+                        }
+                    });
+                    log::info!("[Settings] {operation} saved");
+                }
+                Err(error) => {
+                    set_settings_saved(&ui, target, false);
+                    ToastManager::get(&ui)
+                        .invoke_error(settings_toast(&format!("Failed to save {operation}.")));
+                    log::error!("[Settings] Failed to save {operation}: {error}");
+                }
+            }
+        });
+    });
+}
+
 fn ui() -> Result<MainWindow> {
     memory_diagnostics::initialize_baseline();
     log::info!("Usher v{} starting...", env!("CARGO_PKG_VERSION"));
@@ -192,31 +260,23 @@ fn ui() -> Result<MainWindow> {
     let app_weak_git_tokens = app.as_weak();
     AppState::get(&app).on_save_git_tokens(
         move |github_token, gitlab_token, gitee_token, gitee_enterprise_token| {
-            settings::save_git_platform_tokens(
-                github_token.as_str(),
-                gitlab_token.as_str(),
-                gitee_token.as_str(),
-                gitee_enterprise_token.as_str(),
-            );
-            if let Some(win) = app_weak_git_tokens.upgrade() {
-                win.set_settings_git_tokens_saved(true);
-                let win_weak = win.as_weak();
-                Timer::single_shot(std::time::Duration::from_secs(2), move || {
-                    if let Some(win) = win_weak.upgrade() {
-                        win.set_settings_git_tokens_saved(false);
-                    }
-                });
-            }
-            log::info!(
-                "[Settings] Git tokens updated: github={}, gitlab={}, gitee_public={}, gitee_enterprise={}",
-                if github_token.is_empty() { "empty" } else { "set" },
-                if gitlab_token.is_empty() { "empty" } else { "set" },
-                if gitee_token.is_empty() { "empty" } else { "set" },
-                if gitee_enterprise_token.is_empty() {
-                    "empty"
-                } else {
-                    "set"
-                }
+            let github_token = github_token.to_string();
+            let gitlab_token = gitlab_token.to_string();
+            let gitee_token = gitee_token.to_string();
+            let gitee_enterprise_token = gitee_enterprise_token.to_string();
+            save_settings_with_feedback(
+                app_weak_git_tokens.clone(),
+                SettingsSaveTarget::GitTokens,
+                "code hosting tokens",
+                "Code hosting tokens saved.",
+                move || {
+                    settings::save_git_platform_tokens(
+                        &github_token,
+                        &gitlab_token,
+                        &gitee_token,
+                        &gitee_enterprise_token,
+                    )
+                },
             );
         },
     );
@@ -230,39 +290,26 @@ fn ui() -> Result<MainWindow> {
               gitlab_enterprise,
               gitee_api_base_url,
               gitee_enterprise| {
-            settings::save_git_hosted_repository_configs(
-                github_api_base_url.as_str(),
-                github_enterprise.as_str(),
-                gitlab_api_base_url.as_str(),
-                gitlab_enterprise.as_str(),
-                gitee_api_base_url.as_str(),
-                gitee_enterprise.as_str(),
-            );
-            if let Some(win) = app_weak_git_hosting_config.upgrade() {
-                win.set_settings_git_hosting_config_saved(true);
-                let win_weak = win.as_weak();
-                Timer::single_shot(std::time::Duration::from_secs(2), move || {
-                    if let Some(win) = win_weak.upgrade() {
-                        win.set_settings_git_hosting_config_saved(false);
-                    }
-                });
-            }
-            log::info!(
-                "[Settings] Code hosting API configuration updated: github={}, gitlab={}, gitee={}",
-                if github_api_base_url.is_empty() {
-                    "empty"
-                } else {
-                    "set"
-                },
-                if gitlab_api_base_url.is_empty() {
-                    "empty"
-                } else {
-                    "set"
-                },
-                if gitee_api_base_url.is_empty() {
-                    "empty"
-                } else {
-                    "set"
+            let github_api_base_url = github_api_base_url.to_string();
+            let github_enterprise = github_enterprise.to_string();
+            let gitlab_api_base_url = gitlab_api_base_url.to_string();
+            let gitlab_enterprise = gitlab_enterprise.to_string();
+            let gitee_api_base_url = gitee_api_base_url.to_string();
+            let gitee_enterprise = gitee_enterprise.to_string();
+            save_settings_with_feedback(
+                app_weak_git_hosting_config.clone(),
+                SettingsSaveTarget::GitHosting,
+                "code hosting API configuration",
+                "Code hosting API configuration saved.",
+                move || {
+                    settings::save_git_hosted_repository_configs(
+                        &github_api_base_url,
+                        &github_enterprise,
+                        &gitlab_api_base_url,
+                        &gitlab_enterprise,
+                        &gitee_api_base_url,
+                        &gitee_enterprise,
+                    )
                 },
             );
         },
@@ -271,27 +318,16 @@ fn ui() -> Result<MainWindow> {
     // ========= AI Agent Settings ========= //
     let app_weak_ai_agent_save = app.as_weak();
     AppState::get(&app).on_save_ai_agent_settings(move |provider, base_url, api_key, model| {
-        settings::save_ai_agent_settings(
-            provider.as_str(),
-            base_url.as_str(),
-            api_key.as_str(),
-            model.as_str(),
-        );
-        if let Some(win) = app_weak_ai_agent_save.upgrade() {
-            win.set_settings_ai_agent_saved(true);
-            let win_weak = win.as_weak();
-            Timer::single_shot(std::time::Duration::from_secs(2), move || {
-                if let Some(win) = win_weak.upgrade() {
-                    win.set_settings_ai_agent_saved(false);
-                }
-            });
-        }
-        log::info!(
-            "[Settings] AI Agent settings updated: provider={}, base_url={}, api_key={}, model={}",
-            provider,
-            if base_url.is_empty() { "empty" } else { "set" },
-            if api_key.is_empty() { "empty" } else { "set" },
-            if model.is_empty() { "empty" } else { "set" },
+        let provider = provider.to_string();
+        let base_url = base_url.to_string();
+        let api_key = api_key.to_string();
+        let model = model.to_string();
+        save_settings_with_feedback(
+            app_weak_ai_agent_save.clone(),
+            SettingsSaveTarget::AiAgent,
+            "AI Agent settings",
+            "AI Agent settings saved.",
+            move || settings::save_ai_agent_settings(&provider, &base_url, &api_key, &model),
         );
     });
 
@@ -321,7 +357,7 @@ fn ui() -> Result<MainWindow> {
                         ToastManager::get(&ui).invoke_success(ToastOptions {
                             message: message.into(),
                             duration: 3_500,
-                            position: "top".into(),
+                            position: "bottom".into(),
                             icon: "".into(),
                             overlay: false,
                             close_on_click: true,
@@ -330,23 +366,16 @@ fn ui() -> Result<MainWindow> {
                         });
                     }
                     Err(error) => {
-                        // HTTP failures already use the centralized Toast feedback configured
-                        // by the shared HTTP module. Local validation failures need a UI message.
-                        if matches!(
-                            error.kind,
-                            http::HttpErrorKind::Request | http::HttpErrorKind::Build
-                        ) {
-                            ToastManager::get(&ui).invoke_error(ToastOptions {
-                                message: error.message.into(),
-                                duration: 3_500,
-                                position: "top".into(),
-                                icon: "".into(),
-                                overlay: false,
-                                close_on_click: true,
-                                loading_type: "".into(),
-                                width: "auto".into(),
-                            });
-                        }
+                        ToastManager::get(&ui).invoke_error(ToastOptions {
+                            message: error.user_message().into(),
+                            duration: 3_500,
+                            position: "bottom".into(),
+                            icon: "".into(),
+                            overlay: false,
+                            close_on_click: true,
+                            loading_type: "".into(),
+                            width: "auto".into(),
+                        });
                     }
                 }
             });
@@ -426,6 +455,36 @@ fn ui() -> Result<MainWindow> {
 
             // Save to config file
             settings::save_theme_mode(mode);
+
+            // The Linux detector talks to the XDG Desktop Portal over D-Bus.
+            // Resolve Auto away from the Slint event loop so a slow or missing
+            // portal cannot stall the UI.
+            #[cfg(target_os = "linux")]
+            if mode == 2 {
+                let win_weak = win.as_weak();
+                if let Err(error) = std::thread::Builder::new()
+                    .name("system-theme-detect".to_string())
+                    .spawn(move || {
+                        let is_dark = get_effective_dark_mode(2);
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(win) = win_weak.upgrade() else {
+                                return;
+                            };
+                            let app_state = AppState::get(&win);
+                            if app_state.get_theme_mode() != 2 {
+                                return;
+                            }
+                            app_state.set_effective_dark_mode(is_dark);
+                            set_title_bar_color(&win, is_dark);
+                            set_terminal_dark_mode(&win, is_dark);
+                            log::info!("[Theme] Changed to mode: 2 (effective dark: {is_dark})");
+                        });
+                    })
+                {
+                    log::warn!("[Theme] Failed to start Linux theme detector: {error}");
+                }
+                return;
+            }
 
             // Get effective dark mode (resolves Auto to actual light/dark)
             let is_dark = get_effective_dark_mode(mode);

@@ -25,12 +25,12 @@ Values are stored in the local platform `settings.toml` under `[ai.agent]`, incl
 - `src/ai/agent.rs` owns the AI Agent provider connection and appends `/models` to the configured provider URL (which may already include `/v1`).
 - The existing RAG Chat endpoint and `src/chat/chat.rs` are unchanged. A future AI Agent feature must use this configuration explicitly rather than repurposing RAG Chat.
 - The Settings-page test uses `/models` through the same shared HTTP module. It verifies URL reachability and credentials without creating a billable completion. A provider may not list every model; this is reported as a non-fatal result.
-- The user-triggered connection test uses centralized HTTP Toast feedback for request failures and a success Toast on completion.
+- The user-triggered connection test owns one bottom Toast for every terminal result. Request feedback stays silent in the shared HTTP layer so failures are not duplicated.
 
 - `src/ai/agent.rs` 负责 AI Agent Provider 的连接，在配置的服务地址后追加 `/models`（地址可自行包含 `/v1`）。
 - 既有 RAG Chat endpoint 和 `src/chat/chat.rs` 保持不变；未来 AI Agent 功能必须显式使用本配置，不能复用或替换 RAG Chat。
 - 设置页测试通过同一 HTTP 模块调用 `/models`，验证地址可达和凭据有效，不产生生成费用。Provider 不列出全部模型时只作提示，不视为连接失败。
-- Chat 的失败仍显示为内联 assistant 消息；用户主动测试时，HTTP 失败使用统一 Toast，成功也显示 Toast。
+- Chat 的失败仍显示为内联 assistant 消息；用户主动测试时由 AI Agent 功能层对成功或失败统一显示一个底部 Toast，共享 HTTP 层保持静默以避免重复提示。
 
 ## Invariants / 不变量
 
@@ -47,6 +47,6 @@ Values are stored in the local platform `settings.toml` under `[ai.agent]`, incl
 ## Regression checklist / 回归检查
 
 - Save a DeepSeek preset, restart the app, and verify all three fields are restored (the key remains masked).
-- Test a valid provider/key and confirm a success Toast; test invalid credentials and confirm centralized error feedback.
+- Test a valid provider/key and confirm a bottom success Toast; test invalid credentials and confirm one bottom error Toast.
 - Verify a RAG Chat message still reaches the original RAG endpoint after AI Agent settings are saved.
 - Verify no logs contain the API key and no new direct reqwest client exists outside `src/http/mod.rs`.

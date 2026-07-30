@@ -1,6 +1,7 @@
 mod bindings;
 pub mod branch;
 pub mod cd;
+pub(crate) mod jobs;
 mod pr_list;
 mod pr_review;
 pub mod state;

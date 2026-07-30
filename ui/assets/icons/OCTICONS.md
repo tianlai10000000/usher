@@ -42,6 +42,13 @@ GitHub PR-list filter triggers.
 `octicon-alert-16.svg` is the upstream warning mark used by GitHub-style
 embedded loading errors.
 `octicon-info-16.svg` is the upstream info mark used by Tag status banners.
+`octicon-check-circle-16.svg` and `octicon-stop-16.svg` are the upstream
+success and critical Banner marks used by the shared Notify component.
+`octicon-check-circle-fill-16.svg` is the upstream filled success mark used by
+GitHub Actions step rows in both their expanded and collapsed states.
+`octicon-x-circle-fill-16.svg` is the matching filled failure mark so success
+and failure share the same 16 px circle diameter (not a 20 px painted disc
+behind a plain X).
 `octicon-terminal-16.svg`, `octicon-pencil-16.svg`, `octicon-trash-16.svg`,
 `octicon-sync-16.svg`, `octicon-plus-16.svg`, and `octicon-repo-16.svg` are the
 unchanged upstream controls used by the Project list and its actions.

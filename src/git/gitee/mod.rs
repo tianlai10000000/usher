@@ -11,13 +11,13 @@ use crate::http::{self, RequestOptions};
 
 use super::{
     GiteeApiProfile, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
-    PullRequestDiffDetail, PullRequestDiffFile, PullRequestItem, PullRequestMergeMethod,
-    PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestRevertResult,
-    PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
-    configured_api_base_url, configured_enterprise, configured_gitee_token,
-    conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
-    finalize_conversation_timeline, gitee_api_profile, is_redundant_commit_system_note,
-    is_redundant_merge_system_note, percent_encode_path,
+    PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters, PullRequestItem,
+    PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
+    PullRequestRevertResult, PullRequestReviewAction, PullRequestState, RepoLocator, RepoType,
+    commit_count_from_detail, configured_api_base_url, configured_enterprise,
+    configured_gitee_token, conversation_commit_batch_items, conversation_count_from_detail,
+    conversation_merged_item, finalize_conversation_timeline, gitee_api_profile,
+    is_redundant_commit_system_note, is_redundant_merge_system_note, percent_encode_path,
 };
 
 mod conversation;
@@ -115,6 +115,7 @@ pub(super) async fn get_pull_requests(
     locator: &RepoLocator,
     repo_project_id: &str,
     state: Option<PullRequestState>,
+    filters: &PullRequestFilters,
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
@@ -130,7 +131,7 @@ pub(super) async fn get_pull_requests(
             page.max(1),
             per_page.max(1),
         );
-        return get_enterprise_pull_requests(repo_project_id, state, page, per_page).await;
+        return get_enterprise_pull_requests(repo_project_id, state, filters, page, per_page).await;
     }
     log::debug!(
         "[CodeReview][Gitee] Load merge requests: source=public remote_host={} api_base_configured={} state={} page={} per_page={}",
@@ -142,12 +143,13 @@ pub(super) async fn get_pull_requests(
         page.max(1),
         per_page.max(1),
     );
-    get_public_pull_requests(locator, state, page, per_page).await
+    get_public_pull_requests(locator, state, filters, page, per_page).await
 }
 
 async fn get_enterprise_pull_requests(
     repo_project_id: &str,
     state: Option<PullRequestState>,
+    filters: &PullRequestFilters,
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
@@ -163,12 +165,17 @@ async fn get_enterprise_pull_requests(
             percent_encode_path(repo_project_id).as_str(),
         );
     let per_page = per_page.max(1);
+    let (order_by, sort) = gitee_enterprise_list_sort(filters.sort.as_str());
+    let per_page_query = per_page.to_string();
+    let page_query = page.max(1).to_string();
     let mut request = http::get(endpoint)
         .header("OAUTH", "enabled")
         .header(ACCEPT, "application/json")
         .query(&[
-            ("per_page", &per_page.to_string()),
-            ("page", &page.max(1).to_string()),
+            ("per_page", per_page_query.as_str()),
+            ("page", page_query.as_str()),
+            ("order_by", order_by),
+            ("sort", sort),
         ]);
     if let Some(enterprise) = configured_enterprise(RepoType::Gitee) {
         request = request.header("enterprise", enterprise);
@@ -1427,6 +1434,7 @@ fn short_sha(sha: &str) -> &str {
 async fn get_public_pull_requests(
     locator: &RepoLocator,
     state: Option<PullRequestState>,
+    filters: &PullRequestFilters,
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
@@ -1442,11 +1450,16 @@ async fn get_public_pull_requests(
             "{repository}",
             percent_encode_path(locator.repo.as_str()).as_str(),
         );
+    let (sort, direction) = gitee_public_list_sort(filters.sort.as_str());
+    let per_page_query = per_page.to_string();
+    let page_query = page.max(1).to_string();
     let mut request = http::get(endpoint)
         .header(ACCEPT, "application/json")
         .query(&[
-            ("per_page", &per_page.to_string()),
-            ("page", &page.max(1).to_string()),
+            ("per_page", per_page_query.as_str()),
+            ("page", page_query.as_str()),
+            ("sort", sort),
+            ("direction", direction),
         ]);
     if let Some(state) = state {
         request = request.query(&[("state", state.gitee_public_query())]);
@@ -1455,6 +1468,24 @@ async fn get_public_pull_requests(
         request = request.header("Authorization", format!("token {token}"));
     }
     decode_pull_request_page(request, page, per_page).await
+}
+
+fn gitee_enterprise_list_sort(value: &str) -> (&'static str, &'static str) {
+    match value {
+        "oldest" => ("created_at", "asc"),
+        "updated-desc" => ("updated_at", "desc"),
+        "updated-asc" => ("updated_at", "asc"),
+        _ => ("created_at", "desc"),
+    }
+}
+
+fn gitee_public_list_sort(value: &str) -> (&'static str, &'static str) {
+    match value {
+        "oldest" => ("created", "asc"),
+        "updated-desc" => ("updated", "desc"),
+        "updated-asc" => ("updated", "asc"),
+        _ => ("created", "desc"),
+    }
 }
 
 async fn decode_pull_request_page(
@@ -1725,9 +1756,9 @@ mod tests {
         decode_pull_request_diff, enterprise_commit_probe_total, enterprise_commit_refs_can_revert,
         enterprise_compare_diff_payload, enterprise_data_object, enterprise_note_payload,
         enterprise_review_payload, expand_enterprise_conversation_notes,
-        gitee_enterprise_merge_readiness, gitee_public_merge_readiness,
-        normalize_enterprise_commit_order, pull_request_values, select_enterprise_project_id,
-        trusted_enterprise_commit_count,
+        gitee_enterprise_list_sort, gitee_enterprise_merge_readiness, gitee_public_list_sort,
+        gitee_public_merge_readiness, normalize_enterprise_commit_order, pull_request_values,
+        select_enterprise_project_id, trusted_enterprise_commit_count,
     };
     use crate::codereview::api::gitee as endpoints;
     use crate::git::{PullRequestReadinessKind, parse_repo_locator};
@@ -1745,6 +1776,24 @@ mod tests {
             select_enterprise_project_id(&payload, &locator).unwrap(),
             "42"
         );
+    }
+
+    #[test]
+    fn maps_every_pr_list_sort_to_each_gitee_api_profile() {
+        assert_eq!(gitee_enterprise_list_sort("newest"), ("created_at", "desc"));
+        assert_eq!(gitee_enterprise_list_sort("oldest"), ("created_at", "asc"));
+        assert_eq!(
+            gitee_enterprise_list_sort("updated-desc"),
+            ("updated_at", "desc")
+        );
+        assert_eq!(
+            gitee_enterprise_list_sort("updated-asc"),
+            ("updated_at", "asc")
+        );
+        assert_eq!(gitee_public_list_sort("newest"), ("created", "desc"));
+        assert_eq!(gitee_public_list_sort("oldest"), ("created", "asc"));
+        assert_eq!(gitee_public_list_sort("updated-desc"), ("updated", "desc"));
+        assert_eq!(gitee_public_list_sort("updated-asc"), ("updated", "asc"));
     }
 
     #[test]

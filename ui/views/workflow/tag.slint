@@ -2,50 +2,56 @@ import { MaterialText } from "@material";
 import { AppState } from "../../state/app_state.slint";
 import { TagAddPanel } from "./tag_add.slint";
 import { TagRemovePanel } from "./tag_remove.slint";
-import { StepItem } from "../../components/workflow/steps.slint";
+import { JobStepItem } from "../../components/jobs/job.slint";
 import {
     TagSegmentedControl,
     TagSegmentItem,
     TagSegmentDivider,
 } from "../../components/workflow/tag_controls.slint";
 
-// GitHub UnderlineNav-style tab: hover wash + coral underline on the shared
-// bottom border (same treatment as PR Conversation/Commits/Files tabs).
+// GitHub Primer UnderlineNav item. Durable contract:
+// docs/specs/ui-design.md “UnderlineNav tabs”.
 component TagTabChip inherits Rectangle {
     in property <string> label;
     in property <bool> selected: false;
     callback clicked();
 
-    width: max(120px, label-measure.preferred-width + 32px);
-    height: 100%;
+    width: max(48px, label-measure.preferred-width + 16px);
+    height: 32px;
+    border-radius: 6px;
+    // Primer `--bgColor-neutral-muted` hover wash on the rounded control.
     background: tab-touch.has-hover
-        ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
+        ? (AppState.effective-dark-mode ? #656c7633 : #eaedf0)
         : transparent;
 
     label-measure := Text {
-        width: 0px;
-        height: 0px;
-        opacity: 0;
+        visible: false;
         text: root.label;
         font-size: 14px;
         font-weight: root.selected ? 600 : 400;
+        wrap: no-wrap;
     }
 
     MaterialText {
+        width: parent.width;
+        height: parent.height;
         text: root.label;
         font_size: 14px;
         font_weight: root.selected ? 600 : 400;
         color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
+        horizontal_alignment: center;
+        vertical_alignment: center;
     }
 
-    Rectangle {
+    // Sit on the shared 1px nav border (8px gap under the 32px control in a
+    // 48px row → underline at control.bottom + 6px).
+    if root.selected: Rectangle {
         x: 0px;
-        y: parent.height - 2px;
+        y: parent.height + 6px;
         width: parent.width;
         height: 2px;
-        background: root.selected ? #fd8c73 : transparent;
+        border-radius: 1px;
+        background: AppState.effective-dark-mode ? #f78166 : #fd8c73;
     }
 
     tab-touch := TouchArea {
@@ -55,6 +61,7 @@ component TagTabChip inherits Rectangle {
 }
 
 export component TagFlow {
+    in property <bool> active: false;
     in property <string> mode: "local";
     in property <string> version-mode: "patch";
     in property <string> current-version: "v0.0.0";
@@ -63,9 +70,12 @@ export component TagFlow {
     in property <bool> add-initializing: false;
     in property <bool> remove-initializing: false;
     in property <bool> running: false;
+    in property <string> job-status: "queued";
+    in property <string> job-conclusion: "";
+    in property <string> job-total-duration: "";
     in property <bool> loading-animated: true;
     in property <string> result: "Ready to create a tag.";
-    in property <[StepItem]> steps: [];
+    in property <[JobStepItem]> steps: [];
     callback change-mode(string);
     callback select-version-mode(string);
     callback run(string, string);
@@ -74,15 +84,11 @@ export component TagFlow {
     callback open-remove-tab();
     callback stop();
 
-    private property <int> selected-tab: 0; // 0: Add, 1: Remove
+    in-out property <int> selected-tab: 0; // 0: Add, 1: Remove
     private property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
     private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
     private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
     width: 100%;
-    init => {
-        root.open-add-tab();
-    }
-
     content := VerticalLayout {
         width: root.width;
         spacing: 0px;
@@ -135,8 +141,9 @@ export component TagFlow {
             width: parent.width;
             height: 48px;
             background: root.canvas-default;
+            clip: false;
 
-            // Shared nav border first; selected coral underline covers it.
+            // Shared nav border; selected coral underline covers it.
             Rectangle {
                 y: parent.height - 1px;
                 width: parent.width;
@@ -144,10 +151,14 @@ export component TagFlow {
                 background: root.border-default;
             }
 
+            // Primer: 8px top inset + 32px items + 8px gap above the baseline,
+            // condensed gap between items.
             HorizontalLayout {
+                x: 0px;
+                y: 8px;
                 width: parent.width;
-                height: parent.height;
-                spacing: 0px;
+                height: 32px;
+                spacing: 8px;
                 alignment: start;
                 cross-axis-alignment: center;
 
@@ -184,10 +195,14 @@ export component TagFlow {
             TagAddPanel {
                 width: parent.width;
                 initializing: root.add-initializing;
+                scope-mode: root.mode;
                 version-mode: root.version-mode;
                 current-version: root.current-version;
                 next-version <=> root.next-version;
                 running: root.running;
+                job-status: root.job-status;
+                job-conclusion: root.job-conclusion;
+                job-total-duration: root.job-total-duration;
                 loading-animated: root.loading-animated;
                 result: root.result;
                 steps: root.steps;
@@ -214,6 +229,9 @@ export component TagFlow {
                 tag-to-remove <=> root.remove-target;
                 initializing: root.remove-initializing;
                 running: root.running;
+                job-status: root.job-status;
+                job-conclusion: root.job-conclusion;
+                job-total-duration: root.job-total-duration;
                 loading-animated: root.loading-animated;
                 result: root.result;
                 steps: root.steps;

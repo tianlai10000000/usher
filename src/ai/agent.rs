@@ -7,7 +7,7 @@
 use reqwest::{Method, Url};
 use serde::Deserialize;
 
-use crate::http::{self, ErrorFeedback, HttpError, HttpErrorKind, RequestOptions};
+use crate::http::{self, HttpError, HttpErrorKind, RequestOptions};
 use crate::settings::AiAgentSettings;
 
 #[derive(Debug, Deserialize)]
@@ -76,7 +76,8 @@ pub(crate) async fn test_connection(
     let url = endpoint_url(&settings.base_url, "models")?;
     let response = http::send_json::<ModelsResponse>(
         http::get(url).bearer_auth(settings.api_key.trim()),
-        RequestOptions::new("Test AI Agent connection").feedback(ErrorFeedback::Toast),
+        // The Settings action owns one bottom Toast for every terminal result.
+        RequestOptions::new("Test AI Agent connection"),
     )
     .await?;
     Ok(ConnectionTestResult {

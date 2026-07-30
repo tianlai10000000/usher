@@ -1,0 +1,440 @@
+import { AppState } from "../../state/app_state.slint";
+
+// Public Job input/snapshot item. Callers provide the immutable name/command
+// pair; their workflow controller fills the GitHub-compatible runtime fields.
+export struct JobStepItem {
+    name: string,
+    command: string,
+    status: string,
+    conclusion: string,
+    detail: string,
+    // Joined raw log (expandable check / diagnostics). Display uses log-lines.
+    log: string,
+    // One entry per rendered log line so Slint can use a fixed GitHub-like
+    // row height (Text has no line-height). Built on the UI thread only.
+    log-lines: [string],
+    duration: string,
+    default-expanded: bool,
+}
+
+// One GitHub Actions log source line. Long content wraps onto continuation
+// lines while the original source line number remains on the first visual row.
+component LogLineRow inherits Rectangle {
+    in property <string> line;
+    in property <int> line-number;
+    in property <color> foreground;
+    in property <color> muted-foreground;
+    private property <length> text-width: max(1px, root.width - 80px);
+    private property <color> hover-background: AppState.effective-dark-mode ? #21262d : #eaeef2;
+    // GitHub Actions hover wash has clearer vertical padding than a bare
+    // 20 px glyph box; 28 px min + measured centering matches that density.
+    private property <length> min-line-height: 28px;
+    private property <length> pad-y: 7px;
+    private property <length> content-height: max(1px, line-measure.preferred-height);
+    private property <length> single-line-height: max(1px, single-line-measure.preferred-height);
+    private property <bool> wraps: root.content-height > root.single-line-height + 1px;
+    // Prefer measured-box centering over Text vertical-alignment:center —
+    // font ascent/descent makes glyphs look optically high in the wash.
+    private property <length> content-y: root.wraps
+        ? root.pad-y
+        : (root.height - root.content-height) / 2;
+    private property <length> number-y: root.wraps
+        ? root.pad-y
+        : (root.height - root.single-line-height) / 2;
+
+    width: 100%;
+    height: max(root.min-line-height, root.content-height + root.pad-y * 2);
+    background: row-touch.has-hover ? root.hover-background : transparent;
+
+    single-line-measure := Text {
+        visible: false;
+        text: "Ag";
+        wrap: no-wrap;
+        font-size: 12px;
+        font-family: "monospace";
+    }
+
+    line-measure := Text {
+        visible: false;
+        width: root.text-width;
+        text: root.line;
+        wrap: word-wrap;
+        font-size: 12px;
+        font-family: "monospace";
+    }
+
+    Text {
+        x: 16px;
+        y: root.number-y;
+        width: 32px;
+        height: root.single-line-height;
+        text: root.line-number;
+        wrap: no-wrap;
+        horizontal-alignment: right;
+        vertical-alignment: top;
+        color: root.muted-foreground;
+        font-size: 12px;
+        font-family: "monospace";
+    }
+
+    Text {
+        x: 64px;
+        y: root.content-y;
+        width: root.text-width;
+        height: root.content-height;
+        text: root.line;
+        wrap: word-wrap;
+        vertical-alignment: top;
+        color: root.foreground;
+        font-size: 12px;
+        font-family: "monospace";
+    }
+
+    row-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+    }
+}
+
+// Reproduces the GitHub Actions job-log surface shown in
+// https://docs.github.com/assets/cb-95207/images/help/repository/actions-quickstart-logs.png.
+// Rows use its compact 40 px disclosure-list geometry and the matching Primer
+// canvas tokens for the active application theme.
+component JobStepRow inherits Rectangle {
+    in property <JobStepItem> step;
+    in property <bool> expanded: false;
+    in property <bool> animations-enabled: true;
+    private property <bool> pulse-on: false;
+    private property <bool> expandable: root.step.log != "";
+    private property <bool> queued: root.step.status == "queued";
+    private property <bool> running: root.step.status == "in_progress";
+    private property <bool> succeeded:
+        root.step.status == "completed" && root.step.conclusion == "success";
+    private property <bool> failed:
+        root.step.status == "completed" && root.step.conclusion == "failure";
+    private property <bool> cancelled:
+        root.step.status == "completed" && root.step.conclusion == "cancelled";
+    private property <color> log-canvas: AppState.effective-dark-mode ? #0d1117 : #f6f8fa;
+    // Expanded header is the stronger muted wash; collapsed hover is lighter.
+    // GitHub Actions: idle rows are bare canvas; hover then expanded fill.
+    private property <color> step-header-expanded: AppState.effective-dark-mode ? #21262d : #eaeef2;
+    private property <color> step-header-hover: AppState.effective-dark-mode ? #161b22 : #f3f4f6;
+    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    callback toggle();
+
+    pulse-timer := Timer {
+        interval: 320ms;
+        running: root.running && root.animations-enabled;
+        triggered => {
+            root.pulse-on = !root.pulse-on;
+        }
+    }
+
+    width: 100%;
+    height: step-layout.preferred-height;
+    vertical-stretch: 0;
+    background: root.log-canvas;
+
+    step-layout := VerticalLayout {
+        width: parent.width;
+        spacing: 0px;
+        vertical-stretch: 0;
+
+        header := Rectangle {
+            width: parent.width;
+            height: 40px;
+            vertical-stretch: 0;
+            background: root.log-canvas;
+
+            Rectangle {
+                // Idle collapsed rows stay on the bare log canvas. Hover uses a
+                // lighter wash than the expanded header (GitHub Actions job logs).
+                x: 8px;
+                y: 2px;
+                width: parent.width - 16px;
+                height: parent.height - 4px;
+                border-radius: 6px;
+                background: root.expanded
+                    ? root.step-header-expanded
+                    : (row-touch.has-hover && root.expandable
+                        ? root.step-header-hover
+                        : transparent);
+            }
+
+            // Keep the disclosure column reserved for every row so all titles
+            // align exactly as they do in the GitHub Actions list.
+            if root.expandable: Image {
+                x: 16px;
+                y: 12px;
+                width: 16px;
+                height: 16px;
+                source: root.expanded
+                    ? @image-url("../../assets/icons/octicon-chevron-down-16.svg")
+                    : @image-url("../../assets/icons/octicon-chevron-right-16.svg");
+                image-fit: contain;
+                colorize: root.fg-muted;
+            }
+
+            status-circle := Rectangle {
+                x: 44px;
+                y: 10px;
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                border-width: root.queued ? 1px : 0px;
+                border-color: root.fg-muted;
+                // Success/failure use filled 16px circle Octicons; keep this
+                // slot transparent so both marks share the same visual diameter.
+                background: transparent;
+
+                if root.succeeded: Image {
+                    x: 2px;
+                    y: 2px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/octicon-check-circle-fill-16.svg");
+                    image-fit: contain;
+                    // GitHub Actions: expanded success marks use default
+                    // foreground; collapsed rows stay muted.
+                    colorize: root.expanded ? root.fg-default : root.fg-muted;
+                }
+
+                if root.failed: Image {
+                    x: 2px;
+                    y: 2px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/octicon-x-circle-fill-16.svg");
+                    image-fit: contain;
+                    colorize: AppState.effective-dark-mode ? #f85149 : #cf222e;
+                }
+
+                if root.cancelled: Image {
+                    x: 2px;
+                    y: 2px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/octicon-stop-16.svg");
+                    image-fit: contain;
+                    colorize: AppState.effective-dark-mode ? #d29922 : #9a6700;
+                }
+
+                if root.running: Image {
+                    x: 2px;
+                    y: 2px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/octicon-sync-16.svg");
+                    image-fit: contain;
+                    colorize: AppState.effective-dark-mode ? #58a6ff : #0969da;
+                    opacity: root.animations-enabled ? (root.pulse-on ? 1 : 0.62) : 1;
+                }
+
+                if root.queued: Rectangle {
+                    x: 7px;
+                    y: 7px;
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: root.fg-muted;
+                }
+            }
+
+            Text {
+                x: 80px;
+                y: 0px;
+                width: parent.width - 160px;
+                height: parent.height;
+                text: root.step.name;
+                font-size: 14px;
+                font-weight: 400;
+                color: root.fg-default;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: parent.width - 72px;
+                y: 0px;
+                width: 56px;
+                height: parent.height;
+                // Pending steps have not been measured yet. GitHub leaves this
+                // cell empty instead of presenting a dash as a result.
+                text: root.queued ? "" : root.step.duration;
+                font-size: 12px;
+                font-weight: 400;
+                color: root.fg-muted;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            row-touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                enabled: root.expandable;
+                mouse-cursor: pointer;
+                clicked => { root.toggle(); }
+            }
+        }
+
+        if root.expanded: Rectangle {
+            width: parent.width;
+            height: max(48px, log-rows.preferred-height + 24px);
+            vertical-stretch: 0;
+            background: root.log-canvas;
+
+            // Each source line owns a variable-height row. Wrapped continuation
+            // lines stay indented under the message and do not repeat the
+            // source line number, matching GitHub Actions.
+            log-rows := VerticalLayout {
+                x: 0px;
+                y: 12px;
+                width: parent.width;
+                spacing: 0px;
+                vertical-stretch: 0;
+
+                for line[index] in root.step.log-lines: LogLineRow {
+                    width: parent.width;
+                    line: line;
+                    line-number: index + 1;
+                    foreground: root.fg-default;
+                    muted-foreground: root.fg-muted;
+                }
+            }
+        }
+    }
+}
+
+export component Job inherits Rectangle {
+    in property <string> title: "Workflow steps";
+    in property <string> summary: "";
+    in property <string> empty-text: "No workflow steps yet.";
+    in property <[JobStepItem]> steps: [];
+    // Controlled public state: the workflow owner binds snapshots into these
+    // properties and may read them back without inspecting individual rows.
+    in-out property <string> execution-status: "queued";
+    in-out property <string> conclusion: "";
+    in-out property <string> total-duration: "";
+    out property <bool> is-running: root.execution-status == "in_progress";
+    out property <bool> is-complete: root.execution-status == "completed";
+    in property <bool> animations-enabled: true;
+    // GitHub disclosures are independent: several steps may remain open.
+    // The bit mask stores user overrides to each step's backend default.
+    in-out property <int> expanded-step-overrides: 0;
+    callback step-toggled(int);
+    private property <color> log-canvas: AppState.effective-dark-mode ? #0d1117 : #f6f8fa;
+    private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    pure function step-bit(index: int) -> int {
+        return index == 0 ? 1 :
+            index == 1 ? 2 :
+            index == 2 ? 4 :
+            index == 3 ? 8 :
+            index == 4 ? 16 :
+            index == 5 ? 32 :
+            index == 6 ? 64 :
+            index == 7 ? 128 :
+            index == 8 ? 256 :
+            index == 9 ? 512 :
+            index == 10 ? 1024 :
+            index == 11 ? 2048 :
+            4096;
+    }
+    pure function is-overridden(index: int) -> bool {
+        let bit = root.step-bit(index);
+        return Math.mod(Math.floor(root.expanded-step-overrides / bit), 2) == 1;
+    }
+    pure function is-expanded(index: int, default-expanded: bool) -> bool {
+        return default-expanded != root.is-overridden(index);
+    }
+
+    width: 100%;
+    height: max(72px, steps-content.preferred-height);
+    vertical-stretch: 0;
+    background: root.log-canvas;
+    clip: true;
+
+    steps-content := VerticalLayout {
+        width: root.width;
+        spacing: 0px;
+        vertical-stretch: 0;
+
+        Rectangle {
+            width: parent.width;
+            height: 72px;
+            vertical-stretch: 0;
+            background: root.log-canvas;
+
+            Text {
+                x: 16px;
+                y: 12px;
+                width: parent.width - 32px;
+                height: 26px;
+                text: root.title;
+                vertical-alignment: center;
+                font-size: 20px;
+                font-weight: 600;
+                color: root.fg-default;
+                overflow: elide;
+            }
+
+            Text {
+                x: 16px;
+                y: 38px;
+                width: parent.width - 32px;
+                height: 22px;
+                text: root.summary;
+                vertical-alignment: center;
+                font-size: 12px;
+                font-weight: 400;
+                color: root.fg-muted;
+                overflow: elide;
+            }
+        }
+
+        Rectangle {
+            width: parent.width;
+            height: 1px;
+            vertical-stretch: 0;
+            background: root.border-default;
+        }
+
+        // Keep the first step clear of the section divider and the surrounding
+        // workflow card. Expanded-row insets then match all following rows.
+        if root.steps.length > 0: Rectangle {
+            width: parent.width;
+            height: 8px;
+            vertical-stretch: 0;
+            background: root.log-canvas;
+        }
+
+        if root.steps.length == 0: Text {
+            width: parent.width - 32px;
+            x: 16px;
+            height: 40px;
+            vertical-stretch: 0;
+            text: root.empty-text;
+            vertical-alignment: center;
+            color: root.fg-muted;
+            font-size: 12px;
+        }
+
+        for step[index] in root.steps: JobStepRow {
+            width: parent.width;
+            vertical-stretch: 0;
+            step: step;
+            expanded: root.is-expanded(index, step.default-expanded);
+            animations-enabled: root.animations-enabled;
+            toggle => {
+                let bit = root.step-bit(index);
+                root.expanded-step-overrides = root.is-overridden(index)
+                    ? root.expanded-step-overrides - bit
+                    : root.expanded-step-overrides + bit;
+                root.step-toggled(index);
+            }
+        }
+    }
+}

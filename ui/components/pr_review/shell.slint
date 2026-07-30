@@ -814,17 +814,27 @@ export component PrTabButton inherits Rectangle {
     in property <length> tab-width: 160px;
     callback clicked();
 
+    // Primer UnderlineNav item inside a 48px row: 32px rounded hover control,
+    // coral underline on the shared baseline. Spec: docs/specs/ui-design.md
+    // “UnderlineNav tabs”.
     width: root.tab-width;
     height: 48px;
-    background: tab-touch.has-hover ? (AppState.effective-dark-mode ? #21262d : #f6f8fa) : transparent;
+    background: transparent;
     border-width: 0px;
+    clip: false;
 
-    // Keep Usher's underline selection treatment, but use GitHub's 16 px
-    // Octicons and inline icon/label/count geometry. Center the content group
-    // inside the fixed tab width so left/right padding stays balanced.
     private property <length> count-badge-width: max(22px, count-label.preferred-width + 12px);
     private property <length> content-width: 16px + 10px + tab-label.preferred-width + 10px + root.count-badge-width;
     private property <length> content-x: max(0px, (root.width - root.content-width) / 2);
+
+    if tab-touch.has-hover: Rectangle {
+        x: 0px;
+        y: 8px;
+        width: parent.width;
+        height: 32px;
+        border-radius: 6px;
+        background: AppState.effective-dark-mode ? #656c7633 : #eaedf0;
+    }
 
     Image {
         x: root.content-x;
@@ -837,9 +847,9 @@ export component PrTabButton inherits Rectangle {
     }
     tab-label := MaterialText {
         x: root.content-x + 26px;
-        y: 0px;
+        y: 8px;
         width: self.preferred-width;
-        height: parent.height;
+        height: 32px;
         text: root.label;
         font-size: 14px;
         font-weight: root.selected ? 600 : 400;
@@ -864,12 +874,13 @@ export component PrTabButton inherits Rectangle {
             color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
         }
     }
-    Rectangle {
+    if root.selected: Rectangle {
         x: 0px;
         y: parent.height - 2px;
         width: parent.width;
         height: 2px;
-        background: root.selected ? #fd8c73 : transparent;
+        border-radius: 1px;
+        background: AppState.effective-dark-mode ? #f78166 : #fd8c73;
     }
     tab-touch := TouchArea {
         mouse-cursor: pointer;

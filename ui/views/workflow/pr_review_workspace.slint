@@ -2,6 +2,7 @@ import { MaterialPalette, MaterialText, ToolTip } from "@material";
 import { ListView } from "../../../material-1.7.1-fixed/ui/components/list_view.slint";
 import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
 import { AppState } from "../../state/app_state.slint";
+import { GitHubDialog } from "../../components/dialog/github_dialog.slint";
 import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, ConversationAvatar, WorkflowPrCommit, ReviewActionButton, GithubCommentButton, PullRequestStateBadge, BranchLabel, RelativeTimestamp, PullRequestSummaryMetrics, PullRequestSummaryRow, CenteredErrorState, PrTabButton, CommitRangeButton, MergeReadinessBadge, PrReviewBackButton, HeaderActionStrip, ReviewChoice } from "../../components/pr_review/shell.slint";
 import { TreeIndentGuides, CommitMessageToggleButton, FileToolbarButton, CommitSummaryNavButton, FileChangeTypeIcon, SelectableDiffCode, SplitDiffSide, DiffViewPreview, DiffViewChoice, DiffSettingsPopover, FileTreeToggleButton, FileMenuButton, DiffStatSegment, DiffStatBar, FileDiffStat, CodeRenderingIndicator, LargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, DiffFindBar } from "../../components/pr_review/content.slint";
 export component PrReviewWorkspace inherits FocusScope {
@@ -3485,78 +3486,30 @@ export component PrReviewWorkspace inherits FocusScope {
         }
     }
 
-    if root.commit-range-dialog-open: Rectangle {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
-        z: 1000;
-        background: #00000066;
-
-        // Slint rectangles do not capture pointer input. Without this, clicks and
-        // hovers fall through the scrim to header actions and the Files tree.
-        TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: default;
+    commit-dialog-frame := GitHubDialog {
+        dialog-visible: root.commit-range-dialog-open;
+        title: "Select commits to view";
+        dialog-width: 640px;
+        dialog-height: min(720px, root.height - 32px);
+        body-padding: 0px;
+        close-enabled: !root.loading;
+        primary-label: "Save";
+        primary-success: true;
+        primary-enabled: !root.commits-loading && !root.loading;
+        close-requested => { root.commit-range-dialog-open = false; }
+        cancel-clicked => { root.commit-range-dialog-open = false; }
+        primary-clicked => {
+            root.apply-commit-range(root.draft-range-start, root.draft-range-end);
+            root.commit-range-dialog-open = false;
         }
+    }
 
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(640px, parent.width - 48px);
-            height: min(720px, parent.height - 48px);
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: root.github-border-default;
-            background: root.github-bg-default;
-            clip: true;
-
-            MaterialText {
-                x: 24px;
-                y: 14px;
-                width: parent.width - 80px;
-                height: 30px;
-                text: "Select commits to view";
-                font-size: 18px;
-                font-weight: 600;
-                color: root.github-fg-default;
-                vertical-alignment: center;
-            }
-            Rectangle {
-                x: parent.width - 48px;
-                y: 12px;
-                width: 32px;
-                height: 32px;
-                border-radius: 6px;
-                background: commit-range-close-touch.has-hover ? root.github-bg-muted : transparent;
-                Image {
-                    x: 8px;
-                    y: 8px;
-                    width: 16px;
-                    height: 16px;
-                    source: @image-url("../../assets/icons/octicon-x-16.svg");
-                    image-fit: contain;
-                    colorize: root.github-fg-muted;
-                }
-                commit-range-close-touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.commit-range-dialog-open = false; }
-                }
-            }
-            Rectangle {
-                x: 0px;
-                y: 56px;
-                width: parent.width;
-                height: 1px;
-                background: root.github-border-default;
-            }
-
-            commit-range-scroll := ScrollView {
-                x: 0px;
-                y: 57px;
-                width: parent.width;
-                height: parent.height - 123px;
+            if root.commit-range-dialog-open: commit-range-scroll := ScrollView {
+                x: commit-dialog-frame.content-x;
+                y: commit-dialog-frame.content-y;
+                width: commit-dialog-frame.content-width;
+                height: commit-dialog-frame.content-height;
+                z: 3100;
                 horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
                 vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
                 viewport-height: commit-range-content.preferred-height;
@@ -3762,495 +3715,235 @@ export component PrReviewWorkspace inherits FocusScope {
                 }
             }
 
+    review-dialog-frame := GitHubDialog {
+        dialog-visible: root.review-dialog-open;
+        title: "Review changes";
+        dialog-width: 480px;
+        dialog-height: min(500px, root.height - 32px);
+        body-padding: 0px;
+        close-enabled: !root.action-loading;
+        primary-label: root.action-loading ? "Submitting…" : "Submit review";
+        primary-success: true;
+        primary-enabled: !root.action-loading;
+        primary-busy: root.action-loading;
+        close-requested => { root.review-dialog-open = false; }
+        cancel-clicked => { root.review-dialog-open = false; }
+        primary-clicked => { root.submit-review(root.selected-review-action, root.review-body); }
+    }
+
+        if root.review-dialog-open: MaterialText {
+            x: review-dialog-frame.content-x + 16px;
+            y: review-dialog-frame.content-y + 16px;
+            width: review-dialog-frame.content-width - 32px;
+            height: 20px;
+            z: 3100;
+            text: "Review summary";
+            font-size: 12px;
+            font-weight: 600;
+            color: root.github-fg-default;
+        }
+        if root.review-dialog-open: Rectangle {
+            x: review-dialog-frame.content-x + 16px;
+            y: review-dialog-frame.content-y + 42px;
+            width: review-dialog-frame.content-width - 32px;
+            height: 112px;
+            z: 3100;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: review-editor.has-focus ? #0969da : root.github-border-default;
+            background: root.github-bg-default;
+            review-editor := TextInput {
+                x: 10px;
+                y: 8px;
+                width: parent.width - 20px;
+                height: parent.height - 16px;
+                text <=> root.review-body;
+                single-line: false;
+                wrap: word-wrap;
+                color: root.github-fg-default;
+                font-size: 12px;
+                enabled: !root.action-loading;
+            }
+        }
+        if root.review-dialog-open: VerticalLayout {
+            x: review-dialog-frame.content-x + 8px;
+            y: review-dialog-frame.content-y + 164px;
+            width: review-dialog-frame.content-width - 16px;
+            z: 3100;
+            spacing: 0px;
+            ReviewChoice {
+                width: parent.width;
+                title: "Comment";
+                description: "Submit general feedback without explicit approval.";
+                selected: root.selected-review-action == "comment";
+                choice-enabled: root.can-comment && !root.action-loading;
+                chosen => { root.selected-review-action = "comment"; }
+            }
+            ReviewChoice {
+                width: parent.width;
+                title: "Approve";
+                description: "Submit feedback and approve merging these changes.";
+                selected: root.selected-review-action == "approve";
+                choice-enabled: root.can-approve && !root.action-loading;
+                chosen => { root.selected-review-action = "approve"; }
+            }
+            ReviewChoice {
+                width: parent.width;
+                title: "Request changes";
+                description: root.provider == "gitee" && !root.can-request-changes
+                    ? "Gitee public v5 does not provide this review action."
+                    : "Submit feedback that must be addressed before merging.";
+                selected: root.selected-review-action == "request_changes";
+                choice-enabled: root.can-request-changes && !root.action-loading;
+                chosen => { root.selected-review-action = "request_changes"; }
+            }
+        }
+
+    merge-dialog-frame := GitHubDialog {
+        dialog-visible: root.merge-dialog-open;
+        title: "Merge pull request #" + root.pull-request-number;
+        dialog-width: 480px;
+        dialog-height: min(470px, root.height - 32px);
+        body-padding: 0px;
+        close-enabled: !root.action-loading;
+        primary-label: root.action-loading ? "Merging…" : "Confirm merge";
+        primary-success: true;
+        primary-enabled: !root.action-loading && root.can-merge;
+        primary-busy: root.action-loading;
+        close-requested => { root.merge-dialog-open = false; }
+        cancel-clicked => { root.merge-dialog-open = false; }
+        primary-clicked => { root.merge(root.selected-merge-method, root.remove-source-branch); }
+    }
+
+        if root.merge-dialog-open: MaterialText {
+            x: merge-dialog-frame.content-x + 16px;
+            y: merge-dialog-frame.content-y + 14px;
+            width: merge-dialog-frame.content-width - 32px;
+            height: 36px;
+            z: 3100;
+            text: "Choose how the commits from " + root.source-branch + " are added to " + root.target-branch + ".";
+            font-size: 12px;
+            color: root.github-fg-muted;
+            wrap: word-wrap;
+        }
+        if root.merge-dialog-open: VerticalLayout {
+            x: merge-dialog-frame.content-x + 8px;
+            y: merge-dialog-frame.content-y + 56px;
+            width: merge-dialog-frame.content-width - 16px;
+            z: 3100;
+            spacing: 0px;
+            if root.merge-method-merge: ReviewChoice {
+                width: parent.width;
+                title: "Create a merge commit";
+                description: "All commits will be added with a merge commit.";
+                selected: root.selected-merge-method == "merge";
+                choice-enabled: !root.action-loading;
+                chosen => { root.selected-merge-method = "merge"; }
+            }
+            if root.merge-method-squash: ReviewChoice {
+                width: parent.width;
+                title: "Squash and merge";
+                description: "The commits will be combined into one commit.";
+                selected: root.selected-merge-method == "squash";
+                choice-enabled: !root.action-loading;
+                chosen => { root.selected-merge-method = "squash"; }
+            }
+            if root.merge-method-rebase: ReviewChoice {
+                width: parent.width;
+                title: "Rebase and merge";
+                description: "The commits will be rebased onto the base branch.";
+                selected: root.selected-merge-method == "rebase";
+                choice-enabled: !root.action-loading;
+                chosen => { root.selected-merge-method = "rebase"; }
+            }
+            if root.merge-method-fast-forward: ReviewChoice {
+                width: parent.width;
+                title: "Fast-forward and merge";
+                description: "Move the base branch directly to the pull request head.";
+                selected: root.selected-merge-method == "fast_forward";
+                choice-enabled: !root.action-loading;
+                chosen => { root.selected-merge-method = "fast_forward"; }
+            }
+        }
+        if root.merge-dialog-open: Rectangle {
+            x: merge-dialog-frame.content-x + 16px;
+            y: merge-dialog-frame.content-y + merge-dialog-frame.content-height - 42px;
+            width: merge-dialog-frame.content-width - 32px;
+            height: 34px;
+            z: 3100;
+            border-radius: 6px;
+            background: source-branch-touch.has-hover ? root.github-bg-muted : transparent;
             Rectangle {
                 x: 0px;
-                y: parent.height - 66px;
-                width: parent.width;
-                height: 66px;
+                y: 8px;
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
                 border-width: 1px;
-                border-color: root.github-border-default;
-                background: root.github-bg-default;
-                Rectangle {
-                    x: parent.width - 220px;
-                    y: 15px;
-                    width: 92px;
-                    height: 36px;
-                    ReviewActionButton {
-                        width: parent.width;
-                        text: "Cancel";
-                        clicked => { root.commit-range-dialog-open = false; }
-                    }
-                }
-                Rectangle {
-                    x: parent.width - 116px;
-                    y: 15px;
-                    width: 96px;
-                    height: 36px;
-                    ReviewActionButton {
-                        width: parent.width;
-                        text: "Save";
-                        success: true;
-                        button-enabled: !root.commits-loading && !root.loading;
-                        clicked => {
-                            root.apply-commit-range(root.draft-range-start, root.draft-range-end);
-                            root.commit-range-dialog-open = false;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if root.review-dialog-open: Rectangle {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
-        z: 1000;
-        background: #00000066;
-
-        // Slint rectangles do not capture pointer input. Without this, clicks and
-        // hovers fall through the scrim to readiness / review / merge controls.
-        TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: default;
-        }
-
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(520px, parent.width - 48px);
-            height: min(500px, parent.height - 48px);
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: root.github-border-default;
-            background: root.github-bg-default;
-
-            MaterialText {
-                x: 20px;
-                y: 16px;
-                width: parent.width - 64px;
-                height: 28px;
-                text: "Review changes";
-                font_size: 16px;
-                font_weight: 600;
-                color: root.github-fg-default;
-                vertical_alignment: center;
-            }
-            Rectangle {
-                x: parent.width - 44px;
-                y: 12px;
-                width: 32px;
-                height: 32px;
-                border-radius: 6px;
-                background: review-close-touch.has-hover ? root.github-bg-muted : transparent;
-                Image {
-                    x: 8px;
-                    y: 8px;
+                border-color: root.remove-source-branch ? #0969da : root.github-border-default;
+                background: root.remove-source-branch ? #0969da : transparent;
+                if root.remove-source-branch: Image {
                     width: 16px;
                     height: 16px;
-                    source: @image-url("../../assets/icons/close.svg");
-                    colorize: root.github-fg-muted;
-                }
-                review-close-touch := TouchArea {
-                    enabled: !root.action-loading;
-                    mouse-cursor: pointer;
-                    clicked => { root.review-dialog-open = false; }
+                    source: @image-url("../../assets/icons/octicon-check-16.svg");
+                    colorize: #ffffff;
                 }
             }
-            Rectangle { x: 0px; y: 56px; width: parent.width; height: 1px; background: root.github-border-default; }
-
             MaterialText {
-                x: 20px;
-                y: 72px;
-                width: parent.width - 40px;
-                height: 20px;
-                text: "Review summary";
-                font_size: 12px;
-                font_weight: 600;
-                color: root.github-fg-default;
-            }
-            Rectangle {
-                x: 20px;
-                y: 98px;
-                width: parent.width - 40px;
-                height: 112px;
-                border-radius: 6px;
-                border-width: 1px;
-                border-color: review-editor.has-focus ? #0969da : root.github-border-default;
-                background: root.github-bg-default;
-                review-editor := TextInput {
-                    x: 10px;
-                    y: 8px;
-                    width: parent.width - 20px;
-                    height: parent.height - 16px;
-                    text <=> root.review-body;
-                    single-line: false;
-                    wrap: word-wrap;
-                    color: root.github-fg-default;
-                    font-size: 12px;
-                    enabled: !root.action-loading;
-                }
-            }
-
-            VerticalLayout {
-                x: 12px;
-                y: 220px;
-                width: parent.width - 24px;
-                spacing: 0px;
-                ReviewChoice {
-                    width: parent.width;
-                    title: "Comment";
-                    description: "Submit general feedback without explicit approval.";
-                    selected: root.selected-review-action == "comment";
-                    choice-enabled: root.can-comment && !root.action-loading;
-                    chosen => { root.selected-review-action = "comment"; }
-                }
-                ReviewChoice {
-                    width: parent.width;
-                    title: "Approve";
-                    description: "Submit feedback and approve merging these changes.";
-                    selected: root.selected-review-action == "approve";
-                    choice-enabled: root.can-approve && !root.action-loading;
-                    chosen => { root.selected-review-action = "approve"; }
-                }
-                ReviewChoice {
-                    width: parent.width;
-                    title: "Request changes";
-                    description: root.provider == "gitee" && !root.can-request-changes
-                        ? "Gitee public v5 does not provide this review action."
-                        : "Submit feedback that must be addressed before merging.";
-                    selected: root.selected-review-action == "request_changes";
-                    choice-enabled: root.can-request-changes && !root.action-loading;
-                    chosen => { root.selected-review-action = "request_changes"; }
-                }
-            }
-
-            Rectangle { x: 0px; y: parent.height - 62px; width: parent.width; height: 1px; background: root.github-border-default; }
-            Rectangle {
-                x: parent.width - 238px;
-                y: parent.height - 49px;
-                width: 94px;
-                height: 36px;
-                ReviewActionButton {
-                    width: parent.width;
-                    text: "Cancel";
-                    button-enabled: !root.action-loading;
-                    clicked => { root.review-dialog-open = false; }
-                }
-            }
-            Rectangle {
-                x: parent.width - 132px;
-                y: parent.height - 49px;
-                width: 112px;
-                height: 36px;
-                ReviewActionButton {
-                    width: parent.width;
-                    text: root.action-loading ? "Submitting…" : "Submit review";
-                    success: true;
-                    button-enabled: !root.action-loading;
-                    clicked => { root.submit-review(root.selected-review-action, root.review-body); }
-                }
-            }
-        }
-    }
-
-    if root.merge-dialog-open: Rectangle {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
-        z: 1000;
-        background: #00000066;
-
-        // Same scrim hit-target as review/revert: block all underlay interaction.
-        TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: default;
-        }
-
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(500px, parent.width - 48px);
-            height: min(470px, parent.height - 48px);
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: root.github-border-default;
-            background: root.github-bg-default;
-
-            MaterialText {
-                x: 20px;
-                y: 16px;
-                width: parent.width - 64px;
-                height: 28px;
-                text: "Merge pull request #" + root.pull-request-number;
-                font_size: 16px;
-                font_weight: 600;
-                color: root.github-fg-default;
-                vertical_alignment: center;
-            }
-            Rectangle {
-                x: parent.width - 44px;
-                y: 12px;
-                width: 32px;
-                height: 32px;
-                border-radius: 6px;
-                background: merge-close-touch.has-hover ? root.github-bg-muted : transparent;
-                Image {
-                    x: 8px;
-                    y: 8px;
-                    width: 16px;
-                    height: 16px;
-                    source: @image-url("../../assets/icons/close.svg");
-                    colorize: root.github-fg-muted;
-                }
-                merge-close-touch := TouchArea {
-                    enabled: !root.action-loading;
-                    mouse-cursor: pointer;
-                    clicked => { root.merge-dialog-open = false; }
-                }
-            }
-            Rectangle { x: 0px; y: 56px; width: parent.width; height: 1px; background: root.github-border-default; }
-            MaterialText {
-                x: 20px;
-                y: 70px;
-                width: parent.width - 40px;
-                height: 36px;
-                text: "Choose how the commits from " + root.source-branch + " are added to " + root.target-branch + ".";
-                font_size: 12px;
-                color: root.github-fg-muted;
-                wrap: word-wrap;
-            }
-
-            VerticalLayout {
-                x: 12px;
-                y: 112px;
-                width: parent.width - 24px;
-                spacing: 0px;
-                if root.merge-method-merge: ReviewChoice {
-                    width: parent.width;
-                    title: "Create a merge commit";
-                    description: "All commits will be added with a merge commit.";
-                    selected: root.selected-merge-method == "merge";
-                    choice-enabled: !root.action-loading;
-                    chosen => { root.selected-merge-method = "merge"; }
-                }
-                if root.merge-method-squash: ReviewChoice {
-                    width: parent.width;
-                    title: "Squash and merge";
-                    description: "The commits will be combined into one commit.";
-                    selected: root.selected-merge-method == "squash";
-                    choice-enabled: !root.action-loading;
-                    chosen => { root.selected-merge-method = "squash"; }
-                }
-                if root.merge-method-rebase: ReviewChoice {
-                    width: parent.width;
-                    title: "Rebase and merge";
-                    description: "The commits will be rebased onto the base branch.";
-                    selected: root.selected-merge-method == "rebase";
-                    choice-enabled: !root.action-loading;
-                    chosen => { root.selected-merge-method = "rebase"; }
-                }
-                if root.merge-method-fast-forward: ReviewChoice {
-                    width: parent.width;
-                    title: "Fast-forward and merge";
-                    description: "Move the base branch directly to the pull request head.";
-                    selected: root.selected-merge-method == "fast_forward";
-                    choice-enabled: !root.action-loading;
-                    chosen => { root.selected-merge-method = "fast_forward"; }
-                }
-            }
-
-            Rectangle {
-                x: 20px;
-                y: parent.height - 104px;
-                width: parent.width - 40px;
-                height: 34px;
-                background: source-branch-touch.has-hover ? root.github-bg-muted : transparent;
-                Rectangle {
-                    x: 0px;
-                    y: 8px;
-                    width: 16px;
-                    height: 16px;
-                    border-radius: 3px;
-                    border-width: 1px;
-                    border-color: root.remove-source-branch ? #0969da : root.github-border-default;
-                    background: root.remove-source-branch ? #0969da : transparent;
-                    if root.remove-source-branch: MaterialText {
-                        width: parent.width;
-                        height: parent.height;
-                        text: "✓";
-                        font_size: 11px;
-                        font_weight: 700;
-                        color: #ffffff;
-                        horizontal_alignment: center;
-                        vertical_alignment: center;
-                    }
-                }
-                MaterialText {
-                    x: 26px;
-                    width: parent.width - 26px;
-                    height: parent.height;
-                    text: "Delete the source branch after merging";
-                    font_size: 12px;
-                    color: root.github-fg-default;
-                    vertical_alignment: center;
-                }
-                source-branch-touch := TouchArea {
-                    enabled: !root.action-loading;
-                    mouse-cursor: pointer;
-                    clicked => { root.remove-source-branch = !root.remove-source-branch; }
-                }
-            }
-
-            Rectangle { x: 0px; y: parent.height - 62px; width: parent.width; height: 1px; background: root.github-border-default; }
-            Rectangle {
-                x: parent.width - 250px;
-                y: parent.height - 49px;
-                width: 94px;
-                height: 36px;
-                ReviewActionButton {
-                    width: parent.width;
-                    text: "Cancel";
-                    button-enabled: !root.action-loading;
-                    clicked => { root.merge-dialog-open = false; }
-                }
-            }
-            Rectangle {
-                x: parent.width - 144px;
-                y: parent.height - 49px;
-                width: 124px;
-                height: 36px;
-                ReviewActionButton {
-                    width: parent.width;
-                    text: root.action-loading ? "Merging…" : "Confirm merge";
-                    success: true;
-                    button-enabled: !root.action-loading && root.can-merge;
-                    clicked => { root.merge(root.selected-merge-method, root.remove-source-branch); }
-                }
-            }
-        }
-    }
-
-    if root.revert-dialog-open: Rectangle {
-        x: 0px;
-        y: 0px;
-        width: root.width;
-        height: root.height;
-        z: 1000;
-        background: #00000066;
-
-        // Same scrim hit-target as review/merge: block all underlay interaction.
-        TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: default;
-        }
-
-        Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: min(500px, parent.width - 48px);
-            height: 300px;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: root.github-border-default;
-            background: root.github-bg-default;
-
-            MaterialText {
-                x: 20px;
-                y: 16px;
-                width: parent.width - 64px;
-                height: 28px;
-                text: "Revert pull request #" + root.pull-request-number;
-                font-size: 16px;
-                font-weight: 600;
+                x: 26px;
+                width: parent.width - 26px;
+                height: parent.height;
+                text: "Delete the source branch after merging";
+                font-size: 12px;
                 color: root.github-fg-default;
                 vertical-alignment: center;
             }
-            Rectangle {
-                x: parent.width - 44px;
-                y: 12px;
-                width: 32px;
-                height: 32px;
-                border-radius: 6px;
-                background: revert-close-touch.has-hover ? root.github-bg-muted : transparent;
-                Image {
-                    x: 8px;
-                    y: 8px;
-                    width: 16px;
-                    height: 16px;
-                    source: @image-url("../../assets/icons/close.svg");
-                    colorize: root.github-fg-muted;
-                }
-                revert-close-touch := TouchArea {
-                    enabled: !root.action-loading;
-                    mouse-cursor: root.action-loading ? default : pointer;
-                    clicked => { root.revert-dialog-open = false; }
-                }
-            }
-            Rectangle {
-                x: 0px;
-                y: 56px;
-                width: parent.width;
-                height: 1px;
-                background: root.github-border-default;
-            }
-            MaterialText {
-                x: 20px;
-                y: 78px;
-                width: parent.width - 40px;
-                height: 28px;
-                text: "Reverse the changes introduced by this merged pull request?";
-                font-size: 14px;
-                font-weight: 600;
-                color: root.github-fg-default;
-                wrap: word-wrap;
-                vertical-alignment: top;
-            }
-            MaterialText {
-                x: 20px;
-                y: 122px;
-                width: parent.width - 40px;
-                height: 92px;
-                text: root.revert-confirmation;
-                font-size: 12px;
-                color: root.github-fg-muted;
-                wrap: word-wrap;
-                vertical-alignment: top;
-            }
-            Rectangle {
-                x: 0px;
-                y: parent.height - 62px;
-                width: parent.width;
-                height: 1px;
-                background: root.github-border-default;
-            }
-            Rectangle {
-                x: parent.width - 20px - confirm-revert.width - 12px - 94px;
-                y: parent.height - 49px;
-                width: 94px;
-                height: 36px;
-                ReviewActionButton {
-                    width: parent.width;
-                    text: "Cancel";
-                    button-enabled: !root.action-loading;
-                    clicked => { root.revert-dialog-open = false; }
-                }
-            }
-            confirm-revert := ReviewActionButton {
-                x: parent.width - 20px - self.width;
-                y: parent.height - 49px;
-                hug-content: true;
-                text: root.action-loading ? "Working…" : root.revert-action-label;
-                danger: true;
-                button-enabled: !root.action-loading && root.can-revert;
-                tooltip-text: root.can-revert ? "" : root.revert-block-reason;
-                clicked => { root.revert(); }
+            source-branch-touch := TouchArea {
+                enabled: !root.action-loading;
+                mouse-cursor: self.enabled ? pointer : default;
+                clicked => { root.remove-source-branch = !root.remove-source-branch; }
             }
         }
+
+    revert-dialog-frame := GitHubDialog {
+        dialog-visible: root.revert-dialog-open;
+        title: "Revert pull request #" + root.pull-request-number;
+        dialog-width: 480px;
+        dialog-height: 296px;
+        body-padding: 16px;
+        close-enabled: !root.action-loading;
+        primary-label: root.action-loading ? "Working…" : root.revert-action-label;
+        primary-danger: true;
+        primary-enabled: !root.action-loading && root.can-revert;
+        primary-busy: root.action-loading;
+        close-requested => { root.revert-dialog-open = false; }
+        cancel-clicked => { root.revert-dialog-open = false; }
+        primary-clicked => { root.revert(); }
     }
+
+        if root.revert-dialog-open: MaterialText {
+            x: revert-dialog-frame.content-x;
+            y: revert-dialog-frame.content-y;
+            width: revert-dialog-frame.content-width;
+            height: 36px;
+            z: 3100;
+            text: "Reverse the changes introduced by this merged pull request?";
+            font-size: 14px;
+            font-weight: 600;
+            color: root.github-fg-default;
+            wrap: word-wrap;
+            vertical-alignment: top;
+        }
+        if root.revert-dialog-open: MaterialText {
+            x: revert-dialog-frame.content-x;
+            y: revert-dialog-frame.content-y + 48px;
+            width: revert-dialog-frame.content-width;
+            height: revert-dialog-frame.content-height - 48px;
+            z: 3100;
+            text: root.revert-confirmation;
+            font-size: 12px;
+            color: root.github-fg-muted;
+            wrap: word-wrap;
+            vertical-alignment: top;
+        }
 }

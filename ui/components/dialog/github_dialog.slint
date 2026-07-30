@@ -1,0 +1,188 @@
+import { AppState } from "../../state/app_state.slint";
+import { GitHubButton } from "../settings/github_settings_controls.slint";
+
+// Shared Primer Dialog surface for every application-owned modal.
+//
+// Geometry follows docs/specs/ui-design.md and Primer Dialog:
+// 16 px header/body/footer safe areas, 8 px close-button edge inset,
+// medium 32 px footer controls, and 296/320/480/640 px width variants.
+// Feature-specific content uses the exported content geometry; modality,
+// chrome, footer actions, disabled/busy states, and input blocking stay here.
+export component GitHubDialog inherits Rectangle {
+    in property <bool> dialog-visible: false;
+    in property <bool> show-backdrop: true;
+    in property <string> title;
+    in property <string> subtitle: "";
+    in property <length> dialog-width: 480px;
+    in property <length> dialog-height: 320px;
+    in property <length> body-padding: 16px;
+    in property <bool> show-footer: true;
+    in property <bool> show-close: true;
+    in property <bool> close-enabled: true;
+    in property <bool> dismiss-on-backdrop: false;
+    in property <[string]> secondary-actions: [];
+    in property <string> cancel-label: "Cancel";
+    in property <bool> show-cancel: true;
+    in property <string> primary-label: "";
+    in property <bool> primary-enabled: true;
+    in property <bool> primary-busy: false;
+    in property <bool> primary-danger: false;
+    in property <bool> primary-success: false;
+
+    callback close-requested();
+    callback cancel-clicked();
+    callback secondary-action-clicked(int);
+    callback primary-clicked();
+
+    private property <length> header-height: root.subtitle == "" ? 56px : 72px;
+    private property <length> footer-height: root.show-footer ? 64px : 0px;
+    out property <length> content-x: dialog-surface.x + root.body-padding;
+    out property <length> content-y: dialog-surface.y + root.header-height + root.body-padding;
+    out property <length> content-width: dialog-surface.width - root.body-padding * 2;
+    out property <length> content-height: dialog-surface.height
+        - root.header-height - root.footer-height - root.body-padding * 2;
+
+    visible: root.dialog-visible;
+    width: 100%;
+    height: 100%;
+    z: 3000;
+    background: root.show-backdrop ? #00000066 : transparent;
+
+    backdrop-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: default;
+        clicked => {
+            if root.dismiss-on-backdrop && root.close-enabled {
+                root.close-requested();
+            }
+        }
+    }
+
+    dialog-surface := Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: min(root.dialog-width, root.width - 32px);
+        height: min(root.dialog-height, root.height - 32px);
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+        background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000055;
+        drop-shadow-offset-y: 8px;
+    }
+
+    // Keep all chrome in the component root coordinate system. Feature body
+    // content consumes the exported content geometry as a clipped sibling.
+    TouchArea {
+        x: dialog-surface.x;
+        y: dialog-surface.y;
+        width: dialog-surface.width;
+        height: dialog-surface.height;
+        mouse-cursor: default;
+    }
+
+    Rectangle {
+        x: dialog-surface.x;
+        y: dialog-surface.y + root.header-height - 1px;
+        width: dialog-surface.width;
+        height: 1px;
+        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    }
+
+    Text {
+        x: dialog-surface.x + 16px;
+        y: dialog-surface.y + (root.subtitle == "" ? 0px : 10px);
+        width: dialog-surface.width - (root.show-close ? 64px : 32px);
+        height: root.subtitle == "" ? root.header-height : 28px;
+        text: root.title;
+        font-size: root.subtitle == "" ? 16px : 20px;
+        font-weight: 600;
+        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.subtitle != "": Text {
+        x: dialog-surface.x + 16px;
+        y: dialog-surface.y + 40px;
+        width: dialog-surface.width - (root.show-close ? 64px : 32px);
+        height: 20px;
+        text: root.subtitle;
+        font-size: 13px;
+        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.show-close: close-button := Rectangle {
+        x: dialog-surface.x + dialog-surface.width - 40px;
+        y: dialog-surface.y + 8px;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        background: close-touch.pressed
+            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+            : (close-touch.has-hover
+                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
+                : transparent);
+        opacity: root.close-enabled ? 1 : 0.5;
+
+        Image {
+            x: 8px;
+            y: 8px;
+            width: 16px;
+            height: 16px;
+            source: @image-url("../../assets/icons/octicon-x-16.svg");
+            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        }
+
+        close-touch := TouchArea {
+            width: 100%;
+            height: 100%;
+            enabled: root.close-enabled;
+            mouse-cursor: self.enabled ? pointer : default;
+            clicked => { root.close-requested(); }
+        }
+    }
+
+    if root.show-footer: Rectangle {
+        x: dialog-surface.x;
+        y: dialog-surface.y + dialog-surface.height - root.footer-height;
+        width: dialog-surface.width;
+        height: 1px;
+        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    }
+
+    if root.show-footer: HorizontalLayout {
+        x: dialog-surface.x + 16px;
+        y: dialog-surface.y + dialog-surface.height - 48px;
+        width: dialog-surface.width - 32px;
+        height: 32px;
+        spacing: 8px;
+        alignment: end;
+
+        Rectangle { horizontal-stretch: 1; }
+
+        for action[index] in root.secondary-actions: GitHubButton {
+            text: action;
+            clicked => { root.secondary-action-clicked(index); }
+        }
+
+        if root.show-cancel: GitHubButton {
+            text: root.cancel-label;
+            disabled: !root.close-enabled;
+            clicked => { root.cancel-clicked(); }
+        }
+
+        if root.primary-label != "": GitHubButton {
+            text: root.primary-label;
+            primary: root.primary-success;
+            danger: root.primary-danger;
+            disabled: !root.primary-enabled;
+            busy: root.primary-busy;
+            clicked => { root.primary-clicked(); }
+        }
+    }
+}
