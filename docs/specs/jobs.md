@@ -26,6 +26,9 @@ References:
 - [Workflow syntax: jobs and steps](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)
 - [Creating a composite action](https://docs.github.com/en/actions/tutorials/create-actions/create-a-composite-action)
 - [Reusing workflow configurations](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations)
+- [Workflow commands and log annotations](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands)
+- [Using workflow run logs](https://docs.github.com/en/actions/how-tos/monitor-workflows/use-workflow-run-logs)
+- [Primer semantic color usage](https://primer.style/product/getting-started/foundations/color-usage/)
 
 ## Contract / 契约
 
@@ -54,6 +57,22 @@ References:
    controller; it must not copy the Job UI or add domain branches to it.
 8. Step disclosure state is local presentation state. Disclosures are
    independent, matching GitHub Actions; opening one step does not close another.
+9. Raw process output remains backend-owned. The presenter requests a step's
+   parsed line model only on its first expansion. A failed step may opt into
+   `default_expanded`, which also materializes its log. Once requested, the
+   latch survives progress and completion snapshots for that project.
+10. Process stdout and stderr are consumed while the process is running.
+    Controllers publish bounded snapshots at a throttled cadence, and an already
+    loaded disclosure receives those lines without waiting for step completion.
+11. Log semantics follow GitHub workflow commands. `notice`, `warning`, `error`,
+    and `debug` map to Primer accent, attention, danger, and muted presentation.
+    Conventional `warning:`, `error:`, `fatal:`, `notice:`, and `debug:` process
+    prefixes use the same mapping. Warning, error, and notice rows retain their
+    semantic muted background; ordinary rows use the neutral hover wash.
+12. An in-progress step uses a continuously rotating attention-colored spinner.
+    A queued step has an empty status ring but no disclosure, pointer cursor, or
+    hover wash. Completed/running steps are interactive only when output can be
+    shown.
 
 1. 不可变输入为有序 `Vec<JobStepDefinition>`，每项只包含展示名称与命令 argv；
    执行时不得把命令压平成 shell 字符串。
@@ -74,6 +93,18 @@ References:
    definitions 与对应 controller，不得复制 Job UI，也不得向 Job 中添加业务分支。
 8. Step 展开状态属于本地展示状态；与 GitHub Actions 一致，各 Step 独立展开，
    打开一个 Step 不会关闭其他 Step。
+9. 原始进程输出由后端持有。展示层仅在 Step 第一次展开时请求并构造解析后的行
+   model；失败 Step 可通过 `default_expanded` 自动构造日志。请求标记在同项目的
+   progress 与 completion 快照替换时必须保留。
+10. 进程运行期间持续读取 stdout/stderr。Controller 以受控频率发布有界快照，
+    已加载的展开区无需等待 Step 完成即可看到新日志。
+11. 日志语义遵循 GitHub workflow command：`notice`、`warning`、`error`、
+    `debug` 分别映射 Primer accent、attention、danger、muted；常见进程前缀
+    `warning:`、`error:`、`fatal:`、`notice:`、`debug:` 使用相同映射。
+    Warning、Error、Notice 行始终保留对应的 muted 背景，普通行才使用中性 hover。
+12. 运行中 Step 使用持续旋转的 attention 色 Spinner。queued Step 显示空心
+    状态环，但不得出现 disclosure、手型光标或 hover 背景；只有确实可展示输出的
+    running/completed Step 才可交互。
 
 ## Ownership / 职责
 
@@ -99,6 +130,12 @@ References:
 - Verify argv boundaries survive spaces in paths and values.
 - Verify multiple steps can remain expanded and multiline logs preserve one
   source line number per logical line.
+- Verify the first expansion materializes existing output and subsequent output
+  appears live without reconstructing unopened logs.
+- Verify workflow-command and conventional warning/error prefixes receive the
+  correct Primer semantic row treatment.
+- Verify the running spinner rotates when animations are enabled and queued
+  steps have no hover or click behavior.
 
 - 运行 `cargo test --lib --locked workflow::jobs`。
 - 编译完整 Slint 根 UI。
@@ -106,3 +143,6 @@ References:
 - 验证外部无需读取 Step 行即可取得总耗时。
 - 验证路径和参数含空格时 argv 边界不变。
 - 验证多个 Step 可同时展开，多行日志按逻辑行保留一个源行号。
+- 验证第一次展开才构造已有日志，之后的输出实时出现，未展开日志不被构造。
+- 验证 workflow command 与常见 warning/error 前缀采用正确的 Primer 语义行样式。
+- 验证动画启用时运行 Spinner 持续旋转，queued Step 没有 hover 或点击行为。

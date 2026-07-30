@@ -16,7 +16,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 | [GitHub/Primer UI design](ui-design.md) | Current / 当前 | `ui/`, `ui/assets/icons/`, all UI contributors |
 
-The PR workflow specification includes the reversible GitHub-style expand-all/collapse-non-diff context toggle. / PR 工作流规格包含可逆的 GitHub 风格“展开全部/收起非 Diff 行”上下文切换。
+The UI design specification includes the shared GitHub CopyToClipboardButton, TooltipV2, and Primer ActionMenu/AnchoredOverlay contracts; the PR workflow specification includes the reversible expand-all/collapse-non-diff context toggle and post-merge list invalidation. / UI 设计规范包含共享 GitHub CopyToClipboardButton、TooltipV2 和 Primer ActionMenu/AnchoredOverlay 契约；PR 工作流规格包含可逆的“展开全部/收起非 Diff 行”上下文切换，以及合并后的列表失效刷新。
 
 Documents that are not specs:
 

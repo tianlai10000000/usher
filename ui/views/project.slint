@@ -988,6 +988,9 @@ export component ProjectDialog {
 
     dialog-frame := GitHubDialog {
         dialog-visible: root.modal-visible;
+        // Forms keep Esc dismissible; backdrop stays blocked so pointer
+        // accidents do not discard edits (Primer form-dialog pattern).
+        modal: false;
         title: root.mode == "edit" ? "Edit project" : root.deleting ? "Delete project?" : "New project";
         subtitle: root.deleting
             ? ""
@@ -1013,7 +1016,6 @@ export component ProjectDialog {
             }
             root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags, root.is-pr-auto-update);
         }
-    }
 
         if root.modal-visible: Rectangle {
             x: dialog-frame.content-x;
@@ -1248,3 +1250,4 @@ export component ProjectDialog {
                     }
         }
     }
+}

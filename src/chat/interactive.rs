@@ -150,7 +150,6 @@ fn clear_chat_ui_state(ui: &MainWindow) {
     ui.set_chat_loading_history(false);
     ui.set_chat_virtual_top_spacer(0.0);
     ui.set_chat_virtual_bottom_spacer(0.0);
-    ui.set_chat_copied_message_index(-1);
     ui.set_chat_loading_phase(0);
 }
 
@@ -733,27 +732,21 @@ pub fn setup_interactive(ui: &MainWindow) {
     });
 
     // 处理复制到剪贴板回调
-    let ui_weak_copy = ui.as_weak();
     ui.on_chat_copy_to_clipboard(move |index: i32, text: slint::SharedString| {
         let text_str = text.to_string();
 
         match arboard::Clipboard::new() {
             Ok(mut clipboard) => {
                 if clipboard.set_text(&text_str).is_ok() {
-                    if let Some(ui) = ui_weak_copy.upgrade() {
-                        ui.set_chat_copied_message_index(index);
-
-                        let ui_weak_timer = ui.as_weak();
-                        slint::Timer::single_shot(std::time::Duration::from_secs(2), move || {
-                            if let Some(ui) = ui_weak_timer.upgrade() {
-                                ui.set_chat_copied_message_index(-1);
-                            }
-                        });
-                    }
+                    true
+                } else {
+                    log::error!("[Chat::Copy] FAILED to copy message at index {}", index);
+                    false
                 }
             }
             Err(e) => {
                 log::error!("[Chat::Copy] FAILED to create clipboard instance: {}", e);
+                false
             }
         }
     });

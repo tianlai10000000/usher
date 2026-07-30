@@ -16,7 +16,7 @@ pub fn setup_workflow(ui: &MainWindow) {
     state::register_shared_state(&shared_state);
     state::initialize_current_ui(ui, &shared_state);
     let pr_list_controller = pr_list::bind_pr_list(ui);
-    let pr_review_controller = pr_review::bind_pr_review(ui);
+    let pr_review_controller = pr_review::bind_pr_review(ui, pr_list_controller.clone());
     bindings::bind_project_context(
         ui,
         shared_state.clone(),

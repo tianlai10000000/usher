@@ -195,6 +195,12 @@ export component GitHubTextField inherits Rectangle {
     in property <bool> reveal: false;
     callback edited(string);
 
+    // Secret fields stay on Primer medium 14px body text when revealed.
+    // Slint's password mask is the large U+25CF ● glyph (not the browser
+    // U+2022 • used by github.com), so shrink + letter-space only while
+    // masked so the dots match GitHub password/token field density.
+    private property <bool> masking: root.secret && !root.reveal;
+
     width: 100%;
     height: root.caption == "" ? 58px : 78px;
     background: transparent;
@@ -229,9 +235,10 @@ export component GitHubTextField inherits Rectangle {
             y: (parent.height - self.preferred-height) / 2;
             width: parent.width - (field-input.has-focus ? 22px : 24px);
             text <=> root.text;
-            input-type: root.secret && !root.reveal ? InputType.password : InputType.text;
+            input-type: root.masking ? InputType.password : InputType.text;
             single-line: true;
-            font-size: 14px;
+            font-size: root.masking ? 10px : 14px;
+            letter-spacing: root.masking ? 1.5px : 0px;
             color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
             selection-background-color: AppState.effective-dark-mode ? #264f78 : #b6d7ff;
             selection-foreground-color: self.color;

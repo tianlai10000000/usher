@@ -24,6 +24,7 @@ export component TagAddPanel {
     callback select-version-mode(string);
     callback run(string, string);
     callback stop();
+    callback load-step-log(int);
 
     private property <string> description: "";
     private property <int> expanded-step-overrides: 0;
@@ -182,6 +183,9 @@ export component TagAddPanel {
             steps: root.steps;
             expanded-step-overrides <=> root.expanded-step-overrides;
             animations-enabled: root.loading-animated;
+            load-step-log(index) => {
+                root.load-step-log(index);
+            }
         }
     }
 }

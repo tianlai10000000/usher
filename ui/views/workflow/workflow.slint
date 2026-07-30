@@ -1,7 +1,10 @@
 /// Workflow main entrance page and sub-flow workspace.
-import { MaterialPalette, MaterialText, ToolTip } from "@material";
+import { MaterialPalette, MaterialText } from "@material";
 import { AppState } from "../../state/app_state.slint";
+import { GitHubTooltip } from "../../components/github_tooltip.slint";
+import { GitHubActionMenu } from "../../components/github_action_menu.slint";
 import { PageView } from "../../components/page/page_view.slint";
+import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
 import { Route } from "../../route/routeMap.slint";
 import { PrFlow, WorkflowPullRequestItem } from "./pr.slint";
 import { TagFlow } from "./tag.slint";
@@ -227,7 +230,7 @@ component WorkflowProjectDetails inherits Rectangle {
     in property <image> project-logo-image;
     // GitHub Desktop wording: Show in Finder / Explorer / file manager.
     in property <string> open-local-folder-tooltip: "Show in file manager";
-    callback copy-remote(string);
+    callback copy-remote(string) -> bool;
     callback open-local(string);
 
     // Compact overflow open state is shared with Workflow so the ActionMenu can
@@ -458,43 +461,13 @@ component WorkflowProjectDetails inherits Rectangle {
             overflow: elide;
         }
 
-        if root.has-remote: Rectangle {
-            x: parent.width - 28px;
-            y: 2px;
-            width: 28px;
-            height: 28px;
-            border-radius: 6px;
-            background: copy-touch.has-hover
-                ? (AppState.effective-dark-mode ? #30363d : #eaeef2)
-                : transparent;
-            clip: false;
-
-            Image {
-                x: 6px;
-                y: 6px;
-                width: 16px;
-                height: 16px;
-                source: @image-url("../../assets/icons/octicon-copy-16.svg");
-                image-fit: contain;
-                colorize: root.fg-muted;
-            }
-
-            copy-touch := TouchArea {
-                width: 100%;
-                height: 100%;
-                mouse-cursor: pointer;
-                clicked => {
-                    root.copy-remote(root.project-remote-repo);
-                }
-            }
-
-            // Open upward so the tip stays inside the header layout box and is
-            // not clipped by the page ScrollView under the header edge.
-            if copy-touch.has-hover: ToolTip {
-                x: parent.width - self.width;
-                y: -self.height - 4px;
-                z: 10000;
-                text: "Copy remote URL";
+        if root.has-remote: GitHubCopyButton {
+            x: parent.width - 32px;
+            y: 0px;
+            tooltip-text: "Copy remote URL";
+            tooltip-align-right: true;
+            copy-requested => {
+                root.copy-remote(root.project-remote-repo)
             }
         }
     }
@@ -552,7 +525,7 @@ component WorkflowProjectDetails inherits Rectangle {
                 }
             }
 
-            if open-touch.has-hover: ToolTip {
+            if open-touch.has-hover: GitHubTooltip {
                 x: parent.width - self.width;
                 y: -self.height - 4px;
                 z: 10000;
@@ -595,7 +568,7 @@ component WorkflowProjectDetails inherits Rectangle {
             }
         }
 
-        if compact-details-touch.has-hover && !root.repository-details-open: ToolTip {
+        if compact-details-touch.has-hover && !root.repository-details-open: GitHubTooltip {
             x: parent.width - self.width;
             y: -self.height - 4px;
             z: 10000;
@@ -620,13 +593,14 @@ export component Workflow inherits PageView {
     callback tag-open-add();
     callback tag-open-remove();
     callback tag-stop();
+    callback tag-load-step-log(int);
     callback pr-list-state-change(string);
     callback pr-list-page-change(int);
     callback pr-list-review-filter-change(string);
     callback pr-list-assignee-filter-change(string);
     callback pr-list-sort-filter-change(string);
     callback pr-open-detail(string, string, string, string, string, string);
-    callback copy-remote-repo(string);
+    callback copy-remote-repo(string) -> bool;
     callback open-local-repo(string);
     callback cd-start(string, string, string);
     callback cd-rollback(string);
@@ -756,7 +730,7 @@ export component Workflow inherits PageView {
             project-logo-image: root.project-logo-image;
             repository-details-open <=> root.repository-details-open;
             copy-remote(url) => {
-                root.copy-remote-repo(url);
+                root.copy-remote-repo(url)
             }
             open-local(path) => {
                 root.open-local-repo(path);
@@ -842,6 +816,10 @@ export component Workflow inherits PageView {
                 // stretch the list card over the pagination footer.
                 height: root.pr-flow-content-height;
                 vertical-stretch: 0;
+                viewport-global-x: root.absolute-position.x;
+                viewport-global-y: root.absolute-position.y;
+                viewport-width: root.width;
+                viewport-height: root.height;
                 repo-project-id: root.pr-repo-project-id;
                 repo-type: root.pr-repo-type;
                 pr-items: root.pr-list-items;
@@ -895,6 +873,7 @@ export component Workflow inherits PageView {
                 open-add-tab => { root.tag-open-add(); }
                 open-remove-tab => { root.tag-open-remove(); }
                 stop => { root.tag-stop(); }
+                load-step-log(index) => { root.tag-load-step-log(index); }
             }
         }
 
@@ -916,28 +895,26 @@ export component Workflow inherits PageView {
             }
         }
 
-        if root.repository-details-open: Rectangle {
-            x: max(8px, parent.width - self.width - 12px);
-            y: root.project-header-height - 4px;
-            width: min(320px, parent.width - 24px);
-            height: 140px;
+        if root.repository-details-open: GitHubActionMenu {
             z: 302;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: root.border-default;
-            background: AppState.effective-dark-mode ? #161b22 : #ffffff;
-            drop-shadow-blur: 18px;
-            drop-shadow-color: AppState.effective-dark-mode ? #00000080 : #1f232826;
-            drop-shadow-offset-y: 6px;
-            clip: true;
+            open: root.repository-details-open;
+            viewport-x: 0px;
+            viewport-y: 0px;
+            viewport-width: root.width;
+            viewport-height: root.height;
+            anchor-x: root.width - 44px;
+            anchor-y: 8px;
+            anchor-width: 32px;
+            anchor-height: 32px;
+            menu-width: 320px;
+            content-height: 140px;
+            align: "end";
 
-            TouchArea {
+            Rectangle {
                 width: parent.width;
-                height: parent.height;
-                mouse-cursor: default;
-            }
+                height: 140px;
 
-            Text {
+                Text {
                 x: 12px;
                 y: 8px;
                 width: parent.width - 24px;
@@ -949,7 +926,7 @@ export component Workflow inherits PageView {
                 vertical-alignment: center;
             }
 
-            Text {
+                Text {
                 x: 12px;
                 y: 28px;
                 width: parent.width - 56px;
@@ -961,38 +938,25 @@ export component Workflow inherits PageView {
                 overflow: elide;
             }
 
-            Rectangle {
-                x: parent.width - 40px;
-                y: 30px;
-                width: 28px;
-                height: 28px;
-                border-radius: 6px;
-                background: shell-copy-touch.has-hover
-                    ? (AppState.effective-dark-mode ? #30363d : #eaeef2)
-                    : transparent;
-                Image {
-                    x: 6px;
-                    y: 6px;
-                    width: 16px;
-                    height: 16px;
-                    source: @image-url("../../assets/icons/octicon-copy-16.svg");
-                    colorize: root.fg-muted;
-                }
-                shell-copy-touch := TouchArea {
-                    enabled: root.has-remote;
-                    mouse-cursor: pointer;
-                    clicked => { root.copy-remote-repo(root.project-remote-repo); }
+                GitHubCopyButton {
+                x: parent.width - 44px;
+                y: 28px;
+                button-enabled: root.has-remote;
+                tooltip-text: "Copy remote URL";
+                tooltip-align-right: true;
+                copy-requested => {
+                    root.copy-remote-repo(root.project-remote-repo)
                 }
             }
 
-            Rectangle {
+                Rectangle {
                 y: 68px;
                 width: parent.width;
                 height: 1px;
                 background: AppState.effective-dark-mode ? #3d444d : #d8dee4;
             }
 
-            Text {
+                Text {
                 x: 12px;
                 y: 77px;
                 width: parent.width - 24px;
@@ -1004,7 +968,7 @@ export component Workflow inherits PageView {
                 vertical-alignment: center;
             }
 
-            Text {
+                Text {
                 x: 12px;
                 y: 97px;
                 width: parent.width - 56px;
@@ -1016,7 +980,7 @@ export component Workflow inherits PageView {
                 overflow: elide;
             }
 
-            Rectangle {
+                Rectangle {
                 x: parent.width - 40px;
                 y: 99px;
                 width: 28px;
@@ -1037,6 +1001,7 @@ export component Workflow inherits PageView {
                     enabled: root.has-local;
                     mouse-cursor: pointer;
                     clicked => { root.open-local-repo(root.project-local-repo); }
+                }
                 }
             }
         }

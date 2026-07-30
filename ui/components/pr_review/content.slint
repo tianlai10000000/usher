@@ -1,8 +1,10 @@
-import { MaterialPalette, MaterialText, ToolTip } from "@material";
+import { MaterialPalette, MaterialText } from "@material";
 import { ListView } from "../../../material-1.7.1-fixed/ui/components/list_view.slint";
 import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
 import { AppState } from "../../state/app_state.slint";
 import { WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffTextSlice, WorkflowPrFileExtensionFilter } from "./shell.slint";
+import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubActionMenu } from "../github_action_menu.slint";
 
 export component TreeIndentGuides inherits Rectangle {
     in property <int> depth: 0;
@@ -62,7 +64,7 @@ export component CommitMessageToggleButton inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
-    if toggle-touch.has-hover: ToolTip {
+    if toggle-touch.has-hover: GitHubTooltip {
         y: -self.height - 4px;
         text: root.expanded ? "Hide commit description" : "Show commit description";
     }
@@ -119,11 +121,11 @@ export component FileToolbarButton inherits Rectangle {
             if root.button-enabled { root.clicked(); }
         }
     }
-    if button-touch.has-hover && !root.selected && root.tooltip-text != "": ToolTip {
+    // Match GitHubCopyButton's GitHub/Primer tooltip instead of Material's
+    // default bubble, so adjacent file-toolbar actions look like one system.
+    if button-touch.has-hover && !root.selected && root.tooltip-text != "": GitHubTooltip {
+        z: 10001;
         x: root.tooltip-align-right ? root.width - self.width : 0px;
-        // List delegates paint in order. A downward tooltip from a commit-row
-        // copy action would therefore be covered by the following row, even
-        // though ToolTip itself has a high local z-order.
         y: root.tooltip-above ? -self.height - 4px : root.height + 4px;
         text: root.tooltip-text;
     }
@@ -1081,7 +1083,7 @@ export component FileTreeToggleButton inherits Rectangle {
         clicked => { root.clicked(); }
     }
 
-    if toggle-touch.has-hover: ToolTip {
+    if toggle-touch.has-hover: GitHubTooltip {
         x: 0px;
         y: root.height + 4px;
         text: root.file-tree-visible ? "Hide file tree" : "Show file tree";
@@ -1092,6 +1094,10 @@ export component FileMenuButton inherits Rectangle {
     in property <bool> button-enabled: true;
     in property <bool> viewing-file: false;
     in property <bool> open: false;
+    in property <length> viewport-global-x: 0px;
+    in property <length> viewport-global-y: 0px;
+    in property <length> viewport-width: 0px;
+    in property <length> viewport-height: 0px;
     callback action();
     callback toggle-menu();
 
@@ -1109,24 +1115,23 @@ export component FileMenuButton inherits Rectangle {
         clicked => { root.toggle-menu(); }
     }
 
-    menu-popup := Rectangle {
-        x: root.width - self.width;
-        y: root.height - 4px;
-        width: 192px;
-        height: 52px;
-        visible: root.open;
-        z: 10000;
+    menu-popup := GitHubActionMenu {
+        open: root.open;
+        viewport-x: root.viewport-global-x - root.absolute-position.x;
+        viewport-y: root.viewport-global-y - root.absolute-position.y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+        anchor-x: 0px;
+        anchor-y: 0px;
+        anchor-width: root.width;
+        anchor-height: root.height;
+        menu-width: 192px;
+        content-height: 52px;
+        align: "end";
 
         Rectangle {
             width: parent.width;
-            height: parent.height;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-            background: AppState.effective-dark-mode ? #151b23 : #ffffff;
-            drop-shadow-blur: 18px;
-            drop-shadow-color: #00000030;
-            drop-shadow-offset-y: 6px;
+            height: 52px;
 
             Rectangle {
                 x: 8px;
@@ -1616,39 +1621,53 @@ export component DiffFindBar inherits Rectangle {
     }
 }
 
+// Primer ActionMenu for the file-tree filter. Rows are plain ActionList items
+// (not a nested ListView) so GitHubActionMenu owns viewport collision, auto
+// flip, height clamping, and vertical scrolling — nesting ListView inside the
+// overlay Flickable lets delegates paint outside the clipped surface and steals
+// wheel events, which shows up as detached rows and a cut-off bottom on short
+// windows. See docs/specs/ui-design.md "Anchored action menus".
 export component GitHubFilterMenu inherits Rectangle {
     in property <[WorkflowPrFileExtensionFilter]> extension-filters: [];
     in property <bool> only-manifest-files: false;
     in property <bool> show-viewed-files: true;
     in property <string> font-family: ".SF NS";
     in property <bool> open: false;
+    in property <length> viewport-global-x: 0px;
+    in property <length> viewport-global-y: 0px;
+    in property <length> viewport-width: 0px;
+    in property <length> viewport-height: 0px;
     callback toggle-extension(string);
     callback toggle-manifest();
     callback toggle-viewed();
+
+    // Header 53 + extension rows + divider 1 + two footer options 72.
+    private property <length> extensions-height: root.extension-filters.length * 36px;
+    private property <length> popup-content-height: 53px + root.extensions-height + 1px + 72px;
 
     width: 34px;
     height: 34px;
     background: transparent;
 
-    filter-popup := Rectangle {
-        x: 0px;
-        y: root.height + 6px;
-        width: 224px;
-        height: 53px + min(root.extension-filters.length * 36px, 252px) + 1px + 72px;
-        visible: root.open;
-        z: 10000;
+    filter-popup := GitHubActionMenu {
+        open: root.open;
+        viewport-x: root.viewport-global-x - root.absolute-position.x;
+        viewport-y: root.viewport-global-y - root.absolute-position.y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+        anchor-x: 0px;
+        anchor-y: 0px;
+        anchor-width: root.width;
+        anchor-height: root.height;
+        menu-width: 224px;
+        content-height: root.popup-content-height;
+        menu-max-height: 432px;
+        align: "start";
+        side: "auto";
 
         Rectangle {
             width: parent.width;
-            height: parent.height;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-            background: AppState.effective-dark-mode ? #151b23 : #ffffff;
-            drop-shadow-blur: 18px;
-            drop-shadow-color: #00000030;
-            drop-shadow-offset-y: 6px;
-            clip: true;
+            height: root.popup-content-height;
 
             Text {
                 x: 16px;
@@ -1663,69 +1682,63 @@ export component GitHubFilterMenu inherits Rectangle {
                 color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
             }
 
-            extension-list := ListView {
+            for extension[index] in root.extension-filters: Rectangle {
                 x: 0px;
-                y: 53px;
+                y: 53px + index * 36px;
                 width: parent.width;
-                height: min(root.extension-filters.length * 36px, 252px);
-                horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
-                vertical_scrollbar_policy: root.extension-filters.length > 7 ? ScrollBarPolicy.as_needed : ScrollBarPolicy.always_off;
-                for extension in root.extension-filters: Rectangle {
-                    width: extension-list.visible_width;
-                    height: 36px;
-                    background: extension-touch.has-hover
-                        ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
-                        : transparent;
-                    Image {
-                        x: 16px;
-                        y: 10px;
-                        width: 16px;
-                        height: 16px;
-                        source: @image-url("../../assets/icons/octicon-check-16.svg");
-                        image-fit: contain;
-                        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
-                        opacity: extension.selected ? 1 : 0;
-                    }
+                height: 36px;
+                background: extension-touch.has-hover
+                    ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
+                    : transparent;
+                Image {
+                    x: 16px;
+                    y: 10px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/octicon-check-16.svg");
+                    image-fit: contain;
+                    colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    opacity: extension.selected ? 1 : 0;
+                }
+                Text {
+                    x: 48px;
+                    width: parent.width - 96px;
+                    height: parent.height;
+                    text: extension.extension;
+                    vertical-alignment: center;
+                    font-family: root.font-family;
+                    font-size: 14px;
+                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                    overflow: elide;
+                }
+                Rectangle {
+                    x: parent.width - 48px;
+                    y: 8px;
+                    width: 32px;
+                    height: 20px;
+                    border-radius: 10px;
+                    background: AppState.effective-dark-mode ? #656c7633 : #818b981f;
                     Text {
-                        x: 48px;
-                        width: parent.width - 96px;
+                        width: parent.width;
                         height: parent.height;
-                        text: extension.extension;
+                        text: extension.count;
+                        horizontal-alignment: center;
                         vertical-alignment: center;
                         font-family: root.font-family;
-                        font-size: 14px;
+                        font-size: 12px;
+                        font-weight: 600;
                         color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-                        overflow: elide;
                     }
-                    Rectangle {
-                        x: parent.width - 48px;
-                        y: 8px;
-                        width: 32px;
-                        height: 20px;
-                        border-radius: 10px;
-                        background: AppState.effective-dark-mode ? #656c7633 : #818b981f;
-                        Text {
-                            width: parent.width;
-                            height: parent.height;
-                            text: extension.count;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            font-family: root.font-family;
-                            font-size: 12px;
-                            font-weight: 600;
-                            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-                        }
-                    }
-                    extension-touch := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.toggle-extension(extension.extension); }
-                    }
+                }
+                extension-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.toggle-extension(extension.extension); }
                 }
             }
 
             Rectangle {
                 x: 0px;
-                y: 53px + extension-list.height;
+                y: 53px + root.extensions-height;
                 width: parent.width;
                 height: 1px;
                 background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
@@ -1733,7 +1746,7 @@ export component GitHubFilterMenu inherits Rectangle {
 
             for option[index] in ["Only manifest files", "Viewed files"]: Rectangle {
                 x: 0px;
-                y: 54px + extension-list.height + index * 36px;
+                y: 54px + root.extensions-height + index * 36px;
                 width: parent.width;
                 height: 36px;
                 background: option-touch.has-hover

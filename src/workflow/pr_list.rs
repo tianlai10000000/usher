@@ -108,6 +108,13 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
 }
 
 impl WorkflowPrListController {
+    pub(crate) fn refresh_after_remote_mutation(&self, ui: &MainWindow) {
+        let state = PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
+            .unwrap_or(PullRequestState::Open);
+        self.clear_and_load_page(ui, state, 1);
+        self.refresh_state_totals(ui);
+    }
+
     pub(crate) fn select_project(&self, ui: &MainWindow, project_alias: String) {
         let request = self.request_sequence.fetch_add(1, Ordering::SeqCst) + 1;
         self.count_sequence.fetch_add(1, Ordering::SeqCst);

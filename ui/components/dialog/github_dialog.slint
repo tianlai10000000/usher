@@ -6,11 +6,15 @@ import { GitHubButton } from "../settings/github_settings_controls.slint";
 // Geometry follows docs/specs/ui-design.md and Primer Dialog:
 // 16 px header/body/footer safe areas, 8 px close-button edge inset,
 // medium 32 px footer controls, and 296/320/480/640 px width variants.
-// Feature-specific content uses the exported content geometry; modality,
-// chrome, footer actions, disabled/busy states, and input blocking stay here.
-export component GitHubDialog inherits Rectangle {
+// Feature-specific content nests as @children so Esc capture stays on the
+// focus path; modality, chrome, footer actions, disabled/busy states, and
+// input blocking stay here.
+export component GitHubDialog inherits FocusScope {
     in property <bool> dialog-visible: false;
     in property <bool> show-backdrop: true;
+    // When true, Esc does not dismiss. Backdrop dismiss stays independent via
+    // dismiss-on-backdrop so callers can combine either gesture.
+    in property <bool> modal: false;
     in property <string> title;
     in property <string> subtitle: "";
     in property <length> dialog-width: 480px;
@@ -42,19 +46,55 @@ export component GitHubDialog inherits Rectangle {
     out property <length> content-height: dialog-surface.height
         - root.header-height - root.footer-height - root.body-padding * 2;
 
+    // Primer Dialog dismisses on Esc unless the caller opts into a hard-modal
+    // session (unsaved forms, blocking progress, or DialogManager.modal).
+    private property <bool> escape-dismisses:
+        root.dialog-visible && !root.modal && root.close-enabled;
+
     visible: root.dialog-visible;
     width: 100%;
     height: 100%;
     z: 3000;
-    background: root.show-backdrop ? #00000066 : transparent;
 
-    backdrop-touch := TouchArea {
+    changed dialog-visible => {
+        if root.dialog-visible {
+            root.focus();
+        } else if root.has-focus {
+            root.clear-focus();
+        }
+    }
+
+    // Intercept Esc before nested TextInputs so the dialog closes even while
+    // a field inside @children has focus (matches github.com Dialog).
+    capture-key-pressed(event) => {
+        if root.escape-dismisses && event.text == Key.Escape {
+            root.close-requested();
+            return accept;
+        }
+        return reject;
+    }
+
+    key-pressed(event) => {
+        if root.escape-dismisses && event.text == Key.Escape {
+            root.close-requested();
+            return accept;
+        }
+        return reject;
+    }
+
+    Rectangle {
         width: 100%;
         height: 100%;
-        mouse-cursor: default;
-        clicked => {
-            if root.dismiss-on-backdrop && root.close-enabled {
-                root.close-requested();
+        background: root.show-backdrop ? #00000066 : transparent;
+
+        backdrop-touch := TouchArea {
+            width: 100%;
+            height: 100%;
+            mouse-cursor: default;
+            clicked => {
+                if root.dismiss-on-backdrop && root.close-enabled {
+                    root.close-requested();
+                }
             }
         }
     }
@@ -74,7 +114,7 @@ export component GitHubDialog inherits Rectangle {
     }
 
     // Keep all chrome in the component root coordinate system. Feature body
-    // content consumes the exported content geometry as a clipped sibling.
+    // content consumes the exported content geometry as nested @children.
     TouchArea {
         x: dialog-surface.x;
         y: dialog-surface.y;
@@ -185,4 +225,7 @@ export component GitHubDialog inherits Rectangle {
             clicked => { root.primary-clicked(); }
         }
     }
+
+    // Nested body content stays on the Esc capture path.
+    @children
 }

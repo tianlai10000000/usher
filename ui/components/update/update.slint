@@ -35,6 +35,8 @@ export component DownloadProgressModal inherits Rectangle {
     
     dialog-frame := GitHubDialog {
         dialog-visible: root.show-modal;
+        // Keep Esc available so Cancel download matches the footer action.
+        modal: false;
         title: "Downloading update";
         subtitle: "Downloading version " + root.version + "…";
         dialog-width: 480px;
@@ -45,7 +47,6 @@ export component DownloadProgressModal inherits Rectangle {
         cancel-label: "Cancel download";
         close-requested => { root.cancel-clicked(); }
         cancel-clicked => { root.cancel-clicked(); }
-    }
 
         if root.show-modal: Rectangle {
             x: dialog-frame.content-x;
@@ -88,4 +89,5 @@ export component DownloadProgressModal inherits Rectangle {
                 vertical-alignment: center;
             }
         }
+    }
 }

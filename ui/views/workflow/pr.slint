@@ -1,5 +1,7 @@
-import { MaterialText, ToolTip } from "@material";
+import { MaterialText } from "@material";
 import { AppState } from "../../state/app_state.slint";
+import { GitHubTooltip } from "../../components/github_tooltip.slint";
+import { GitHubActionMenu } from "../../components/github_action_menu.slint";
 
 export struct WorkflowPullRequestItem {
     number: string,
@@ -106,7 +108,7 @@ component PrStateButton inherits Rectangle {
     }
 
     // Explain a missing count on the interactive control (Primer guidance).
-    if root.count < 0 && state-touch.has-hover: ToolTip {
+    if root.count < 0 && state-touch.has-hover: GitHubTooltip {
         x: 8px;
         y: parent.height - 4px;
         z: 20;
@@ -267,14 +269,7 @@ component PrFilterMenu inherits Rectangle {
     height: root.menu-type == "assignee"
         ? 128px
         : (root.menu-type == "more" ? 313px : 160px);
-    border-radius: 12px;
-    border-width: 1px;
-    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    background: AppState.effective-dark-mode ? #161b22 : #ffffff;
-    drop-shadow-blur: 18px;
-    drop-shadow-color: AppState.effective-dark-mode ? #00000080 : #1f232826;
-    drop-shadow-offset-y: 6px;
-    clip: true;
+    background: transparent;
 
     // Own the full popover hit area so blank regions (title band) cannot fall
     // through to the full-window dismiss scrim underneath.
@@ -477,6 +472,10 @@ component PrListStatePanel inherits Rectangle {
 }
 
 export component PrFlow {
+    in property <length> viewport-global-x: 0px;
+    in property <length> viewport-global-y: 0px;
+    in property <length> viewport-width: 0px;
+    in property <length> viewport-height: 0px;
     in property <string> repo-project-id;
     in property <string> repo-type;
     in property <[WorkflowPullRequestItem]> pr-items: [];
@@ -534,7 +533,6 @@ export component PrFlow {
             - (root.active-menu == "reviews"
                 ? 130px
                 : (root.active-menu == "assignee" ? 52px : 0px));
-    private property <length> menu-x: max(8px, root.menu-anchor-right - 200px);
     // Lock geometry so a taller Workflow panel cannot stretch the list card
     // and pull the pagination footer inside its border.
     height: root.list-height + root.pagination-block-height;
@@ -905,31 +903,48 @@ export component PrFlow {
 
     // Paint outside pr-list so the clipped, rounded list border cannot cut off
     // the last row's absolute-time tooltip.
-    if root.hovered-time-index >= 0 && root.hovered-time-tooltip != "": ToolTip {
+    if root.hovered-time-index >= 0 && root.hovered-time-tooltip != "": GitHubTooltip {
         x: 42px;
         y: root.header-height + root.hovered-time-index * 72px + 58px;
         z: 200;
         text: root.hovered-time-tooltip;
     }
 
-    if root.active-menu != "": PrFilterMenu {
-        x: root.menu-x;
-        y: root.header-height;
+    if root.active-menu != "": GitHubActionMenu {
         z: 100;
-        menu-type: root.active-menu;
-        review-selected-value: root.pr-review-filter;
-        assignee-selected-value: root.pr-assignee-filter;
-        sort-selected-value: root.pr-sort-filter;
-        selected(kind, value) => {
-            if kind == "reviews" {
-                root.change-review-filter(value);
-            } else if kind == "assignee" {
-                root.change-assignee-filter(value);
-            } else {
-                root.change-sort-filter(value);
+        open: root.active-menu != "";
+        viewport-x: root.viewport-global-x - root.absolute-position.x;
+        viewport-y: root.viewport-global-y - root.absolute-position.y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+        anchor-x: root.menu-anchor-right;
+        anchor-y: 0px;
+        anchor-width: 0px;
+        anchor-height: root.header-height;
+        menu-width: 200px;
+        content-height: root.active-menu == "assignee"
+            ? 128px
+            : (root.active-menu == "more" ? 313px : 160px);
+        menu-max-height: 432px;
+        align: "end";
+
+        PrFilterMenu {
+            width: parent.width;
+            menu-type: root.active-menu;
+            review-selected-value: root.pr-review-filter;
+            assignee-selected-value: root.pr-assignee-filter;
+            sort-selected-value: root.pr-sort-filter;
+            selected(kind, value) => {
+                if kind == "reviews" {
+                    root.change-review-filter(value);
+                } else if kind == "assignee" {
+                    root.change-assignee-filter(value);
+                } else {
+                    root.change-sort-filter(value);
+                }
+                root.active-menu = "";
             }
-            root.active-menu = "";
+            close => { root.active-menu = ""; }
         }
-        close => { root.active-menu = ""; }
     }
 }

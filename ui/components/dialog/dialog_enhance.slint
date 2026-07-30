@@ -19,6 +19,8 @@ export component DialogEnhance inherits Rectangle {
     dialog-frame := GitHubDialog {
         dialog-visible: DialogManager.visible;
         show-backdrop: DialogManager.overlay;
+        // DialogManager.modal blocks both Esc and backdrop dismiss.
+        modal: DialogManager.modal;
         title: DialogManager.title;
         dialog-width: max(296px, root.requested-width);
         dialog-height: max(200px, root.requested-height);
@@ -35,7 +37,6 @@ export component DialogEnhance inherits Rectangle {
         primary-clicked => {
             root.on-default-action-clicked(DialogManager.id);
         }
-    }
 
         if DialogManager.visible: ScrollView {
             x: dialog-frame.content-x;
@@ -57,4 +58,5 @@ export component DialogEnhance inherits Rectangle {
                 vertical-alignment: top;
             }
         }
+    }
 }

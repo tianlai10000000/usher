@@ -7,6 +7,7 @@ import { AppState } from "../state/app_state.slint";
 import { ColorsTheme } from "../theme/color.slint";
 import { Route } from "../route/routeMap.slint";
 import { StyleMetrics } from "std-widgets.slint";
+import { GitHubCopyButton } from "../components/button/github_copy_button.slint";
 
 // 消息类型枚举
 export enum MessageRole {
@@ -79,13 +80,11 @@ component MessageBubble inherits Rectangle {
     // 消息最大宽度（由外层 Chat 根据窗口宽度动态计算）
     in property <length> max-bubble-width: 420px;
     
-    // 复制成功状态（由外部控制）
-    in property <bool> show-copied: false;
     // 低频等待动效相位（由 Rust 定时器每 500ms 更新一次）
     in property <int> loading-phase: 0;
     
     // 复制回调 - 传递消息内容
-    callback copy-message(string);
+    callback copy-message(string) -> bool;
     callback open-link(string);
     
     // 高度跟随当前角色对应行的内容高度，避免根容器产生额外空白
@@ -139,7 +138,7 @@ component MessageBubble inherits Rectangle {
                 y: user-content.preferred-height;
                 width: parent.width;
                 height: 32px;
-                visible: (message-hover.has-hover || toolbar-hover.has-hover || copy-touch.has-hover || root.show-copied) && !root.is-loading;
+                visible: (message-hover.has-hover || toolbar-hover.has-hover || user-copy-button.has-hover || user-copy-button.copied) && !root.is-loading;
 
                 toolbar-hover := TouchArea {}
 
@@ -149,29 +148,10 @@ component MessageBubble inherits Rectangle {
                     padding-right: 4px;
                     spacing: 4px;
                     
-                    Rectangle {
-                        width: 28px;
-                        height: 28px;
-                        border-radius: 6px;
-                        background: copy-touch.has-hover ? MaterialPalette.surface_container_highest : MaterialPalette.surface_container;
-                        
-                        copy-touch := TouchArea {
-                            clicked => {
-                                if (!root.show-copied) {
-                                    root.copy-message(root.content);
-                                }
-                            }
-                        }
-                        
-                        Image {
-                            width: 16px;
-                            height: 16px;
-                            source: root.show-copied 
-                                ? @image-url("../assets/icons/done.svg") 
-                                : @image-url("../assets/icons/copy.svg");
-                            colorize: root.show-copied 
-                                ? ColorsTheme.success 
-                                : MaterialPalette.on_surface_variant;
+                    user-copy-button := GitHubCopyButton {
+                        tooltip-text: "Copy message";
+                        copy-requested => {
+                            root.copy-message(root.content)
                         }
                     }
                 }
@@ -379,7 +359,7 @@ component MessageBubble inherits Rectangle {
                 y: ai-content.preferred-height;
                 width: parent.width;
                 height: 32px;
-                visible: (ai-message-hover.has-hover || ai-toolbar-hover.has-hover || ai-copy-touch.has-hover || root.show-copied) && !root.is-loading;
+                visible: (ai-message-hover.has-hover || ai-toolbar-hover.has-hover || assistant-copy-button.has-hover || assistant-copy-button.copied) && !root.is-loading;
                 
                 ai-toolbar-hover := TouchArea {}
                 
@@ -389,32 +369,10 @@ component MessageBubble inherits Rectangle {
                     padding-top: 4px;
                     spacing: 4px;
                     
-                    // 复制按钮
-                    Rectangle {
-                        width: 28px;
-                        height: 28px;
-                        border-radius: 6px;
-                        background: ai-copy-touch.has-hover ? MaterialPalette.surface_container_highest : MaterialPalette.surface_container;
-                        
-                        ai-copy-touch := TouchArea {
-                            clicked => {
-                                // 如果在冷却期内（2s），不触发复制
-                                if (!root.show-copied) {
-                                    root.copy-message(root.content);
-                                }
-                            }
-                        }
-                        
-                        Image {
-                            width: 16px;
-                            height: 16px;
-                            // 根据复制状态显示不同图标
-                            source: root.show-copied 
-                                ? @image-url("../assets/icons/done.svg") 
-                                : @image-url("../assets/icons/copy.svg");
-                            colorize: root.show-copied 
-                                ? ColorsTheme.success 
-                                : MaterialPalette.on_surface_variant;
+                    assistant-copy-button := GitHubCopyButton {
+                        tooltip-text: "Copy message";
+                        copy-requested => {
+                            root.copy-message(root.content)
                         }
                     }
                 }
@@ -536,12 +494,9 @@ export component Chat inherits Rectangle {
     callback load-more-history();
     
     // 回调 - 复制消息到剪贴板（传递索引和内容）
-    callback copy-to-clipboard(int, string);
+    callback copy-to-clipboard(int, string) -> bool;
     // 回调 - 打开链接
     callback open-link(string);
-    
-    // 最后复制成功的消息索引（-1 表示无）
-    in-out property <int> copied-message-index: -1;
     
     // 计算属性：是否应该显示加载指示器
     // 简化逻辑：只在发送中且消息列表为空时显示，或者检查最后一条消息
@@ -639,11 +594,8 @@ export component Chat inherits Rectangle {
                                 is-loading: message.content == "" && 
                                            root.is-sending && 
                                            index == root.messages.length - 1;
-                                // 显示复制成功状态
-                                show-copied: index == root.copied-message-index;
-                                
                                 copy-message(text) => {
-                                    root.copy-to-clipboard(index, text);
+                                    root.copy-to-clipboard(index, text)
                                 }
                                 open-link(url) => {
                                     root.open-link(url);
@@ -664,7 +616,6 @@ export component Chat inherits Rectangle {
                                 markdown-blocks: [];
                                 timestamp: "";
                                 is-loading: true;
-                                show-copied: false;
                             }
 
                             Rectangle {

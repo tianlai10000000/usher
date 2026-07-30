@@ -1,6 +1,6 @@
-import { ToolTip } from "@material";
 import { Route } from "../route/routeMap.slint";
 import { AppState } from "../state/app_state.slint";
+import { GitHubTooltip } from "../components/github_tooltip.slint";
 
 // Primer Breadcrumbs "normal" variant:
 // 14 px link text, accent-colored ancestors, default-colored current page,
@@ -108,7 +108,7 @@ component BreadcrumbBackButton inherits Rectangle {
         clicked => { root.clicked(); }
     }
 
-    if back-touch.has-hover: ToolTip {
+    if back-touch.has-hover: GitHubTooltip {
         z: 100;
         x: -4px;
         y: root.height + 4px;

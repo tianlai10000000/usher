@@ -1,0 +1,111 @@
+import { AppState } from "../state/app_state.slint";
+
+// Primer ActionMenu is an ActionList inside AnchoredOverlay. This shell owns
+// the shared Overlay surface and collision-aware placement. Coordinates are in
+// the component's parent space so callers can anchor from any page layer.
+export component GitHubActionMenu inherits Rectangle {
+    in property <bool> open: false;
+    in property <length> viewport-x: 0px;
+    in property <length> viewport-y: 0px;
+    in property <length> viewport-width: 0px;
+    in property <length> viewport-height: 0px;
+    in property <length> anchor-x: 0px;
+    in property <length> anchor-y: 0px;
+    in property <length> anchor-width: 0px;
+    in property <length> anchor-height: 0px;
+    in property <length> menu-width: 256px;
+    in property <length> content-height: 0px;
+    in property <length> menu-max-height: 600px;
+    in property <string> align: "start";
+    // "auto" flips to the side with more room; "top"/"bottom" pin a side.
+    in property <string> side: "auto";
+    in property <length> anchor-gap: 4px;
+    in property <length> viewport-margin: 8px;
+    out property <bool> opens-above:
+        root.side == "top"
+        || (root.side == "auto"
+            && root.space-below < root.desired-height
+            && root.space-above > root.space-below);
+
+    private property <length> desired-width:
+        min(root.menu-width, max(0px, root.viewport-width - root.viewport-margin * 2));
+    private property <length> desired-height: min(root.content-height, root.menu-max-height);
+    private property <length> viewport-right: root.viewport-x + root.viewport-width;
+    private property <length> viewport-bottom: root.viewport-y + root.viewport-height;
+    private property <length> space-above:
+        max(0px, root.anchor-y - root.viewport-y - root.viewport-margin - root.anchor-gap);
+    private property <length> space-below:
+        max(0px, root.viewport-bottom - root.viewport-margin
+            - (root.anchor-y + root.anchor-height) - root.anchor-gap);
+    private property <length> aligned-x:
+        root.align == "end"
+            ? root.anchor-x + root.anchor-width - root.desired-width
+            : (root.align == "center"
+                ? root.anchor-x + (root.anchor-width - root.desired-width) / 2
+                : root.anchor-x);
+    private property <length> scroll-offset-y: 0px;
+
+    changed open => {
+        if root.open {
+            root.scroll-offset-y = 0px;
+        }
+    }
+
+    visible: root.open && root.width > 0px && root.height > 0px;
+    x: max(
+        root.viewport-x + root.viewport-margin,
+        min(root.viewport-right - root.viewport-margin - root.desired-width, root.aligned-x)
+    );
+    y: root.opens-above
+        ? root.anchor-y - root.anchor-gap - root.height
+        : root.anchor-y + root.anchor-height + root.anchor-gap;
+    width: root.desired-width;
+    height: min(root.desired-height, root.opens-above ? root.space-above : root.space-below);
+    z: 10000;
+    clip: false;
+
+    menu-surface := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+        background: AppState.effective-dark-mode ? #151b23 : #ffffff;
+        drop-shadow-blur: 18px;
+        drop-shadow-color: AppState.effective-dark-mode ? #00000080 : #1f232826;
+        drop-shadow-offset-y: 6px;
+        clip: true;
+
+        // Own blank areas so the page-level outside-click scrim cannot receive
+        // events through the menu.
+        TouchArea { mouse-cursor: default; }
+
+        menu-scroll := Flickable {
+            width: parent.width;
+            height: parent.height;
+            viewport-width: self.width;
+            viewport-height: max(self.height, root.content-height);
+            viewport-x: 0px;
+            viewport-y <=> root.scroll-offset-y;
+            interactive: true;
+
+            content-host := Rectangle {
+                width: menu-scroll.width;
+                height: root.content-height;
+                background: transparent;
+                @children
+            }
+        }
+
+        if root.content-height > root.height: scroll-thumb := Rectangle {
+            x: parent.width - 7px;
+            y: 2px + (-menu-scroll.viewport-y)
+                * (parent.height - self.height - 4px)
+                / max(1px, root.content-height - parent.height);
+            width: 5px;
+            height: max(24px, (parent.height - 4px) * parent.height / root.content-height);
+            border-radius: 3px;
+            background: AppState.effective-dark-mode ? #9198a180 : #59636e66;
+        }
+    }
+}

@@ -1,0 +1,23 @@
+// Application-owned counterpart to GitHub's TooltipV2. Keep every tooltip in
+// the app on these shared geometry and Primer color tokens.
+export component GitHubTooltip inherits Rectangle {
+    in property <string> text;
+
+    width: tip-label.preferred-width + 16px;
+    height: tip-label.preferred-height + 8px;
+    border-radius: 6px;
+    border-width: 0px;
+    background: #25292e;
+
+    tip-label := Text {
+        x: 8px;
+        y: 4px;
+        width: self.preferred-width;
+        height: self.preferred-height;
+        text: root.text;
+        color: #ffffff;
+        font-size: 12px;
+        vertical-alignment: center;
+        wrap: no-wrap;
+    }
+}

@@ -1,7 +1,10 @@
-import { MaterialPalette, MaterialText, ToolTip } from "@material";
+import { MaterialPalette, MaterialText } from "@material";
 import { ListView } from "../../../material-1.7.1-fixed/ui/components/list_view.slint";
 import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
 import { AppState } from "../../state/app_state.slint";
+import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubActionMenu } from "../github_action_menu.slint";
+import { GitHubCopyButton } from "../button/github_copy_button.slint";
 
 export struct WorkflowPrDiffFile {
     path: string,
@@ -266,7 +269,7 @@ export component ReviewActionButton inherits Rectangle {
         mouse-cursor: root.button-enabled ? pointer : default;
         clicked => { if (root.button-enabled) { root.clicked(); } }
     }
-    if root.embed-tooltip && action-touch.has-hover && root.tooltip-text != "": ToolTip {
+    if root.embed-tooltip && action-touch.has-hover && root.tooltip-text != "": GitHubTooltip {
         x: root.tooltip-align-start ? 0px : root.width - self.width;
         y: root.height + 4px;
         text: root.tooltip-text;
@@ -310,7 +313,7 @@ export component GithubCommentButton inherits Rectangle {
         mouse-cursor: root.button-enabled ? pointer : default;
         clicked => { if (root.button-enabled) { root.clicked(); } }
     }
-    if action-touch.has-hover && root.tooltip-text != "": ToolTip {
+    if action-touch.has-hover && root.tooltip-text != "": GitHubTooltip {
         // Composer card clips descendants; keep the tip above the footer button.
         x: root.width - self.width;
         y: -self.height - 4px;
@@ -378,9 +381,9 @@ export component BranchLabel inherits Rectangle {
     }
 }
 
-// GitHub-style relative timestamp: muted label with absolute datetime tooltip.
-// Prefer Material ToolTip (no mouse grab). Avoid PopupWindow on hover — it
-// steals input and flickers as has-hover toggles.
+// GitHub-style relative timestamp: muted label with an absolute datetime
+// GitHubTooltip. Avoid PopupWindow on hover — it steals input and flickers as
+// has-hover toggles.
 export component RelativeTimestamp inherits Rectangle {
     in property <string> text;
     in property <string> tooltip-text;
@@ -434,7 +437,7 @@ export component RelativeTimestamp inherits Rectangle {
             wrap: no-wrap;
         }
     }
-    if time-touch.has-hover && root.tooltip-text != "" && !root.tooltip-after && !root.tooltip-beside: ToolTip {
+    if time-touch.has-hover && root.tooltip-text != "" && !root.tooltip-after && !root.tooltip-beside: GitHubTooltip {
         // above/below: pin trailing edge when tooltip-align-right.
         x: root.tooltip-align-right ? root.width - self.width : 0px;
         y: root.tooltip-above ? -self.height - 4px : root.height + 4px;
@@ -518,7 +521,7 @@ export component PullRequestSummaryRow inherits Rectangle {
     // Keep branch names fully visible like GitHub: one row when they fit,
     // otherwise move the branch segment to a second row (never elide).
     out property <bool> wraps: root.width < metrics.inline-width;
-    callback copy-source-branch(string);
+    callback copy-source-branch(string) -> bool;
 
     height: root.wraps ? 64px : 32px;
     // Tooltips must escape this one-line layout; clipping turns the hovered
@@ -593,28 +596,12 @@ export component PullRequestSummaryRow inherits Rectangle {
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
         }
-        Rectangle {
-            width: 28px;
-            height: 28px;
-            border-radius: 6px;
-            background: copy-touch.has-hover ? root.muted-background : transparent;
-            Image {
-                x: 6px;
-                y: 6px;
-                width: 16px;
-                height: 16px;
-                source: @image-url("../../assets/icons/octicon-copy-16.svg");
-                image-fit: contain;
-                colorize: root.muted-color;
-            }
-            copy-touch := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.copy-source-branch(root.source-branch); }
-            }
-            if copy-touch.has-hover: ToolTip {
-                x: root.width - self.width;
-                y: root.height + 4px;
-                text: "Copy source branch";
+        GitHubCopyButton {
+            tooltip-text: "Copy source branch";
+            tooltip-above: false;
+            tooltip-align-right: true;
+            copy-requested => {
+                root.copy-source-branch(root.source-branch)
             }
         }
         if root.updated-at != "": RelativeTimestamp {
@@ -698,28 +685,12 @@ export component PullRequestSummaryRow inherits Rectangle {
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
         }
-        Rectangle {
-            width: 28px;
-            height: 28px;
-            border-radius: 6px;
-            background: compact-copy-touch.has-hover ? root.muted-background : transparent;
-            Image {
-                x: 6px;
-                y: 6px;
-                width: 16px;
-                height: 16px;
-                source: @image-url("../../assets/icons/octicon-copy-16.svg");
-                image-fit: contain;
-                colorize: root.muted-color;
-            }
-            compact-copy-touch := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.copy-source-branch(root.source-branch); }
-            }
-            if compact-copy-touch.has-hover: ToolTip {
-                x: root.width - self.width;
-                y: root.height + 4px;
-                text: "Copy source branch";
+        GitHubCopyButton {
+            tooltip-text: "Copy source branch";
+            tooltip-above: false;
+            tooltip-align-right: true;
+            copy-requested => {
+                root.copy-source-branch(root.source-branch)
             }
         }
         if root.updated-at != "": RelativeTimestamp {
@@ -949,6 +920,10 @@ export component MergeReadinessBadge inherits Rectangle {
     // in-window popover cannot outlive the scrim.
     in property <bool> interactions-enabled: true;
     in property <bool> popup-open: false;
+    in property <length> viewport-global-x: 0px;
+    in property <length> viewport-global-y: 0px;
+    in property <length> viewport-width: 0px;
+    in property <length> viewport-height: 0px;
     in property <color> background-color;
     in property <color> badge-border-color;
     in property <color> foreground-color;
@@ -1061,27 +1036,23 @@ export component MergeReadinessBadge inherits Rectangle {
     }
     private property <length> popup-height: 16px + 28px + 8px + max(20px, popup-measure-detail-wrapped.preferred-height) + 16px;
 
-    readiness-popup := Rectangle {
-        // Compact headers sit near the left edge: open start-aligned so the
-        // overlay grows rightward with the usual page gutter. Wide headers pin
-        // the badge to the trailing edge: open end-aligned like Primer ActionMenu.
-        x: root.popup-align-end ? root.width - root.popup-width : 0px;
-        y: root.height + 4px;
-        width: root.popup-width;
-        height: root.popup-height;
-        visible: root.popup-open && root.interactions-enabled;
-        z: 10000;
+    readiness-popup := GitHubActionMenu {
+        open: root.popup-open && root.interactions-enabled;
+        viewport-x: root.viewport-global-x - root.absolute-position.x;
+        viewport-y: root.viewport-global-y - root.absolute-position.y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+        anchor-x: 0px;
+        anchor-y: 0px;
+        anchor-width: root.width;
+        anchor-height: root.height;
+        menu-width: root.popup-width;
+        content-height: root.popup-height;
+        align: root.popup-align-end ? "end" : "start";
 
         Rectangle {
             width: parent.width;
-            height: parent.height;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: root.badge-border-color;
-            background: root.background-color;
-            drop-shadow-blur: 18px;
-            drop-shadow-color: #00000030;
-            drop-shadow-offset-y: 6px;
+            height: root.popup-height;
 
             Rectangle {
                 x: 16px;
@@ -1168,7 +1139,7 @@ export component PrReviewBackButton inherits Rectangle {
     }
 
     // Optional embedded tip for callers that already elevate their own host.
-    if root.embed-tooltip && back-touch.has-hover: ToolTip {
+    if root.embed-tooltip && back-touch.has-hover: GitHubTooltip {
         x: 0px;
         y: root.height + 4px;
         text: root.tooltip-text;
@@ -1194,6 +1165,10 @@ export component HeaderActionStrip inherits Rectangle {
     // hover tips cannot outlive the scrim.
     in property <bool> actions-enabled: true;
     in property <bool> readiness-popup-open: false;
+    in property <length> viewport-global-x: 0px;
+    in property <length> viewport-global-y: 0px;
+    in property <length> viewport-width: 0px;
+    in property <length> viewport-height: 0px;
     in property <string> revert-action-label: "Revert pull request";
     in property <string> merge-block-reason;
     in property <color> background-color;
@@ -1237,6 +1212,10 @@ export component HeaderActionStrip inherits Rectangle {
                 popup-align-end: !root.align-start;
                 interactions-enabled: root.actions-enabled;
                 popup-open: root.readiness-popup-open;
+                viewport-global-x: root.viewport-global-x;
+                viewport-global-y: root.viewport-global-y;
+                viewport-width: root.viewport-width;
+                viewport-height: root.viewport-height;
                 background-color: root.background-color;
                 badge-border-color: root.outline-color;
                 foreground-color: root.foreground-color;
@@ -1371,4 +1350,3 @@ export component ReviewChoice inherits Rectangle {
         clicked => { root.chosen(); }
     }
 }
-

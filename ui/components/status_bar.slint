@@ -1,8 +1,10 @@
-import { Horizontal, Vertical, MaterialText, ToolTip } from "@material";
+import { Horizontal, Vertical, MaterialText } from "@material";
 import { UpdateLogic } from "./update/update.slint";
 import { NotificationManager } from "./notify/notification.slint";
 import { AppState } from "../state/app_state.slint";
 import { LayoutConstants } from "../layout_constants.slint";
+import { GitHubTooltip } from "./github_tooltip.slint";
+import { GitHubActionMenu } from "./github_action_menu.slint";
 
 // Enum to identify which popup is active
 enum ActivePopup {
@@ -82,7 +84,7 @@ component StatusBarItem inherits Rectangle {
     }
     
     // Tooltip
-    if hover-area.has-hover && tooltip-text != "" : ToolTip {
+    if hover-area.has-hover && tooltip-text != "" : GitHubTooltip {
         y: -24px;
         text: root.tooltip-text;
     }
@@ -126,18 +128,6 @@ export component StatusBar inherits Rectangle {
     
     // Convert absolute anchor x to relative x (relative to StatusBar)
     property <length> popup-anchor-rel-x: popup-anchor-x - root.absolute-position.x;
-    
-    // Helper: center x position (before clamping)
-    property <length> popup-center-x: popup-anchor-rel-x + (popup-anchor-width / 2) - (popup-width / 2);
-    // Helper: min x (left edge margin)
-    property <length> popup-min-x: 8px;
-    // Helper: max x (right edge margin)
-    property <length> popup-max-x: root.width - popup-width - 8px;
-    
-    // Calculate popup x position: center above the anchor, with boundary clamping
-    property <length> popup-x: 
-        popup-center-x < popup-min-x ? popup-min-x : 
-        (popup-center-x > popup-max-x ? popup-max-x : popup-center-x);
     
     height: LayoutConstants.status-bar-height;
     background: root.canvas-subtle;
@@ -242,7 +232,7 @@ export component StatusBar inherits Rectangle {
                     }
                     
                     // Tooltip
-                    if hover-area.has-hover : ToolTip {
+                    if hover-area.has-hover : GitHubTooltip {
                         y: -28px;
                         text: "Download progress: " + Math.round(UpdateLogic.download-progress * 100) + "%\n" +
                             UpdateLogic.download-status;
@@ -344,41 +334,49 @@ export component StatusBar inherits Rectangle {
         }
     }
     
-    // Popup overlay - displayed above status bar, responsive to layout changes
-    if active-popup != ActivePopup.None : Rectangle {
-        x: root.popup-x;
-        y: -popup-content-layout.preferred-height - 2px;
-        width: root.popup-width;
-        height: popup-content-layout.preferred-height;
-        background: root.canvas-default;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: root.border-default;
-        drop-shadow-blur: 16px;
-        drop-shadow-offset-y: 4px;
-        drop-shadow-color: AppState.effective-dark-mode ? #010409cc : #1f232826;
-        
-        // Popup content - height auto-expands based on content (flex-like)
-        popup-content-layout := VerticalLayout {
-            width: 100%;
-            spacing: 8px;
-            padding: 12px;
-            
-            if root.popup-title != "" : MaterialText {
-                width: root.popup-width - 24px;
-                text: root.popup-title;
-                font-size: 14px;
-                font-weight: 600;
-                color: root.fg-default;
-                overflow: elide;
-            }
-            
-            if root.popup-content != "" : MaterialText {
-                width: root.popup-width - 24px;
-                text: root.popup-content;
-                font-size: 12px;
-                color: root.fg-muted;
-                wrap: word-wrap;
+    // Popup overlay - Primer AnchoredOverlay flips above this bottom anchor and
+    // scrolls internally if the window is shorter than its content.
+    if active-popup != ActivePopup.None : GitHubActionMenu {
+        open: true;
+        viewport-x: -root.absolute-position.x;
+        viewport-y: -root.absolute-position.y;
+        viewport-width: root.width;
+        viewport-height: root.absolute-position.y + root.height;
+        anchor-x: root.popup-anchor-rel-x;
+        anchor-y: 0px;
+        anchor-width: root.popup-anchor-width;
+        anchor-height: root.height;
+        menu-width: root.popup-width;
+        content-height: popup-content-layout.preferred-height;
+        align: "center";
+        side: "top";
+
+        Rectangle {
+            width: parent.width;
+            height: popup-content-layout.preferred-height;
+
+            // Popup content - height auto-expands based on content (flex-like)
+            popup-content-layout := VerticalLayout {
+                width: 100%;
+                spacing: 8px;
+                padding: 12px;
+
+                if root.popup-title != "" : MaterialText {
+                    width: root.popup-width - 24px;
+                    text: root.popup-title;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: root.fg-default;
+                    overflow: elide;
+                }
+
+                if root.popup-content != "" : MaterialText {
+                    width: root.popup-width - 24px;
+                    text: root.popup-content;
+                    font-size: 12px;
+                    color: root.fg-muted;
+                    wrap: word-wrap;
+                }
             }
         }
     }

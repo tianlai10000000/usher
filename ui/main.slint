@@ -13,7 +13,7 @@ import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
 import { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
 import { PrReviewWorkspace } from "./views/workflow/pr_review_workspace.slint";
 import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
-import { JobStepItem } from "./components/jobs/job.slint";
+import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 
 import { List as ListPage } from "./views/list.slint";
 import { Detail as DetailPage } from "./views/detail.slint";
@@ -50,7 +50,7 @@ export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_
 export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
 export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
-export { JobStepItem } from "./components/jobs/job.slint";
+export { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 export { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 
@@ -133,11 +133,10 @@ export component MainWindow inherits Window {
     in property <length> chat-virtual-top-spacer: 0px;
     in property <length> chat-virtual-bottom-spacer: 0px;
     in-out property <length> chat-scroll-position: 0px;
-    in-out property <int> chat-copied-message-index: -1;
     in-out property <int> chat-loading-phase: 0;
     callback chat-send-message(string);
     callback chat-load-more-history();
-    callback chat-copy-to-clipboard(int, string);
+    callback chat-copy-to-clipboard(int, string) -> bool;
     callback chat-open-link(string);
     callback chat-route-visible-changed(bool);
 
@@ -326,12 +325,13 @@ export component MainWindow inherits Window {
     callback workflow-tag-open-add();
     callback workflow-tag-open-remove();
     callback workflow-tag-stop();
+    callback workflow-tag-load-step-log(int);
     callback workflow-pr-list-state-change(string);
     callback workflow-pr-list-page-change(int);
     callback workflow-pr-list-review-filter-change(string);
     callback workflow-pr-list-assignee-filter-change(string);
     callback workflow-pr-list-sort-filter-change(string);
-    callback workflow-copy-remote-repo(string);
+    callback workflow-copy-remote-repo(string) -> bool;
     callback workflow-open-local-repo(string);
     callback workflow-pr-review-open(string, string, string, string, string, string);
     callback workflow-pr-review-back();
@@ -352,9 +352,9 @@ export component MainWindow inherits Window {
     callback workflow-pr-review-expand-hunk(int, string);
     callback workflow-pr-review-expand-all-hunks();
     callback workflow-pr-review-collapse-non-diff-lines();
-    callback workflow-pr-review-copy-file-path(string);
-    callback workflow-pr-review-copy-commit-sha(string);
-    callback workflow-pr-review-copy-source-branch(string);
+    callback workflow-pr-review-copy-file-path(string) -> bool;
+    callback workflow-pr-review-copy-commit-sha(string) -> bool;
+    callback workflow-pr-review-copy-source-branch(string) -> bool;
     callback workflow-pr-review-copy-diff-selection(int, int, int, int, string);
     callback workflow-pr-review-resolve-diff-selection(int, float, float, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
     pure callback workflow-pr-review-resolve-diff-selection-slice(int, string, int, int) -> WorkflowPrDiffTextSlice;
@@ -714,6 +714,9 @@ export component MainWindow inherits Window {
                             tag-stop => {
                                 root.workflow-tag-stop();
                             }
+                            tag-load-step-log(index) => {
+                                root.workflow-tag-load-step-log(index);
+                            }
                             pr-list-state-change(state) => {
                                 root.workflow-pr-list-state-change(state);
                             }
@@ -730,7 +733,7 @@ export component MainWindow inherits Window {
                                 root.workflow-pr-list-sort-filter-change(value);
                             }
                             copy-remote-repo(url) => {
-                                root.workflow-copy-remote-repo(url);
+                                root.workflow-copy-remote-repo(url)
                             }
                             open-local-repo(path) => {
                                 root.workflow-open-local-repo(path);
@@ -905,7 +908,6 @@ export component MainWindow inherits Window {
                 virtual-top-spacer: root.chat-virtual-top-spacer;
                 virtual-bottom-spacer: root.chat-virtual-bottom-spacer;
                 scroll-position <=> root.chat-scroll-position;
-                copied-message-index <=> root.chat-copied-message-index;
                 loading-phase <=> root.chat-loading-phase;
                 navigate(route) => {
                     root.navigate(route);
@@ -917,7 +919,7 @@ export component MainWindow inherits Window {
                     root.chat-load-more-history();
                 }
                 copy-to-clipboard(index, text) => {
-                    root.chat-copy-to-clipboard(index, text);
+                    root.chat-copy-to-clipboard(index, text)
                 }
                 open-link(url) => {
                     root.chat-open-link(url);
@@ -958,11 +960,15 @@ export component MainWindow inherits Window {
         }
     }
     // Compact Primer utility status bar fixed to the bottom edge.
+    // z must sit above PageScrollActions (500) so version/network popovers and
+    // click-outside dismiss paint over the terminal / back-to-top IconButtons.
+    // Keep below full-page overlays (PrReview 800), Notify (900), and Toast (1000).
     StatusBar {
         x: 0;
         y: root.height - LayoutConstants.status-bar-height;
         width: root.width;
         height: LayoutConstants.status-bar-height;
+        z: 600;
     }
 
     if (root.current-route == Route.Workflow || root.current-route == Route.Project) && root.show-page-scroll-view: Rectangle {
@@ -1160,9 +1166,9 @@ export component MainWindow inherits Window {
         }
         expand-all-hunks => { root.workflow-pr-review-expand-all-hunks(); }
         collapse-non-diff-lines => { root.workflow-pr-review-collapse-non-diff-lines(); }
-        copy-file-path(path) => { root.workflow-pr-review-copy-file-path(path); }
-        copy-commit-sha(sha) => { root.workflow-pr-review-copy-commit-sha(sha); }
-        copy-source-branch(branch) => { root.workflow-pr-review-copy-source-branch(branch); }
+        copy-file-path(path) => { root.workflow-pr-review-copy-file-path(path) }
+        copy-commit-sha(sha) => { root.workflow-pr-review-copy-commit-sha(sha) }
+        copy-source-branch(branch) => { root.workflow-pr-review-copy-source-branch(branch) }
         copy-diff-selection(start-line, start-col, end-line, end-col, side) => {
             root.workflow-pr-review-copy-diff-selection(start-line, start-col, end-line, end-col, side);
         }

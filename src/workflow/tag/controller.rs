@@ -11,6 +11,10 @@ use std::process::{Command as StdCommand, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+use tokio::process::Command as TokioCommand;
+use tokio::sync::mpsc;
+use tokio::time::{Duration as TokioDuration, sleep};
 
 use super::commands::{create_tag_plan, remove_tag_plan};
 use super::version::{is_valid_semver_tag, next_semver_for_mode, parse_semver_tag};
@@ -86,6 +90,28 @@ fn request_tag_cancel() -> bool {
 
 pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
     log::info!("[Workflow][Tag] Binding Tag tab callbacks");
+    let ui_weak = ui.as_weak();
+    let state_logs = shared_state.clone();
+    ui.on_workflow_tag_load_step_log(move |index| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        let requested = state_logs
+            .lock()
+            .ok()
+            .map(|mut guard| {
+                let mut requested = false;
+                guard.upsert_current(|view| {
+                    requested = view.tag_job.request_step_log(index.max(0) as usize);
+                });
+                requested
+            })
+            .unwrap_or(false);
+        if requested {
+            initialize_current_ui(&ui, &state_logs);
+        }
+    });
+
     let ui_weak = ui.as_weak();
     let state_mode = shared_state.clone();
     ui.on_workflow_tag_change_mode(move |mode| {
@@ -619,7 +645,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         // from step statuses flashes Stop away between steps
                         // (and on the final success/error progress tick) because
                         // no row is "running" for those moments.
-                        entry.tag_job.steps = steps;
+                        entry.tag_job.replace_steps(steps);
                         entry.tag_result = result;
                         if current_project_id != project_local {
                             return;
@@ -859,7 +885,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         let entry = guard.projects.entry(project_local.clone()).or_default();
                         // Same latch as create: only the terminal callback/stop
                         // handler clears tag_running.
-                        entry.tag_job.steps = steps;
+                        entry.tag_job.replace_steps(steps);
                         entry.tag_result = result;
                         if current_project_id != project_local {
                             return;
@@ -1231,7 +1257,19 @@ async fn run_local_tag_flow(
             );
         }
 
-        let result = run_command(command.clone(), &cancel_token).await;
+        let running_summary = format!(
+            "Running step {}/{}: {}",
+            index + 1,
+            commands.len(),
+            steps[index].definition.name
+        );
+        let result = run_command(command.clone(), &cancel_token, |live_log| {
+            set_step_log(&mut steps[index], live_log);
+            if let Some(progress) = on_progress.as_ref() {
+                progress(steps.clone(), running_summary.clone());
+            }
+        })
+        .await;
         steps[index].duration = format_duration(step_started.elapsed()).into();
         match result {
             Ok(log) => {
@@ -1400,7 +1438,19 @@ async fn run_local_remove_tag_flow(
             );
         }
 
-        let result = run_command(command.clone(), &cancel_token).await;
+        let running_summary = format!(
+            "Running remove step {}/{}: {}",
+            index + 1,
+            commands.len(),
+            steps[index].definition.name
+        );
+        let result = run_command(command.clone(), &cancel_token, |live_log| {
+            set_step_log(&mut steps[index], live_log);
+            if let Some(progress) = on_progress.as_ref() {
+                progress(steps.clone(), running_summary.clone());
+            }
+        })
+        .await;
         steps[index].duration = format_duration(step_started.elapsed()).into();
         match result {
             Ok(log) => {
@@ -1508,42 +1558,48 @@ async fn run_local_remove_tag_flow(
             ),
         );
     }
-    let (latest_tag, refresh_log) = tokio::task::spawn_blocking({
-        let repo = repo.to_string();
-        move || inspect_latest_remote_tag(&repo)
+    let refresh_summary = format!(
+        "Running remove step 4/4: {}",
+        steps[refresh_index].definition.name
+    );
+    let refresh_result = inspect_latest_remote_tag_live(repo, &cancel_token, |live_log| {
+        set_step_log(&mut steps[refresh_index], live_log);
+        if let Some(progress) = on_progress.as_ref() {
+            progress(steps.clone(), refresh_summary.clone());
+        }
     })
-    .await
-    .map_err(|error| TagRunFailure {
-        summary: format!(
-            "Tag remove workflow failed while joining refresh step: {}",
-            error
-        ),
-        steps: {
+    .await;
+    let (latest_tag, refresh_log) = match refresh_result {
+        Ok(result) => result,
+        Err(error) => {
             steps[refresh_index].status = JobStepStatus::Completed;
-            steps[refresh_index].conclusion = Some(JobConclusion::Failure);
+            steps[refresh_index].conclusion = Some(if cancel_token.load(Ordering::SeqCst) {
+                JobConclusion::Cancelled
+            } else {
+                JobConclusion::Failure
+            });
             steps[refresh_index].default_expanded = true;
             steps[refresh_index].duration = format_duration(refresh_started.elapsed()).into();
-            steps[refresh_index].detail = "Failed to join refresh task.".into();
-            set_step_log(&mut steps[refresh_index], error.to_string());
-            steps.clone()
-        },
-    })?
-    .map_err(|error| {
-        steps[refresh_index].status = JobStepStatus::Completed;
-        steps[refresh_index].conclusion = Some(JobConclusion::Failure);
-        steps[refresh_index].default_expanded = true;
-        steps[refresh_index].duration = format_duration(refresh_started.elapsed()).into();
-        steps[refresh_index].detail = "Failed to refresh latest remote tag.".into();
-        set_step_log(&mut steps[refresh_index], error.clone());
-        TagRunFailure {
-            summary: format!(
-                "Tag remove workflow failed at step {} ('{}').",
-                refresh_index + 1,
-                steps[refresh_index].definition.name
-            ),
-            steps: steps.clone(),
+            steps[refresh_index].detail = if cancel_token.load(Ordering::SeqCst) {
+                "Cancelled by user. Workflow paused.".into()
+            } else {
+                "Failed to refresh latest remote tag.".into()
+            };
+            set_step_log(&mut steps[refresh_index], error);
+            return Err(TagRunFailure {
+                summary: if cancel_token.load(Ordering::SeqCst) {
+                    "Tag remove workflow cancelled while refreshing remote tags.".into()
+                } else {
+                    format!(
+                        "Tag remove workflow failed at step {} ('{}').",
+                        refresh_index + 1,
+                        steps[refresh_index].definition.name
+                    )
+                },
+                steps,
+            });
         }
-    })?;
+    };
     steps[refresh_index].status = JobStepStatus::Completed;
     steps[refresh_index].conclusion = Some(JobConclusion::Success);
     steps[refresh_index].duration = format_duration(refresh_started.elapsed()).into();
@@ -1596,10 +1652,107 @@ async fn run_local_remove_tag_flow(
     })
 }
 
-async fn run_command(
+async fn read_command_stream<R>(reader: R, sender: mpsc::UnboundedSender<String>)
+where
+    R: AsyncRead + Unpin,
+{
+    let mut reader = BufReader::new(reader);
+    let mut bytes = Vec::new();
+    loop {
+        bytes.clear();
+        match reader.read_until(b'\n', &mut bytes).await {
+            Ok(0) => break,
+            Ok(_) => {
+                while bytes
+                    .last()
+                    .is_some_and(|byte| matches!(byte, b'\n' | b'\r'))
+                {
+                    bytes.pop();
+                }
+                let _ = sender.send(String::from_utf8_lossy(&bytes).into_owned());
+            }
+            Err(error) => {
+                let _ = sender.send(format!("error: failed to read process output: {error}"));
+                break;
+            }
+        }
+    }
+}
+
+async fn inspect_latest_remote_tag_live<F>(
+    local_repo: &str,
+    cancel_token: &Arc<AtomicBool>,
+    mut on_log: F,
+) -> Result<(String, String), String>
+where
+    F: FnMut(String),
+{
+    let fetch_command = vec![
+        "git".to_string(),
+        "-C".to_string(),
+        local_repo.to_string(),
+        "fetch".to_string(),
+        "origin".to_string(),
+        "--tags".to_string(),
+        "--force".to_string(),
+    ];
+    let fetch_log = run_command(fetch_command, cancel_token, |log| on_log(log)).await?;
+
+    let list_command = vec![
+        "git".to_string(),
+        "-C".to_string(),
+        local_repo.to_string(),
+        "ls-remote".to_string(),
+        "--tags".to_string(),
+        "--refs".to_string(),
+        "origin".to_string(),
+    ];
+    let list_log = run_command(list_command, cancel_token, |log| {
+        on_log(clamp_step_log(format!("{fetch_log}\n{log}")));
+    })
+    .await?;
+    let combined_log = clamp_step_log(format!("{fetch_log}\n{list_log}"));
+
+    let mut latest: Option<(String, (u64, u64, u64))> = None;
+    for line in list_log.lines() {
+        let Some(tag_ref) = line.split_whitespace().nth(1) else {
+            continue;
+        };
+        let Some(tag) = tag_ref.strip_prefix("refs/tags/") else {
+            continue;
+        };
+        let Some(parsed) = parse_semver_tag(tag) else {
+            continue;
+        };
+        match latest.as_ref() {
+            Some((_, current)) if *current >= parsed => {}
+            _ => latest = Some((tag.to_string(), parsed)),
+        }
+    }
+    Ok((
+        latest
+            .map(|(tag, _)| tag)
+            .unwrap_or_else(|| "v0.0.0".to_string()),
+        combined_log,
+    ))
+}
+
+fn append_live_log(log: &mut String, line: String) {
+    if !log.is_empty() {
+        log.push('\n');
+    }
+    log.push_str(&line);
+    *log = clamp_step_log(std::mem::take(log));
+}
+
+async fn run_command<F>(
     command: Vec<String>,
     cancel_token: &Arc<AtomicBool>,
-) -> Result<String, String> {
+    mut on_log: F,
+) -> Result<String, String>
+where
+    F: FnMut(String),
+{
     if command.is_empty() {
         log::error!("[Workflow][Tag] run_command called with empty command");
         return Err("Command vector is empty.".to_string());
@@ -1613,105 +1766,95 @@ async fn run_command(
         return Err(format!("Run {}\nCancelled by user.", rendered));
     }
     log::info!("[Workflow][Tag] Executing command: {}", rendered);
-    let run_with_capture = |command_vec: Vec<String>, capture: bool| {
-        tokio::task::spawn_blocking(move || {
-            let mut process = StdCommand::new(&command_vec[0]);
-            for arg in command_vec.iter().skip(1) {
-                process.arg(arg);
-            }
-            if capture {
-                process
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .output()
-                    .map(|output| (output.status, output.stdout, output.stderr))
-            } else {
-                process
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .map(|status| (status, Vec::new(), Vec::new()))
-            }
-        })
-    };
+    let mut process = TokioCommand::new(&command[0]);
+    process.args(command.iter().skip(1));
+    process
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = process.spawn().map_err(|error| {
+        log::error!(
+            "[Workflow][Tag] Command spawn failed: {} | error={}",
+            rendered,
+            error
+        );
+        format!(
+            "Run {}\nerror: failed to spawn command: {}",
+            rendered, error
+        )
+    })?;
 
-    let output = match run_with_capture(command.clone(), true).await {
-        Ok(result) => match result {
-            Ok(result) => result,
-            Err(error) if error.raw_os_error() == Some(9) => {
-                log::warn!(
-                    "[Workflow][Tag] Command spawn failed with bad fd, retry without capture: {}",
-                    rendered
-                );
-                let retry = run_with_capture(command.clone(), false)
-                    .await
-                    .map_err(|error| {
-                        log::error!(
-                            "[Workflow][Tag] Command join failed: {} | error={}",
-                            rendered,
-                            error
-                        );
-                        format!("Run {}\nFailed to join command: {}", rendered, error)
-                    })?
-                    .map_err(|error| {
-                        log::error!(
-                            "[Workflow][Tag] Command spawn failed: {} | error={}",
-                            rendered,
-                            error
-                        );
-                        format!("Run {}\nFailed to spawn command: {}", rendered, error)
-                    })?;
-                retry
+    let stdout = child
+        .stdout
+        .take()
+        .expect("piped command stdout must be available");
+    let stderr = child
+        .stderr
+        .take()
+        .expect("piped command stderr must be available");
+    let (sender, mut receiver) = mpsc::unbounded_channel();
+    let stdout_task = tokio::spawn(read_command_stream(stdout, sender.clone()));
+    let stderr_task = tokio::spawn(read_command_stream(stderr, sender));
+
+    let mut command_log = format!("Run {rendered}");
+    on_log(command_log.clone());
+    let mut last_emit = Instant::now();
+    let mut pending_emit = false;
+    let status = loop {
+        if cancel_token.load(Ordering::SeqCst) {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            append_live_log(&mut command_log, "Cancelled by user.".into());
+            on_log(command_log.clone());
+            return Err(command_log);
+        }
+
+        if let Some(status) = child.try_wait().map_err(|error| {
+            format!("Run {rendered}\nerror: failed to wait for command: {error}")
+        })? {
+            break status;
+        }
+
+        tokio::select! {
+            line = receiver.recv() => {
+                if let Some(line) = line {
+                    append_live_log(&mut command_log, line);
+                    pending_emit = true;
+                    if last_emit.elapsed() >= TokioDuration::from_millis(50) {
+                        on_log(command_log.clone());
+                        last_emit = Instant::now();
+                        pending_emit = false;
+                    }
+                }
             }
-            Err(error) => {
-                log::error!(
-                    "[Workflow][Tag] Command spawn failed: {} | error={}",
-                    rendered,
-                    error
-                );
-                return Err(format!(
-                    "Run {}\nFailed to spawn command: {}",
-                    rendered, error
-                ));
+            _ = sleep(TokioDuration::from_millis(40)) => {
+                if pending_emit && last_emit.elapsed() >= TokioDuration::from_millis(50) {
+                    on_log(command_log.clone());
+                    last_emit = Instant::now();
+                    pending_emit = false;
+                }
             }
-        },
-        Err(error) => {
-            log::error!(
-                "[Workflow][Tag] Command join failed: {} | error={}",
-                rendered,
-                error
-            );
-            return Err(format!(
-                "Run {}\nFailed to join command: {}",
-                rendered, error
-            ));
         }
     };
 
-    let (status, stdout_bytes, stderr_bytes) = output;
-    if cancel_token.load(Ordering::SeqCst) {
-        log::warn!(
-            "[Workflow][Tag] Command result ignored due to cancellation: {}",
-            rendered
-        );
-        return Err(format!("Run {}\nCancelled by user.", rendered));
+    let _ = stdout_task.await;
+    let _ = stderr_task.await;
+    while let Ok(line) = receiver.try_recv() {
+        append_live_log(&mut command_log, line);
     }
+    on_log(command_log.clone());
 
-    let stdout = String::from_utf8_lossy(&stdout_bytes);
-    let stderr = String::from_utf8_lossy(&stderr_bytes);
-    let log = format_command_log(&rendered, &stdout, &stderr);
     if status.success() {
         log::info!("[Workflow][Tag] Command succeeded: {}", rendered);
-        Ok(log)
+        Ok(command_log)
     } else {
         log::error!(
             "[Workflow][Tag] Command failed: {} | status={}",
             rendered,
             status
         );
-        Err(log)
+        Err(command_log)
     }
 }
 
@@ -1857,9 +2000,11 @@ fn run_command_blocking(command: Vec<String>) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_command_log, format_duration};
+    use super::{format_command_log, format_duration, run_command};
     use crate::workflow::jobs::{JobConclusion, JobStepData, JobStepDefinition, JobStepStatus};
     use slint::Model;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
     #[test]
@@ -1896,16 +2041,20 @@ mod tests {
             log: "Run git status\nclean\ncomplete".into(),
             duration: "0s".into(),
             default_expanded: false,
+            log_requested: true,
         };
         let slint_step = step.to_slint();
         assert_eq!(slint_step.log_lines.row_count(), 3);
         assert_eq!(
-            slint_step.log_lines.row_data(0).unwrap().as_str(),
+            slint_step.log_lines.row_data(0).unwrap().text.as_str(),
             "Run git status"
         );
-        assert_eq!(slint_step.log_lines.row_data(1).unwrap().as_str(), "clean");
         assert_eq!(
-            slint_step.log_lines.row_data(2).unwrap().as_str(),
+            slint_step.log_lines.row_data(1).unwrap().text.as_str(),
+            "clean"
+        );
+        assert_eq!(
+            slint_step.log_lines.row_data(2).unwrap().text.as_str(),
             "complete"
         );
     }
@@ -1914,5 +2063,31 @@ mod tests {
     fn step_duration_matches_githubs_compact_units() {
         assert_eq!(format_duration(Duration::from_millis(999)), "0s");
         assert_eq!(format_duration(Duration::from_secs(65)), "1m 5s");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn command_output_is_published_before_process_completion() {
+        let token = Arc::new(AtomicBool::new(false));
+        let mut snapshots = Vec::new();
+        let result = run_command(
+            vec![
+                "sh".into(),
+                "-c".into(),
+                "printf 'warning: first\\n'; sleep 0.15; printf 'error: second\\n' >&2".into(),
+            ],
+            &token,
+            |snapshot| snapshots.push(snapshot),
+        )
+        .await
+        .expect("shell command should succeed");
+
+        assert!(result.contains("error: second"));
+        assert!(
+            snapshots
+                .iter()
+                .take(snapshots.len().saturating_sub(1))
+                .any(|snapshot| snapshot.contains("warning: first"))
+        );
     }
 }

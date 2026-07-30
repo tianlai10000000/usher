@@ -83,6 +83,7 @@ export component TagFlow {
     callback open-add-tab();
     callback open-remove-tab();
     callback stop();
+    callback load-step-log(int);
 
     in-out property <int> selected-tab: 0; // 0: Add, 1: Remove
     private property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
@@ -215,6 +216,9 @@ export component TagFlow {
                 stop => {
                     root.stop();
                 }
+                load-step-log(index) => {
+                    root.load-step-log(index);
+                }
             }
         }
 
@@ -240,6 +244,9 @@ export component TagFlow {
                 }
                 stop => {
                     root.stop();
+                }
+                load-step-log(index) => {
+                    root.load-step-log(index);
                 }
             }
         }

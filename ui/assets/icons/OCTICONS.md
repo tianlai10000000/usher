@@ -12,6 +12,8 @@ by Slint with GitHub Primer semantic foreground tokens rather than embedded fill
 outline icon used by the Workflow header “Show in Finder/Explorer” control.
 `octicon-file-directory-open-fill-16.svg` is the Primer Octicons `file-directory-open-fill-16` icon.
 `octicon-copy-16.svg` is the Primer Octicons `copy-16` icon.
+`octicon-check-16.svg` is the matching success-state icon used with Copy by
+the shared GitHub CopyToClipboardButton.
 `octicon-fold-16.svg` is the Primer Octicons `fold-16` icon.
 `octicon-fold-down-16.svg` is the Primer Octicons `fold-down-16` icon used by
 GitHub's per-hunk “expand following lines” gutter control.

@@ -80,8 +80,11 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/views/` | 页面级视图。 |
 | `ui/views/workflow/` | Tag、PR 工作流视图；Branch 与 CD Tab 当前显示 Coming soon 占位。 |
 | `ui/components/` | 应用复用组件。 |
+| `ui/components/github_tooltip.slint` | 所有应用自有 Hover 提示共用的 GitHub TooltipV2 视觉契约。 |
+| `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面、视口碰撞定位和限高纵向滚动。 |
+| `ui/components/button/github_copy_button.slint` | 所有图标复制操作共用的 GitHub CopyToClipboardButton 交互；组件负责短时 Copy→Check 状态和 `Copied!` Tooltip，feature callback 返回剪贴板写入是否成功。 |
 | `ui/components/jobs/` | 可复用的 GitHub Actions 风格 Job/Step 展示；只接收归一化快照，不执行流程命令。 |
-| `ui/components/dialog/github_dialog.slint` | 全局、项目、PR Review 和更新弹窗共用的 Primer Dialog 外壳，统一遮罩输入归属、Header/Body/Footer 安全边距、关闭行为与操作状态。 |
+| `ui/components/dialog/github_dialog.slint` | 全局、项目、PR Review 和更新弹窗共用的 Primer Dialog 外壳，统一遮罩输入归属、Header/Body/Footer 安全边距、Esc 关闭（`modal` 时禁用）、关闭行为与操作状态；功能正文以 `@children` 嵌套。 |
 | `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在工作区视图。 |
 | `ui/theme/` | 应用主题色映射。 |
 | `material-1.7.1-fixed/` | 与 Slint v1.17.1 对齐的 Material 源码。 |
@@ -187,6 +190,11 @@ Tag 工作流采用相同的 façade 模式：`workflow/tag.rs` 暴露绑定和�
 保留 argv 边界，仓库路径、Tag 名称和描述都不经过 shell 插值。后续 CD 或 Branch
 流程通过提供自己的 definitions 与 controller 复用这一 Job 边界，不复制展示组件，
 也不向通用组件加入领域分支。
+Step 原始日志在 disclosure 第一次请求行 model 前始终保留在项目级 Rust 快照中，
+该请求标记在后续 progress 快照替换时继续保留。Tag 命令执行期间持续读取
+stdout/stderr 并发布有界进度，因此已展开 Step 可实时更新。展示组件把 GitHub
+`notice`、`warning`、`error`、`debug` 标注映射为 Primer 语义行，为运行中 Step
+旋转 attention 色 Spinner，并让 queued Step 保持不可交互。
 
 Revert 命令与 review/merge 命令共用 Provider-neutral façade 和 action 序列，迟到响应不得影响其他项目或 PR。已合并或已关闭请求隐藏页头 review/merge 控件；在已配置凭据时 Conversation 评论框保持可用（GitHub Conversation 评论按 issue comment 写入，因此合并后仍可留言）。只有 adapter 返回 `can_revert` 时，已合并请求的页头才在就绪徽标同一行显示明确可见的 Primer 风格次级回退按钮（Usher 不用 GitHub 页头 kebab ActionMenu，以保证完整标签可读）。GitHub GraphQL 创建独立的反向 PR；Gitee 企业版重新读取 MR，要求 merge/squash commit 的 `/repository/commits/:sha/refs` 响应同时返回 `merge_commit_by_pr` 与 `can_revert`，随后对目标分支调用文档定义的 commit revert endpoint。rebase/fast-forward、Gitee 公有版与 GitLab 均保持不支持；Provider 专属确认说明必须明确 Gitee 会直接修改目标分支。
 
@@ -211,6 +219,8 @@ Conversation 提交批次使用 Primer 官方 `repo-push` Octicon；相对时间
 Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度，从而避免最右侧露出未绘制区域，并保持 Tab/双宽字符对齐。代码栏支持 GitHub 风格的跨 ListView 行拖拽选中（不含行号栏；hunk/meta 行不可选且不进入剪贴板）；双击按相同字符类扩展为单词选区（字母数字/`_`、空白、其余标点各自成组），三击选中整行代码列，连击状态由审核工作区持有以免 ListView 回收打断手势；软换行继续使用 Slint `TextInput.word-wrap` 自动换行，并采用它的原生 UTF-8 选区几何，因此续行双击会高亮完整逻辑单词，不再近似换行偏移。Unified 换行行的行号与 `+`/`-` 使用字体自然首行行盒，未换行行仍使用名义 22px 行槽。仅需 preferred-width 的探测 Text 保持零尺寸。⌘/Ctrl+F 在选中文件工具栏停靠紧凑的编辑器式查找栏（GitHub PR Files changed 无应用内查找；栏体对齐 CodeMirror/GitHub 文件编辑器：查询、序号/总数、上一个/下一个、关闭），对可复制代码列做不区分大小写匹配、滚动定位，并只高亮当前命中；review controller 的同步命中测试按投影 model 中每个逻辑行的实际换行高度遍历，因此正向或反向拖入软换行终点时都能精确落到字符。⌘/Ctrl+C 静默写入剪贴板。选中状态只保存两个端点，选区渲染只由已选且可见的 delegate 创建，因此保留有界懒加载 model 与普通 token-only 滚动路径。
 
 Conversation 与 Commits 的 commit 链接会按 SHA 定位并复用 Files changed 工作区，把当前 commit 应用为单项范围。审核控制器会把来源 Conversation 或 Commits Tab 记录为 feature 页内下钻返回点，因此页头 Back 会先恢复来源 Tab，下一次 Back 才返回 Workflow 的 PR 列表；如果 commits 尚未加载，控制器会在加载完成后应用待处理选择，复制 SHA 保持独立。
+
+合并成功会把保留的 PR 列表标记为过期。审核页顶层 Back 会重新加载当前列表筛选的第一页及状态总数，确保已合并请求不再留在 Open 列表中；页内 commit Back 仍只恢复来源 Tab，不会提前消费这次刷新。
 
 ### Pull Request 子系统边界
 

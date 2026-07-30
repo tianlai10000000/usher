@@ -1,5 +1,5 @@
 import { FilledButton, MaterialPalette, MaterialText } from "@material";
-import { Job, JobStepItem } from "../../components/jobs/job.slint";
+import { Job, JobLogLineItem, JobStepItem } from "../../components/jobs/job.slint";
 import { TagField } from "../../components/workflow/fields.slint";
 
 export component CdFlow {
@@ -56,7 +56,9 @@ export component CdFlow {
                 : (root.build-step-status == "paused" ? "cancelled" : "")),
             detail: root.build-detail,
             log: root.build-detail,
-            log-lines: [root.build-detail],
+            has-log: root.build-step-status != "pending",
+            log-loaded: true,
+            log-lines: [{ text: root.build-detail, prefix: "", kind: "plain" }],
             duration: "—",
             default-expanded: false,
         },
@@ -70,7 +72,9 @@ export component CdFlow {
                 : (root.test-step-status == "paused" ? "cancelled" : "")),
             detail: root.test-detail,
             log: root.test-detail,
-            log-lines: [root.test-detail],
+            has-log: root.test-step-status != "pending",
+            log-loaded: true,
+            log-lines: [{ text: root.test-detail, prefix: "", kind: "plain" }],
             duration: "—",
             default-expanded: false,
         },
@@ -84,7 +88,9 @@ export component CdFlow {
                 : (root.deploy-step-status == "paused" ? "cancelled" : "")),
             detail: root.deploy-detail,
             log: root.deploy-detail,
-            log-lines: [root.deploy-detail],
+            has-log: root.deploy-step-status != "pending",
+            log-loaded: true,
+            log-lines: [{ text: root.deploy-detail, prefix: "", kind: "plain" }],
             duration: "—",
             default-expanded: false,
         },
@@ -98,7 +104,9 @@ export component CdFlow {
                 : (root.verify-step-status == "paused" ? "cancelled" : "")),
             detail: root.verify-detail,
             log: root.verify-detail,
-            log-lines: [root.verify-detail],
+            has-log: root.verify-step-status != "pending",
+            log-loaded: true,
+            log-lines: [{ text: root.verify-detail, prefix: "", kind: "plain" }],
             duration: "—",
             default-expanded: false,
         }

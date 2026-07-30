@@ -80,8 +80,11 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `ui/views/` | Page-level views. |
 | `ui/views/workflow/` | Tag and PR workflow views; Branch and CD tabs currently show Coming soon placeholders. |
 | `ui/components/` | Reusable application components. |
+| `ui/components/github_tooltip.slint` | Shared GitHub TooltipV2 visual contract for every application-owned hover tip. |
+| `ui/components/github_action_menu.slint` | Shared Primer ActionMenu/AnchoredOverlay surface, viewport collision placement, and bounded vertical scrolling for click-triggered overlays. |
+| `ui/components/button/github_copy_button.slint` | Shared GitHub CopyToClipboardButton interaction for every icon-copy action. It owns the transient Copy→Check state and `Copied!` tooltip; feature callbacks return clipboard-write success. |
 | `ui/components/jobs/` | Reusable GitHub Actions-style Job/Step presentation. It accepts normalized snapshots and never executes workflow commands. |
-| `ui/components/dialog/github_dialog.slint` | Shared Primer Dialog chrome, backdrop input ownership, header/body/footer safe areas, close behavior, and action states for global, project, PR-review, and update dialogs. |
+| `ui/components/dialog/github_dialog.slint` | Shared Primer Dialog chrome, backdrop input ownership, header/body/footer safe areas, Esc dismiss (unless `modal`), close behavior, and action states for global, project, PR-review, and update dialogs. Feature body content nests as `@children`. |
 | `ui/components/pr_review/` | PR Review public UI structs plus reusable shell, file-tree, and diff controls; cross-region state stays in the workspace view. |
 | `ui/theme/` | Application palette mapping. |
 | `material-1.7.1-fixed/` | Vendored Material source aligned with Slint v1.17.1. |
@@ -197,6 +200,11 @@ steps. `ui/components/jobs/job.slint` renders that snapshot but owns no I/O or t
 commands remain argument vectors so repository paths, tag names, and descriptions never pass
 through shell interpolation. CD or Branch workflows reuse this Job boundary by supplying their
 own definitions and controller; they do not copy the presenter or add domain branches to it.
+Raw step logs remain in the project-scoped Rust snapshot until a disclosure first requests its
+line model; that request latch survives later progress snapshots. Tag commands stream stdout and
+stderr while running and publish bounded progress, so an opened step updates live. The presenter
+maps GitHub `notice`, `warning`, `error`, and `debug` annotations to Primer semantic rows, rotates
+an attention spinner for the active step, and leaves queued steps non-interactive.
 
 Revert commands use the same provider-neutral façade and action sequence as review/merge commands, so stale results cannot affect another project or PR. A merged or closed request hides header review/merge controls while the Conversation composer stays available when credentials are configured (GitHub posts Conversation comments as issue comments so they work after merge). A merged request may expose a visible same-row Primer-style secondary header revert button only when the adapter returns `can_revert` (Usher prefers that over GitHub's kebab ActionMenu so the full label stays readable). GitHub GraphQL creates a separate reverse PR. Gitee Enterprise reloads the MR, requires a merge/squash commit whose `/repository/commits/:sha/refs` response reports both `merge_commit_by_pr` and `can_revert`, then calls the documented commit-revert endpoint against the target branch; rebase/fast-forward, public Gitee, and GitLab remain unsupported. Provider-specific confirmation text makes the direct Gitee branch mutation explicit.
 
@@ -221,6 +229,8 @@ Conversation commit batches use Primer's official `repo-push` Octicon. Their rel
 Diff geometry uses one measured extent: Rust passes the longest expanded code line alongside display-column metadata, and Slint measures it with the active monospace font for horizontal scrolling and row-background painting. This prevents an unpainted strip at the right edge and keeps tabs/wide glyphs aligned. The code column accepts GitHub-style drag selection across ListView rows (gutters excluded; hunk/meta rows never selectable and omitted from clipboard text); double-click expands to the same character-class run (word / whitespace / punctuation) and triple-click selects the full code line, with the multi-click streak owned by the review workspace so ListView recycling cannot break the gesture. Soft-wrapped rows keep Slint `TextInput.word-wrap` auto-wrap and use its native UTF-8 selection geometry, so double-click highlights the complete logical word on continuation lines without approximating wrap offsets. Wrapped Unified gutter labels and `+`/`-` use the font's natural first-line box, while unwrapped rows retain the nominal 22px slot. Layout measure probes that only need preferred-width stay zero-sized. ⌘/Ctrl+F docks a compact editor-style find bar in the selected-file toolbar (GitHub PR Files changed has no first-party find chrome; the bar follows CodeMirror/GitHub file-editor find: query, index/total, previous/next, close), with case-insensitive matches over copyable code columns, scroll-into-view, and current-hit highlighting only. The synchronous review-controller hit test walks actual projected row wrap heights so a forward or reverse drag can resolve an exact character in a wrapped endpoint. ⌘/Ctrl+C copies the plain selection silently. Selection state is only two endpoints, and selection rendering is created only by selected visible delegates, preserving the bounded lazy model and normal token-only scroll path.
 
 Commit links in Conversation and Commits reuse the Files changed workspace by resolving the selected SHA and applying it as a one-item commit range. The review controller records the originating Conversation or Commits tab as a feature-local drill-down checkpoint, so the review header's Back action restores that tab before the next Back returns to the Workflow PR list. When the commit list is still lazy, the controller completes that load before applying the pending selection; Copy SHA remains independent.
+
+A successful merge marks the retained PR list stale. The top-level review Back refreshes page one of the active list filter and its state totals, so a merged request cannot remain in the Open list; feature-local commit Back continues to restore its source tab without consuming that refresh.
 
 ### Pull request subsystem boundary
 

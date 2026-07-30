@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -20,6 +20,7 @@ use crate::{
 };
 
 use super::super::bindings::{show_error, show_success};
+use super::super::pr_list::WorkflowPrListController;
 use super::super::syntax_highlight::{HighlightResources, HighlightedLine, highlight_diff_lines};
 
 use super::avatar::{load_commit_avatars, load_conversation_avatars};
@@ -68,6 +69,7 @@ pub(super) struct ReviewRequest {
 
 #[derive(Clone)]
 pub(crate) struct WorkflowPrReviewController {
+    pr_list_controller: WorkflowPrListController,
     project_alias: Arc<Mutex<String>>,
     active_request: Arc<Mutex<Option<ReviewRequest>>>,
     cache: Arc<Mutex<Option<ReviewCache>>>,
@@ -90,6 +92,7 @@ pub(crate) struct WorkflowPrReviewController {
     commits: Arc<Mutex<Vec<PullRequestCommit>>>,
     pending_open_commit: Arc<Mutex<Option<String>>>,
     commit_detail_return_tab: Arc<Mutex<Option<i32>>>,
+    pr_list_refresh_pending: Arc<AtomicBool>,
 }
 
 fn session_highlight_resources(
@@ -103,8 +106,12 @@ fn session_highlight_resources(
         .clone()
 }
 
-pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
+pub(crate) fn bind_pr_review(
+    ui: &MainWindow,
+    pr_list_controller: WorkflowPrListController,
+) -> WorkflowPrReviewController {
     let controller = WorkflowPrReviewController {
+        pr_list_controller,
         project_alias: Arc::new(Mutex::new(String::new())),
         active_request: Arc::new(Mutex::new(None)),
         cache: Arc::new(Mutex::new(None)),
@@ -127,6 +134,7 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
         commits: Arc::new(Mutex::new(Vec::new())),
         pending_open_commit: Arc::new(Mutex::new(None)),
         commit_detail_return_tab: Arc::new(Mutex::new(None)),
+        pr_list_refresh_pending: Arc::new(AtomicBool::new(false)),
     };
 
     let open_controller = controller.clone();
@@ -400,19 +408,16 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
     ui.on_workflow_pr_review_copy_file_path(move |path| {
         let path = path.trim();
         if path.is_empty() {
-            return;
+            return false;
         }
         match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(path)) {
-            Ok(()) => {
-                if let Some(ui) = ui_weak.upgrade() {
-                    show_success(&ui, "Copied file path.");
-                }
-            }
+            Ok(()) => true,
             Err(error) => {
                 log::warn!("[Workflow][PR Review] Failed to copy file path: {error}");
                 if let Some(ui) = ui_weak.upgrade() {
                     show_error(&ui, "Failed to copy the file path.");
                 }
+                false
             }
         }
     });
@@ -421,19 +426,16 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
     ui.on_workflow_pr_review_copy_commit_sha(move |sha| {
         let sha = sha.trim();
         if sha.is_empty() {
-            return;
+            return false;
         }
         match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(sha)) {
-            Ok(()) => {
-                if let Some(ui) = ui_weak.upgrade() {
-                    show_success(&ui, "Copied commit SHA.");
-                }
-            }
+            Ok(()) => true,
             Err(error) => {
                 log::warn!("[Workflow][PR Review] Failed to copy commit SHA: {error}");
                 if let Some(ui) = ui_weak.upgrade() {
                     show_error(&ui, "Failed to copy the commit SHA.");
                 }
+                false
             }
         }
     });
@@ -449,19 +451,16 @@ pub(crate) fn bind_pr_review(ui: &MainWindow) -> WorkflowPrReviewController {
     ui.on_workflow_pr_review_copy_source_branch(move |branch| {
         let branch = branch.trim();
         if branch.is_empty() {
-            return;
+            return false;
         }
         match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(branch)) {
-            Ok(()) => {
-                if let Some(ui) = ui_weak.upgrade() {
-                    show_success(&ui, "Copied source branch.");
-                }
-            }
+            Ok(()) => true,
             Err(error) => {
                 log::warn!("[Workflow][PR Review] Failed to copy source branch: {error}");
                 if let Some(ui) = ui_weak.upgrade() {
                     show_error(&ui, "Failed to copy the source branch.");
                 }
+                false
             }
         }
     });
@@ -685,11 +684,15 @@ impl WorkflowPrReviewController {
         }
         reset_review_ui(ui);
         ui.invoke_navigate_back();
+        if self.pr_list_refresh_pending.swap(false, Ordering::SeqCst) {
+            self.pr_list_controller.refresh_after_remote_mutation(ui);
+        }
         self.log_memory_diagnostics("review_close.after_clear");
     }
 
     pub(crate) fn select_project(&self, ui: &MainWindow, project_alias: String) {
         self.log_memory_diagnostics("project_switch.before_clear");
+        self.pr_list_refresh_pending.store(false, Ordering::SeqCst);
         self.request_sequence.fetch_add(1, Ordering::SeqCst);
         self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
         self.expand_sequence.fetch_add(1, Ordering::SeqCst);
@@ -1581,6 +1584,9 @@ impl WorkflowPrReviewController {
                         ui.set_workflow_pr_merge_block_reason(
                             "This pull request has been merged.".into(),
                         );
+                        controller
+                            .pr_list_refresh_pending
+                            .store(true, Ordering::SeqCst);
                         show_success(&ui, "Pull request merged successfully.");
                         controller.refresh_action_state(&ui);
                         controller.refresh_conversation_after_remote_action(&ui);

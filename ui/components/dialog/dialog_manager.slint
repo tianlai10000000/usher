@@ -7,7 +7,7 @@ export struct DialogOptions {
     actions: [string],       // 自定义操作按钮文本数组，如 ["Cancel", "Delete"]
     default-action: string,  // 默认主按钮文本，如 "OK" 或 "Confirm"
     overlay: bool,           // 是否显示遮罩层，默认为 true
-    modal: bool,             // 是否为模态对话框（点击背景不关闭），默认为 true
+    modal: bool,             // 硬模态：为 true 时 Esc 与点击背景均不关闭，默认为 true
     width: string,           // 对话框宽度，支持 "400px" 或 "80%"
     height: string,          // 对话框高度，支持 "300px" 或 "50%"
 }
@@ -21,7 +21,7 @@ export global DialogManager {
     in-out property <[string]> actions: [];
     in-out property <string> default-action: "";
     in-out property <bool> overlay: true;
-    in-out property <bool> modal: true;          // 是否为模态对话框
+    in-out property <bool> modal: true;          // 硬模态：Esc 与背景点击均不关闭
     
     // 尺寸属性（由 Rust 解析后设置）
     in-out property <length> width-px: 400px;        // 宽度像素值（当使用 px 时）

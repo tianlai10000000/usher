@@ -1,10 +1,12 @@
-import { MaterialPalette, MaterialText, ToolTip } from "@material";
+import { MaterialPalette, MaterialText } from "@material";
 import { ListView } from "../../../material-1.7.1-fixed/ui/components/list_view.slint";
 import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
 import { AppState } from "../../state/app_state.slint";
 import { GitHubDialog } from "../../components/dialog/github_dialog.slint";
 import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, ConversationAvatar, WorkflowPrCommit, ReviewActionButton, GithubCommentButton, PullRequestStateBadge, BranchLabel, RelativeTimestamp, PullRequestSummaryMetrics, PullRequestSummaryRow, CenteredErrorState, PrTabButton, CommitRangeButton, MergeReadinessBadge, PrReviewBackButton, HeaderActionStrip, ReviewChoice } from "../../components/pr_review/shell.slint";
 import { TreeIndentGuides, CommitMessageToggleButton, FileToolbarButton, CommitSummaryNavButton, FileChangeTypeIcon, SelectableDiffCode, SplitDiffSide, DiffViewPreview, DiffViewChoice, DiffSettingsPopover, FileTreeToggleButton, FileMenuButton, DiffStatSegment, DiffStatBar, FileDiffStat, CodeRenderingIndicator, LargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, DiffFindBar } from "../../components/pr_review/content.slint";
+import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
+import { GitHubTooltip } from "../../components/github_tooltip.slint";
 export component PrReviewWorkspace inherits FocusScope {
     in property <bool> live-resizing: false;
     in property <string> project-name;
@@ -243,6 +245,11 @@ export component PrReviewWorkspace inherits FocusScope {
     private property <bool> pending-ignore-whitespace: root.ignore-whitespace;
     private property <length> stable-layout-width: root.width;
     private property <length> stable-layout-height: root.height;
+    // File-filter ActionMenu mounts on the workspace root (above the
+    // files-changed-toolbar z:80 band). These track the filter IconButton in
+    // workspace-local coordinates.
+    private property <length> filter-menu-anchor-x: 0px;
+    private property <length> filter-menu-anchor-y: 0px;
     // Primer `$width-md` (768px). GitHub's PR Files changed Layout uses
     // `Layout--flowRow-until-md` + `sidebarPosition-flowRow-none`, which sets
     // `.Layout-sidebar { display: none }` under `max-width: 767.98px`.
@@ -304,9 +311,9 @@ export component PrReviewWorkspace inherits FocusScope {
     callback expand-hunk(int, string);
     callback expand-all-hunks();
     callback collapse-non-diff-lines();
-    callback copy-file-path(string);
-    callback copy-commit-sha(string);
-    callback copy-source-branch(string);
+    callback copy-file-path(string) -> bool;
+    callback copy-commit-sha(string) -> bool;
+    callback copy-source-branch(string) -> bool;
     // Copy the current code-column selection (start/end are document-ordered).
     callback copy-diff-selection(int, int, int, int, string);
     callback resolve-diff-selection(int, float, float, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
@@ -604,6 +611,8 @@ export component PrReviewWorkspace inherits FocusScope {
     }
 
     // Capture ⌘/Ctrl+F while focus is in Filters/TextInputs under Files changed.
+    // Esc for open dialogs is owned by nested GitHubDialog capture; reject here
+    // so the dialog FocusScope on the path can accept it.
     capture-key-pressed(event) => {
         if (root.selected-tab == 2
             && event.modifiers.control
@@ -656,6 +665,25 @@ export component PrReviewWorkspace inherits FocusScope {
                 return accept;
             }
             if (event.text == Key.Escape) {
+                // Prefer dismissing an open dialog over find/selection when the
+                // workspace still holds focus (GitHubDialog also handles Esc
+                // while it or its nested fields are focused).
+                if (root.review-dialog-open && !root.action-loading) {
+                    root.review-dialog-open = false;
+                    return accept;
+                }
+                if (root.merge-dialog-open && !root.action-loading) {
+                    root.merge-dialog-open = false;
+                    return accept;
+                }
+                if (root.revert-dialog-open && !root.action-loading) {
+                    root.revert-dialog-open = false;
+                    return accept;
+                }
+                if (root.commit-range-dialog-open && !root.loading) {
+                    root.commit-range-dialog-open = false;
+                    return accept;
+                }
                 if (root.diff-find-open) {
                     root.close-diff-find();
                     return accept;
@@ -792,7 +820,7 @@ export component PrReviewWorkspace inherits FocusScope {
                         muted-background: root.github-bg-muted;
                         branch-background: root.github-accent-muted;
                         branch-foreground: AppState.effective-dark-mode ? #58a6ff : #0969da;
-                        copy-source-branch(branch) => { root.copy-source-branch(branch); }
+                        copy-source-branch(branch) => { root.copy-source-branch(branch) }
                     }
                 }
 
@@ -810,6 +838,10 @@ export component PrReviewWorkspace inherits FocusScope {
                     action-loading: root.action-loading;
                     actions-enabled: !root.modal-open;
                     readiness-popup-open: root.active-popover == "readiness";
+                    viewport-global-x: root.absolute-position.x;
+                    viewport-global-y: root.absolute-position.y;
+                    viewport-width: root.width;
+                    viewport-height: root.height;
                     can-comment: root.can-comment;
                     can-approve: root.can-approve;
                     can-request-changes: root.can-request-changes;
@@ -874,6 +906,10 @@ export component PrReviewWorkspace inherits FocusScope {
                         action-loading: root.action-loading;
                         actions-enabled: !root.modal-open;
                         readiness-popup-open: root.active-popover == "readiness";
+                        viewport-global-x: root.absolute-position.x;
+                        viewport-global-y: root.absolute-position.y;
+                        viewport-width: root.width;
+                        viewport-height: root.height;
                         can-comment: root.can-comment;
                         can-approve: root.can-approve;
                         can-request-changes: root.can-request-changes;
@@ -931,14 +967,13 @@ export component PrReviewWorkspace inherits FocusScope {
                     muted-background: root.github-bg-muted;
                     branch-background: root.github-accent-muted;
                     branch-foreground: AppState.effective-dark-mode ? #58a6ff : #0969da;
-                    copy-source-branch(branch) => { root.copy-source-branch(branch); }
+                    copy-source-branch(branch) => { root.copy-source-branch(branch) }
                 }
             }
 
             // Header-layer tip: same below-icon placement, but declared last with
-            // a high z so summary/readiness siblings cannot occlude it. Do not
-            // change Material ToolTip or other feature tips.
-            if root.back-button-hovered: ToolTip {
+            // a high z so summary/readiness siblings cannot occlude it.
+            if root.back-button-hovered: GitHubTooltip {
                 z: 200;
                 x: 24px;
                 y: root.stable-layout-width >= 1500px
@@ -1166,15 +1201,12 @@ export component PrReviewWorkspace inherits FocusScope {
                         horizontal-alignment: right;
                         vertical-alignment: center;
                     }
-                    FileToolbarButton {
-                        width: 30px;
-                        height: parent.height;
-                        icon-source: @image-url("../../assets/icons/octicon-copy-16.svg");
+                    GitHubCopyButton {
                         tooltip-text: "Copy full SHA for "
                             + root.commits[root.commit-range-start].short-sha;
                         tooltip-align-right: true;
-                        clicked => {
-                            root.copy-commit-sha(root.commits[root.commit-range-start].sha);
+                        copy-requested => {
+                            root.copy-commit-sha(root.commits[root.commit-range-start].sha)
                         }
                     }
                 }
@@ -2364,20 +2396,18 @@ export component PrReviewWorkspace inherits FocusScope {
                                     commit-row.sha-hovered = self.has-hover;
                                 }
                             }
-                            if commit-row.sha-hovered: ToolTip {
+                            if commit-row.sha-hovered: GitHubTooltip {
                                 x: parent.width - self.width;
                                 y: -self.height - 4px;
                                 text: "View commit details";
                             }
                         }
-                        copy-sha-button := FileToolbarButton {
+                        copy-sha-button := GitHubCopyButton {
                             x: parent.width - 44px;
                             y: (parent.height - self.height) / 2;
-                            icon-source: @image-url("../../assets/icons/octicon-copy-16.svg");
                             tooltip-text: "Copy full SHA";
                             tooltip-align-right: true;
-                            tooltip-above: true;
-                            clicked => { root.copy-commit-sha(commit.sha); }
+                            copy-requested => { root.copy-commit-sha(commit.sha) }
                         }
                         // Always mounted so row-hovered can read has-hover; hide
                         // when there is no message body to expand. Declared last
@@ -2411,6 +2441,9 @@ export component PrReviewWorkspace inherits FocusScope {
         if root.selected-tab == 2: Rectangle {
             width: parent.width;
             vertical-stretch: 1;
+            // File-filter ActionMenu may flip above into the tab row; the menu
+            // itself mounts on the workspace root so toolbar z:80 cannot cover it.
+            clip: false;
             background: root.github-bg-default;
 
             if root.loading: MaterialText {
@@ -2436,6 +2469,9 @@ export component PrReviewWorkspace inherits FocusScope {
             if !root.loading && root.error-text == "": diff-surface := Rectangle {
                 width: parent.width;
                 height: parent.height;
+                // Keep false so the file-filter ActionMenu can flip above the
+                // tree header into the tabs row without being clipped here.
+                clip: false;
                 background: transparent;
                 private property <int> observed-line-model-revision: root.line-model-revision;
                 private property <int> observed-hunk-scroll-restore-revision:
@@ -2750,6 +2786,10 @@ export component PrReviewWorkspace inherits FocusScope {
                                 padding-left: 16px;
                                 padding-right: 16px;
                                 spacing: 8px;
+                                // The file toolbar is 46px tall while icon actions are
+                                // GitHub's 32px controls. Center their hit targets and
+                                // allow their tooltip layer to sit over the diff below.
+                                cross-axis-alignment: center;
                                 Rectangle {
                                     width: 16px;
                                     height: parent.height;
@@ -2772,6 +2812,10 @@ export component PrReviewWorkspace inherits FocusScope {
                                         width: parent.width;
                                         height: parent.height;
                                         spacing: 2px;
+                                        // This is the layout that owns the 32px copy
+                                        // control. Keep it centered within the 46px
+                                        // selected-file toolbar.
+                                        cross-axis-alignment: center;
 
                                         MaterialText {
                                             horizontal-stretch: 1;
@@ -2783,11 +2827,13 @@ export component PrReviewWorkspace inherits FocusScope {
                                             overflow: elide;
                                             vertical_alignment: center;
                                         }
-                                        FileToolbarButton {
-                                            icon-source: @image-url("../../assets/icons/octicon-copy-16.svg");
+                                        GitHubCopyButton {
                                             button-enabled: root.selected-file-path != "";
                                             tooltip-text: "Copy file path";
-                                            clicked => { root.copy-file-path(root.selected-file-path); }
+                                            // An above-tooltip would leave this toolbar's
+                                            // stacking context. Show it over the diff body.
+                                            tooltip-above: false;
+                                            copy-requested => { root.copy-file-path(root.selected-file-path) }
                                         }
                                         FileToolbarButton {
                                             icon-source: root.context-expanded
@@ -2854,6 +2900,10 @@ export component PrReviewWorkspace inherits FocusScope {
                                     button-enabled: root.selected-file-index >= 0 && !root.code-loading;
                                     viewing-file: root.viewing-file;
                                     open: root.active-popover == "file-menu";
+                                    viewport-global-x: root.absolute-position.x;
+                                    viewport-global-y: root.absolute-position.y;
+                                    viewport-width: root.width;
+                                    viewport-height: root.height;
                                     toggle-menu => {
                                         root.active-popover = root.active-popover == "file-menu" ? "" : "file-menu";
                                     }
@@ -3466,28 +3516,52 @@ export component PrReviewWorkspace inherits FocusScope {
                     opacity: root.file-list-visible && (root.file-list-resizing || file-list-resize-handle.has-hover) ? 0.8 : 0;
                 }
 
-                // Mount the popover after both the file tree and diff panes.
-                // A child of the left pane cannot out-z the later-painted diff
-                // sibling, regardless of its local z value.
-                if root.file-list-visible: filter-menu := GitHubFilterMenu {
-                    z: 1000;
+                // Sync the filter IconButton position to the workspace-root
+                // ActionMenu host. Nested ids are not visible outside this
+                // conditional, so push coordinates through root properties.
+                if root.file-list-visible: filter-menu-anchor := Rectangle {
                     x: root.file-list-width - 46px;
                     y: 9px;
-                    open: root.active-popover == "file-filter";
-                    extension-filters: root.extension-filters;
-                    only-manifest-files: root.only-manifest-files;
-                    show-viewed-files: root.show-viewed-files;
-                    font-family: root.tree-font-family;
-                    toggle-extension(extension) => { root.toggle-extension-filter(extension); }
-                    toggle-manifest => { root.toggle-manifest-filter(); }
-                    toggle-viewed => { root.toggle-viewed-files(); }
+                    width: 34px;
+                    height: 34px;
+                    background: transparent;
+                    init => {
+                        root.filter-menu-anchor-x = self.absolute-position.x - root.absolute-position.x;
+                        root.filter-menu-anchor-y = self.absolute-position.y - root.absolute-position.y;
+                    }
+                    changed absolute-position => {
+                        root.filter-menu-anchor-x = self.absolute-position.x - root.absolute-position.x;
+                        root.filter-menu-anchor-y = self.absolute-position.y - root.absolute-position.y;
+                    }
                 }
             }
         }
     }
 
+    // Host File extensions above VerticalLayout siblings (toolbar z:80, tabs)
+    // so auto-flip on short/narrow windows is not covered. Anchor coords are
+    // synced from filter-menu-anchor inside the files pane.
+    if root.selected-tab == 2 && root.file-list-visible && !root.loading && root.error-text == "": GitHubFilterMenu {
+        z: 1200;
+        x: root.filter-menu-anchor-x;
+        y: root.filter-menu-anchor-y;
+        open: root.active-popover == "file-filter";
+        viewport-global-x: root.absolute-position.x;
+        viewport-global-y: root.absolute-position.y;
+        viewport-width: root.width;
+        viewport-height: root.height;
+        extension-filters: root.extension-filters;
+        only-manifest-files: root.only-manifest-files;
+        show-viewed-files: root.show-viewed-files;
+        font-family: root.tree-font-family;
+        toggle-extension(extension) => { root.toggle-extension-filter(extension); }
+        toggle-manifest => { root.toggle-manifest-filter(); }
+        toggle-viewed => { root.toggle-viewed-files(); }
+    }
+
     commit-dialog-frame := GitHubDialog {
         dialog-visible: root.commit-range-dialog-open;
+        modal: false;
         title: "Select commits to view";
         dialog-width: 640px;
         dialog-height: min(720px, root.height - 32px);
@@ -3502,7 +3576,6 @@ export component PrReviewWorkspace inherits FocusScope {
             root.apply-commit-range(root.draft-range-start, root.draft-range-end);
             root.commit-range-dialog-open = false;
         }
-    }
 
             if root.commit-range-dialog-open: commit-range-scroll := ScrollView {
                 x: commit-dialog-frame.content-x;
@@ -3714,9 +3787,11 @@ export component PrReviewWorkspace inherits FocusScope {
                     }
                 }
             }
+    }
 
     review-dialog-frame := GitHubDialog {
         dialog-visible: root.review-dialog-open;
+        modal: false;
         title: "Review changes";
         dialog-width: 480px;
         dialog-height: min(500px, root.height - 32px);
@@ -3729,7 +3804,6 @@ export component PrReviewWorkspace inherits FocusScope {
         close-requested => { root.review-dialog-open = false; }
         cancel-clicked => { root.review-dialog-open = false; }
         primary-clicked => { root.submit-review(root.selected-review-action, root.review-body); }
-    }
 
         if root.review-dialog-open: MaterialText {
             x: review-dialog-frame.content-x + 16px;
@@ -3798,9 +3872,11 @@ export component PrReviewWorkspace inherits FocusScope {
                 chosen => { root.selected-review-action = "request_changes"; }
             }
         }
+    }
 
     merge-dialog-frame := GitHubDialog {
         dialog-visible: root.merge-dialog-open;
+        modal: false;
         title: "Merge pull request #" + root.pull-request-number;
         dialog-width: 480px;
         dialog-height: min(470px, root.height - 32px);
@@ -3813,7 +3889,6 @@ export component PrReviewWorkspace inherits FocusScope {
         close-requested => { root.merge-dialog-open = false; }
         cancel-clicked => { root.merge-dialog-open = false; }
         primary-clicked => { root.merge(root.selected-merge-method, root.remove-source-branch); }
-    }
 
         if root.merge-dialog-open: MaterialText {
             x: merge-dialog-frame.content-x + 16px;
@@ -3904,9 +3979,11 @@ export component PrReviewWorkspace inherits FocusScope {
                 clicked => { root.remove-source-branch = !root.remove-source-branch; }
             }
         }
+    }
 
     revert-dialog-frame := GitHubDialog {
         dialog-visible: root.revert-dialog-open;
+        modal: false;
         title: "Revert pull request #" + root.pull-request-number;
         dialog-width: 480px;
         dialog-height: 296px;
@@ -3919,7 +3996,6 @@ export component PrReviewWorkspace inherits FocusScope {
         close-requested => { root.revert-dialog-open = false; }
         cancel-clicked => { root.revert-dialog-open = false; }
         primary-clicked => { root.revert(); }
-    }
 
         if root.revert-dialog-open: MaterialText {
             x: revert-dialog-frame.content-x;
@@ -3946,4 +4022,5 @@ export component PrReviewWorkspace inherits FocusScope {
             wrap: word-wrap;
             vertical-alignment: top;
         }
+    }
 }

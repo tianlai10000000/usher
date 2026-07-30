@@ -144,19 +144,16 @@ pub(crate) fn bind_project_context(
     ui.on_workflow_copy_remote_repo(move |remote| {
         let remote = remote.trim();
         if remote.is_empty() {
-            return;
+            return false;
         }
         match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(remote)) {
-            Ok(()) => {
-                if let Some(ui) = ui_weak.upgrade() {
-                    show_success(&ui, "Copied remote URL.");
-                }
-            }
+            Ok(()) => true,
             Err(error) => {
                 log::warn!("[Workflow] Failed to copy remote URL: {error}");
                 if let Some(ui) = ui_weak.upgrade() {
                     show_error(&ui, "Failed to copy the remote URL.");
                 }
+                false
             }
         }
     });

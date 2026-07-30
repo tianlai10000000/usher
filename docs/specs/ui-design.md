@@ -87,6 +87,93 @@ For every new component or material visual change:
 - 实质性视觉改动必须截图或检查实际渲染结果；仅编译通过不算完成。
 - 交付时说明无法访问的参考资料以及未手工检查的状态。
 
+## Copy button / 复制按钮
+
+Every icon-only copy action must use
+`ui/components/button/github_copy_button.slint`; pages must not recreate the
+Copy/Check state, success color, or confirmation tooltip. The component
+reproduces GitHub's current repository Clone popover CopyToClipboardButton:
+a 32×32 invisible IconButton with a 6px radius, a centered 16px Copy Octicon,
+Primer muted foreground, and transparent hover/pressed control overlays. The
+clipboard callback returns `bool`. Only `true` switches the icon to the 16px
+Check Octicon in `fgColor-success`, changes the visible tooltip text to
+`Copied!`, and starts the two-second reset. A failed write remains in the
+default state and the owning feature may report an error; successful copy
+actions must not also show a global Toast.
+
+All application-owned hover tips must use
+`ui/components/github_tooltip.slint` (`GitHubTooltip`), including non-copy
+controls. It follows GitHub TooltipV2: 12px white text on `#25292e`, 4px/8px
+vertical/horizontal padding, a 6px radius, and a 4px gap from the host
+control. Callers may select above/below and leading/trailing placement only to
+avoid clipping; they supply the action-specific text. `GitHubCopyButton`
+composes this shared component and owns the `Copied!` confirmation state.
+
+所有仅图标复制操作必须复用
+`ui/components/button/github_copy_button.slint`；页面不得自行重做
+Copy/Check 状态、成功色或确认 Tooltip。组件复刻 GitHub 当前仓库 Clone
+浮层的 CopyToClipboardButton：32×32、6px 圆角的 invisible IconButton，
+居中 16px Copy Octicon、Primer muted 前景色，以及透明的 Hover/按下状态层。
+剪贴板 callback 返回 `bool`；只有返回 `true` 时才切换到使用
+`fgColor-success` 的 16px Check Octicon，把可见 Tooltip 改为 `Copied!`，
+并启动两秒恢复计时。写入失败保持默认状态，可由 feature 报错；复制成功不得
+再重复显示全局 Toast。
+
+所有应用自有的 Hover 提示（包括非复制控件）必须使用
+`ui/components/github_tooltip.slint` 中的 `GitHubTooltip`。它对齐 GitHub
+TooltipV2：12px 白字、`#25292e` 背景、纵向/横向 4px/8px 内边距、6px 圆角，
+并与宿主控件间隔 4px。调用方只能为避免裁切选择上下和首尾位置，并传入
+操作专属文案；`GitHubCopyButton` 组合这个共享组件并负责 `Copied!` 确认状态。
+
+References: the current `github.com` repository Clone popover, [Primer
+Octicons](https://github.com/primer/octicons), and [Primer functional color
+tokens](https://github.com/primer/primitives).
+
+## Anchored action menus / 锚定操作菜单
+
+Every application-owned click-triggered anchored menu or compact information
+overlay must use `ui/components/github_action_menu.slint`
+(`GitHubActionMenu`). The component implements Primer's composition of an
+ActionList inside an AnchoredOverlay: a 12px-radius overlay surface, semantic
+canvas and border colors, medium shadow, a 4px anchor gap, and start/center/end
+alignment. Callers provide anchor and viewport rectangles in one coordinate
+space plus the content's natural height; they must not recreate the surface,
+shadow, collision handling, or scrolling locally.
+
+Placement is responsive to the current application viewport. The menu clamps
+to an 8px viewport inset, opens on the requested side, and in `auto` mode flips
+above the anchor when the preferred content does not fit below and more room is
+available above. Its height is bounded by both the selected Primer overlay
+height and the available side of the viewport. Overflow stays inside the menu
+and scrolls vertically; opening a menu resets it to the first item. Page-level
+outside-click dismissal remains owned by the feature so switching between
+adjacent triggers still works.
+
+The PR review `DiffSettingsPopover` (the **Diff view** selector) is an explicit
+product exception and retains its current specialized popover implementation.
+Modal dialogs and inline disclosure sections are not ActionMenus and are also
+outside this contract.
+
+所有应用自有、由点击触发的锚定菜单或紧凑信息浮层必须使用
+`ui/components/github_action_menu.slint` 中的 `GitHubActionMenu`。该组件实现
+Primer 的 ActionList + AnchoredOverlay 组合：12px 圆角浮层、语义画布和边框色、
+中等阴影、与锚点 4px 间距，以及 start/center/end 对齐。调用方只提供同一坐标系
+中的锚点矩形、视口矩形和内容自然高度，不得在页面内重复实现浮层表面、阴影、
+碰撞处理或滚动。
+
+定位必须随当前程序视口变化。菜单与视口保持 8px 安全边距；按指定方向打开，
+`auto` 模式下若下方容纳不下首选内容且上方空间更多，则自动翻到锚点上方。高度
+同时受所选 Primer Overlay 档位和当前方向可用空间限制；溢出内容只在菜单内部
+纵向滚动，每次打开从第一项开始。页面级点击外部关闭仍由 feature 管理，以保留
+相邻触发器之间一次点击直接切换的交互。
+
+PR Review 的 `DiffSettingsPopover`（**Diff view** 选择器）是明确的产品例外，
+继续保留当前专用实现。模态 Dialog 和页面内联展开区域也不属于 ActionMenu 契约。
+
+References: [Primer ActionMenu](https://primer.style/product/components/action-menu/),
+[Primer AnchoredOverlay](https://primer.style/product/components/anchored-overlay/),
+and [Primer Overlay](https://primer.style/product/components/overlay/).
+
 ## Toast reference / Toast 参考
 
 The shared Toast in `ui/components/toast/toast.slint` follows the official Primer CSS Toast geometry: a horizontally centered, content-sized card capped at 450 px, 16 px vertical viewport margin (8 px below the 544 px breakpoint), a 48 px semantic icon rail, 16 px content padding, neutral canvas, semantic rail color, border, and medium shadow. `top`, `middle`, and `bottom` select only the vertical position. Success uses the Check Octicon, error uses Alert, informational text uses Info, and loading uses a spinner.
@@ -120,7 +207,11 @@ The content is centered within equal left and right gutters, capped at 1120 px,
 and must shrink to the allocated viewport width without introducing a
 horizontal scrollbar. Above 1000 px the Settings gutters grow to 48 px so the
 form column keeps clearer trailing space; the start-side NavList pane is 180 px
-wide for the short section labels.
+wide for the short section labels. Secret `GitHubTextField` values stay on the
+medium 14 px body size when revealed; while masked, Slint renders U+25CF ●
+instead of github.com's browser U+2022 •, so the shared control uses a 10 px
+mask glyph with 1.5 px letter-spacing only in that state to match GitHub
+password/token field density.
 
 设置页面采用 Primer 的 Settings Page 组合：常规和宽窗口使用左侧
 `NavList` + 单一内容区的 `SplitPageLayout`，低于 768px 的 regular
@@ -131,6 +222,10 @@ wide for the short section labels.
 页面内容须在等宽的左右边距内居中，最大宽度为 1120px，并随实际分配的
 视口宽度收缩，不得产生横向滚动条。宽度超过 1000px 时 Settings 外边距
 增至 48px，避免表单贴紧右侧；左侧 NavList 对短标签使用 180px 宽度。
+密钥类 `GitHubTextField` 在明文显示时保持中号 14px 正文字号；遮罩态下
+Slint 使用较大的 U+25CF ●（而非 github.com 浏览器的 U+2022 •），因此共享
+控件仅在遮罩态使用 10px 字号与 1.5px 字距，以贴近 GitHub 密码/Token
+输入框的点阵密度。
 
 About uses the same full-page `PageHeader` hierarchy, Primer metadata `Label`,
 bordered `Box` rows, semantic muted text, and a maximum readable content width.
@@ -213,13 +308,18 @@ high, subtle canvas, one-pixel default top border, 12 px muted labels, and
 mounted hover/pressed targets. Transient update and notification state stays
 left-aligned; connection and version metadata stay right-aligned. Popovers use
 the default canvas, default border, 6 px radius, and Primer floating shadow.
-Status color is reserved for connection or error meaning.
+Status color is reserved for connection or error meaning. In `ui/main.slint`,
+the utility bar's root `z` must stay above `PageScrollActions` so anchored
+popovers are not covered by the terminal or back-to-top IconButtons, and below
+full-page overlays, Notify, and Toast.
 
 GitHub 网页 App Footer 不对应 Usher 常驻的桌面运行状态，因此底部采用紧凑
 Primer utility bar：高度 28px、subtle 画布、1px 默认顶边框、12px 弱化
 标签及常驻 Hover/按下命中区。更新与通知等临时状态左对齐，网络连接和版本
 元信息右对齐；Popover 使用默认画布、默认边框、6px 圆角和 Primer floating
-阴影。状态色仅用于表达连接或错误语义。
+阴影。状态色仅用于表达连接或错误语义。在 `ui/main.slint` 中，utility bar
+的根层 `z` 必须高于 `PageScrollActions`，避免锚定 Popover 被终端或返回顶部
+IconButton 遮挡，同时仍低于全页遮罩、Notify 与 Toast。
 
 References: [Primer navigation patterns](https://primer.style/product/ui-patterns/navigation/),
 [Primer NavList guidelines](https://primer.style/product/components/nav-list/guidlines/),
@@ -489,6 +589,12 @@ Every application-owned modal uses the shared
 imperative state/action adapter; project forms, PR review/merge/revert and
 commit-range content, update prompts, and download progress must not recreate
 backdrop, surface, header, close button, footer, or action-state chrome locally.
+Feature body content must nest as `GitHubDialog` `@children` so Esc stays on the
+focus path while a nested field is focused. `GitHubDialog.modal` defaults to
+`false`: Esc dismisses via `close-requested` when `close-enabled` is true.
+Set `modal: true` for hard-modal sessions that must not dismiss on Esc (and,
+through `DialogEnhance`, also block backdrop dismiss when `DialogManager.modal`
+is true). `dismiss-on-backdrop` remains an independent backdrop gesture.
 
 新增和编辑采用 Primer Dialog 的 480px large 宽度、Header/Body/Footer 的
 16px 安全边距、32px 中号控件、6px 输入框圆角及单列滚动表单。删除采用
@@ -500,7 +606,12 @@ backdrop, surface, header, close button, footer, or action-state chrome locally.
 `ui/components/dialog/github_dialog.slint` 外壳。`DialogManager` 只负责
 命令式状态与操作适配；项目表单、PR Review/Merge/Revert、Commit Range、
 更新提示和下载进度不得在页面内重复实现遮罩、Surface、Header、关闭按钮、
-Footer 或操作状态样式。
+Footer 或操作状态样式。功能正文必须作为 `GitHubDialog` 的 `@children`
+嵌套，这样在内部输入框聚焦时 Esc 仍落在同一条焦点捕获路径上。
+`GitHubDialog.modal` 默认为 `false`：在 `close-enabled` 为 true 时，Esc
+通过 `close-requested` 关闭弹窗。需要禁止 Esc 关闭时设置 `modal: true`
+（`DialogEnhance` 在 `DialogManager.modal == true` 时同时禁止 Esc 与背景
+点击关闭）。`dismiss-on-backdrop` 仍是独立的背景点击关闭开关。
 
 References: [Primer Card](https://primer.style/product/components/card/),
 [Primer SegmentedControl](https://primer.style/product/components/segmented-control/),
