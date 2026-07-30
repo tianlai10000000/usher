@@ -77,6 +77,23 @@ pub(crate) fn set_app_appearance(is_dark: bool) {
     );
 }
 
+/// Leave NSApplication appearance unset so AppKit tracks the system setting.
+/// Required for Auto mode; a forced Aqua/DarkAqua locks the process appearance.
+pub(crate) fn follow_system_appearance() {
+    let Some(app_class) = Class::get("NSApplication") else {
+        return;
+    };
+    let app: *mut Object = unsafe { msg_send![app_class, sharedApplication] };
+    if app.is_null() {
+        return;
+    }
+    let nil: *mut Object = std::ptr::null_mut();
+    unsafe {
+        let _: () = msg_send![app, setAppearance: nil];
+    }
+    log::info!("[Theme] App appearance follows the system setting");
+}
+
 pub(crate) fn detect_system_dark_mode() -> bool {
     let Some(defaults_class) = Class::get("NSUserDefaults") else {
         return false;
@@ -506,6 +523,76 @@ pub(crate) fn setup_pr_review_fonts(app: &MainWindow) {
         app.set_workflow_pr_review_tree_font_family("Helvetica Neue".into());
         log::warn!("[PR Review] macOS system UI font unavailable; falling back to Helvetica Neue");
     }
+}
+
+/// Observe macOS appearance flips and refresh Auto theme promptly.
+///
+/// `AppleInterfaceThemeChangedNotification` is delivered on the distributed
+/// notification center. A short delay lets `NSUserDefaults` settle before we
+/// re-read `AppleInterfaceStyle`.
+pub(crate) fn install_system_theme_change_observer() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        static mut OBSERVER_CLASS: *const Class = std::ptr::null();
+        static mut OBSERVER: *mut Object = std::ptr::null_mut();
+
+        unsafe {
+            let Some(superclass) = Class::get("NSObject") else {
+                log::warn!("[Theme] NSObject unavailable for theme observer");
+                return;
+            };
+            let Some(mut decl) = ClassDecl::new("UsherSystemThemeObserver", superclass) else {
+                log::warn!("[Theme] Failed to declare system theme observer class");
+                return;
+            };
+
+            extern "C" fn theme_changed(_this: &Object, _cmd: Sel, _notification: *mut Object) {
+                let _ = std::thread::Builder::new()
+                    .name("system-theme-notify".to_string())
+                    .spawn(|| {
+                        // Defaults can lag the distributed notification slightly.
+                        std::thread::sleep(std::time::Duration::from_millis(120));
+                        super::publish_system_theme_if_changed();
+                    });
+            }
+
+            decl.add_method(
+                sel!(usherSystemThemeChanged:),
+                theme_changed as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            OBSERVER_CLASS = decl.register();
+
+            let observer_class = &*OBSERVER_CLASS;
+            let observer: *mut Object = msg_send![observer_class, alloc];
+            let observer: *mut Object = msg_send![observer, init];
+            if observer.is_null() {
+                log::warn!("[Theme] Failed to allocate system theme observer");
+                return;
+            }
+            let _: () = msg_send![observer, retain];
+            OBSERVER = observer;
+
+            let Some(center_class) = Class::get("NSDistributedNotificationCenter") else {
+                log::warn!("[Theme] NSDistributedNotificationCenter unavailable");
+                return;
+            };
+            let center: *mut Object = msg_send![center_class, defaultCenter];
+            if center.is_null() {
+                return;
+            }
+            let Some(name) = nsstring("AppleInterfaceThemeChangedNotification") else {
+                return;
+            };
+            let _: () = msg_send![
+                center,
+                addObserver: observer
+                selector: sel!(usherSystemThemeChanged:)
+                name: name
+                object: std::ptr::null::<Object>()
+            ];
+            log::info!("[Theme] Listening for AppleInterfaceThemeChangedNotification");
+        }
+    });
 }
 
 /// Play a short system UI click via AppKit `NSSound`.

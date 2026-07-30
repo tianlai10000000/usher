@@ -53,9 +53,10 @@ mod app_runtime;
 mod memory_diagnostics;
 mod platform;
 use platform::{
-    effective_dark_mode as get_effective_dark_mode, install_titlebar_settings_button,
-    play_ui_click, set_app_appearance, set_title_bar_color, setup_application_font,
-    setup_pr_review_fonts,
+    THEME_MODE_AUTO, apply_native_appearance_for_mode, apply_native_chrome_for_mode,
+    effective_dark_mode as get_effective_dark_mode, install_system_theme_watch,
+    install_titlebar_settings_button, play_ui_click, set_auto_theme_watch_enabled,
+    set_title_bar_color, setup_application_font, setup_pr_review_fonts,
 };
 mod terminal;
 
@@ -155,9 +156,10 @@ fn ui() -> Result<MainWindow> {
     // Load settings BEFORE creating window to set app appearance early (prevents theme flash)
     let loaded_settings = settings::load_settings();
 
-    // Set app-level appearance before window is created (prevents flash on macOS)
-    let is_dark = get_effective_dark_mode(loaded_settings.theme_mode);
-    set_app_appearance(is_dark);
+    // Set app-level appearance before window is created (prevents flash on macOS).
+    // Auto clears any forced AppKit appearance so the process can track the OS.
+    let is_dark = apply_native_appearance_for_mode(loaded_settings.theme_mode);
+    set_auto_theme_watch_enabled(loaded_settings.theme_mode == THEME_MODE_AUTO);
 
     // Now create the MainWindow (will inherit app appearance)
     // Using native macOS title bar
@@ -450,34 +452,35 @@ fn ui() -> Result<MainWindow> {
         if let Some(win) = app_weak.upgrade() {
             let app_state = AppState::get(&win);
 
-            // Update UI state
             app_state.set_theme_mode(mode);
-
-            // Save to config file
             settings::save_theme_mode(mode);
+            set_auto_theme_watch_enabled(mode == THEME_MODE_AUTO);
+            apply_native_chrome_for_mode(mode);
 
             // The Linux detector talks to the XDG Desktop Portal over D-Bus.
             // Resolve Auto away from the Slint event loop so a slow or missing
             // portal cannot stall the UI.
             #[cfg(target_os = "linux")]
-            if mode == 2 {
+            if mode == THEME_MODE_AUTO {
                 let win_weak = win.as_weak();
                 if let Err(error) = std::thread::Builder::new()
                     .name("system-theme-detect".to_string())
                     .spawn(move || {
-                        let is_dark = get_effective_dark_mode(2);
+                        let is_dark = get_effective_dark_mode(THEME_MODE_AUTO);
                         let _ = slint::invoke_from_event_loop(move || {
                             let Some(win) = win_weak.upgrade() else {
                                 return;
                             };
                             let app_state = AppState::get(&win);
-                            if app_state.get_theme_mode() != 2 {
+                            if app_state.get_theme_mode() != THEME_MODE_AUTO {
                                 return;
                             }
                             app_state.set_effective_dark_mode(is_dark);
                             set_title_bar_color(&win, is_dark);
                             set_terminal_dark_mode(&win, is_dark);
-                            log::info!("[Theme] Changed to mode: 2 (effective dark: {is_dark})");
+                            log::info!(
+                                "[Theme] Changed to mode: {THEME_MODE_AUTO} (effective dark: {is_dark})"
+                            );
                         });
                     })
                 {
@@ -486,33 +489,37 @@ fn ui() -> Result<MainWindow> {
                 return;
             }
 
-            // Get effective dark mode (resolves Auto to actual light/dark)
             let is_dark = get_effective_dark_mode(mode);
-
-            // For Auto mode, set the effective-dark-mode property so Slint can update Palette
-            if mode == 2 {
+            if mode == THEME_MODE_AUTO {
                 app_state.set_effective_dark_mode(is_dark);
             }
-
-            // Set title bar color
             set_title_bar_color(&win, is_dark);
             set_terminal_dark_mode(&win, is_dark);
 
-            log::info!(
-                "[Theme] Changed to mode: {} (effective dark: {})",
-                mode,
-                is_dark
-            );
+            log::info!("[Theme] Changed to mode: {mode} (effective dark: {is_dark})");
         }
     });
 
     // ========= Auto Theme Mode ========= //
-    // For Auto mode, set effective-dark-mode so Slint can update Palette
+    // Seed Auto's resolved palette and install the live OS theme watcher.
     let initial_theme = loaded_settings.theme_mode;
-    if initial_theme == 2 {
-        let is_dark = get_effective_dark_mode(initial_theme);
+    if initial_theme == THEME_MODE_AUTO {
         AppState::get(&app).set_effective_dark_mode(is_dark);
     }
+    let app_weak_theme_watch = app.as_weak();
+    install_system_theme_watch(move |is_dark| {
+        let Some(win) = app_weak_theme_watch.upgrade() else {
+            return;
+        };
+        let app_state = AppState::get(&win);
+        if app_state.get_theme_mode() != THEME_MODE_AUTO {
+            return;
+        }
+        app_state.set_effective_dark_mode(is_dark);
+        set_title_bar_color(&win, is_dark);
+        set_terminal_dark_mode(&win, is_dark);
+        log::info!("[Theme] System appearance changed (effective dark: {is_dark})");
+    });
 
     // ========= App Info ========= //
     // Set application version number

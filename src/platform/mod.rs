@@ -6,6 +6,10 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::sync::Once;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use crate::MainWindow;
 
@@ -18,13 +22,25 @@ mod windows;
 #[cfg(target_os = "linux")]
 mod linux;
 
+/// Persisted theme choice: Light / Dark / Auto.
+pub(crate) const THEME_MODE_LIGHT: i32 = 0;
+pub(crate) const THEME_MODE_DARK: i32 = 1;
+pub(crate) const THEME_MODE_AUTO: i32 = 2;
+
+type SystemThemeHandler = Arc<dyn Fn(bool) + Send + Sync + 'static>;
+
+static SYSTEM_THEME_HANDLER: OnceLock<SystemThemeHandler> = OnceLock::new();
+static AUTO_THEME_WATCH_ENABLED: AtomicBool = AtomicBool::new(false);
+static LAST_SYSTEM_DARK: AtomicBool = AtomicBool::new(false);
+static THEME_WATCH_STARTED: Once = Once::new();
+
 #[cfg(target_os = "macos")]
 pub use macos::is_window_interacting;
 
 #[cfg(target_os = "macos")]
 pub(crate) use macos::{
-    detect_system_dark_mode, install_titlebar_settings_button, play_ui_click, set_app_appearance,
-    set_title_bar_color, setup_pr_review_fonts,
+    detect_system_dark_mode, follow_system_appearance, install_titlebar_settings_button,
+    play_ui_click, set_app_appearance, set_title_bar_color, setup_pr_review_fonts,
 };
 
 #[cfg(target_os = "windows")]
@@ -45,6 +61,9 @@ pub fn is_window_interacting() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn set_app_appearance(_is_dark: bool) {}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn follow_system_appearance() {}
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn set_title_bar_color(_window: &MainWindow, _is_dark: bool) {}
@@ -84,11 +103,87 @@ pub(crate) fn setup_pr_review_fonts(app: &MainWindow) {
 /// Resolve the persisted theme choice to the effective light/dark appearance.
 pub(crate) fn effective_dark_mode(theme_mode: i32) -> bool {
     match theme_mode {
-        0 => false,
-        1 => true,
-        2 => detect_system_dark_mode(),
+        THEME_MODE_LIGHT => false,
+        THEME_MODE_DARK => true,
+        THEME_MODE_AUTO => detect_system_dark_mode(),
         _ => false,
     }
+}
+
+/// Apply native window chrome for Light/Dark/Auto without resolving Auto's palette.
+///
+/// Auto clears any forced AppKit appearance so the process can track the OS;
+/// explicit Light/Dark lock Aqua/DarkAqua on macOS. No-op chrome helpers on
+/// Windows/Linux still leave Slint palette updates to the caller.
+pub(crate) fn apply_native_chrome_for_mode(theme_mode: i32) {
+    if theme_mode == THEME_MODE_AUTO {
+        follow_system_appearance();
+    } else {
+        set_app_appearance(theme_mode == THEME_MODE_DARK);
+    }
+}
+
+/// Apply native chrome for Light/Dark/Auto and return the effective dark flag.
+pub(crate) fn apply_native_appearance_for_mode(theme_mode: i32) -> bool {
+    apply_native_chrome_for_mode(theme_mode);
+    effective_dark_mode(theme_mode)
+}
+
+/// Enable or disable live system-theme watching used by Auto mode.
+pub(crate) fn set_auto_theme_watch_enabled(enabled: bool) {
+    if enabled {
+        LAST_SYSTEM_DARK.store(detect_system_dark_mode(), Ordering::SeqCst);
+    }
+    AUTO_THEME_WATCH_ENABLED.store(enabled, Ordering::SeqCst);
+}
+
+/// Install the cross-platform Auto theme watcher once.
+///
+/// - macOS: `AppleInterfaceThemeChangedNotification` plus a 1s poll fallback
+/// - Windows / Linux: 1s poll of the native theme preference / XDG portal
+///
+/// `on_change` runs on the Slint event loop with the newly detected dark flag.
+pub(crate) fn install_system_theme_watch(on_change: impl Fn(bool) + Send + Sync + 'static) {
+    let _ = SYSTEM_THEME_HANDLER.set(Arc::new(on_change));
+    LAST_SYSTEM_DARK.store(detect_system_dark_mode(), Ordering::SeqCst);
+
+    #[cfg(target_os = "macos")]
+    macos::install_system_theme_change_observer();
+
+    THEME_WATCH_STARTED.call_once(|| {
+        if let Err(error) = std::thread::Builder::new()
+            .name("system-theme-watch".to_string())
+            .spawn(|| {
+                loop {
+                    std::thread::sleep(Duration::from_secs(1));
+                    if !AUTO_THEME_WATCH_ENABLED.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    publish_system_theme_if_changed();
+                }
+            })
+        {
+            log::warn!("[Theme] Failed to start system theme watcher: {error}");
+        }
+    });
+}
+
+/// Re-read the OS theme and notify the UI when Auto mode is active and it changed.
+pub(crate) fn publish_system_theme_if_changed() {
+    if !AUTO_THEME_WATCH_ENABLED.load(Ordering::SeqCst) {
+        return;
+    }
+    let is_dark = detect_system_dark_mode();
+    let previous = LAST_SYSTEM_DARK.swap(is_dark, Ordering::SeqCst);
+    if previous == is_dark {
+        return;
+    }
+    let Some(handler) = SYSTEM_THEME_HANDLER.get().cloned() else {
+        return;
+    };
+    let _ = slint::invoke_from_event_loop(move || {
+        handler(is_dark);
+    });
 }
 
 /// GitHub Desktop wording for revealing a folder in the OS file manager.
@@ -150,12 +245,12 @@ pub(crate) fn open_directory_in_file_manager(path: &Path) -> Result<(), String> 
 
 #[cfg(test)]
 mod tests {
-    use super::{effective_dark_mode, open_directory_tooltip};
+    use super::{THEME_MODE_DARK, THEME_MODE_LIGHT, effective_dark_mode, open_directory_tooltip};
 
     #[test]
     fn resolves_explicit_theme_modes_without_platform_state() {
-        assert!(!effective_dark_mode(0));
-        assert!(effective_dark_mode(1));
+        assert!(!effective_dark_mode(THEME_MODE_LIGHT));
+        assert!(effective_dark_mode(THEME_MODE_DARK));
         assert!(!effective_dark_mode(-1));
         assert!(!effective_dark_mode(99));
     }

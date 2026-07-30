@@ -515,13 +515,17 @@ export component MainWindow inherits Window {
                                 { icon: @image-url("./assets/icons/home.svg"), text: "Home" },
                                 { icon: @image-url("./assets/icons/chat.svg"), text: "Chat" },
                                 { icon: @image-url("./assets/icons/project.svg"), text: "Project" },
-                                { icon: @image-url("./assets/icons/search.svg"), text: "Search" },
-                                { icon: @image-url("./assets/icons/info.svg"), text: "Notification" },
-                                { icon: @image-url("./assets/icons/success.svg"), text: "Toast" },
-                                { icon: @image-url("./assets/icons/warning.svg"), text: "Dialog" },
-                                { icon: @image-url("./assets/icons/tools.svg"), text: "Tools" },
-                                { icon: @image-url("./assets/icons/list.svg"), text: "List" },
-                                { icon: @image-url("./assets/icons/detail.svg"), text: "Detail" },
+                                // Temporarily hide development-only routes from the
+                                // primary rail. Keep these entries here (commented)
+                                // so they can be restored together with the matching
+                                // `NAVIGATION_ROUTES` entries in src/router/mod.rs.
+                                // { icon: @image-url("./assets/icons/search.svg"), text: "Search" },
+                                // { icon: @image-url("./assets/icons/info.svg"), text: "Notification" },
+                                // { icon: @image-url("./assets/icons/success.svg"), text: "Toast" },
+                                // { icon: @image-url("./assets/icons/warning.svg"), text: "Dialog" },
+                                // { icon: @image-url("./assets/icons/tools.svg"), text: "Tools" },
+                                // { icon: @image-url("./assets/icons/list.svg"), text: "List" },
+                                // { icon: @image-url("./assets/icons/detail.svg"), text: "Detail" },
                             ];
 
                             selected(item_index) => {

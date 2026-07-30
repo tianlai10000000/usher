@@ -11,13 +11,16 @@ const NAVIGATION_ROUTES: &[Route] = &[
     Route::Home,
     Route::Chat,
     Route::Project,
-    Route::Search,
-    Route::Notification,
-    Route::Toast,
-    Route::Dialog,
-    Route::Tools,
-    Route::List,
-    Route::Detail,
+    // Temporarily hidden from the primary navigation rail. Uncomment these
+    // together with the matching items in `ui/main.slint` when the development
+    // routes should become visible again.
+    // Route::Search,
+    // Route::Notification,
+    // Route::Toast,
+    // Route::Dialog,
+    // Route::Tools,
+    // Route::List,
+    // Route::Detail,
 ];
 
 #[derive(Debug, Clone, Copy)]
