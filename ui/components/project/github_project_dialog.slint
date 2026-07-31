@@ -1,0 +1,313 @@
+import {
+    GitHubTextField,
+    GitHubToggle
+} from "../settings/github_settings_controls.slint";
+import { GitHubDialog } from "../dialog/github_dialog.slint";
+import { GitHubScrollView } from "../github_scroll_view.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+
+export component GitHubProjectDialog {
+    in property <bool> modal-visible: false;
+    in property <string> mode: "add";
+    in property <string> original-alias: "";
+    in-out property <string> name;
+    in-out property <string> alias;
+    in-out property <string> local-repo;
+    in-out property <string> remote-repo;
+    in-out property <string> logo;
+    in-out property <string> project-tags;
+    in-out property <bool> is-pr-auto-update;
+    in property <image> logo-preview-image: @image-url("../../../logo.png");
+    in property <string> logo-preview-status: "Using app default logo";
+    in-out property <string> error-text;
+    callback submit(string, string, string, string, string, string, bool);
+    callback preview-logo(string);
+    callback confirm-delete(string);
+    callback cancel();
+
+    private property <bool> deleting: root.mode == "delete";
+    private property <length> dialog-width: root.deleting ? 320px : 480px;
+    private property <length> dialog-height: root.deleting
+        ? 248px
+        : min(680px, root.height - 32px);
+
+    dialog-frame := GitHubDialog {
+        dialog-visible: root.modal-visible;
+        // Forms keep Esc dismissible; backdrop stays blocked so pointer
+        // accidents do not discard edits (Primer form-dialog pattern).
+        modal: false;
+        title: root.mode == "edit" ? "Edit project" : root.deleting ? "Delete project?" : "New project";
+        subtitle: root.deleting
+            ? ""
+            : (root.mode == "edit"
+                ? "Update repository metadata and project options."
+                : "Add a local Git repository to Usher.");
+        dialog-width: root.dialog-width;
+        dialog-height: root.dialog-height;
+        body-padding: 0px;
+        primary-label: root.mode == "edit" ? "Save changes" : root.deleting ? "Delete project" : "Add project";
+        primary-success: !root.deleting;
+        primary-danger: root.deleting;
+        close-requested => { root.cancel(); }
+        cancel-clicked => { root.cancel(); }
+        primary-clicked => {
+            if root.deleting {
+                root.confirm-delete(root.original-alias);
+                return;
+            }
+            if root.name == "" || root.alias == "" || root.local-repo == "" || root.remote-repo == "" {
+                root.error-text = "Project name, alias, local repository, and remote repository are required.";
+                return;
+            }
+            root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags, root.is-pr-auto-update);
+        }
+
+        if root.modal-visible: Rectangle {
+            x: dialog-frame.content-x;
+            y: dialog-frame.content-y;
+            width: dialog-frame.content-width;
+            height: dialog-frame.content-height;
+            z: 3100;
+            background: transparent;
+            clip: true;
+
+                    if root.deleting: Rectangle {
+                        x: 16px;
+                        y: 16px;
+                        width: parent.width - 32px;
+                        height: parent.height - 32px;
+                        background: transparent;
+
+                        Image {
+                            x: 0px;
+                            y: 2px;
+                            width: 16px;
+                            height: 16px;
+                            source: @image-url("../../assets/icons/octicon-alert-16.svg");
+                            colorize: GitHubTheme.danger-fg;
+                        }
+
+                        Text {
+                            x: 28px;
+                            y: 0px;
+                            width: parent.width - 28px;
+                            text: "This will permanently delete “" + root.name + "” from Usher. Repository files on disk will not be removed.";
+                            font-size: 14px;
+                            color: GitHubTheme.fg-default;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    if !root.deleting: GitHubScrollView {
+                        width: parent.width;
+                        height: parent.height;
+                        interactive: true;
+                        show-scrollbar: true;
+
+                        form-content := Rectangle {
+                            width: parent.width;
+                            height: root.error-text == "" ? 648px : 700px;
+                            background: transparent;
+
+                        GitHubTextField {
+                            x: 16px;
+                            y: 16px;
+                            width: parent.width - 32px;
+                            label: "Project name";
+                            text <=> root.name;
+                            placeholder: "e.g. Atlas";
+                            required: true;
+                            validation-error: root.error-text != "" && root.name == "";
+                            edited(text) => { root.error-text = ""; }
+                        }
+                        GitHubTextField {
+                            x: 16px;
+                            y: 86px;
+                            width: parent.width - 32px;
+                            label: "Project alias";
+                            text <=> root.alias;
+                            placeholder: "e.g. atlas";
+                            required: true;
+                            validation-error: root.error-text != "" && root.alias == "";
+                            edited(text) => { root.error-text = ""; }
+                        }
+                        GitHubTextField {
+                            x: 16px;
+                            y: 156px;
+                            width: parent.width - 32px;
+                            label: "Local repository";
+                            text <=> root.local-repo;
+                            placeholder: "/path/to/repository";
+                            required: true;
+                            validation-error: root.error-text != "" && root.local-repo == "";
+                            edited(text) => { root.error-text = ""; }
+                        }
+                        GitHubTextField {
+                            x: 16px;
+                            y: 226px;
+                            width: parent.width - 32px;
+                            label: "Remote repository";
+                            text <=> root.remote-repo;
+                            placeholder: "git@github.com:org/repo.git";
+                            required: true;
+                            validation-error: root.error-text != "" && root.remote-repo == "";
+                            edited(text) => { root.error-text = ""; }
+                        }
+                        GitHubTextField {
+                            x: 16px;
+                            y: 296px;
+                            width: parent.width - 32px;
+                            label: "Logo";
+                            text <=> root.logo;
+                            placeholder: "Local path, HTTPS URL, or data URI";
+                            caption: "Optional. Used in the project list and workflow header.";
+                            edited(text) => {
+                                root.error-text = "";
+                                root.preview-logo(text);
+                            }
+                        }
+                        GitHubTextField {
+                            x: 16px;
+                            y: 386px;
+                            width: parent.width - 32px;
+                            label: "Project type tags";
+                            text <=> root.project-tags;
+                            placeholder: "H5, Web, RN";
+                            caption: "Optional. Separate multiple labels with commas.";
+                        }
+
+                        Rectangle {
+                            x: 16px;
+                            y: 476px;
+                            width: parent.width - 32px;
+                            height: 68px;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: GitHubTheme.border-default;
+                            background: GitHubTheme.canvas-subtle;
+
+                            Text {
+                                x: 12px;
+                                y: 8px;
+                                width: parent.width - 84px;
+                                height: 20px;
+                                text: "Auto-refresh pull request counts";
+                                font-size: 14px;
+                                font-weight: 600;
+                                color: GitHubTheme.fg-default;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                x: 12px;
+                                y: 32px;
+                                width: parent.width - 84px;
+                                height: 18px;
+                                text: "Fetch FAT, UAT, and PROD counts when this list loads.";
+                                font-size: 12px;
+                                color: GitHubTheme.fg-muted;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            GitHubToggle {
+                                x: parent.width - 60px;
+                                y: 22px;
+                                checked <=> root.is-pr-auto-update;
+                            }
+                        }
+
+                        Rectangle {
+                            x: 16px;
+                            y: 556px;
+                            width: parent.width - 32px;
+                            height: 76px;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: GitHubTheme.border-default;
+                            background: GitHubTheme.canvas-default;
+
+                            Rectangle {
+                                x: 12px;
+                                y: 10px;
+                                width: 56px;
+                                height: 56px;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: GitHubTheme.border-default;
+                                background: GitHubTheme.control-default-rest;
+                                clip: true;
+
+                                Image {
+                                    x: 8px;
+                                    y: 8px;
+                                    width: 40px;
+                                    height: 40px;
+                                    source: root.logo-preview-image;
+                                }
+                            }
+
+                            Text {
+                                x: 80px;
+                                y: 12px;
+                                width: parent.width - 92px;
+                                height: 20px;
+                                text: "Logo preview";
+                                font-size: 14px;
+                                font-weight: 600;
+                                color: GitHubTheme.fg-default;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                x: 80px;
+                                y: 36px;
+                                width: parent.width - 92px;
+                                height: 20px;
+                                text: root.logo-preview-status;
+                                font-size: 12px;
+                                color: root.logo-preview-status == "Invalid input, using default logo"
+                                    ? (GitHubTheme.danger-fg)
+                                    : (GitHubTheme.fg-muted);
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+
+                        if root.error-text != "": Rectangle {
+                            x: 16px;
+                            y: 644px;
+                            width: parent.width - 32px;
+                            height: 40px;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: GitHubTheme.danger-border-muted;
+                            background: GitHubTheme.danger-inset;
+
+                            Image {
+                                x: 12px;
+                                y: 12px;
+                                width: 16px;
+                                height: 16px;
+                                source: @image-url("../../assets/icons/octicon-alert-16.svg");
+                                colorize: GitHubTheme.danger-fg;
+                            }
+
+                            Text {
+                                x: 36px;
+                                width: parent.width - 48px;
+                                height: parent.height;
+                                text: root.error-text;
+                                font-size: 12px;
+                                color: GitHubTheme.fg-default;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        }
+
+                    }
+        }
+    }
+}

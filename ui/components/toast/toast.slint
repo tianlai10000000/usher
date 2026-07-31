@@ -1,7 +1,11 @@
-import { MaterialText } from "@material";
-import { AppState } from "../../state/app_state.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
-export component Toast inherits Rectangle {
+// Compact floating feedback surface built from the current Primer Banner
+// anatomy: semantic leading visual, concise text, optional dismiss action, and
+// responsive stacking. It intentionally avoids legacy Toast's solid icon rail.
+export component GitHubToast inherits Rectangle {
     in property <string> message;
     in property <string> type;               // text, success, error, loading
     in property <string> position: "middle"; // top | middle | bottom
@@ -13,130 +17,145 @@ export component Toast inherits Rectangle {
     in property <bool> toast-width-is-auto: false;
     callback dismiss();
 
-    private property <length> viewport-margin: root.width < 544px ? 8px : 16px;
-    private property <length> available-width: max(1px, root.width - root.viewport-margin * 2);
-    private property <length> natural-width: message-measure.preferred-width + 80px;
-    private property <length> automatic-width: min(root.available-width, max(200px, min(450px, root.natural-width)));
+    private property <length> viewport-margin:
+        root.width < GitHubMetrics.breakpoint-small
+            ? GitHubMetrics.size-8
+            : GitHubMetrics.size-16;
+    private property <length> available-width:
+        max(1px, root.width - root.viewport-margin * 2);
+    private property <length> natural-width:
+        message-measure.preferred-width + GitHubMetrics.size-80;
+    private property <length> automatic-width:
+        min(root.available-width, max(240px, min(450px, root.natural-width)));
     private property <length> resolved-width: root.toast-width-is-auto
         ? root.automatic-width
         : (root.toast-width-value > 0px
             ? min(root.available-width, root.toast-width-value)
             : (root.toast-width-percent > 0
-                ? min(root.available-width, root.width * root.toast-width-percent * 0.01)
+                ? min(
+                    root.available-width,
+                    root.width * root.toast-width-percent * 0.01
+                )
                 : root.automatic-width));
-    private property <color> github-canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-    private property <color> github-border-default: AppState.effective-dark-mode ? #3d444d : #d0d7de;
-    private property <color> github-fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-    private property <color> github-accent-emphasis: AppState.effective-dark-mode ? #1f6feb : #0969da;
-    private property <color> github-success-emphasis: AppState.effective-dark-mode ? #238636 : #1f883d;
-    private property <color> github-danger-emphasis: AppState.effective-dark-mode ? #da3633 : #cf222e;
-    private property <color> github-neutral-emphasis: AppState.effective-dark-mode ? #6e7681 : #57606a;
+    private property <color> semantic-foreground:
+        root.type == "success" ? GitHubTheme.success-fg
+        : root.type == "error" ? GitHubTheme.danger-fg
+        : GitHubTheme.accent-fg;
+    private property <color> semantic-background:
+        root.type == "success" ? GitHubTheme.success-muted
+        : root.type == "error" ? GitHubTheme.danger-muted
+        : GitHubTheme.accent-subtle;
+    private property <color> semantic-border:
+        root.type == "success" ? GitHubTheme.success-fg
+        : root.type == "error" ? GitHubTheme.danger-border-muted
+        : GitHubTheme.accent-muted;
 
     width: 100%;
     height: 100%;
     background: transparent;
-    visible: toast-visible;
+    visible: root.toast-visible;
 
-    if overlay && toast-visible: Rectangle {
+    if root.overlay && root.toast-visible: Rectangle {
         width: 100%;
         height: 100%;
-        background: #00000040;
-        z: 0;
+        background: GitHubTheme.backdrop-subtle;
 
         TouchArea {
             width: 100%;
             height: 100%;
-            clicked => { if root.close-on-click { root.dismiss(); } }
-        }
-    }
-
-    // GitHub Primer Toast: content-sized neutral card with a fixed 48px
-    // semantic icon rail. This intentionally reproduces Primer's canonical
-    // retired Toast rather than Material's full-color snackbar treatment.
-    message-measure := MaterialText {
-        visible: false;
-        text: root.message;
-        font-size: 14px;
-    }
-
-    if toast-visible: toast-card := Rectangle {
-        z: 1;
-        width: root.resolved-width;
-        min-height: 48px;
-        height: max(48px, message-label.preferred-height + 32px);
-        // Toasts are horizontally centered for every vertical position.
-        x: parent.width / 2 - self.width / 2;
-        y: position == "top" ? root.viewport-margin :
-           position == "bottom" ? parent.height - self.height - root.viewport-margin :
-           parent.height / 2 - self.height / 2;
-        background: root.github-canvas-default;
-        border-width: 1px;
-        border-color: root.github-border-default;
-        border-radius: 6px;
-        drop-shadow-blur: 10px;
-        drop-shadow-color: AppState.effective-dark-mode ? #00000066 : #1f232826;
-        drop-shadow-offset-y: 1px;
-        clip: true;
-
-        icon-rail := Rectangle {
-            x: 0px;
-            y: 0px;
-            width: 48px;
-            height: parent.height;
-            background: root.type == "success" ? root.github-success-emphasis :
-                        root.type == "error" ? root.github-danger-emphasis :
-                        root.type == "loading" ? root.github-neutral-emphasis :
-                        root.github-accent-emphasis;
-
-            if root.type != "loading": Image {
-                x: 16px;
-                y: (parent.height - self.height) / 2;
-                width: 16px;
-                height: 16px;
-                source: root.type == "success"
-                    ? @image-url("../../assets/icons/octicon-check-16.svg")
-                    : root.type == "error"
-                        ? @image-url("../../assets/icons/octicon-alert-16.svg")
-                        : @image-url("../../assets/icons/octicon-info-16.svg");
-                colorize: #ffffff;
-            }
-
-            if root.type == "loading": Rectangle {
-                x: 14px;
-                y: (parent.height - self.height) / 2;
-                width: 20px;
-                height: 20px;
-                background: transparent;
-                private property <float> rotation-progress: mod(animation-tick(), 1000ms) / 1000ms;
-
-                Image {
-                    width: parent.width;
-                    height: parent.height;
-                    source: @image-url("../../assets/icons/github-spinner-16.svg");
-                    image-fit: contain;
-                    colorize: #ffffff;
-                    transform-rotation: parent.rotation-progress * 360deg;
-                    transform-origin: { x: self.width / 2, y: self.height / 2 };
+            clicked => {
+                if root.close-on-click {
+                    root.dismiss();
                 }
             }
         }
+    }
 
-        message-label := MaterialText {
-            x: 64px;
-            y: 16px;
-            width: parent.width - 80px;
+    message-measure := Text {
+        visible: false;
+        text: root.message;
+        font-size: GitHubMetrics.text-medium;
+        wrap: no-wrap;
+    }
+
+    if root.toast-visible: toast-card := Rectangle {
+        z: 1;
+        width: root.resolved-width;
+        min-height: GitHubMetrics.size-48;
+        height: max(
+            GitHubMetrics.size-48,
+            message-label.preferred-height + GitHubMetrics.size-24
+        );
+        x: (parent.width - self.width) / 2;
+        y: root.position == "top" ? root.viewport-margin
+            : root.position == "bottom"
+                ? parent.height - self.height - root.viewport-margin
+                : (parent.height - self.height) / 2;
+        background: root.semantic-background;
+        border-width: GitHubMetrics.border-thin;
+        border-color: root.semantic-border;
+        border-radius: GitHubMetrics.radius-medium;
+        drop-shadow-blur: GitHubMetrics.size-12;
+        drop-shadow-color: GitHubTheme.shadow-floating-medium;
+        drop-shadow-offset-y: GitHubMetrics.size-2;
+
+        if root.type == "loading": GitHubSpinner {
+            x: GitHubMetrics.size-16;
+            y: (parent.height - self.height) / 2;
+            spinner-size: GitHubMetrics.icon-medium;
+            foreground: root.semantic-foreground;
+        }
+
+        if root.type != "loading": Image {
+            x: GitHubMetrics.size-16;
+            y: (parent.height - self.height) / 2;
+            width: GitHubMetrics.icon-medium;
+            height: GitHubMetrics.icon-medium;
+            source: root.type == "success"
+                ? @image-url("../../assets/icons/octicon-check-16.svg")
+                : root.type == "error"
+                    ? @image-url("../../assets/icons/octicon-alert-16.svg")
+                    : @image-url("../../assets/icons/octicon-info-16.svg");
+            colorize: root.semantic-foreground;
+        }
+
+        message-label := Text {
+            x: GitHubMetrics.size-44;
+            y: GitHubMetrics.size-12;
+            width: parent.width - self.x
+                - (root.type == "loading"
+                    ? GitHubMetrics.size-16
+                    : GitHubMetrics.size-48);
             text: root.message;
-            font-size: 14px;
-            font-weight: 400;
-            color: root.github-fg-default;
-            vertical-alignment: center;
+            font-size: GitHubMetrics.text-medium;
+            color: GitHubTheme.fg-default;
             wrap: word-wrap;
+            vertical-alignment: center;
+        }
+
+        if root.type != "loading": GitHubIconButton {
+            x: parent.width - GitHubMetrics.size-40;
+            y: GitHubMetrics.size-8;
+            icon: @image-url("../../assets/icons/octicon-x-16.svg");
+            tooltip-text: "Dismiss";
+            tooltip-align-right: true;
+            tooltip-above: root.position != "top";
+            foreground: GitHubTheme.fg-muted;
+            clicked => { root.dismiss(); }
         }
 
         TouchArea {
-            width: 100%;
+            width: parent.width - (root.type == "loading"
+                ? 0px
+                : GitHubMetrics.size-40);
             height: 100%;
-            clicked => { if root.close-on-click { root.dismiss(); } }
+            enabled: root.close-on-click;
+            mouse-cursor: self.enabled ? pointer : default;
+            clicked => {
+                if root.close-on-click {
+                    root.dismiss();
+                }
+            }
         }
     }
 }

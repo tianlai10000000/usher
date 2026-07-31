@@ -14,7 +14,8 @@ This is the stable contract for the project-aware terminal drawer. Historical ex
 - Root bridge and docking: `ui/main.slint`.
 - Drawer presentation: `ui/components/drawer/terminal_drawer.slint`.
 - Project entry point: `src/project/mod.rs`.
-- Workflow entry point: root shell-drawer callback and `PageScrollActions`.
+- Workflow entry point: root shell-drawer callback and
+  `GitHubPageScrollActions`.
 
 - Rust controller、Session 与 PTY 状态：`src/terminal/mod.rs`、`session.rs`、`render.rs`。
 - 纯键盘映射、诊断格式和刷新节流策略：`src/terminal/input.rs`、
@@ -32,6 +33,9 @@ This is the stable contract for the project-aware terminal drawer. Historical ex
 8. Fullscreen hides the page scroll view and occupies the work area below the title/breadcrumb region.
 9. Docked width and padding align with the page content area.
 10. PTY reads and process waits never run on the Slint event loop.
+11. Terminal chrome reuses shared GitHub Button/IconButton focus, tooltip,
+    selected, disabled, and loading contracts. Terminal cells keep the
+    documented monospace font and PTY-provided ANSI colors.
 
 1. `open_terminal_for_project` 是 Project 页面唯一标准入口。
 2. 同项目重开保留 PTY/Session 内容和 cwd。
@@ -43,6 +47,9 @@ This is the stable contract for the project-aware terminal drawer. Historical ex
 8. Fullscreen 隐藏页面 ScrollView，占据标题/面包屑以下工作区。
 9. Docked 宽度和 padding 与页面内容区对齐。
 10. PTY 读取和进程等待不得运行在 Slint event loop。
+11. Terminal 外壳复用共享 GitHub Button/IconButton 的焦点、Tooltip、选中、
+    禁用与 loading 契约。终端单元格继续使用约定的等宽字体和 PTY 提供的 ANSI
+    色。
 
 ## Project switching matrix / 项目切换矩阵
 

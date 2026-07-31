@@ -1,13 +1,14 @@
-# Reusable workflow jobs / 可复用 Workflow Job
+# Reusable job runs / 可复用 Job Run
 
 ## Scope / 范围
 
-This specification defines the reusable Job boundary used by Tag and future CD,
-branch-build, and other deterministic workflows. It covers immutable step input,
-runtime snapshots, ownership, presentation, and observable lifecycle state.
+This specification defines the application-wide Job Run boundary used by Tag
+and future executable features. It covers immutable step input, runtime
+snapshots, source-independent routing, ownership, presentation, and observable
+lifecycle state.
 
-本文定义 Tag 以及后续 CD、分支构建等确定性流程共用的 Job 边界，覆盖不可变步骤输入、
-运行时快照、职责归属、展示以及可观察的生命周期状态。
+本文定义 Tag 与后续可执行 Feature 共用的应用级 Job Run 边界，覆盖不可变步骤输入、
+运行时快照、来源无关路由、职责归属、展示以及可观察的生命周期状态。
 
 GitHub Actions is the reference model: a workflow contains jobs; a job contains
 ordered steps; both jobs and steps expose status, conclusion, start time, and
@@ -68,11 +69,36 @@ References:
     and `debug` map to Primer accent, attention, danger, and muted presentation.
     Conventional `warning:`, `error:`, `fatal:`, `notice:`, and `debug:` process
     prefixes use the same mapping. Warning, error, and notice rows retain their
-    semantic muted background; ordinary rows use the neutral hover wash.
+    semantic muted background; ordinary rows use the neutral hover wash. Every
+    source line uses one fixed line-number column and one text block; semantic
+    prefixes are measured and wrapped with their message so all rows stay aligned.
 12. An in-progress step uses a continuously rotating attention-colored spinner.
     A queued step has an empty status ring but no disclosure, pointer cursor, or
     hover wash. Completed/running steps are interactive only when output can be
     shown.
+13. CD may adapt its project-scoped stage snapshot to `JobStepItem` for the
+    common visual presenter, but the presenter must not mutate deployment state
+    or start callbacks. Branch validation is not an executable Job; it must not
+    fabricate running Steps until a controller owns real execution state.
+14. `Route.JobRun` is an application-level route, not a child of Workflow and
+    not a member of the Workflow lifecycle domain. Any page may navigate to it.
+    Global Router history returns Back to the exact source route.
+15. A source publishes a `JobRunDescriptor` and `JobSnapshot` through
+    `src/jobs::apply_job_run`. The descriptor provides a stable source key,
+    title, workflow/process label, context label, selected job name, and trigger
+    detail; the run page must not read properties owned by a particular feature.
+16. Source-specific execution state, process ownership, cancellation, and log
+    retention remain in the source feature. `src/jobs/` only owns the normalized
+    model, UI projection, and source-keyed action dispatch for Stop and lazy log
+    loading.
+17. The run layout follows GitHub Actions: run status and trigger metadata in
+    the header, a Jobs navigation region, and the selected Job's ordered Step
+    log surface. Wide layouts use a bounded 216 px Jobs region and a flexible log
+    pane inside the 1280 px wide-page limit. On narrow viewports the Jobs region
+    stacks above the log without changing execution state or rebuilding the model.
+18. A configuration page must not embed the Job Run surface. After a valid start
+    is accepted, it publishes the run and navigates to `Route.JobRun`; it may
+    expose a secondary action that reopens the current/latest run.
 
 1. 不可变输入为有序 `Vec<JobStepDefinition>`，每项只包含展示名称与命令 argv；
    执行时不得把命令压平成 shell 字符串。
@@ -102,28 +128,53 @@ References:
     `debug` 分别映射 Primer accent、attention、danger、muted；常见进程前缀
     `warning:`、`error:`、`fatal:`、`notice:`、`debug:` 使用相同映射。
     Warning、Error、Notice 行始终保留对应的 muted 背景，普通行才使用中性 hover。
+    每条源日志统一使用固定行号列和单一正文块；语义前缀与消息共同测量和换行，保证
+    所有日志行严格对齐。
 12. 运行中 Step 使用持续旋转的 attention 色 Spinner。queued Step 显示空心
     状态环，但不得出现 disclosure、手型光标或 hover 背景；只有确实可展示输出的
     running/completed Step 才可交互。
+13. CD 可以把项目级 Stage Snapshot 适配为 `JobStepItem` 交给共用视觉展示，但
+    Presenter 不得修改部署状态或启动 callback。Branch 校验不是可执行 Job；在
+    Controller 尚未持有真实执行状态前，不得伪造运行中的 Steps。
+14. `Route.JobRun` 是应用级路由，不是 Workflow 子页面，也不属于 Workflow
+    生命周期域；任何页面都可进入，Back 由全局 Router 历史精确返回来源路由。
+15. 来源 Feature 通过 `src/jobs::apply_job_run` 发布 `JobRunDescriptor` 与
+    `JobSnapshot`。描述符提供稳定 source key、标题、流程名、上下文名、选中 Job
+    名称与触发信息；运行页不得读取某个具体 Feature 的属性。
+16. 领域执行状态、进程所有权、取消和日志保留仍归来源 Feature；`src/jobs/` 只拥有
+    归一化 model、UI 投影，以及按 source key 分发 Stop 和懒加载日志动作。
+17. 页面布局遵循 GitHub Actions：页头展示运行状态和触发元数据，Jobs 区展示当前
+    Job，主区展示选中 Job 的有序 Step 日志；宽屏在 1280 px 宽页上限内使用固定
+    216 px Jobs 区与自适应日志区；窄屏把 Jobs 区堆叠到日志上方，不得改变执行状态
+    或重建 model。
+18. 配置页面不得内嵌 Job Run。合法启动被接受后，先发布运行数据再导航到
+    `Route.JobRun`；配置页可提供次级操作重新打开当前或最近一次运行。
 
 ## Ownership / 职责
 
-- `src/workflow/jobs/model.rs`: reusable definition, runtime snapshot, lifecycle,
-  and compact duration formatting.
-- `ui/components/jobs/job.slint`: reusable GitHub Actions-style Job and Step log
+- `src/jobs/model.rs`: reusable definition, runtime snapshot, lifecycle, and
+  compact duration formatting.
+- `src/jobs/mod.rs`: source-independent descriptor, UI projection, and
+  source-keyed Stop/log action dispatch.
+- `ui/components/jobs/job.slint`: reusable `GitHubActionsJob` and Step log
   presentation.
+- `ui/components/jobs/github_job_run.slint`: GitHub Actions-style run layout.
+- `ui/views/job_run.slint`: application-level `Route.JobRun` composition.
 - Feature controllers such as `src/workflow/tag/controller.rs`: domain
   orchestration and side effects.
 - `src/workflow/state.rs`: project-scoped ownership of feature Job snapshots.
 
-- `src/workflow/jobs/model.rs`：通用定义、运行时快照、生命周期和紧凑耗时格式。
-- `ui/components/jobs/job.slint`：可复用的 GitHub Actions 风格 Job/Step 日志展示。
+- `src/jobs/model.rs`：通用定义、运行时快照、生命周期和紧凑耗时格式。
+- `src/jobs/mod.rs`：来源无关描述符、UI 投影和按 source key 分发 Stop/日志动作。
+- `ui/components/jobs/job.slint`：可复用的 `GitHubActionsJob` 与 Step 日志展示。
+- `ui/components/jobs/github_job_run.slint`：GitHub Actions 风格运行页布局。
+- `ui/views/job_run.slint`：应用级 `Route.JobRun` 装配。
 - `src/workflow/tag/controller.rs` 等 Feature controller：领域编排与副作用。
 - `src/workflow/state.rs`：按项目隔离持有各 Feature 的 Job 快照。
 
 ## Regression checklist / 回归清单
 
-- Run `cargo test --lib --locked workflow::jobs`.
+- Run `cargo test --lib --locked jobs`.
 - Compile the complete root Slint UI.
 - Verify queued → in-progress → completed transitions and all conclusions.
 - Verify total duration is readable independently of step rows.
@@ -136,8 +187,10 @@ References:
   correct Primer semantic row treatment.
 - Verify the running spinner rotates when animations are enabled and queued
   steps have no hover or click behavior.
+- Verify entry from Workflow and UI Components, then Back to each exact source.
+- Verify Stop and lazy log loading dispatch only to the active source key.
 
-- 运行 `cargo test --lib --locked workflow::jobs`。
+- 运行 `cargo test --lib --locked jobs`。
 - 编译完整 Slint 根 UI。
 - 验证 queued → in-progress → completed 以及全部 conclusion。
 - 验证外部无需读取 Step 行即可取得总耗时。
@@ -146,3 +199,5 @@ References:
 - 验证第一次展开才构造已有日志，之后的输出实时出现，未展开日志不被构造。
 - 验证 workflow command 与常见 warning/error 前缀采用正确的 Primer 语义行样式。
 - 验证动画启用时运行 Spinner 持续旋转，queued Step 没有 hover 或点击行为。
+- 分别从 Workflow 与 UI Components 进入并验证 Back 精确返回各来源。
+- 验证 Stop 与日志懒加载只分发给当前 source key。

@@ -51,7 +51,8 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `src/project/` | 稳定 façade/controller，以及独立的持久化模型/存储、Logo、PR/MR overview 选择和 Workflow/Terminal 入口。 |
 | `src/codereview/api/` | Gitee、GitLab、GitHub 仓库接口的 URL 与路径模板；不包含请求执行、鉴权或响应解析。 |
 | `src/git/` | Provider-neutral façade，以及独立的领域模型、remote 定位、unified-diff 解析、PR 概览计数和 Provider adapter。Gitee 的传输、解码、Conversation/Commit 归一化、readiness 与 revert 语义位于专用子模块。 |
-| `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行。`jobs/` 负责可复用 Step 定义与 Job 快照；Tag 与 PR Review 通过稳定文件 façade 暴露内部 controller 和纯逻辑模块。 |
+| `src/jobs/` | 应用级 Job 生命周期 model、来源无关运行描述符/UI 投影，以及按 source key 的动作分发；不拥有任何 Feature 进程。 |
+| `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行；Tag 与 PR Review 通过稳定文件 façade 暴露内部 controller 和纯逻辑模块。 |
 | `src/terminal/` | PTY 生命周期、viewport 同步、渲染、选择和项目切换；纯输入映射、诊断与刷新节流使用独立模块。 |
 | `src/chat/` | 聊天请求、会话、JSONL 持久化、Markdown、渲染缓存、分页、UI 绑定和纯有界虚拟布局。 |
 | `src/update/` | Release 检查、流式下载、进度、取消、安装和重启。 |
@@ -77,22 +78,47 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/main.slint` | 根窗口、路由装配、Rust-facing property/callback、Modal 层和 Terminal Dock。 |
 | `ui/route/routeMap.slint` | 完整 `Route` 枚举；主导航只开放其中一部分。 |
 | `ui/state/` | Slint 全局状态适配。 |
-| `ui/views/` | 页面级视图。 |
-| `ui/views/workflow/` | Tag、PR 工作流视图；Branch 与 CD Tab 当前显示 Coming soon 占位。 |
-| `ui/components/` | 应用复用组件。 |
+| `ui/views/` | 只负责路由级页面编排；活跃入口统一使用 `GitHub*Page` 命名，并从 `ui/components/` 引入全部视觉积木，view 文件不再声明局部控件。 |
+| `ui/views/job_run.slint` | 应用级 `Route.JobRun` 装配，可从任意来源路由复用。 |
+| `ui/views/ui_components.slint` | 交互式 UI Components 演练场的纯路由编排。 |
+| `ui/views/workflow/` | Workflow 路由编排和全窗口 PR Review 页面；Flow、Tab、Filter、Field、Panel 组件归 `ui/components/workflow/`。 |
+| `ui/components/` | 所有应用视觉组件的统一归属目录，包括 Control、Row、Card、Menu、Tab、Panel、Dialog、Field、Feedback 和功能专用视觉积木；GitHub/Primer 实现统一使用 `GitHub*` 符号。 |
+| `ui/components/about/`、`chat/`、`project/`、`workflow/` | 从路由页面抽出的功能级 GitHub/Primer 视觉积木，不负责 I/O 或路由跳转。 |
+| `ui/components/showcase/` | GitHub/Primer 属性对比矩阵，以及把依赖业务 model 的组合组件链接到真实路由的登记表；新增或实质变更的视觉组件必须同步登记。 |
+| `ui/components/button/github_icon_button.slint` | 图标按钮、浮动按钮、Terminal、项目卡片和复制操作共用的 `GitHubIconButton` 基础，统一键盘焦点、Tooltip、加载态和语义变体。 |
+| `ui/components/github_link.slint` | 共用的 Primer 文本链接状态和键盘交互。 |
+| `ui/components/github_spinner.slint` | 控件和加载界面统一使用的应用自有 Primer 不定进度 Spinner。 |
+| `ui/components/github_progress_bar.slint` | 状态栏和更新界面共用的语义化确定/不确定进度条。 |
+| `ui/components/github_scroll_view.slint` | 应用自有的常驻纵向视口和语义滚动条基础。 |
+| `ui/components/navigation/github_underline_nav.slint` | Workflow 及其功能子页签共用的、支持键盘的 Primer UnderlineNav/UnderlinePanels Item。 |
+| `ui/components/github_segmented_control.slint` | 共用的紧凑 Primer SegmentedControl 外壳、Item、Divider 及焦点/禁用交互。 |
 | `ui/components/github_tooltip.slint` | 所有应用自有 Hover 提示共用的 GitHub TooltipV2 视觉契约。 |
-| `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面、视口碰撞定位和限高纵向滚动。 |
+| `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面，统一焦点归属、Esc 关闭、视口碰撞定位、限高纵向滚动及 ActionList 行。 |
+| `ui/components/page/github_page_header.slint` | 标题、说明、前导视觉、分隔线和尾部操作共用的 Primer PageHeader 基础。 |
 | `ui/components/button/github_copy_button.slint` | 所有图标复制操作共用的 GitHub CopyToClipboardButton 交互；组件负责短时 Copy→Check 状态和 `Copied!` Tooltip，feature callback 返回剪贴板写入是否成功。 |
-| `ui/components/jobs/` | 可复用的 GitHub Actions 风格 Job/Step 展示；只接收归一化快照，不执行流程命令。 |
-| `ui/components/dialog/github_dialog.slint` | 全局、项目、PR Review 和更新弹窗共用的 Primer Dialog 外壳，统一遮罩输入归属、Header/Body/Footer 安全边距、Esc 关闭（`modal` 时禁用）、关闭行为与操作状态；功能正文以 `@children` 嵌套。 |
+| `ui/components/jobs/` | 可复用的 GitHub Actions 风格 Run/Job/Step/日志展示；只接收归一化快照，不执行流程命令。 |
+| `ui/components/dialog/github_dialog.slint` | 全局、项目、PR Review 和更新弹窗共用的响应式 Primer Dialog 外壳，统一遮罩输入归属、初始关闭按钮焦点、Header/Body/Footer 安全边距、Esc 关闭（`modal` 时禁用）、窄屏全窗口布局、关闭行为与操作状态；功能正文以 `@children` 嵌套。 |
+| `ui/components/toast/`、`ui/components/notify/` | 共用的紧凑 Primer Banner 风格瞬时/排队反馈；根层同一时刻只渲染一条排队通知。 |
 | `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在工作区视图。 |
-| `ui/theme/` | 应用主题色映射。 |
+| `ui/theme/github_theme.slint` | 应用自有的 `GitHubTheme` 语义色，以及 `GitHubMetrics` Primer 几何、控件、字体、浮层与断点令牌；功能性 UI 原始颜色统一在此管理。 |
 | `material-1.7.1-fixed/` | 与 Slint v1.17.1 对齐的 Material 源码。 |
 | `vendor/i-slint-live-preview/` | 仅由显式 `live-preview` feature 选择的临时 Slint 1.17.1 override；其中有文档记录的 `mtime` 保护避免 macOS 文件监听误报引发无限重编译。 |
 
-应用 UI 必须通过 `@material` 导入 Material；新代码禁止直接引用 vendored 实现路径。绝对禁止为应用行为或外观修改 `material-1.7.1-fixed/` 或其他 vendored Slint Material UI 源码。所有适配必须放在项目自有代码中，确保依赖升级时可以直接替换 Material UI 目录而无需迁移补丁。
+应用 UI 必须通过 `@material` 导入 Material，禁止直接引用 vendored 实现路径。
+绝对禁止为应用行为或外观修改 `material-1.7.1-fixed/` 或其他 vendored Slint
+Material UI 源码。Material palette、typography 和 style metrics 不定义产品
+外观；应用界面统一消费 `GitHubTheme` 与 `GitHubMetrics`。所有视觉适配必须放在
+项目自有代码中，确保依赖升级时可以直接替换 Material UI 目录而无需迁移补丁。
+当前白名单有意保持最小：`ui/main.slint` 的 `MaterialWindowAdapter`，以及 PR
+Review 工作区用于虚拟化的公开 `ListView`/`ScrollView`。
+`scripts/check-ui-policy.sh` 自动检查该边界及 Octicon 命令图标策略。
 
-所有产品页面和复用视觉组件均遵循 [GitHub/Primer 页面设计规范](specs/ui-design.md)。GitHub 当前产品界面以及 Primer 官方文档/源码是视觉事实来源；遇到不熟悉的模式必须先查证，禁止自行创造近似样式。Material 可继续作为实现库使用，但不定义 Usher 的产品外观。
+所有产品页面和复用视觉组件均遵循
+[GitHub/Primer 页面设计规范](specs/ui-design.md)。所有应用自有 GitHub/Primer
+视觉组件都必须使用 `GitHub` 前缀。现有命名和视觉欠债按
+[UI 分批改造清单](ui-github-migration-plan.md)逐批迁移，每批均需用户验收后才
+能继续；发现的缺陷追加到 [`bug-history.md`](../bug-history.md)。GitHub 当前产品
+界面以及 Primer 官方文档/源码是视觉事实来源。
 
 根 Shell 持有两个常驻 Primer Surface：位于
 `ui/components/navigation/custom_nav_drawer.slint` 的仅图标路由栏，以及
@@ -167,13 +193,31 @@ Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_
 Slint event loop 之外执行。完成结果回到 event loop 后，只有持久化成功
 才更新临时 Saved 标签，并为最终结果显示一个底部 Toast。
 
+Settings 与 About 路由文件只负责组合；可复用导航、字段、Toggle、Section 和
+详情行分别位于 `ui/components/settings/` 与 `ui/components/about/`，视觉组件
+符号使用 `GitHub` 前缀。紧凑 Settings 导航与常规 NavList 暴露相同 Section
+model 和键盘交互契约。
+
 ### 项目
 
 `project/projects.json` 保存于平台 local-data 目录。新增或编辑项目保存时，Rust 根据 `remote_repo` 推导 Provider，由 `src/git/` 使用 `src/codereview/api/` 中的 URL 模板查询项目详情，并把返回的 `repo_project_id` 与小写 `repo_type`（`gitee`、`gitlab`、`github`）一并保存。查询失败不会改写已有配置。Rust 将记录转换为 Slint model，解析本地/Base64/远程 Logo，并调度 PR 概览任务。远程 Logo 缓存位于进程临时目录，UI 渲染路径不应直接进行网络 IO。
 
+用户主动刷新项目注册表时，会把阻塞式存储读取隔离到共享 runtime；加载期间
+阻止重复触发，并通过 Slint event loop 回写 model 或可恢复错误状态。
+`ui/views/project.slint` 只负责路由编排；可复用的项目卡片、工具栏控件和对话框统一位于
+`ui/components/project/`。Home、Search、Detail、Project 路由状态统一复用
+`GitHubPageHeader` 与 `GitHubBlankslate`，不再维护页面局部占位模式。
+
 ### Workflow
 
 Workflow 在所有支持的宽度下统一使用 GitHub 仓库页的 UnderlineNav 交互；低于 720px 时，仓库路径与操作从身份页头移入尾部 kebab 浮层。PR 列表严格复刻 GitHub 响应式筛选工具栏：Open/Closed 与筛选保持同一行；低于 620px 时直接保留 Assignee，把 Reviews 与 Sort 合并进一个分组 kebab ActionMenu。所有菜单互斥，第一次点击即可切换。GitHub 仓库会把这些菜单映射为原生 Search qualifier 和排序参数，并在切换后重置分页重新请求，其他 Provider 会忽略不支持的 GitHub qualifier。项目或筛选条件变化时独立获取 Open 与 Closed 总数，页头不再复用当前选中分页的临时数量。总数仍在加载或计数请求失败时，页头按 Primer 降级体验隐藏数字并保留 Open/Closed 标签，而不是长期停留在加载占位。列表时间使用相对时间，并提供东八区绝对时间 Tooltip。
+
+Workflow 顶层 PR/Tag/Branch/CD 导航和 Tag Add/Remove 导航统一复用
+`GitHubUnderlineNavItem`；Tag Scope 与语义版本选项统一复用
+`GitHubSegmentedControl*`。Branch 展示现有项目级校验计划，CD 展示现有分阶段
+部署和回退 Controller，不再渲染不可用占位页。Branch/CD 的 Field、Action 和
+Result 统一位于 `ui/components/workflow/`，在紧凑宽度下自适应，并使用应用自有
+GitHub 控件。
 
 `WorkflowStore` 保存当前项目和各项目的 `WorkflowViewState`。切换项目必须重新绑定 UI，避免日志、步骤和 running 标记串到其他项目。`Route.Workflow` 与 `Route.PrReview` 构成同一生命周期域：两者之间切换保留 Workflow 列表/model 状态；临时进入域外路由时，只要仍可通过 Back 返回任一 Workflow 路由，也继续保留这些状态。
 
@@ -183,13 +227,18 @@ Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provide
 
 Tag 工作流采用相同的 façade 模式：`workflow/tag.rs` 暴露绑定和刷新，
 `tag/controller.rs` 负责项目状态、UI 序列、取消和命令执行，`tag/version.rs` 与
-`tag/commands.rs` 保存可直接单测的纯规则。可复用的 `workflow/jobs/` model
+`tag/commands.rs` 保存可直接单测的纯规则。应用级 `src/jobs/` model
 把不可变的 `name + argv` Step 定义与运行时数据分开，并用单个 `JobSnapshot`
-统一持有 Job status、conclusion、总耗时和有序 Steps。
-`ui/components/jobs/job.slint` 只渲染该快照，不负责 I/O 或计时。Git 命令始终
-保留 argv 边界，仓库路径、Tag 名称和描述都不经过 shell 插值。后续 CD 或 Branch
-流程通过提供自己的 definitions 与 controller 复用这一 Job 边界，不复制展示组件，
-也不向通用组件加入领域分支。
+统一持有 Job status、conclusion、总耗时和有序 Steps。来源 Feature 发布
+`JobRunDescriptor` 与快照，并用稳定 source key 注册 Stop 和日志懒加载动作。
+`Route.JobRun` 不属于 Workflow 生命周期域，因此可从任意页面进入，并由全局 Router
+历史精确返回来源；该路由只读取通用 Job Run 属性，不读取 Workflow 或 Tag 属性。
+`ui/components/jobs/job.slint` 渲染选中 Job 快照，`github_job_run.slint` 提供
+GitHub Actions 风格页头、Jobs 区和响应式日志布局；两者都不负责 I/O 或计时。Git 命令始终
+保留 argv 边界，仓库路径、Tag 名称和描述都不经过 shell 插值。CD 把项目级
+Stage Snapshot 适配到共用 `GitHubActionsJob` 视觉展示；Branch 当前只生成校验
+计划、不执行 Job。未来若让 Branch 执行命令，必须采用复用 Job 边界，不得复制
+展示组件或向通用组件加入领域分支。
 Step 原始日志在 disclosure 第一次请求行 model 前始终保留在项目级 Rust 快照中，
 该请求标记在后续 progress 快照替换时继续保留。Tag 命令执行期间持续读取
 stdout/stderr 并发布有界进度，因此已展开 Step 可实时更新。展示组件把 GitHub
@@ -222,6 +271,13 @@ Conversation 与 Commits 的 commit 链接会按 SHA 定位并复用 Files chang
 
 合并成功会把保留的 PR 列表标记为过期。审核页顶层 Back 会重新加载当前列表筛选的第一页及状态总数，确保已合并请求不再留在 Open 列表中；页内 commit Back 仍只恢复来源 Tab，不会提前消费这次刷新。
 
+PR 展示层遵循统一 UI 边界：列表、筛选、分页、审核外壳、文件树和 diff
+等可复用控件位于 `ui/components/`，组件符号以 `GitHub` 开头；
+`ui/views/workflow/` 只负责全窗口路由装配。公开的 `@material`
+ListView/ScrollView 可以为大型时间线、文件树和 diff 提供虚拟化，但不拥有产品
+排版、配色、焦点状态或控件外观；这些能力全部由项目自有 GitHub 组件负责。
+空白/错误状态复用 `GitHubBlankslate`，图标操作复用 `GitHubIconButton`。
+
 ### Pull Request 子系统边界
 
 PR 功能由五个可替换层组成。这是后续迁移到其他技术栈时应保持的边界：
@@ -249,9 +305,24 @@ Provider adapters
 
 聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。启动时最近一段只加载到 Rust session；Chat 组件及有界 Slint 消息 model 仅在 Chat 路由挂载。离开 Chat 会销毁 UI 树并清空 Slint model/Markdown 缓存，重新进入时从 session 重建可见窗口。迟到的历史分页或 assistant 响应继续更新持久化/session，但不得填充隐藏 UI。渲染和滚动锚点计算分离，以减少滚动/缩放期间的工作量。
 
+Chat 展示层拆分为 `ui/views/chat.slint` 的路由组合与
+`ui/components/chat/` 的消息/欢迎组件，并统一使用应用自有 GitHub
+ScrollView、Spinner、Button/IconButton、Copy、token 与焦点契约。该展示边界
+不得扩大 Rust 的有界消息窗口，也不得把持久化或 HTTP 工作移入 event loop。
+
 ### Terminal
 
 Terminal 状态感知项目；同一项目重新打开时复用，切换项目时重置会话展示并切换工作目录。稳定行为契约见 [specs/terminal.md](specs/terminal.md)。
+
+`GitHubTerminalDrawer` 只负责 Drawer 外壳、viewport 上报、输入与单元格展示；
+页头/选择操作复用共享 GitHub 控件。终端单元格几何、等宽字体、ANSI 色、PTY
+归属与 scrollback 独立于产品排版。
+
+主菜单公开 `Route.UiComponents` 作为应用自有组件演练场。它使用真实共享控件和
+根层 Toast、Notification、Dialog Manager 演练属性状态。依赖业务 model 的组合
+组件继续在 Project、Workflow、Chat、Settings、Shell 或 PR Review 真实路由中
+测试，并由演练场登记表链接过去。原 Login、Tools、List、Detail、Notification、
+Toast、Dialog demo 路由已删除。
 
 ## 主要数据流
 
@@ -282,13 +353,22 @@ Terminal 状态感知项目；同一项目重新打开时复用，切换项目�
 4. 只有查询成功才会将 `repo_project_id`、`repo_type` 写入 `projects.json`；UI 刷新回到 Slint event loop 执行。
 5. 查询或持久化失败时只显示一次项目模块错误 Toast，不写入不完整记录。
 
+### 项目注册表刷新
+
+1. 用户主动刷新时，在 Slint event loop 设置 Project 页面加载状态；加载中的
+   IconButton 会阻止再次触发。
+2. 共享应用 runtime 把 `load_projects` 放入 blocking task。
+3. 完成结果通过 `slint::invoke_from_event_loop` 回写。
+4. 成功时替换 Project model 并清除行内错误；失败时结束加载、显示可恢复的
+   行内重试状态，同时保持导航响应。
+
 ### 项目终端
 
 1. Project 卡片操作或 Workflow FAB 触发 Terminal callback。
 2. Rust 解析 project key 和本地仓库路径。
 3. `open_terminal_for_project` 决定复用还是重置。
 4. PTY 会话在 UI 线程之外运行。
-5. 渲染结果通过根 property 交给 `TerminalDrawer`。
+5. 渲染结果通过根 property 交给 `GitHubTerminalDrawer`。
 
 ### Chat 请求
 
@@ -331,7 +411,13 @@ Interceptor 按注册顺序执行。Request hook 可修改 header；Response hoo
 
 - Rust-facing property 和 callback 统一在 `ui/main.slint` 声明并保持命名一致。
 - Feature view 负责布局；Rust 负责 IO 和业务状态转换。
-- 优先复用 `PageScrollActions`、`ProjectCardActions`、`IconActionButton` 和项目终端入口。
+- `ui/views/` 下的路由文件只声明 `GitHub*Page` 页面编排；视觉子组件统一放入
+  `ui/components/<feature>/`；实现 GitHub/Primer 模式的组件使用 `GitHub*`
+  名称，其他领域组件保持领域命名。
+- 优先复用 `GitHubPageScrollActions`、`GitHubProjectCardActions`、
+  `GitHubIconButton`、`GitHubPageHeader`、`GitHubScrollView`、
+  `GitHubBlankslate`、`GitHubActionMenu`、`GitHubDialog`、Banner 反馈和
+  项目终端入口。
 - Hover 关键节点应常驻，通过 opacity/state 控制，不要条件创建命中区域。
 - 全窗口 Modal 必须挂在根层。
 - 滚动和窗口缩放期间避免重建 layout/model，精确计算应延迟到交互稳定后。
@@ -341,9 +427,11 @@ Interceptor 按注册顺序执行。Request hook 可修改 header；Response hoo
 Rust 或 Slint 改动至少运行：
 
 ```sh
+./scripts/check-ui-policy.sh
 cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
+git diff --check
 ```
 
 Terminal viewport/session、更新取消、托盘关闭和路由布局需要做针对性手工验证。完整测试目前包含一个无关的 logger doctest 失败，不能用这个已知问题掩盖新增失败。
@@ -351,6 +439,7 @@ Terminal viewport/session、更新取消、托盘关闭和路由布局需要做�
 ## 已知技术债
 
 - `src/logger/debug_logger.rs` 有一个无法编译的 doctest。
-- `Route` 中部分页面是开发/演示界面；左侧导航可临时暴露它们便于本地测试，不代表最终产品信息架构。
+- `Route.UiComponents` 是长期维护的组件演练场；旧 Login/Tools/List/Detail/
+  Notification/Toast/Dialog demo 路由已删除。
 - 应用为专有/非开源软件，见根目录 `LICENSE.txt`；第三方 vendored 组件仍保留各自许可证。
 - `docs/terminal_viewport_iteration_notes.md` 是历史证据，不是当前规格。

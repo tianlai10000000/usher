@@ -1,0 +1,152 @@
+import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+// Primer IconButton foundation for application-owned icon-only actions.
+// Every instance requires an action label through tooltip-text.
+// Reference: https://primer.style/product/components/icon-button/
+export component GitHubIconButton inherits FocusScope {
+    in property <image> icon;
+    in property <string> tooltip-text;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> invisible: true;
+    in property <bool> selected: false;
+    in property <bool> button-enabled: true;
+    in property <bool> loading: false;
+    in property <bool> activation-enabled:
+        root.button-enabled && !root.loading;
+    in property <bool> floating: false;
+    in property <bool> force-tooltip: false;
+    in property <bool> tooltip-above: true;
+    in property <bool> tooltip-align-right: false;
+    in property <length> control-size: GitHubMetrics.control-medium-size;
+    in property <length> glyph-size: GitHubMetrics.icon-medium;
+    in property <color> foreground:
+        root.primary
+            ? GitHubTheme.fg-on-emphasis
+            : (root.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-muted);
+    out property <bool> has-hover: button-touch.has-hover;
+    private property <bool> keyboard-focus-visible: false;
+    callback clicked();
+
+    // Let TouchArea own the press. Default focus-on-click consumes the first
+    // press that grants focus, so unfocused icon buttons (e.g. terminal FAB
+    // after the drawer stole focus) need a second click to activate.
+    focus-on-click: false;
+    width: root.control-size;
+    height: root.control-size;
+    accessible-role: button;
+    accessible-enabled: root.activation-enabled;
+    accessible-label: root.tooltip-text;
+    accessible-checkable: root.selected;
+    accessible-checked: root.selected;
+
+    key-pressed(event) => {
+        root.keyboard-focus-visible = true;
+        if (root.activation-enabled
+                && (event.text == Key.Return || event.text == " ")) {
+            root.clicked();
+            return accept;
+        }
+        return reject;
+    }
+    focus-gained(reason) => {
+        root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+    }
+    focus-lost => {
+        root.keyboard-focus-visible = false;
+    }
+
+    if root.has-focus && root.keyboard-focus-visible: focus-ring := Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
+
+    surface := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: root.invisible ? 0px : GitHubMetrics.border-thin;
+        border-color: root.primary
+            ? GitHubTheme.control-primary-rest
+            : (root.danger && button-touch.has-hover
+                ? GitHubTheme.danger-emphasis
+                : GitHubTheme.border-default);
+        background: root.primary
+            ? (button-touch.pressed
+                ? GitHubTheme.control-primary-active
+                : (button-touch.has-hover
+                    ? GitHubTheme.control-primary-hover
+                    : GitHubTheme.control-primary-rest))
+            : root.danger
+                ? (button-touch.pressed
+                    ? GitHubTheme.control-danger-active
+                    : (button-touch.has-hover
+                        ? GitHubTheme.danger-muted
+                        : (root.invisible ? transparent : GitHubTheme.control-default-rest)))
+                : root.selected
+                    ? GitHubTheme.control-default-active
+                    : (button-touch.pressed
+                        ? (root.invisible
+                            ? GitHubTheme.control-transparent-active
+                            : GitHubTheme.control-default-active)
+                        : (button-touch.has-hover
+                            ? (root.invisible
+                                ? GitHubTheme.control-transparent-hover
+                                : GitHubTheme.control-default-hover)
+                            : (root.invisible ? transparent : GitHubTheme.control-default-rest)));
+        opacity: root.button-enabled ? 1 : 0.5;
+        drop-shadow-blur: root.floating ? GitHubMetrics.size-12 : 0px;
+        drop-shadow-color: root.floating
+            ? GitHubTheme.shadow-floating-small
+            : transparent;
+        drop-shadow-offset-y: root.floating ? GitHubMetrics.size-6 : 0px;
+
+        if root.loading: GitHubSpinner {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            spinner-size: root.glyph-size;
+            foreground: root.foreground;
+        }
+
+        if !root.loading: Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: root.glyph-size;
+            height: root.glyph-size;
+            source: root.icon;
+            image-fit: contain;
+            colorize: root.foreground;
+        }
+    }
+
+    button-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.activation-enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => {
+            root.keyboard-focus-visible = false;
+            // Manual focus replaces focus-on-click so the same press both
+            // focuses (for Enter/Space) and activates.
+            root.focus();
+            root.clicked();
+        }
+    }
+
+    if (button-touch.has-hover || root.keyboard-focus-visible || root.force-tooltip) && root.tooltip-text != "": GitHubTooltip {
+        z: 10001;
+        x: root.tooltip-align-right ? root.width - self.width : (root.width - self.width) / 2;
+        y: root.tooltip-above
+            ? -self.height - GitHubMetrics.overlay-offset
+            : root.height + GitHubMetrics.overlay-offset;
+        text: root.tooltip-text;
+    }
+}

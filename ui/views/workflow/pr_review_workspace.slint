@@ -1,13 +1,12 @@
-import { MaterialPalette, MaterialText } from "@material";
-import { ListView } from "../../../material-1.7.1-fixed/ui/components/list_view.slint";
-import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
+import { ListView, ScrollView } from "@material";
+import { GitHubTheme } from "../../theme/github_theme.slint";
 import { AppState } from "../../state/app_state.slint";
 import { GitHubDialog } from "../../components/dialog/github_dialog.slint";
-import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, ConversationAvatar, WorkflowPrCommit, ReviewActionButton, GithubCommentButton, PullRequestStateBadge, BranchLabel, RelativeTimestamp, PullRequestSummaryMetrics, PullRequestSummaryRow, CenteredErrorState, PrTabButton, CommitRangeButton, MergeReadinessBadge, PrReviewBackButton, HeaderActionStrip, ReviewChoice } from "../../components/pr_review/shell.slint";
-import { TreeIndentGuides, CommitMessageToggleButton, FileToolbarButton, CommitSummaryNavButton, FileChangeTypeIcon, SelectableDiffCode, SplitDiffSide, DiffViewPreview, DiffViewChoice, DiffSettingsPopover, FileTreeToggleButton, FileMenuButton, DiffStatSegment, DiffStatBar, FileDiffStat, CodeRenderingIndicator, LargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, DiffFindBar } from "../../components/pr_review/content.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubPullRequestReviewBackButton, GitHubHeaderActionStrip, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
+import { GitHubTreeIndentGuides, GitHubCommitMessageToggleButton, GitHubFileToolbarButton, GitHubCommitSummaryNavButton, GitHubFileChangeTypeIcon, GitHubSelectableDiffCode, GitHubSplitDiffSide, GitHubDiffViewPreview, GitHubDiffViewChoice, GitHubDiffSettingsPopover, GitHubFileTreeToggleButton, GitHubFileMenuButton, GitHubDiffStatSegment, GitHubDiffStatBar, GitHubFileDiffStat, GitHubCodeRenderingIndicator, GitHubLargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, GitHubDiffFindBar } from "../../components/pr_review/content.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
-export component PrReviewWorkspace inherits FocusScope {
+export component GitHubPullRequestReviewPage inherits FocusScope {
     in property <bool> live-resizing: false;
     in property <string> project-name;
     in property <string> provider;
@@ -138,21 +137,21 @@ export component PrReviewWorkspace inherits FocusScope {
         max(root.max-code-columns * root.code-character-width, longest-code-line-measure.preferred-width);
     // GitHub Primer functional tokens (primer/primitives:
     // src/tokens/functional/color/fgColor.json5) and DiffBlob tokens.
-    private property <color> github-bg-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-    private property <color> github-bg-muted: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
-    private property <color> github-border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    private property <color> github-fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-    private property <color> github-fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
-    private property <color> github-success-fg: AppState.effective-dark-mode ? #3fb950 : #1a7f37;
-    private property <color> github-danger-fg: AppState.effective-dark-mode ? #f85149 : #d1242f;
-    private property <color> github-attention-fg: AppState.effective-dark-mode ? #d29922 : #9a6700;
-    private property <color> github-done-fg: AppState.effective-dark-mode ? #ab7df8 : #8250df;
-    private property <color> github-accent-fg: AppState.effective-dark-mode ? #58a6ff : #0969da;
-    private property <color> github-accent-muted: AppState.effective-dark-mode ? #388bfd1a : #ddf4ff;
+    private property <color> github-bg-default: GitHubTheme.canvas-default;
+    private property <color> github-bg-muted: GitHubTheme.canvas-subtle;
+    private property <color> github-border-default: GitHubTheme.border-default;
+    private property <color> github-fg-default: GitHubTheme.fg-default;
+    private property <color> github-fg-muted: GitHubTheme.fg-muted;
+    private property <color> github-success-fg: GitHubTheme.success-fg;
+    private property <color> github-danger-fg: GitHubTheme.danger-fg-strong;
+    private property <color> github-attention-fg: GitHubTheme.attention-fg;
+    private property <color> github-done-fg: GitHubTheme.done-fg-strong;
+    private property <color> github-accent-fg: GitHubTheme.accent-fg-strong;
+    private property <color> github-accent-muted: GitHubTheme.accent-subtle;
     // Match the filter-input selection brush so diff copy looks Primer-native.
-    private property <color> diff-selection-background: AppState.effective-dark-mode ? #388bfd66 : #0969da55;
+    private property <color> diff-selection-background: GitHubTheme.diff-selection-bg;
     // CodeMirror/editor-style current find match (attention yellow).
-    private property <color> diff-find-background: AppState.effective-dark-mode ? #bb800966 : #ffe66d99;
+    private property <color> diff-find-background: GitHubTheme.diff-find-bg;
     // GitHub-style code selection (code column only; gutters are excluded).
     private property <int> diff-sel-anchor-line: -1;
     private property <int> diff-sel-anchor-col: 0;
@@ -213,12 +212,12 @@ export component PrReviewWorkspace inherits FocusScope {
         root.diff-sel-anchor-first ? root.diff-sel-anchor-col : root.diff-sel-focus-col;
     private property <int> diff-sel-hi-col:
         root.diff-sel-anchor-first ? root.diff-sel-focus-col : root.diff-sel-anchor-col;
-    private property <color> diff-addition-background: AppState.effective-dark-mode ? #2ea04326 : #dafbe1;
-    private property <color> diff-addition-gutter-background: AppState.effective-dark-mode ? #3fb9504d : #aceebb;
-    private property <color> diff-deletion-background: AppState.effective-dark-mode ? #f851491a : #ffebe9;
-    private property <color> diff-deletion-gutter-background: AppState.effective-dark-mode ? #f851494d : #ffcecb;
+    private property <color> diff-addition-background: GitHubTheme.diff-addition-bg;
+    private property <color> diff-addition-gutter-background: GitHubTheme.diff-addition-gutter-bg;
+    private property <color> diff-deletion-background: GitHubTheme.diff-deletion-bg;
+    private property <color> diff-deletion-gutter-background: GitHubTheme.diff-deletion-gutter-bg;
     private property <color> hunk-background: root.github-accent-muted;
-    private property <color> hunk-gutter-background: AppState.effective-dark-mode ? #0c2d6b : #b6e3ff;
+    private property <color> hunk-gutter-background: GitHubTheme.diff-hunk-gutter-bg;
     private property <color> hunk-foreground: root.github-fg-muted;
     private property <string> selected-review-action: "comment";
     private property <string> review-body: "";
@@ -701,7 +700,7 @@ export component PrReviewWorkspace inherits FocusScope {
         font-size: 22px;
         font-weight: 600;
     }
-    compact-summary-metrics := PullRequestSummaryMetrics {
+    compact-summary-metrics := GitHubPullRequestSummaryMetrics {
         state-kind: root.merge-readiness-kind;
         author: root.author;
         commit-count: root.commit-count;
@@ -770,7 +769,7 @@ export component PrReviewWorkspace inherits FocusScope {
                 // alignment:start would collapse preferred-width:0 siblings and
                 // leave Merged/Review/Merge stuck beside the back link.
                 cross-axis-alignment: start;
-                PrReviewBackButton {
+                GitHubPullRequestReviewBackButton {
                     // Tip is painted on the header layer below so Open/summary
                     // chrome cannot cover it; keep position under the icon.
                     embed-tooltip: false;
@@ -796,12 +795,12 @@ export component PrReviewWorkspace inherits FocusScope {
                         text: root.pull-request-title + " #" + root.pull-request-number;
                         font-size: 22px;
                         font-weight: 600;
-                        color: MaterialPalette.on_surface;
+                        color: GitHubTheme.fg-default;
                         wrap: word-wrap;
                         overflow: clip;
                         vertical-alignment: top;
                     }
-                    PullRequestSummaryRow {
+                    GitHubPullRequestSummaryRow {
                         x: 0px;
                         y: root.wide-title-block-height + 6px;
                         width: parent.width;
@@ -819,12 +818,12 @@ export component PrReviewWorkspace inherits FocusScope {
                         muted-color: root.github-fg-muted;
                         muted-background: root.github-bg-muted;
                         branch-background: root.github-accent-muted;
-                        branch-foreground: AppState.effective-dark-mode ? #58a6ff : #0969da;
+                        branch-foreground: GitHubTheme.accent-fg-strong;
                         copy-source-branch(branch) => { root.copy-source-branch(branch) }
                     }
                 }
 
-                HeaderActionStrip {
+                GitHubHeaderActionStrip {
                     // Trailing-edge strip: internal leading spacer pins controls
                     // to the window right on the title's first line. z above the
                     // title column so downward action tips are not covered.
@@ -884,7 +883,7 @@ export component PrReviewWorkspace inherits FocusScope {
                     spacing: 12px;
                     cross-axis-alignment: center;
 
-                    PrReviewBackButton {
+                    GitHubPullRequestReviewBackButton {
                         // Tip is painted on the header layer below so Open/summary
                         // chrome cannot cover it; keep position under the icon.
                         embed-tooltip: false;
@@ -894,7 +893,7 @@ export component PrReviewWorkspace inherits FocusScope {
                         }
                         clicked => { root.back(); }
                     }
-                    HeaderActionStrip {
+                    GitHubHeaderActionStrip {
                         height: 36px;
                         horizontal-stretch: 1;
                         align-start: true;
@@ -942,12 +941,12 @@ export component PrReviewWorkspace inherits FocusScope {
                     text: root.pull-request-title + " #" + root.pull-request-number;
                     font-size: 22px;
                     font-weight: 600;
-                    color: MaterialPalette.on_surface;
+                    color: GitHubTheme.fg-default;
                     wrap: word-wrap;
                     overflow: clip;
                     vertical-alignment: top;
                 }
-                compact-summary-row := PullRequestSummaryRow {
+                compact-summary-row := GitHubPullRequestSummaryRow {
                     z: 0;
                     x: 24px;
                     y: 50px + root.compact-title-block-height + 6px;
@@ -966,7 +965,7 @@ export component PrReviewWorkspace inherits FocusScope {
                     muted-color: root.github-fg-muted;
                     muted-background: root.github-bg-muted;
                     branch-background: root.github-accent-muted;
-                    branch-foreground: AppState.effective-dark-mode ? #58a6ff : #0969da;
+                    branch-foreground: GitHubTheme.accent-fg-strong;
                     copy-source-branch(branch) => { root.copy-source-branch(branch) }
                 }
             }
@@ -992,7 +991,7 @@ export component PrReviewWorkspace inherits FocusScope {
             HorizontalLayout {
                 padding-left: 0px;
                 spacing: 0px;
-                PrTabButton {
+                GitHubPullRequestTabButton {
                     label: "Conversation";
                     tab-width: 200px;
                     // Badge summaries load with the PR detail. Keep them independent
@@ -1006,7 +1005,7 @@ export component PrReviewWorkspace inherits FocusScope {
                         root.select-tab(0);
                     }
                 }
-                PrTabButton {
+                GitHubPullRequestTabButton {
                     label: "Commits";
                     tab-width: 170px;
                     // Loading this tab must not be what makes its badge appear.
@@ -1019,7 +1018,7 @@ export component PrReviewWorkspace inherits FocusScope {
                         root.select-tab(1);
                     }
                 }
-                PrTabButton {
+                GitHubPullRequestTabButton {
                     label: "Files changed";
                     tab-width: 210px;
                     count: root.files.length;
@@ -1032,7 +1031,7 @@ export component PrReviewWorkspace inherits FocusScope {
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
-                FileDiffStat {
+                GitHubFileDiffStat {
                     height: parent.height;
                     additions: root.added-lines;
                     deletions: root.removed-lines;
@@ -1054,6 +1053,15 @@ export component PrReviewWorkspace inherits FocusScope {
             // top/bottom borders (top is the shared 1px rule above this row).
             background: root.github-bg-default;
             clip: false;
+
+            // Paint the rule below toolbar controls so descendant tooltips are
+            // never crossed by a later sibling separator.
+            Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: root.github-border-default;
+            }
 
             // Gear center in toolbar coordinates. Derive panel x and caret x
             // from this same value so caret never depends on popover.self.x
@@ -1080,14 +1088,14 @@ export component PrReviewWorkspace inherits FocusScope {
                         padding-right: 12px;
                         spacing: 12px;
 
-                        FileTreeToggleButton {
+                        GitHubFileTreeToggleButton {
                             file-tree-visible: root.file-list-visible;
                             clicked => {
                                 root.file-list-resizing = false;
                                 root.file-list-user-visible = !root.file-list-user-visible;
                             }
                         }
-                        commit-range-button := CommitRangeButton {
+                        commit-range-button := GitHubCommitRangeButton {
                             y: (parent.height - self.height) / 2;
                             text: root.commit-range-label;
                             clicked => {
@@ -1095,10 +1103,10 @@ export component PrReviewWorkspace inherits FocusScope {
                                 root.ensure-commits();
                             }
                         }
-                        diff-settings-button := FileToolbarButton {
+                        diff-settings-button := GitHubFileToolbarButton {
                             width: 30px;
                             height: parent.height;
-                            icon-source: @image-url("../../assets/icons/settings.svg");
+                            icon-source: @image-url("../../assets/icons/octicon-gear-16.svg");
                             selected: root.active-popover == "diff-settings";
                             outlined: true;
                             tooltip-text: "Open diff view settings";
@@ -1124,7 +1132,7 @@ export component PrReviewWorkspace inherits FocusScope {
                     spacing: 8px;
                     cross-axis-alignment: center;
 
-                    single-commit-title := MaterialText {
+                    single-commit-title := Text {
                         horizontal-stretch: 1;
                         height: parent.height;
                         text: root.commits[root.commit-range-start].title;
@@ -1145,7 +1153,7 @@ export component PrReviewWorkspace inherits FocusScope {
                         background: root.github-bg-default;
                         clip: true;
 
-                        CommitSummaryNavButton {
+                        GitHubCommitSummaryNavButton {
                             x: 0px;
                             width: 56px;
                             text: "Prev";
@@ -1158,7 +1166,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                 );
                             }
                         }
-                        CommitSummaryNavButton {
+                        GitHubCommitSummaryNavButton {
                             x: 56px;
                             width: 56px;
                             text: "Next";
@@ -1175,13 +1183,13 @@ export component PrReviewWorkspace inherits FocusScope {
                         }
                     }
 
-                    if root.width >= 1100px: ConversationAvatar {
+                    if root.width >= 1100px: GitHubConversationAvatar {
                         avatar-size: 22px;
                         label-size: 9px;
                         avatar: root.commits[root.commit-range-start].avatar;
                         fallback-label: root.commits[root.commit-range-start].avatar-label;
                     }
-                    if root.width >= 1100px: single-commit-author := MaterialText {
+                    if root.width >= 1100px: single-commit-author := Text {
                         width: min(190px, self.preferred-width);
                         height: parent.height;
                         text: root.commits[root.commit-range-start].author
@@ -1192,7 +1200,7 @@ export component PrReviewWorkspace inherits FocusScope {
                         vertical-alignment: center;
                         overflow: elide;
                     }
-                    MaterialText {
+                    Text {
                         width: 96px;
                         height: parent.height;
                         text: "Commit " + root.commits[root.commit-range-start].short-sha;
@@ -1214,7 +1222,7 @@ export component PrReviewWorkspace inherits FocusScope {
 
             // Host on the full toolbar row (not the leading strip) so the panel
             // can extend over the diff while the Primer caret stays under the gear.
-            DiffSettingsPopover {
+            GitHubDiffSettingsPopover {
                 z: 1000;
                 x: files-changed-toolbar.diff-settings-popover-x;
                 // Leave Primer-like gap under the gear (mt-2 + caret height).
@@ -1225,40 +1233,34 @@ export component PrReviewWorkspace inherits FocusScope {
                 pending-ignore-whitespace <=> root.pending-ignore-whitespace;
                 ignore-whitespace-supported: root.ignore-whitespace-supported;
                 bg-default: root.github-bg-default;
-                bg-hover: AppState.effective-dark-mode ? #262c36 : #f3f4f6;
+                bg-hover: GitHubTheme.control-raised-hover;
                 bg-muted: root.github-bg-muted;
                 border-default: root.github-border-default;
                 accent-fg: root.github-accent-fg;
                 fg-default: root.github-fg-default;
                 fg-muted: root.github-fg-muted;
-                addition-color: AppState.effective-dark-mode ? #2ea04366 : #aceebb;
-                deletion-color: AppState.effective-dark-mode ? #f8514966 : #ffcecb;
+                addition-color: GitHubTheme.diff-addition-stat;
+                deletion-color: GitHubTheme.diff-deletion-stat;
                 apply(view, ignore-whitespace) => {
                     root.active-popover = "";
                     root.apply-diff-settings(view, ignore-whitespace);
                 }
             }
 
-            Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: root.github-border-default;
-            }
         }
 
         if root.selected-tab == 2 && root.too-many-commits: Rectangle {
             width: parent.width;
             height: 32px;
-            background: MaterialPalette.tertiary_container;
-            MaterialText {
+            background: GitHubTheme.done-muted;
+            Text {
                 x: 18px;
                 width: parent.width - 36px;
                 height: parent.height;
                 text: "This pull request exceeds the server commit limit; the displayed diff may be partial.";
-                vertical_alignment: center;
+                vertical-alignment: center;
                 font-size: 11px;
-                color: MaterialPalette.on_tertiary_container;
+                color: GitHubTheme.done-fg;
             }
         }
 
@@ -1267,7 +1269,7 @@ export component PrReviewWorkspace inherits FocusScope {
             vertical-stretch: 1;
             background: root.github-bg-default;
 
-            if root.conversation-loading: MaterialText {
+            if root.conversation-loading: Text {
                 width: parent.width;
                 height: parent.height;
                 text: "Loading conversation…";
@@ -1275,7 +1277,7 @@ export component PrReviewWorkspace inherits FocusScope {
                 vertical-alignment: center;
                 color: root.github-fg-muted;
             }
-            if !root.conversation-loading && root.conversation-error != "": CenteredErrorState {
+            if !root.conversation-loading && root.conversation-error != "": GitHubCenteredErrorState {
                 width: parent.width;
                 height: parent.height;
                 background-color: root.github-bg-default;
@@ -1306,7 +1308,7 @@ export component PrReviewWorkspace inherits FocusScope {
                 if root.conversation-items.length == 0: Rectangle {
                     width: parent.width;
                     height: 120px;
-                    MaterialText {
+                    Text {
                         width: parent.width;
                         height: parent.height;
                         text: "No conversation activity was returned by this provider.";
@@ -1393,7 +1395,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             height: parent.height;
                             spacing: 8px;
                             cross-axis-alignment: center;
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: item.author;
                                 font-size: 13px;
@@ -1401,14 +1403,14 @@ export component PrReviewWorkspace inherits FocusScope {
                                 color: root.github-fg-default;
                                 vertical-alignment: center;
                             }
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: item.body;
                                 font-size: 13px;
                                 color: root.github-fg-muted;
                                 vertical-alignment: center;
                             }
-                            if item.created-at != "": RelativeTimestamp {
+                            if item.created-at != "": GitHubRelativeTimestamp {
                                 text: item.created-at;
                                 tooltip-text: item.created-at-tooltip;
                                 // Trailing free space after the label; avoids ListView clip.
@@ -1446,7 +1448,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             private property <length> title-width:
                                 min(conv-commit-title-measure.preferred-width, self.title-max-width);
 
-                            ConversationAvatar {
+                            GitHubConversationAvatar {
                                 x: 0px;
                                 y: (parent.height - self.height) / 2;
                                 avatar-size: 20px;
@@ -1486,13 +1488,13 @@ export component PrReviewWorkspace inherits FocusScope {
                                 mouse-cursor: pointer;
                                 clicked => { root.open-commit(item.id); }
                             }
-                            if item.message-body != "": CommitMessageToggleButton {
+                            if item.message-body != "": GitHubCommitMessageToggleButton {
                                 x: 28px + parent.title-width + 6px;
                                 y: (parent.height - self.height) / 2;
                                 expanded: item.message-expanded;
                                 clicked => { root.toggle-commit-message(item.id); }
                             }
-                            MaterialText {
+                            Text {
                                 x: parent.width - 72px;
                                 width: 72px;
                                 height: parent.height;
@@ -1539,7 +1541,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                 width: 16px;
                                 height: 16px;
                                 source: @image-url("../../assets/icons/octicon-git-merge-16.svg");
-                                colorize: #ffffff;
+                                colorize: GitHubTheme.fg-on-emphasis;
                             }
                         }
 
@@ -1549,13 +1551,13 @@ export component PrReviewWorkspace inherits FocusScope {
                             height: parent.height;
                             spacing: 8px;
                             cross-axis-alignment: center;
-                            ConversationAvatar {
+                            GitHubConversationAvatar {
                                 avatar-size: 20px;
                                 label-size: 9px;
                                 avatar: item.avatar;
                                 fallback-label: item.avatar-label;
                             }
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: item.author;
                                 font-size: 13px;
@@ -1563,14 +1565,14 @@ export component PrReviewWorkspace inherits FocusScope {
                                 color: root.github-fg-default;
                                 vertical-alignment: center;
                             }
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: "merged commit";
                                 font-size: 13px;
                                 color: root.github-fg-muted;
                                 vertical-alignment: center;
                             }
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: item.body;
                                 font-size: 12px;
@@ -1578,19 +1580,19 @@ export component PrReviewWorkspace inherits FocusScope {
                                 color: root.github-fg-default;
                                 vertical-alignment: center;
                             }
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: "into";
                                 font-size: 13px;
                                 color: root.github-fg-muted;
                                 vertical-alignment: center;
                             }
-                            BranchLabel {
+                            GitHubBranchLabel {
                                 text: item.state;
                                 background-color: root.github-accent-muted;
-                                foreground-color: AppState.effective-dark-mode ? #58a6ff : #0969da;
+                                foreground-color: GitHubTheme.accent-fg-strong;
                             }
-                            if item.created-at != "": RelativeTimestamp {
+                            if item.created-at != "": GitHubRelativeTimestamp {
                                 text: item.created-at;
                                 tooltip-text: item.created-at-tooltip;
                                 tooltip-above: true;
@@ -1599,7 +1601,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             }
                         }
 
-                        if item.kind == "review_summary": ConversationAvatar {
+                        if item.kind == "review_summary": GitHubConversationAvatar {
                             x: 0px;
                             y: 4px;
                             avatar: item.avatar;
@@ -1629,20 +1631,20 @@ export component PrReviewWorkspace inherits FocusScope {
                             height: parent.height;
                             spacing: 7px;
                             cross-axis-alignment: center;
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: item.author;
                                 font-size: 13px;
                                 font-weight: 600;
                                 color: root.github-fg-default;
                             }
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: item.body;
                                 font-size: 13px;
                                 color: root.github-fg-muted;
                             }
-                            if item.created-at != "": RelativeTimestamp {
+                            if item.created-at != "": GitHubRelativeTimestamp {
                                 text: item.created-at;
                                 tooltip-text: item.created-at-tooltip;
                                 // Below tip is clipped by the following review card.
@@ -1662,7 +1664,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             background: root.github-bg-muted;
                             border-width: 1px;
                             border-color: root.github-border-default;
-                            MaterialText {
+                            Text {
                                 width: parent.width;
                                 height: parent.height;
                                 text: "●";
@@ -1679,7 +1681,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             height: parent.height;
                             spacing: 10px;
                             cross-axis-alignment: center;
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: item.author;
                                 font-size: 13px;
@@ -1687,7 +1689,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                 color: root.github-fg-default;
                                 vertical-alignment: center;
                             }
-                            MaterialText {
+                            Text {
                                 horizontal-stretch: 1;
                                 text: item.body;
                                 font-size: 13px;
@@ -1695,7 +1697,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                 vertical-alignment: center;
                                 overflow: elide;
                             }
-                            if item.created-at != "": RelativeTimestamp {
+                            if item.created-at != "": GitHubRelativeTimestamp {
                                 text: item.created-at;
                                 tooltip-text: item.created-at-tooltip;
                                 tooltip-align-right: true;
@@ -1705,7 +1707,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             }
                         }
 
-                        if self.is-card && item.kind != "review": ConversationAvatar {
+                        if self.is-card && item.kind != "review": GitHubConversationAvatar {
                             x: 0px;
                             y: 6px;
                             avatar: item.avatar;
@@ -1741,7 +1743,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                         padding-right: 12px;
                                         spacing: 8px;
                                         cross-axis-alignment: center;
-                                        MaterialText {
+                                        Text {
                                             width: self.preferred-width;
                                             text: item.author;
                                             font-size: 13px;
@@ -1749,7 +1751,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                             color: root.github-fg-default;
                                             vertical-alignment: center;
                                         }
-                                        MaterialText {
+                                        Text {
                                             width: self.preferred-width;
                                             text: item.kind == "review" && item.state != ""
                                                 ? (item.state == "approved"
@@ -1762,7 +1764,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                             color: root.github-fg-muted;
                                             vertical-alignment: center;
                                         }
-                                        if item.kind != "review" && item.created-at != "": RelativeTimestamp {
+                                        if item.kind != "review" && item.created-at != "": GitHubRelativeTimestamp {
                                             text: item.created-at;
                                             tooltip-text: item.created-at-tooltip;
                                             // Trailing free space in the card header.
@@ -1777,7 +1779,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                             border-width: 1px;
                                             border-color: root.github-border-default;
                                             background: transparent;
-                                            MaterialText {
+                                            Text {
                                                 width: parent.width;
                                                 height: parent.height;
                                                 text: "Author";
@@ -1837,7 +1839,7 @@ export component PrReviewWorkspace inherits FocusScope {
                     vertical-stretch: 0;
                     background: transparent;
 
-                    ConversationAvatar {
+                    GitHubConversationAvatar {
                         x: 0px;
                         y: 0px;
                         avatar: AppState.user-avatar;
@@ -1888,7 +1890,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                         height: 2px;
                                         background: root.github-bg-default;
                                     }
-                                    MaterialText {
+                                    Text {
                                         width: parent.width;
                                         height: parent.height - 1px;
                                         text: "Write";
@@ -1914,10 +1916,10 @@ export component PrReviewWorkspace inherits FocusScope {
                                     border-radius: 6px;
                                     border-width: 1px;
                                     border-color: conversation-comment-editor.has-focus
-                                        ? #0969da
+                                        ? GitHubTheme.accent-emphasis
                                         : root.github-border-default;
-                                    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-                                    if root.conversation-comment-body == "" && !conversation-comment-editor.has-focus: MaterialText {
+                                    background: GitHubTheme.canvas-default;
+                                    if root.conversation-comment-body == "" && !conversation-comment-editor.has-focus: Text {
                                         x: 12px;
                                         y: 10px;
                                         width: parent.width - 24px;
@@ -1951,7 +1953,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                     height: 1px;
                                     background: root.github-border-default;
                                 }
-                                MaterialText {
+                                Text {
                                     x: 12px;
                                     y: 1px;
                                     width: parent.width - 140px;
@@ -1963,7 +1965,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                     color: root.github-fg-muted;
                                     vertical-alignment: center;
                                 }
-                                GithubCommentButton {
+                                GitHubCommentButton {
                                     x: parent.width - 108px;
                                     y: 10px;
                                     width: 96px;
@@ -1992,7 +1994,7 @@ export component PrReviewWorkspace inherits FocusScope {
             width: parent.width;
             vertical-stretch: 1;
             background: root.github-bg-default;
-            if root.commits-loading: MaterialText {
+            if root.commits-loading: Text {
                 width: parent.width;
                 height: parent.height;
                 text: "Loading commits…";
@@ -2000,7 +2002,7 @@ export component PrReviewWorkspace inherits FocusScope {
                 vertical-alignment: center;
                 color: root.github-fg-muted;
             }
-            if !root.commits-loading && root.commits-error != "": CenteredErrorState {
+            if !root.commits-loading && root.commits-error != "": GitHubCenteredErrorState {
                 width: parent.width;
                 height: parent.height;
                 background-color: root.github-bg-default;
@@ -2076,7 +2078,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             colorize: root.github-fg-muted;
                         }
                     }
-                    if commit.group-start: MaterialText {
+                    if commit.group-start: Text {
                         x: 48px;
                         // Same vertical center as the badge so the date label
                         // sits in the middle of the gap between cards.
@@ -2141,9 +2143,8 @@ export component PrReviewWorkspace inherits FocusScope {
                             || (commit.message-body != "" && commit-kebab.has-hover)
                             || (commit.short-date-label != "" && self.time-hovered);
                         private property <length> content-trail-width: 188px;
-                        private property <color> sha-hover-fill: AppState.effective-dark-mode
-                            ? #656c7633
-                            : #eaeef2;
+                        private property <color> sha-hover-fill:
+                            GitHubTheme.control-muted-hover;
 
                         // Hidden measure keeps expand-extra and the author footer
                         // aligned to the wrapped body without blank gaps.
@@ -2258,21 +2259,21 @@ export component PrReviewWorkspace inherits FocusScope {
                             height: 22px;
                             spacing: 4px;
                             cross-axis-alignment: center;
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: commit.author;
                                 font-size: 12px;
                                 color: root.github-fg-muted;
                                 vertical-alignment: center;
                             }
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: "committed";
                                 font-size: 12px;
                                 color: root.github-fg-muted;
                                 vertical-alignment: center;
                             }
-                            if commit.short-date-label != "": RelativeTimestamp {
+                            if commit.short-date-label != "": GitHubRelativeTimestamp {
                                 text: commit.short-date-label;
                                 tooltip-text: commit.authored-at;
                                 tooltip-after: true;
@@ -2311,13 +2312,13 @@ export component PrReviewWorkspace inherits FocusScope {
                             height: root.commit-tab-author-band;
                             spacing: 6px;
                             cross-axis-alignment: center;
-                            ConversationAvatar {
+                            GitHubConversationAvatar {
                                 avatar-size: 20px;
                                 label-size: 9px;
                                 avatar: commit.avatar;
                                 fallback-label: commit.avatar-label;
                             }
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: commit.author;
                                 font-size: 12px;
@@ -2325,14 +2326,14 @@ export component PrReviewWorkspace inherits FocusScope {
                                 color: root.github-fg-default;
                                 vertical-alignment: center;
                             }
-                            MaterialText {
+                            Text {
                                 width: self.preferred-width;
                                 text: "committed";
                                 font-size: 12px;
                                 color: root.github-fg-muted;
                                 vertical-alignment: center;
                             }
-                            if commit.short-date-label != "": RelativeTimestamp {
+                            if commit.short-date-label != "": GitHubRelativeTimestamp {
                                 text: commit.short-date-label;
                                 tooltip-text: commit.authored-at;
                                 tooltip-after: true;
@@ -2346,7 +2347,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             Rectangle { horizontal-stretch: 1; }
                         }
 
-                        if commit.verified: MaterialText {
+                        if commit.verified: Text {
                             x: parent.width - 226px;
                             y: 0px;
                             width: 64px;
@@ -2366,7 +2367,7 @@ export component PrReviewWorkspace inherits FocusScope {
                         // GitHub short SHA is plain text at rest. Its rounded
                         // control-hover pill appears only while the SHA itself
                         // is hovered—never from row chrome alone. Use Primer
-                        // control hover (`#eaeef2` / translucent dark), not
+                        // the shared semantic control-hover token, not
                         // page `bg-muted`, so the pill stays visible on both
                         // white and row-muted fills.
                         commit-sha-chip := Rectangle {
@@ -2380,7 +2381,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             background: commit-row.sha-hovered
                                 ? commit-row.sha-hover-fill
                                 : transparent;
-                            MaterialText {
+                            Text {
                                 width: parent.width;
                                 height: parent.height;
                                 text: commit.short-sha;
@@ -2412,7 +2413,7 @@ export component PrReviewWorkspace inherits FocusScope {
                         // Always mounted so row-hovered can read has-hover; hide
                         // when there is no message body to expand. Declared last
                         // so the kebab wins hit-testing over the title touch.
-                        commit-kebab := CommitMessageToggleButton {
+                        commit-kebab := GitHubCommitMessageToggleButton {
                             visible: commit.message-body != "";
                             x: min(
                                 root.commit-tab-content-x + parent.title-end-x + 8px,
@@ -2428,7 +2429,7 @@ export component PrReviewWorkspace inherits FocusScope {
                     }
                 }
             }
-            if !root.commits-loading && root.commits-error == "" && root.commits.length == 0: MaterialText {
+            if !root.commits-loading && root.commits-error == "" && root.commits.length == 0: Text {
                 width: parent.width;
                 height: parent.height;
                 text: "No commits were returned by this provider.";
@@ -2446,17 +2447,17 @@ export component PrReviewWorkspace inherits FocusScope {
             clip: false;
             background: root.github-bg-default;
 
-            if root.loading: MaterialText {
+            if root.loading: Text {
                 width: parent.width;
                 height: parent.height;
                 text: "Loading changed files…";
-                horizontal_alignment: center;
-                vertical_alignment: center;
-                font_size: 14px;
-                color: MaterialPalette.on_surface_variant;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: 14px;
+                color: GitHubTheme.fg-muted;
             }
 
-            if !root.loading && root.error-text != "": CenteredErrorState {
+            if !root.loading && root.error-text != "": GitHubCenteredErrorState {
                 width: parent.width;
                 height: parent.height;
                 background-color: root.github-bg-default;
@@ -2587,14 +2588,14 @@ export component PrReviewWorkspace inherits FocusScope {
                                 border-radius: 6px;
                                 border-width: 1px;
                                 border-color: root.file-filters-active
-                                    ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
+                                    ? (GitHubTheme.accent-fg)
                                     : root.github-border-default;
                                 background: filter-button-touch.has-hover
                                     ? (root.active-popover == "file-filter"
-                                        ? (AppState.effective-dark-mode ? #656c7626 : #eff2f5)
+                                        ? (GitHubTheme.control-soft-rest)
                                         : root.github-bg-muted)
                                     : (root.active-popover == "file-filter"
-                                        ? (AppState.effective-dark-mode ? #656c7633 : #e6eaef)
+                                        ? (GitHubTheme.control-soft-hover)
                                         : root.github-bg-default);
                                 Image {
                                     x: 9px;
@@ -2604,7 +2605,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                     source: @image-url("../../assets/icons/octicon-filter-16.svg");
                                     image-fit: contain;
                                     colorize: root.file-filters-active
-                                        ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
+                                        ? (GitHubTheme.accent-fg)
                                         : root.github-fg-muted;
                                 }
                                 filter-button-touch := TouchArea {
@@ -2634,7 +2635,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                             ? root.github-bg-muted
                                             : transparent);
                                     border-width: 0px;
-                                    TreeIndentGuides { width: parent.width; height: parent.height; depth: item.depth; }
+                                    GitHubTreeIndentGuides { width: parent.width; height: parent.height; depth: item.depth; }
                                     HorizontalLayout {
                                         padding-left: 10px + item.depth * 18px;
                                         padding-right: 10px;
@@ -2662,7 +2663,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                                     : @image-url("../../assets/icons/octicon-file-directory-fill-16.svg");
                                                 image-fit: contain;
                                             }
-                                            if item.kind == "file": FileChangeTypeIcon {
+                                            if item.kind == "file": GitHubFileChangeTypeIcon {
                                                 x: 18px;
                                                 y: (parent.height - self.height) / 2;
                                                 width: 14px;
@@ -2678,8 +2679,8 @@ export component PrReviewWorkspace inherits FocusScope {
                                             horizontal-stretch: 1;
                                             height: parent.height;
                                             text: item.name;
-                                            horizontal_alignment: left;
-                                            vertical_alignment: center;
+                                            horizontal-alignment: left;
+                                            vertical-alignment: center;
                                             font-family: root.tree-font-family;
                                             font-size: 14px;
                                             font-weight: 600;
@@ -2690,8 +2691,8 @@ export component PrReviewWorkspace inherits FocusScope {
                                             width: 24px;
                                             height: parent.height;
                                             text: item.file-count;
-                                            horizontal_alignment: right;
-                                            vertical_alignment: center;
+                                            horizontal-alignment: right;
+                                            vertical-alignment: center;
                                             font-family: root.tree-font-family;
                                             font-size: 12px;
                                             color: root.github-fg-muted;
@@ -2704,8 +2705,8 @@ export component PrReviewWorkspace inherits FocusScope {
                                                 width: min(self.preferred-width, max(0px, parent.width - 60px));
                                                 height: parent.height;
                                                 text: item.name;
-                                                horizontal_alignment: left;
-                                                vertical_alignment: center;
+                                                horizontal-alignment: left;
+                                                vertical-alignment: center;
                                                 font-family: root.tree-font-family;
                                                 font-size: 14px;
                                                 font-weight: root.selected-file-index == item.file-index ? 600 : 400;
@@ -2717,8 +2718,8 @@ export component PrReviewWorkspace inherits FocusScope {
                                                 width: self.preferred-width;
                                                 height: parent.height;
                                                 text: "+" + item.added-lines;
-                                                horizontal_alignment: left;
-                                                vertical_alignment: center;
+                                                horizontal-alignment: left;
+                                                vertical-alignment: center;
                                                 font-family: root.tree-font-family;
                                                 font-size: 12px;
                                                 font-weight: 500;
@@ -2729,8 +2730,8 @@ export component PrReviewWorkspace inherits FocusScope {
                                                 width: self.preferred-width;
                                                 height: parent.height;
                                                 text: "−" + item.removed-lines;
-                                                horizontal_alignment: left;
-                                                vertical_alignment: center;
+                                                horizontal-alignment: left;
+                                                vertical-alignment: center;
                                                 font-family: root.tree-font-family;
                                                 font-size: 12px;
                                                 font-weight: 500;
@@ -2749,15 +2750,15 @@ export component PrReviewWorkspace inherits FocusScope {
                                 }
                             }
 
-                            if root.tree-items.length == 0: MaterialText {
+                            if root.tree-items.length == 0: Text {
                                 width: parent.width;
                                 height: 72px;
                                 text: root.file-filter == "" ? "No changed files" : "No matching files";
-                                horizontal_alignment: center;
-                                vertical_alignment: center;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
                                 font-family: root.tree-font-family;
                                 font-size: 14px;
-                                color: MaterialPalette.on_surface_variant;
+                                color: GitHubTheme.fg-muted;
                             }
                         }
                     }
@@ -2782,6 +2783,12 @@ export component PrReviewWorkspace inherits FocusScope {
                             z: 20;
                             background: root.github-bg-default;
                             border-width: 0px;
+                            Rectangle {
+                                y: parent.height - 1px;
+                                width: parent.width;
+                                height: 1px;
+                                background: root.github-border-default;
+                            }
                             HorizontalLayout {
                                 padding-left: 16px;
                                 padding-right: 16px;
@@ -2793,7 +2800,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                 Rectangle {
                                     width: 16px;
                                     height: parent.height;
-                                    FileChangeTypeIcon {
+                                    GitHubFileChangeTypeIcon {
                                         y: (parent.height - self.height) / 2;
                                         width: 16px;
                                         height: 16px;
@@ -2817,15 +2824,15 @@ export component PrReviewWorkspace inherits FocusScope {
                                         // selected-file toolbar.
                                         cross-axis-alignment: center;
 
-                                        MaterialText {
+                                        Text {
                                             horizontal-stretch: 1;
                                             height: parent.height;
                                             text: root.selected-file-path == "" ? "Select a changed file" : root.selected-file-path;
                                             font-size: 12px;
                                             font-weight: 600;
-                                            color: MaterialPalette.on_surface;
+                                            color: GitHubTheme.fg-default;
                                             overflow: elide;
-                                            vertical_alignment: center;
+                                            vertical-alignment: center;
                                         }
                                         GitHubCopyButton {
                                             button-enabled: root.selected-file-path != "";
@@ -2835,7 +2842,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                             tooltip-above: false;
                                             copy-requested => { root.copy-file-path(root.selected-file-path) }
                                         }
-                                        FileToolbarButton {
+                                        GitHubFileToolbarButton {
                                             icon-source: root.context-expanded
                                                 ? @image-url("../../assets/icons/octicon-fold-16.svg")
                                                 : @image-url("../../assets/icons/octicon-unfold-16.svg");
@@ -2848,12 +2855,12 @@ export component PrReviewWorkspace inherits FocusScope {
                                         }
                                     }
                                 }
-                                FileDiffStat {
+                                GitHubFileDiffStat {
                                     additions: root.selected-file-added-lines;
                                     deletions: root.selected-file-removed-lines;
                                     has-selection: root.selected-file-index >= 0;
                                 }
-                                diff-find-bar := DiffFindBar {
+                                diff-find-bar := GitHubDiffFindBar {
                                     visible: root.diff-find-open;
                                     width: root.diff-find-open ? 320px : 0px;
                                     query <=> root.diff-find-query;
@@ -2874,29 +2881,29 @@ export component PrReviewWorkspace inherits FocusScope {
                                         }
                                     }
                                 }
-                                if !root.diff-find-open: MaterialText {
+                                if !root.diff-find-open: Text {
                                     width: 48px;
                                     height: parent.height;
                                     text: root.selected-file-index < 0 ? "" : (root.selected-file-index + 1) + " / " + root.files.length;
-                                    horizontal_alignment: center;
+                                    horizontal-alignment: center;
                                     font-size: 10px;
-                                    color: MaterialPalette.on_surface_variant;
-                                    vertical_alignment: center;
+                                    color: GitHubTheme.fg-muted;
+                                    vertical-alignment: center;
                                 }
-                                if !root.diff-find-open: FileToolbarButton {
+                                if !root.diff-find-open: GitHubFileToolbarButton {
                                     icon-source: @image-url("../../assets/icons/octicon-chevron-left-16.svg");
                                     button-enabled: root.selected-file-index > 0 && !root.code-loading;
                                     tooltip-text: "Previous file";
                                     clicked => { root.select-relative-file(-1); }
                                 }
-                                if !root.diff-find-open: FileToolbarButton {
+                                if !root.diff-find-open: GitHubFileToolbarButton {
                                     icon-source: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
                                     button-enabled: root.selected-file-index >= 0 && root.selected-file-index + 1 < root.files.length && !root.code-loading;
                                     tooltip-text: "Next file";
                                     tooltip-align-right: true;
                                     clicked => { root.select-relative-file(1); }
                                 }
-                                FileMenuButton {
+                                GitHubFileMenuButton {
                                     button-enabled: root.selected-file-index >= 0 && !root.code-loading;
                                     viewing-file: root.viewing-file;
                                     open: root.active-popover == "file-menu";
@@ -2913,7 +2920,6 @@ export component PrReviewWorkspace inherits FocusScope {
                                     }
                                 }
                             }
-                            Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: root.github-border-default; }
                         }
 
                         diff-scroll := ListView {
@@ -2979,7 +2985,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                 if root.diff-view != "split": unified-row := Rectangle {
                                         width: parent.width;
                                         height: parent.height;
-                                        // Absolute gutters match SplitDiffSide: HorizontalLayout was
+                                        // Absolute gutters match GitHubSplitDiffSide: HorizontalLayout was
                                         // still vertically centering +/- across soft-wrapped row height.
                                         private property <length> gutter-width: 120px;
 
@@ -3001,7 +3007,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                                     height: 16px;
                                                     source: @image-url("../../assets/icons/octicon-unfold-16.svg");
                                                     image-fit: contain;
-                                                    colorize: hunk-expand-all-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                                    colorize: hunk-expand-all-touch.has-hover ? GitHubTheme.fg-on-emphasis : root.github-fg-muted;
                                                 }
                                                 hunk-expand-all-touch := TouchArea {
                                                     mouse-cursor: pointer;
@@ -3021,7 +3027,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                                     height: 16px;
                                                     source: @image-url("../../assets/icons/octicon-fold-down-16.svg");
                                                     image-fit: contain;
-                                                    colorize: hunk-expand-down-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                                    colorize: hunk-expand-down-touch.has-hover ? GitHubTheme.fg-on-emphasis : root.github-fg-muted;
                                                 }
                                                 hunk-expand-down-touch := TouchArea {
                                                     mouse-cursor: pointer;
@@ -3041,7 +3047,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                                     height: 16px;
                                                     source: @image-url("../../assets/icons/octicon-fold-up-16.svg");
                                                     image-fit: contain;
-                                                    colorize: hunk-expand-up-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                                    colorize: hunk-expand-up-touch.has-hover ? GitHubTheme.fg-on-emphasis : root.github-fg-muted;
                                                 }
                                                 hunk-expand-up-touch := TouchArea {
                                                     mouse-cursor: pointer;
@@ -3128,7 +3134,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                             font-size: root.code-font-size;
                                             color: root.hunk-foreground;
                                         }
-                                        if line.kind != "hunk" && line.kind != "meta": SelectableDiffCode {
+                                        if line.kind != "hunk" && line.kind != "meta": GitHubSelectableDiffCode {
                                             x: unified-row.gutter-width;
                                             y: 0px;
                                             width: parent.width - unified-row.gutter-width;
@@ -3181,7 +3187,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                     width: parent.width;
                                     height: parent.height;
                                     spacing: 0px;
-                                    SplitDiffSide {
+                                    GitHubSplitDiffSide {
                                         width: (parent.width - 1px) / 2;
                                         height: parent.height;
                                         line-number: line.left-line;
@@ -3241,7 +3247,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                         height: parent.height;
                                         background: root.github-border-default;
                                     }
-                                    SplitDiffSide {
+                                    GitHubSplitDiffSide {
                                         width: (parent.width - 1px) / 2;
                                         height: parent.height;
                                         line-number: line.right-line;
@@ -3327,7 +3333,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                             ? root.hunk-foreground
                                             : root.github-fg-muted;
                                     }
-                                    if line.kind != "hunk" && line.kind != "meta": SelectableDiffCode {
+                                    if line.kind != "hunk" && line.kind != "meta": GitHubSelectableDiffCode {
                                         horizontal-stretch: 1;
                                         height: parent.height;
                                         content: line.content;
@@ -3395,7 +3401,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                             height: 16px;
                                             source: @image-url("../../assets/icons/octicon-unfold-16.svg");
                                             image-fit: contain;
-                                            colorize: split-hunk-expand-all-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                            colorize: split-hunk-expand-all-touch.has-hover ? GitHubTheme.fg-on-emphasis : root.github-fg-muted;
                                         }
                                         split-hunk-expand-all-touch := TouchArea {
                                             mouse-cursor: pointer;
@@ -3416,7 +3422,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                             height: 16px;
                                             source: @image-url("../../assets/icons/octicon-fold-down-16.svg");
                                             image-fit: contain;
-                                            colorize: split-hunk-expand-down-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                            colorize: split-hunk-expand-down-touch.has-hover ? GitHubTheme.fg-on-emphasis : root.github-fg-muted;
                                         }
                                         split-hunk-expand-down-touch := TouchArea {
                                             mouse-cursor: pointer;
@@ -3437,7 +3443,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                             height: 16px;
                                             source: @image-url("../../assets/icons/octicon-fold-up-16.svg");
                                             image-fit: contain;
-                                            colorize: split-hunk-expand-up-touch.has-hover ? #ffffff : root.github-fg-muted;
+                                            colorize: split-hunk-expand-up-touch.has-hover ? GitHubTheme.fg-on-emphasis : root.github-fg-muted;
                                         }
                                         split-hunk-expand-up-touch := TouchArea {
                                             mouse-cursor: pointer;
@@ -3450,7 +3456,7 @@ export component PrReviewWorkspace inherits FocusScope {
 
                     }
 
-                    if root.large-diff-deferred || root.large-diff-loading: LargeDiffPlaceholder {
+                    if root.large-diff-deferred || root.large-diff-loading: GitHubLargeDiffPlaceholder {
                         z: 30;
                         x: 0px;
                         y: 46px;
@@ -3460,11 +3466,11 @@ export component PrReviewWorkspace inherits FocusScope {
                         bg-default: root.github-bg-default;
                         bg-muted: root.github-bg-muted;
                         fg-muted: root.github-fg-muted;
-                        accent-fg: AppState.effective-dark-mode ? #4493f8 : #0969da;
+                        accent-fg: GitHubTheme.accent-fg;
                         load => { root.load-large-diff(); }
                     }
 
-                    if root.code-loading && !root.large-diff-loading: CodeRenderingIndicator {
+                    if root.code-loading && !root.large-diff-loading: GitHubCodeRenderingIndicator {
                         x: (parent.width - self.width) / 2;
                         y: 56px;
                     }
@@ -3512,7 +3518,7 @@ export component PrReviewWorkspace inherits FocusScope {
                     width: 3px;
                     height: parent.height;
                     z: 101;
-                    background: MaterialPalette.primary;
+                    background: GitHubTheme.success-emphasis;
                     opacity: root.file-list-visible && (root.file-list-resizing || file-list-resize-handle.has-hover) ? 0.8 : 0;
                 }
 
@@ -3557,6 +3563,7 @@ export component PrReviewWorkspace inherits FocusScope {
         toggle-extension(extension) => { root.toggle-extension-filter(extension); }
         toggle-manifest => { root.toggle-manifest-filter(); }
         toggle-viewed => { root.toggle-viewed-files(); }
+        dismiss => { root.active-popover = ""; }
     }
 
     commit-dialog-frame := GitHubDialog {
@@ -3605,7 +3612,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             colorize: root.github-fg-muted;
                             opacity: root.draft-range-start < 0 ? 1 : 0;
                         }
-                        MaterialText {
+                        Text {
                             x: 56px;
                             y: 5px;
                             width: parent.width - 80px;
@@ -3616,7 +3623,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             color: root.github-fg-default;
                             vertical-alignment: center;
                         }
-                        MaterialText {
+                        Text {
                             x: 56px;
                             y: 29px;
                             width: parent.width - 80px;
@@ -3639,7 +3646,7 @@ export component PrReviewWorkspace inherits FocusScope {
                         width: parent.width;
                         height: 72px;
                         background: root.github-bg-default;
-                        MaterialText {
+                        Text {
                             x: 56px;
                             y: 7px;
                             width: parent.width - 80px;
@@ -3650,7 +3657,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             color: root.github-fg-muted;
                             vertical-alignment: center;
                         }
-                        MaterialText {
+                        Text {
                             x: 56px;
                             y: 35px;
                             width: parent.width - 80px;
@@ -3668,7 +3675,7 @@ export component PrReviewWorkspace inherits FocusScope {
                         border-width: 1px;
                         border-color: root.github-border-default;
                         background: root.github-bg-muted;
-                        MaterialText {
+                        Text {
                             x: 24px;
                             width: parent.width - 48px;
                             height: parent.height;
@@ -3683,7 +3690,7 @@ export component PrReviewWorkspace inherits FocusScope {
                     if root.commits-loading: Rectangle {
                         width: parent.width;
                         height: 180px;
-                        MaterialText {
+                        Text {
                             width: parent.width;
                             height: parent.height;
                             text: "Loading commits…";
@@ -3695,7 +3702,7 @@ export component PrReviewWorkspace inherits FocusScope {
                     if !root.commits-loading && root.commits-error != "": Rectangle {
                         width: parent.width;
                         height: 220px;
-                        CenteredErrorState {
+                        GitHubCenteredErrorState {
                             x: 24px;
                             width: parent.width - 48px;
                             height: parent.height;
@@ -3726,8 +3733,8 @@ export component PrReviewWorkspace inherits FocusScope {
                             height: 20px;
                             border-radius: 4px;
                             border-width: 1px;
-                            border-color: range-selected ? #0969da : root.github-border-default;
-                            background: range-selected ? #0969da : root.github-bg-default;
+                            border-color: range-selected ? GitHubTheme.accent-emphasis : root.github-border-default;
+                            background: range-selected ? GitHubTheme.accent-emphasis : root.github-bg-default;
                             if range-selected: Image {
                                 x: 2px;
                                 y: 2px;
@@ -3735,7 +3742,7 @@ export component PrReviewWorkspace inherits FocusScope {
                                 height: 16px;
                                 source: @image-url("../../assets/icons/octicon-check-16.svg");
                                 image-fit: contain;
-                                colorize: #ffffff;
+                                colorize: GitHubTheme.fg-on-emphasis;
                             }
                         }
                         commit-title := Text {
@@ -3750,7 +3757,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             wrap: word-wrap;
                             overflow: clip;
                         }
-                        MaterialText {
+                        Text {
                             x: 56px;
                             y: commit-title.y + commit-title.height + 3px;
                             width: parent.width - 180px;
@@ -3761,7 +3768,7 @@ export component PrReviewWorkspace inherits FocusScope {
                             vertical-alignment: center;
                             overflow: elide;
                         }
-                        MaterialText {
+                        Text {
                             x: parent.width - 108px;
                             y: 7px;
                             width: 84px;
@@ -3805,7 +3812,7 @@ export component PrReviewWorkspace inherits FocusScope {
         cancel-clicked => { root.review-dialog-open = false; }
         primary-clicked => { root.submit-review(root.selected-review-action, root.review-body); }
 
-        if root.review-dialog-open: MaterialText {
+        if root.review-dialog-open: Text {
             x: review-dialog-frame.content-x + 16px;
             y: review-dialog-frame.content-y + 16px;
             width: review-dialog-frame.content-width - 32px;
@@ -3824,7 +3831,7 @@ export component PrReviewWorkspace inherits FocusScope {
             z: 3100;
             border-radius: 6px;
             border-width: 1px;
-            border-color: review-editor.has-focus ? #0969da : root.github-border-default;
+            border-color: review-editor.has-focus ? GitHubTheme.accent-emphasis : root.github-border-default;
             background: root.github-bg-default;
             review-editor := TextInput {
                 x: 10px;
@@ -3845,7 +3852,7 @@ export component PrReviewWorkspace inherits FocusScope {
             width: review-dialog-frame.content-width - 16px;
             z: 3100;
             spacing: 0px;
-            ReviewChoice {
+            GitHubReviewChoice {
                 width: parent.width;
                 title: "Comment";
                 description: "Submit general feedback without explicit approval.";
@@ -3853,7 +3860,7 @@ export component PrReviewWorkspace inherits FocusScope {
                 choice-enabled: root.can-comment && !root.action-loading;
                 chosen => { root.selected-review-action = "comment"; }
             }
-            ReviewChoice {
+            GitHubReviewChoice {
                 width: parent.width;
                 title: "Approve";
                 description: "Submit feedback and approve merging these changes.";
@@ -3861,7 +3868,7 @@ export component PrReviewWorkspace inherits FocusScope {
                 choice-enabled: root.can-approve && !root.action-loading;
                 chosen => { root.selected-review-action = "approve"; }
             }
-            ReviewChoice {
+            GitHubReviewChoice {
                 width: parent.width;
                 title: "Request changes";
                 description: root.provider == "gitee" && !root.can-request-changes
@@ -3890,7 +3897,7 @@ export component PrReviewWorkspace inherits FocusScope {
         cancel-clicked => { root.merge-dialog-open = false; }
         primary-clicked => { root.merge(root.selected-merge-method, root.remove-source-branch); }
 
-        if root.merge-dialog-open: MaterialText {
+        if root.merge-dialog-open: Text {
             x: merge-dialog-frame.content-x + 16px;
             y: merge-dialog-frame.content-y + 14px;
             width: merge-dialog-frame.content-width - 32px;
@@ -3907,7 +3914,7 @@ export component PrReviewWorkspace inherits FocusScope {
             width: merge-dialog-frame.content-width - 16px;
             z: 3100;
             spacing: 0px;
-            if root.merge-method-merge: ReviewChoice {
+            if root.merge-method-merge: GitHubReviewChoice {
                 width: parent.width;
                 title: "Create a merge commit";
                 description: "All commits will be added with a merge commit.";
@@ -3915,7 +3922,7 @@ export component PrReviewWorkspace inherits FocusScope {
                 choice-enabled: !root.action-loading;
                 chosen => { root.selected-merge-method = "merge"; }
             }
-            if root.merge-method-squash: ReviewChoice {
+            if root.merge-method-squash: GitHubReviewChoice {
                 width: parent.width;
                 title: "Squash and merge";
                 description: "The commits will be combined into one commit.";
@@ -3923,7 +3930,7 @@ export component PrReviewWorkspace inherits FocusScope {
                 choice-enabled: !root.action-loading;
                 chosen => { root.selected-merge-method = "squash"; }
             }
-            if root.merge-method-rebase: ReviewChoice {
+            if root.merge-method-rebase: GitHubReviewChoice {
                 width: parent.width;
                 title: "Rebase and merge";
                 description: "The commits will be rebased onto the base branch.";
@@ -3931,7 +3938,7 @@ export component PrReviewWorkspace inherits FocusScope {
                 choice-enabled: !root.action-loading;
                 chosen => { root.selected-merge-method = "rebase"; }
             }
-            if root.merge-method-fast-forward: ReviewChoice {
+            if root.merge-method-fast-forward: GitHubReviewChoice {
                 width: parent.width;
                 title: "Fast-forward and merge";
                 description: "Move the base branch directly to the pull request head.";
@@ -3955,16 +3962,16 @@ export component PrReviewWorkspace inherits FocusScope {
                 height: 16px;
                 border-radius: 3px;
                 border-width: 1px;
-                border-color: root.remove-source-branch ? #0969da : root.github-border-default;
-                background: root.remove-source-branch ? #0969da : transparent;
+                border-color: root.remove-source-branch ? GitHubTheme.accent-emphasis : root.github-border-default;
+                background: root.remove-source-branch ? GitHubTheme.accent-emphasis : transparent;
                 if root.remove-source-branch: Image {
                     width: 16px;
                     height: 16px;
                     source: @image-url("../../assets/icons/octicon-check-16.svg");
-                    colorize: #ffffff;
+                    colorize: GitHubTheme.fg-on-emphasis;
                 }
             }
-            MaterialText {
+            Text {
                 x: 26px;
                 width: parent.width - 26px;
                 height: parent.height;
@@ -3997,7 +4004,7 @@ export component PrReviewWorkspace inherits FocusScope {
         cancel-clicked => { root.revert-dialog-open = false; }
         primary-clicked => { root.revert(); }
 
-        if root.revert-dialog-open: MaterialText {
+        if root.revert-dialog-open: Text {
             x: revert-dialog-frame.content-x;
             y: revert-dialog-frame.content-y;
             width: revert-dialog-frame.content-width;
@@ -4010,7 +4017,7 @@ export component PrReviewWorkspace inherits FocusScope {
             wrap: word-wrap;
             vertical-alignment: top;
         }
-        if root.revert-dialog-open: MaterialText {
+        if root.revert-dialog-open: Text {
             x: revert-dialog-frame.content-x;
             y: revert-dialog-frame.content-y + 48px;
             width: revert-dialog-frame.content-width;

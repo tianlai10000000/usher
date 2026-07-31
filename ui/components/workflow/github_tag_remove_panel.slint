@@ -1,0 +1,57 @@
+import { GitHubTagField } from "./fields.slint";
+import { GitHubTagActionButton } from "./tag_controls.slint";
+
+export component GitHubTagRemovePanel {
+    in property <bool> running: false;
+    in property <bool> initializing: false;
+    in property <bool> has-run: false;
+    in-out property <string> tag-to-remove: "";
+    callback remove-tag(string);
+    callback view-run();
+
+    width: 100%;
+    height: panel-content.preferred-height;
+    vertical-stretch: 0;
+
+    panel-content := VerticalLayout {
+        width: 100%;
+        spacing: 16px;
+        alignment: start;
+        padding: 8px;
+        padding-top: 16px;
+
+        GitHubTagField {
+            width: 100%;
+            label: "Tag to remove";
+            value <=> root.tag-to-remove;
+            placeholder: "v1.2.3";
+            enabled: !root.running && !root.initializing;
+        }
+
+        HorizontalLayout {
+            width: 100%;
+            spacing: 12px;
+            alignment: start;
+            cross-axis-alignment: center;
+            height: 32px;
+
+            GitHubTagActionButton {
+                enabled: !root.running && !root.initializing;
+                loading: root.initializing;
+                label: root.initializing ? "Loading…" : "Remove tag";
+                danger: true;
+                clicked => {
+                    root.remove-tag(root.tag-to-remove);
+                }
+            }
+
+            if root.has-run: GitHubTagActionButton {
+                label: root.running ? "View running job" : "View latest job";
+                action-primary: false;
+                clicked => {
+                    root.view-run();
+                }
+            }
+        }
+    }
+}

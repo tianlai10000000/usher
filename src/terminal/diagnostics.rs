@@ -36,20 +36,15 @@ pub(super) fn format_bytes_for_log(bytes: &[u8]) -> String {
 
 pub(super) fn route_label(route: Route) -> &'static str {
     match route {
-        Route::Login => "Login",
         Route::Home => "Home",
         Route::Search => "Search",
         Route::Settings => "Settings",
-        Route::Notification => "Notification",
-        Route::Toast => "Toast",
-        Route::Dialog => "Dialog",
-        Route::Tools => "Tools",
         Route::Project => "Project",
         Route::Chat => "Chat",
+        Route::UiComponents => "UI Components",
         Route::About => "About",
-        Route::List => "List",
-        Route::Detail => "Detail",
         Route::Workflow => "Workflow",
+        Route::JobRun => "JobRun",
         Route::PrReview => "PrReview",
     }
 }

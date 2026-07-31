@@ -1,10 +1,12 @@
-import { AppState } from "../../state/app_state.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { NotificationType } from "notification.slint";
 
 // Floating application notifications reproduce Primer React Banner's compact
 // geometry: 8px outer padding, 1px semantic border, 6px radius, 16px status
 // Octicon, 14px text, and stacked actions below complex content.
-export component ActionsNotify inherits Rectangle {
+export component GitHubNotificationBanner inherits Rectangle {
     in property <int> notification-id;
     in property <string> title;
     in property <string> message;
@@ -15,16 +17,23 @@ export component ActionsNotify inherits Rectangle {
     callback close-clicked();
     callback action-clicked(/* action-index */ int);
 
-    private property <bool> dark: AppState.effective-dark-mode;
-    private property <color> foreground: root.dark ? #f0f6fc : #1f2328;
-    private property <color> muted-foreground: root.dark ? #b7bdc8 : #59636e;
-    private property <color> canvas: root.dark ? #0d1117 : #ffffff;
-    private property <color> border: root.dark ? #3d444d : #d1d9e0;
+    private property <color> foreground: GitHubTheme.fg-default;
+    private property <color> muted-foreground: GitHubTheme.fg-muted;
+    private property <color> canvas:
+        root.notification-type == NotificationType.Success ? GitHubTheme.success-muted :
+        root.notification-type == NotificationType.Info ? GitHubTheme.accent-subtle :
+        root.notification-type == NotificationType.Warning ? GitHubTheme.attention-muted :
+        GitHubTheme.danger-muted;
+    private property <color> border:
+        root.notification-type == NotificationType.Success ? GitHubTheme.success-fg :
+        root.notification-type == NotificationType.Info ? GitHubTheme.accent-muted :
+        root.notification-type == NotificationType.Warning ? GitHubTheme.attention-fg :
+        GitHubTheme.danger-border-muted;
     private property <color> semantic-foreground:
-        root.notification-type == NotificationType.Success ? (root.dark ? #3fb950 : #1a7f37) :
-        root.notification-type == NotificationType.Info ? (root.dark ? #4493f8 : #0969da) :
-        root.notification-type == NotificationType.Warning ? (root.dark ? #d29922 : #9a6700) :
-        (root.dark ? #f85149 : #cf222e);
+        root.notification-type == NotificationType.Success ? GitHubTheme.success-fg :
+        root.notification-type == NotificationType.Info ? GitHubTheme.accent-fg :
+        root.notification-type == NotificationType.Warning ? GitHubTheme.attention-fg :
+        GitHubTheme.danger-fg;
 
     height: max(48px, banner-content.preferred-height);
     background: root.canvas;
@@ -33,7 +42,7 @@ export component ActionsNotify inherits Rectangle {
     border-radius: 6px;
     drop-shadow-blur: 8px;
     drop-shadow-offset-y: 2px;
-    drop-shadow-color: root.dark ? #00000066 : #1f232826;
+    drop-shadow-color: GitHubTheme.shadow-floating-medium;
 
     banner-content := VerticalLayout {
         width: parent.width;
@@ -99,72 +108,23 @@ export component ActionsNotify inherits Rectangle {
             // secondary first and primary last.
             Rectangle { horizontal-stretch: 1; }
 
-            for action[index] in root.actions: Rectangle {
-                private property <bool> primary:
-                    root.actions.length > 1 && index == root.actions.length - 1;
-
-                action-label-measure := Text {
-                    visible: false;
-                    text: action;
-                    font-size: 14px;
-                    font-weight: 600;
-                    wrap: no-wrap;
-                }
-
-                width: max(64px, action-label-measure.preferred-width + 24px);
-                horizontal-stretch: 0;
-                height: 32px;
-                border-radius: 6px;
-                border-width: primary ? 0px : 1px;
-                border-color: root.dark ? #3d444d : #d1d9e0;
-                background: primary
-                    ? (action-touch.has-hover ? (root.dark ? #2ea043 : #1a7f37) : (root.dark ? #238636 : #1f883d))
-                    : (action-touch.has-hover ? (root.dark ? #30363d : #f3f4f6) : (root.dark ? #21262d : #f6f8fa));
-
-                HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
-
-                    Text {
-                        text: action;
-                        color: primary ? #ffffff : root.foreground;
-                        font-size: 14px;
-                        font-weight: 600;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-
-                action-touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.action-clicked(index); }
-                }
+            for action[index] in root.actions: GitHubButton {
+                text: action;
+                primary: root.actions.length > 1
+                    && index == root.actions.length - 1;
+                clicked => { root.action-clicked(index); }
             }
         }
     }
 
-    close-button := Rectangle {
+    close-button := GitHubIconButton {
         x: parent.width - 40px;
         y: 8px;
-        width: 32px;
-        height: 32px;
-        border-radius: 6px;
-        background: close-touch.has-hover
-            ? (root.dark ? #ffffff14 : #1f23280f)
-            : transparent;
-
-        Image {
-            x: 8px;
-            y: 8px;
-            width: 16px;
-            height: 16px;
-            source: @image-url("../../assets/icons/octicon-x-16.svg");
-            colorize: root.muted-foreground;
-        }
-
-        close-touch := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { root.close-clicked(); }
-        }
+        icon: @image-url("../../assets/icons/octicon-x-16.svg");
+        tooltip-text: "Dismiss notification";
+        tooltip-align-right: true;
+        tooltip-above: false;
+        foreground: root.muted-foreground;
+        clicked => { root.close-clicked(); }
     }
 }

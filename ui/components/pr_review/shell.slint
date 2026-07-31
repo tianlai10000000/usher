@@ -1,9 +1,7 @@
-import { MaterialPalette, MaterialText } from "@material";
-import { ListView } from "../../../material-1.7.1-fixed/ui/components/list_view.slint";
-import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
-import { AppState } from "../../state/app_state.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubActionMenu } from "../github_action_menu.slint";
+import { GitHubBlankslate } from "../github_blankslate.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
 
 export struct WorkflowPrDiffFile {
@@ -126,7 +124,7 @@ export struct WorkflowPrConversationItem {
     row-height: int,
 }
 
-export component ConversationAvatar inherits Rectangle {
+export component GitHubConversationAvatar inherits Rectangle {
     in property <image> avatar;
     in property <string> fallback-label;
     in property <length> avatar-size: 40px;
@@ -136,10 +134,10 @@ export component ConversationAvatar inherits Rectangle {
     height: root.avatar-size;
     border-radius: root.avatar-size / 2;
     border-width: 1px;
-    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    border-color: GitHubTheme.border-default;
     background: root.avatar.width > 0
         ? transparent
-        : (AppState.effective-dark-mode ? #21262d : #f6f8fa);
+        : (GitHubTheme.control-default-rest);
     clip: true;
 
     if root.avatar.width > 0: Image {
@@ -149,13 +147,13 @@ export component ConversationAvatar inherits Rectangle {
         image-fit: cover;
     }
 
-    if root.avatar.width <= 0: MaterialText {
+    if root.avatar.width <= 0: Text {
         width: parent.width;
         height: parent.height;
         text: root.fallback-label;
         font-size: root.label-size;
         font-weight: 600;
-        color: MaterialPalette.on_surface_variant;
+        color: GitHubTheme.fg-muted;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -184,7 +182,7 @@ export struct WorkflowPrCommit {
     verified: bool,
 }
 
-export component ReviewActionButton inherits Rectangle {
+export component GitHubReviewActionButton inherits Rectangle {
     in property <string> text;
     in property <bool> primary: false;
     in property <bool> success: false;
@@ -206,10 +204,10 @@ export component ReviewActionButton inherits Rectangle {
 
     // Primer default Button tokens (not Material surfaces) so header actions
     // like "Create revert PR" match GitHub's secondary btn.
-    private property <color> default-fg: AppState.effective-dark-mode ? #f0f6fc : #25292e;
-    private property <color> default-border: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    private property <color> default-bg: AppState.effective-dark-mode ? #21262d : #f6f8fa;
-    private property <color> default-bg-hover: AppState.effective-dark-mode ? #292e36 : #eff2f5;
+    private property <color> default-fg: GitHubTheme.fg-default;
+    private property <color> default-border: GitHubTheme.border-default;
+    private property <color> default-bg: GitHubTheme.control-default-rest;
+    private property <color> default-bg-hover: GitHubTheme.control-default-hover;
 
     width: root.hug-content
         ? (label-text.preferred-width + (root.show-chevron ? 40px : 24px))
@@ -225,33 +223,33 @@ export component ReviewActionButton inherits Rectangle {
         border-radius: 6px;
         border-width: 1px;
         border-color: root.danger
-            ? (AppState.effective-dark-mode ? #da3633 : #cf222e)
+            ? (GitHubTheme.danger-emphasis)
             : (root.success
-                ? (AppState.effective-dark-mode ? #238636 : #1f883d)
-                : (root.primary ? MaterialPalette.primary : root.default-border));
+                ? (GitHubTheme.control-primary-rest)
+                : (root.primary ? GitHubTheme.success-emphasis : root.default-border));
         background: root.success
-            ? (action-touch.has-hover && root.button-enabled ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37) : (AppState.effective-dark-mode ? #238636 : #1f883d))
+            ? (action-touch.has-hover && root.button-enabled ? (GitHubTheme.control-primary-hover) : (GitHubTheme.control-primary-rest))
             : root.danger
             ? (action-touch.has-hover && root.button-enabled
-                ? (AppState.effective-dark-mode ? #f85149 : #a40e26)
-                : (AppState.effective-dark-mode ? #da3633 : #cf222e))
+                ? GitHubTheme.control-danger-selected
+                : (GitHubTheme.danger-emphasis))
             : root.primary
-            ? (action-touch.has-hover ? MaterialPalette.primary.darker(8%) : MaterialPalette.primary)
+            ? (action-touch.has-hover ? GitHubTheme.success-emphasis.darker(8%) : GitHubTheme.success-emphasis)
             : (action-touch.has-hover && root.button-enabled ? root.default-bg-hover : root.default-bg);
         opacity: root.button-enabled ? 1 : 0.5;
 
-        label-text := MaterialText {
+        label-text := Text {
             // Keep an unconstrained preferred-width when hugging so the root
             // width binding cannot circularly clamp the measured label.
             x: root.hug-content ? (parent.width - self.preferred-width) / 2 : 0px;
             width: root.hug-content ? self.preferred-width : parent.width;
             height: parent.height;
             text: root.text;
-            horizontal_alignment: center;
-            vertical_alignment: center;
-            font_size: 12px;
-            font_weight: 600;
-            color: root.primary || root.success || root.danger ? #ffffff : root.default-fg;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: root.primary || root.success || root.danger ? GitHubTheme.fg-on-emphasis : root.default-fg;
         }
 
         if root.show-chevron: Image {
@@ -261,7 +259,7 @@ export component ReviewActionButton inherits Rectangle {
             height: 14px;
             source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
             image-fit: contain;
-            colorize: #ffffff;
+            colorize: GitHubTheme.fg-on-emphasis;
         }
     }
 
@@ -277,7 +275,7 @@ export component ReviewActionButton inherits Rectangle {
 }
 
 // Primer-like primary green button used by the Conversation comment composer.
-export component GithubCommentButton inherits Rectangle {
+export component GitHubCommentButton inherits Rectangle {
     in property <string> text: "Comment";
     in property <bool> button-enabled: true;
     in property <string> tooltip-text: "";
@@ -292,19 +290,19 @@ export component GithubCommentButton inherits Rectangle {
         height: parent.height;
         border-radius: 6px;
         border-width: 1px;
-        border-color: AppState.effective-dark-mode ? #238636 : #1f883d;
+        border-color: GitHubTheme.control-primary-rest;
         background: root.button-enabled
             ? (action-touch.has-hover
-                ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37)
-                : (AppState.effective-dark-mode ? #238636 : #1f883d))
-            : (AppState.effective-dark-mode ? #23863666 : #94d3a2);
-        label := MaterialText {
+                ? (GitHubTheme.control-primary-hover)
+                : (GitHubTheme.control-primary-rest))
+            : (GitHubTheme.control-primary-disabled);
+        label := Text {
             width: parent.width;
             height: parent.height;
             text: root.text;
             font-size: 14px;
             font-weight: 600;
-            color: #ffffff;
+            color: GitHubTheme.fg-on-emphasis;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
@@ -321,7 +319,7 @@ export component GithubCommentButton inherits Rectangle {
     }
 }
 
-export component PullRequestStateBadge inherits Rectangle {
+export component GitHubPullRequestStateBadge inherits Rectangle {
     in property <string> kind;
     in property <color> success-color;
     in property <color> danger-color;
@@ -345,9 +343,9 @@ export component PullRequestStateBadge inherits Rectangle {
         height: 14px;
         source: @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
         image-fit: contain;
-        colorize: #ffffff;
+        colorize: GitHubTheme.fg-on-emphasis;
     }
-    state-label-text := MaterialText {
+    state-label-text := Text {
         x: 30px;
         width: self.preferred-width;
         height: parent.height;
@@ -355,11 +353,11 @@ export component PullRequestStateBadge inherits Rectangle {
         vertical-alignment: center;
         font-size: 12px;
         font-weight: 600;
-        color: #ffffff;
+        color: GitHubTheme.fg-on-emphasis;
     }
 }
 
-export component BranchLabel inherits Rectangle {
+export component GitHubBranchLabel inherits Rectangle {
     in property <string> text;
     in property <color> background-color;
     in property <color> foreground-color;
@@ -370,7 +368,7 @@ export component BranchLabel inherits Rectangle {
     border-radius: 6px;
     background: root.background-color;
 
-    branch-label-text := MaterialText {
+    branch-label-text := Text {
         x: 8px;
         width: self.preferred-width;
         height: parent.height;
@@ -384,7 +382,7 @@ export component BranchLabel inherits Rectangle {
 // GitHub-style relative timestamp: muted label with an absolute datetime
 // GitHubTooltip. Avoid PopupWindow on hover — it steals input and flickers as
 // has-hover toggles.
-export component RelativeTimestamp inherits Rectangle {
+export component GitHubRelativeTimestamp inherits Rectangle {
     in property <string> text;
     in property <string> tooltip-text;
     in property <color> foreground-color;
@@ -404,7 +402,7 @@ export component RelativeTimestamp inherits Rectangle {
     background: transparent;
     clip: false;
 
-    time-label := MaterialText {
+    time-label := Text {
         width: parent.width;
         height: parent.height;
         text: root.text;
@@ -425,15 +423,15 @@ export component RelativeTimestamp inherits Rectangle {
         width: tip-label.preferred-width + 16px;
         height: tip-label.preferred-height + 8px;
         border-radius: 4px;
-        background: MaterialPalette.inverse_surface;
-        tip-label := MaterialText {
+        background: GitHubTheme.tooltip-bg;
+        tip-label := Text {
             x: 8px;
             y: 4px;
             width: self.preferred-width;
             height: self.preferred-height;
             text: root.tooltip-text;
             font-size: 12px;
-            color: MaterialPalette.inverse_on_surface;
+            color: GitHubTheme.tooltip-fg;
             wrap: no-wrap;
         }
     }
@@ -445,7 +443,7 @@ export component RelativeTimestamp inherits Rectangle {
     }
 }
 
-export component PullRequestSummaryMetrics inherits Rectangle {
+export component GitHubPullRequestSummaryMetrics inherits Rectangle {
     in property <string> state-kind;
     in property <string> author;
     in property <int> commit-count: 0;
@@ -502,7 +500,7 @@ export component PullRequestSummaryMetrics inherits Rectangle {
     }
 }
 
-export component PullRequestSummaryRow inherits Rectangle {
+export component GitHubPullRequestSummaryRow inherits Rectangle {
     in property <string> state-kind;
     in property <string> author;
     in property <int> commit-count: 0;
@@ -528,7 +526,7 @@ export component PullRequestSummaryRow inherits Rectangle {
     // timestamp tooltip into a dark underline.
     clip: false;
 
-    metrics := PullRequestSummaryMetrics {
+    metrics := GitHubPullRequestSummaryMetrics {
         state-kind: root.state-kind;
         author: root.author;
         commit-count: root.commit-count;
@@ -544,7 +542,7 @@ export component PullRequestSummaryRow inherits Rectangle {
         alignment: start;
         cross-axis-alignment: center;
 
-        PullRequestStateBadge {
+        GitHubPullRequestStateBadge {
             kind: root.state-kind;
             success-color: root.success-color;
             danger-color: root.danger-color;
@@ -553,7 +551,7 @@ export component PullRequestSummaryRow inherits Rectangle {
         Rectangle {
             width: min(root.compact ? 120px : 150px, author-label.preferred-width);
             height: 24px;
-            author-label := MaterialText {
+            author-label := Text {
                 width: parent.width;
                 height: parent.height;
                 text: root.author;
@@ -570,7 +568,7 @@ export component PullRequestSummaryRow inherits Rectangle {
                 background: root.muted-color;
             }
         }
-        merge-summary-label := MaterialText {
+        merge-summary-label := Text {
             width: self.preferred-width;
             height: 26px;
             text: "wants to merge " + root.commit-count + (root.commit-count == 1 ? " commit into" : " commits into");
@@ -578,12 +576,12 @@ export component PullRequestSummaryRow inherits Rectangle {
             color: root.muted-color;
             vertical-alignment: center;
         }
-        BranchLabel {
+        GitHubBranchLabel {
             text: root.target-branch;
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
         }
-        from-label := MaterialText {
+        from-label := Text {
             width: self.preferred-width;
             height: 26px;
             text: "from";
@@ -591,7 +589,7 @@ export component PullRequestSummaryRow inherits Rectangle {
             color: root.muted-color;
             vertical-alignment: center;
         }
-        BranchLabel {
+        GitHubBranchLabel {
             text: root.source-branch;
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
@@ -604,7 +602,7 @@ export component PullRequestSummaryRow inherits Rectangle {
                 root.copy-source-branch(root.source-branch)
             }
         }
-        if root.updated-at != "": RelativeTimestamp {
+        if root.updated-at != "": GitHubRelativeTimestamp {
             text: root.updated-at;
             tooltip-text: root.updated-at-tooltip;
             tooltip-align-right: true;
@@ -622,7 +620,7 @@ export component PullRequestSummaryRow inherits Rectangle {
         alignment: start;
         cross-axis-alignment: center;
 
-        PullRequestStateBadge {
+        GitHubPullRequestStateBadge {
             kind: root.state-kind;
             success-color: root.success-color;
             danger-color: root.danger-color;
@@ -631,7 +629,7 @@ export component PullRequestSummaryRow inherits Rectangle {
         Rectangle {
             width: min(root.compact ? 120px : 150px, compact-author-label.preferred-width);
             height: 24px;
-            compact-author-label := MaterialText {
+            compact-author-label := Text {
                 width: parent.width;
                 height: parent.height;
                 text: root.author;
@@ -648,7 +646,7 @@ export component PullRequestSummaryRow inherits Rectangle {
                 background: root.muted-color;
             }
         }
-        compact-summary-label := MaterialText {
+        compact-summary-label := Text {
             width: self.preferred-width;
             height: 26px;
             text: "wants to merge " + root.commit-count + (root.commit-count == 1 ? " commit into" : " commits into");
@@ -667,12 +665,12 @@ export component PullRequestSummaryRow inherits Rectangle {
         alignment: start;
         cross-axis-alignment: center;
 
-        BranchLabel {
+        GitHubBranchLabel {
             text: root.target-branch;
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
         }
-        compact-from-label := MaterialText {
+        compact-from-label := Text {
             width: self.preferred-width;
             height: 26px;
             text: "from";
@@ -680,7 +678,7 @@ export component PullRequestSummaryRow inherits Rectangle {
             color: root.muted-color;
             vertical-alignment: center;
         }
-        BranchLabel {
+        GitHubBranchLabel {
             text: root.source-branch;
             background-color: root.branch-background;
             foreground-color: root.branch-foreground;
@@ -693,7 +691,7 @@ export component PullRequestSummaryRow inherits Rectangle {
                 root.copy-source-branch(root.source-branch)
             }
         }
-        if root.updated-at != "": RelativeTimestamp {
+        if root.updated-at != "": GitHubRelativeTimestamp {
             text: root.updated-at;
             tooltip-text: root.updated-at-tooltip;
             tooltip-align-right: true;
@@ -703,7 +701,7 @@ export component PullRequestSummaryRow inherits Rectangle {
     }
 }
 
-export component CenteredErrorState inherits Rectangle {
+export component GitHubCenteredErrorState inherits Rectangle {
     in property <string> title: "Uh oh!";
     in property <string> detail: "There was an error while loading. Please reload this page.";
     in property <color> background-color;
@@ -712,78 +710,30 @@ export component CenteredErrorState inherits Rectangle {
     in property <color> muted-color;
     callback retry();
 
-    private property <length> content-top: max(16px, (root.height - 142px) / 2);
-
     background: root.background-color;
 
-    Image {
-        x: (parent.width - self.width) / 2;
-        y: root.content-top;
-        width: 28px;
-        height: 28px;
-        source: @image-url("../../assets/icons/octicon-alert-16.svg");
-        image-fit: contain;
-        colorize: root.muted-color;
-    }
-    MaterialText {
+    GitHubBlankslate {
         x: 24px;
-        y: root.content-top + 36px;
+        y: (parent.height - self.height) / 2;
         width: parent.width - 48px;
-        height: 24px;
-        text: root.title;
-        font-size: 16px;
-        font-weight: 600;
-        color: root.foreground-color;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    Text {
-        x: 24px;
-        y: root.content-top + 66px;
-        width: parent.width - 48px;
-        height: 34px;
-        text: root.detail;
-        font-size: 12px;
-        color: root.muted-color;
-        wrap: word-wrap;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    Rectangle {
-        x: (parent.width - self.width) / 2;
-        y: root.content-top + 108px;
-        width: 92px;
-        height: 32px;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: root.outline-color;
-        background: retry-touch.has-hover
-            ? (AppState.effective-dark-mode ? #21262d : #f3f4f6)
-            : (AppState.effective-dark-mode ? #21262d : #f6f8fa);
-        MaterialText {
-            width: parent.width;
-            height: parent.height;
-            text: "Try again";
-            font-size: 12px;
-            font-weight: 600;
-            color: root.foreground-color;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-        retry-touch := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { root.retry(); }
-        }
+        icon: @image-url("../../assets/icons/octicon-alert-16.svg");
+        heading: root.title;
+        description: root.detail;
+        primary-label: "Try again";
+        error: true;
+        narrow: true;
+        primary-clicked => { root.retry(); }
     }
 }
 
-export component PrTabButton inherits Rectangle {
+export component GitHubPullRequestTabButton inherits Rectangle {
     in property <string> label;
     in property <int> count: 0;
     in property <image> icon;
     in property <bool> selected: false;
     in property <length> tab-width: 160px;
     callback clicked();
+    private property <bool> keyboard-focus-visible: false;
 
     // Primer UnderlineNav item inside a 48px row: 32px rounded hover control,
     // coral underline on the shared baseline. Spec: docs/specs/ui-design.md
@@ -793,6 +743,25 @@ export component PrTabButton inherits Rectangle {
     background: transparent;
     border-width: 0px;
     clip: false;
+
+    tab-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.keyboard-focus-visible = false;
+        }
+    }
 
     private property <length> count-badge-width: max(22px, count-label.preferred-width + 12px);
     private property <length> content-width: 16px + 10px + tab-label.preferred-width + 10px + root.count-badge-width;
@@ -804,7 +773,7 @@ export component PrTabButton inherits Rectangle {
         width: parent.width;
         height: 32px;
         border-radius: 6px;
-        background: AppState.effective-dark-mode ? #656c7633 : #eaedf0;
+        background: GitHubTheme.underline-nav-hover;
     }
 
     Image {
@@ -814,9 +783,9 @@ export component PrTabButton inherits Rectangle {
         height: 16px;
         source: root.icon;
         image-fit: contain;
-        colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        colorize: GitHubTheme.fg-default;
     }
-    tab-label := MaterialText {
+    tab-label := Text {
         x: root.content-x + 26px;
         y: 8px;
         width: self.preferred-width;
@@ -824,7 +793,7 @@ export component PrTabButton inherits Rectangle {
         text: root.label;
         font-size: 14px;
         font-weight: root.selected ? 600 : 400;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        color: GitHubTheme.fg-default;
         vertical-alignment: center;
     }
     Rectangle {
@@ -833,8 +802,8 @@ export component PrTabButton inherits Rectangle {
         width: root.count-badge-width;
         height: 20px;
         border-radius: 10px;
-        background: AppState.effective-dark-mode ? #6e768166 : #afb8c133;
-        count-label := MaterialText {
+        background: GitHubTheme.overlay-handle;
+        count-label := Text {
             width: parent.width;
             height: parent.height;
             text: root.count;
@@ -842,7 +811,7 @@ export component PrTabButton inherits Rectangle {
             vertical-alignment: center;
             font-size: 11px;
             font-weight: 600;
-            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+            color: GitHubTheme.fg-default;
         }
     }
     if root.selected: Rectangle {
@@ -851,26 +820,60 @@ export component PrTabButton inherits Rectangle {
         width: parent.width;
         height: 2px;
         border-radius: 1px;
-        background: AppState.effective-dark-mode ? #f78166 : #fd8c73;
+        background: GitHubTheme.underline-nav-selected;
     }
     tab-touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            tab-focus.focus();
+            root.clicked();
+        }
+    }
+    if tab-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: GitHubMetrics.size-4;
+        y: GitHubMetrics.size-6;
+        width: parent.width - GitHubMetrics.size-8;
+        height: parent.height - GitHubMetrics.size-12;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
     }
 }
 
-export component CommitRangeButton inherits Rectangle {
+export component GitHubCommitRangeButton inherits Rectangle {
     in property <string> text: "All commits";
     callback clicked();
+    private property <bool> keyboard-focus-visible: false;
 
     width: max(132px, range-label.preferred-width + 66px);
     height: 32px;
     border-radius: 6px;
     border-width: 1px;
-    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+    border-color: GitHubTheme.border-default;
     background: range-touch.has-hover
-        ? (AppState.effective-dark-mode ? #21262d : #f3f4f6)
-        : (AppState.effective-dark-mode ? #151b23 : #f6f8fa);
+        ? (GitHubTheme.control-default-hover)
+        : (GitHubTheme.canvas-subtle);
+
+    range-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.keyboard-focus-visible = false;
+        }
+    }
 
     Image {
         x: 12px;
@@ -879,9 +882,9 @@ export component CommitRangeButton inherits Rectangle {
         height: 16px;
         source: @image-url("../../assets/icons/octicon-stack-16.svg");
         image-fit: contain;
-        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        colorize: GitHubTheme.fg-muted;
     }
-    range-label := MaterialText {
+    range-label := Text {
         x: 36px;
         y: 0px;
         width: min(self.preferred-width, parent.width - 62px);
@@ -889,7 +892,7 @@ export component CommitRangeButton inherits Rectangle {
         text: root.text;
         font-size: 13px;
         font-weight: 500;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        color: GitHubTheme.fg-default;
         vertical-alignment: center;
         overflow: elide;
     }
@@ -900,15 +903,29 @@ export component CommitRangeButton inherits Rectangle {
         height: 16px;
         source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
         image-fit: contain;
-        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        colorize: GitHubTheme.fg-muted;
     }
     range-touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            range-focus.focus();
+            root.clicked();
+        }
+    }
+    if range-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
     }
 }
 
-export component MergeReadinessBadge inherits Rectangle {
+export component GitHubMergeReadinessBadge inherits Rectangle {
     in property <string> kind;
     in property <string> label;
     in property <string> detail;
@@ -954,7 +971,7 @@ export component MergeReadinessBadge inherits Rectangle {
     border-radius: 6px;
     border-width: 1px;
     border-color: root.badge-border-color;
-    background: badge-touch.has-hover ? (AppState.effective-dark-mode ? #656c7633 : #818b981f) : root.background-color;
+    background: badge-touch.has-hover ? (GitHubTheme.control-neutral-hover) : root.background-color;
 
     Rectangle {
         x: 12px;
@@ -963,18 +980,18 @@ export component MergeReadinessBadge inherits Rectangle {
         height: 16px;
         border-radius: 8px;
         background: root.state-color;
-        MaterialText {
+        Text {
             width: parent.width;
             height: parent.height;
             text: root.state-symbol;
-            horizontal_alignment: center;
-            vertical_alignment: center;
-            font_size: 11px;
-            font_weight: 700;
-            color: #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: 11px;
+            font-weight: 700;
+            color: GitHubTheme.fg-on-emphasis;
         }
     }
-    // Match ReviewActionButton: fill the badge height and center the glyph
+    // Match GitHubReviewActionButton: fill the badge height and center the glyph
     // box. A fixed 20px line plus +1px optical nudge left the label off-midline.
     label-text := Text {
         x: 36px;
@@ -1049,6 +1066,7 @@ export component MergeReadinessBadge inherits Rectangle {
         menu-width: root.popup-width;
         content-height: root.popup-height;
         align: root.popup-align-end ? "end" : "start";
+        dismiss-requested => { root.toggle-popup(); }
 
         Rectangle {
             width: parent.width;
@@ -1061,44 +1079,44 @@ export component MergeReadinessBadge inherits Rectangle {
                 height: 18px;
                 border-radius: 9px;
                 background: root.state-color;
-                MaterialText {
+                Text {
                     width: parent.width;
                     height: parent.height;
                     text: root.state-symbol;
-                    horizontal_alignment: center;
-                    vertical_alignment: center;
-                    font_size: 13px;
-                    font_weight: 700;
-                    color: #ffffff;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: GitHubTheme.fg-on-emphasis;
                 }
             }
-            MaterialText {
+            Text {
                 x: 44px;
                 y: 12px;
                 width: parent.width - 60px;
                 height: 28px;
                 text: root.label;
-                vertical_alignment: center;
-                font_size: 14px;
-                font_weight: 600;
+                vertical-alignment: center;
+                font-size: 14px;
+                font-weight: 600;
                 color: root.foreground-color;
             }
-            MaterialText {
+            Text {
                 x: 16px;
                 y: 48px;
                 width: parent.width - 32px;
                 height: parent.height - 64px;
                 text: root.detail;
-                vertical_alignment: top;
+                vertical-alignment: top;
                 wrap: word-wrap;
-                font_size: 12px;
+                font-size: 12px;
                 color: root.muted-color;
             }
         }
     }
 }
 
-export component PrReviewBackButton inherits Rectangle {
+export component GitHubPullRequestReviewBackButton inherits Rectangle {
     // Parents host the tip as a later, high-z sibling. A nested tip still loses
     // to following header chrome (summary Open badge, readiness strip) even when
     // this root has a higher z—overflow is not elevated with the button box.
@@ -1118,7 +1136,7 @@ export component PrReviewBackButton inherits Rectangle {
         height: 36px;
         border-radius: 8px;
         background: back-touch.has-hover
-            ? MaterialPalette.surface_container_high
+            ? GitHubTheme.control-default-hover
             : transparent;
 
         Image {
@@ -1127,7 +1145,7 @@ export component PrReviewBackButton inherits Rectangle {
             width: 16px;
             height: 16px;
             source: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
-            colorize: MaterialPalette.on_surface;
+            colorize: GitHubTheme.fg-default;
         }
     }
 
@@ -1146,7 +1164,7 @@ export component PrReviewBackButton inherits Rectangle {
     }
 }
 
-export component HeaderActionStrip inherits Rectangle {
+export component GitHubHeaderActionStrip inherits Rectangle {
     in property <string> readiness-kind;
     in property <string> readiness-label;
     in property <string> readiness-detail;
@@ -1201,7 +1219,7 @@ export component HeaderActionStrip inherits Rectangle {
         if root.show-readiness && root.readiness-label != "": Rectangle {
             width: readiness-badge.width;
             height: parent.height;
-            readiness-badge := MergeReadinessBadge {
+            readiness-badge := GitHubMergeReadinessBadge {
                 y: (parent.height - self.height) / 2;
                 kind: root.readiness-kind;
                 label: root.readiness-label;
@@ -1230,7 +1248,7 @@ export component HeaderActionStrip inherits Rectangle {
         if !root.terminal-state && (root.remote-review-state == "review_approved" || root.remote-review-state == "approved"): Rectangle {
             width: 88px;
             height: parent.height;
-            MaterialText {
+            Text {
                 width: parent.width;
                 height: parent.height;
                 text: "✓  Approved";
@@ -1244,7 +1262,7 @@ export component HeaderActionStrip inherits Rectangle {
         if !root.terminal-state: Rectangle {
             width: 120px;
             height: parent.height;
-            ReviewActionButton {
+            GitHubReviewActionButton {
                 y: (parent.height - self.height) / 2;
                 width: parent.width;
                 text: "Review changes";
@@ -1259,7 +1277,7 @@ export component HeaderActionStrip inherits Rectangle {
         if !root.terminal-state: Rectangle {
             width: 172px;
             height: parent.height;
-            ReviewActionButton {
+            GitHubReviewActionButton {
                 y: (parent.height - self.height) / 2;
                 width: parent.width;
                 text: root.action-loading ? "Working…" : "Merge pull request";
@@ -1277,7 +1295,7 @@ export component HeaderActionStrip inherits Rectangle {
             // provider label stays readable without a truncated overflow item.
             width: revert-action.width;
             height: parent.height;
-            revert-action := ReviewActionButton {
+            revert-action := GitHubReviewActionButton {
                 y: (parent.height - self.height) / 2;
                 hug-content: true;
                 tooltip-align-start: root.align-start;
@@ -1290,7 +1308,7 @@ export component HeaderActionStrip inherits Rectangle {
     }
 }
 
-export component ReviewChoice inherits Rectangle {
+export component GitHubReviewChoice inherits Rectangle {
     in property <string> title;
     in property <string> description;
     in property <bool> selected: false;
@@ -1300,7 +1318,7 @@ export component ReviewChoice inherits Rectangle {
     height: 58px;
     border-radius: 6px;
     background: choice-touch.has-hover && root.choice-enabled
-        ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
+        ? (GitHubTheme.control-default-rest)
         : transparent;
     opacity: root.choice-enabled ? 1 : 0.48;
 
@@ -1311,37 +1329,37 @@ export component ReviewChoice inherits Rectangle {
         height: 16px;
         border-radius: 8px;
         border-width: 1px;
-        border-color: root.selected ? #0969da : (AppState.effective-dark-mode ? #6e7681 : #8c959f);
-        background: root.selected ? #0969da : transparent;
+        border-color: root.selected ? GitHubTheme.accent-emphasis : (GitHubTheme.border-strong);
+        background: root.selected ? GitHubTheme.accent-emphasis : transparent;
         if root.selected: Rectangle {
             x: 5px;
             y: 5px;
             width: 6px;
             height: 6px;
             border-radius: 3px;
-            background: #ffffff;
+            background: GitHubTheme.fg-on-emphasis;
         }
     }
-    MaterialText {
+    Text {
         x: 40px;
         y: 8px;
         width: parent.width - 52px;
         height: 22px;
         text: root.title;
-        font_size: 13px;
-        font_weight: 600;
-        color: MaterialPalette.on_surface;
-        vertical_alignment: center;
+        font-size: 13px;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+        vertical-alignment: center;
     }
-    MaterialText {
+    Text {
         x: 40px;
         y: 30px;
         width: parent.width - 52px;
         height: 20px;
         text: root.description;
-        font_size: 11px;
-        color: MaterialPalette.on_surface_variant;
-        vertical_alignment: center;
+        font-size: 11px;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
         overflow: elide;
     }
     choice-touch := TouchArea {

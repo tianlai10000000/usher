@@ -1,22 +1,24 @@
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+
 // Application-owned counterpart to GitHub's TooltipV2. Keep every tooltip in
 // the app on these shared geometry and Primer color tokens.
 export component GitHubTooltip inherits Rectangle {
     in property <string> text;
 
-    width: tip-label.preferred-width + 16px;
-    height: tip-label.preferred-height + 8px;
-    border-radius: 6px;
+    width: tip-label.preferred-width + GitHubMetrics.size-16;
+    height: tip-label.preferred-height + GitHubMetrics.size-8;
+    border-radius: GitHubMetrics.radius-medium;
     border-width: 0px;
-    background: #25292e;
+    background: GitHubTheme.tooltip-bg;
 
     tip-label := Text {
-        x: 8px;
-        y: 4px;
+        x: GitHubMetrics.size-8;
+        y: GitHubMetrics.size-4;
         width: self.preferred-width;
         height: self.preferred-height;
         text: root.text;
-        color: #ffffff;
-        font-size: 12px;
+        color: GitHubTheme.tooltip-fg;
+        font-size: GitHubMetrics.text-small;
         vertical-alignment: center;
         wrap: no-wrap;
     }

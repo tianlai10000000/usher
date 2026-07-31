@@ -1,5 +1,6 @@
-import { AppState } from "../../state/app_state.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
 // Shared Primer Dialog surface for every application-owned modal.
 //
@@ -32,6 +33,7 @@ export component GitHubDialog inherits FocusScope {
     in property <bool> primary-busy: false;
     in property <bool> primary-danger: false;
     in property <bool> primary-success: false;
+    in property <bool> fullscreen-on-narrow: true;
 
     callback close-requested();
     callback cancel-clicked();
@@ -40,6 +42,8 @@ export component GitHubDialog inherits FocusScope {
 
     private property <length> header-height: root.subtitle == "" ? 56px : 72px;
     private property <length> footer-height: root.show-footer ? 64px : 0px;
+    private property <bool> narrow-fullscreen:
+        root.fullscreen-on-narrow && root.width < GitHubMetrics.breakpoint-small;
     out property <length> content-x: dialog-surface.x + root.body-padding;
     out property <length> content-y: dialog-surface.y + root.header-height + root.body-padding;
     out property <length> content-width: dialog-surface.width - root.body-padding * 2;
@@ -58,7 +62,11 @@ export component GitHubDialog inherits FocusScope {
 
     changed dialog-visible => {
         if root.dialog-visible {
-            root.focus();
+            if root.show-close && root.close-enabled {
+                close-button.focus();
+            } else {
+                root.focus();
+            }
         } else if root.has-focus {
             root.clear-focus();
         }
@@ -85,7 +93,7 @@ export component GitHubDialog inherits FocusScope {
     Rectangle {
         width: 100%;
         height: 100%;
-        background: root.show-backdrop ? #00000066 : transparent;
+        background: root.show-backdrop ? GitHubTheme.backdrop : transparent;
 
         backdrop-touch := TouchArea {
             width: 100%;
@@ -100,16 +108,20 @@ export component GitHubDialog inherits FocusScope {
     }
 
     dialog-surface := Rectangle {
-        x: (root.width - self.width) / 2;
-        y: (root.height - self.height) / 2;
-        width: min(root.dialog-width, root.width - 32px);
-        height: min(root.dialog-height, root.height - 32px);
-        border-radius: 12px;
-        border-width: 1px;
-        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-        background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+        x: root.narrow-fullscreen ? 0px : (root.width - self.width) / 2;
+        y: root.narrow-fullscreen ? 0px : (root.height - self.height) / 2;
+        width: root.narrow-fullscreen
+            ? root.width
+            : min(root.dialog-width, root.width - GitHubMetrics.size-32);
+        height: root.narrow-fullscreen
+            ? root.height
+            : min(root.dialog-height, root.height - GitHubMetrics.size-32);
+        border-radius: root.narrow-fullscreen ? 0px : GitHubMetrics.radius-large;
+        border-width: root.narrow-fullscreen ? 0px : GitHubMetrics.border-thin;
+        border-color: GitHubTheme.border-default;
+        background: GitHubTheme.canvas-default;
         drop-shadow-blur: 24px;
-        drop-shadow-color: #00000055;
+        drop-shadow-color: GitHubTheme.backdrop-medium;
         drop-shadow-offset-y: 8px;
     }
 
@@ -128,7 +140,7 @@ export component GitHubDialog inherits FocusScope {
         y: dialog-surface.y + root.header-height - 1px;
         width: dialog-surface.width;
         height: 1px;
-        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+        background: GitHubTheme.border-default;
     }
 
     Text {
@@ -139,7 +151,7 @@ export component GitHubDialog inherits FocusScope {
         text: root.title;
         font-size: root.subtitle == "" ? 16px : 20px;
         font-weight: 600;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        color: GitHubTheme.fg-default;
         vertical-alignment: center;
         overflow: elide;
     }
@@ -151,40 +163,26 @@ export component GitHubDialog inherits FocusScope {
         height: 20px;
         text: root.subtitle;
         font-size: 13px;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        color: GitHubTheme.fg-muted;
         vertical-alignment: center;
         overflow: elide;
     }
 
-    if root.show-close: close-button := Rectangle {
+    // Keep the close control above nested body content. Feature dialogs may
+    // raise ScrollView/list z (e.g. commit range at 3100); without this the
+    // below-button "Close" tooltip paints under the body and looks clipped.
+    close-button := GitHubIconButton {
+        visible: root.show-close;
+        z: 4000;
         x: dialog-surface.x + dialog-surface.width - 40px;
         y: dialog-surface.y + 8px;
-        width: 32px;
-        height: 32px;
-        border-radius: 6px;
-        background: close-touch.pressed
-            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
-            : (close-touch.has-hover
-                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
-                : transparent);
-        opacity: root.close-enabled ? 1 : 0.5;
-
-        Image {
-            x: 8px;
-            y: 8px;
-            width: 16px;
-            height: 16px;
-            source: @image-url("../../assets/icons/octicon-x-16.svg");
-            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        }
-
-        close-touch := TouchArea {
-            width: 100%;
-            height: 100%;
-            enabled: root.close-enabled;
-            mouse-cursor: self.enabled ? pointer : default;
-            clicked => { root.close-requested(); }
-        }
+        icon: @image-url("../../assets/icons/octicon-x-16.svg");
+        tooltip-text: "Close";
+        tooltip-above: false;
+        tooltip-align-right: true;
+        button-enabled: root.show-close && root.close-enabled;
+        foreground: GitHubTheme.fg-muted;
+        clicked => { root.close-requested(); }
     }
 
     if root.show-footer: Rectangle {
@@ -192,7 +190,7 @@ export component GitHubDialog inherits FocusScope {
         y: dialog-surface.y + dialog-surface.height - root.footer-height;
         width: dialog-surface.width;
         height: 1px;
-        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+        background: GitHubTheme.border-default;
     }
 
     if root.show-footer: HorizontalLayout {

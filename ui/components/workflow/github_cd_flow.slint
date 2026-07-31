@@ -1,0 +1,354 @@
+import { GitHubButton } from "../settings/github_settings_controls.slint";
+import { GitHubActionsJob, JobStepItem } from "../jobs/job.slint";
+import { GitHubTagField } from "./fields.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+export component GitHubCdFlow {
+    in property <bool> running;
+    in property <string> summary;
+    in property <string> build-status;
+    in property <string> build-detail;
+    in property <string> test-status;
+    in property <string> test-detail;
+    in property <string> deploy-status;
+    in property <string> deploy-detail;
+    in property <string> verify-status;
+    in property <string> verify-detail;
+    callback start-deploy(string, string, string);
+    callback request-rollback(string);
+
+    private property <string> environment-name: "production";
+    private property <string> release-name: "2026.03.09";
+    private property <string> commit-hash: "HEAD";
+    private property <string> rollback-commit: "";
+    private property <int> expanded-step-overrides: 0;
+    private property <bool> stacked-deploy-row: root.width < 760px;
+    private property <bool> stacked-rollback-row: root.width < 720px;
+    private property <bool> show-steps:
+        root.running
+        || root.build-status != "pending"
+        || root.test-status != "pending"
+        || root.deploy-status != "pending"
+        || root.verify-status != "pending";
+    private property <string> build-step-status:
+        root.build-status == "failed" ? "error"
+        : root.build-status == "rolled_back" ? "paused"
+        : root.build-status;
+    private property <string> test-step-status:
+        root.test-status == "failed" ? "error"
+        : root.test-status == "rolled_back" ? "paused"
+        : root.test-status;
+    private property <string> deploy-step-status:
+        root.deploy-status == "failed" ? "error"
+        : root.deploy-status == "rolled_back" ? "paused"
+        : root.deploy-status;
+    private property <string> verify-step-status:
+        root.verify-status == "failed" ? "error"
+        : root.verify-status == "rolled_back" ? "paused"
+        : root.verify-status;
+    private property <string> job-status:
+        root.running ? "in_progress"
+        : root.show-steps ? "completed"
+        : "queued";
+    private property <string> job-conclusion:
+        root.running || !root.show-steps ? ""
+        : root.build-step-status == "error"
+            || root.test-step-status == "error"
+            || root.deploy-step-status == "error"
+            || root.verify-step-status == "error"
+            ? "failure"
+            : "success";
+    private property <[JobStepItem]> cd-steps: [
+        {
+            name: "Build",
+            command: "build",
+            status: root.build-step-status == "pending" ? "queued"
+                : root.build-step-status == "running" ? "in_progress"
+                : "completed",
+            conclusion: root.build-step-status == "success" ? "success"
+                : root.build-step-status == "error" ? "failure"
+                : root.build-step-status == "paused" ? "cancelled"
+                : "",
+            detail: root.build-detail,
+            log: root.build-detail,
+            has-log: root.build-step-status != "pending",
+            log-loaded: true,
+            log-lines: [{ text: root.build-detail, prefix: "", kind: "plain" }],
+            duration: "",
+            default-expanded: false,
+        },
+        {
+            name: "Test",
+            command: "test",
+            status: root.test-step-status == "pending" ? "queued"
+                : root.test-step-status == "running" ? "in_progress"
+                : "completed",
+            conclusion: root.test-step-status == "success" ? "success"
+                : root.test-step-status == "error" ? "failure"
+                : root.test-step-status == "paused" ? "cancelled"
+                : "",
+            detail: root.test-detail,
+            log: root.test-detail,
+            has-log: root.test-step-status != "pending",
+            log-loaded: true,
+            log-lines: [{ text: root.test-detail, prefix: "", kind: "plain" }],
+            duration: "",
+            default-expanded: false,
+        },
+        {
+            name: "Deploy",
+            command: "deploy",
+            status: root.deploy-step-status == "pending" ? "queued"
+                : root.deploy-step-status == "running" ? "in_progress"
+                : "completed",
+            conclusion: root.deploy-step-status == "success" ? "success"
+                : root.deploy-step-status == "error" ? "failure"
+                : root.deploy-step-status == "paused" ? "cancelled"
+                : "",
+            detail: root.deploy-detail,
+            log: root.deploy-detail,
+            has-log: root.deploy-step-status != "pending",
+            log-loaded: true,
+            log-lines: [{ text: root.deploy-detail, prefix: "", kind: "plain" }],
+            duration: "",
+            default-expanded: false,
+        },
+        {
+            name: "Verify",
+            command: "verify",
+            status: root.verify-step-status == "pending" ? "queued"
+                : root.verify-step-status == "running" ? "in_progress"
+                : "completed",
+            conclusion: root.verify-step-status == "success" ? "success"
+                : root.verify-step-status == "error" ? "failure"
+                : root.verify-step-status == "paused" ? "cancelled"
+                : "",
+            detail: root.verify-detail,
+            log: root.verify-detail,
+            has-log: root.verify-step-status != "pending",
+            log-loaded: true,
+            log-lines: [{ text: root.verify-detail, prefix: "", kind: "plain" }],
+            duration: "",
+            default-expanded: false,
+        }
+    ];
+
+    width: 100%;
+    height: content.preferred-height;
+
+    content := VerticalLayout {
+        width: root.width;
+        spacing: GitHubMetrics.size-16;
+        alignment: start;
+
+        Text {
+            width: parent.width;
+            text: "Run a staged deployment and inspect its build, test, deploy, and verification steps.";
+            wrap: word-wrap;
+            font-size: GitHubMetrics.text-medium;
+            color: GitHubTheme.fg-muted;
+        }
+
+        if !root.stacked-deploy-row: HorizontalLayout {
+            width: parent.width;
+            spacing: GitHubMetrics.size-12;
+
+            GitHubTagField {
+                width: 180px;
+                label: "Environment";
+                value <=> root.environment-name;
+                placeholder: "production";
+                enabled: !root.running;
+            }
+
+            GitHubTagField {
+                width: 220px;
+                label: "Release";
+                value <=> root.release-name;
+                placeholder: "2026.03.09";
+                enabled: !root.running;
+            }
+
+            GitHubTagField {
+                width: 220px;
+                label: "Commit";
+                value <=> root.commit-hash;
+                placeholder: "abcdef1";
+                enabled: !root.running;
+            }
+        }
+
+        if root.stacked-deploy-row: VerticalLayout {
+            width: parent.width;
+            spacing: GitHubMetrics.size-12;
+            alignment: start;
+
+            GitHubTagField {
+                width: parent.width;
+                label: "Environment";
+                value <=> root.environment-name;
+                placeholder: "production";
+                enabled: !root.running;
+            }
+
+            GitHubTagField {
+                width: parent.width;
+                label: "Release";
+                value <=> root.release-name;
+                placeholder: "2026.03.09";
+                enabled: !root.running;
+            }
+
+            GitHubTagField {
+                width: parent.width;
+                label: "Commit";
+                value <=> root.commit-hash;
+                placeholder: "abcdef1";
+                enabled: !root.running;
+            }
+        }
+
+        GitHubButton {
+            text: root.running ? "Deployment running…" : "Start deployment";
+            primary: true;
+            busy: root.running;
+            disabled: root.running;
+            clicked => {
+                root.expanded-step-overrides = 0;
+                root.start-deploy(root.environment-name, root.release-name, root.commit-hash);
+            }
+        }
+
+        Rectangle {
+            width: parent.width;
+            height: max(GitHubMetrics.size-64,
+                summary-text.preferred-height + GitHubMetrics.size-24);
+            border-radius: GitHubMetrics.radius-medium;
+            border-width: GitHubMetrics.border-thin;
+            border-color: GitHubTheme.border-default;
+            background: GitHubTheme.canvas-subtle;
+
+            summary-text := Text {
+                x: GitHubMetrics.size-12;
+                y: GitHubMetrics.size-12;
+                width: parent.width - GitHubMetrics.size-24;
+                text: root.summary;
+                wrap: word-wrap;
+                font-size: GitHubMetrics.text-medium;
+                color: GitHubTheme.fg-default;
+            }
+        }
+
+        Rectangle {
+            width: parent.width;
+            height: rollback-content.preferred-height + GitHubMetrics.size-32;
+            border-radius: GitHubMetrics.radius-medium;
+            border-width: GitHubMetrics.border-thin;
+            border-color: GitHubTheme.border-default;
+            background: GitHubTheme.canvas-default;
+
+            rollback-content := VerticalLayout {
+                x: GitHubMetrics.size-16;
+                y: GitHubMetrics.size-16;
+                width: parent.width - GitHubMetrics.size-32;
+                spacing: GitHubMetrics.size-12;
+                alignment: start;
+
+                Text {
+                    width: parent.width;
+                    text: "Rollback";
+                    font-size: GitHubMetrics.text-medium;
+                    font-weight: 600;
+                    color: GitHubTheme.fg-default;
+                }
+
+                Text {
+                    width: parent.width;
+                    text: "Return the active deployment to a previously verified commit.";
+                    wrap: word-wrap;
+                    font-size: GitHubMetrics.text-small;
+                    color: GitHubTheme.fg-muted;
+                }
+
+                if !root.stacked-rollback-row: HorizontalLayout {
+                    width: parent.width;
+                    spacing: GitHubMetrics.size-12;
+                    cross-axis-alignment: end;
+
+                    GitHubTagField {
+                        width: 280px;
+                        label: "Rollback commit";
+                        value <=> root.rollback-commit;
+                        placeholder: "previous stable hash";
+                        enabled: !root.running;
+                    }
+
+                    GitHubButton {
+                        text: "Start rollback";
+                        danger: true;
+                        disabled: root.running;
+                        clicked => {
+                            root.expanded-step-overrides = 0;
+                            root.request-rollback(root.rollback-commit);
+                        }
+                    }
+                }
+
+                if root.stacked-rollback-row: VerticalLayout {
+                    width: parent.width;
+                    spacing: GitHubMetrics.size-12;
+                    alignment: start;
+
+                    GitHubTagField {
+                        width: parent.width;
+                        label: "Rollback commit";
+                        value <=> root.rollback-commit;
+                        placeholder: "previous stable hash";
+                        enabled: !root.running;
+                    }
+
+                    GitHubButton {
+                        text: "Start rollback";
+                        danger: true;
+                        disabled: root.running;
+                        clicked => {
+                            root.expanded-step-overrides = 0;
+                            root.request-rollback(root.rollback-commit);
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.show-steps: GitHubActionsJob {
+            width: parent.width;
+            title: "CD workflow";
+            summary: root.summary;
+            execution-status: root.job-status;
+            conclusion: root.job-conclusion;
+            steps: root.cd-steps;
+            expanded-step-overrides <=> root.expanded-step-overrides;
+            animations-enabled: root.running;
+        }
+
+        if !root.show-steps: Rectangle {
+            width: parent.width;
+            height: GitHubMetrics.size-48;
+            border-radius: GitHubMetrics.radius-medium;
+            border-width: GitHubMetrics.border-thin;
+            border-color: GitHubTheme.border-default;
+            background: GitHubTheme.canvas-subtle;
+
+            Text {
+                x: GitHubMetrics.size-12;
+                width: parent.width - GitHubMetrics.size-24;
+                height: parent.height;
+                text: "Workflow steps will appear after deployment or rollback starts.";
+                color: GitHubTheme.fg-muted;
+                font-size: GitHubMetrics.text-small;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+}

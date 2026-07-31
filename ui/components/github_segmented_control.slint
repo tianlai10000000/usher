@@ -1,0 +1,131 @@
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+
+// Shared compact Primer SegmentedControl shell.
+export component GitHubSegmentedControl inherits Rectangle {
+    in property <string> group-label;
+
+    width: segments.preferred-width;
+    height: GitHubMetrics.control-small-size;
+    border-radius: GitHubMetrics.radius-medium;
+    border-width: GitHubMetrics.border-thin;
+    border-color: GitHubTheme.border-default;
+    background: GitHubTheme.canvas-default;
+    clip: true;
+    vertical-stretch: 0;
+    accessible-role: list;
+    accessible-label: root.group-label;
+
+    segments := HorizontalLayout {
+        height: parent.height;
+        spacing: 0px;
+        alignment: start;
+        @children
+    }
+}
+
+export component GitHubSegmentedControlItem inherits FocusScope {
+    in property <string> label;
+    in property <bool> selected: false;
+    in property <bool> item-enabled: true;
+    callback clicked();
+
+    private property <bool> keyboard-focus-visible: false;
+    private property <length> segment-width:
+        max(GitHubMetrics.size-48 + GitHubMetrics.size-8,
+            label-measure.preferred-width + GitHubMetrics.size-24);
+
+    width: root.segment-width;
+    height: GitHubMetrics.control-small-size;
+    vertical-stretch: 0;
+    opacity: root.item-enabled ? 1 : 0.55;
+    accessible-role: button;
+    accessible-enabled: root.item-enabled;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+
+    key-pressed(event) => {
+        root.keyboard-focus-visible = true;
+        if (root.item-enabled && !root.selected
+                && (event.text == Key.Return || event.text == " ")) {
+            root.clicked();
+            return accept;
+        }
+        return reject;
+    }
+    focus-gained(reason) => {
+        root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+    }
+    focus-lost => {
+        root.keyboard-focus-visible = false;
+    }
+
+    label-measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: GitHubMetrics.text-small;
+        // Reserve the selected-state weight for every item. Switching the
+        // visible label to semibold must never move dividers or resize the
+        // control.
+        font-weight: 600;
+        wrap: no-wrap;
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: !root.item-enabled
+            ? transparent
+            : root.selected
+                ? GitHubTheme.control-muted-rest
+                : segment-touch.pressed
+                    ? GitHubTheme.control-default-active
+                    : segment-touch.has-hover
+                    ? GitHubTheme.control-default-hover
+                    : transparent;
+    }
+
+    if root.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: GitHubMetrics.size-2;
+        y: GitHubMetrics.size-2;
+        width: parent.width - GitHubMetrics.size-4;
+        height: parent.height - GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium - GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        font-size: GitHubMetrics.text-small;
+        font-weight: root.selected ? 600 : 400;
+        color: GitHubTheme.fg-default;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    segment-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.item-enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => {
+            root.keyboard-focus-visible = false;
+            root.focus();
+            if !root.selected {
+                root.clicked();
+            }
+        }
+    }
+}
+
+export component GitHubSegmentedControlDivider inherits Rectangle {
+    width: GitHubMetrics.border-thin;
+    height: GitHubMetrics.control-small-size;
+    background: GitHubTheme.border-default;
+    vertical-stretch: 0;
+}

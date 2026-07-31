@@ -1,0 +1,185 @@
+import { GitHubTagAddPanel } from "./github_tag_add_panel.slint";
+import { GitHubTagRemovePanel } from "./github_tag_remove_panel.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+import {
+    GitHubSegmentedControl,
+    GitHubSegmentedControlItem,
+    GitHubSegmentedControlDivider,
+} from "../github_segmented_control.slint";
+import { GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
+// GitHub Primer UnderlineNav item. Durable contract:
+// docs/specs/ui-design.md “UnderlineNav tabs”.
+
+
+export component GitHubTagFlow {
+    in property <bool> active: false;
+    in property <string> mode: "local";
+    in property <string> version-mode: "patch";
+    in property <string> current-version: "v0.0.0";
+    in-out property <string> next-version: "v0.0.1";
+    in-out property <string> remove-target: "";
+    in property <bool> add-initializing: false;
+    in property <bool> remove-initializing: false;
+    in property <bool> running: false;
+    in property <bool> has-run: false;
+    in property <string> result: "Ready to create a tag.";
+    callback change-mode(string);
+    callback select-version-mode(string);
+    callback run(string, string);
+    callback remove-tag(string);
+    callback open-add-tab();
+    callback open-remove-tab();
+    callback view-run();
+
+    in-out property <int> selected-tab: 0; // 0: Add, 1: Remove
+    private property <color> canvas-default: GitHubTheme.canvas-default;
+    private property <color> border-default: GitHubTheme.border-default;
+    private property <color> fg-muted: GitHubTheme.fg-muted;
+    width: 100%;
+    content := VerticalLayout {
+        width: root.width;
+        spacing: 0px;
+        alignment: start;
+
+        // Scope is repository context, not an Add/Remove tab. Keep it on its
+        // own compact toolbar above the UnderlineNav, aligned to the left.
+        scope-row := Rectangle {
+            width: parent.width;
+            height: 36px;
+            background: root.canvas-default;
+
+            scope-group := HorizontalLayout {
+                x: 0px;
+                y: 4px;
+                height: 28px;
+                spacing: 8px;
+                alignment: start;
+                cross-axis-alignment: center;
+
+                Text {
+                    height: 28px;
+                    text: "Scope";
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: root.fg-muted;
+                    vertical-alignment: center;
+                }
+
+                GitHubSegmentedControl {
+                    group-label: "Tag repository scope";
+
+                    GitHubSegmentedControlItem {
+                        label: "Local";
+                        selected: root.mode != "remote";
+                        item-enabled: !root.running;
+                        clicked => { root.change-mode("local"); }
+                    }
+                    GitHubSegmentedControlDivider { }
+                    GitHubSegmentedControlItem {
+                        label: "Remote";
+                        selected: root.mode == "remote";
+                        item-enabled: !root.running;
+                        clicked => { root.change-mode("remote"); }
+                    }
+                }
+            }
+        }
+
+        // GitHub UnderlineNav for the actual tag operations.
+        tabs-row := Rectangle {
+            width: parent.width;
+            height: 48px;
+            background: root.canvas-default;
+            clip: false;
+
+            // Shared nav border; selected coral underline covers it.
+            Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: root.border-default;
+            }
+
+            HorizontalLayout {
+                x: 0px;
+                width: parent.width;
+                height: parent.height;
+                spacing: 4px;
+                alignment: start;
+                cross-axis-alignment: center;
+
+                GitHubUnderlineNavItem {
+                    label: "Add Tag";
+                    selected: root.selected-tab == 0;
+                    clicked => {
+                        root.selected-tab = 0;
+                        root.open-add-tab();
+                    }
+                }
+
+                GitHubUnderlineNavItem {
+                    label: "Remove Tag";
+                    selected: root.selected-tab == 1;
+                    clicked => {
+                        root.selected-tab = 1;
+                        root.open-remove-tab();
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+
+        Rectangle { width: parent.width; height: 12px; background: transparent; }
+
+        if root.selected-tab == 0: Rectangle {
+            border-width: 1px;
+            border-color: root.border-default;
+            border-radius: 6px;
+            background: root.canvas-default;
+
+            GitHubTagAddPanel {
+                width: parent.width;
+                initializing: root.add-initializing;
+                scope-mode: root.mode;
+                version-mode: root.version-mode;
+                current-version: root.current-version;
+                next-version <=> root.next-version;
+                running: root.running;
+                has-run: root.has-run;
+                select-version-mode(mode) => {
+                    root.select-version-mode(mode);
+                }
+                run(version, description) => {
+                    root.run(version, description);
+                }
+                view-run => {
+                    root.view-run();
+                }
+            }
+        }
+
+        if root.selected-tab == 1: Rectangle {
+            border-width: 1px;
+            border-color: root.border-default;
+            border-radius: 6px;
+            background: root.canvas-default;
+
+            GitHubTagRemovePanel {
+                width: parent.width;
+                tag-to-remove <=> root.remove-target;
+                initializing: root.remove-initializing;
+                running: root.running;
+                has-run: root.has-run;
+                remove-tag(tag) => {
+                    root.remove-tag(tag);
+                }
+                view-run => {
+                    root.view-run();
+                }
+            }
+        }
+    }
+
+    height: content.preferred-height;
+}

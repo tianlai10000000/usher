@@ -1,5 +1,5 @@
-import { AppState } from "../../state/app_state.slint";
-import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubIconButton } from "github_icon_button.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
 
 // GitHub's current repository Clone popover CopyToClipboardButton:
 // 32px invisible IconButton, 16px Copy/Check Octicons, 6px radius,
@@ -11,49 +11,30 @@ export component GitHubCopyButton inherits Rectangle {
     in property <string> tooltip-text: "Copy to clipboard";
     in property <bool> tooltip-above: true;
     in property <bool> tooltip-align-right: false;
-    out property <bool> has-hover: copy-touch.has-hover;
+    out property <bool> has-hover: copy-button.has-hover;
     out property <bool> copied: false;
     callback copy-requested() -> bool;
-
-    private property <color> fg-muted:
-        AppState.effective-dark-mode ? #9198a1 : #59636e;
-    private property <color> fg-success:
-        AppState.effective-dark-mode ? #3fb950 : #1a7f37;
-    private property <color> control-hover:
-        AppState.effective-dark-mode ? #656c7626 : #818b981a;
-    private property <color> control-active:
-        AppState.effective-dark-mode ? #656c7633 : #818b9833;
 
     width: 32px;
     height: 32px;
     // Keep the hover confirmation above sibling controls in dense toolbars.
     z: 10000;
-    border-radius: 6px;
-    border-width: 0px;
-    background: copy-touch.pressed && root.button-enabled
-        ? root.control-active
-        : (copy-touch.has-hover && root.button-enabled
-            ? root.control-hover
-            : transparent);
-    opacity: root.button-enabled ? 1 : 0.38;
+    background: transparent;
     clip: false;
 
-    Image {
-        x: 8px;
-        y: 8px;
-        width: 16px;
-        height: 16px;
-        source: root.copied
+    copy-button := GitHubIconButton {
+        icon: root.copied
             ? @image-url("../../assets/icons/octicon-check-16.svg")
             : @image-url("../../assets/icons/octicon-copy-16.svg");
-        image-fit: contain;
-        colorize: root.copied ? root.fg-success : root.fg-muted;
-    }
-
-    copy-touch := TouchArea {
-        mouse-cursor: root.button-enabled ? pointer : default;
+        tooltip-text: root.copied ? "Copied!" : root.tooltip-text;
+        tooltip-above: root.tooltip-above;
+        tooltip-align-right: root.tooltip-align-right;
+        force-tooltip: root.copied;
+        button-enabled: root.button-enabled;
+        activation-enabled: root.button-enabled && !root.copied;
+        foreground: root.copied ? GitHubTheme.success-fg : GitHubTheme.fg-muted;
         clicked => {
-            if root.button-enabled && !root.copied && root.copy-requested() {
+            if root.copy-requested() {
                 root.copied = true;
             }
         }
@@ -65,15 +46,5 @@ export component GitHubCopyButton inherits Rectangle {
         triggered => {
             root.copied = false;
         }
-    }
-
-    if (copy-touch.has-hover || root.copied) && root.tooltip-text != "": copied-tip := GitHubTooltip {
-        z: 10001;
-        x: root.tooltip-align-right ? root.width - self.width : 0px;
-        // In a 46px toolbar this 32px control is vertically centered with a
-        // 7px inset. +11px places a below-tooltip 4px below the toolbar edge,
-        // rather than across its bottom divider.
-        y: root.tooltip-above ? -self.height - 4px : root.height + 11px;
-        text: root.copied ? "Copied!" : root.tooltip-text;
     }
 }

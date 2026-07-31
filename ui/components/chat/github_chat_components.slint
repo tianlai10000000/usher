@@ -1,0 +1,436 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubCopyButton } from "../button/github_copy_button.slint";
+import { GitHubButton } from "../settings/github_settings_controls.slint";
+
+
+export enum MessageRole {
+    User,
+    Assistant,
+}
+
+export enum MessageStatus {
+    Normal,
+    Error,
+    Success,
+}
+
+export enum MarkdownBlockKind {
+    Paragraph,
+    Heading1,
+    Heading2,
+    Heading3,
+    ListItem,
+    CodeBlock,
+    Quote,
+}
+
+export enum MarkdownInlineKind {
+    Text,
+    Strong,
+    Emphasis,
+    Code,
+    Link,
+}
+
+export struct MarkdownInlineSpan {
+    kind: MarkdownInlineKind,
+    text: string,
+    href: string,
+}
+
+export struct MarkdownInlineLine {
+    spans: [MarkdownInlineSpan],
+}
+
+export struct MarkdownBlock {
+    kind: MarkdownBlockKind,
+    text: string,
+    inline_lines: [MarkdownInlineLine],
+}
+
+export struct ChatMessage {
+    id: int,
+    role: MessageRole,
+    status: MessageStatus,
+    content: string,
+    rendered_content: string,
+    is_markdown: bool,
+    markdown_blocks: [MarkdownBlock],
+    timestamp: string,
+}
+
+export component GitHubMessageBubble inherits Rectangle {
+    in property <MessageRole> role;
+    in property <MessageStatus> status: MessageStatus.Normal;
+    in property <string> content;
+    in property <string> rendered-content;
+    in property <bool> is-markdown: false;
+    in property <[MarkdownBlock]> markdown-blocks: [];
+    in property <string> timestamp;
+    in property <bool> is-loading: false;
+    // 消息最大宽度（由外层 Chat 根据窗口宽度动态计算）
+    in property <length> max-bubble-width: 420px;
+    
+    // 低频等待动效相位（由 Rust 定时器每 500ms 更新一次）
+    in property <int> loading-phase: 0;
+    
+    // 复制回调 - 传递消息内容
+    callback copy-message(string) -> bool;
+    callback open-link(string);
+    
+    // 高度跟随当前角色对应行的内容高度，避免根容器产生额外空白
+    height: root.role == MessageRole.User ? user-row.preferred-height : ai-row.preferred-height;
+    background: transparent;
+
+    
+    // 用户消息布局（右对齐）
+    user-row := HorizontalLayout {
+        visible: root.role == MessageRole.User;
+        height: root.role == MessageRole.User ? self.preferred-height : 0px;
+        spacing: 8px;
+        alignment: end;
+        
+        // 发送的消息内容
+        Rectangle {
+            max-width: root.max-bubble-width;
+            height: user-content.preferred-height;
+            background: GitHubTheme.accent-subtle;
+            border-radius: GitHubMetrics.radius-medium;
+            border-width: GitHubMetrics.border-thin;
+            border-color: GitHubTheme.accent-muted;
+            
+            // 消息内容的 hover 检测
+            message-hover := TouchArea {}
+            
+            user-content := VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 2px;
+                
+                Text {
+                    text: root.content;
+                    color: GitHubTheme.fg-default;
+                    wrap: word-wrap;
+                    font-size: 14px;
+                }
+                
+                Text {
+                    text: root.timestamp;
+                    color: GitHubTheme.fg-muted;
+                    font-size: 11px;
+                    horizontal-alignment: right;
+                }
+            }
+            
+            // 悬浮工具栏 - 绝对定位在消息下方，不影响气泡高度
+            Rectangle {
+                x: 0;
+                y: user-content.preferred-height;
+                width: parent.width;
+                height: 32px;
+                visible: (message-hover.has-hover || toolbar-hover.has-hover || user-copy-button.has-hover || user-copy-button.copied) && !root.is-loading;
+
+                toolbar-hover := TouchArea {}
+
+                HorizontalLayout {
+                    alignment: end;
+                    padding-top: 4px;
+                    padding-right: 4px;
+                    spacing: 4px;
+                    
+                    user-copy-button := GitHubCopyButton {
+                        tooltip-text: "Copy message";
+                        copy-requested => {
+                            root.copy-message(root.content)
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 用户头像
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 16px;
+            background: GitHubTheme.success-muted;
+            
+            Text {
+                text: "U";
+                color: GitHubTheme.success-fg;
+                font-size: 14px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+    
+    // AI 消息布局（左对齐）
+    ai-row := HorizontalLayout {
+        visible: root.role == MessageRole.Assistant;
+        height: root.role == MessageRole.Assistant ? self.preferred-height : 0px;
+        spacing: 8px;
+        alignment: start;
+        
+        // AI 头像
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 16px;
+            background: GitHubTheme.done-muted;
+            
+            Text {
+                text: "AI";
+                color: GitHubTheme.done-fg;
+                font-size: 11px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        
+        // 消息内容
+        Rectangle {
+            max-width: root.max-bubble-width;
+            height: ai-content.preferred-height;
+            background: GitHubTheme.canvas-subtle;
+            border-radius: GitHubMetrics.radius-medium;
+            border-width: GitHubMetrics.border-thin;
+            border-color: GitHubTheme.border-default;
+            
+            // AI 消息内容的 hover 检测
+            ai-message-hover := TouchArea {}
+            
+            ai-content := VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 2px;
+                
+                // 加载状态
+                HorizontalLayout {
+                    visible: root.is-loading;
+                    height: root.is-loading ? self.preferred-height : 0px;
+                    spacing: 6px;
+                    alignment: start;
+                    
+                    Text {
+                        text: "●";
+                        color: GitHubTheme.success-emphasis;
+                        font-size: 12px;
+                    }
+
+                    Text {
+                        text: "Thinking";
+                        color: GitHubTheme.fg-muted;
+                        font-size: 14px;
+                    }
+
+                    Text {
+                        text: root.loading-phase == 0 ? "." :
+                              root.loading-phase == 1 ? ".." : "...";
+                        color: GitHubTheme.fg-muted;
+                        font-size: 14px;
+                    }
+                }
+                
+                // Markdown 富文本块渲染（仅 AI 消息）
+                VerticalLayout {
+                    visible: !root.is-loading && root.is-markdown && root.markdown-blocks.length > 0;
+                    spacing: 6px;
+
+                    for block[index] in root.markdown-blocks: VerticalLayout {
+                        spacing: 2px;
+
+                        // 细粒度行内渲染（同一段落内粗体/斜体/链接）
+                        if block.inline_lines.length > 0: VerticalLayout {
+                            spacing: 2px;
+
+                            for line[line_index] in block.inline_lines: HorizontalLayout {
+                                spacing: 0px;
+                                alignment: start;
+                                private property <length> line-height: block.kind == MarkdownBlockKind.Heading1 ? 30px :
+                                                                       block.kind == MarkdownBlockKind.Heading2 ? 28px :
+                                                                       block.kind == MarkdownBlockKind.Heading3 ? 24px :
+                                                                       22px;
+
+                                for span[span_index] in line.spans: Rectangle {
+                                    background: transparent;
+                                    height: parent.line-height;
+                                    width: span-text.preferred-width;
+
+                                    span-touch := TouchArea {
+                                        enabled: span.kind == MarkdownInlineKind.Link && span.href != "";
+                                        clicked => {
+                                            if (span.href != "") {
+                                                root.open-link(span.href);
+                                            }
+                                        }
+                                    }
+
+                                    span-text := Text {
+                                        y: (parent.height - self.preferred-height) / 2;
+                                        text: span.text;
+                                        color: span.kind == MarkdownInlineKind.Link ? GitHubTheme.success-emphasis : GitHubTheme.fg-default;
+                                        font-size: block.kind == MarkdownBlockKind.Heading1 ? 20px :
+                                                   block.kind == MarkdownBlockKind.Heading2 ? 18px :
+                                                   block.kind == MarkdownBlockKind.Heading3 ? 16px :
+                                                   block.kind == MarkdownBlockKind.CodeBlock ? 13px :
+                                                   14px;
+                                        font-weight: (block.kind == MarkdownBlockKind.Heading1 ||
+                                                      block.kind == MarkdownBlockKind.Heading2 ||
+                                                      block.kind == MarkdownBlockKind.Heading3 ||
+                                                      span.kind == MarkdownInlineKind.Strong) ? 700 : 400;
+                                        font-italic: span.kind == MarkdownInlineKind.Emphasis;
+                                    }
+                                }
+                            }
+                        }
+
+                        // 降级文本（如 code block 或无行内切分结果）
+                        if block.inline_lines.length == 0: Text {
+                            text: block.text;
+                            color: GitHubTheme.fg-default;
+                            wrap: word-wrap;
+                            font-size: block.kind == MarkdownBlockKind.Heading1 ? 20px :
+                                       block.kind == MarkdownBlockKind.Heading2 ? 18px :
+                                       block.kind == MarkdownBlockKind.Heading3 ? 16px :
+                                       block.kind == MarkdownBlockKind.CodeBlock ? 13px :
+                                       14px;
+                            font-weight: (block.kind == MarkdownBlockKind.Heading1 ||
+                                          block.kind == MarkdownBlockKind.Heading2 ||
+                                          block.kind == MarkdownBlockKind.Heading3) ? 700 : 400;
+                        }
+                    }
+                }
+
+                // 纯文本/降级渲染。状态使用矢量图标，避免加载彩色 Emoji 字体。
+                HorizontalLayout {
+                    visible: !root.is-loading && (!root.is-markdown || root.markdown-blocks.length == 0);
+                    height: (!root.is-loading && (!root.is-markdown || root.markdown-blocks.length == 0)) ? self.preferred-height : 0px;
+                    spacing: root.status == MessageStatus.Normal ? 0px : 6px;
+                    alignment: start;
+
+                    if root.status != MessageStatus.Normal: Image {
+                        width: 16px;
+                        height: 16px;
+                        source: root.status == MessageStatus.Error
+                            ? @image-url("../../assets/icons/octicon-x-circle-fill-16.svg")
+                            : @image-url("../../assets/icons/octicon-check-circle-fill-16.svg");
+                        colorize: root.status == MessageStatus.Error
+                            ? GitHubTheme.danger-fg
+                            : GitHubTheme.success-fg;
+                    }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.rendered-content;
+                        color: GitHubTheme.fg-default;
+                        wrap: word-wrap;
+                        font-size: 14px;
+                    }
+                }
+                
+                // 时间戳
+                Text {
+                    visible: !root.is-loading && root.timestamp != "";
+                    height: (!root.is-loading && root.timestamp != "") ? self.preferred-height : 0px;
+                    text: root.timestamp;
+                    color: GitHubTheme.fg-muted.with_alpha(0.7);
+                    font-size: 11px;
+                    horizontal-alignment: left;
+                }
+            }
+            
+            // 悬浮工具栏 - 绝对定位在消息下方，不影响气泡高度
+            Rectangle {
+                x: 0;
+                y: ai-content.preferred-height;
+                width: parent.width;
+                height: 32px;
+                visible: (ai-message-hover.has-hover || ai-toolbar-hover.has-hover || assistant-copy-button.has-hover || assistant-copy-button.copied) && !root.is-loading;
+                
+                ai-toolbar-hover := TouchArea {}
+                
+                HorizontalLayout {
+                    alignment: start;
+                    padding-left: 4px;
+                    padding-top: 4px;
+                    spacing: 4px;
+                    
+                    assistant-copy-button := GitHubCopyButton {
+                        tooltip-text: "Copy message";
+                        copy-requested => {
+                            root.copy-message(root.content)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component GitHubChatWelcomeView inherits Rectangle {
+    in property <[string]> suggestions: [
+        "What can you help me with?",
+        "Tell me a joke",
+        "Explain quantum computing",
+    ];
+    
+    callback suggestion-clicked(string);
+    
+    background: transparent;
+    
+    VerticalLayout {
+        width: min(parent.width, 560px);
+        x: (parent.width - self.width) / 2;
+        alignment: center;
+        spacing: GitHubMetrics.size-12;
+        padding: GitHubMetrics.size-32;
+        
+        Text {
+            text: "Welcome to Usher Chat";
+            color: GitHubTheme.fg-default;
+            font-size: GitHubMetrics.heading-small;
+            font-weight: 600;
+            horizontal-alignment: center;
+        }
+        
+        Text {
+            text: "Start a conversation by typing a message below.";
+            color: GitHubTheme.fg-muted;
+            font-size: 14px;
+            horizontal-alignment: center;
+        }
+        
+        Rectangle {
+            width: max(0px, parent.width - GitHubMetrics.size-64);
+            height: suggestion-list.preferred-height;
+            background: transparent;
+
+            suggestion-list := VerticalLayout {
+                x: (parent.width - self.width) / 2;
+                width: min(parent.width, 420px);
+                spacing: GitHubMetrics.size-8;
+                padding-top: GitHubMetrics.size-16;
+
+                Text {
+                    text: "Try asking:";
+                    color: GitHubTheme.fg-muted;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                }
+
+                for suggestion[idx] in root.suggestions: GitHubButton {
+                    width: parent.width;
+                    text: suggestion;
+                    clicked => { root.suggestion-clicked(suggestion); }
+                }
+            }
+        }
+    }
+}

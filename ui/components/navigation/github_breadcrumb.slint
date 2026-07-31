@@ -1,0 +1,242 @@
+import { Route } from "../../route/routeMap.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubLink } from "../github_link.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+
+// Primer Breadcrumbs "normal" variant:
+// 14 px link text, accent-colored ancestors, default-colored current page,
+// hover underline, and the official compact slanted divider geometry.
+component GitHubBreadcrumbItem {
+    in property <image> icon;
+    in property <string> text;
+    in property <bool> is-current: false;
+    in property <bool> clickable: true;
+
+    callback clicked();
+
+    private property <color> default-foreground: GitHubTheme.fg-default;
+    private property <color> link-foreground: GitHubTheme.accent-fg;
+    private property <bool> has-icon: icon.width > 0 && icon.height > 0;
+    private property <length> label-x: root.has-icon ? 22px : 0px;
+
+    width: root.label-x + item-label-measure.preferred-width;
+    height: 32px;
+
+    item-label-measure := Text {
+        visible: false;
+        text: root.text;
+        font-size: 14px;
+    }
+
+    if root.has-icon: Image {
+        x: 0px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: root.icon;
+        colorize: root.is-current ? root.default-foreground : root.link-foreground;
+    }
+
+    if root.is-current: Text {
+        x: root.label-x;
+        width: item-label-measure.preferred-width;
+        height: parent.height;
+        text: root.text;
+        font-size: 14px;
+        font-weight: 400;
+        color: root.default-foreground;
+        vertical-alignment: center;
+    }
+
+    if !root.is-current: GitHubLink {
+        x: root.label-x;
+        // GitHubLink owns a compact 20 px line box while the breadcrumb row
+        // is 32 px tall. Center it so linked and current crumb baselines match.
+        y: (root.height - self.height) / 2;
+        text: root.text;
+        link-enabled: root.clickable;
+        clicked => { root.clicked(); }
+    }
+
+    // Keep a leading icon inside the same breadcrumb action.
+    if root.has-icon && !root.is-current: TouchArea {
+        x: 0px;
+        width: root.label-x;
+        mouse-cursor: root.clickable ? pointer : default;
+        enabled: root.clickable;
+        clicked => { root.clicked(); }
+    }
+}
+
+component GitHubBreadcrumbSeparator {
+    width: 15px;
+    height: 32px;
+
+    // Primer React uses a 0.8 em line rotated 15 degrees with 0.5 em inline
+    // margins. At the 14 px body size that maps to an 11 px divider.
+    Rectangle {
+        x: 7px;
+        y: 10px;
+        width: 1px;
+        height: 11px;
+        background: GitHubTheme.fg-muted;
+        transform-rotation: 15deg;
+        transform-origin: { x: 0.5px, y: 5.5px };
+    }
+}
+
+// PageHeader trailing action: an invisible Primer IconButton with the standard
+// 32 px control size, 6 px radius, and semantic transparent hover/press fills.
+component GitHubBreadcrumbBackButton inherits GitHubIconButton {
+    callback back();
+
+    icon: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
+    tooltip-text: "Back";
+    tooltip-above: false;
+    foreground: GitHubTheme.fg-default;
+    clicked => { root.back(); }
+}
+
+export component GitHubBreadcrumb inherits Rectangle {
+    in property <Route> current-route: Route.Home;
+    in property <Route> previous-route: Route.Home;
+
+    callback navigate(Route);
+    callback back();
+
+    private property <bool> is-about-page: current-route == Route.About;
+    private property <bool> is-settings-page: current-route == Route.Settings;
+    private property <bool> is-ui-components-page: current-route == Route.UiComponents;
+    private property <bool> is-home: current-route == Route.Home;
+    private property <bool> can-go-back: !is-home && previous-route != current-route;
+
+    height: 40px;
+    // Alpha ≈ 0.35 on fill only (not root.opacity) so crumb text stays opaque.
+    // Real translucency needs page content scrolling underneath this bar.
+    background: GitHubTheme.canvas-translucent;
+    clip: false;
+    drop-shadow-blur: 5px;
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 1px;
+    drop-shadow-color: GitHubTheme.shadow-floating-subtle;
+
+    // Slint rectangles do not capture pointer input. Without this shield,
+    // clicks fall through the translucent bar onto scrolled page controls
+    // (e.g. Project "New project" under the overlay). Later crumb/back
+    // TouchAreas still win hit-testing on their own geometry.
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: default;
+    }
+
+    HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        // The page ScrollView contributes a 4 px outer gutter before each
+        // page's 24 px content inset. Add the same offset so breadcrumbs and
+        // page headings share one left edge.
+        padding-left: 20px;
+        padding-right: 16px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 8px;
+
+        breadcrumb-region := Rectangle {
+            horizontal-stretch: 1;
+            height: parent.height;
+            background: transparent;
+            clip: true;
+
+            HorizontalLayout {
+                x: 0px;
+                width: self.preferred-width;
+                height: parent.height;
+                alignment: start;
+                spacing: 0px;
+
+                GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/octicon-home-16.svg");
+                    text: "Home";
+                    is-current: root.is-home;
+                    clickable: !root.is-home;
+                    clicked => { root.navigate(Route.Home); }
+                }
+
+                if root.is-about-page: GitHubBreadcrumbSeparator {}
+                if root.is-about-page: GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/octicon-info-16.svg");
+                    text: "About";
+                    is-current: true;
+                }
+
+                if root.is-settings-page: GitHubBreadcrumbSeparator {}
+                if root.is-settings-page: GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/octicon-gear-16.svg");
+                    text: "Settings";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Search: GitHubBreadcrumbSeparator {}
+                if root.current-route == Route.Search: GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/octicon-search-16.svg");
+                    text: "Search";
+                    is-current: true;
+                }
+
+                if root.is-ui-components-page: GitHubBreadcrumbSeparator {}
+                if root.is-ui-components-page: GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/octicon-stack-16.svg");
+                    text: "UI Components";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Project: GitHubBreadcrumbSeparator {}
+                if root.current-route == Route.Project: GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/octicon-repo-16.svg");
+                    text: "Projects";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Workflow: GitHubBreadcrumbSeparator {}
+                if root.current-route == Route.Workflow: GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/octicon-repo-16.svg");
+                    text: "Projects";
+                    clicked => { root.navigate(Route.Project); }
+                }
+                if root.current-route == Route.Workflow: GitHubBreadcrumbSeparator {}
+                if root.current-route == Route.Workflow: GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
+                    text: "Workflow";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.JobRun: GitHubBreadcrumbSeparator {}
+                if root.current-route == Route.JobRun: GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
+                    text: "Job run";
+                    is-current: true;
+                }
+
+                if root.current-route == Route.Chat: GitHubBreadcrumbSeparator {}
+                if root.current-route == Route.Chat: GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg");
+                    text: "Chat";
+                    is-current: true;
+                }
+
+            }
+        }
+
+        if root.can-go-back: GitHubBreadcrumbBackButton {
+            back => { root.back(); }
+        }
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: GitHubTheme.border-default;
+    }
+}

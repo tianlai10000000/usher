@@ -1,7 +1,8 @@
-import { MaterialText, MaterialPalette, MaterialStyleMetrics } from "@material";
+import { GitHubIconButton } from "./button/github_icon_button.slint";
 import { Route } from "../route/routeMap.slint";
+import { GitHubTheme } from "../theme/github_theme.slint";
 
-export component TitleBar {
+export component GitHubTitleBar {
     in property <string> title: "Usher";
     in property <Route> current-route: Route.Home;
     callback navigate(Route);
@@ -14,7 +15,7 @@ export component TitleBar {
     Rectangle {
         width: 100%;
         height: 100%;
-        background: MaterialPalette.surface;
+        background: GitHubTheme.canvas-default;
         
         // 三列布局：左侧占位 | 中间标题 | 右侧按钮
         HorizontalLayout {
@@ -54,12 +55,12 @@ export component TitleBar {
                     Rectangle {
                         height: 38px;
                         
-                        MaterialText {
+                        Text {
                             text: title;
-                            font_size: 13px;
-                            font_weight: 600;
-                            color: MaterialPalette.on_surface;
-                            vertical_alignment: center;
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: GitHubTheme.fg-default;
+                            vertical-alignment: center;
                         }
                     }
                 }
@@ -79,63 +80,31 @@ export component TitleBar {
                     spacing: 4px;
                     alignment: end;
                     
-                    // Settings 按钮
-                    settings_btn := Rectangle {
-                        width: 28px;
-                        height: 28px;
-                        border_radius: 6px;
-                        background: settings_touch.has-hover ? MaterialPalette.surface_container_high : transparent;
-                        
-                        animate background { duration: 120ms; easing: ease-out; }
-                        
-                        Image {
-                            width: 16px;
-                            height: 16px;
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            source: @image-url("../assets/icons/settings.svg");
-                            colorize: current-route == Route.Settings 
-                                ? MaterialPalette.primary 
-                                : MaterialPalette.on_surface_variant;
-                        }
-                        
-                        settings_touch := TouchArea {
-                            width: 100%;
-                            height: 100%;
-                            mouse-cursor: pointer;
-                            clicked => {
-                                root.navigate(Route.Settings);
-                            }
+                    GitHubIconButton {
+                        control-size: 28px;
+                        icon: @image-url("../assets/icons/settings.svg");
+                        tooltip-text: "Settings";
+                        tooltip-above: false;
+                        selected: current-route == Route.Settings;
+                        foreground: current-route == Route.Settings
+                            ? GitHubTheme.accent-fg
+                            : GitHubTheme.fg-muted;
+                        clicked => {
+                            root.navigate(Route.Settings);
                         }
                     }
-                    
-                    // About 按钮
-                    about_btn := Rectangle {
-                        width: 28px;
-                        height: 28px;
-                        border_radius: 6px;
-                        background: about_touch.has-hover ? MaterialPalette.surface_container_high : transparent;
-                        
-                        animate background { duration: 120ms; easing: ease-out; }
-                        
-                        Image {
-                            width: 16px;
-                            height: 16px;
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            source: @image-url("../assets/icons/about.svg");
-                            colorize: current-route == Route.About 
-                                ? MaterialPalette.primary 
-                                : MaterialPalette.on_surface_variant;
-                        }
-                        
-                        about_touch := TouchArea {
-                            width: 100%;
-                            height: 100%;
-                            mouse-cursor: pointer;
-                            clicked => {
-                                root.navigate(Route.About);
-                            }
+
+                    GitHubIconButton {
+                        control-size: 28px;
+                        icon: @image-url("../assets/icons/about.svg");
+                        tooltip-text: "About";
+                        tooltip-above: false;
+                        selected: current-route == Route.About;
+                        foreground: current-route == Route.About
+                            ? GitHubTheme.accent-fg
+                            : GitHubTheme.fg-muted;
+                        clicked => {
+                            root.navigate(Route.About);
                         }
                     }
                 }
@@ -148,7 +117,7 @@ export component TitleBar {
             y: parent.height - 1px;
             width: 100%;
             height: 1px;
-            background: MaterialPalette.outline_variant;
+            background: GitHubTheme.border-default;
         }
     }
 }

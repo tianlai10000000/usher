@@ -29,6 +29,15 @@ This is the stable contract for persisted Chat history, message presentation, vi
 7. History I/O and HTTP requests never block the Slint event loop; UI updates are scheduled back onto that loop.
 8. The Chat component and its Slint message model are route-scoped. Leaving Chat destroys the component and clears its UI model/cache; the Rust session remains the source of truth and reconstructs the bounded model on re-entry.
 9. A history-page or assistant response that completes after leaving Chat updates the Rust session/persistence only and must not remount or repopulate the hidden Chat UI.
+10. Chat presentation is application-owned: native layouts plus
+    `GitHubScrollView`, `GitHubSpinner`, `GitHubCopyButton`, and
+    `GitHubIconButton`; Material visuals are not part of the product contract.
+11. Message surfaces use compact semantic borders and six-pixel corners.
+    Suggestions and send/load actions support keyboard activation and
+    keyboard-visible focus.
+12. The composer adapts to available width, retains resize behavior, and keeps
+    its model mounted while sending. Loading does not duplicate or reorder the
+    bounded message window.
 
 1. Chat 历史继续使用 JSONL；缺少 `status` 字段的旧记录按普通消息兼容读取。
 2. 应用生成的错误/成功状态与正文分开保存，并使用矢量图标展示；禁止重新加入会触发彩色字体回退的固定 Emoji 前缀。
@@ -39,6 +48,13 @@ This is the stable contract for persisted Chat history, message presentation, vi
 7. 历史 I/O 和 HTTP 请求不得阻塞 Slint event loop；UI 更新必须调度回该线程。
 8. Chat 组件及其 Slint 消息 model 按路由管理；离开 Chat 时销毁组件并清空 UI model/cache，Rust session 继续作为事实来源，重新进入时重建有界 model。
 9. 离开 Chat 后才完成的历史分页或 assistant 响应只更新 Rust session/持久化，不得重新挂载或填充隐藏的 Chat UI。
+10. Chat 展示层由应用自有 native layout、`GitHubScrollView`、
+    `GitHubSpinner`、`GitHubCopyButton` 和 `GitHubIconButton` 组成，
+    Material 视觉不属于产品契约。
+11. 消息表面使用紧凑语义边框和 6px 圆角；建议、发送和历史加载操作必须支持
+    键盘激活与仅键盘可见的焦点状态。
+12. 编辑器必须随可用宽度自适应，保留拖拽调高能力，发送期间保持 model 常驻；
+    loading 不得复制或重排有界消息窗口。
 
 ## Regression checklist / 回归检查
 

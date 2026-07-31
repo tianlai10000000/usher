@@ -16,6 +16,9 @@ This specification covers provider metadata resolved on the Project page and the
 - `src/git/overview.rs` aggregates normalized open PR/MR pages into `fat`, `uat`, and `prod` counts; Project and Workflow do not implement provider requests.
 - `src/http/mod.rs` owns request execution, interception, timeout/status handling, and safe logging.
 - `src/workflow/pr_list.rs` owns selected-project list state, request sequencing, status filters, and pagination.
+- `ui/views/project.slint` owns only `GitHubProjectPage` route composition.
+  Project controls/cards/dialogs live under `ui/components/project/`; generic
+  empty/loading/error presentation is owned by `GitHubBlankslate`.
 
 - `src/project/mod.rs` 是稳定 feature façade。`controller.rs` 校验表单并编排异步保存；
   `model.rs`、`storage.rs`、`logo.rs`、`overview.rs` 分别负责持久化记录、
@@ -25,6 +28,9 @@ This specification covers provider metadata resolved on the Project page and the
 - `src/git/overview.rs` 将归一化的 open PR/MR 分页聚合为 `fat`、`uat`、`prod` 数量；Project 与 Workflow 不实现 Provider 请求。
 - `src/http/mod.rs` 负责请求执行、拦截、超时/状态处理及安全日志。
 - `src/workflow/pr_list.rs` 负责当前项目的 PR 列表状态、请求序号、状态筛选和分页。
+- `ui/views/project.slint` 只负责 `GitHubProjectPage` 路由编排。Project
+  控件、卡片和对话框统一位于 `ui/components/project/`；通用空白、加载和错误
+  展示由 `GitHubBlankslate` 负责。
 
 ## Invariants / 不变量
 
@@ -40,6 +46,20 @@ This specification covers provider metadata resolved on the Project page and the
 10. The PR tab displays 10 records per page and bottom-centered pagination. It must lazily request only the page selected by the user. GitHub may issue one detail request for each visible row to enrich its search response with source and target branch names; these requests remain scoped to that selected page. All parseable provider `updated_at` timestamps are displayed in UTC+08:00. Branch pairs and Updated timestamps wrap to additional lines instead of eliding; when the list card is narrower than the table floor width, the table scrolls horizontally rather than dropping columns. The documented response `meta.total_count` and `meta.total_pages` determine the exact total and total pages where available. Stale responses must not overwrite the current project/filter/page.
 11. `src/codereview/api/` must remain constants-only. It must not execute requests or own provider response models; endpoint changes must not require changing operation call sites.
 12. Project-card and Workflow environment counts use the persisted provider type/id and the same Git façade as the PR list. They run on the shared runtime, count only open requests whose normalized target branch is exactly `fat`, `uat`, or `prod`, and write UI state only from the Slint event loop.
+13. User-triggered project-registry reloads run on the shared runtime with
+    blocking storage work isolated from the Slint event loop. The Project page
+    disables duplicate reload activation and exposes visible loading and
+    recoverable inline error/retry states; an empty search result is distinct
+    from an empty registry.
+14. The Project page uses the shared GitHub/Primer PageHeader, Blankslate,
+    Button, IconButton, TextField, Dialog, and ScrollView contracts. Required
+    dialog fields remain visibly labeled, validation is descriptive, and
+    deletion remains a confirmed danger action.
+15. `is_pr_auto_update` currently means one-shot PR-count prefetch, not a
+    recurring background refresh. When enabled, the Project list fetches the
+    FAT/UAT/PROD overview while it is loaded or rebuilt, and Workflow fetches
+    the same overview when that project is opened. The current implementation
+    has no polling interval or automatic retry timer.
 
 1. `remote_repo` 决定 Provider，支持 `gitee`、`gitlab`、`github`。
 2. 支持 HTTPS 或 SSH Git URL，且必须包含 owner/group 与仓库路径。
@@ -53,6 +73,30 @@ This specification covers provider metadata resolved on the Project page and the
 10. PR Tab 每页显示 10 条以及底部水平居中的分页，并且必须只懒加载用户选中的页。GitHub 可以为当前可见的每一行补充发起一个详情请求，以从搜索响应中补齐源分支和目标分支；这些请求必须始终限定在已选中的页面内。所有可解析的 Provider `updated_at` 时间戳均按东八区（UTC+08:00）显示。Branch 与 Updated 列换行完整显示，不得省略号截断；列表卡片窄于表宽下限时横向滚动，而不是丢列。可用时使用接口响应中定义的 `meta.total_count`、`meta.total_pages` 显示准确总条数和总页数；旧项目、旧筛选或旧页码响应不得覆盖当前视图。
 11. `src/codereview/api/` 必须保持仅包含常量，不得执行请求或持有 Provider 响应模型；修改接口地址时不应要求修改业务调用点。
 12. Project 卡片和 Workflow 环境计数使用持久化的 Provider 类型/id，并与 PR 列表共用 Git façade。任务运行在共享 runtime，只统计归一化目标分支严格为 `fat`、`uat`、`prod` 的 open 请求，且只能在 Slint event loop 回写 UI。
+13. 用户主动刷新项目注册表时，存储读取在共享 runtime 的 blocking task 中
+    执行，不得阻塞 Slint event loop。Project 页面必须阻止重复刷新，并展示可见
+    加载状态及可恢复的行内错误/重试状态；搜索无结果与项目注册表为空是两个
+    不同状态。
+14. Project 页面统一复用 GitHub/Primer PageHeader、Blankslate、Button、
+    IconButton、TextField、Dialog 和 ScrollView 契约。对话框必填字段始终有
+    可见标签，校验信息必须可描述，删除操作必须使用危险语义并二次确认。
+15. `is_pr_auto_update` 当前表示“一次性预取 PR 数量”，而不是后台周期刷新。
+    开启后，Project 列表加载或重建时会请求 FAT/UAT/PROD 概览；打开该项目的
+    Workflow 时也会请求同一概览。当前实现没有轮询间隔或自动重试定时器。
+
+## Deferred enhancement / 后续优化
+
+The persisted `is_pr_auto_update` setting is a future candidate for a true
+periodic refresh mode. Before changing its behavior, define the refresh
+interval, project/page visibility scope, duplicate-request and cancellation
+rules, silent HTTP feedback, failure backoff/retry policy, and visible
+last-updated/loading/error state. If the one-shot behavior is retained, rename
+the control so it describes preloading rather than automatic refresh.
+
+持久化的 `is_pr_auto_update` 设置可在后续升级为真正的周期刷新模式。改动前需要
+明确刷新间隔、项目/页面可见性范围、重复请求与取消规则、静默 HTTP 反馈、失败
+退避/重试策略，以及可见的最近更新时间/加载/错误状态。若保留一次性行为，应将
+控件改名为“预加载 PR 数量”，避免使用“自动刷新”。
 
 ## Provider requests / Provider 请求
 
@@ -75,6 +119,12 @@ The enterprise Gitee search result is selected by exact namespace/path where ava
 - Simulate an unsupported remote, 401/403, or timeout and verify no partial project record is written.
 - Save twice before the first lookup finishes and verify only one request is sent.
 - Confirm the UI remains responsive during the lookup and no token appears in logs.
+- Reload the project registry and verify the visible loading state, inline
+  retry state on storage failure, no-project action, and filtered-empty reset
+  action without blocking navigation.
+- At the minimum supported width, verify the Project header/toolbar/cards and
+  add/edit dialog remain usable, fields scroll inside the dialog body, and
+  footer actions remain visible.
 - Enter Workflow and verify the PR tab shows the saved provider/id and the first 10 open requests.
 - For a GitHub PR page, verify every available `head.ref → base.ref` pair is shown and a failed row-detail request does not hide the rest of the page.
 - Switch open/closed/merged/all and paginate rapidly; verify only the latest response updates the list.

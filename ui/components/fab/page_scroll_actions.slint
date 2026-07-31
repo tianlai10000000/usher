@@ -1,8 +1,7 @@
 import { LayoutConstants } from "../../layout_constants.slint";
-import { BackToTopFab } from "./back_to_top_fab.slint";
-import { TerminalFab } from "./terminal_fab.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
 
-export component PageScrollActions inherits Rectangle {
+export component GitHubPageScrollActions inherits Rectangle {
     in property <length> container-width: 0px;
     in property <length> container-height: 0px;
     in property <bool> enable-to-top: true;
@@ -18,34 +17,46 @@ export component PageScrollActions inherits Rectangle {
     callback request-scroll-to-top();
     callback request-open-terminal();
 
+    private property <bool> to-top-visible:
+        root.scroll-offset > root.show-threshold;
+
     x: 0px;
     y: 0px;
     width: root.container-width;
     height: root.container-height;
     background: transparent;
 
-    if root.enable-terminal: TerminalFab {
-        container-width: parent.width;
-        container-height: parent.height;
-        bottom-offset: root.terminal-bottom-offset;
-        right-offset: root.right-offset;
-        active: root.terminal-active;
-        interactive: root.terminal-interactive;
-        tooltip-text: root.terminal-tooltip-text;
-        request-open-terminal => {
-            root.request-open-terminal();
-        }
+    if root.enable-to-top: GitHubIconButton {
+        x: parent.width - self.width - root.right-offset;
+        y: root.to-top-visible
+            ? parent.height - self.height - root.to-top-bottom-offset
+            : parent.height - self.height - root.to-top-bottom-offset + 28px;
+        icon: @image-url("../../assets/icons/octicon-arrow-up-16.svg");
+        tooltip-text: "Back to top";
+        invisible: false;
+        floating: true;
+        opacity: root.to-top-visible ? 1 : 0;
+        button-enabled: root.to-top-visible;
+        animate opacity { duration: 220ms; }
+        animate y { duration: 240ms; }
+        clicked => { root.request-scroll-to-top(); }
     }
 
-    if root.enable-to-top: BackToTopFab {
-        container-width: parent.width;
-        container-height: parent.height;
-        bottom-offset: root.to-top-bottom-offset;
-        right-offset: root.right-offset;
-        scroll-offset: root.scroll-offset;
-        show-threshold: root.show-threshold;
-        request-scroll-to-top => {
-            root.request-scroll-to-top();
-        }
+    // Paint the terminal action last so its upward tooltip can cross the
+    // back-to-top sibling without being covered by that button.
+    if root.enable-terminal: GitHubIconButton {
+        x: parent.width - self.width - root.right-offset;
+        y: parent.height - self.height - root.terminal-bottom-offset;
+        icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
+        primary: true;
+        selected: root.terminal-active;
+        tooltip-text: root.terminal-active
+            ? "Close terminal"
+            : root.terminal-tooltip-text;
+        tooltip-align-right: true;
+        button-enabled: root.terminal-interactive;
+        invisible: false;
+        floating: true;
+        clicked => { root.request-open-terminal(); }
     }
 }

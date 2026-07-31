@@ -1,6 +1,6 @@
-import { IconActionButton, TerminalActionButton } from "./terminal_action_button.slint";
+import { GitHubIconButton } from "./github_icon_button.slint";
 
-export component ProjectCardActions inherits Rectangle {
+export component GitHubProjectCardActions inherits Rectangle {
     out property <bool> has-hover: terminal-btn.has-hover || settings-btn.has-hover || delete-btn.has-hover;
     callback request-open-terminal();
     callback request-open-settings();
@@ -16,25 +16,32 @@ export component ProjectCardActions inherits Rectangle {
         spacing: 2px;
         alignment: center;
 
-        terminal-btn := TerminalActionButton {
+        terminal-btn := GitHubIconButton {
+            icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
             tooltip-text: "Open terminal";
-            request-open-terminal => {
+            control-size: 28px;
+            glyph-size: 16px;
+            clicked => {
                 root.request-open-terminal();
             }
         }
 
-        settings-btn := IconActionButton {
-            icon: @image-url("../../assets/icons/settings.svg");
+        settings-btn := GitHubIconButton {
+            icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
             tooltip-text: "Settings";
+            control-size: 28px;
+            glyph-size: 16px;
             clicked => {
                 root.request-open-settings();
             }
         }
 
-        delete-btn := IconActionButton {
-            icon: @image-url("../../assets/icons/delete.svg");
+        delete-btn := GitHubIconButton {
+            icon: @image-url("../../assets/icons/octicon-trash-16.svg");
             tooltip-text: "Delete";
-            has-error: true;
+            danger: true;
+            control-size: 28px;
+            glyph-size: 16px;
             clicked => {
                 root.request-delete();
             }

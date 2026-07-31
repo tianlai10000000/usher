@@ -8,7 +8,7 @@ Usher 是一个处于 Alpha 阶段的桌面 Git 项目工作台，用于管理�
 
 - 管理本地仓库、别名、标签、Logo 和远程仓库地址。
 - 统计 GitHub、GitLab 和 Gitee 兼容服务上 `fat`、`uat`、`prod` 分支的 PR/MR 数量。
-- 按项目隔离并执行 Tag、PR 引导流程；Branch 与 CD Tab 暂时显示 Coming soon。
+- 按项目隔离执行 Branch 校验、Tag 自动化、分阶段 CD 与 Pull Request 流程。
 - 在当前页面打开项目感知的终端抽屉。
 - 配置独立的 OpenAI-compatible AI Agent Provider（如 DeepSeek）；既有 RAG Chat 页面保持独立。
 - 提供更新、Toast、通知、托盘和网络状态反馈。
@@ -46,9 +46,11 @@ cargo run
 常用开发命令：
 
 ```sh
+./scripts/check-ui-policy.sh
 cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
+git diff --check
 ```
 
 日常 `dev` 和 `test` 构建保留源码行号与增量编译，但不再使用 macOS 默认的
@@ -128,6 +130,7 @@ src/main.rs
      -> src/http/mod.rs        统一 HTTP 客户端和拦截器
      -> src/platform/          原生外观、标题栏、窗口交互和字体适配
      -> src/project/           项目、Logo、PR 概览
+     -> src/jobs/              可复用 Job model 与应用级运行页投影
      -> src/workflow/          Branch / Tag / PR / CD 状态与执行
      -> src/terminal/          PTY 会话和终端渲染
      -> src/chat/              聊天请求、历史、Markdown、UI 绑定
@@ -173,6 +176,9 @@ GitHub Release 工作流会生成 macOS 压缩包/DMG 和 Windows ZIP Bundle。
 - [项目结构审计与重构路线图](docs/architecture-structure-audit.md)
 - [Coding agent 指令](AGENTS.md)
 - [规格索引](docs/specs/README.md)
+- [GitHub/Primer UI 设计规范](docs/specs/ui-design.md)
+- [GitHub/Primer UI 分批改造清单](docs/ui-github-migration-plan.md)
+- [UI Bug 历史](bug-history.md)
 - [Pull Request 工作流规格](docs/specs/pr-review.md)
 - [终端行为规格](docs/specs/terminal.md)
 - [构建性能与产物策略](docs/build-performance.md)

@@ -1,7 +1,7 @@
 import { Notification } from "notification.slint";
-import { ActionsNotify } from "actions_notify.slint";
+import { GitHubNotificationBanner } from "actions_notify.slint";
 
-export component NotificationItem inherits Rectangle {
+export component GitHubNotificationItem inherits Rectangle {
     in property <Notification> notification;
     in property <int> index;
 
@@ -26,7 +26,7 @@ export component NotificationItem inherits Rectangle {
         mouse-cursor: default;
     }
 
-    banner := ActionsNotify {
+    banner := GitHubNotificationBanner {
         width: parent.width;
         notification-id: root.notification.id;
         title: root.notification.title;

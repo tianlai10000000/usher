@@ -1,10 +1,11 @@
-import { Horizontal, Vertical, MaterialText } from "@material";
 import { UpdateLogic } from "./update/update.slint";
 import { NotificationManager } from "./notify/notification.slint";
 import { AppState } from "../state/app_state.slint";
 import { LayoutConstants } from "../layout_constants.slint";
 import { GitHubTooltip } from "./github_tooltip.slint";
 import { GitHubActionMenu } from "./github_action_menu.slint";
+import { GitHubProgressBar } from "./github_progress_bar.slint";
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 
 // Enum to identify which popup is active
 enum ActivePopup {
@@ -17,17 +18,18 @@ enum ActivePopup {
 }
 
 // Status bar item component - simple version without built-in popup
-component StatusBarItem inherits Rectangle {
+component GitHubStatusBarItem inherits Rectangle {
     in property <string> label;
     in property <string> tooltip-text;
     in property <bool> clickable: true;
     in property <bool> active: false;
     in property <bool> show-icon: false;
     in property <image> icon;
-    in property <color> icon-color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-    property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
-    property <color> control-hover: AppState.effective-dark-mode ? #ffffff1a : #818b981f;
-    property <color> control-active: AppState.effective-dark-mode ? #ffffff29 : #818b9833;
+    in property <color> icon-color: GitHubTheme.fg-muted;
+    private property <bool> keyboard-focus-visible: false;
+    property <color> fg-muted: GitHubTheme.fg-muted;
+    property <color> control-hover: GitHubTheme.control-transparent-hover;
+    property <color> control-active: GitHubTheme.control-transparent-active;
     
     // Output: item's absolute x position and width for popup positioning
     out property <length> item-x: self.absolute-position.x;
@@ -39,7 +41,27 @@ component StatusBarItem inherits Rectangle {
     min-width: 28px;
     border-radius: 6px;
     background: hover-area.pressed ? root.control-active :
-                hover-area.has-hover ? root.control-hover : transparent;
+                hover-area.has-hover || root.active ? root.control-hover : transparent;
+
+    status-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        enabled: root.clickable;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.keyboard-focus-visible = false;
+        }
+    }
     
     hover-area := TouchArea {
         width: 100%;
@@ -48,6 +70,8 @@ component StatusBarItem inherits Rectangle {
         
         clicked => {
             if (root.clickable) {
+                root.keyboard-focus-visible = false;
+                status-focus.focus();
                 root.clicked();
             }
         }
@@ -75,12 +99,23 @@ component StatusBarItem inherits Rectangle {
             }
         }
         
-        if root.label != "" : MaterialText {
+        if root.label != "" : Text {
             text: root.label;
             font-size: 12px;
             color: root.fg-muted;
-            vertical_alignment: center;
+            vertical-alignment: center;
         }
+    }
+
+    if status-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height - GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
     }
     
     // Tooltip
@@ -92,7 +127,7 @@ component StatusBarItem inherits Rectangle {
 
 // GitHub has no persistent web status bar equivalent. This desktop utility
 // surface composes Primer canvas, border, typography, control and overlay tokens.
-export component StatusBar inherits Rectangle {
+export component GitHubStatusBar inherits Rectangle {
     // Internal popup state - using enum to track which popup is active
     property <ActivePopup> active-popup: ActivePopup.None;
     property <string> popup-title: "";
@@ -100,16 +135,16 @@ export component StatusBar inherits Rectangle {
     
     // Popup dimensions
     property <length> popup-width: 220px;
-    property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-    property <color> canvas-subtle: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
-    property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-    property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
-    property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    property <color> accent-fg: AppState.effective-dark-mode ? #4493f8 : #0969da;
-    property <color> success-fg: AppState.effective-dark-mode ? #3fb950 : #1a7f37;
-    property <color> danger-fg: AppState.effective-dark-mode ? #f85149 : #cf222e;
-    property <color> control-hover: AppState.effective-dark-mode ? #ffffff1a : #818b981f;
-    property <color> control-active: AppState.effective-dark-mode ? #ffffff29 : #818b9833;
+    property <color> canvas-default: GitHubTheme.canvas-default;
+    property <color> canvas-subtle: GitHubTheme.canvas-subtle;
+    property <color> fg-default: GitHubTheme.fg-default;
+    property <color> fg-muted: GitHubTheme.fg-muted;
+    property <color> border-default: GitHubTheme.border-default;
+    property <color> accent-fg: GitHubTheme.accent-fg;
+    property <color> success-fg: GitHubTheme.success-fg;
+    property <color> danger-fg: GitHubTheme.danger-fg;
+    property <color> control-hover: GitHubTheme.control-transparent-hover;
+    property <color> control-active: GitHubTheme.control-transparent-active;
     
     // Dynamic anchor position - binds to the currently active item's real-time position
     property <length> popup-anchor-x: 
@@ -126,13 +161,13 @@ export component StatusBar inherits Rectangle {
         active-popup == ActivePopup.Network ? network-item.item-width :
         active-popup == ActivePopup.Version ? version-item.item-width : 0px;
     
-    // Convert absolute anchor x to relative x (relative to StatusBar)
+    // Convert absolute anchor x to relative x (relative to GitHubStatusBar)
     property <length> popup-anchor-rel-x: popup-anchor-x - root.absolute-position.x;
     
     height: LayoutConstants.status-bar-height;
     background: root.canvas-subtle;
 
-    Vertical {
+    VerticalLayout {
         width: 100%;
         height: 100%;
         spacing: 0px;
@@ -159,7 +194,7 @@ export component StatusBar inherits Rectangle {
                 alignment: start;
                 
                 // Update check status
-                update-check-item := StatusBarItem {
+                update-check-item := GitHubStatusBarItem {
                     label: UpdateLogic.checking-update ? "Update Checking..." : "";
                     tooltip-text: "Checking for updates...";
                     active: UpdateLogic.checking-update;
@@ -204,30 +239,23 @@ export component StatusBar inherits Rectangle {
                         }
                     }
                     
-                    Horizontal {
+                    HorizontalLayout {
                         spacing: 8px;
                         padding-left: 8px;
                         padding-right: 8px;
                         
-                        MaterialText {
+                        Text {
                             text: "Downloading " + Math.round(UpdateLogic.download-progress * 100) + "%";
                             font-size: 12px;
                             color: root.accent-fg;
-                            vertical_alignment: center;
+                            vertical-alignment: center;
                         }
-                        
-                        Rectangle {
+
+                        GitHubProgressBar {
                             width: 60px;
                             height: 4px;
-                            background: root.border-default;
-                            border-radius: 2px;
-                            
-                            Rectangle {
-                                width: parent.width * UpdateLogic.download-progress;
-                                height: 100%;
-                                background: root.accent-fg;
-                                border-radius: 2px;
-                            }
+                            progress: UpdateLogic.download-progress;
+                            foreground: root.accent-fg;
                         }
                     }
                     
@@ -240,7 +268,7 @@ export component StatusBar inherits Rectangle {
                 }
                 
                 // Notification status
-                notification-item := StatusBarItem {
+                notification-item := GitHubStatusBarItem {
                     label: "Notifications " + NotificationManager.queue.length;
                     tooltip-text: NotificationManager.queue.length > 0 ? 
                                 (NotificationManager.queue.length + " unread notifications") : 
@@ -275,13 +303,15 @@ export component StatusBar inherits Rectangle {
                 alignment: end;
                 
                 // Network status (simple online indicator)
-                network-item := StatusBarItem {
+                network-item := GitHubStatusBarItem {
                     label: "";
                     tooltip-text: AppState.network-online ? "Network connected" : "Network disconnected";
-                    active: AppState.network-online;
+                    active: root.active-popup == ActivePopup.Network;
                     visible: true;
                     show-icon: true;
-                    icon: AppState.network-online ? @image-url("../assets/icons/wifi.svg") : @image-url("../assets/icons/wifi_off.svg");
+                    icon: AppState.network-online
+                        ? @image-url("../assets/icons/octicon-broadcast-16.svg")
+                        : @image-url("../assets/icons/octicon-alert-16.svg");
                     icon-color: AppState.network-online ? root.success-fg : root.danger-fg;
                     
                     clicked => {
@@ -296,10 +326,10 @@ export component StatusBar inherits Rectangle {
                 }
                 
                 // Application version info
-                version-item := StatusBarItem {
+                version-item := GitHubStatusBarItem {
                     label: "v" + AppState.version;
                     tooltip-text: "Version: " + AppState.version;
-                    active: true;
+                    active: root.active-popup == ActivePopup.Version;
                     visible: AppState.version != "";
                     clickable: true;
                     
@@ -350,6 +380,7 @@ export component StatusBar inherits Rectangle {
         content-height: popup-content-layout.preferred-height;
         align: "center";
         side: "top";
+        dismiss-requested => { root.active-popup = ActivePopup.None; }
 
         Rectangle {
             width: parent.width;
@@ -361,7 +392,7 @@ export component StatusBar inherits Rectangle {
                 spacing: 8px;
                 padding: 12px;
 
-                if root.popup-title != "" : MaterialText {
+                if root.popup-title != "" : Text {
                     width: root.popup-width - 24px;
                     text: root.popup-title;
                     font-size: 14px;
@@ -370,7 +401,7 @@ export component StatusBar inherits Rectangle {
                     overflow: elide;
                 }
 
-                if root.popup-content != "" : MaterialText {
+                if root.popup-content != "" : Text {
                     width: root.popup-width - 24px;
                     text: root.popup-content;
                     font-size: 12px;

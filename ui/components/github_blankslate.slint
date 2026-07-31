@@ -1,0 +1,144 @@
+import { GitHubButton } from "settings/github_settings_controls.slint";
+import { GitHubLink } from "github_link.slint";
+import { GitHubSpinner } from "github_spinner.slint";
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+
+// Primer Blankslate foundation for empty, filtered-empty, loading, and error
+// states. The visible heading/description remain mounted for assistive context.
+export component GitHubBlankslate inherits Rectangle {
+    in property <image> icon;
+    in property <string> heading;
+    in property <string> description: "";
+    in property <string> primary-label: "";
+    in property <string> secondary-label: "";
+    in property <bool> bordered: false;
+    in property <bool> narrow: false;
+    in property <bool> spacious: false;
+    in property <bool> loading: false;
+    in property <bool> error: false;
+    in property <bool> large-visual: false;
+    in property <float> visual-opacity: 1;
+    callback primary-clicked();
+    callback secondary-clicked();
+
+    private property <bool> has-icon:
+        root.icon.width > 0 && root.icon.height > 0;
+    private property <length> horizontal-padding:
+        root.narrow ? GitHubMetrics.size-16 : GitHubMetrics.size-24;
+    private property <length> vertical-padding:
+        root.spacious ? GitHubMetrics.size-48
+        : root.narrow ? GitHubMetrics.size-16
+        : GitHubMetrics.size-32;
+    private property <length> action-height:
+        root.primary-label == "" && root.secondary-label == ""
+            ? 0px
+            : GitHubMetrics.size-32;
+    private property <bool> has-actions: root.action-height > 0px;
+    private property <bool> has-visual: root.has-icon || root.loading;
+    private property <length> visual-height:
+        root.large-visual ? 128px : GitHubMetrics.size-32;
+    private property <length> natural-height:
+        root.vertical-padding * 2 + content.preferred-height;
+
+    width: 100%;
+    height: root.natural-height;
+    preferred-height: root.natural-height;
+    border-radius: GitHubMetrics.radius-medium;
+    border-width: root.bordered ? GitHubMetrics.border-thin : 0px;
+    border-color: GitHubTheme.border-default;
+    background: root.bordered ? GitHubTheme.canvas-default : transparent;
+
+    content := VerticalLayout {
+        x: root.horizontal-padding;
+        y: root.vertical-padding;
+        width: parent.width - root.horizontal-padding * 2;
+        spacing: GitHubMetrics.size-8;
+        // Keep the content stack anchored to the declared padding. `center`
+        // distributes spare vertical space between children in Slint and
+        // pushes actions against the bottom border.
+        alignment: start;
+
+        if root.loading: Rectangle {
+            width: parent.width;
+            height: GitHubMetrics.size-32;
+            background: transparent;
+
+            GitHubSpinner {
+                x: (parent.width - self.width) / 2;
+                spinner-size: GitHubMetrics.size-32;
+                foreground: GitHubTheme.fg-muted;
+            }
+        }
+
+        if !root.loading && root.has-icon: Rectangle {
+            width: parent.width;
+            height: root.visual-height;
+            background: transparent;
+
+            Image {
+                x: root.large-visual
+                    ? max(0px, (parent.width - min(320px, parent.width)) / 2)
+                    : (parent.width - self.width) / 2;
+                width: root.large-visual
+                    ? min(320px, parent.width)
+                    : GitHubMetrics.size-32;
+                height: root.visual-height;
+                source: root.icon;
+                image-fit: contain;
+                opacity: root.visual-opacity;
+                colorize: root.large-visual
+                    ? transparent
+                    : (root.error ? GitHubTheme.danger-fg : GitHubTheme.fg-muted);
+            }
+        }
+
+        Text {
+            width: parent.width;
+            height: GitHubMetrics.size-28;
+            text: root.heading;
+            font-size: GitHubMetrics.text-large;
+            font-weight: 600;
+            color: GitHubTheme.fg-default;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+
+        if root.description != "": description-text := Text {
+            x: (parent.width - self.width) / 2;
+            width: min(parent.width, 560px);
+            height: self.preferred-height;
+            text: root.description;
+            font-size: GitHubMetrics.text-medium;
+            color: GitHubTheme.fg-muted;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+
+        if root.primary-label != "" || root.secondary-label != "": HorizontalLayout {
+            height: GitHubMetrics.size-32;
+            spacing: GitHubMetrics.size-12;
+            alignment: center;
+
+            if root.primary-label != "": VerticalLayout {
+                alignment: center;
+
+                GitHubButton {
+                    text: root.primary-label;
+                    primary: true;
+                    clicked => { root.primary-clicked(); }
+                }
+            }
+
+            if root.secondary-label != "": VerticalLayout {
+                alignment: center;
+
+                GitHubLink {
+                    text: root.secondary-label;
+                    clicked => { root.secondary-clicked(); }
+                }
+            }
+        }
+    }
+}

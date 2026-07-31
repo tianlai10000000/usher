@@ -1,0 +1,403 @@
+import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubCopyButton } from "../button/github_copy_button.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+
+export component GitHubWorkflowMetaLabel inherits Rectangle {
+    in property <string> text: "";
+    private property <length> chip-width: max(28px, label-measure.preferred-width + 14px);
+
+    width: root.chip-width;
+    height: 20px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: GitHubTheme.border-default;
+    background: GitHubTheme.control-default-rest;
+    vertical-stretch: 0;
+
+    label-measure := Text {
+        visible: false;
+        text: root.text;
+        font-size: 12px;
+        font-weight: 500;
+        wrap: no-wrap;
+    }
+
+    // Keep the compact label centered within its nominal line box.
+    Text {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: parent.width;
+        height: 18px;
+        text: root.text;
+        font-size: 12px;
+        font-weight: 500;
+        color: GitHubTheme.fg-default;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+export component GitHubWorkflowProjectDetails inherits Rectangle {
+    in property <string> project-name: "";
+    in property <string> project-alias: "";
+    in property <string> project-local-repo: "";
+    in property <string> project-remote-repo: "";
+    in property <string> repo-type: "";
+    in property <string> repo-project-id: "";
+    in property <image> project-logo-image;
+    // GitHub Desktop wording: Show in Finder / Explorer / file manager.
+    in property <string> open-local-folder-tooltip: "Show in file manager";
+    callback copy-remote(string) -> bool;
+    callback open-local(string);
+
+    // Compact overflow open state is shared with Workflow so the ActionMenu can
+    // mount on the shell above the tab row (header-local popups are covered).
+    in-out property <bool> repository-details-open: false;
+    private property <bool> compact: root.width < 720px;
+    private property <color> canvas-default: GitHubTheme.canvas-default;
+    private property <color> canvas-subtle: GitHubTheme.canvas-subtle;
+    private property <color> border-default: GitHubTheme.border-default;
+    private property <color> fg-default: GitHubTheme.fg-default;
+    private property <color> fg-muted: GitHubTheme.fg-muted;
+    private property <string> display-name: root.project-name == "" ? "Untitled project" : root.project-name;
+    private property <bool> has-alias: root.project-alias != "";
+    private property <bool> has-remote: root.project-remote-repo != "";
+    private property <bool> has-local: root.project-local-repo != "";
+    private property <string> display-remote: root.has-remote
+        ? root.project-remote-repo
+        : "No remote URL";
+    private property <string> display-local: root.has-local
+        ? root.project-local-repo
+        : "No local path";
+    private property <string> provider-label:
+        root.repo-type == "github" ? "GitHub"
+            : (root.repo-type == "gitlab" ? "GitLab"
+                : (root.repo-type == "gitee" ? "Gitee"
+                    : (root.repo-type == "" ? "Not configured" : root.repo-type)));
+    private property <bool> has-repo-id: root.repo-project-id != "";
+    private property <string> id-label: root.has-repo-id ? ("ID " + root.repo-project-id) : "ID —";
+
+    // Content metrics for a compact first-line identity and auto-sized paths.
+    name-measure := Text {
+        visible: false;
+        text: root.display-name;
+        font-size: 20px;
+        font-weight: 600;
+        wrap: no-wrap;
+    }
+    alias-measure := Text {
+        visible: false;
+        text: root.project-alias;
+        font-size: 16px;
+        wrap: no-wrap;
+    }
+    provider-measure := Text {
+        visible: false;
+        text: root.provider-label;
+        font-size: 12px;
+        font-weight: 500;
+        wrap: no-wrap;
+    }
+    id-measure := Text {
+        visible: false;
+        text: root.id-label;
+        font-size: 12px;
+        font-weight: 500;
+        wrap: no-wrap;
+    }
+    remote-measure := Text {
+        visible: false;
+        text: root.display-remote;
+        font-size: 12px;
+        wrap: no-wrap;
+    }
+    local-measure := Text {
+        visible: false;
+        text: root.display-local;
+        font-size: 12px;
+        wrap: no-wrap;
+    }
+    private property <length> alias-width: root.has-alias
+        ? max(40px, alias-measure.preferred-width)
+        : 0px;
+    private property <length> remote-ideal-width: remote-measure.preferred-width
+        + (root.has-remote ? 36px : 0px);
+    private property <length> local-ideal-width: local-measure.preferred-width
+        + (root.has-local ? 36px : 0px);
+    private property <length> path-min-width: 80px;
+    private property <length> paths-gap: 16px;
+    private property <length> meta-left: 16px + 32px + 12px;
+    private property <length> first-line-width: max(
+        0px,
+        root.width - root.meta-left - (root.compact ? 52px : 16px),
+    );
+    private property <length> provider-label-width: max(28px, provider-measure.preferred-width + 14px);
+    private property <length> id-label-width: max(28px, id-measure.preferred-width + 14px);
+    private property <length> labels-width: root.provider-label-width + 8px + root.id-label-width;
+    private property <length> alias-gap: root.has-alias ? 8px : 0px;
+    private property <length> labels-gap: 12px;
+    // Preserve the complete alias whenever the row can fit by shrinking the
+    // project name first. Only very narrow windows elide the alias.
+    private property <length> name-width: min(
+        name-measure.preferred-width,
+        max(80px, root.first-line-width - root.alias-gap - root.alias-width - root.labels-gap - root.labels-width),
+    );
+    private property <length> alias-display-width: root.has-alias
+        ? min(
+            root.alias-width,
+            max(0px, root.first-line-width - root.name-width - root.alias-gap - root.labels-gap - root.labels-width),
+        )
+        : 0px;
+    private property <length> labels-left: root.meta-left + root.name-width
+        + (root.alias-display-width > 0px ? root.alias-gap + root.alias-display-width : 0px)
+        + root.labels-gap;
+    // Shared title band with the logo (y=8, h=32). Position text by preferred
+    // height — Text vertical-alignment inside a taller box still paints high.
+    private property <length> title-row-y: 8px;
+    private property <length> title-row-height: 32px;
+    private property <length> name-y: root.title-row-y
+        + (root.title-row-height - name-measure.preferred-height) / 2;
+    private property <length> alias-y: root.title-row-y
+        + (root.title-row-height - alias-measure.preferred-height) / 2;
+    private property <length> chip-y: root.title-row-y
+        + (root.title-row-height - 20px) / 2;
+    private property <length> paths-available: max(0px, root.width - root.meta-left - 16px);
+    // Wide headers hug each path's ideal width (same density as the original
+    // remote-only row). Only when both ideals no longer fit do the fields
+    // share the remaining width and elide. Compact headers move details into
+    // a trailing kebab overlay instead of wrapping a second path row.
+    private property <bool> paths-fit: !root.has-local
+        || (root.remote-ideal-width + root.paths-gap + root.local-ideal-width
+            <= root.paths-available);
+    private property <length> remote-width: !root.has-local
+        ? min(root.paths-available, max(root.path-min-width, root.remote-ideal-width))
+        : (root.paths-fit
+            ? root.remote-ideal-width
+            : max(root.path-min-width, (root.paths-available - root.paths-gap) / 2));
+    private property <length> local-width: !root.has-local
+        ? 0px
+        : (root.paths-fit
+            ? root.local-ideal-width
+            : max(root.path-min-width, root.paths-available - root.remote-width - root.paths-gap));
+    private property <length> row2-y: 8px + 32px + 6px;
+    private property <length> local-x: root.meta-left + root.remote-width + root.paths-gap;
+    private property <length> local-y: root.row2-y;
+
+    height: root.compact ? 52px : 86px;
+    background: root.canvas-default;
+    clip: false;
+    // Stay above the shell dismiss scrim while open so the kebab remains
+    // clickable; the ActionMenu itself mounts later on the Workflow shell.
+    z: root.repository-details-open ? 301 : 20;
+
+    changed compact => {
+        if !root.compact {
+            root.repository-details-open = false;
+        }
+    }
+
+    // Logo
+    Rectangle {
+        x: 16px;
+        y: 8px;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: root.border-default;
+        background: root.canvas-default;
+        clip: true;
+
+        Image {
+            x: 4px;
+            y: 4px;
+            width: 24px;
+            height: 24px;
+            source: root.project-logo-image;
+            image-fit: contain;
+        }
+    }
+
+    // Logo / name / alias / chips share the same 32px mid-line.
+    Text {
+        x: root.meta-left;
+        y: root.name-y;
+        width: root.name-width;
+        height: name-measure.preferred-height;
+        text: root.display-name;
+        font-size: 20px;
+        font-weight: 600;
+        color: root.fg-default;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.alias-display-width > 0px: Text {
+        x: root.meta-left + root.name-width + root.alias-gap;
+        y: root.alias-y;
+        width: root.alias-display-width;
+        height: alias-measure.preferred-height;
+        text: root.project-alias;
+        font-size: 16px;
+        color: root.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    GitHubWorkflowMetaLabel {
+        x: root.labels-left;
+        y: root.chip-y;
+        text: root.provider-label;
+    }
+
+    GitHubWorkflowMetaLabel {
+        x: root.labels-left + root.provider-label-width + 8px;
+        y: root.chip-y;
+        text: root.id-label;
+    }
+
+    // Remote URL: plain text with a copy action, without input-like chrome.
+    if !root.compact: remote-field := Rectangle {
+        x: root.meta-left;
+        y: root.row2-y;
+        width: root.remote-width;
+        height: 32px;
+        border-width: 0px;
+        background: transparent;
+        clip: false;
+
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width - (root.has-remote ? 36px : 0px);
+            height: parent.height;
+            text: root.display-remote;
+            font-size: 12px;
+            color: root.has-remote ? root.fg-default : root.fg-muted;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        if root.has-remote: GitHubCopyButton {
+            x: parent.width - 32px;
+            y: 0px;
+            tooltip-text: "Copy remote URL";
+            tooltip-align-right: true;
+            copy-requested => {
+                root.copy-remote(root.project-remote-repo)
+            }
+        }
+    }
+
+    // Local path: same IconButton geometry as the remote copy control; opens the
+    // OS file manager (GitHub Desktop “Show in Finder/Explorer” pattern).
+    if !root.compact && root.has-local: Rectangle {
+        x: root.local-x;
+        y: root.local-y;
+        width: root.local-width;
+        height: 32px;
+        border-width: 0px;
+        background: transparent;
+        clip: false;
+
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width - 36px;
+            height: parent.height;
+            text: root.display-local;
+            font-size: 12px;
+            color: root.fg-default;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        Rectangle {
+            x: parent.width - 28px;
+            y: 2px;
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: open-touch.has-hover
+                ? (GitHubTheme.control-muted-hover)
+                : transparent;
+            clip: false;
+
+            Image {
+                x: 6px;
+                y: 6px;
+                width: 16px;
+                height: 16px;
+                source: @image-url("../../assets/icons/octicon-file-directory-16.svg");
+                image-fit: contain;
+                colorize: root.fg-muted;
+            }
+
+            open-touch := TouchArea {
+                width: 100%;
+                height: 100%;
+                mouse-cursor: pointer;
+                clicked => {
+                    root.open-local(root.project-local-repo);
+                }
+            }
+
+            if open-touch.has-hover: GitHubTooltip {
+                x: parent.width - self.width;
+                y: -self.height - 4px;
+                z: 10000;
+                text: root.open-local-folder-tooltip;
+            }
+        }
+    }
+
+    // GitHub compact repository header: keep identity on one row. Paths and
+    // actions open from a trailing invisible IconButton; the ActionMenu is
+    // mounted on the Workflow shell so tabs cannot cover it.
+    if root.compact: Rectangle {
+        x: parent.width - 48px;
+        y: 8px;
+        width: 32px;
+        height: 32px;
+        z: 2;
+        border-radius: 6px;
+        border-width: 0px;
+        background: compact-details-touch.pressed
+            ? GitHubTheme.control-divider-hover
+            : (compact-details-touch.has-hover || root.repository-details-open
+                ? GitHubTheme.control-divider-rest
+                : transparent);
+
+        Image {
+            x: 8px;
+            y: 8px;
+            width: 16px;
+            height: 16px;
+            source: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
+            image-fit: contain;
+            colorize: GitHubTheme.fg-default;
+        }
+
+        compact-details-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.repository-details-open = !root.repository-details-open;
+            }
+        }
+
+        if compact-details-touch.has-hover && !root.repository-details-open: GitHubTooltip {
+            x: parent.width - self.width;
+            y: -self.height - 4px;
+            z: 10000;
+            text: "Repository details";
+        }
+    }
+
+    Rectangle {
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: root.border-default;
+    }
+}

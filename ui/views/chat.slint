@@ -1,871 +1,314 @@
-import { 
-    MaterialText, MaterialPalette, MaterialStyleMetrics, MaterialTypography,
-    TextField, FilledButton, IconButton, FilledIconButton, ScrollView,
-    ElevatedCard, CircularProgressIndicator, Vertical, Horizontal
-} from "@material";
-import { AppState } from "../state/app_state.slint";
-import { ColorsTheme } from "../theme/color.slint";
 import { Route } from "../route/routeMap.slint";
-import { StyleMetrics } from "std-widgets.slint";
-import { GitHubCopyButton } from "../components/button/github_copy_button.slint";
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+import { GitHubIconButton } from "../components/button/github_icon_button.slint";
+import { GitHubScrollView } from "../components/github_scroll_view.slint";
+import { GitHubSpinner } from "../components/github_spinner.slint";
+import { GitHubMessageBubble, GitHubChatWelcomeView, MessageRole, MessageStatus, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineLine, MarkdownBlock, ChatMessage } from "../components/chat/github_chat_components.slint";
 
-// 消息类型枚举
-export enum MessageRole {
-    User,
-    Assistant,
-}
+export { MessageRole, MessageStatus, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineLine, MarkdownBlock, ChatMessage } from "../components/chat/github_chat_components.slint";
 
-export enum MessageStatus {
-    Normal,
-    Error,
-    Success,
-}
-
-export enum MarkdownBlockKind {
-    Paragraph,
-    Heading1,
-    Heading2,
-    Heading3,
-    ListItem,
-    CodeBlock,
-    Quote,
-}
-
-export enum MarkdownInlineKind {
-    Text,
-    Strong,
-    Emphasis,
-    Code,
-    Link,
-}
-
-export struct MarkdownInlineSpan {
-    kind: MarkdownInlineKind,
-    text: string,
-    href: string,
-}
-
-export struct MarkdownInlineLine {
-    spans: [MarkdownInlineSpan],
-}
-
-export struct MarkdownBlock {
-    kind: MarkdownBlockKind,
-    text: string,
-    inline_lines: [MarkdownInlineLine],
-}
-
-// 消息数据结构
-export struct ChatMessage {
-    id: int,
-    role: MessageRole,
-    status: MessageStatus,
-    content: string,
-    rendered_content: string,
-    is_markdown: bool,
-    markdown_blocks: [MarkdownBlock],
-    timestamp: string,
-}
-
-// 统一的消息气泡组件 - 根据角色自动切换样式
-component MessageBubble inherits Rectangle {
-    in property <MessageRole> role;
-    in property <MessageStatus> status: MessageStatus.Normal;
-    in property <string> content;
-    in property <string> rendered-content;
-    in property <bool> is-markdown: false;
-    in property <[MarkdownBlock]> markdown-blocks: [];
-    in property <string> timestamp;
-    in property <bool> is-loading: false;
-    // 消息最大宽度（由外层 Chat 根据窗口宽度动态计算）
-    in property <length> max-bubble-width: 420px;
-    
-    // 低频等待动效相位（由 Rust 定时器每 500ms 更新一次）
-    in property <int> loading-phase: 0;
-    
-    // 复制回调 - 传递消息内容
-    callback copy-message(string) -> bool;
-    callback open-link(string);
-    
-    // 高度跟随当前角色对应行的内容高度，避免根容器产生额外空白
-    height: root.role == MessageRole.User ? user-row.preferred-height : ai-row.preferred-height;
-    background: transparent;
-
-    
-    // 用户消息布局（右对齐）
-    user-row := HorizontalLayout {
-        visible: root.role == MessageRole.User;
-        height: root.role == MessageRole.User ? self.preferred-height : 0px;
-        spacing: 8px;
-        alignment: end;
-        
-        // 发送的消息内容
-        Rectangle {
-            max-width: root.max-bubble-width;
-            height: user-content.preferred-height;
-            background: MaterialPalette.primary;
-            border-radius: 16px;
-            border-top-right-radius: 4px;
-            
-            // 消息内容的 hover 检测
-            message-hover := TouchArea {}
-            
-            user-content := VerticalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                padding-top: 8px;
-                padding-bottom: 8px;
-                spacing: 2px;
-                
-                Text {
-                    text: root.content;
-                    color: MaterialPalette.on_primary;
-                    wrap: word-wrap;
-                    font-size: 14px;
-                }
-                
-                Text {
-                    text: root.timestamp;
-                    color: MaterialPalette.on_primary.with_alpha(0.7);
-                    font-size: 11px;
-                    horizontal-alignment: right;
-                }
-            }
-            
-            // 悬浮工具栏 - 绝对定位在消息下方，不影响气泡高度
-            Rectangle {
-                x: 0;
-                y: user-content.preferred-height;
-                width: parent.width;
-                height: 32px;
-                visible: (message-hover.has-hover || toolbar-hover.has-hover || user-copy-button.has-hover || user-copy-button.copied) && !root.is-loading;
-
-                toolbar-hover := TouchArea {}
-
-                HorizontalLayout {
-                    alignment: end;
-                    padding-top: 4px;
-                    padding-right: 4px;
-                    spacing: 4px;
-                    
-                    user-copy-button := GitHubCopyButton {
-                        tooltip-text: "Copy message";
-                        copy-requested => {
-                            root.copy-message(root.content)
-                        }
-                    }
-                }
-            }
-        }
-        
-        // 用户头像
-        Rectangle {
-            width: 32px;
-            height: 32px;
-            border-radius: 16px;
-            background: MaterialPalette.primary_container;
-            
-            MaterialText {
-                text: "U";
-                color: MaterialPalette.on_primary_container;
-                font-size: 14px;
-                font-weight: 600;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-    }
-    
-    // AI 消息布局（左对齐）
-    ai-row := HorizontalLayout {
-        visible: root.role == MessageRole.Assistant;
-        height: root.role == MessageRole.Assistant ? self.preferred-height : 0px;
-        spacing: 8px;
-        alignment: start;
-        
-        // AI 头像
-        Rectangle {
-            width: 32px;
-            height: 32px;
-            border-radius: 16px;
-            background: MaterialPalette.tertiary_container;
-            
-            MaterialText {
-                text: "AI";
-                color: MaterialPalette.on_tertiary_container;
-                font-size: 11px;
-                font-weight: 600;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-        
-        // 消息内容
-        Rectangle {
-            max-width: root.max-bubble-width;
-            height: ai-content.preferred-height;
-            background: MaterialPalette.surface_container_high;
-            border-radius: 16px;
-            border-top-left-radius: 4px;
-            
-            // AI 消息内容的 hover 检测
-            ai-message-hover := TouchArea {}
-            
-            ai-content := VerticalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                padding-top: 8px;
-                padding-bottom: 8px;
-                spacing: 2px;
-                
-                // 加载状态
-                HorizontalLayout {
-                    visible: root.is-loading;
-                    height: root.is-loading ? self.preferred-height : 0px;
-                    spacing: 6px;
-                    alignment: start;
-                    
-                    Text {
-                        text: "●";
-                        color: MaterialPalette.primary;
-                        font-size: 12px;
-                    }
-
-                    Text {
-                        text: "Thinking";
-                        color: MaterialPalette.on_surface_variant;
-                        font-size: 14px;
-                    }
-
-                    Text {
-                        text: root.loading-phase == 0 ? "." :
-                              root.loading-phase == 1 ? ".." : "...";
-                        color: MaterialPalette.on_surface_variant;
-                        font-size: 14px;
-                    }
-                }
-                
-                // Markdown 富文本块渲染（仅 AI 消息）
-                VerticalLayout {
-                    visible: !root.is-loading && root.is-markdown && root.markdown-blocks.length > 0;
-                    spacing: 6px;
-
-                    for block[index] in root.markdown-blocks: VerticalLayout {
-                        spacing: 2px;
-
-                        // 细粒度行内渲染（同一段落内粗体/斜体/链接）
-                        if block.inline_lines.length > 0: VerticalLayout {
-                            spacing: 2px;
-
-                            for line[line_index] in block.inline_lines: HorizontalLayout {
-                                spacing: 0px;
-                                alignment: start;
-                                private property <length> line-height: block.kind == MarkdownBlockKind.Heading1 ? 30px :
-                                                                       block.kind == MarkdownBlockKind.Heading2 ? 28px :
-                                                                       block.kind == MarkdownBlockKind.Heading3 ? 24px :
-                                                                       22px;
-
-                                for span[span_index] in line.spans: Rectangle {
-                                    background: transparent;
-                                    height: parent.line-height;
-                                    width: span-text.preferred-width;
-
-                                    span-touch := TouchArea {
-                                        enabled: span.kind == MarkdownInlineKind.Link && span.href != "";
-                                        clicked => {
-                                            if (span.href != "") {
-                                                root.open-link(span.href);
-                                            }
-                                        }
-                                    }
-
-                                    span-text := Text {
-                                        y: (parent.height - self.preferred-height) / 2;
-                                        text: span.text;
-                                        color: span.kind == MarkdownInlineKind.Link ? MaterialPalette.primary : MaterialPalette.on_surface;
-                                        font-size: block.kind == MarkdownBlockKind.Heading1 ? 20px :
-                                                   block.kind == MarkdownBlockKind.Heading2 ? 18px :
-                                                   block.kind == MarkdownBlockKind.Heading3 ? 16px :
-                                                   block.kind == MarkdownBlockKind.CodeBlock ? 13px :
-                                                   14px;
-                                        font-weight: (block.kind == MarkdownBlockKind.Heading1 ||
-                                                      block.kind == MarkdownBlockKind.Heading2 ||
-                                                      block.kind == MarkdownBlockKind.Heading3 ||
-                                                      span.kind == MarkdownInlineKind.Strong) ? 700 : 400;
-                                        font-italic: span.kind == MarkdownInlineKind.Emphasis;
-                                    }
-                                }
-                            }
-                        }
-
-                        // 降级文本（如 code block 或无行内切分结果）
-                        if block.inline_lines.length == 0: Text {
-                            text: block.text;
-                            color: MaterialPalette.on_surface;
-                            wrap: word-wrap;
-                            font-size: block.kind == MarkdownBlockKind.Heading1 ? 20px :
-                                       block.kind == MarkdownBlockKind.Heading2 ? 18px :
-                                       block.kind == MarkdownBlockKind.Heading3 ? 16px :
-                                       block.kind == MarkdownBlockKind.CodeBlock ? 13px :
-                                       14px;
-                            font-weight: (block.kind == MarkdownBlockKind.Heading1 ||
-                                          block.kind == MarkdownBlockKind.Heading2 ||
-                                          block.kind == MarkdownBlockKind.Heading3) ? 700 : 400;
-                        }
-                    }
-                }
-
-                // 纯文本/降级渲染。状态使用矢量图标，避免加载彩色 Emoji 字体。
-                HorizontalLayout {
-                    visible: !root.is-loading && (!root.is-markdown || root.markdown-blocks.length == 0);
-                    height: (!root.is-loading && (!root.is-markdown || root.markdown-blocks.length == 0)) ? self.preferred-height : 0px;
-                    spacing: root.status == MessageStatus.Normal ? 0px : 6px;
-                    alignment: start;
-
-                    if root.status != MessageStatus.Normal: Image {
-                        width: 16px;
-                        height: 16px;
-                        source: root.status == MessageStatus.Error
-                            ? @image-url("../assets/icons/error.svg")
-                            : @image-url("../assets/icons/success.svg");
-                        colorize: root.status == MessageStatus.Error
-                            ? ColorsTheme.error
-                            : ColorsTheme.success;
-                    }
-
-                    Text {
-                        horizontal-stretch: 1;
-                        text: root.rendered-content;
-                        color: MaterialPalette.on_surface;
-                        wrap: word-wrap;
-                        font-size: 14px;
-                    }
-                }
-                
-                // 时间戳
-                Text {
-                    visible: !root.is-loading && root.timestamp != "";
-                    height: (!root.is-loading && root.timestamp != "") ? self.preferred-height : 0px;
-                    text: root.timestamp;
-                    color: MaterialPalette.on_surface_variant.with_alpha(0.7);
-                    font-size: 11px;
-                    horizontal-alignment: left;
-                }
-            }
-            
-            // 悬浮工具栏 - 绝对定位在消息下方，不影响气泡高度
-            Rectangle {
-                x: 0;
-                y: ai-content.preferred-height;
-                width: parent.width;
-                height: 32px;
-                visible: (ai-message-hover.has-hover || ai-toolbar-hover.has-hover || assistant-copy-button.has-hover || assistant-copy-button.copied) && !root.is-loading;
-                
-                ai-toolbar-hover := TouchArea {}
-                
-                HorizontalLayout {
-                    alignment: start;
-                    padding-left: 4px;
-                    padding-top: 4px;
-                    spacing: 4px;
-                    
-                    assistant-copy-button := GitHubCopyButton {
-                        tooltip-text: "Copy message";
-                        copy-requested => {
-                            root.copy-message(root.content)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// 欢迎界面组件
-component WelcomeView inherits Rectangle {
-    in property <[string]> suggestions: [
-        "What can you help me with?",
-        "Tell me a joke",
-        "Explain quantum computing",
-    ];
-    
-    callback suggestion-clicked(string);
-    
-    background: transparent;
-    
-    VerticalLayout {
-        alignment: center;
-        spacing: 16px;
-        padding: 32px;
-        
-        // Logo
-        // Rectangle {
-        //     width: 80px;
-        //     height: 80px;
-        //     border-radius: 40px;
-        //     background: MaterialPalette.primary_container;
-            
-        //     MaterialText {
-        //         text: "AI";
-        //         color: MaterialPalette.on_primary_container;
-        //         font-size: 28px;
-        //         font-weight: 700;
-        //         horizontal-alignment: center;
-        //         vertical-alignment: center;
-        //     }
-        // }
-        
-        MaterialText {
-            text: "Welcome to Usher Chat";
-            color: MaterialPalette.on_surface;
-            font-size: 24px;
-            font-weight: 600;
-            horizontal-alignment: center;
-        }
-        
-        MaterialText {
-            text: "Start a conversation by typing a message below.";
-            color: MaterialPalette.on_surface_variant;
-            font-size: 14px;
-            horizontal-alignment: center;
-        }
-        
-        // 示例提示
-        VerticalLayout {
-            spacing: 8px;
-            padding-top: 16px;
-            
-            MaterialText {
-                text: "Try asking:";
-                color: MaterialPalette.on_surface_variant;
-                font-size: 12px;
-                horizontal-alignment: center;
-            }
-            
-            for suggestion[idx] in root.suggestions: Rectangle {
-                height: 40px;
-                background: touch.has-hover ? MaterialPalette.surface_container_high : MaterialPalette.surface_container;
-                border-radius: 20px;
-                
-                animate background { duration: 150ms; }
-                
-                touch := TouchArea {
-                    clicked => {
-                        root.suggestion-clicked(suggestion);
-                    }
-                }
-                
-                MaterialText {
-                    x: 16px;
-                    y: (parent.height - self.height) / 2;
-                    width: parent.width - 32px;
-                    text: suggestion;
-                    color: MaterialPalette.on_surface_variant;
-                    font-size: 13px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-        }
-    }
-}
-
-// 主聊天组件 - 不继承 PageView，直接管理布局
-export component Chat inherits Rectangle {
-    // 消息列表 - 由 Rust 端管理
+// Route-scoped chat composition. Rust owns persistence and the bounded virtual
+// history window; this component owns only presentation and interaction.
+export component GitHubChatPage inherits Rectangle {
     in property <[ChatMessage]> messages: [];
-    
-    // 输入状态
     in-out property <string> input-text: "";
     in property <bool> is-sending: false;
     in property <bool> can-load-more-history: false;
     in property <bool> loading-history: false;
     in property <length> virtual-top-spacer: 0px;
     in property <length> virtual-bottom-spacer: 0px;
-    // 低频等待动效相位（0,1,2）
     in-out property <int> loading-phase: 0;
-    
-    // 与其他页面保持一致的属性
     in property <length> viewport-height;
+    in-out property <length> scroll-position: 0px;
+
     callback navigate(Route);
-    
-    // 回调 - 发送消息给 Rust 端处理
     callback send-message(string);
     callback load-more-history();
-    
-    // 回调 - 复制消息到剪贴板（传递索引和内容）
     callback copy-to-clipboard(int, string) -> bool;
-    // 回调 - 打开链接
     callback open-link(string);
-    
-    // 计算属性：是否应该显示加载指示器
-    // 简化逻辑：只在发送中且消息列表为空时显示，或者检查最后一条消息
-    private property <bool> should-show-loading: false;
-    
-    // 跟踪消息数量变化，用于触发自动滚动
-    private property <int> message-count-trigger: root.messages.length;
-    
-    // 底部输入区域高度（可拖拽调整）
-    private property <length> input-area-height: 72px;
-    
-    // 滚动位置控制（从 Rust 端设置来触发滚动）
-    in-out property <length> scroll-position: 0px;
-    // 类似微信：按窗口宽度分段，小屏更紧凑，大屏更宽
-    // < 720px: 0.58, 720px~1200px: 0.62, > 1200px: 0.66
+
+    private property <length> input-area-height: 96px;
     private property <length> message-bubble-max-width: max(
         280px,
         min(
             960px,
             chat-content.width
                 * (chat-content.width < 720px
-                    ? 0.58
+                    ? 0.78
                     : chat-content.width < 1200px
-                        ? 0.62
-                        : 0.66)
+                        ? 0.68
+                        : 0.62)
         )
     );
-    
-    // 使用 ElevatedCard 包装，与其他页面风格一致
-    Horizontal {
-        padding: MaterialStyleMetrics.padding_8;
-        padding-left: 0;
 
-        chat-content := ElevatedCard {
-            VerticalLayout {
-                spacing: 0;
-                padding: 0;
-                
-                // 聊天消息区域
-                Rectangle {
-                    vertical-stretch: 1;
-                    background: MaterialPalette.surface;
-                    clip: true;
+    background: GitHubTheme.canvas-default;
 
-                    // 欢迎界面（无消息时显示）
-                    WelcomeView {
-                        visible: root.messages.length == 0 && !root.is-sending;
-                        width: 100%;
-                        height: 100%;
-                        
-                        suggestion-clicked(text) => {
-                            root.input-text = text;
-                            text-input.focus();
-                        }
-                    }
-                    
-                    // 消息列表（有消息时显示）
-                    message-scroll-view := ScrollView {
-                        visible: root.messages.length > 0 || root.is-sending;
-                        width: 100%;
-                        height: 100%;
-                        viewport-width: self.width;
-                        viewport-height: message-list-layout.preferred-height;
-                        viewport-y <=> root.scroll-position;
-                        // 始终显示垂直滚动条
-                        vertical-scrollbar-policy: ScrollBarPolicy.always-on;
-                        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                        
-                        message-list-layout := VerticalLayout {
-                            spacing: 8px;
-                            padding-left: MaterialStyleMetrics.padding_16;
-                            padding-right: MaterialStyleMetrics.padding_16;
-                            padding-top: MaterialStyleMetrics.padding_16;
-                            padding-bottom: MaterialStyleMetrics.padding_24;
-                            alignment: start;
+    chat-content := VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 0px;
 
-                            Rectangle {
-                                width: 1px;
-                                height: root.virtual-top-spacer;
-                                background: transparent;
-                            }
-                            
-                            // 消息列表：使用统一的 MessageBubble 组件
-                            for message[index] in root.messages: MessageBubble {
-                                role: message.role;
-                                status: message.status;
-                                max-bubble-width: root.message-bubble-max-width;
-                                loading-phase: root.loading-phase;
-                                content: message.content;
-                                rendered-content: message.rendered_content;
-                                is-markdown: message.is_markdown;
-                                markdown-blocks: message.markdown_blocks;
-                                timestamp: message.timestamp;
-                                // 只有最后一条消息且内容为空时才显示 loading
-                                is-loading: message.content == "" && 
-                                           root.is-sending && 
-                                           index == root.messages.length - 1;
-                                copy-message(text) => {
-                                    root.copy-to-clipboard(index, text)
-                                }
-                                open-link(url) => {
-                                    root.open-link(url);
-                                }
-                            }
-                            
-                            // 发送中的加载指示器（当没有 AI 占位消息时显示）
-                            MessageBubble {
-                                visible: root.is-sending && root.messages.length == 0;
-                                height: root.is-sending && root.messages.length == 0 ? self.preferred-height : 0px;
-                                role: MessageRole.Assistant;
-                                status: MessageStatus.Normal;
-                                max-bubble-width: root.message-bubble-max-width;
-                                loading-phase: root.loading-phase;
-                                content: "";
-                                rendered-content: "";
-                                is-markdown: false;
-                                markdown-blocks: [];
-                                timestamp: "";
-                                is-loading: true;
-                            }
+        message-host := Rectangle {
+            vertical-stretch: 1;
+            background: GitHubTheme.canvas-default;
+            clip: true;
 
-                            Rectangle {
-                                width: 1px;
-                                height: root.virtual-bottom-spacer;
-                                background: transparent;
-                            }
-                        }
-                    }
+            GitHubChatWelcomeView {
+                visible: root.messages.length == 0 && !root.is-sending;
+                width: 100%;
+                height: 100%;
+                suggestion-clicked(text) => {
+                    root.input-text = text;
+                    text-input.focus();
+                }
+            }
 
-                    // Rust uses a sentinel to request "scroll to latest". Resolve it
-                    // only after this route-scoped component has completed a layout
-                    // pass; otherwise a newly mounted Flickable keeps the sentinel as
-                    // its literal viewport offset and renders the message tree outside
-                    // the visible area.
-                    bottom-scroll-timer := Timer {
-                        interval: 16ms;
-                        running: root.scroll-position < -90000px;
+            message-scroll-view := GitHubScrollView {
+                visible: root.messages.length > 0 || root.is-sending;
+                width: 100%;
+                height: 100%;
+                viewport_y <=> root.scroll-position;
+                show-scrollbar: true;
 
-                        triggered => {
-                            root.scroll-position = -max(
-                                0px,
-                                message-scroll-view.viewport-height
-                                    - message-scroll-view.visible-height
-                            );
-                        }
-                    }
+                message-list-layout := VerticalLayout {
+                    width: parent.width;
+                    spacing: GitHubMetrics.size-8;
+                    padding-left: root.width < 720px
+                        ? GitHubMetrics.size-12
+                        : GitHubMetrics.size-24;
+                    padding-right: root.width < 720px
+                        ? GitHubMetrics.size-12
+                        : GitHubMetrics.size-24;
+                    padding-top: GitHubMetrics.size-24;
+                    padding-bottom: GitHubMetrics.size-32;
+                    alignment: start;
 
-                    // 微信式顶部加载提示（固定层，放在 ScrollView 之后，确保可见）
                     Rectangle {
-                        visible: root.loading-history || root.can-load-more-history;
-                        x: (parent.width - self.width) / 2;
-                        y: 8px;
-                        width: 190px;
-                        height: 30px;
-                        border-radius: 15px;
-                        background: MaterialPalette.surface_container;
-                        z: 100;
+                        width: 1px;
+                        height: root.virtual-top-spacer;
+                        background: transparent;
+                    }
 
-                        HorizontalLayout {
-                            x: 0;
-                            y: 0;
-                            width: parent.width;
-                            height: parent.height;
-                            spacing: 6px;
-                            alignment: center;
+                    for message[index] in root.messages: GitHubMessageBubble {
+                        role: message.role;
+                        status: message.status;
+                        max-bubble-width: root.message-bubble-max-width;
+                        loading-phase: root.loading-phase;
+                        content: message.content;
+                        rendered-content: message.rendered_content;
+                        is-markdown: message.is_markdown;
+                        markdown-blocks: message.markdown_blocks;
+                        timestamp: message.timestamp;
+                        is-loading: message.content == ""
+                            && root.is-sending
+                            && index == root.messages.length - 1;
+                        copy-message(text) => {
+                            root.copy-to-clipboard(index, text)
+                        }
+                        open-link(url) => {
+                            root.open-link(url);
+                        }
+                    }
 
-                            if root.loading-history: CircularProgressIndicator {
-                                // 在独立容器内居中，避免受文本基线导致的视觉偏移
-                                width: 14px;
-                                height: 14px;
-                                y: (parent.height - self.height) / 2;
-                                indeterminate: true;
-                            }
+                    GitHubMessageBubble {
+                        visible: root.is-sending && root.messages.length == 0;
+                        height: self.visible ? self.preferred-height : 0px;
+                        role: MessageRole.Assistant;
+                        status: MessageStatus.Normal;
+                        max-bubble-width: root.message-bubble-max-width;
+                        loading-phase: root.loading-phase;
+                        content: "";
+                        rendered-content: "";
+                        is-markdown: false;
+                        markdown-blocks: [];
+                        timestamp: "";
+                        is-loading: true;
+                    }
 
-                            MaterialText {
-                                text: root.loading-history ? "Loading more..." : "Pull down to load more";
-                                color: MaterialPalette.on_surface_variant;
-                                font-size: 12px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                    Rectangle {
+                        width: 1px;
+                        height: root.virtual-bottom-spacer;
+                        background: transparent;
+                    }
+                }
+            }
+
+            bottom-scroll-timer := Timer {
+                interval: 16ms;
+                running: root.scroll-position < -90000px;
+                triggered => {
+                    root.scroll-position = -max(
+                        0px,
+                        message-scroll-view.content_height
+                            - message-scroll-view.visible_height
+                    );
+                }
+            }
+
+            if root.loading-history || root.can-load-more-history: history-control := Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: GitHubMetrics.size-8;
+                width: root.loading-history ? 148px : 174px;
+                height: GitHubMetrics.size-32;
+                border-radius: GitHubMetrics.radius-medium;
+                border-width: GitHubMetrics.border-thin;
+                border-color: GitHubTheme.border-default;
+                background: history-touch.has-hover && !root.loading-history
+                    ? GitHubTheme.control-default-hover
+                    : GitHubTheme.canvas-overlay;
+                drop-shadow-blur: GitHubMetrics.size-8;
+                drop-shadow-color: GitHubTheme.shadow-floating-small;
+                drop-shadow-offset-y: GitHubMetrics.size-2;
+                z: 100;
+
+                if root.loading-history: GitHubSpinner {
+                    x: GitHubMetrics.size-12;
+                    y: GitHubMetrics.size-8;
+                    spinner-size: GitHubMetrics.icon-medium;
+                    foreground: GitHubTheme.fg-muted;
+                }
+
+                Text {
+                    x: root.loading-history ? GitHubMetrics.size-36 : GitHubMetrics.size-12;
+                    width: parent.width - self.x - GitHubMetrics.size-12;
+                    height: parent.height;
+                    text: root.loading-history
+                        ? "Loading history"
+                        : "Load earlier messages";
+                    font-size: GitHubMetrics.text-small;
+                    font-weight: 600;
+                    color: GitHubTheme.fg-default;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                history-touch := TouchArea {
+                    enabled: !root.loading-history;
+                    mouse-cursor: self.enabled ? pointer : default;
+                    clicked => { root.load-more-history(); }
+                }
+            }
+        }
+
+        composer := Rectangle {
+            height: root.input-area-height;
+            background: GitHubTheme.canvas-subtle;
+            border-width: GitHubMetrics.border-thin;
+            border-color: GitHubTheme.border-default;
+
+            editor-row := Rectangle {
+                x: max(
+                    GitHubMetrics.size-12,
+                    (parent.width - min(800px, parent.width - GitHubMetrics.size-24)) / 2
+                );
+                y: GitHubMetrics.size-16;
+                width: min(800px, parent.width - GitHubMetrics.size-24);
+                height: parent.height - GitHubMetrics.size-24;
+                border-radius: GitHubMetrics.radius-medium;
+                border-width: text-input.has-focus
+                    ? GitHubMetrics.focus-outline-width
+                    : GitHubMetrics.border-thin;
+                border-color: text-input.has-focus
+                    ? GitHubTheme.focus-outline
+                    : GitHubTheme.border-default;
+                background: GitHubTheme.control-input-bg;
+                clip: false;
+
+                input-scroll := Flickable {
+                    x: GitHubMetrics.size-12;
+                    y: GitHubMetrics.size-8;
+                    width: parent.width - GitHubMetrics.size-64;
+                    height: parent.height - GitHubMetrics.size-16;
+                    viewport-width: self.width;
+                    viewport-height: max(self.height, text-input.preferred-height);
+                    interactive: true;
+
+                    text-input := TextInput {
+                        width: input-scroll.width;
+                        min-height: input-scroll.height;
+                        text <=> root.input-text;
+                        enabled: !root.is-sending;
+                        single-line: false;
+                        wrap: word-wrap;
+                        font-size: GitHubMetrics.text-medium;
+                        color: GitHubTheme.fg-default;
+                        selection-background-color: GitHubTheme.diff-selection-bg;
+                        selection-foreground-color: self.color;
+                        accepted => {
+                            if root.input-text != "" && !root.is-sending {
+                                root.send-message(root.input-text);
                             }
                         }
                     }
                 }
-                
-                // 底部输入区域 - 可拖拽调整高度
-                Rectangle {
-                    height: root.input-area-height;
-                    background: MaterialPalette.surface_container;
-                    
-                    // 顶部拖拽手柄区域
-                    Rectangle {
-                        x: 0;
-                        y: 0;
-                        width: 100%;
-                        height: 8px;
-                        background: transparent;
-                        
-                        // 拖拽手柄视觉指示（居中的横线）
-                        Rectangle {
-                            x: (parent.width - self.width) / 2;
-                            y: 2px;
-                            width: 40px;
-                            height: 4px;
-                            border-radius: 2px;
-                            background: resize-handle.has-hover || resize-handle.pressed 
-                                ? MaterialPalette.outline 
-                                : MaterialPalette.outline_variant.with_alpha(0.5);
-                        }
-                        
-                        // 拖拽检测区域
-                        resize-handle := TouchArea {
-                            mouse-cursor: n-resize;
-                            
-                            moved => {
-                                // 使用当前高度减去偏移量（不是起始高度）
-                                // 这样可以补偿 TouchArea 移动导致的坐标变化
-                                root.input-area-height = max(72px, min(root.height / 2.5, 
-                                    root.input-area-height - (self.mouse-y - self.pressed-y)));
-                            }
-                        }
-                    }
-                    
-                    // 顶部分隔线
-                    Rectangle {
-                        x: 0;
-                        y: 0;
-                        width: 100%;
-                        height: 1px;
-                        background: MaterialPalette.outline_variant.with_alpha(0.5);
-                    }
-                    
-                    // 输入内容区域
-                    Rectangle {
-                        x: 0;
-                        y: 8px;  // 留出拖拽手柄空间
-                        width: 100%;
-                        height: parent.height - 8px;  // 预留底部间距
-                        
-                        // 水平居中布局
-                        HorizontalLayout {
-                            padding: 8px;
-                            alignment: center;  // 水平居中
-                            
-                            // 输入框和按钮容器
-                            HorizontalLayout {
-                                spacing: 12px;
-                                alignment: end;     // 发送按钮对齐底部
-                                max-width: 800px;   // 最大宽度限制
-                                
-                                // 输入框容器
-                                Rectangle {
-                                    width: 580px;       // 固定宽度
-                                    vertical-stretch: 1;  // 填满可用高度
-                                    background: MaterialPalette.surface_container_highest;
-                                    border-radius: MaterialStyleMetrics.border_radius_8;
-                
-                                
-                                HorizontalLayout {
-                                    padding-left: 16px;
-                                    padding-right: 12px;
-                                    padding-top: 8px;
-                                    padding-bottom: 8px;
-                                    spacing: 8px;
-                                    
-                                    // 文本输入区域 - 支持垂直滚动
-                                    Rectangle {
-                                        horizontal-stretch: 1;
-                                        clip: true;
-                                        
-                                        ScrollView {
-                                            width: 100%;
-                                            height: 100%;
-                                            viewport-width: self.width - 12px;  // 留出滚动条空间
-                                            viewport-height: text-input.preferred-height;
-                                            // 滚动条在需要时自动出现
-                                            vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
-                                            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                                            
-                                            // 文本输入 - 多行自动换行
-                                            text-input := TextInput {
-                                                width: parent.viewport-width;
-                                                font-size: 14px;
-                                                color: MaterialPalette.on_surface;
-                                                text <=> root.input-text;
-                                                single-line: false;  // 多行输入
-                                                wrap: word-wrap;     // 自动换行
-                                                enabled: !root.is-sending;
-                                                private property <length> cursor-margin: 8px;
-                                                
-                                                accepted => {
-                                                    if (root.input-text != "" && !root.is-sending) {
-                                                        root.send-message(root.input-text);
-                                                    }
-                                                }
 
-                                                // 保持输入光标始终可见（自动滚动）
-                                                cursor-position-changed(cursor-position) => {
-                                                    let line-height = self.font-metrics.ascent - self.font-metrics.descent;
-                                                    let cursor-top = cursor-position.y;
-                                                    let cursor-bottom = cursor-position.y + line-height;
-                                                    let view-height = parent.height;
-                                                    let current-scroll = -parent.viewport-y;
-                                                    let max-scroll = max(0px, parent.viewport-height - view-height);
-                                                    if (cursor-top < current-scroll + self.cursor-margin) {
-                                                        let target = max(0px, cursor-top - self.cursor-margin);
-                                                        parent.viewport-y = -min(max-scroll, target);
-                                                    } else if (cursor-bottom > current-scroll + view-height - self.cursor-margin) {
-                                                        let target = cursor-bottom - view-height + self.cursor-margin;
-                                                        parent.viewport-y = -min(max-scroll, target);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        
-                                        // 占位文本 - 始终在顶部左边
-                                        if root.input-text == "": MaterialText {
-                                            x: 0;
-                                            y: 0;
-                                            text: root.is-sending ? "Waiting for response..." : "Type a message...";
-                                            color: MaterialPalette.on_surface_variant;
-                                            font-size: 14px;
-                                            horizontal-alignment: left;
-                                            vertical-alignment: top;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // 发送按钮
-                            Rectangle {
-                                width: 48px;
-                                height: 48px;
-                                border-radius: 24px;
-                                background: root.input-text != "" && !root.is-sending ? 
-                                    (send-touch.has-hover ? MaterialPalette.primary.darker(0.1) : MaterialPalette.primary) : 
-                                    MaterialPalette.surface_container_high;
-                                
-                                animate background { duration: 150ms; }
-                                
-                                send-touch := TouchArea {
-                                    enabled: root.input-text != "" && !root.is-sending;
-                                    
-                                    clicked => {
-                                        root.send-message(root.input-text);
-                                    }
-                                }
-                                
-                                // 发送图标
-                                if !root.is-sending: Image {
-                                    width: 24px;
-                                    height: 24px;
-                                    source: root.input-text != "" ? @image-url("../assets/icons/arrow_upward.svg") : @image-url("../assets/icons/graphic_eq.svg");
-                                    colorize: root.input-text != "" ? 
-                                        MaterialPalette.on_primary : MaterialPalette.on_surface_variant;
-                                }
-                                
-                                // 发送中的加载指示器
-                                if root.is-sending: CircularProgressIndicator {
-                                    width: 24px;
-                                    height: 24px;
-                                    indeterminate: true;
-                                }
-                            }
-                        }
+                if root.input-text == "": Text {
+                    x: GitHubMetrics.size-12;
+                    y: GitHubMetrics.size-8;
+                    width: parent.width - GitHubMetrics.size-64;
+                    height: GitHubMetrics.size-20;
+                    text: root.is-sending
+                        ? "Waiting for response..."
+                        : "Type a message...";
+                    font-size: GitHubMetrics.text-medium;
+                    color: GitHubTheme.fg-muted;
+                    vertical-alignment: center;
+                }
+
+                GitHubIconButton {
+                    x: parent.width - self.width - GitHubMetrics.size-6;
+                    y: parent.height - self.height - GitHubMetrics.size-6;
+                    control-size: GitHubMetrics.size-32;
+                    glyph-size: GitHubMetrics.icon-medium;
+                    icon: @image-url("../assets/icons/octicon-arrow-up-16.svg");
+                    tooltip-text: root.is-sending ? "Sending message" : "Send message";
+                    tooltip-above: true;
+                    tooltip-align-right: true;
+                    primary: true;
+                    loading: root.is-sending;
+                    button-enabled: root.input-text != "";
+                    clicked => { root.send-message(root.input-text); }
+                }
+            }
+
+            // Keep visual and hit geometry in one explicitly top-anchored strip
+            // so the resize cursor cannot drift into the editor body.
+            resize-strip := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: 100%;
+                height: GitHubMetrics.size-16;
+                z: 102;
+                background: transparent;
+
+                Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: GitHubMetrics.size-2;
+                    width: GitHubMetrics.size-40;
+                    height: GitHubMetrics.size-4;
+                    border-radius: GitHubMetrics.size-2;
+                    background: resize-handle.has-hover || resize-handle.pressed
+                        ? GitHubTheme.fg-muted
+                        : GitHubTheme.border-strong;
+                }
+
+                resize-handle := TouchArea {
+                    x: (parent.width - GitHubMetrics.size-64) / 2;
+                    y: 0px;
+                    width: GitHubMetrics.size-64;
+                    height: parent.height;
+                    mouse-cursor: n-resize;
+                    moved => {
+                        root.input-area-height = max(
+                            72px,
+                            min(
+                                root.height / 2.5,
+                                root.input-area-height - (self.mouse-y - self.pressed-y)
+                            )
+                        );
                     }
                 }
             }
         }
     }
-}
 }

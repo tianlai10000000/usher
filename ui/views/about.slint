@@ -1,47 +1,11 @@
 import { AppState } from "../state/app_state.slint";
-import { PageView } from "../components/page/page_view.slint";
+import { GitHubPageView } from "../components/page/page_view.slint";
+import { GitHubTheme } from "../theme/github_theme.slint";
 
-component AboutDetailRow inherits Rectangle {
-    in property <string> label;
-    in property <string> value;
-    in property <bool> last: false;
 
-    width: 100%;
-    height: 48px;
-    background: transparent;
 
-    Text {
-        x: 16px;
-        width: 112px;
-        height: parent.height;
-        text: root.label;
-        font-size: 14px;
-        font-weight: 600;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-        vertical-alignment: center;
-    }
-
-    Text {
-        x: 136px;
-        width: parent.width - 152px;
-        height: parent.height;
-        text: root.value;
-        font-size: 14px;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    if !root.last: Rectangle {
-        x: 0px;
-        y: parent.height - 1px;
-        width: parent.width;
-        height: 1px;
-        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    }
-}
-
-export component About inherits PageView {
+import { GitHubAboutDetailRow } from "../components/about/github_about_components.slint";
+export component GitHubAboutPage inherits GitHubPageView {
     private property <length> available-width: max(320px, root.width - 32px);
     private property <length> content-width: min(896px, root.available-width);
 
@@ -61,7 +25,7 @@ export component About inherits PageView {
                 text: "About";
                 font-size: 24px;
                 font-weight: 600;
-                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                color: GitHubTheme.fg-default;
             }
 
             HorizontalLayout {
@@ -74,8 +38,8 @@ export component About inherits PageView {
                     height: 64px;
                     border-radius: 12px;
                     border-width: 1px;
-                    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-                    background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
+                    border-color: GitHubTheme.border-default;
+                    background: GitHubTheme.control-default-rest;
                     clip: true;
 
                     Image {
@@ -102,7 +66,7 @@ export component About inherits PageView {
                             text: "Usher";
                             font-size: 24px;
                             font-weight: 600;
-                            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                            color: GitHubTheme.fg-default;
                             vertical-alignment: center;
                         }
 
@@ -112,7 +76,7 @@ export component About inherits PageView {
                             y: 5px;
                             border-radius: 10px;
                             border-width: 1px;
-                            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                            border-color: GitHubTheme.border-default;
                             background: transparent;
 
                             version-text := Text {
@@ -121,7 +85,7 @@ export component About inherits PageView {
                                 text: "v" + AppState.version;
                                 font-size: 12px;
                                 font-weight: 500;
-                                color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                                color: GitHubTheme.fg-muted;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -132,7 +96,7 @@ export component About inherits PageView {
                         width: parent.width;
                         text: "A desktop workspace for local Git projects and repeatable delivery workflows.";
                         font-size: 14px;
-                        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                        color: GitHubTheme.fg-muted;
                         wrap: word-wrap;
                     }
                 }
@@ -141,7 +105,7 @@ export component About inherits PageView {
             Rectangle {
                 width: parent.width;
                 height: 1px;
-                background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                background: GitHubTheme.border-default;
             }
 
             VerticalLayout {
@@ -153,14 +117,14 @@ export component About inherits PageView {
                     text: "About Usher";
                     font-size: 20px;
                     font-weight: 600;
-                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                    color: GitHubTheme.fg-default;
                 }
 
                 Text {
                     width: parent.width;
                     text: "Usher brings project metadata, pull request summaries, guided Git workflows, an embedded terminal, update management, and desktop notifications into one focused application.";
                     font-size: 14px;
-                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                    color: GitHubTheme.fg-default;
                     wrap: word-wrap;
                 }
             }
@@ -174,7 +138,7 @@ export component About inherits PageView {
                     text: "Application information";
                     font-size: 16px;
                     font-weight: 600;
-                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                    color: GitHubTheme.fg-default;
                 }
 
                 Rectangle {
@@ -182,23 +146,23 @@ export component About inherits PageView {
                     height: 144px;
                     border-radius: 6px;
                     border-width: 1px;
-                    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-                    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+                    border-color: GitHubTheme.border-default;
+                    background: GitHubTheme.canvas-default;
                     clip: true;
 
                     VerticalLayout {
                         width: parent.width;
                         spacing: 0px;
 
-                        AboutDetailRow {
+                        GitHubAboutDetailRow {
                             label: "Author";
                             value: "yuankai";
                         }
-                        AboutDetailRow {
+                        GitHubAboutDetailRow {
                             label: "Contact";
                             value: "tianlai10000000@gmail.com";
                         }
-                        AboutDetailRow {
+                        GitHubAboutDetailRow {
                             label: "License";
                             value: "Proprietary (non-open-source)";
                             last: true;
@@ -212,8 +176,8 @@ export component About inherits PageView {
                 height: 52px;
                 border-radius: 6px;
                 border-width: 1px;
-                border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-                background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
+                border-color: GitHubTheme.border-default;
+                background: GitHubTheme.canvas-subtle;
 
                 Image {
                     x: 16px;
@@ -221,7 +185,7 @@ export component About inherits PageView {
                     width: 16px;
                     height: 16px;
                     source: @image-url("../assets/icons/octicon-info-16.svg");
-                    colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    colorize: GitHubTheme.fg-muted;
                 }
                 Text {
                     x: 44px;
@@ -229,7 +193,7 @@ export component About inherits PageView {
                     height: parent.height;
                     text: "Usher is under active development.";
                     font-size: 14px;
-                    color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    color: GitHubTheme.fg-muted;
                     vertical-alignment: center;
                     overflow: elide;
                 }

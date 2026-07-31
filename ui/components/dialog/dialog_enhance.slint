@@ -1,11 +1,11 @@
-import { ScrollView } from "@material";
 import { DialogManager } from "./dialog_manager.slint";
 import { GitHubDialog } from "./github_dialog.slint";
-import { AppState } from "../../state/app_state.slint";
+import { GitHubScrollView } from "../github_scroll_view.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
 
 // Imperative DialogManager adapter. All visible chrome is owned by the same
 // GitHubDialog used by project, PR review, and update surfaces.
-export component DialogEnhance inherits Rectangle {
+export component GitHubDialogEnhance inherits Rectangle {
     callback on-default-action-clicked(string);
     callback on-action-clicked(string, int);
 
@@ -38,22 +38,19 @@ export component DialogEnhance inherits Rectangle {
             root.on-default-action-clicked(DialogManager.id);
         }
 
-        if DialogManager.visible: ScrollView {
+        if DialogManager.visible: GitHubScrollView {
             x: dialog-frame.content-x;
             y: dialog-frame.content-y;
             width: dialog-frame.content-width;
             height: dialog-frame.content-height;
             z: 3100;
-            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-            vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
-            viewport-height: content-text.preferred-height;
 
             content-text := Text {
-                width: parent.visible-width;
-                min-height: parent.visible-height;
+                width: dialog-frame.content-width;
+                min-height: dialog-frame.content-height;
                 text: DialogManager.content;
                 font-size: 14px;
-                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                color: GitHubTheme.fg-default;
                 wrap: word-wrap;
                 vertical-alignment: top;
             }

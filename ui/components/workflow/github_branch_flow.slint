@@ -1,0 +1,150 @@
+import { GitHubButton, GitHubToggle } from "../settings/github_settings_controls.slint";
+import { GitHubTagField } from "./fields.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+export component GitHubBranchFlow {
+    in property <string> result;
+    callback submit(string, string, bool);
+
+    private property <string> source-branch: "main";
+    private property <string> target-branch: "release/candidate";
+    private property <bool> recreate-remote: true;
+    private property <bool> stacked-fields: root.width < 720px;
+    private property <length> split-field-width:
+        max(0px, (root.width - GitHubMetrics.size-12) / 2);
+
+    width: 100%;
+    height: content.preferred-height;
+
+    content := VerticalLayout {
+        width: root.width;
+        spacing: GitHubMetrics.size-16;
+        alignment: start;
+
+        Text {
+            width: parent.width;
+            text: "Validate a clean source and target branch before recreating the branch plan.";
+            wrap: word-wrap;
+            font-size: GitHubMetrics.text-medium;
+            color: GitHubTheme.fg-muted;
+        }
+
+        if !root.stacked-fields: HorizontalLayout {
+            width: parent.width;
+            spacing: GitHubMetrics.size-12;
+
+            GitHubTagField {
+                width: root.split-field-width;
+                label: "Source branch";
+                value <=> root.source-branch;
+                placeholder: "main";
+            }
+
+            GitHubTagField {
+                width: root.split-field-width;
+                label: "Target branch";
+                value <=> root.target-branch;
+                placeholder: "release/x.y";
+            }
+        }
+
+        if root.stacked-fields: VerticalLayout {
+            width: parent.width;
+            spacing: GitHubMetrics.size-12;
+            alignment: start;
+
+            GitHubTagField {
+                width: parent.width;
+                label: "Source branch";
+                value <=> root.source-branch;
+                placeholder: "main";
+            }
+
+            GitHubTagField {
+                width: parent.width;
+                label: "Target branch";
+                value <=> root.target-branch;
+                placeholder: "release/x.y";
+            }
+        }
+
+        Rectangle {
+            width: parent.width;
+            height: GitHubMetrics.size-64;
+            border-radius: GitHubMetrics.radius-medium;
+            border-width: GitHubMetrics.border-thin;
+            border-color: GitHubTheme.border-default;
+            background: GitHubTheme.canvas-subtle;
+
+            Text {
+                x: GitHubMetrics.size-12;
+                y: GitHubMetrics.size-8;
+                width: parent.width - GitHubMetrics.size-80;
+                height: GitHubMetrics.size-20;
+                text: "Recreate remote tracking";
+                font-size: GitHubMetrics.text-medium;
+                font-weight: 600;
+                color: GitHubTheme.fg-default;
+                vertical-alignment: center;
+            }
+
+            Text {
+                x: GitHubMetrics.size-12;
+                y: GitHubMetrics.size-32;
+                width: parent.width - GitHubMetrics.size-80;
+                height: GitHubMetrics.size-16;
+                text: "Include the remote tracking branch in the validated plan.";
+                font-size: GitHubMetrics.text-small;
+                color: GitHubTheme.fg-muted;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            GitHubToggle {
+                x: parent.width - GitHubMetrics.size-64;
+                y: GitHubMetrics.size-20;
+                checked <=> root.recreate-remote;
+            }
+        }
+
+        GitHubButton {
+            text: "Validate branch plan";
+            primary: true;
+            clicked => {
+                root.submit(root.source-branch, root.target-branch, root.recreate-remote);
+            }
+        }
+
+        Rectangle {
+            width: parent.width;
+            height: max(GitHubMetrics.size-96,
+                result-text.preferred-height + GitHubMetrics.size-48 + GitHubMetrics.size-4);
+            border-radius: GitHubMetrics.radius-medium;
+            border-width: GitHubMetrics.border-thin;
+            border-color: GitHubTheme.border-default;
+            background: GitHubTheme.canvas-default;
+
+            Text {
+                x: GitHubMetrics.size-16;
+                y: GitHubMetrics.size-12;
+                width: parent.width - GitHubMetrics.size-32;
+                height: GitHubMetrics.size-20;
+                text: "Execution plan";
+                font-size: GitHubMetrics.text-small;
+                font-weight: 600;
+                color: GitHubTheme.fg-muted;
+                vertical-alignment: center;
+            }
+
+            result-text := Text {
+                x: GitHubMetrics.size-16;
+                y: GitHubMetrics.size-40;
+                width: parent.width - GitHubMetrics.size-32;
+                text: root.result;
+                wrap: word-wrap;
+                color: GitHubTheme.fg-default;
+                font-size: GitHubMetrics.text-medium;
+            }
+        }
+    }
+}

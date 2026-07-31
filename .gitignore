@@ -26,6 +26,3 @@ Thumbs.db
 
 dist/
 workflow-dist/
-
-# Local solved-bug notes for agents/dev; do not commit.
-bug-history.md

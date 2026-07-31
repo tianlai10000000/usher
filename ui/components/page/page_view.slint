@@ -1,11 +1,15 @@
-import { ElevatedCard, MaterialStyleMetrics, OutlinedCard } from "@material";
 import { Route } from "../../route/routeMap.slint";
 import { LayoutConstants } from "../../layout_constants.slint";
-import { MaterialPalette } from "../../../material-1.7.1-fixed/material.slint";
+import { GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubPageHeader } from "github_page_header.slint";
 
-export component PageView {
+export component GitHubPageView {
     callback navigate(Route);
     in property <length> viewport-height;
+    in property <string> page-title: "";
+    in property <string> page-description: "";
+    in property <image> page-icon;
+    in property <bool> page-header-border: true;
 
     property <length> page_viewport_height: viewport-height > 0px ? viewport-height : LayoutConstants.default-page-viewport-height;
 
@@ -14,9 +18,16 @@ export component PageView {
         min-height: page_viewport_height;
 
         VerticalLayout {
-            padding: MaterialStyleMetrics.padding_16;
-            spacing: MaterialStyleMetrics.padding_16;
+            padding: GitHubMetrics.size-16;
+            spacing: GitHubMetrics.size-16;
             alignment: start;
+
+            if root.page-title != "": GitHubPageHeader {
+                title: root.page-title;
+                description: root.page-description;
+                leading-icon: root.page-icon;
+                show-border: root.page-header-border;
+            }
 
             @children
         }

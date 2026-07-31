@@ -1,671 +1,36 @@
-import { AppState } from "../state/app_state.slint";
 import { Route } from "../route/routeMap.slint";
+import { GitHubButton } from "../components/settings/github_settings_controls.slint";
+import { GitHubBlankslate } from "../components/github_blankslate.slint";
+import { GitHubPageHeader } from "../components/page/github_page_header.slint";
 import {
-    GitHubButton,
-    GitHubTextField,
-    GitHubToggle
-} from "../components/settings/github_settings_controls.slint";
-import { GitHubDialog } from "../components/dialog/github_dialog.slint";
-
-export struct ProjectItem {
-    project_name: string,
-    project_alias: string,
-    local_repo: string,
-    remote_repo: string,
-    logo: string,
-    logo_image: image,
-    is_pr_auto_update: bool,
-    pr_count_loading: bool,
-    pr_count_failed: bool,
-    pr_fat_count_text: string,
-    pr_uat_count_text: string,
-    pr_prod_count_text: string,
-    project_tags: [string],
-    project_tags_text: string,
-}
-
+    GitHubProjectGridCard,
+    GitHubProjectIconButton,
+    GitHubProjectListRow,
+    GitHubProjectSearchField,
+    GitHubProjectViewSwitcher,
+    ProjectItem
+} from "../components/project/github_project_components.slint";
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+export { ProjectItem } from "../components/project/github_project_components.slint";
 // Project uses Primer's Card/List collection, medium controls, Labels and
 // Dialog safe-area geometry. See docs/specs/ui-design.md.
-component ProjectIconButton inherits Rectangle {
-    in property <image> icon;
-    in property <string> tooltip: "";
-    // Prefer above when the control sits near a clipped bottom edge (grid cards).
-    in property <bool> tooltip-above: false;
-    // Prefer end alignment near a clipped trailing edge so long labels grow left.
-    in property <bool> tooltip-end: false;
-    in property <bool> danger: false;
-    in property <bool> selected: false;
-    callback clicked();
 
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
-    border-width: root.selected ? 1px : 0px;
-    border-color: AppState.effective-dark-mode ? #6e7681 : #8c959f;
-    background: root.selected
-        ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
-        : (button-touch.pressed
-            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
-            : (button-touch.has-hover
-                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
-                : transparent));
-    clip: false;
 
-    Image {
-        x: 8px;
-        y: 8px;
-        width: 16px;
-        height: 16px;
-        source: root.icon;
-        colorize: root.danger
-            ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
-            : (AppState.effective-dark-mode ? #f0f6fc : #1f2328);
-    }
 
-    button-touch := TouchArea {
-        width: 100%;
-        height: 100%;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-
-    if button-touch.has-hover && root.tooltip != "": Rectangle {
-        x: root.tooltip-end ? parent.width - self.width : (parent.width - self.width) / 2;
-        y: root.tooltip-above ? -(24px + 4px) : parent.height + 4px;
-        width: tooltip-text.preferred-width + 12px;
-        height: 24px;
-        border-radius: 6px;
-        background: AppState.effective-dark-mode ? #f0f6fc : #24292f;
-        z: 40;
-
-        tooltip-text := Text {
-            x: 6px;
-            width: parent.width - 12px;
-            height: parent.height;
-            text: root.tooltip;
-            font-size: 11px;
-            color: AppState.effective-dark-mode ? #1f2328 : #ffffff;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            wrap: no-wrap;
-        }
-    }
-}
-
-component ProjectSearchField inherits Rectangle {
-    in-out property <string> text;
-    in property <string> placeholder: "Find a project…";
-    callback accepted(string);
-
-    width: 320px;
-    height: 32px;
-    border-radius: 6px;
-    border-width: search-input.has-focus ? 2px : 1px;
-    border-color: search-input.has-focus
-        ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
-        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
-    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-    clip: true;
-
-    Image {
-        x: search-input.has-focus ? 9px : 10px;
-        y: 8px;
-        width: 16px;
-        height: 16px;
-        source: @image-url("../assets/icons/octicon-search-16.svg");
-        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
-    }
-
-    search-input := TextInput {
-        x: search-input.has-focus ? 33px : 34px;
-        y: (parent.height - self.preferred-height) / 2;
-        width: parent.width - self.x - 12px;
-        text <=> root.text;
-        single-line: true;
-        font-size: 14px;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-        selection-background-color: AppState.effective-dark-mode ? #264f78 : #b6d7ff;
-        selection-foreground-color: self.color;
-        accepted => { root.accepted(self.text); }
-    }
-
-    if root.text == "" && !search-input.has-focus: Text {
-        x: 34px;
-        width: parent.width - 46px;
-        height: parent.height;
-        text: root.placeholder;
-        font-size: 14px;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-}
 
 // Primer's 32 px icon-only view controls, separated by the product-specified
 // 8 px gap so the two view choices remain visually distinct.
-component ProjectViewSwitcher inherits Rectangle {
-    in-out property <string> mode: "grid";
 
-    width: 72px;
-    height: 32px;
-    background: transparent;
 
-    list-segment := Rectangle {
-        x: 0px;
-        y: 0px;
-        width: 32px;
-        height: 32px;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-        background: root.mode == "list"
-            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
-            : (list-touch.has-hover
-                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
-                : (AppState.effective-dark-mode ? #21262d : #f6f8fa));
 
-        Image {
-            x: 8px;
-            y: 8px;
-            width: 16px;
-            height: 16px;
-            source: @image-url("../assets/icons/octicon-list-unordered-16.svg");
-            colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-        }
 
-        list-touch := TouchArea {
-            width: 100%;
-            height: 100%;
-            mouse-cursor: pointer;
-            clicked => { root.mode = "list"; }
-        }
 
-        if list-touch.has-hover: Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: parent.height + 4px;
-            width: 60px;
-            height: 24px;
-            border-radius: 6px;
-            background: AppState.effective-dark-mode ? #f0f6fc : #24292f;
-            z: 40;
 
-            Text {
-                width: parent.width;
-                height: parent.height;
-                text: "List view";
-                font-size: 11px;
-                color: AppState.effective-dark-mode ? #1f2328 : #ffffff;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-    }
 
-    grid-segment := Rectangle {
-        x: 40px;
-        y: 0px;
-        width: 32px;
-        height: 32px;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-        background: root.mode == "grid"
-            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
-            : (grid-touch.has-hover
-                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
-                : (AppState.effective-dark-mode ? #21262d : #f6f8fa));
 
-        Image {
-            x: 8px;
-            y: 8px;
-            width: 16px;
-            height: 16px;
-            source: @image-url("../assets/icons/octicon-table-16.svg");
-            colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-        }
 
-        grid-touch := TouchArea {
-            width: 100%;
-            height: 100%;
-            mouse-cursor: pointer;
-            clicked => { root.mode = "grid"; }
-        }
 
-        if grid-touch.has-hover: Rectangle {
-            x: (parent.width - self.width) / 2;
-            y: parent.height + 4px;
-            width: 60px;
-            height: 24px;
-            border-radius: 6px;
-            background: AppState.effective-dark-mode ? #f0f6fc : #24292f;
-            z: 40;
-
-            Text {
-                width: parent.width;
-                height: parent.height;
-                text: "Grid view";
-                font-size: 11px;
-                color: AppState.effective-dark-mode ? #1f2328 : #ffffff;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-    }
-}
-
-component ProjectLabel inherits Rectangle {
-    in property <string> text;
-    // 0px keeps content-sized chips (tags). Alias pills pass a max so long
-    // names elide instead of stretching the title row or card header.
-    in property <length> max-label-width: 0px;
-
-    label-measure := Text {
-        visible: false;
-        text: root.text;
-        font-size: 12px;
-        font-weight: 500;
-        wrap: no-wrap;
-    }
-
-    private property <length> natural-width: label-measure.preferred-width + 16px;
-    width: root.max-label-width > 0px
-        ? min(root.natural-width, root.max-label-width)
-        : root.natural-width;
-    height: 20px;
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    background: transparent;
-
-    Text {
-        x: 8px;
-        width: parent.width - 16px;
-        height: parent.height;
-        text: root.text;
-        font-size: 12px;
-        font-weight: 500;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        horizontal-alignment: left;
-        vertical-alignment: center;
-        wrap: no-wrap;
-        overflow: elide;
-    }
-}
-
-component PullRequestSummary inherits Rectangle {
-    in property <ProjectItem> project;
-
-    width: 228px;
-    height: 24px;
-    background: transparent;
-
-    if root.project.is_pr_auto_update: HorizontalLayout {
-        width: parent.width;
-        height: parent.height;
-        spacing: 8px;
-        alignment: end;
-
-        Text {
-            text: "Pull requests";
-            font-size: 12px;
-            color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-            vertical-alignment: center;
-        }
-
-        if root.project.pr_count_loading: Image {
-            width: 14px;
-            height: 14px;
-            source: @image-url("../assets/icons/github-spinner-16.svg");
-            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
-            transform-rotation: mod(animation-tick(), 1s) / 1s * 360deg;
-            transform-origin: { x: self.width / 2, y: self.height / 2 };
-        }
-
-        if root.project.pr_count_failed: Image {
-            width: 14px;
-            height: 14px;
-            source: @image-url("../assets/icons/octicon-alert-16.svg");
-            colorize: AppState.effective-dark-mode ? #f85149 : #cf222e;
-        }
-
-        Text {
-            text: "FAT " + root.project.pr_fat_count_text;
-            font-size: 12px;
-            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-            vertical-alignment: center;
-        }
-        Text {
-            text: "UAT " + root.project.pr_uat_count_text;
-            font-size: 12px;
-            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-            vertical-alignment: center;
-        }
-        Text {
-            text: "PROD " + root.project.pr_prod_count_text;
-            font-size: 12px;
-            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-            vertical-alignment: center;
-        }
-    }
-}
-
-component ProjectListRow inherits Rectangle {
-    in property <ProjectItem> project;
-    in property <bool> first: false;
-    callback open-requested();
-    callback terminal-requested();
-    callback edit-requested();
-    callback delete-requested();
-
-    // Identity + path metadata + topics (GitHub repo-row density with paths).
-    height: 136px;
-    background: row-touch.has-hover
-        ? (AppState.effective-dark-mode ? #151b23 : #f6f8fa)
-        : transparent;
-
-    // Separator above the row (not under the next row's hover fill), so the
-    // Box border and row dividers stay visible while hovering.
-    if !root.first: Rectangle {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: 1px;
-        z: 2;
-        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    }
-
-    Rectangle {
-        x: 16px;
-        y: 16px;
-        width: 40px;
-        height: 40px;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-        background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
-        clip: true;
-
-        Image {
-            x: 6px;
-            y: 6px;
-            width: 28px;
-            height: 28px;
-            source: root.project.logo_image;
-        }
-    }
-
-    title-line := HorizontalLayout {
-        x: 72px;
-        y: 14px;
-        width: max(40px, parent.width - 72px - 116px);
-        height: 24px;
-        spacing: 8px;
-        alignment: start;
-
-        Text {
-            text: root.project.project_name;
-            font-size: 16px;
-            font-weight: 600;
-            color: AppState.effective-dark-mode ? #4493f8 : #0969da;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-
-        if root.project.project_alias != "": ProjectLabel {
-            // ~24 Latin chars / ~12 CJK at 12px before ellipsis.
-            max-label-width: 168px;
-            text: root.project.project_alias;
-        }
-    }
-
-    Text {
-        x: 72px;
-        y: 42px;
-        width: max(40px, parent.width - 72px - 116px);
-        height: 20px;
-        text: root.project.remote_repo;
-        font-size: 12px;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    Text {
-        x: 72px;
-        y: 64px;
-        width: max(40px, parent.width - 72px - 116px);
-        height: 20px;
-        text: root.project.local_repo;
-        font-size: 12px;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    HorizontalLayout {
-        x: 72px;
-        y: 96px;
-        width: max(40px, parent.width - 72px - 252px);
-        height: 24px;
-        spacing: 6px;
-        alignment: start;
-
-        for project-tag in root.project.project_tags: ProjectLabel {
-            text: project-tag;
-        }
-    }
-
-    if root.project.is_pr_auto_update: PullRequestSummary {
-        x: parent.width - self.width - 16px;
-        y: 96px;
-        project: root.project;
-    }
-
-    actions := HorizontalLayout {
-        x: parent.width - 112px;
-        y: 12px;
-        width: 96px;
-        height: 32px;
-        spacing: 0px;
-        alignment: end;
-
-        ProjectIconButton {
-            icon: @image-url("../assets/icons/octicon-terminal-16.svg");
-            tooltip: "Open terminal";
-            tooltip-end: true;
-            clicked => { root.terminal-requested(); }
-        }
-        ProjectIconButton {
-            icon: @image-url("../assets/icons/octicon-pencil-16.svg");
-            tooltip: "Edit project";
-            tooltip-end: true;
-            clicked => { root.edit-requested(); }
-        }
-        ProjectIconButton {
-            icon: @image-url("../assets/icons/octicon-trash-16.svg");
-            tooltip: "Delete project";
-            tooltip-end: true;
-            danger: true;
-            clicked => { root.delete-requested(); }
-        }
-    }
-
-    row-touch := TouchArea {
-        x: 0px;
-        y: 0px;
-        width: max(0px, parent.width - 120px);
-        height: parent.height;
-        mouse-cursor: pointer;
-        clicked => { root.open-requested(); }
-    }
-}
-
-component ProjectGridCard inherits Rectangle {
-    in property <ProjectItem> project;
-    callback open-requested();
-    callback terminal-requested();
-    callback edit-requested();
-    callback delete-requested();
-
-    // Primer repo card with path metadata filling the middle band.
-    height: 204px;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    background: card-touch.has-hover
-        ? (AppState.effective-dark-mode ? #151b23 : #f6f8fa)
-        : (AppState.effective-dark-mode ? #0d1117 : #ffffff);
-    clip: true;
-
-    Rectangle {
-        x: 16px;
-        y: 16px;
-        width: 40px;
-        height: 40px;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-        background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
-        clip: true;
-
-        Image {
-            x: 6px;
-            y: 6px;
-            width: 28px;
-            height: 28px;
-            source: root.project.logo_image;
-        }
-    }
-
-    Text {
-        x: 68px;
-        y: 14px;
-        width: max(32px, parent.width - 84px);
-        height: 24px;
-        text: root.project.project_name;
-        font-size: 16px;
-        font-weight: 600;
-        color: AppState.effective-dark-mode ? #4493f8 : #0969da;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    if root.project.project_alias != "": ProjectLabel {
-        x: 68px;
-        y: 40px;
-        max-label-width: min(168px, max(48px, parent.width - 84px));
-        text: root.project.project_alias;
-    }
-
-    Text {
-        x: 16px;
-        y: 70px;
-        width: parent.width - 32px;
-        height: 20px;
-        text: root.project.remote_repo;
-        font-size: 12px;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    Text {
-        x: 16px;
-        y: 94px;
-        width: parent.width - 32px;
-        height: 20px;
-        text: root.project.local_repo;
-        font-size: 12px;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    HorizontalLayout {
-        x: 16px;
-        y: 126px;
-        width: parent.width - 32px;
-        height: 20px;
-        spacing: 6px;
-        alignment: start;
-
-        for project-tag in root.project.project_tags: ProjectLabel {
-            text: project-tag;
-        }
-    }
-
-    if root.project.is_pr_auto_update: Text {
-        x: 16px;
-        y: 168px;
-        width: max(24px, parent.width - 136px);
-        height: 20px;
-        text: root.project.pr_count_loading
-            ? "Pull requests loading"
-            : root.project.pr_count_failed
-                ? "Pull requests unavailable"
-                : "FAT " + root.project.pr_fat_count_text
-                    + " · UAT " + root.project.pr_uat_count_text
-                    + " · PROD " + root.project.pr_prod_count_text;
-        font-size: 12px;
-        color: root.project.pr_count_failed
-            ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
-            : (AppState.effective-dark-mode ? #9198a1 : #59636e);
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    card-touch := TouchArea {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: 160px;
-        mouse-cursor: pointer;
-        clicked => { root.open-requested(); }
-    }
-
-    TouchArea {
-        x: 0px;
-        y: 160px;
-        width: max(0px, parent.width - 112px);
-        height: 44px;
-        mouse-cursor: pointer;
-        clicked => { root.open-requested(); }
-    }
-
-    HorizontalLayout {
-        x: parent.width - 112px;
-        y: 164px;
-        width: 96px;
-        height: 32px;
-        spacing: 0px;
-        alignment: end;
-
-        ProjectIconButton {
-            icon: @image-url("../assets/icons/octicon-terminal-16.svg");
-            tooltip: "Open terminal";
-            tooltip-above: true;
-            tooltip-end: true;
-            clicked => { root.terminal-requested(); }
-        }
-        ProjectIconButton {
-            icon: @image-url("../assets/icons/octicon-pencil-16.svg");
-            tooltip: "Edit project";
-            tooltip-above: true;
-            tooltip-end: true;
-            clicked => { root.edit-requested(); }
-        }
-        ProjectIconButton {
-            icon: @image-url("../assets/icons/octicon-trash-16.svg");
-            tooltip: "Delete project";
-            tooltip-above: true;
-            tooltip-end: true;
-            danger: true;
-            clicked => { root.delete-requested(); }
-        }
-    }
-}
-
-export component Project {
+export component GitHubProjectPage {
     callback navigate(Route);
     callback open-project(string, string, string, string, string, image, bool);
     callback open-terminal(string, string, string);
@@ -692,9 +57,12 @@ export component Project {
     in-out property <string> modal-original-alias: "";
     in-out property <string> search-query: "";
     in-out property <string> view-mode: "grid";
+    in property <bool> loading: false;
+    in property <string> load-error: "";
 
     private property <length> available-width: max(320px, root.width - 32px);
-    private property <length> content-width: min(1120px, root.available-width);
+    private property <length> content-width:
+        min(GitHubMetrics.page-content-max-width, root.available-width);
     private property <int> grid-columns: root.width >= 1000px ? 4
         : root.width >= 720px ? 3
         : root.width >= 480px ? 2
@@ -716,34 +84,12 @@ export component Project {
             spacing: 16px;
             alignment: start;
 
-            Rectangle {
+            GitHubPageHeader {
                 width: parent.width;
-                height: 60px;
-                background: transparent;
-
-                Text {
-                    x: 0px;
-                    y: 0px;
-                    width: parent.width - 136px;
-                    height: 30px;
-                    text: "Projects";
-                    font-size: 24px;
-                    font-weight: 600;
-                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-                    vertical-alignment: center;
-                }
-
-                Text {
-                    x: 0px;
-                    y: 34px;
-                    width: parent.width - 136px;
-                    height: 20px;
-                    text: "Manage local repositories and open their delivery workflows.";
-                    font-size: 14px;
-                    color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
+                title: "Projects";
+                description: "Manage local repositories and open their delivery workflows.";
+                leading-icon: @image-url("../assets/icons/octicon-repo-16.svg");
+                actions-width: 120px;
 
                 GitHubButton {
                     x: parent.width - self.width;
@@ -776,10 +122,10 @@ export component Project {
                     y: parent.height - 1px;
                     width: parent.width;
                     height: 1px;
-                    background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                    background: GitHubTheme.border-default;
                 }
 
-                ProjectSearchField {
+                GitHubProjectSearchField {
                     x: 0px;
                     y: 0px;
                     width: min(360px, parent.width - 136px);
@@ -787,17 +133,18 @@ export component Project {
                     accepted(query) => { root.search-projects(query); }
                 }
 
-                ProjectViewSwitcher {
+                GitHubProjectViewSwitcher {
                     x: parent.width - 120px;
                     y: 0px;
                     mode <=> root.view-mode;
                 }
 
-                ProjectIconButton {
+                GitHubProjectIconButton {
                     x: parent.width - 32px;
                     y: 0px;
                     icon: @image-url("../assets/icons/octicon-sync-16.svg");
                     tooltip: "Reload projects";
+                    loading: root.loading;
                     // Trailing toolbar edge: grow the tip left so it is not clipped.
                     tooltip-end: true;
                     clicked => { root.reload-projects(); }
@@ -806,63 +153,74 @@ export component Project {
 
             list-box := Rectangle {
                 width: parent.width;
-                height: root.projects.length == 0
-                    ? 176px
+                height: root.loading || root.load-error != "" || root.projects.length == 0
+                    ? (root.search-query == "" ? 224px : 184px)
                     : root.view-mode == "list"
                         ? root.projects.length * 136px
                         : root.grid-rows * 220px - 16px;
                 border-radius: 6px;
-                border-width: root.projects.length == 0 || root.view-mode == "list" ? 1px : 0px;
-                border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-                background: root.projects.length == 0 || root.view-mode == "list"
-                    ? (AppState.effective-dark-mode ? #0d1117 : #ffffff)
+                border-width: root.loading || root.load-error != ""
+                    || root.projects.length == 0 || root.view-mode == "list"
+                        ? 1px : 0px;
+                border-color: GitHubTheme.border-default;
+                background: root.loading || root.load-error != ""
+                    || root.projects.length == 0 || root.view-mode == "list"
+                    ? (GitHubTheme.canvas-default)
                     : transparent;
                 // Clip row hover fills inside the border so the Box edge stays visible.
-                clip: root.projects.length == 0 || root.view-mode == "list";
+                clip: root.loading || root.load-error != ""
+                    || root.projects.length == 0 || root.view-mode == "list";
 
-                if root.projects.length == 0: Rectangle {
+                if root.loading: GitHubBlankslate {
                     width: parent.width;
                     height: parent.height;
-                    background: transparent;
+                    narrow: true;
+                    loading: true;
+                    heading: "Loading projects";
+                    description: "Reading the local project registry.";
+                }
 
-                    Image {
-                        x: (parent.width - 24px) / 2;
-                        y: 28px;
-                        width: 24px;
-                        height: 24px;
-                        source: @image-url("../assets/icons/octicon-repo-16.svg");
-                        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
-                    }
+                if !root.loading && root.load-error != "": GitHubBlankslate {
+                    width: parent.width;
+                    height: parent.height;
+                    narrow: true;
+                    error: true;
+                    icon: @image-url("../assets/icons/octicon-alert-16.svg");
+                    heading: "Projects could not be loaded";
+                    description: root.load-error;
+                    primary-label: "Try again";
+                    primary-clicked => { root.reload-projects(); }
+                }
 
-                    Text {
-                        x: 16px;
-                        y: 64px;
-                        width: parent.width - 32px;
-                        height: 24px;
-                        text: root.search-query == "" ? "No projects yet" : "No matching projects";
-                        font-size: 16px;
-                        font-weight: 600;
-                        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-
-                    Text {
-                        x: 16px;
-                        y: 92px;
-                        width: parent.width - 32px;
-                        height: 20px;
-                        text: root.search-query == ""
-                            ? "Add a local Git repository to get started."
-                            : "Try another name or alias.";
-                        font-size: 14px;
-                        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                if !root.loading && root.load-error == "" && root.projects.length == 0: GitHubBlankslate {
+                    width: parent.width;
+                    height: parent.height;
+                    narrow: root.search-query != "";
+                    icon: root.search-query == ""
+                        ? @image-url("../assets/icons/octicon-repo-16.svg")
+                        : @image-url("../assets/icons/octicon-search-16.svg");
+                    heading: root.search-query == "" ? "No projects yet" : "No matching projects";
+                    description: root.search-query == ""
+                        ? "Add a local Git repository to get started."
+                        : "Try another project name or alias.";
+                    primary-label: root.search-query == "" ? "New project" : "";
+                    primary-clicked => {
+                        root.modal-mode = "add";
+                        root.modal-original-alias = "";
+                        root.new-project-name = "";
+                        root.new-project-alias = "";
+                        root.new-project-local-repo = "";
+                        root.new-project-remote-repo = "";
+                        root.new-project-logo = "";
+                        root.new-project-tags = "";
+                        root.new-project-pr-auto-update = false;
+                        root.preview-logo("");
+                        root.add-error = "";
+                        root.show-add-modal = true;
                     }
                 }
 
-                for project[index] in root.projects: ProjectListRow {
+                for project[index] in root.projects: GitHubProjectListRow {
                     y: index * 136px;
                     width: parent.width;
                     visible: root.view-mode == "list";
@@ -917,7 +275,7 @@ export component Project {
                         Math.min(self.start-index + root.grid-columns, root.projects.length);
                     private property <int> cards-in-row: self.end-index - self.start-index;
 
-                    for column-index in self.cards-in-row: ProjectGridCard {
+                    for column-index in self.cards-in-row: GitHubProjectGridCard {
                         width: root.grid-card-width;
                         project: root.projects[grid-row.start-index + column-index];
                         open-requested => {
@@ -957,297 +315,6 @@ export component Project {
                     }
                 }
             }
-        }
-    }
-}
-
-export component ProjectDialog {
-    in property <bool> modal-visible: false;
-    in property <string> mode: "add";
-    in property <string> original-alias: "";
-    in-out property <string> name;
-    in-out property <string> alias;
-    in-out property <string> local-repo;
-    in-out property <string> remote-repo;
-    in-out property <string> logo;
-    in-out property <string> project-tags;
-    in-out property <bool> is-pr-auto-update;
-    in property <image> logo-preview-image: @image-url("../../logo.png");
-    in property <string> logo-preview-status: "Using app default logo";
-    in-out property <string> error-text;
-    callback submit(string, string, string, string, string, string, bool);
-    callback preview-logo(string);
-    callback confirm-delete(string);
-    callback cancel();
-
-    private property <bool> deleting: root.mode == "delete";
-    private property <length> dialog-width: root.deleting ? 320px : 480px;
-    private property <length> dialog-height: root.deleting
-        ? 248px
-        : min(680px, root.height - 32px);
-
-    dialog-frame := GitHubDialog {
-        dialog-visible: root.modal-visible;
-        // Forms keep Esc dismissible; backdrop stays blocked so pointer
-        // accidents do not discard edits (Primer form-dialog pattern).
-        modal: false;
-        title: root.mode == "edit" ? "Edit project" : root.deleting ? "Delete project?" : "New project";
-        subtitle: root.deleting
-            ? ""
-            : (root.mode == "edit"
-                ? "Update repository metadata and project options."
-                : "Add a local Git repository to Usher.");
-        dialog-width: root.dialog-width;
-        dialog-height: root.dialog-height;
-        body-padding: 0px;
-        primary-label: root.mode == "edit" ? "Save changes" : root.deleting ? "Delete project" : "Add project";
-        primary-success: !root.deleting;
-        primary-danger: root.deleting;
-        close-requested => { root.cancel(); }
-        cancel-clicked => { root.cancel(); }
-        primary-clicked => {
-            if root.deleting {
-                root.confirm-delete(root.original-alias);
-                return;
-            }
-            if root.name == "" || root.alias == "" || root.local-repo == "" || root.remote-repo == "" {
-                root.error-text = "Project name, alias, local repository, and remote repository are required.";
-                return;
-            }
-            root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags, root.is-pr-auto-update);
-        }
-
-        if root.modal-visible: Rectangle {
-            x: dialog-frame.content-x;
-            y: dialog-frame.content-y;
-            width: dialog-frame.content-width;
-            height: dialog-frame.content-height;
-            z: 3100;
-            background: transparent;
-            clip: true;
-
-                    if root.deleting: Rectangle {
-                        x: 16px;
-                        y: 16px;
-                        width: parent.width - 32px;
-                        height: parent.height - 32px;
-                        background: transparent;
-
-                        Image {
-                            x: 0px;
-                            y: 2px;
-                            width: 16px;
-                            height: 16px;
-                            source: @image-url("../assets/icons/octicon-alert-16.svg");
-                            colorize: AppState.effective-dark-mode ? #f85149 : #cf222e;
-                        }
-
-                        Text {
-                            x: 28px;
-                            y: 0px;
-                            width: parent.width - 28px;
-                            text: "This will permanently delete “" + root.name + "” from Usher. Repository files on disk will not be removed.";
-                            font-size: 14px;
-                            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-                            wrap: word-wrap;
-                        }
-                    }
-
-                    if !root.deleting: Flickable {
-                        width: parent.width;
-                        height: parent.height;
-                        interactive: true;
-
-                        form-content := Rectangle {
-                            width: parent.width;
-                            height: root.error-text == "" ? 648px : 700px;
-                            background: transparent;
-
-                        GitHubTextField {
-                            x: 16px;
-                            y: 16px;
-                            width: parent.width - 32px;
-                            label: "Project name";
-                            text <=> root.name;
-                            placeholder: "e.g. Atlas";
-                        }
-                        GitHubTextField {
-                            x: 16px;
-                            y: 86px;
-                            width: parent.width - 32px;
-                            label: "Project alias";
-                            text <=> root.alias;
-                            placeholder: "e.g. atlas";
-                        }
-                        GitHubTextField {
-                            x: 16px;
-                            y: 156px;
-                            width: parent.width - 32px;
-                            label: "Local repository";
-                            text <=> root.local-repo;
-                            placeholder: "/path/to/repository";
-                        }
-                        GitHubTextField {
-                            x: 16px;
-                            y: 226px;
-                            width: parent.width - 32px;
-                            label: "Remote repository";
-                            text <=> root.remote-repo;
-                            placeholder: "git@github.com:org/repo.git";
-                        }
-                        GitHubTextField {
-                            x: 16px;
-                            y: 296px;
-                            width: parent.width - 32px;
-                            label: "Logo";
-                            text <=> root.logo;
-                            placeholder: "Local path, HTTPS URL, or data URI";
-                            caption: "Optional. Used in the project list and workflow header.";
-                            edited(text) => { root.preview-logo(text); }
-                        }
-                        GitHubTextField {
-                            x: 16px;
-                            y: 386px;
-                            width: parent.width - 32px;
-                            label: "Project type tags";
-                            text <=> root.project-tags;
-                            placeholder: "H5, Web, RN";
-                            caption: "Optional. Separate multiple labels with commas.";
-                        }
-
-                        Rectangle {
-                            x: 16px;
-                            y: 476px;
-                            width: parent.width - 32px;
-                            height: 68px;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-                            background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
-
-                            Text {
-                                x: 12px;
-                                y: 8px;
-                                width: parent.width - 84px;
-                                height: 20px;
-                                text: "Auto-refresh pull request counts";
-                                font-size: 14px;
-                                font-weight: 600;
-                                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-
-                            Text {
-                                x: 12px;
-                                y: 32px;
-                                width: parent.width - 84px;
-                                height: 18px;
-                                text: "Fetch FAT, UAT, and PROD counts when this list loads.";
-                                font-size: 12px;
-                                color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-
-                            GitHubToggle {
-                                x: parent.width - 60px;
-                                y: 22px;
-                                checked <=> root.is-pr-auto-update;
-                            }
-                        }
-
-                        Rectangle {
-                            x: 16px;
-                            y: 556px;
-                            width: parent.width - 32px;
-                            height: 76px;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-                            background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-
-                            Rectangle {
-                                x: 12px;
-                                y: 10px;
-                                width: 56px;
-                                height: 56px;
-                                border-radius: 6px;
-                                border-width: 1px;
-                                border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-                                background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
-                                clip: true;
-
-                                Image {
-                                    x: 8px;
-                                    y: 8px;
-                                    width: 40px;
-                                    height: 40px;
-                                    source: root.logo-preview-image;
-                                }
-                            }
-
-                            Text {
-                                x: 80px;
-                                y: 12px;
-                                width: parent.width - 92px;
-                                height: 20px;
-                                text: "Logo preview";
-                                font-size: 14px;
-                                font-weight: 600;
-                                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-                                vertical-alignment: center;
-                            }
-
-                            Text {
-                                x: 80px;
-                                y: 36px;
-                                width: parent.width - 92px;
-                                height: 20px;
-                                text: root.logo-preview-status;
-                                font-size: 12px;
-                                color: root.logo-preview-status == "Invalid input, using default logo"
-                                    ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
-                                    : (AppState.effective-dark-mode ? #9198a1 : #59636e);
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                        }
-
-                        if root.error-text != "": Rectangle {
-                            x: 16px;
-                            y: 644px;
-                            width: parent.width - 32px;
-                            height: 40px;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: AppState.effective-dark-mode ? #f8514966 : #cf222e66;
-                            background: AppState.effective-dark-mode ? #3d1117 : #ffebe9;
-
-                            Image {
-                                x: 12px;
-                                y: 12px;
-                                width: 16px;
-                                height: 16px;
-                                source: @image-url("../assets/icons/octicon-alert-16.svg");
-                                colorize: AppState.effective-dark-mode ? #f85149 : #cf222e;
-                            }
-
-                            Text {
-                                x: 36px;
-                                width: parent.width - 48px;
-                                height: parent.height;
-                                text: root.error-text;
-                                font-size: 12px;
-                                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                        }
-                        }
-
-                        viewport-height: form-content.height;
-                    }
         }
     }
 }

@@ -1,0 +1,75 @@
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+
+// Primer text Link. Inline links remain underlined; standalone links underline
+// on hover/focus. Muted links use muted foreground at rest and accent on hover.
+// Reference: https://primer.style/product/components/link/
+export component GitHubLink inherits FocusScope {
+    in property <string> text;
+    in property <bool> inline: false;
+    in property <bool> muted: false;
+    in property <bool> link-enabled: true;
+    private property <bool> keyboard-focus-visible: false;
+    callback clicked();
+
+    width: link-label.preferred-width;
+    height: max(GitHubMetrics.size-20, link-label.preferred-height);
+    opacity: root.link-enabled ? 1 : 0.5;
+    accessible-role: button;
+    accessible-enabled: root.link-enabled;
+    accessible-label: root.text;
+
+    key-pressed(event) => {
+        root.keyboard-focus-visible = true;
+        if (root.link-enabled && (event.text == Key.Return || event.text == " ")) {
+            root.clicked();
+            return accept;
+        }
+        return reject;
+    }
+    focus-gained(reason) => {
+        root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+    }
+    focus-lost => {
+        root.keyboard-focus-visible = false;
+    }
+
+    link-label := Text {
+        width: self.preferred-width;
+        height: parent.height;
+        text: root.text;
+        font-size: GitHubMetrics.text-medium;
+        color: root.muted && !link-touch.has-hover && !root.has-focus
+            ? GitHubTheme.fg-muted
+            : GitHubTheme.accent-fg;
+        vertical-alignment: center;
+        wrap: no-wrap;
+    }
+
+    if root.inline || link-touch.has-hover || root.has-focus: Rectangle {
+        y: parent.height - GitHubMetrics.size-2;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: link-label.color;
+    }
+
+    if root.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-small;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
+
+    link-touch := TouchArea {
+        enabled: root.link-enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => {
+            root.keyboard-focus-visible = false;
+            root.focus();
+            root.clicked();
+        }
+    }
+}

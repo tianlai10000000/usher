@@ -1,16 +1,17 @@
-import { MaterialPalette, MaterialText } from "@material";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
-export component CompactTextField inherits Rectangle {
+export component GitHubCompactTextField inherits Rectangle {
     in-out property <string> text;
     in property <string> placeholder: "";
     in property <bool> enabled: true;
     in property <bool> read-only: false;
     in property <InputType> input-type: InputType.text;
-    in property <length> field-height: 40px;
-    in property <length> border-radius-size: 10px;
-    in property <length> input-font-size: 14px;
-    in property <brush> field-background: MaterialPalette.surface_container_highest;
-    in property <color> field-border-color: MaterialPalette.outline_variant;
+    in property <length> field-height: GitHubMetrics.control-medium-size;
+    in property <length> border-radius-size: GitHubMetrics.radius-medium;
+    in property <length> input-font-size: GitHubMetrics.text-medium;
+    in property <brush> field-background: GitHubTheme.canvas-default;
+    in property <color> field-border-color: GitHubTheme.border-default;
+    in property <bool> validation-error: false;
     callback edited(string);
     callback accepted(string);
 
@@ -19,8 +20,14 @@ export component CompactTextField inherits Rectangle {
 
     height: root.field-height;
     border-radius: root.border-radius-size;
-    border-width: 1px;
-    border-color: root.field-border-color;
+    border-width: input.has-focus
+        ? GitHubMetrics.focus-outline-width
+        : GitHubMetrics.border-thin;
+    border-color: root.validation-error
+        ? GitHubTheme.danger-emphasis
+        : (input.has-focus
+            ? GitHubTheme.focus-outline
+            : root.field-border-color);
     background: root.field-background;
     clip: true;
 
@@ -33,12 +40,16 @@ export component CompactTextField inherits Rectangle {
         enabled: root.enabled;
         read-only: root.read-only;
         input-type: root.input-type;
-        color: MaterialPalette.on_surface;
+        color: GitHubTheme.fg-default;
         font-size: root.input-font-size;
         text-cursor-width: 2px;
         single-line: true;
-        selection-background-color: MaterialPalette.primary.with-alpha(0.35);
+        selection-background-color: GitHubTheme.selection-bg;
         selection-foreground-color: self.color;
+        accessible-role: text-input;
+        accessible-enabled: root.enabled;
+        accessible-label: root.placeholder;
+        accessible-value <=> self.text;
 
         cursor_position_changed(cursor_position) => {
             if cursor_position.x + root.computed_x < 0px {
@@ -57,11 +68,12 @@ export component CompactTextField inherits Rectangle {
         }
     }
 
-    if root.text == "": MaterialText {
+    if root.text == "" && !input.has-focus: Text {
         x: root.horizontal-padding;
         y: (parent.height - self.preferred-height) / 2;
         text: root.placeholder;
-        font_size: root.input-font-size;
-        color: MaterialPalette.on_surface_variant;
+        font-size: root.input-font-size;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
     }
 }

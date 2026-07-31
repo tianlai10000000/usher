@@ -51,7 +51,8 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/project/` | Stable façade/controller plus separated persistence models/storage, logo handling, PR/MR overview selection, and project-to-workflow/terminal entry points. |
 | `src/codereview/api/` | URL and path templates for Gitee, GitLab, and GitHub repository APIs. It contains no request execution, authentication, or response decoding. |
 | `src/git/` | Provider-neutral façade plus separated domain models, remote locator, unified-diff parsing, PR overview counting, and provider adapters. Gitee keeps transport, decoding, conversation/commit normalization, readiness, and revert semantics in dedicated submodules. |
-| `src/workflow/` | Per-project Branch, Tag, PR, and CD state and command execution. `jobs/` owns reusable step definitions and Job snapshots; Tag and PR Review expose stable file façades with internal controller and pure-logic modules. |
+| `src/jobs/` | Application-wide Job lifecycle model, source-independent run descriptor/UI projection, and source-keyed action dispatch. It owns no feature process. |
+| `src/workflow/` | Per-project Branch, Tag, PR, and CD state and command execution. Tag and PR Review expose stable file façades with internal controller and pure-logic modules. |
 | `src/terminal/` | PTY lifecycle, viewport synchronization, rendering, selection, and project switching; pure input mapping, diagnostics, and refresh throttling use dedicated modules. |
 | `src/chat/` | Chat transport, sessions, JSONL persistence, Markdown conversion, rendering cache, pagination, interaction binding, and pure bounded virtual layout. |
 | `src/update/` | Release checks, streamed downloads, progress, cancellation, installation, and restart. |
@@ -77,22 +78,53 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `ui/main.slint` | Root window, route composition, Rust-facing properties/callbacks, modal layers, and terminal docking. |
 | `ui/route/routeMap.slint` | Complete `Route` enum. Only a subset is exposed in main navigation. |
 | `ui/state/` | Slint global state adapters. |
-| `ui/views/` | Page-level views. |
-| `ui/views/workflow/` | Tag and PR workflow views; Branch and CD tabs currently show Coming soon placeholders. |
-| `ui/components/` | Reusable application components. |
+| `ui/views/` | Route-level page composition only. Active entries use `GitHub*Page` names and import all visual building blocks from `ui/components/`; view files do not declare local controls. |
+| `ui/views/job_run.slint` | Application-level `Route.JobRun` composition, reusable from any source route. |
+| `ui/views/ui_components.slint` | Route-only composition for the interactive UI Components playground. |
+| `ui/views/workflow/` | Workflow route composition and the full-window PR review page. Flow, tab, filter, field, and panel components live under `ui/components/workflow/`. |
+| `ui/components/` | Central ownership for every application visual component: controls, rows, cards, menus, tabs, panels, dialogs, fields, feedback, and feature-specific building blocks. GitHub/Primer implementations use `GitHub*` symbols. |
+| `ui/components/about/`, `chat/`, `project/`, `workflow/` | Feature-owned GitHub/Primer visual building blocks extracted from route views; they own no I/O or route transitions. |
+| `ui/components/showcase/` | Interactive GitHub/Primer property matrices and the registry linking model-dependent feature composites to their live routes. New or materially changed visual components must be registered here. |
+| `ui/components/button/github_icon_button.slint` | Shared `GitHubIconButton` foundation for icon-only, floating, terminal, project-card, and copy actions, including keyboard focus, Tooltip, loading, and semantic variants. |
+| `ui/components/github_link.slint` | Shared Primer text-link states and keyboard interaction. |
+| `ui/components/github_spinner.slint` | Single application-owned Primer indeterminate spinner used by controls and loading surfaces. |
+| `ui/components/github_progress_bar.slint` | Shared semantic determinate/indeterminate progress track for status and update surfaces. |
+| `ui/components/github_scroll_view.slint` | Application-owned mounted vertical viewport and semantic scrollbar foundation. |
+| `ui/components/navigation/github_underline_nav.slint` | Shared keyboard-accessible Primer UnderlineNav/UnderlinePanels item used by Workflow and nested feature tabs. |
+| `ui/components/github_segmented_control.slint` | Shared compact Primer SegmentedControl shell, items, dividers, and focus/disabled interaction. |
 | `ui/components/github_tooltip.slint` | Shared GitHub TooltipV2 visual contract for every application-owned hover tip. |
-| `ui/components/github_action_menu.slint` | Shared Primer ActionMenu/AnchoredOverlay surface, viewport collision placement, and bounded vertical scrolling for click-triggered overlays. |
+| `ui/components/github_action_menu.slint` | Shared Primer ActionMenu/AnchoredOverlay surface with focus ownership, Escape dismissal, viewport collision placement, bounded vertical scrolling, and reusable ActionList rows. |
+| `ui/components/page/github_page_header.slint` | Shared Primer PageHeader foundation for title, description, leading visual, divider, and trailing actions. |
 | `ui/components/button/github_copy_button.slint` | Shared GitHub CopyToClipboardButton interaction for every icon-copy action. It owns the transient Copy→Check state and `Copied!` tooltip; feature callbacks return clipboard-write success. |
-| `ui/components/jobs/` | Reusable GitHub Actions-style Job/Step presentation. It accepts normalized snapshots and never executes workflow commands. |
-| `ui/components/dialog/github_dialog.slint` | Shared Primer Dialog chrome, backdrop input ownership, header/body/footer safe areas, Esc dismiss (unless `modal`), close behavior, and action states for global, project, PR-review, and update dialogs. Feature body content nests as `@children`. |
+| `ui/components/jobs/` | Reusable GitHub Actions-style run, Job, Step, and log presentation. It accepts normalized snapshots and never executes workflow commands. |
+| `ui/components/dialog/github_dialog.slint` | Shared responsive Primer Dialog chrome, backdrop input ownership, initial close-control focus, header/body/footer safe areas, Esc dismiss (unless `modal`), close behavior, narrow full-window layout, and action states for global, project, PR-review, and update dialogs. Feature body content nests as `@children`. |
+| `ui/components/toast/`, `ui/components/notify/` | Shared compact Primer Banner-style transient and queued feedback; the root renders one queued notification Banner at a time. |
 | `ui/components/pr_review/` | PR Review public UI structs plus reusable shell, file-tree, and diff controls; cross-region state stays in the workspace view. |
-| `ui/theme/` | Application palette mapping. |
+| `ui/theme/github_theme.slint` | Application-owned `GitHubTheme` semantic color roles and `GitHubMetrics` Primer geometry, control, typography, overlay, and breakpoint tokens. Raw functional UI colors are centralized here. |
 | `material-1.7.1-fixed/` | Vendored Material source aligned with Slint v1.17.1. |
 | `vendor/i-slint-live-preview/` | Temporary Slint 1.17.1 override selected only by the opt-in `live-preview` feature. Its documented `mtime` guard prevents spurious macOS watcher events from causing an endless recompile loop. |
 
-Application UI must import Material through `@material`; direct imports from vendored implementation paths are not allowed for new code. Never modify `material-1.7.1-fixed/` or other vendored Slint Material UI source for application behavior or appearance. Keep every adaptation in application-owned code so a dependency upgrade can replace the Material UI tree without carrying patches.
+Application UI must import Material through `@material`; direct imports from
+vendored implementation paths are forbidden. Never modify
+`material-1.7.1-fixed/` or other vendored Slint Material UI source for
+application behavior or appearance. Material palette, typography, and style
+metrics do not define the product UI. Application surfaces consume
+`GitHubTheme` and `GitHubMetrics`, and every visual adaptation stays in
+application-owned code so a dependency upgrade can replace the Material tree
+without carrying patches.
+The current allowlist is intentionally narrow: `MaterialWindowAdapter` in
+`ui/main.slint`, plus public `ListView`/`ScrollView` virtualization in the PR
+Review workspace. `scripts/check-ui-policy.sh` enforces this boundary and the
+Octicon command-icon policy.
 
-All product pages and reusable visual components follow the [GitHub/Primer UI design specification](specs/ui-design.md). GitHub's current product UI and official Primer documentation/source are the visual source of truth; contributors must verify unfamiliar patterns instead of inventing approximate styles. Material remains an implementation library where useful, but it does not define Usher's product appearance.
+All product pages and reusable visual components follow the
+[GitHub/Primer UI design specification](specs/ui-design.md). Every
+application-owned GitHub/Primer visual component uses a `GitHub`-prefixed
+component name. Existing naming and visual debt is migrated under the staged
+[UI migration plan](ui-github-migration-plan.md), one user-accepted batch at a
+time; discovered defects are appended to [`bug-history.md`](../bug-history.md).
+GitHub's current product UI and official Primer documentation/source are the
+visual source of truth.
 
 The root shell owns two persistent Primer surfaces: the icon-only route rail in
 `ui/components/navigation/custom_nav_drawer.slint` and the runtime utility bar
@@ -177,13 +209,35 @@ loop. Their completion returns through the event loop, updates the transient
 Saved label only after persistence succeeds, and emits one bottom Toast for the
 terminal result.
 
+Settings and About route files are composition-only. Reusable navigation,
+fields, toggles, sections, and detail rows live under
+`ui/components/settings/` and `ui/components/about/` with `GitHub`-prefixed
+symbols. Compact Settings navigation exposes the same section model and
+keyboard interaction as the regular NavList.
+
 ### Projects
 
 `project/projects.json` stores project records in the platform local-data directory. On an add or edit save, Rust derives the provider from `remote_repo`, fetches its project details through `src/git/` using URL templates from `src/codereview/api/`, and stores the resulting `repo_project_id` and lower-case `repo_type` (`gitee`, `gitlab`, or `github`) together with the project record. A failed lookup leaves the previous configuration untouched. Rust converts records to Slint models, resolves local/base64/remote logos, and schedules PR overview work. Remote logo bytes are cached under the process temporary directory; UI rendering should read cached data rather than perform network work.
 
+User-triggered project-registry reloads isolate blocking storage reads on the
+shared runtime, prevent duplicate activation while loading, and return model
+or recoverable error state through the Slint event loop.
+`ui/views/project.slint` is route composition only; reusable project cards,
+toolbar controls, and dialogs live in `ui/components/project/`.
+Home/Search/Detail/Project route states share `GitHubPageHeader` and
+`GitHubBlankslate` rather than maintaining page-local placeholder patterns.
+
 ### Workflow
 
 The Workflow shell follows GitHub repository UnderlineNav behavior at every supported width; below 720 px, repository paths/actions move from the identity header into a trailing kebab overlay. The PR list reproduces GitHub's responsive filter toolbar: Open/Closed and filters stay on one row; below 620 px, Assignee remains direct while Reviews and Sort move into one grouped kebab ActionMenu. All menus are mutually exclusive and switch on the first click. For GitHub repositories these map to native Search qualifiers and sort parameters and reset pagination before reloading, while other providers ignore unsupported GitHub qualifiers. Open and Closed totals are fetched independently when the project or filters change, so the header does not reuse the selected page's transient count. When a total is still loading or the count request fails, the header hides the number and keeps the Open/Closed label (Primer degraded-experience rule) instead of a perpetual loading placeholder. List timestamps use relative labels with UTC+08:00 absolute tooltips.
+
+Workflow-level PR/Tag/Branch/CD navigation and Tag Add/Remove navigation share
+`GitHubUnderlineNavItem`; Tag scope and semantic-version choices share
+`GitHubSegmentedControl*`. Branch exposes the existing project-scoped
+validation plan, while CD exposes the existing staged deployment and rollback
+controller instead of rendering unavailable placeholders. Branch and CD
+fields/actions/results live in `ui/components/workflow/`, adapt at compact
+widths, and use application-owned GitHub controls.
 
 `WorkflowStore` keeps a current project plus per-project `WorkflowViewState`. Switching projects must rebind UI state and prevent logs, steps, or running flags from leaking between projects. `Route.Workflow` and `Route.PrReview` form one lifecycle domain: moving between them retains the Workflow list/model state, and a temporary route outside the domain retains it while either workflow route remains reachable through Back.
 
@@ -193,13 +247,21 @@ The Workflow PR list and full-window review workspace use a single provider-neut
 
 The Tag workflow follows the same façade pattern: `workflow/tag.rs` exposes binding and refresh,
 `tag/controller.rs` owns project state, UI sequencing, cancellation, and command execution,
-while `tag/version.rs` and `tag/commands.rs` are pure, directly tested rules. The reusable
-`workflow/jobs/` model separates immutable `name + argv` step definitions from runtime step data
+while `tag/version.rs` and `tag/commands.rs` are pure, directly tested rules. The application-wide
+`src/jobs/` model separates immutable `name + argv` step definitions from runtime step data
 and makes one `JobSnapshot` the source of job status, conclusion, total duration, and ordered
-steps. `ui/components/jobs/job.slint` renders that snapshot but owns no I/O or timing. Git
+steps. A source feature publishes a `JobRunDescriptor` plus that snapshot and registers its Stop
+and lazy-log actions under a stable source key. `Route.JobRun` is outside the Workflow lifecycle
+domain, so any page may enter it and global Router history returns to the exact source. The route
+reads only generic Job Run properties; it never reads Workflow or Tag properties.
+`ui/components/jobs/job.slint` renders the selected Job snapshot, while
+`github_job_run.slint` provides the GitHub Actions-style header, Jobs region, and responsive log
+layout. Both own no I/O or timing. Git
 commands remain argument vectors so repository paths, tag names, and descriptions never pass
-through shell interpolation. CD or Branch workflows reuse this Job boundary by supplying their
-own definitions and controller; they do not copy the presenter or add domain branches to it.
+through shell interpolation. CD adapts its project-scoped stage snapshot to the shared
+`GitHubActionsJob` visual presenter. Branch currently produces a validation plan rather than
+executing a Job; any future executable Branch plan must adopt the reusable Job boundary instead
+of copying the presenter or adding domain branches to it.
 Raw step logs remain in the project-scoped Rust snapshot until a disclosure first requests its
 line model; that request latch survives later progress snapshots. Tag commands stream stdout and
 stderr while running and publish bounded progress, so an opened step updates live. The presenter
@@ -215,6 +277,15 @@ The Files changed `Diff view` popover owns a provider-neutral Unified/Split pref
 Large files are classified by a provider-neutral changed-line or payload-size budget. Their normal file header remains available, but syntax highlighting and the Slint line model are deferred until that file's `Load diff` action is invoked. The in-place loading decision is scoped to the active complete/range diff and resets when the commit range changes.
 
 The existing Workflow PR tab owns the repository pull-request list. `workflow/pr_list.rs` reads the selected project's persisted `repo_project_id` and `repo_type` off the event loop, then lazily requests one 10-record remote page through `src/git/` when the user opens or changes a page. GitHub preserves search-result totals and concurrently enriches only that page's rows with per-PR detail requests so source and target branch names are available. The controller formats parseable provider update timestamps for UTC+08:00 before passing list values to Slint, and uses exact totals where the provider supplies them. The tab defaults to open requests and explicitly supplies the selected open/closed/merged/all filter. Request sequencing prevents a late response from a previous project, state, or page from replacing the current view. A successful zero-item page renders a filter-specific illustrated empty state, while transport, authentication, and schema failures remain a distinct retryable error state. Clicking a row navigates to the full-window `Route.PrReview`; the Workflow component instance is destroyed, while its root/model state is retained so Back reconstructs the PR tab without reloading the list. The review route owns GitHub-style Conversation, Commits, and Files changed tabs. Conversation and Commits *content* are loaded only on first selection through provider-neutral models: GitHub combines PR detail, issue comments, reviews, and issue timeline activity (`committed` batches, `merged`, and selected system events); Gitee public v5 uses PR detail/comments/commits and synthesizes commit/merge activity from commits plus merge metadata; Gitee Enterprise v8 uses MR detail/notes/commits (plus best-effort `/reviews`) with the same synthesized activity after flattening nested enterprise `notes[].note` threads and reading ordinary note bodies from `note` / nested `note.note` / `comment` / string `content` (never object `content`), and MR commit timestamps from `created_at`; GitLab uses MR detail/notes/commits and synthesizes the same portable `commits`/`commit`/`merged` rows while filtering redundant system notes. Tab badge numbers do not wait for Conversation/Commits tab activation: they come from lightweight PR/MR summary fields carried with the diff load (`commit_count`, `conversation_count`, `files.length`). When a provider omits totals, adapters may issue one bounded count probe (GitHub/GitLab Link/`X-Total` with `per_page=1`; Gitee public short-page `per_page=100`; Gitee Enterprise diffs `commits_size`, MR `user_notes_count`/`notes_count`, or `with_page=true&per_page=1` + `meta.total_count`). Full Conversation timelines and commit lists stay lazy until those tabs (or the commit selector) are opened. The provider-neutral finalizer sorts each `commits` header with its consecutive `commit` rows as one atomic block, preserving the GitHub-style `added N commits` record for every provider even when individual authored dates differ. Conversation commit children and the Commits tab (including the Files changed commit selector) render newest→oldest; adapters still normalize lists oldest→newest, and the controller remaps display indices before contiguous range compares. A successful remote review or merge invalidates the cached Conversation timeline and reloads it immediately when Conversation is active. The Files changed controller loads and normalizes the selected PR diff, derives a collapsible directory tree, and keeps path filtering, folder expansion, and previous/next file navigation local. Its commit selector reuses the lazy commit list and dispatches contiguous ranges to each provider's repository compare endpoint; the original PR detail and previously loaded ranges remain cached for the active review. `workflow/syntax_highlight.rs` uses `syntect` off the UI layer to convert the selected file into theme-aware token models while preserving tabs and display-column widths. During file switches or hunk expansion, the previous line model stays mounted until the new highlighted model is ready; the event loop swaps it atomically, and only a real file switch resets the viewport. A hunk click records the clicked row's actual screen position before asynchronous expansion. After the model swap, the target delegate reports its post-layout content position and Slint reapplies the resulting visual anchor for a bounded number of layout frames. This avoids estimating wrapped row heights: a surviving hunk control remains under the pointer, while a removed separator places the first revealed row at the old control position. On macOS, native live-resize notifications freeze the review workspace's internal geometry and replace each visible token repeater with one plain monospace line; the final geometry and full token-colored tree are restored when live resize ends.
+
+PR presentation ownership follows the common UI boundary: reusable list,
+filter, pagination, review-shell, file-tree, and diff controls live under
+`ui/components/` with `GitHub`-prefixed symbols. `ui/views/workflow/` only
+composes the full-window route. Public `@material` ListView/ScrollView may
+provide virtualization for large timelines, trees, and diffs, but they do not
+own product typography, palette, focus treatment, or controls; those stay in
+application-owned GitHub components. Empty/error states reuse
+`GitHubBlankslate`, and icon actions reuse `GitHubIconButton`.
 
 The review header follows GitHub's two-step command model. A GitHub-styled readiness badge beside the title renders the normalized kind/detail with Primer semantic colors, while each adapter owns its merge semantics: GitHub maps REST mergeability, Gitee Enterprise maps v8 `current_state` conditions, public Gitee maps only v5 fields, and GitLab maps `detailed_merge_status` with an asynchronous recheck. The shared enum is a presentation boundary and must never cause one provider's conditions to be applied to another. `Review changes` submits an explicit provider-neutral Comment, Approve, or Request changes command; unsupported choices remain visible but disabled. The Conversation tab also exposes a GitHub-style plain-text composer (`Write` + green `Comment`) that submits the same Comment action. Provider success triggers a remote state refresh and never starts a merge. `Merge pull request` is enabled only by the latest normalized `PullRequestActionState` and presents only adapter-returned methods. GitHub supports repository-enabled merge, squash, and rebase methods. Gitee Enterprise v8 maps review states, omits the optional `comment` field for an Approve with no summary, and supports merge, squash, rebase, and fast-forward according to `restrict_merge_type`; public Gitee v5 supports comments plus merge/squash but has no approve/request-changes endpoint. GitLab supports comments, approvals, and SHA-guarded merge/squash with explicit source-branch deletion; its project `squash_option` limits the presented methods, and Request changes remains disabled because the stable REST API has no matching write command.
 
@@ -259,9 +330,28 @@ Presentation does not receive provider JSON or credentials. Provider adapters do
 
 Chat history is append-only JSONL at `im/chat_history.jsonl`. Startup loads a recent tail into the Rust session, but the Chat component and bounded Slint message model are mounted only on the Chat route. Leaving Chat destroys its UI tree and clears the Slint model/Markdown cache; re-entry reconstructs the visible window from the session. Late history or assistant responses continue updating persistence/session without repopulating a hidden UI. Rendering and scroll-anchor calculations are deliberately separated to limit work during scrolling/resizing.
 
+Chat presentation is split between route composition in `ui/views/chat.slint`
+and reusable message/welcome components in `ui/components/chat/`. It uses the
+application-owned GitHub ScrollView, Spinner, Button/IconButton, Copy, tokens,
+and focus contracts. This presentation boundary must not expand the bounded
+Rust message window or move persistence/HTTP work onto the event loop.
+
 ### Terminal
 
 Terminal state is project-aware and persists while reopening the same project. Switching projects resets session-specific presentation and changes the working directory. The stable contract is documented in [specs/terminal.md](specs/terminal.md).
+
+`GitHubTerminalDrawer` owns only drawer chrome, viewport reporting, input, and
+cell presentation. Header/selection actions reuse shared GitHub controls;
+terminal cell geometry, monospace font, ANSI colors, PTY ownership, and
+scrollback remain independent of product typography.
+
+The primary rail exposes `Route.UiComponents` as the application-owned
+component playground. It exercises shared control properties and the real
+root-layer Toast, Notification, and Dialog managers. Model-dependent feature
+components remain tested on their owning Project, Workflow, Chat, Settings,
+shell, or PR Review route and are linked from the playground registry. The
+former Login, Tools, List, Detail, Notification, Toast, and Dialog demo routes
+have been removed.
 
 ## Main data flows
 
@@ -292,13 +382,23 @@ Terminal state is project-aware and persists while reopening the same project. S
 4. Only a successful response updates `projects.json` with `repo_project_id` and `repo_type`; the UI refresh runs on the Slint event loop.
 5. Lookup or persistence failures show one project-owned error toast and do not write a partial record.
 
+### Project-registry reload
+
+1. A user reload sets the Project page loading state on the Slint event loop;
+   the loading IconButton prevents another activation.
+2. The shared application runtime moves `load_projects` to a blocking task.
+3. Completion returns through `slint::invoke_from_event_loop`.
+4. Success replaces the Project model and clears the inline error; failure
+   clears loading and exposes a recoverable inline retry state while retaining
+   navigation responsiveness.
+
 ### Project-aware terminal
 
 1. Project card actions or the workflow FAB invoke a terminal callback.
 2. Rust resolves the project key and local repository path.
 3. `open_terminal_for_project` chooses reuse versus reset.
 4. The PTY session runs off the UI thread.
-5. Rendered terminal state is applied to `TerminalDrawer` through root properties.
+5. Rendered terminal state is applied to `GitHubTerminalDrawer` through root properties.
 
 ### Chat request
 
@@ -341,7 +441,14 @@ Interceptors execute in registration order. Request hooks may mutate headers; re
 
 - Root Rust-facing properties and callbacks are declared in `ui/main.slint` with consistent names.
 - Feature views own layout; Rust owns I/O and business state transitions.
-- Reuse `PageScrollActions`, `ProjectCardActions`, `IconActionButton`, and project-aware terminal entry points.
+- Route files under `ui/views/` declare only `GitHub*Page` composition.
+  Visual subcomponents belong in `ui/components/<feature>/`; components that
+  implement GitHub/Primer patterns use `GitHub*` names, while other domain
+  components retain domain names.
+- Reuse `GitHubPageScrollActions`, `GitHubProjectCardActions`,
+  `GitHubIconButton`, `GitHubPageHeader`, `GitHubScrollView`,
+  `GitHubBlankslate`, `GitHubActionMenu`, `GitHubDialog`, Banner feedback, and
+  project-aware terminal entry points.
 - Keep hover-sensitive nodes mounted and vary opacity/state instead of conditionally creating hit targets.
 - Mount full-window modal overlays at the root layer.
 - Avoid layout/model rebuilds during scroll and window resize; defer precise work until interaction settles.
@@ -351,9 +458,11 @@ Interceptors execute in registration order. Request hooks may mutate headers; re
 Minimum validation for Rust or Slint changes:
 
 ```sh
+./scripts/check-ui-policy.sh
 cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
+git diff --check
 ```
 
 Run targeted manual checks for terminal viewport/session changes, update cancellation, tray shutdown, and route-specific layouts. The complete test command currently includes one unrelated failing logger doctest; do not hide a new failure behind that known issue.
@@ -361,6 +470,7 @@ Run targeted manual checks for terminal viewport/session changes, update cancell
 ## Known technical debt
 
 - `src/logger/debug_logger.rs` contains a doctest that does not compile.
-- Some routes in `Route` are development/demo surfaces; the left navigation may expose them for local testing and is not a finished product IA.
+- `Route.UiComponents` is the maintained component playground; obsolete
+  Login/Tools/List/Detail/Notification/Toast/Dialog demo routes are removed.
 - The application is proprietary / non-open-source; see root `LICENSE.txt`. Third-party vendored components keep their own licenses.
 - `docs/terminal_viewport_iteration_notes.md` is historical evidence, not a current specification.

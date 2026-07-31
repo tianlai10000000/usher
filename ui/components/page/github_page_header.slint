@@ -1,0 +1,72 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+// Primer PageHeader foundation. Pages may supply title, description, leading
+// visual, trailing actions, and navigation without recreating header geometry.
+export component GitHubPageHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> description: "";
+    in property <image> leading-icon;
+    in property <bool> show-border: true;
+    in property <bool> large-title: false;
+    in property <length> actions-width: 0px;
+
+    private property <bool> has-leading-icon:
+        root.leading-icon.width > 0 && root.leading-icon.height > 0;
+    private property <length> title-height:
+        root.large-title ? GitHubMetrics.size-40 : GitHubMetrics.size-32;
+    private property <length> description-height:
+        root.description == "" ? 0px : GitHubMetrics.size-24;
+
+    width: 100%;
+    height: root.title-height + root.description-height
+        + (root.show-border ? GitHubMetrics.size-12 : 0px);
+    background: transparent;
+
+    if root.has-leading-icon: Image {
+        x: 0px;
+        y: (root.title-height - self.height) / 2;
+        width: GitHubMetrics.icon-large;
+        height: GitHubMetrics.icon-large;
+        source: root.leading-icon;
+        colorize: GitHubTheme.fg-muted;
+    }
+
+    Text {
+        x: root.has-leading-icon
+            ? GitHubMetrics.icon-large + GitHubMetrics.size-8
+            : 0px;
+        y: 0px;
+        width: parent.width - self.x - root.actions-width
+            - (root.actions-width > 0px ? GitHubMetrics.size-8 : 0px);
+        height: root.title-height;
+        text: root.title;
+        font-size: root.large-title
+            ? GitHubMetrics.heading-large
+            : GitHubMetrics.heading-medium;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.description != "": Text {
+        x: 0px;
+        y: root.title-height;
+        width: parent.width;
+        height: root.description-height;
+        text: root.description;
+        font-size: GitHubMetrics.text-medium;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.show-border: Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-default;
+    }
+
+    @children
+}

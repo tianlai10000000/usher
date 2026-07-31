@@ -1,0 +1,497 @@
+import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubActionMenu } from "../github_action_menu.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubButton } from "../settings/github_settings_controls.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { GitHubPullRequestStateButton, GitHubPullRequestFilterButton, GitHubPullRequestFilterMoreButton, GitHubPullRequestFilterMenuOption, GitHubPullRequestFilterMenu, GitHubPullRequestListStatePanel, WorkflowPullRequestItem } from "./github_pr_list_components.slint";
+export { WorkflowPullRequestItem } from "./github_pr_list_components.slint";
+export component GitHubPullRequestFlow {
+    in property <length> viewport-global-x: 0px;
+    in property <length> viewport-global-y: 0px;
+    in property <length> viewport-width: 0px;
+    in property <length> viewport-height: 0px;
+    in property <string> repo-project-id;
+    in property <string> repo-type;
+    in property <[WorkflowPullRequestItem]> pr-items: [];
+    in property <int> pr-total: 0;
+    in property <bool> pr-total-exact: false;
+    in property <int> pr-open-total: -1;
+    in property <int> pr-closed-total: -1;
+    in property <int> pr-page: 1;
+    in property <int> pr-page-count: 1;
+    in property <string> pr-state: "open";
+    in property <string> pr-review-filter: "all";
+    in property <string> pr-assignee-filter: "any";
+    in property <string> pr-sort-filter: "newest";
+    in property <bool> pr-loading: false;
+    in property <string> pr-error: "";
+    callback change-state(string);
+    callback change-page(int);
+    callback change-review-filter(string);
+    callback change-assignee-filter(string);
+    callback change-sort-filter(string);
+    callback open-detail(string, string, string, string, string, string);
+
+    private property <string> active-menu: "";
+    private property <int> hovered-time-index: -1;
+    private property <string> hovered-time-tooltip: "";
+    private property <bool> compact-filters: root.width < 620px;
+    private property <bool> supports-review-filter: root.repo-type == "github";
+    private property <bool> supports-assignee-filter: root.repo-type == "github"
+        || root.repo-type == "gitlab";
+    // GitHub keeps state and filter actions on one compact toolbar row.
+    private property <length> header-height: 48px;
+    private property <string> empty-title: root.pr-state == "open"
+        ? "There aren’t any open pull requests."
+        : "There aren’t any closed pull requests.";
+    private property <color> canvas-default: GitHubTheme.canvas-default;
+    private property <color> canvas-subtle: GitHubTheme.canvas-subtle;
+    private property <color> border-default: GitHubTheme.border-default;
+    private property <color> fg-default: GitHubTheme.fg-default;
+    private property <color> fg-muted: GitHubTheme.fg-muted;
+    private property <length> list-height: root.pr-loading || root.pr-error != "" || root.pr-items.length == 0
+        ? root.header-height + 320px
+        : root.header-height + root.pr-items.length * 72px;
+    private property <bool> show-pagination: !root.pr-loading
+        && root.pr-error == ""
+        && root.pr-items.length > 0
+        && root.pr-page-count > 1;
+    // Footer is 16px gap + 32px controls + 8px trailing inset below the card.
+    private property <length> pagination-block-height: root.show-pagination ? 56px : 0px;
+    // Each popover follows GitHub's Overlay contract: its right edge is
+    // anchored to the right edge of the button that opened it.
+    private property <length> menu-anchor-right: root.compact-filters
+        ? filter-bar-host.x + filter-bar-host.width
+            - (root.active-menu == "assignee" ? 32px : 0px)
+        : filter-bar-host.x + filter-bar-host.width
+            - (root.active-menu == "reviews"
+                ? 130px
+                : (root.active-menu == "assignee" ? 52px : 0px));
+    // Lock geometry so a taller Workflow panel cannot stretch the list card
+    // and pull the pagination footer inside its border.
+    height: root.list-height + root.pagination-block-height;
+    vertical-stretch: 0;
+
+    // Same stacking contract as the review-workspace Diff view / file-filter /
+    // readiness popovers: dismiss is mounted under the interactive chrome so
+    // the first click on another filter switches menus instead of only closing.
+    // Slint rectangles alone do not capture pointer input; the TouchArea must
+    // own the hit target. Full-window absolute positioning matches the
+    // status-bar outside-click pattern for clicks outside the list card.
+    if root.active-menu != "": Rectangle {
+        x: -root.absolute-position.x;
+        y: -root.absolute-position.y;
+        width: 9999px;
+        height: 9999px;
+        z: 0;
+        background: transparent;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+            clicked => { root.active-menu = ""; }
+        }
+    }
+
+    // Keep the card and pager in one explicit layout. Absolute y coordinates
+    // can still be compressed by an ancestor's layout constraints; a real
+    // sibling layout preserves the 16px gap even on a tall Closed page.
+    content-layout := VerticalLayout {
+        width: root.width;
+        height: root.height;
+        spacing: root.show-pagination ? 16px : 0px;
+        alignment: start;
+
+        pr-list := Rectangle {
+            width: parent.width;
+            height: root.list-height;
+            vertical-stretch: 0;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: root.border-default;
+            background: root.canvas-default;
+            clip: true;
+
+            header := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: root.header-height;
+                z: 10;
+                background: root.canvas-subtle;
+
+            HorizontalLayout {
+                x: 4px;
+                width: open-state-btn.width + closed-state-btn.width;
+                height: parent.height;
+                spacing: 0px;
+                open-state-btn := GitHubPullRequestStateButton {
+                    label: "Open";
+                    value: "open";
+                    selected-value: root.pr-state;
+                    count: root.pr-open-total;
+                    selected(value) => { root.change-state(value); }
+                }
+                closed-state-btn := GitHubPullRequestStateButton {
+                    label: "Closed";
+                    value: "closed";
+                    selected-value: root.pr-state;
+                    count: root.pr-closed-total;
+                    selected(value) => { root.change-state(value); }
+                }
+            }
+
+            // Keep status and filters on one GitHub-style toolbar row.
+            // Same stacking contract as Diff view / file-filter / readiness
+            // on the review workspace: triggers stay above the dismiss layer
+            // so the first click switches menus.
+            filter-bar-host := Rectangle {
+                x: 4px;
+                y: 8px;
+                width: parent.width - 8px;
+                height: 32px;
+                z: 95;
+                background: transparent;
+
+                filter-bar := HorizontalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    spacing: 0px;
+                    alignment: end;
+
+                    if !root.compact-filters && root.supports-review-filter: reviews-btn := GitHubPullRequestFilterButton {
+                        label: "Reviews";
+                        selected: root.active-menu == "reviews" || root.pr-review-filter != "all";
+                        clicked => { root.active-menu = root.active-menu == "reviews" ? "" : "reviews"; }
+                    }
+                    if !root.compact-filters && root.supports-assignee-filter: assignee-btn := GitHubPullRequestFilterButton {
+                        label: "Assignee";
+                        selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
+                        clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
+                    }
+                    if !root.compact-filters: sort-btn := GitHubPullRequestFilterButton {
+                        label: "Sort";
+                        selected: root.active-menu == "sort" || root.pr-sort-filter != "newest";
+                        clicked => { root.active-menu = root.active-menu == "sort" ? "" : "sort"; }
+                    }
+                    if root.compact-filters && root.supports-assignee-filter: GitHubPullRequestFilterButton {
+                        label: "Assignee";
+                        selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
+                        clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
+                    }
+                    if root.compact-filters: GitHubPullRequestFilterMoreButton {
+                        selected: root.active-menu == (root.supports-review-filter ? "more" : "sort")
+                            || (root.supports-review-filter && root.pr-review-filter != "all")
+                            || root.pr-sort-filter != "newest";
+                        clicked => {
+                            root.active-menu = root.active-menu
+                                == (root.supports-review-filter ? "more" : "sort")
+                                ? ""
+                                : (root.supports-review-filter ? "more" : "sort");
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.pr-loading: Rectangle {
+            y: root.header-height;
+            width: parent.width;
+            height: parent.height - root.header-height;
+
+            GitHubSpinner {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - 64px) / 2;
+                spinner-size: 32px;
+                foreground: root.fg-muted;
+            }
+
+            Text {
+                x: 24px;
+                y: (parent.height - 64px) / 2 + 42px;
+                width: parent.width - 48px;
+                height: 22px;
+                text: "Loading pull requests…";
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: 13px;
+                color: root.fg-muted;
+            }
+        }
+
+        if !root.pr-loading && root.pr-error != "": GitHubPullRequestListStatePanel {
+            y: root.header-height;
+            width: parent.width;
+            error-state: true;
+            title: "Unable to load pull requests";
+            description: "Check your code hosting configuration or connection, then try again.";
+            show-action: true;
+            action => { root.change-page(root.pr-page); }
+        }
+
+        if !root.pr-loading && root.pr-error == "" && root.pr-items.length == 0: GitHubPullRequestListStatePanel {
+            y: root.header-height;
+            width: parent.width;
+            title: root.empty-title;
+            description: "Try another status filter.";
+        }
+
+        if !root.pr-loading && root.pr-error == "" && root.pr-items.length > 0: Rectangle {
+            y: root.header-height;
+            width: parent.width;
+            height: root.pr-items.length * 72px;
+            background: transparent;
+
+            for item[index] in root.pr-items: Rectangle {
+                y: index * 72px;
+                width: parent.width;
+                height: 72px;
+                // GitHub PR list rows stay on the default canvas. The title is an
+                // accent link; hover underlines the title instead of painting
+                // Box-row--hover-gray across the row.
+                background: transparent;
+                private property <length> title-max-width: parent.width - 58px;
+                private property <length> title-draw-width: min(title-measure.preferred-width, self.title-max-width);
+
+                if index > 0: Rectangle {
+                    y: 0px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.border-default;
+                }
+
+                Image {
+                    x: 16px;
+                    y: 17px;
+                    width: 16px;
+                    height: 16px;
+                    source: item.state == "merged"
+                        ? @image-url("../../assets/icons/octicon-git-merge-16.svg")
+                        : @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
+                    colorize: item.state == "merged"
+                        ? (GitHubTheme.done-fg)
+                        : (item.state == "closed"
+                            ? (GitHubTheme.danger-fg)
+                            : (GitHubTheme.success-fg));
+                }
+
+                title-measure := Text {
+                    visible: false;
+                    text: item.title;
+                    font-size: 14px;
+                    font-weight: 600;
+                    wrap: no-wrap;
+                }
+
+                Text {
+                    x: 42px;
+                    y: 8px;
+                    width: parent.title-max-width;
+                    height: 26px;
+                    text: item.title;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: title-touch.has-hover
+                        ? (GitHubTheme.accent-fg)
+                        : root.fg-default;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if title-touch.has-hover: Rectangle {
+                    x: 42px;
+                    y: 8px + 22px;
+                    width: parent.title-draw-width;
+                    height: 1px;
+                    background: GitHubTheme.accent-fg;
+                }
+
+                title-touch := TouchArea {
+                    x: 42px;
+                    y: 8px;
+                    width: parent.title-draw-width;
+                    height: 26px;
+                    z: 2;
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.open-detail(
+                            item.number,
+                            item.title,
+                            item.author,
+                            item.source-branch,
+                            item.target-branch,
+                            item.updated-at-raw,
+                        );
+                    }
+                }
+
+                meta := Text {
+                    x: 42px;
+                    y: 34px;
+                    width: parent.width - 58px;
+                    height: 22px;
+                    text: "#" + item.number + " by " + item.author
+                        + (item.state == "merged"
+                            ? " was merged "
+                            : (item.state == "closed" ? " was closed " : " was opened "))
+                        + item.updated-at;
+                    font-size: 12px;
+                    color: root.fg-muted;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                meta-touch := TouchArea {
+                    x: 42px;
+                    y: 34px;
+                    width: min(meta.preferred-width, parent.width - 58px);
+                    height: 22px;
+                    z: 2;
+                    mouse-cursor: pointer;
+                    changed has-hover => {
+                        if self.has-hover && item.updated-at-tooltip != "" {
+                            root.hovered-time-index = index;
+                            root.hovered-time-tooltip = item.updated-at-tooltip;
+                        } else if root.hovered-time-index == index {
+                            root.hovered-time-index = -1;
+                            root.hovered-time-tooltip = "";
+                        }
+                    }
+                    clicked => {
+                        root.open-detail(
+                            item.number,
+                            item.title,
+                            item.author,
+                            item.source-branch,
+                            item.target-branch,
+                            item.updated-at-raw,
+                        );
+                    }
+                }
+
+                row-touch := TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    z: 1;
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.open-detail(
+                            item.number,
+                            item.title,
+                            item.author,
+                            item.source-branch,
+                            item.target-branch,
+                            item.updated-at-raw,
+                        );
+                    }
+                }
+            }
+        }
+        }
+
+        // Pagination is a full-width footer sibling. The compact control group
+        // is centered inside it instead of positioning the footer itself.
+        if root.show-pagination: Rectangle {
+            width: parent.width;
+            height: 32px;
+            vertical-stretch: 0;
+
+            pager-controls := Rectangle {
+                x: max(0px, (parent.width - self.width) / 2);
+                width: min(parent.width, 284px);
+                height: parent.height;
+
+                GitHubButton {
+                    x: 0px;
+                    width: 84px;
+                    text: "Previous";
+                    disabled: !(root.pr-page > 1 && !root.pr-loading);
+                    clicked => { root.change-page(root.pr-page - 1); }
+                }
+                Text {
+                    x: 96px;
+                    width: max(0px, parent.width - 192px);
+                    height: parent.height;
+                    text: "Page " + root.pr-page + " / " + root.pr-page-count;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    color: root.fg-muted;
+                }
+                GitHubButton {
+                    x: parent.width - self.width;
+                    width: 84px;
+                    text: "Next";
+                    disabled: !(root.pr-page < root.pr-page-count && !root.pr-loading);
+                    clicked => { root.change-page(root.pr-page + 1); }
+                }
+            }
+        }
+    }
+
+    // Paint outside pr-list so the clipped, rounded list border cannot cut off
+    // the last row's absolute-time tooltip.
+    if root.hovered-time-index >= 0 && root.hovered-time-tooltip != "": GitHubTooltip {
+        x: 42px;
+        y: root.header-height + root.hovered-time-index * 72px + 58px;
+        z: 200;
+        text: root.hovered-time-tooltip;
+    }
+
+    if root.active-menu != "": GitHubActionMenu {
+        z: 100;
+        open: root.active-menu != "";
+        viewport-x: root.viewport-global-x - root.absolute-position.x;
+        viewport-y: root.viewport-global-y - root.absolute-position.y;
+        viewport-width: root.viewport-width;
+        viewport-height: root.viewport-height;
+        anchor-x: root.menu-anchor-right;
+        anchor-y: 0px;
+        anchor-width: 0px;
+        anchor-height: root.header-height;
+        menu-width: 200px;
+        content-height: root.active-menu == "assignee"
+            ? 128px
+            : (root.active-menu == "more" ? 313px : 160px);
+        menu-max-height: 432px;
+        align: "end";
+        dismiss-requested => { root.active-menu = ""; }
+
+        GitHubPullRequestFilterMenu {
+            width: parent.width;
+            menu-type: root.active-menu;
+            review-selected-value: root.pr-review-filter;
+            assignee-selected-value: root.pr-assignee-filter;
+            sort-selected-value: root.pr-sort-filter;
+            selected(kind, value) => {
+                if kind == "reviews" {
+                    root.change-review-filter(value);
+                } else if kind == "assignee" {
+                    root.change-assignee-filter(value);
+                } else {
+                    root.change-sort-filter(value);
+                }
+                root.active-menu = "";
+            }
+            close => { root.active-menu = ""; }
+        }
+    }
+}

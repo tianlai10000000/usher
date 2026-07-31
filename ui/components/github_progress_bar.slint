@@ -1,0 +1,48 @@
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+
+// Primer-style progress track for determinate and indeterminate operations.
+export component GitHubProgressBar inherits Rectangle {
+    in property <float> progress: 0;
+    in property <bool> indeterminate: false;
+    in property <color> foreground: GitHubTheme.accent-emphasis;
+    in property <string> status-label: "Progress";
+
+    private property <float> clamped-progress:
+        max(0, min(1, root.progress));
+
+    width: 100%;
+    height: GitHubMetrics.size-8;
+    border-radius: GitHubMetrics.radius-small;
+    background: GitHubTheme.control-soft-rest;
+    clip: true;
+    accessible-role: progress-indicator;
+    accessible-label: root.status-label;
+    accessible-value: !root.indeterminate ? root.clamped-progress : "";
+    accessible-value-minimum: 0.0;
+    accessible-value-maximum: 1.0;
+
+    if !root.indeterminate: Rectangle {
+        width: parent.width * root.clamped-progress;
+        height: parent.height;
+        border-radius: GitHubMetrics.radius-small;
+        background: root.foreground;
+        animate width { duration: 160ms; easing: ease-out; }
+    }
+
+    if root.indeterminate: Rectangle {
+        private property <float> phase:
+            mod(animation-tick(), 1200ms) / 1200ms;
+        private property <float> travel-phase:
+            self.phase < 0.5
+                ? self.phase * 2
+                : (1 - self.phase) * 2;
+        width: min(
+            parent.width,
+            max(GitHubMetrics.size-32, parent.width * 0.3)
+        );
+        x: (parent.width - self.width) * self.travel-phase;
+        height: parent.height;
+        border-radius: GitHubMetrics.radius-small;
+        background: root.foreground;
+    }
+}

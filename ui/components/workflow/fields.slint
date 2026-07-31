@@ -1,8 +1,7 @@
-import { MaterialPalette, MaterialText } from "@material";
-import { CompactTextField } from "../input/compact_text_field.slint";
-import { AppState } from "../../state/app_state.slint";
+import { GitHubCompactTextField } from "../input/compact_text_field.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
-export component TagField {
+export component GitHubTagField {
     in property <string> label;
     in-out property <string> value;
     in property <string> placeholder;
@@ -17,16 +16,16 @@ export component TagField {
         height: root.height;
         spacing: 8px;
 
-        MaterialText {
+        Text {
             text: root.label;
             height: root.label-height;
-            vertical_alignment: center;
-            font_size: 12px;
+            vertical-alignment: center;
+            font-size: GitHubMetrics.text-small;
             font-weight: 600;
-            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+            color: GitHubTheme.fg-default;
         }
 
-        CompactTextField {
+        GitHubCompactTextField {
             width: root.width - 2px;
             text <=> root.value;
             placeholder: root.placeholder;
@@ -34,12 +33,12 @@ export component TagField {
             field-height: root.input-height;
             border-radius-size: 6px;
             input-font-size: 14px;
-            field-background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+            field-background: GitHubTheme.canvas-default;
         }
     }
 }
 
-export component TagReadonlyField {
+export component GitHubTagReadonlyField {
     in property <string> label;
     in property <string> value;
     private property <length> label-height: 16px;
@@ -51,13 +50,13 @@ export component TagReadonlyField {
         height: root.height;
         spacing: 8px;
 
-        MaterialText {
+        Text {
             text: root.label;
             height: root.label-height;
-            vertical_alignment: center;
-            font_size: 12px;
+            vertical-alignment: center;
+            font-size: GitHubMetrics.text-small;
             font-weight: 600;
-            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+            color: GitHubTheme.fg-default;
         }
 
         Rectangle {
@@ -65,57 +64,19 @@ export component TagReadonlyField {
             height: root.input-height;
             border-radius: 6px;
             border-width: 1px;
-            border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-            background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
+            border-color: GitHubTheme.border-default;
+            background: GitHubTheme.canvas-subtle;
 
-            // Use native Text + vertical-alignment (same as GitHubTextField /
-            // CompactTextField TextInput). MaterialText with manual y centering
-            // lands on fractional pixels and renders softer than the input below.
             Text {
                 x: 12px;
                 width: parent.width - 24px;
                 height: parent.height;
                 text: root.value;
                 font-size: 14px;
-                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                color: GitHubTheme.fg-default;
                 vertical-alignment: center;
                 overflow: elide;
             }
         }
-    }
-}
-
-export component TagModeChip inherits Rectangle {
-    in property <string> label;
-    in property <bool> selected: false;
-    in property <bool> enabled: true;
-    callback clicked();
-
-    width: 110px;
-    height: 34px;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    background: root.selected
-        ? (AppState.effective-dark-mode ? #21262d : #eaeef2)
-        : (chip-touch.has-hover
-            ? (AppState.effective-dark-mode ? #21262d : #f6f8fa)
-            : (AppState.effective-dark-mode ? #0d1117 : #ffffff));
-
-    chip-touch := TouchArea {
-        width: 100%;
-        height: 100%;
-        enabled: root.enabled;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-
-    MaterialText {
-        text: root.label;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-        font_size: 13px;
-        font_weight: root.selected ? 600 : 500;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
     }
 }

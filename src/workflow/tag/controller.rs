@@ -1,10 +1,11 @@
-use crate::MainWindow;
 use crate::app_runtime::shared_runtime;
-use crate::workflow::bindings::{show_error, show_success};
-use crate::workflow::jobs::{
-    JobConclusion, JobSnapshot, JobStepData, JobStepDefinition, JobStepStatus, format_duration,
+use crate::jobs::{
+    JobConclusion, JobRunDescriptor, JobStepData, JobStepDefinition, JobStepStatus,
+    format_duration, register_job_run_source,
 };
+use crate::workflow::bindings::{show_error, show_success};
 use crate::workflow::state::{SharedWorkflowState, default_tag_steps, initialize_current_ui};
+use crate::{MainWindow, Route};
 use slint::ComponentHandle;
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
@@ -90,6 +91,22 @@ fn request_tag_cancel() -> bool {
 
 pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
     log::info!("[Workflow][Tag] Binding Tag tab callbacks");
+    let ui_weak_stop = ui.as_weak();
+    let ui_weak_log = ui.as_weak();
+    register_job_run_source(
+        "tag",
+        move || {
+            if let Some(ui) = ui_weak_stop.upgrade() {
+                ui.invoke_workflow_tag_stop();
+            }
+        },
+        move |index| {
+            if let Some(ui) = ui_weak_log.upgrade() {
+                ui.invoke_workflow_tag_load_step_log(index);
+            }
+        },
+    );
+
     let ui_weak = ui.as_weak();
     let state_logs = shared_state.clone();
     ui.on_workflow_tag_load_step_log(move |index| {
@@ -130,7 +147,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 view.tag_remove_ready = false;
                 view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
                 view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-                view.tag_job = JobSnapshot::queued(default_tag_steps());
+                view.reset_tag_job(default_tag_steps());
             });
             log::info!(
                 "[Workflow][Tag] Mode updated in state, reset running flag and step list -> {}",
@@ -159,7 +176,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 view.tag_next_version =
                     next_semver_for_mode(&view.tag_current_version, version_mode.as_str());
                 if !view.tag_running {
-                    view.tag_job = JobSnapshot::queued(default_tag_steps());
+                    view.reset_tag_job(default_tag_steps());
                     view.tag_result = if view.tag_mode == TAG_MODE_REMOTE {
                         "Remote mode is TODO in this iteration.".to_string()
                     } else {
@@ -227,7 +244,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     view.tag_selected_tab = 0;
                     // Always restore the create plan so a prior run's expanded /
                     // failed steps cannot leak into the Add tab surface.
-                    view.tag_job = JobSnapshot::queued(default_tag_steps());
+                    view.reset_tag_job(default_tag_steps());
                     view.tag_result = format!(
                         "Local mode ready. Current latest tag is '{}', next {} version prepared.",
                         view.tag_current_version, view.tag_version_mode
@@ -246,7 +263,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     view.tag_result = "Remote mode is TODO in this iteration.".to_string();
                     view.tag_add_initializing = false;
                     view.tag_add_ready = false;
-                    view.tag_job = JobSnapshot::queued(default_tag_steps());
+                    view.reset_tag_job(default_tag_steps());
                 });
             }
             initialize_current_ui(&ui, &state_add);
@@ -265,7 +282,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     "Loading latest local tag for add workflow in project '{}'.",
                     project_name
                 );
-                view.tag_job = JobSnapshot::queued(default_tag_steps());
+                view.reset_tag_job(default_tag_steps());
             });
             request_seq
         } else {
@@ -378,7 +395,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     view.tag_selected_tab = 1;
                     // Always restore the remove plan so a prior create run's
                     // steps/disclosures cannot leak into the Remove tab.
-                    view.tag_job = JobSnapshot::queued(default_remove_tag_steps());
+                    view.reset_tag_job(default_remove_tag_steps());
                     view.tag_result = format!(
                         "Remove mode ready. Latest remote tag is '{}'.",
                         view.tag_remove_target
@@ -398,7 +415,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     view.tag_remove_initializing = false;
                     view.tag_remove_ready = false;
                     view.tag_remove_target = "TODO".to_string();
-                    view.tag_job = JobSnapshot::queued(default_remove_tag_steps());
+                    view.reset_tag_job(default_remove_tag_steps());
                 });
             }
             initialize_current_ui(&ui, &state_open_remove);
@@ -418,7 +435,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     "Loading latest remote tag for remove workflow in project '{}'.",
                     project_name
                 );
-                view.tag_job = JobSnapshot::queued(default_remove_tag_steps());
+                view.reset_tag_job(default_remove_tag_steps());
             });
             request_seq
         } else {
@@ -564,7 +581,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     view.tag_remove_ready = false;
                     view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
                     view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-                    view.tag_job = JobSnapshot::queued(default_tag_steps());
+                    view.reset_tag_job(default_tag_steps());
                 });
             } else {
                 log::warn!("[Workflow][Tag] Failed to acquire state lock while handling remote TODO");
@@ -611,6 +628,15 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 );
                 view.tag_next_version = version.clone();
                 view.tag_job.start(default_tag_steps());
+                view.job_run = JobRunDescriptor {
+                    active: true,
+                    source: "tag".to_string(),
+                    run_title: format!("Create tag {version}"),
+                    workflow_name: "Tag workflow".to_string(),
+                    context_name: project_name.clone(),
+                    job_name: "create-tag".to_string(),
+                    trigger_detail: "Started manually from Tag".to_string(),
+                };
             });
             log::info!(
                 "[Workflow][Tag] Run accepted: state switched to running for version '{}'",
@@ -620,6 +646,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             log::warn!("[Workflow][Tag] Failed to acquire state lock before scheduling run");
         }
         initialize_current_ui(&ui, &state_run);
+        ui.invoke_navigate(Route::JobRun);
 
         let ui_weak_task = ui_weak.clone();
         let state_task = state_run.clone();
@@ -820,7 +847,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     view.tag_remove_ready = false;
                     view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
                     view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-                    view.tag_job = JobSnapshot::queued(default_remove_tag_steps());
+                    view.reset_tag_job(default_remove_tag_steps());
                 });
             }
             initialize_current_ui(&ui, &state_remove);
@@ -860,9 +887,19 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 );
                 view.tag_remove_target = tag.clone();
                 view.tag_job.start(default_remove_tag_steps());
+                view.job_run = JobRunDescriptor {
+                    active: true,
+                    source: "tag".to_string(),
+                    run_title: format!("Remove tag {tag}"),
+                    workflow_name: "Tag workflow".to_string(),
+                    context_name: project_name.clone(),
+                    job_name: "remove-tag".to_string(),
+                    trigger_detail: "Started manually from Tag".to_string(),
+                };
             });
         }
         initialize_current_ui(&ui, &state_remove);
+        ui.invoke_navigate(Route::JobRun);
 
         let ui_weak_task = ui_weak.clone();
         let state_task = state_remove.clone();
@@ -1085,7 +1122,7 @@ pub(crate) fn refresh_tag_context(
             view.tag_remove_ready = false;
             view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
             view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-            view.tag_job = JobSnapshot::queued(default_tag_steps());
+            view.reset_tag_job(default_tag_steps());
             if mode == TAG_MODE_REMOTE {
                 log::info!("[Workflow][Tag] Refresh context -> remote TODO state");
                 view.tag_current_version = "TODO".to_string();
@@ -2001,7 +2038,7 @@ fn run_command_blocking(command: Vec<String>) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{format_command_log, format_duration, run_command};
-    use crate::workflow::jobs::{JobConclusion, JobStepData, JobStepDefinition, JobStepStatus};
+    use crate::jobs::{JobConclusion, JobStepData, JobStepDefinition, JobStepStatus};
     use slint::Model;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;

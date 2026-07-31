@@ -1,0 +1,531 @@
+import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+
+export struct ProjectItem {
+    project_name: string,
+    project_alias: string,
+    local_repo: string,
+    remote_repo: string,
+    logo: string,
+    logo_image: image,
+    is_pr_auto_update: bool,
+    pr_count_loading: bool,
+    pr_count_failed: bool,
+    pr_fat_count_text: string,
+    pr_uat_count_text: string,
+    pr_prod_count_text: string,
+    project_tags: [string],
+    project_tags_text: string,
+}
+
+export component GitHubProjectIconButton inherits GitHubIconButton {
+    in property <string> tooltip: "";
+    in property <bool> tooltip-end: false;
+    tooltip-text: root.tooltip;
+    tooltip-above: false;
+    tooltip-align-right: root.tooltip-end;
+    control-size: GitHubMetrics.control-medium-size;
+    glyph-size: GitHubMetrics.icon-medium;
+    foreground: root.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-default;
+}
+
+export component GitHubProjectSearchField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "Find a project…";
+    callback accepted(string);
+
+    width: 320px;
+    height: 32px;
+    border-radius: 6px;
+    border-width: search-input.has-focus ? 2px : 1px;
+    border-color: search-input.has-focus
+        ? (GitHubTheme.accent-fg)
+        : (GitHubTheme.border-default);
+    background: GitHubTheme.canvas-default;
+    clip: false;
+
+    Image {
+        x: search-input.has-focus ? 9px : 10px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../../assets/icons/octicon-search-16.svg");
+        colorize: GitHubTheme.fg-muted;
+    }
+
+    search-input := TextInput {
+        x: search-input.has-focus ? 33px : 34px;
+        y: (parent.height - self.preferred-height) / 2;
+        width: parent.width - self.x - (root.text == "" ? 12px : 40px);
+        text <=> root.text;
+        single-line: true;
+        font-size: 14px;
+        color: GitHubTheme.fg-default;
+        selection-background-color: GitHubTheme.selection-bg;
+        selection-foreground-color: self.color;
+        accessible-role: text-input;
+        accessible-enabled: true;
+        accessible-label: root.placeholder;
+        accessible-value <=> self.text;
+        accepted => { root.accepted(self.text); }
+    }
+
+    if root.text == "" && !search-input.has-focus: Text {
+        x: 34px;
+        width: parent.width - 46px;
+        height: parent.height;
+        text: root.placeholder;
+        font-size: 14px;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.text != "": GitHubProjectIconButton {
+        x: parent.width - GitHubMetrics.control-medium-size;
+        y: 0px;
+        icon: @image-url("../../assets/icons/octicon-x-16.svg");
+        tooltip: "Clear search";
+        tooltip-end: true;
+        clicked => {
+            root.text = "";
+            root.accepted("");
+        }
+    }
+}
+
+export component GitHubProjectViewSwitcher inherits Rectangle {
+    in-out property <string> mode: "grid";
+
+    width: 72px;
+    height: GitHubMetrics.control-medium-size;
+    background: transparent;
+
+    GitHubProjectIconButton {
+        x: 0px;
+        icon: @image-url("../../assets/icons/octicon-list-unordered-16.svg");
+        tooltip: "List view";
+        invisible: false;
+        selected: root.mode == "list";
+        clicked => { root.mode = "list"; }
+    }
+
+    GitHubProjectIconButton {
+        x: 40px;
+        icon: @image-url("../../assets/icons/octicon-table-16.svg");
+        tooltip: "Grid view";
+        invisible: false;
+        selected: root.mode == "grid";
+        clicked => { root.mode = "grid"; }
+    }
+}
+
+export component GitHubProjectLabel inherits Rectangle {
+    in property <string> text;
+    // 0px keeps content-sized chips (tags). Alias pills pass a max so long
+    // names elide instead of stretching the title row or card header.
+    in property <length> max-label-width: 0px;
+
+    label-measure := Text {
+        visible: false;
+        text: root.text;
+        font-size: 12px;
+        font-weight: 500;
+        wrap: no-wrap;
+    }
+
+    private property <length> natural-width: label-measure.preferred-width + 16px;
+    width: root.max-label-width > 0px
+        ? min(root.natural-width, root.max-label-width)
+        : root.natural-width;
+    height: 20px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: GitHubTheme.border-default;
+    background: transparent;
+
+    Text {
+        x: 8px;
+        width: parent.width - 16px;
+        height: parent.height;
+        text: root.text;
+        font-size: 12px;
+        font-weight: 500;
+        color: GitHubTheme.fg-muted;
+        horizontal-alignment: left;
+        vertical-alignment: center;
+        wrap: no-wrap;
+        overflow: elide;
+    }
+}
+
+export component GitHubPullRequestSummary inherits Rectangle {
+    in property <ProjectItem> project;
+
+    width: 228px;
+    height: 24px;
+    background: transparent;
+
+    if root.project.is_pr_auto_update: HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 8px;
+        alignment: end;
+
+        Text {
+            text: "Pull requests";
+            font-size: 12px;
+            color: GitHubTheme.fg-muted;
+            vertical-alignment: center;
+        }
+
+        if root.project.pr_count_loading: GitHubSpinner {
+            spinner-size: 14px;
+            foreground: GitHubTheme.fg-muted;
+        }
+
+        if root.project.pr_count_failed: Image {
+            width: 14px;
+            height: 14px;
+            source: @image-url("../../assets/icons/octicon-alert-16.svg");
+            colorize: GitHubTheme.danger-fg;
+        }
+
+        Text {
+            text: "FAT " + root.project.pr_fat_count_text;
+            font-size: 12px;
+            color: GitHubTheme.fg-default;
+            vertical-alignment: center;
+        }
+        Text {
+            text: "UAT " + root.project.pr_uat_count_text;
+            font-size: 12px;
+            color: GitHubTheme.fg-default;
+            vertical-alignment: center;
+        }
+        Text {
+            text: "PROD " + root.project.pr_prod_count_text;
+            font-size: 12px;
+            color: GitHubTheme.fg-default;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component GitHubProjectListRow inherits Rectangle {
+    in property <ProjectItem> project;
+    in property <bool> first: false;
+    callback open-requested();
+    callback terminal-requested();
+    callback edit-requested();
+    callback delete-requested();
+
+    // Identity + path metadata + topics (GitHub repo-row density with paths).
+    height: 136px;
+    background: row-touch.has-hover
+        ? (GitHubTheme.canvas-subtle)
+        : transparent;
+
+    // Separator above the row (not under the next row's hover fill), so the
+    // Box border and row dividers stay visible while hovering.
+    if !root.first: Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 1px;
+        z: 2;
+        background: GitHubTheme.border-default;
+    }
+
+    Rectangle {
+        x: 16px;
+        y: 16px;
+        width: 40px;
+        height: 40px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: GitHubTheme.border-default;
+        background: GitHubTheme.control-default-rest;
+        clip: true;
+
+        Image {
+            x: 6px;
+            y: 6px;
+            width: 28px;
+            height: 28px;
+            source: root.project.logo_image;
+        }
+    }
+
+    title-line := HorizontalLayout {
+        x: 72px;
+        y: 14px;
+        width: max(40px, parent.width - 72px - 116px);
+        height: 24px;
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: root.project.project_name;
+            font-size: 16px;
+            font-weight: 600;
+            color: GitHubTheme.accent-fg;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        if root.project.project_alias != "": GitHubProjectLabel {
+            // ~24 Latin chars / ~12 CJK at 12px before ellipsis.
+            max-label-width: 168px;
+            text: root.project.project_alias;
+        }
+    }
+
+    Text {
+        x: 72px;
+        y: 42px;
+        width: max(40px, parent.width - 72px - 116px);
+        height: 20px;
+        text: root.project.remote_repo;
+        font-size: 12px;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: 72px;
+        y: 64px;
+        width: max(40px, parent.width - 72px - 116px);
+        height: 20px;
+        text: root.project.local_repo;
+        font-size: 12px;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    HorizontalLayout {
+        x: 72px;
+        y: 96px;
+        width: max(40px, parent.width - 72px - 252px);
+        height: 24px;
+        spacing: 6px;
+        alignment: start;
+
+        for project-tag in root.project.project_tags: GitHubProjectLabel {
+            text: project-tag;
+        }
+    }
+
+    if root.project.is_pr_auto_update: GitHubPullRequestSummary {
+        x: parent.width - self.width - 16px;
+        y: 96px;
+        project: root.project;
+    }
+
+    actions := HorizontalLayout {
+        x: parent.width - 112px;
+        y: 12px;
+        width: 96px;
+        height: 32px;
+        spacing: 0px;
+        alignment: end;
+
+        GitHubProjectIconButton {
+            icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
+            tooltip: "Open terminal";
+            tooltip-end: true;
+            clicked => { root.terminal-requested(); }
+        }
+        GitHubProjectIconButton {
+            icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
+            tooltip: "Edit project";
+            tooltip-end: true;
+            clicked => { root.edit-requested(); }
+        }
+        GitHubProjectIconButton {
+            icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+            tooltip: "Delete project";
+            tooltip-end: true;
+            danger: true;
+            clicked => { root.delete-requested(); }
+        }
+    }
+
+    row-touch := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: max(0px, parent.width - 120px);
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.open-requested(); }
+    }
+}
+
+export component GitHubProjectGridCard inherits Rectangle {
+    in property <ProjectItem> project;
+    callback open-requested();
+    callback terminal-requested();
+    callback edit-requested();
+    callback delete-requested();
+
+    // Primer repo card with path metadata filling the middle band.
+    height: 204px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: GitHubTheme.border-default;
+    background: card-touch.has-hover
+        ? (GitHubTheme.canvas-subtle)
+        : (GitHubTheme.canvas-default);
+    clip: true;
+
+    Rectangle {
+        x: 16px;
+        y: 16px;
+        width: 40px;
+        height: 40px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: GitHubTheme.border-default;
+        background: GitHubTheme.control-default-rest;
+        clip: true;
+
+        Image {
+            x: 6px;
+            y: 6px;
+            width: 28px;
+            height: 28px;
+            source: root.project.logo_image;
+        }
+    }
+
+    Text {
+        x: 68px;
+        y: 14px;
+        width: max(32px, parent.width - 84px);
+        height: 24px;
+        text: root.project.project_name;
+        font-size: 16px;
+        font-weight: 600;
+        color: GitHubTheme.accent-fg;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.project.project_alias != "": GitHubProjectLabel {
+        x: 68px;
+        y: 40px;
+        max-label-width: min(168px, max(48px, parent.width - 84px));
+        text: root.project.project_alias;
+    }
+
+    Text {
+        x: 16px;
+        y: 70px;
+        width: parent.width - 32px;
+        height: 20px;
+        text: root.project.remote_repo;
+        font-size: 12px;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: 16px;
+        y: 94px;
+        width: parent.width - 32px;
+        height: 20px;
+        text: root.project.local_repo;
+        font-size: 12px;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    HorizontalLayout {
+        x: 16px;
+        y: 126px;
+        width: parent.width - 32px;
+        height: 20px;
+        spacing: 6px;
+        alignment: start;
+
+        for project-tag in root.project.project_tags: GitHubProjectLabel {
+            text: project-tag;
+        }
+    }
+
+    if root.project.is_pr_auto_update: Text {
+        x: 16px;
+        y: 168px;
+        width: max(24px, parent.width - 136px);
+        height: 20px;
+        text: root.project.pr_count_loading
+            ? "Pull requests loading"
+            : root.project.pr_count_failed
+                ? "Pull requests unavailable"
+                : "FAT " + root.project.pr_fat_count_text
+                    + " · UAT " + root.project.pr_uat_count_text
+                    + " · PROD " + root.project.pr_prod_count_text;
+        font-size: 12px;
+        color: root.project.pr_count_failed
+            ? (GitHubTheme.danger-fg)
+            : (GitHubTheme.fg-muted);
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    card-touch := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 160px;
+        mouse-cursor: pointer;
+        clicked => { root.open-requested(); }
+    }
+
+    TouchArea {
+        x: 0px;
+        y: 160px;
+        width: max(0px, parent.width - 112px);
+        height: 44px;
+        mouse-cursor: pointer;
+        clicked => { root.open-requested(); }
+    }
+
+    HorizontalLayout {
+        x: parent.width - 112px;
+        y: 164px;
+        width: 96px;
+        height: 32px;
+        spacing: 0px;
+        alignment: end;
+
+        GitHubProjectIconButton {
+            icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
+            tooltip: "Open terminal";
+            tooltip-above: true;
+            tooltip-end: true;
+            clicked => { root.terminal-requested(); }
+        }
+        GitHubProjectIconButton {
+            icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
+            tooltip: "Edit project";
+            tooltip-above: true;
+            tooltip-end: true;
+            clicked => { root.edit-requested(); }
+        }
+        GitHubProjectIconButton {
+            icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+            tooltip: "Delete project";
+            tooltip-above: true;
+            tooltip-end: true;
+            danger: true;
+            clicked => { root.delete-requested(); }
+        }
+    }
+}

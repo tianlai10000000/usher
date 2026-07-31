@@ -1,590 +1,18 @@
 /// Workflow main entrance page and sub-flow workspace.
-import { MaterialPalette, MaterialText } from "@material";
-import { AppState } from "../../state/app_state.slint";
-import { GitHubTooltip } from "../../components/github_tooltip.slint";
 import { GitHubActionMenu } from "../../components/github_action_menu.slint";
-import { PageView } from "../../components/page/page_view.slint";
+import { GitHubPageView } from "../../components/page/page_view.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
+import { GitHubUnderlineNavItem } from "../../components/navigation/github_underline_nav.slint";
 import { Route } from "../../route/routeMap.slint";
-import { PrFlow, WorkflowPullRequestItem } from "./pr.slint";
-import { TagFlow } from "./tag.slint";
-import { JobStepItem } from "../../components/jobs/job.slint";
+import { GitHubPullRequestFlow, WorkflowPullRequestItem } from "../../components/workflow/github_pr_flow.slint";
+import { GitHubBranchFlow } from "../../components/workflow/github_branch_flow.slint";
+import { GitHubCdFlow } from "../../components/workflow/github_cd_flow.slint";
+import { GitHubTagFlow } from "../../components/workflow/github_tag_flow.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubWorkflowProjectDetails } from "../../components/workflow/github_workflow_components.slint";
 
-component WorkflowComingSoon inherits Rectangle {
-    in property <string> feature-name: "";
 
-    width: 100%;
-    min-height: 460px;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-
-    // GitHub blankslate: one centered column (icon → title → description).
-    private property <length> blankslate-height: 48px + 16px + 28px + 8px + 20px;
-    private property <length> blankslate-top: max(48px, (root.height - root.blankslate-height) / 2);
-
-    Rectangle {
-        x: (root.width - 48px) / 2;
-        y: root.blankslate-top;
-        width: 48px;
-        height: 48px;
-        border-radius: 24px;
-        background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
-
-        Image {
-            x: 12px;
-            y: 12px;
-            width: 24px;
-            height: 24px;
-            source: @image-url("../../assets/icons/octicon-repo-push-16.svg");
-            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        }
-    }
-
-    MaterialText {
-        x: 32px;
-        y: root.blankslate-top + 64px;
-        width: root.width - 64px;
-        height: 28px;
-        text: root.feature-name + " workflow";
-        font_size: 20px;
-        font_weight: 600;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-        horizontal_alignment: center;
-        vertical_alignment: center;
-    }
-
-    MaterialText {
-        x: 32px;
-        y: root.blankslate-top + 100px;
-        width: root.width - 64px;
-        height: 20px;
-        text: "This workflow is not available yet.";
-        font_size: 14px;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        horizontal_alignment: center;
-        vertical_alignment: center;
-    }
-}
-
-// GitHub repository UnderlineNav item. Durable contract:
-// docs/specs/ui-design.md “UnderlineNav tabs”.
-component WorkflowWideTab inherits Rectangle {
-    in property <string> label;
-    in property <image> icon;
-    in property <bool> selected: false;
-    in property <bool> available: true;
-    callback clicked();
-
-    private property <length> label-width: max(24px, label-measure.preferred-width);
-    width: root.label-width + 48px;
-    height: 48px;
-    background: transparent;
-    clip: false;
-
-    // Rounded hover wash on the 32px control only — never covers the baseline.
-    if tab-touch.has-hover: Rectangle {
-        x: 0px;
-        y: 8px;
-        width: parent.width;
-        height: 32px;
-        border-radius: 6px;
-        background: AppState.effective-dark-mode ? #656c7633 : #eaedf0;
-    }
-
-    label-measure := Text {
-        visible: false;
-        text: root.label;
-        font-size: 14px;
-        font-weight: root.selected ? 600 : 400;
-        wrap: no-wrap;
-    }
-
-    Image {
-        x: 12px;
-        y: 16px;
-        width: 16px;
-        height: 16px;
-        source: root.icon;
-        colorize: root.available
-            ? (AppState.effective-dark-mode ? #9198a1 : #59636e)
-            : (AppState.effective-dark-mode ? #6e7681 : #8c959f);
-    }
-
-    Text {
-        x: 36px;
-        y: 8px;
-        width: root.label-width;
-        height: 32px;
-        text: root.label;
-        font-size: 14px;
-        font-weight: root.selected ? 600 : 400;
-        color: root.available
-            ? (AppState.effective-dark-mode ? #f0f6fc : #1f2328)
-            : (AppState.effective-dark-mode ? #6e7681 : #8c959f);
-        vertical-alignment: center;
-    }
-
-    if root.selected: Rectangle {
-        x: 0px;
-        y: parent.height - 2px;
-        width: parent.width;
-        height: 2px;
-        border-radius: 1px;
-        background: AppState.effective-dark-mode ? #f78166 : #fd8c73;
-    }
-
-    tab-touch := TouchArea {
-        width: 100%;
-        height: 100%;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-export component WorkflowPrOverview inherits Rectangle {
-    in property <bool> enabled: false;
-    in property <bool> loading: false;
-    in property <bool> failed: false;
-    in property <string> fat-count: "-";
-    in property <string> uat-count: "-";
-    in property <string> prod-count: "-";
-    height: root.enabled ? 74px : 0px;
-
-    if root.enabled: Rectangle {
-        width: parent.width;
-        height: 74px;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-        background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
-
-        VerticalLayout {
-            x: 12px;
-            y: 10px;
-            width: parent.width - 24px;
-            spacing: 8px;
-
-            MaterialText {
-                text: root.loading ? "Loading pull request counts…" : (root.failed ? "Counts unavailable" : "Open pull requests");
-                font_size: 12px;
-                font_weight: 600;
-                color: root.failed
-                    ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
-                    : (AppState.effective-dark-mode ? #f0f6fc : #1f2328);
-            }
-
-            HorizontalLayout {
-                spacing: 14px;
-            }
-        }
-    }
-}
-
-// Primer-style Label chip for Provider / Repository ID (GitHub Label look).
-component WorkflowMetaLabel inherits Rectangle {
-    in property <string> text: "";
-    private property <length> chip-width: max(28px, label-measure.preferred-width + 14px);
-
-    width: root.chip-width;
-    height: 20px;
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: AppState.effective-dark-mode ? #3d444d : #d0d7de;
-    background: AppState.effective-dark-mode ? #21262d : #f6f8fa;
-    vertical-stretch: 0;
-
-    label-measure := Text {
-        visible: false;
-        text: root.text;
-        font-size: 12px;
-        font-weight: 500;
-        wrap: no-wrap;
-    }
-
-    // Keep the compact label centered within its nominal line box.
-    Text {
-        x: 0px;
-        y: (parent.height - self.height) / 2;
-        width: parent.width;
-        height: 18px;
-        text: root.text;
-        font-size: 12px;
-        font-weight: 500;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-}
-
-// GitHub repo-header style identity: title + alias + labels, then remote/local paths.
-component WorkflowProjectDetails inherits Rectangle {
-    in property <string> project-name: "";
-    in property <string> project-alias: "";
-    in property <string> project-local-repo: "";
-    in property <string> project-remote-repo: "";
-    in property <string> repo-type: "";
-    in property <string> repo-project-id: "";
-    in property <image> project-logo-image;
-    // GitHub Desktop wording: Show in Finder / Explorer / file manager.
-    in property <string> open-local-folder-tooltip: "Show in file manager";
-    callback copy-remote(string) -> bool;
-    callback open-local(string);
-
-    // Compact overflow open state is shared with Workflow so the ActionMenu can
-    // mount on the shell above the tab row (header-local popups are covered).
-    in-out property <bool> repository-details-open: false;
-    private property <bool> compact: root.width < 720px;
-    private property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-    private property <color> canvas-subtle: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
-    private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
-    private property <string> display-name: root.project-name == "" ? "Untitled project" : root.project-name;
-    private property <bool> has-alias: root.project-alias != "";
-    private property <bool> has-remote: root.project-remote-repo != "";
-    private property <bool> has-local: root.project-local-repo != "";
-    private property <string> display-remote: root.has-remote
-        ? root.project-remote-repo
-        : "No remote URL";
-    private property <string> display-local: root.has-local
-        ? root.project-local-repo
-        : "No local path";
-    private property <string> provider-label:
-        root.repo-type == "github" ? "GitHub"
-            : (root.repo-type == "gitlab" ? "GitLab"
-                : (root.repo-type == "gitee" ? "Gitee"
-                    : (root.repo-type == "" ? "Not configured" : root.repo-type)));
-    private property <bool> has-repo-id: root.repo-project-id != "";
-    private property <string> id-label: root.has-repo-id ? ("ID " + root.repo-project-id) : "ID —";
-
-    // Content metrics for a compact first-line identity and auto-sized paths.
-    name-measure := Text {
-        visible: false;
-        text: root.display-name;
-        font-size: 20px;
-        font-weight: 600;
-        wrap: no-wrap;
-    }
-    alias-measure := Text {
-        visible: false;
-        text: root.project-alias;
-        font-size: 16px;
-        wrap: no-wrap;
-    }
-    provider-measure := Text {
-        visible: false;
-        text: root.provider-label;
-        font-size: 12px;
-        font-weight: 500;
-        wrap: no-wrap;
-    }
-    id-measure := Text {
-        visible: false;
-        text: root.id-label;
-        font-size: 12px;
-        font-weight: 500;
-        wrap: no-wrap;
-    }
-    remote-measure := Text {
-        visible: false;
-        text: root.display-remote;
-        font-size: 12px;
-        wrap: no-wrap;
-    }
-    local-measure := Text {
-        visible: false;
-        text: root.display-local;
-        font-size: 12px;
-        wrap: no-wrap;
-    }
-    private property <length> alias-width: root.has-alias
-        ? max(40px, alias-measure.preferred-width)
-        : 0px;
-    private property <length> remote-ideal-width: remote-measure.preferred-width
-        + (root.has-remote ? 36px : 0px);
-    private property <length> local-ideal-width: local-measure.preferred-width
-        + (root.has-local ? 36px : 0px);
-    private property <length> path-min-width: 80px;
-    private property <length> paths-gap: 16px;
-    private property <length> meta-left: 16px + 32px + 12px;
-    private property <length> first-line-width: max(
-        0px,
-        root.width - root.meta-left - (root.compact ? 52px : 16px),
-    );
-    private property <length> provider-label-width: max(28px, provider-measure.preferred-width + 14px);
-    private property <length> id-label-width: max(28px, id-measure.preferred-width + 14px);
-    private property <length> labels-width: root.provider-label-width + 8px + root.id-label-width;
-    private property <length> alias-gap: root.has-alias ? 8px : 0px;
-    private property <length> labels-gap: 12px;
-    // Preserve the complete alias whenever the row can fit by shrinking the
-    // project name first. Only very narrow windows elide the alias.
-    private property <length> name-width: min(
-        name-measure.preferred-width,
-        max(80px, root.first-line-width - root.alias-gap - root.alias-width - root.labels-gap - root.labels-width),
-    );
-    private property <length> alias-display-width: root.has-alias
-        ? min(
-            root.alias-width,
-            max(0px, root.first-line-width - root.name-width - root.alias-gap - root.labels-gap - root.labels-width),
-        )
-        : 0px;
-    private property <length> labels-left: root.meta-left + root.name-width
-        + (root.alias-display-width > 0px ? root.alias-gap + root.alias-display-width : 0px)
-        + root.labels-gap;
-    // Shared title band with the logo (y=8, h=32). Position text by preferred
-    // height — Text vertical-alignment inside a taller box still paints high.
-    private property <length> title-row-y: 8px;
-    private property <length> title-row-height: 32px;
-    private property <length> name-y: root.title-row-y
-        + (root.title-row-height - name-measure.preferred-height) / 2;
-    private property <length> alias-y: root.title-row-y
-        + (root.title-row-height - alias-measure.preferred-height) / 2;
-    private property <length> chip-y: root.title-row-y
-        + (root.title-row-height - 20px) / 2;
-    private property <length> paths-available: max(0px, root.width - root.meta-left - 16px);
-    // Wide headers hug each path's ideal width (same density as the original
-    // remote-only row). Only when both ideals no longer fit do the fields
-    // share the remaining width and elide. Compact headers move details into
-    // a trailing kebab overlay instead of wrapping a second path row.
-    private property <bool> paths-fit: !root.has-local
-        || (root.remote-ideal-width + root.paths-gap + root.local-ideal-width
-            <= root.paths-available);
-    private property <length> remote-width: !root.has-local
-        ? min(root.paths-available, max(root.path-min-width, root.remote-ideal-width))
-        : (root.paths-fit
-            ? root.remote-ideal-width
-            : max(root.path-min-width, (root.paths-available - root.paths-gap) / 2));
-    private property <length> local-width: !root.has-local
-        ? 0px
-        : (root.paths-fit
-            ? root.local-ideal-width
-            : max(root.path-min-width, root.paths-available - root.remote-width - root.paths-gap));
-    private property <length> row2-y: 8px + 32px + 6px;
-    private property <length> local-x: root.meta-left + root.remote-width + root.paths-gap;
-    private property <length> local-y: root.row2-y;
-
-    height: root.compact ? 52px : 86px;
-    background: root.canvas-default;
-    clip: false;
-    // Stay above the shell dismiss scrim while open so the kebab remains
-    // clickable; the ActionMenu itself mounts later on the Workflow shell.
-    z: root.repository-details-open ? 301 : 20;
-
-    changed compact => {
-        if !root.compact {
-            root.repository-details-open = false;
-        }
-    }
-
-    // Logo
-    Rectangle {
-        x: 16px;
-        y: 8px;
-        width: 32px;
-        height: 32px;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: root.border-default;
-        background: root.canvas-default;
-        clip: true;
-
-        Image {
-            x: 4px;
-            y: 4px;
-            width: 24px;
-            height: 24px;
-            source: root.project-logo-image;
-            image-fit: contain;
-        }
-    }
-
-    // Logo / name / alias / chips share the same 32px mid-line.
-    Text {
-        x: root.meta-left;
-        y: root.name-y;
-        width: root.name-width;
-        height: name-measure.preferred-height;
-        text: root.display-name;
-        font-size: 20px;
-        font-weight: 600;
-        color: root.fg-default;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    if root.alias-display-width > 0px: Text {
-        x: root.meta-left + root.name-width + root.alias-gap;
-        y: root.alias-y;
-        width: root.alias-display-width;
-        height: alias-measure.preferred-height;
-        text: root.project-alias;
-        font-size: 16px;
-        color: root.fg-muted;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    WorkflowMetaLabel {
-        x: root.labels-left;
-        y: root.chip-y;
-        text: root.provider-label;
-    }
-
-    WorkflowMetaLabel {
-        x: root.labels-left + root.provider-label-width + 8px;
-        y: root.chip-y;
-        text: root.id-label;
-    }
-
-    // Remote URL: plain text with a copy action, without input-like chrome.
-    if !root.compact: remote-field := Rectangle {
-        x: root.meta-left;
-        y: root.row2-y;
-        width: root.remote-width;
-        height: 32px;
-        border-width: 0px;
-        background: transparent;
-        clip: false;
-
-        Text {
-            x: 0px;
-            y: 0px;
-            width: parent.width - (root.has-remote ? 36px : 0px);
-            height: parent.height;
-            text: root.display-remote;
-            font-size: 12px;
-            color: root.has-remote ? root.fg-default : root.fg-muted;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-
-        if root.has-remote: GitHubCopyButton {
-            x: parent.width - 32px;
-            y: 0px;
-            tooltip-text: "Copy remote URL";
-            tooltip-align-right: true;
-            copy-requested => {
-                root.copy-remote(root.project-remote-repo)
-            }
-        }
-    }
-
-    // Local path: same IconButton geometry as the remote copy control; opens the
-    // OS file manager (GitHub Desktop “Show in Finder/Explorer” pattern).
-    if !root.compact && root.has-local: Rectangle {
-        x: root.local-x;
-        y: root.local-y;
-        width: root.local-width;
-        height: 32px;
-        border-width: 0px;
-        background: transparent;
-        clip: false;
-
-        Text {
-            x: 0px;
-            y: 0px;
-            width: parent.width - 36px;
-            height: parent.height;
-            text: root.display-local;
-            font-size: 12px;
-            color: root.fg-default;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-
-        Rectangle {
-            x: parent.width - 28px;
-            y: 2px;
-            width: 28px;
-            height: 28px;
-            border-radius: 6px;
-            background: open-touch.has-hover
-                ? (AppState.effective-dark-mode ? #30363d : #eaeef2)
-                : transparent;
-            clip: false;
-
-            Image {
-                x: 6px;
-                y: 6px;
-                width: 16px;
-                height: 16px;
-                source: @image-url("../../assets/icons/octicon-file-directory-16.svg");
-                image-fit: contain;
-                colorize: root.fg-muted;
-            }
-
-            open-touch := TouchArea {
-                width: 100%;
-                height: 100%;
-                mouse-cursor: pointer;
-                clicked => {
-                    root.open-local(root.project-local-repo);
-                }
-            }
-
-            if open-touch.has-hover: GitHubTooltip {
-                x: parent.width - self.width;
-                y: -self.height - 4px;
-                z: 10000;
-                text: root.open-local-folder-tooltip;
-            }
-        }
-    }
-
-    // GitHub compact repository header: keep identity on one row. Paths and
-    // actions open from a trailing invisible IconButton; the ActionMenu is
-    // mounted on the Workflow shell so tabs cannot cover it.
-    if root.compact: Rectangle {
-        x: parent.width - 44px;
-        y: 8px;
-        width: 32px;
-        height: 32px;
-        z: 2;
-        border-radius: 6px;
-        border-width: 0px;
-        background: compact-details-touch.pressed
-            ? (AppState.effective-dark-mode ? #6e768166 : #818b9833)
-            : (compact-details-touch.has-hover || root.repository-details-open
-                ? (AppState.effective-dark-mode ? #6e768133 : #818b981f)
-                : transparent);
-
-        Image {
-            x: 8px;
-            y: 8px;
-            width: 16px;
-            height: 16px;
-            source: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
-            image-fit: contain;
-            colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-        }
-
-        compact-details-touch := TouchArea {
-            mouse-cursor: pointer;
-            clicked => {
-                root.repository-details-open = !root.repository-details-open;
-            }
-        }
-
-        if compact-details-touch.has-hover && !root.repository-details-open: GitHubTooltip {
-            x: parent.width - self.width;
-            y: -self.height - 4px;
-            z: 10000;
-            text: "Repository details";
-        }
-    }
-
-    Rectangle {
-        y: parent.height - 1px;
-        width: parent.width;
-        height: 1px;
-        background: root.border-default;
-    }
-}
-
-export component Workflow inherits PageView {
+export component GitHubWorkflowPage inherits GitHubPageView {
     callback branch-submit(string, string, bool);
     callback tag-change-mode(string);
     callback tag-select-version-mode(string);
@@ -592,8 +20,6 @@ export component Workflow inherits PageView {
     callback tag-remove(string);
     callback tag-open-add();
     callback tag-open-remove();
-    callback tag-stop();
-    callback tag-load-step-log(int);
     callback pr-list-state-change(string);
     callback pr-list-page-change(int);
     callback pr-list-review-filter-change(string);
@@ -616,11 +42,7 @@ export component Workflow inherits PageView {
     in property <bool> tag-add-initializing: false;
     in property <bool> tag-remove-initializing: false;
     in property <bool> tag-running: false;
-    in property <string> tag-job-status: "queued";
-    in property <string> tag-job-conclusion: "";
-    in property <string> tag-job-total-duration: "";
-    in property <bool> tag-loading-animated: true;
-    in property <[JobStepItem]> tag-steps: [];
+    in property <bool> tag-has-run: false;
     in property <string> project-id: "default";
     in property <string> project-name: "Default Project";
     in property <string> project-alias: "";
@@ -669,11 +91,11 @@ export component Workflow inherits PageView {
     in-out property <bool> repository-details-open: false;
     private property <length> workflow-content-width: root.width - 32px;
     private property <bool> compact-workflow-layout: root.workflow-content-width < 860px;
-    private property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-    private property <color> canvas-subtle: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
-    private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    private property <color> canvas-default: GitHubTheme.canvas-default;
+    private property <color> canvas-subtle: GitHubTheme.canvas-subtle;
+    private property <color> border-default: GitHubTheme.border-default;
+    private property <color> fg-default: GitHubTheme.fg-default;
+    private property <color> fg-muted: GitHubTheme.fg-muted;
     private property <bool> has-remote: root.project-remote-repo != "";
     private property <bool> has-local: root.project-local-repo != "";
     private property <string> display-remote: root.has-remote
@@ -699,11 +121,14 @@ export component Workflow inherits PageView {
             && root.pr-list-page-count > 1)
             ? 56px
             : 0px);
-    private property <length> selected-panel-height: root.selected-flow == 2
-        ? max(620px, 16px + root.pr-flow-content-height)
-        : (root.selected-flow == 3
-            ? max(620px, 16px + tag-flow.height + 24px)
-            : 620px);
+    private property <length> selected-panel-height:
+        root.selected-flow == 0
+            ? max(620px, 16px + branch-flow.height + 24px)
+        : root.selected-flow == 1
+            ? max(620px, 16px + cd-flow.height + 24px)
+        : root.selected-flow == 2
+            ? max(620px, 16px + root.pr-flow-content-height)
+        : max(620px, 16px + tag-flow.height + 24px);
     private property <length> body-top: root.project-header-height + root.workflow-nav-height;
 
     workflow-shell := Rectangle {
@@ -717,7 +142,7 @@ export component Workflow inherits PageView {
         clip: false;
 
         // Full-width identity header (GitHub repo page pattern).
-        project-details := WorkflowProjectDetails {
+        project-details := GitHubWorkflowProjectDetails {
             y: 0px;
             width: parent.width;
             project-name: root.project-name;
@@ -757,30 +182,28 @@ export component Workflow inherits PageView {
                 spacing: 4px;
                 alignment: start;
 
-                WorkflowWideTab {
+                GitHubUnderlineNavItem {
                     label: "Pull requests";
                     icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
                     selected: root.selected-flow == 2;
                     clicked => { root.selected-flow = 2; }
                 }
-                WorkflowWideTab {
+                GitHubUnderlineNavItem {
                     label: "Tags";
                     icon: @image-url("../../assets/icons/octicon-stack-16.svg");
                     selected: root.selected-flow == 3;
                     clicked => { root.selected-flow = 3; }
                 }
-                WorkflowWideTab {
+                GitHubUnderlineNavItem {
                     label: "Branch";
                     icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
                     selected: root.selected-flow == 0;
-                    available: false;
                     clicked => { root.selected-flow = 0; }
                 }
-                WorkflowWideTab {
+                GitHubUnderlineNavItem {
                     label: "CD";
                     icon: @image-url("../../assets/icons/octicon-repo-push-16.svg");
                     selected: root.selected-flow == 1;
-                    available: false;
                     clicked => { root.selected-flow = 1; }
                 }
             }
@@ -793,22 +216,41 @@ export component Workflow inherits PageView {
             height: root.selected-panel-height;
             background: root.canvas-default;
 
-            if root.selected-flow == 0: WorkflowComingSoon {
+            branch-flow := GitHubBranchFlow {
+                visible: root.selected-flow == 0;
                 x: root.compact-workflow-layout ? 16px : 24px;
                 y: 16px;
                 width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
-                height: parent.height - 40px;
-                feature-name: "Branch";
-            }
-            if root.selected-flow == 1: WorkflowComingSoon {
-                x: root.compact-workflow-layout ? 16px : 24px;
-                y: 16px;
-                width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
-                height: parent.height - 40px;
-                feature-name: "CD";
+                result: root.branch-result;
+                submit(source, target, recreate-remote) => {
+                    root.branch-submit(source, target, recreate-remote);
+                }
             }
 
-            if root.selected-flow == 2: PrFlow {
+            cd-flow := GitHubCdFlow {
+                visible: root.selected-flow == 1;
+                x: root.compact-workflow-layout ? 16px : 24px;
+                y: 16px;
+                width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
+                running: root.cd-running;
+                summary: root.cd-summary;
+                build-status: root.cd-build-status;
+                build-detail: root.cd-build-detail;
+                test-status: root.cd-test-status;
+                test-detail: root.cd-test-detail;
+                deploy-status: root.cd-deploy-status;
+                deploy-detail: root.cd-deploy-detail;
+                verify-status: root.cd-verify-status;
+                verify-detail: root.cd-verify-detail;
+                start-deploy(environment-name, release-name, commit-hash) => {
+                    root.cd-start(environment-name, release-name, commit-hash);
+                }
+                request-rollback(commit-hash) => {
+                    root.cd-rollback(commit-hash);
+                }
+            }
+
+            if root.selected-flow == 2: GitHubPullRequestFlow {
                 x: root.compact-workflow-layout ? 16px : 24px;
                 y: 16px;
                 width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
@@ -845,7 +287,7 @@ export component Workflow inherits PageView {
                 }
             }
 
-            tag-flow := TagFlow {
+            tag-flow := GitHubTagFlow {
                 visible: root.selected-flow == 3;
                 x: root.compact-workflow-layout ? 16px : 24px;
                 y: 16px;
@@ -860,20 +302,15 @@ export component Workflow inherits PageView {
                 add-initializing: root.tag-add-initializing;
                 remove-initializing: root.tag-remove-initializing;
                 running: root.tag-running;
-                job-status: root.tag-job-status;
-                job-conclusion: root.tag-job-conclusion;
-                job-total-duration: root.tag-job-total-duration;
-                loading-animated: root.tag-loading-animated;
+                has-run: root.tag-has-run;
                 result: root.tag-result;
-                steps: root.tag-steps;
                 change-mode(mode) => { root.tag-change-mode(mode); }
                 select-version-mode(mode) => { root.tag-select-version-mode(mode); }
                 run(version, description) => { root.tag-run(version, description); }
                 remove-tag(tag) => { root.tag-remove(tag); }
                 open-add-tab => { root.tag-open-add(); }
                 open-remove-tab => { root.tag-open-remove(); }
-                stop => { root.tag-stop(); }
-                load-step-log(index) => { root.tag-load-step-log(index); }
+                view-run => { root.navigate(Route.JobRun); }
             }
         }
 
@@ -902,13 +339,15 @@ export component Workflow inherits PageView {
             viewport-y: 0px;
             viewport-width: root.width;
             viewport-height: root.height;
-            anchor-x: root.width - 44px;
+            // Match the compact repository header's 16px trailing gutter.
+            anchor-x: root.width - 48px;
             anchor-y: 8px;
             anchor-width: 32px;
             anchor-height: 32px;
             menu-width: 320px;
             content-height: 140px;
             align: "end";
+            dismiss-requested => { root.repository-details-open = false; }
 
             Rectangle {
                 width: parent.width;
@@ -953,7 +392,7 @@ export component Workflow inherits PageView {
                 y: 68px;
                 width: parent.width;
                 height: 1px;
-                background: AppState.effective-dark-mode ? #3d444d : #d8dee4;
+                background: GitHubTheme.border-muted;
             }
 
                 Text {
@@ -987,7 +426,7 @@ export component Workflow inherits PageView {
                 height: 28px;
                 border-radius: 6px;
                 background: shell-open-touch.has-hover
-                    ? (AppState.effective-dark-mode ? #30363d : #eaeef2)
+                    ? (GitHubTheme.control-muted-hover)
                     : transparent;
                 Image {
                     x: 6px;

@@ -1,7 +1,6 @@
+use crate::MainWindow;
+use crate::jobs::{JobRunDescriptor, JobSnapshot, JobStepData, JobStepDefinition, apply_job_run};
 use crate::workflow::cd::{CdSnapshot, apply_cd_snapshot, default_cd_snapshot};
-use crate::workflow::jobs::{JobConclusion, JobSnapshot, JobStepData, JobStepDefinition};
-use crate::{JobStepItem, MainWindow};
-use slint::{ModelRc, VecModel};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -99,6 +98,7 @@ pub(crate) struct WorkflowViewState {
     pub(crate) tag_remove_request_seq: u64,
     pub(crate) tag_running: bool,
     pub(crate) tag_job: JobSnapshot,
+    pub(crate) job_run: JobRunDescriptor,
     pub(crate) cd: CdSnapshot,
 }
 
@@ -121,8 +121,16 @@ impl Default for WorkflowViewState {
             tag_remove_request_seq: 0,
             tag_running: false,
             tag_job: JobSnapshot::queued(default_tag_steps()),
+            job_run: JobRunDescriptor::default(),
             cd: default_cd_snapshot(),
         }
+    }
+}
+
+impl WorkflowViewState {
+    pub(crate) fn reset_tag_job(&mut self, steps: Vec<JobStepData>) {
+        self.tag_job = JobSnapshot::queued(steps);
+        self.job_run = JobRunDescriptor::default();
     }
 }
 
@@ -198,17 +206,13 @@ pub(crate) fn initialize_ui(
     ui.set_workflow_tag_add_initializing(state.tag_add_initializing);
     ui.set_workflow_tag_remove_initializing(state.tag_remove_initializing);
     ui.set_workflow_tag_running(state.tag_running);
-    let job = &state.tag_job;
-    ui.set_workflow_tag_job_status(job.status.as_str().into());
-    ui.set_workflow_tag_job_conclusion(
-        job.conclusion
-            .map(JobConclusion::as_str)
-            .unwrap_or_default()
-            .into(),
+    apply_job_run(
+        ui,
+        &state.job_run,
+        &state.tag_job,
+        &state.tag_result,
+        state.tag_running,
     );
-    ui.set_workflow_tag_job_total_duration(job.total_duration.clone().into());
-    let steps: Vec<JobStepItem> = job.steps.iter().map(JobStepData::to_slint).collect();
-    ui.set_workflow_tag_steps(ModelRc::new(VecModel::from(steps)));
     apply_cd_snapshot(ui, &state.cd);
 }
 
@@ -297,7 +301,7 @@ fn queued_step(name: &str, command: &[&str], detail: &str) -> JobStepData {
 #[cfg(test)]
 mod tests {
     use super::{WorkflowViewState, clear_heavy_view_state};
-    use crate::workflow::jobs::{JobConclusion, JobStepStatus};
+    use crate::jobs::{JobConclusion, JobStepStatus};
 
     #[test]
     fn route_cleanup_preserves_tag_execution_history() {
@@ -308,6 +312,8 @@ mod tests {
         view.tag_job.steps[0].conclusion = Some(JobConclusion::Success);
         view.tag_job.steps[0].log = "preserved log".into();
         view.tag_job.steps[0].duration = "1s".into();
+        view.job_run.active = true;
+        view.job_run.source = "tag".to_string();
 
         clear_heavy_view_state(&mut view);
 
@@ -320,5 +326,19 @@ mod tests {
         );
         assert_eq!(view.tag_job.steps[0].log.as_str(), "preserved log");
         assert_eq!(view.tag_job.steps[0].duration.as_str(), "1s");
+        assert!(view.job_run.active);
+        assert_eq!(view.job_run.source, "tag");
+    }
+
+    #[test]
+    fn resetting_tag_plan_clears_the_published_job_run() {
+        let mut view = WorkflowViewState::default();
+        view.job_run.active = true;
+        view.job_run.source = "tag".to_string();
+
+        view.reset_tag_job(super::default_tag_steps());
+
+        assert!(!view.job_run.active);
+        assert!(view.job_run.source.is_empty());
     }
 }

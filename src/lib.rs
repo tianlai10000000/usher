@@ -68,6 +68,7 @@ use logger::{setup_debug_logger, setup_tracing_logger};
 mod router;
 use router::{Router, route_for_navigation_index};
 
+mod jobs;
 mod shutdown;
 mod single_instance;
 mod workflow;
@@ -614,6 +615,9 @@ fn ui() -> Result<MainWindow> {
             }
         }
     });
+
+    // ========= Application-wide Job Run ========= //
+    jobs::setup_job_run(&app);
 
     // ========= Workflow ========= //
     setup_workflow(&app);

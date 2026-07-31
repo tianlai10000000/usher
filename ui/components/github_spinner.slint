@@ -1,0 +1,29 @@
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+
+// Primer Spinner is a visual, indeterminate progress indicator. Callers must
+// also keep a visible loading label or status message; the spinner is never
+// the only loading communication.
+// Reference: https://primer.style/product/components/spinner/
+export component GitHubSpinner inherits Rectangle {
+    in property <length> spinner-size: GitHubMetrics.icon-medium;
+    in property <color> foreground: GitHubTheme.fg-muted;
+    in property <bool> spinning: true;
+
+    width: root.spinner-size;
+    height: root.spinner-size;
+    background: transparent;
+    accessible-role: progress-indicator;
+    accessible-label: "Loading";
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("../assets/icons/github-spinner-16.svg");
+        image-fit: contain;
+        colorize: root.foreground;
+        transform-rotation: root.spinning
+            ? mod(animation-tick(), 1s) / 1s * 360deg
+            : 0deg;
+        transform-origin: { x: self.width / 2, y: self.height / 2 };
+    }
+}

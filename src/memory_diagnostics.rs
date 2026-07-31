@@ -195,11 +195,11 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
         }
     }
 
-    let tag_steps = ui.get_workflow_tag_steps();
-    let mut tag_step_text_bytes = 0usize;
-    for index in 0..tag_steps.row_count() {
-        if let Some(step) = tag_steps.row_data(index) {
-            tag_step_text_bytes = tag_step_text_bytes
+    let job_steps = ui.get_job_run_steps();
+    let mut job_step_text_bytes = 0usize;
+    for index in 0..job_steps.row_count() {
+        if let Some(step) = job_steps.row_data(index) {
+            job_step_text_bytes = job_step_text_bytes
                 .saturating_add(step.name.len())
                 .saturating_add(step.status.len())
                 .saturating_add(step.detail.len())
@@ -223,7 +223,7 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
     }
 
     log::info!(
-        "[Memory][UI Models] route={:?} chat_rows={} chat_blocks={} chat_inline_lines={} chat_spans={} chat_text_bytes={} project_rows={} project_tags={} project_text_bytes={} pr_list_rows={} pr_list_text_bytes={} pr_review_files={} pr_review_tree_items={} pr_review_extension_filters={} pr_review_lines={} tag_steps={} tag_step_text_bytes={} terminal_lines={} terminal_spans={} terminal_text_bytes={} terminal_output_bytes={}",
+        "[Memory][UI Models] route={:?} chat_rows={} chat_blocks={} chat_inline_lines={} chat_spans={} chat_text_bytes={} project_rows={} project_tags={} project_text_bytes={} pr_list_rows={} pr_list_text_bytes={} pr_review_files={} pr_review_tree_items={} pr_review_extension_filters={} pr_review_lines={} job_steps={} job_step_text_bytes={} terminal_lines={} terminal_spans={} terminal_text_bytes={} terminal_output_bytes={}",
         route,
         chat.row_count(),
         chat_blocks,
@@ -239,8 +239,8 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
         ui.get_workflow_pr_review_tree_items().row_count(),
         ui.get_workflow_pr_review_extension_filters().row_count(),
         ui.get_workflow_pr_review_lines().row_count(),
-        tag_steps.row_count(),
-        tag_step_text_bytes,
+        job_steps.row_count(),
+        job_step_text_bytes,
         terminal_lines.row_count(),
         terminal_spans,
         terminal_text_bytes,

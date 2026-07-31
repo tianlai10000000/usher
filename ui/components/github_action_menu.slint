@@ -1,9 +1,9 @@
-import { AppState } from "../state/app_state.slint";
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 
 // Primer ActionMenu is an ActionList inside AnchoredOverlay. This shell owns
 // the shared Overlay surface and collision-aware placement. Coordinates are in
 // the component's parent space so callers can anchor from any page layer.
-export component GitHubActionMenu inherits Rectangle {
+export component GitHubActionMenu inherits FocusScope {
     in property <bool> open: false;
     in property <length> viewport-x: 0px;
     in property <length> viewport-y: 0px;
@@ -21,6 +21,8 @@ export component GitHubActionMenu inherits Rectangle {
     in property <string> side: "auto";
     in property <length> anchor-gap: 4px;
     in property <length> viewport-margin: 8px;
+    in property <bool> dismiss-on-escape: true;
+    callback dismiss-requested();
     out property <bool> opens-above:
         root.side == "top"
         || (root.side == "auto"
@@ -45,10 +47,31 @@ export component GitHubActionMenu inherits Rectangle {
                 : root.anchor-x);
     private property <length> scroll-offset-y: 0px;
 
+    accessible-role: list;
+
     changed open => {
         if root.open {
             root.scroll-offset-y = 0px;
+            root.focus();
+        } else if root.has-focus {
+            root.clear-focus();
         }
+    }
+
+    capture-key-pressed(event) => {
+        if root.open && root.dismiss-on-escape && event.text == Key.Escape {
+            root.dismiss-requested();
+            return accept;
+        }
+        return reject;
+    }
+
+    key-pressed(event) => {
+        if root.open && root.dismiss-on-escape && event.text == Key.Escape {
+            root.dismiss-requested();
+            return accept;
+        }
+        return reject;
     }
 
     visible: root.open && root.width > 0px && root.height > 0px;
@@ -62,17 +85,16 @@ export component GitHubActionMenu inherits Rectangle {
     width: root.desired-width;
     height: min(root.desired-height, root.opens-above ? root.space-above : root.space-below);
     z: 10000;
-    clip: false;
 
     menu-surface := Rectangle {
         width: parent.width;
         height: parent.height;
         border-radius: 12px;
         border-width: 1px;
-        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-        background: AppState.effective-dark-mode ? #151b23 : #ffffff;
+        border-color: GitHubTheme.border-default;
+        background: GitHubTheme.canvas-overlay;
         drop-shadow-blur: 18px;
-        drop-shadow-color: AppState.effective-dark-mode ? #00000080 : #1f232826;
+        drop-shadow-color: GitHubTheme.shadow-floating-medium;
         drop-shadow-offset-y: 6px;
         clip: true;
 
@@ -105,7 +127,171 @@ export component GitHubActionMenu inherits Rectangle {
             width: 5px;
             height: max(24px, (parent.height - 4px) * parent.height / root.content-height);
             border-radius: 3px;
-            background: AppState.effective-dark-mode ? #9198a180 : #59636e66;
+            background: GitHubTheme.drag-handle;
         }
+    }
+}
+
+// Shared ActionList row for ActionMenu content. Feature menus provide their
+// own model/state but reuse this geometry and interaction contract.
+export component GitHubActionListItem inherits FocusScope {
+    in property <string> text;
+    in property <string> description: "";
+    in property <string> trailing-text: "";
+    in property <image> icon;
+    in property <bool> selected: false;
+    in property <bool> item-enabled: true;
+    in property <bool> danger: false;
+    in property <length> bottom-padding: 0px;
+    callback activated();
+
+    private property <bool> has-icon:
+        root.icon.width > 0 && root.icon.height > 0;
+    private property <bool> keyboard-focus-visible: false;
+    private property <length> row-height:
+        (root.description == "" ? GitHubMetrics.size-32 : GitHubMetrics.size-48)
+        + root.bottom-padding;
+    private property <bool> has-leading-visual: root.selected || root.has-icon;
+    private property <length> content-x:
+        root.has-leading-visual ? GitHubMetrics.size-32 : GitHubMetrics.size-8;
+
+    width: 100%;
+    height: root.row-height;
+    enabled: root.item-enabled;
+    accessible-role: button;
+    accessible-enabled: root.item-enabled;
+    accessible-label: root.description == ""
+        ? root.text
+        : root.text + ". " + root.description;
+    accessible-checkable: root.selected;
+    accessible-checked: root.selected;
+
+    key-pressed(event) => {
+        root.keyboard-focus-visible = true;
+        if (root.item-enabled
+                && (event.text == Key.Return || event.text == " ")) {
+            root.activated();
+            return accept;
+        }
+        return reject;
+    }
+    focus-gained(reason) => {
+        root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+    }
+    focus-lost => {
+        root.keyboard-focus-visible = false;
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: GitHubMetrics.radius-medium;
+        background: item-touch.pressed
+            ? GitHubTheme.control-transparent-active
+            : (root.has-focus && root.keyboard-focus-visible
+                ? GitHubTheme.accent-subtle
+                : (item-touch.has-hover && root.item-enabled
+                    ? (root.danger
+                        ? GitHubTheme.danger-muted
+                        : GitHubTheme.control-transparent-hover)
+                    : (root.selected
+                        ? GitHubTheme.control-transparent-selected
+                        : transparent)));
+    }
+
+    if root.selected: Rectangle {
+        x: -GitHubMetrics.size-4;
+        y: GitHubMetrics.size-8;
+        width: GitHubMetrics.size-4;
+        height: parent.height - GitHubMetrics.size-16;
+        border-radius: GitHubMetrics.radius-medium;
+        background: GitHubTheme.accent-emphasis;
+    }
+
+    if root.selected: Image {
+        x: GitHubMetrics.size-8;
+        y: (parent.height - self.height) / 2;
+        width: GitHubMetrics.icon-medium;
+        height: GitHubMetrics.icon-medium;
+        source: @image-url("../assets/icons/octicon-check-16.svg");
+        colorize: root.item-enabled
+            ? GitHubTheme.accent-fg
+            : GitHubTheme.control-disabled-fg;
+    }
+
+    if !root.selected && root.has-icon: Image {
+        x: GitHubMetrics.size-8;
+        y: (parent.height - self.height) / 2;
+        width: GitHubMetrics.icon-medium;
+        height: GitHubMetrics.icon-medium;
+        source: root.icon;
+        colorize: !root.item-enabled
+            ? GitHubTheme.control-disabled-fg
+            : (root.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-muted);
+    }
+
+    Text {
+        x: root.content-x;
+        y: root.description == "" ? 0px : GitHubMetrics.size-6;
+        width: parent.width - self.x - GitHubMetrics.size-8
+            - (root.trailing-text == "" ? 0px : GitHubMetrics.size-64);
+        height: root.description == "" ? parent.height : GitHubMetrics.size-20;
+        text: root.text;
+        font-size: GitHubMetrics.text-medium;
+        font-weight: 400;
+        color: !root.item-enabled
+            ? GitHubTheme.control-disabled-fg
+            : (root.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-default);
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.description != "": Text {
+        x: root.content-x;
+        y: GitHubMetrics.size-20 + GitHubMetrics.size-6;
+        width: parent.width - self.x - GitHubMetrics.size-8;
+        height: GitHubMetrics.size-16;
+        text: root.description;
+        font-size: GitHubMetrics.text-small;
+        color: root.item-enabled
+            ? GitHubTheme.fg-muted
+            : GitHubTheme.control-disabled-fg;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.trailing-text != "": Text {
+        x: parent.width - GitHubMetrics.size-64;
+        width: GitHubMetrics.size-48;
+        height: parent.height;
+        text: root.trailing-text;
+        font-size: GitHubMetrics.text-small;
+        color: root.item-enabled
+            ? GitHubTheme.fg-muted
+            : GitHubTheme.control-disabled-fg;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    item-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.item-enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => {
+            root.keyboard-focus-visible = false;
+            root.focus();
+            root.activated();
+        }
+    }
+
+    if root.has-focus && root.keyboard-focus-visible: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
     }
 }

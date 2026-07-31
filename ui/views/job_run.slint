@@ -1,0 +1,42 @@
+import { GitHubPageView } from "../components/page/page_view.slint";
+import { GitHubJobRunSurface } from "../components/jobs/github_job_run.slint";
+import { JobStepItem } from "../components/jobs/job.slint";
+import { GitHubMetrics } from "../theme/github_theme.slint";
+
+// Application-level run route. Any feature may provide the active source.
+export component GitHubJobRunPage inherits GitHubPageView {
+    in property <string> run-title: "Workflow run";
+    in property <string> workflow-name: "Workflow";
+    in property <string> context-name: "Usher";
+    in property <string> job-name: "job";
+    in property <string> trigger-detail: "Started manually";
+    in property <string> summary: "";
+    in property <string> execution-status: "queued";
+    in property <string> conclusion: "";
+    in property <string> total-duration: "";
+    in property <[JobStepItem]> steps: [];
+    in property <bool> running: false;
+    in property <bool> animations-enabled: true;
+    callback stop();
+    callback load-step-log(int);
+    private property <length> available-width:
+        max(320px, root.width - GitHubMetrics.size-32);
+
+    GitHubJobRunSurface {
+        width: root.available-width;
+        run-title: root.run-title;
+        workflow-name: root.workflow-name;
+        context-name: root.context-name;
+        job-name: root.job-name;
+        trigger-detail: root.trigger-detail;
+        summary: root.summary;
+        execution-status: root.execution-status;
+        conclusion: root.conclusion;
+        total-duration: root.total-duration;
+        steps: root.steps;
+        running: root.running;
+        animations-enabled: root.animations-enabled;
+        stop => { root.stop(); }
+        load-step-log(index) => { root.load-step-log(index); }
+    }
+}

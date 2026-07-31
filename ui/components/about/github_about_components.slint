@@ -1,0 +1,42 @@
+import { GitHubTheme } from "../../theme/github_theme.slint";
+
+
+export component GitHubAboutDetailRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> last: false;
+
+    width: 100%;
+    height: 48px;
+    background: transparent;
+
+    Text {
+        x: 16px;
+        width: 112px;
+        height: parent.height;
+        text: root.label;
+        font-size: 14px;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+        vertical-alignment: center;
+    }
+
+    Text {
+        x: 136px;
+        width: parent.width - 152px;
+        height: parent.height;
+        text: root.value;
+        font-size: 14px;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if !root.last: Rectangle {
+        x: 0px;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: GitHubTheme.border-default;
+    }
+}

@@ -6,6 +6,24 @@ This specification is the portable contract for the current pull-request capabil
 
 本文是当前 Pull Request 能力的可迁移契约：项目级计数、分页 PR/MR 列表、全窗口审核工作区、diff/源码补全、远端评审、合并与按能力开放的回退命令。
 
+The Slint presentation is application-owned: reusable PR/Review visual
+components live in `ui/components/workflow/` or `ui/components/pr_review/`
+and every visual symbol uses the `GitHub` prefix. The PR collection follows a
+Primer DataTable/Box pattern with ActionMenu filters, shared Button/IconButton
+actions, Blankslate empty/error states, and pagination outside the bordered
+list. The review route keeps public `@material` ListView/ScrollView only as
+replaceable virtualization/scroll behavior; typography, colors, controls,
+TreeView-like hierarchy, diff chrome, and dialogs are owned by GitHub-prefixed
+application components. Vendored Material source is read-only.
+
+Slint 展示层归应用所有：可复用 PR/Review 视觉组件统一位于
+`ui/components/workflow/` 或 `ui/components/pr_review/`，组件符号全部以
+`GitHub` 开头。PR 集合遵循 Primer DataTable/Box 结构，筛选使用
+ActionMenu，操作复用 Button/IconButton，空白与错误状态使用 Blankslate，
+分页位于列表边框外。审核路由仅把公开 `@material` ListView/ScrollView
+作为可替换的虚拟化/滚动行为；排版、颜色、控件、TreeView 式层级、diff
+外壳及 Dialog 均由 GitHub 前缀的应用组件负责。vendored Material 源码只读。
+
 ## Product boundary / 产品边界
 
 The current product supports the following workflow:

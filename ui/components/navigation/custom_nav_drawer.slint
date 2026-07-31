@@ -1,10 +1,4 @@
-// 自定义导航抽屉组件 - 用于替代 Material NavigationDrawer
-// 主要改进：去除顶部标题，减小菜单项高度和图标大小
-
-import {
-    MaterialAnimations, Icon
-} from "@material";
-import { AppState } from "../../state/app_state.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
 // 导航菜单项数据结构
 export struct NavItem {
@@ -15,48 +9,73 @@ export struct NavItem {
 // 自定义导航菜单项模板
 // Primer ActionList/NavList compact geometry: 32px control, 6px radius,
 // 16–20px leading visual, semantic transparent-control interaction colors.
-component NavItemTemplate {
+component GitHubNavigationItem {
     in property <image> icon;
     in property <string> text;
     in property <bool> selected: false;
     in property <int> index;
+    private property <bool> keyboard-focus-visible: false;
     
     callback clicked();
     callback hovered(string, int, bool);
     
     property <bool> has-icon: root.icon.width > 0 && root.icon.height > 0;
-    property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-    property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
-    property <color> control-hover: AppState.effective-dark-mode ? #ffffff1a : #818b981f;
-    property <color> control-selected: AppState.effective-dark-mode ? #ffffff1f : #818b9826;
-    property <color> control-active: AppState.effective-dark-mode ? #ffffff29 : #818b9833;
+    property <color> fg-default: GitHubTheme.fg-default;
+    property <color> fg-muted: GitHubTheme.fg-muted;
+    property <color> control-hover: GitHubTheme.control-transparent-hover;
+    property <color> control-selected: GitHubTheme.control-transparent-selected;
+    property <color> control-active: GitHubTheme.control-transparent-active;
     property <color> item-color: selected ? root.fg-default : root.fg-muted;
     
-    property <length> icon-size: 20px;
-    property <length> item-height: 40px;
+    property <length> icon-size: GitHubMetrics.icon-large;
+    property <length> item-height: GitHubMetrics.size-44;
 
     height: item-height;
-    
+    accessible-role: tab;
+    accessible-enabled: true;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+
+    navigation-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.keyboard-focus-visible = false;
+        }
+    }
+
     Rectangle {
         width: root.width;
         height: root.item-height;
         background: transparent;
 
         hover-bg := Rectangle {
-            width: 32px;
-            height: 32px;
+            width: GitHubMetrics.size-36;
+            height: GitHubMetrics.size-36;
             x: (root.width - self.width) / 2;
             y: (root.height - self.height) / 2;
-            border-radius: 6px;
+            border-radius: GitHubMetrics.radius-medium;
             background: hover-area.pressed
                 ? root.control-active
                 : root.selected
                     ? root.control-selected
                     : hover-area.has-hover ? root.control-hover : transparent;
-            animate background { duration: MaterialAnimations.opacity_duration; easing: MaterialAnimations.opacity_easing; }
+            animate background { duration: 120ms; easing: ease-out; }
         }
 
-        if root.has-icon : Icon {
+        if root.has-icon : Image {
             x: (root.width - self.width) / 2;
             y: (root.height - self.height) / 2;
             width: root.icon-size;
@@ -71,6 +90,10 @@ component NavItemTemplate {
             mouse-cursor: pointer;
 
             clicked => {
+                navigation-focus.focus();
+                // Some platforms report programmatic focus as tab navigation.
+                // Pointer activation must never leave a keyboard focus ring.
+                root.keyboard-focus-visible = false;
                 root.clicked();
             }
 
@@ -78,13 +101,24 @@ component NavItemTemplate {
                 root.hovered(root.text, root.index, self.has-hover);
             }
         }
+
+        if navigation-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+            x: (root.width - GitHubMetrics.size-40) / 2;
+            y: (root.height - GitHubMetrics.size-40) / 2;
+            width: GitHubMetrics.size-40;
+            height: GitHubMetrics.size-40;
+            border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+            border-width: GitHubMetrics.focus-outline-width;
+            border-color: GitHubTheme.focus-outline;
+            background: transparent;
+        }
     }
-    
-    animate item-color { duration: MaterialAnimations.opacity_duration; easing: MaterialAnimations.opacity_easing; }
+
+    animate item-color { duration: 120ms; easing: ease-out; }
 }
 
 // 自定义导航抽屉组件
-export component CustomNavDrawer {
+export component GitHubNavigationRail {
     in property <[NavItem]> items;
     in property <int> current_index: -1;  // -1 表示无选中项
     in-out property <string> hovered-tooltip-text: "";
@@ -96,6 +130,8 @@ export component CustomNavDrawer {
     width: 100%;
     // Fill the rail so Flickable can clip and scroll when items overflow.
     height: 100%;
+    accessible-role: tab-list;
+    accessible-label: "Primary navigation";
 
     // Wheel/trackpad scroll only — no scrollbar chrome in the 48px rail.
     // Tooltips stay on MainWindow (outside this clip) and use scroll-offset-y.
@@ -111,10 +147,10 @@ export component CustomNavDrawer {
             spacing: 4px;
             padding-left: 0px;
             padding-right: 0px;
-            padding-top: 8px;
-            padding-bottom: 8px;
+            padding-top: GitHubMetrics.size-8;
+            padding-bottom: GitHubMetrics.size-8;
 
-            for item[index] in root.items : NavItemTemplate {
+            for item[index] in root.items : GitHubNavigationItem {
                 width: parent.width;
                 icon: item.icon;
                 text: item.text;

@@ -1,38 +1,37 @@
-import { MaterialPalette, MaterialText } from "@material";
-import { ListView } from "../../../material-1.7.1-fixed/ui/components/list_view.slint";
-import { ScrollView } from "../../../material-1.7.1-fixed/ui/components/scroll_view.slint";
-import { AppState } from "../../state/app_state.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
 import { WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffTextSlice, WorkflowPrFileExtensionFilter } from "./shell.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
-import { GitHubActionMenu } from "../github_action_menu.slint";
+import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
 
-export component TreeIndentGuides inherits Rectangle {
+export component GitHubTreeIndentGuides inherits Rectangle {
     in property <int> depth: 0;
     background: transparent;
     border-width: 0px;
-    if root.depth > 0: Rectangle { x: 15px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
-    if root.depth > 1: Rectangle { x: 33px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
-    if root.depth > 2: Rectangle { x: 51px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
-    if root.depth > 3: Rectangle { x: 69px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
-    if root.depth > 4: Rectangle { x: 87px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
-    if root.depth > 5: Rectangle { x: 105px; width: 1px; height: parent.height; background: AppState.effective-dark-mode ? #3d444d : #d1d9e0; }
+    if root.depth > 0: Rectangle { x: 15px; width: 1px; height: parent.height; background: GitHubTheme.border-default; }
+    if root.depth > 1: Rectangle { x: 33px; width: 1px; height: parent.height; background: GitHubTheme.border-default; }
+    if root.depth > 2: Rectangle { x: 51px; width: 1px; height: parent.height; background: GitHubTheme.border-default; }
+    if root.depth > 3: Rectangle { x: 69px; width: 1px; height: parent.height; background: GitHubTheme.border-default; }
+    if root.depth > 4: Rectangle { x: 87px; width: 1px; height: parent.height; background: GitHubTheme.border-default; }
+    if root.depth > 5: Rectangle { x: 105px; width: 1px; height: parent.height; background: GitHubTheme.border-default; }
 }
 
 // GitHub Commits kebab: bordered muted pill; accent fill + icon when expanded.
 // Clicks must only toggle the message body — never open commit detail.
-export component CommitMessageToggleButton inherits Rectangle {
+export component GitHubCommitMessageToggleButton inherits Rectangle {
     in property <bool> expanded: false;
     out property <bool> has-hover: toggle-touch.has-hover;
     callback clicked();
 
-    private property <color> accent-fg: AppState.effective-dark-mode ? #58a6ff : #0969da;
-    private property <color> accent-bg: AppState.effective-dark-mode ? #388bfd1a : #ddf4ff;
-    private property <color> accent-bg-hover: AppState.effective-dark-mode ? #388bfd33 : #b6e3ff;
-    private property <color> accent-border: AppState.effective-dark-mode ? #388bfd66 : #54aeff66;
-    private property <color> idle-fg: AppState.effective-dark-mode ? #9198a1 : #59636e;
-    private property <color> idle-border: AppState.effective-dark-mode ? #3d444d : #d0d7de;
-    private property <color> idle-bg: AppState.effective-dark-mode ? #21262d : #f6f8fa;
-    private property <color> idle-bg-hover: AppState.effective-dark-mode ? #656c7633 : #eaeef2;
+    private property <color> accent-fg: GitHubTheme.accent-fg-strong;
+    private property <color> accent-bg: GitHubTheme.accent-subtle;
+    private property <color> accent-bg-hover: GitHubTheme.accent-subtle-hover;
+    private property <color> accent-border: GitHubTheme.accent-muted;
+    private property <color> idle-fg: GitHubTheme.fg-muted;
+    private property <color> idle-border: GitHubTheme.border-default;
+    private property <color> idle-bg: GitHubTheme.control-default-rest;
+    private property <color> idle-bg-hover: GitHubTheme.control-muted-hover;
 
     // Above sibling title/row hit targets in the commit row.
     z: 2;
@@ -70,7 +69,7 @@ export component CommitMessageToggleButton inherits Rectangle {
     }
 }
 
-export component FileToolbarButton inherits Rectangle {
+export component GitHubFileToolbarButton inherits Rectangle {
     in property <image> icon-source;
     in property <bool> button-enabled: true;
     in property <bool> selected: false;
@@ -78,60 +77,30 @@ export component FileToolbarButton inherits Rectangle {
     in property <string> tooltip-text;
     in property <bool> tooltip-align-right: false;
     in property <bool> tooltip-above: false;
-    out property <bool> has-hover: button-touch.has-hover;
+    out property <bool> has-hover: icon-button.has-hover;
     callback clicked();
 
     width: 30px;
     height: 46px;
     background: transparent;
 
-    button-surface := Rectangle {
+    icon-button := GitHubIconButton {
+        x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        width: parent.width;
-        height: 28px;
-        border-radius: 6px;
-        border-width: root.outlined ? 1px : 0px;
-        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-        background: root.selected
-            ? (button-touch.has-hover
-                ? (AppState.effective-dark-mode ? #656c7626 : #eff2f5)
-                : (AppState.effective-dark-mode ? #656c7633 : #e6eaef))
-            : (root.outlined
-                ? (button-touch.has-hover && root.button-enabled
-                    ? (AppState.effective-dark-mode ? #262c36 : #eff2f5)
-                    : (AppState.effective-dark-mode ? #212830 : #f6f8fa))
-                : (button-touch.has-hover && root.button-enabled ? MaterialPalette.surface_container_high : transparent));
-        opacity: root.button-enabled ? 1 : 0.38;
-
-        Image {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: 16px;
-            height: 16px;
-            source: root.icon-source;
-            image-fit: contain;
-            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        }
-    }
-    button-touch := TouchArea {
-        y: button-surface.y;
-        height: button-surface.height;
-        mouse-cursor: root.button-enabled ? pointer : default;
-        clicked => {
-            if root.button-enabled { root.clicked(); }
-        }
-    }
-    // Match GitHubCopyButton's GitHub/Primer tooltip instead of Material's
-    // default bubble, so adjacent file-toolbar actions look like one system.
-    if button-touch.has-hover && !root.selected && root.tooltip-text != "": GitHubTooltip {
-        z: 10001;
-        x: root.tooltip-align-right ? root.width - self.width : 0px;
-        y: root.tooltip-above ? -self.height - 4px : root.height + 4px;
-        text: root.tooltip-text;
+        control-size: 28px;
+        glyph-size: 16px;
+        icon: root.icon-source;
+        tooltip-text: root.selected ? "" : root.tooltip-text;
+        tooltip-align-right: root.tooltip-align-right;
+        tooltip-above: root.tooltip-above;
+        invisible: !root.outlined;
+        selected: root.selected;
+        button-enabled: root.button-enabled;
+        clicked => { root.clicked(); }
     }
 }
 
-export component CommitSummaryNavButton inherits Rectangle {
+export component GitHubCommitSummaryNavButton inherits Rectangle {
     in property <string> text;
     in property <image> icon-source;
     in property <bool> icon-after: false;
@@ -141,7 +110,7 @@ export component CommitSummaryNavButton inherits Rectangle {
 
     height: 28px;
     background: nav-touch.has-hover && root.button-enabled
-        ? (AppState.effective-dark-mode ? #656c7626 : #f3f4f6)
+        ? GitHubTheme.control-soft-rest
         : transparent;
     opacity: root.button-enabled ? 1 : 0.5;
 
@@ -149,7 +118,7 @@ export component CommitSummaryNavButton inherits Rectangle {
         x: 0px;
         width: 1px;
         height: parent.height;
-        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+        background: GitHubTheme.border-default;
     }
 
     HorizontalLayout {
@@ -166,15 +135,15 @@ export component CommitSummaryNavButton inherits Rectangle {
             height: 12px;
             source: root.icon-source;
             image-fit: contain;
-            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            colorize: GitHubTheme.fg-muted;
         }
-        MaterialText {
+        Text {
             width: self.preferred-width;
             height: parent.height;
             text: root.text;
             font-size: 12px;
             font-weight: 500;
-            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+            color: GitHubTheme.fg-default;
             vertical-alignment: center;
         }
         if root.icon-after: Image {
@@ -182,7 +151,7 @@ export component CommitSummaryNavButton inherits Rectangle {
             height: 12px;
             source: root.icon-source;
             image-fit: contain;
-            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            colorize: GitHubTheme.fg-muted;
         }
     }
 
@@ -198,7 +167,7 @@ export component CommitSummaryNavButton inherits Rectangle {
 
 // Shared by the Files changed tree and the selected-file toolbar so both
 // surfaces use the same Primer status Octicon for a given change type.
-export component FileChangeTypeIcon inherits Image {
+export component GitHubFileChangeTypeIcon inherits Image {
     in property <string> change-type: "edit_file";
     in property <color> muted-fg;
     in property <color> success-fg;
@@ -227,7 +196,7 @@ export component FileChangeTypeIcon inherits Image {
 // GitHub-style selectable code cell. Syntax tokens stay as Text; selection is a
 // workspace-owned range so drag can cross ListView rows. Gutters and +/- stay
 // outside this component, matching GitHub's code-column copy behavior.
-export component SelectableDiffCode inherits Rectangle {
+export component GitHubSelectableDiffCode inherits Rectangle {
     in property <string> content;
     in property <int> content-columns: content.character-count;
     in property <[WorkflowPrDiffToken]> tokens;
@@ -304,7 +273,7 @@ export component SelectableDiffCode inherits Rectangle {
     clip: true;
 
     // Zero-size probes: preferred-width/height stay measurable, but these must
-    // not inflate SelectableDiffCode's layout min-width. Unconstrained measure
+    // not inflate GitHubSelectableDiffCode's layout min-width. Unconstrained measure
     // Text was squeezing the unified gutter/+ columns (stair-step markers) and
     // breaking soft-wrap in narrow windows.
     content-measure := Text {
@@ -486,7 +455,7 @@ export component SelectableDiffCode inherits Rectangle {
             font-size: root.code-font-size;
             font-weight: token.bold ? 600 : 400;
             font-italic: token.italic;
-            color: AppState.effective-dark-mode ? token.dark-color : token.color;
+            color: GitHubTheme.dark-mode ? token.dark-color : token.color;
         }
     }
     // Keep Slint auto-wrap and use TextInput's native selection geometry for
@@ -585,7 +554,7 @@ export component SelectableDiffCode inherits Rectangle {
 
 }
 
-export component SplitDiffSide inherits Rectangle {
+export component GitHubSplitDiffSide inherits Rectangle {
     in property <int> line-number;
     in property <string> kind;
     in property <string> content;
@@ -685,7 +654,7 @@ export component SplitDiffSide inherits Rectangle {
             }
         }
     }
-    SelectableDiffCode {
+    GitHubSelectableDiffCode {
         x: 70px;
         y: 0px;
         width: parent.width - 70px;
@@ -734,7 +703,7 @@ export component SplitDiffSide inherits Rectangle {
     }
 }
 
-export component DiffViewPreview inherits Rectangle {
+export component GitHubDiffViewPreview inherits Rectangle {
     in property <bool> split: false;
     in property <color> canvas-color;
     in property <color> outline-color;
@@ -790,7 +759,7 @@ export component DiffViewPreview inherits Rectangle {
     }
 }
 
-export component DiffViewChoice inherits Rectangle {
+export component GitHubDiffViewChoice inherits Rectangle {
     in property <string> label;
     in property <bool> split: false;
     in property <bool> selected: false;
@@ -811,7 +780,7 @@ export component DiffViewChoice inherits Rectangle {
     border-color: root.selected ? root.accent-fg : root.border-default;
     background: choice-touch.has-hover ? root.bg-hover : root.bg-default;
 
-    DiffViewPreview {
+    GitHubDiffViewPreview {
         x: (parent.width - self.width) / 2;
         y: 10px;
         split: root.split;
@@ -836,10 +805,10 @@ export component DiffViewChoice inherits Rectangle {
             width: 6px;
             height: 6px;
             border-radius: 3px;
-            background: #ffffff;
+            background: GitHubTheme.fg-on-emphasis;
         }
     }
-    MaterialText {
+    Text {
         x: 29px;
         y: 68px;
         width: parent.width - 36px;
@@ -856,7 +825,7 @@ export component DiffViewChoice inherits Rectangle {
     }
 }
 
-export component DiffSettingsPopover inherits Rectangle {
+export component GitHubDiffSettingsPopover inherits Rectangle {
     in property <bool> open: false;
     // Tip of the upward Primer caret, relative to this popover's left edge.
     // Callers set this to the trigger-button center minus the panel's x so the
@@ -926,7 +895,7 @@ export component DiffSettingsPopover inherits Rectangle {
         background: root.bg-default;
     }
 
-    MaterialText {
+    Text {
         x: 12px;
         y: 8px;
         width: parent.width - 24px;
@@ -937,7 +906,7 @@ export component DiffSettingsPopover inherits Rectangle {
         color: root.fg-default;
         vertical-alignment: center;
     }
-    DiffViewChoice {
+    GitHubDiffViewChoice {
         x: 12px;
         y: 34px;
         label: "Unified";
@@ -952,7 +921,7 @@ export component DiffSettingsPopover inherits Rectangle {
         neutral-color: root.bg-muted;
         choose => { root.pending-view = "unified"; }
     }
-    DiffViewChoice {
+    GitHubDiffViewChoice {
         x: 120px;
         y: 34px;
         label: "Split";
@@ -989,10 +958,10 @@ export component DiffSettingsPopover inherits Rectangle {
             width: 12px;
             height: 12px;
             source: @image-url("../../assets/icons/octicon-check-16.svg");
-            colorize: #ffffff;
+            colorize: GitHubTheme.fg-on-emphasis;
         }
     }
-    MaterialText {
+    Text {
         x: 34px;
         y: 136px;
         width: parent.width - 46px;
@@ -1025,7 +994,7 @@ export component DiffSettingsPopover inherits Rectangle {
         border-width: 1px;
         border-color: root.border-default;
         background: apply-touch.has-hover ? root.bg-hover : root.bg-muted;
-        MaterialText {
+        Text {
             width: parent.width;
             height: parent.height;
             text: "Apply and reload";
@@ -1044,7 +1013,7 @@ export component DiffSettingsPopover inherits Rectangle {
     }
 }
 
-export component FileTreeToggleButton inherits Rectangle {
+export component GitHubFileTreeToggleButton inherits Rectangle {
     in property <bool> file-tree-visible: true;
     callback clicked();
 
@@ -1052,45 +1021,21 @@ export component FileTreeToggleButton inherits Rectangle {
     height: 46px;
     background: transparent;
 
-    button-surface := Rectangle {
-        y: 7px;
-        width: 32px;
-        height: 32px;
-        border-radius: 6px;
-        background: root.file-tree-visible
-            ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
-            : (toggle-touch.has-hover
-                ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
-                : transparent);
-        Image {
-            x: 8px;
-            y: 8px;
-            width: 16px;
-            height: 16px;
-            source: root.file-tree-visible
-                ? @image-url("../../assets/icons/octicon-sidebar-collapse-16.svg")
-                : @image-url("../../assets/icons/octicon-sidebar-expand-16.svg");
-            image-fit: contain;
-            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
-        }
-    }
-
-    toggle-touch := TouchArea {
-        y: button-surface.y;
-        width: button-surface.width;
-        height: button-surface.height;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-
-    if toggle-touch.has-hover: GitHubTooltip {
+    GitHubIconButton {
         x: 0px;
-        y: root.height + 4px;
-        text: root.file-tree-visible ? "Hide file tree" : "Show file tree";
+        y: 7px;
+        control-size: 32px;
+        icon: root.file-tree-visible
+            ? @image-url("../../assets/icons/octicon-sidebar-collapse-16.svg")
+            : @image-url("../../assets/icons/octicon-sidebar-expand-16.svg");
+        tooltip-text: root.file-tree-visible ? "Hide file tree" : "Show file tree";
+        tooltip-above: false;
+        selected: root.file-tree-visible;
+        clicked => { root.clicked(); }
     }
 }
 
-export component FileMenuButton inherits Rectangle {
+export component GitHubFileMenuButton inherits Rectangle {
     in property <bool> button-enabled: true;
     in property <bool> viewing-file: false;
     in property <bool> open: false;
@@ -1104,7 +1049,7 @@ export component FileMenuButton inherits Rectangle {
     width: 30px;
     height: 46px;
 
-    FileToolbarButton {
+    GitHubFileToolbarButton {
         width: parent.width;
         height: parent.height;
         icon-source: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
@@ -1126,54 +1071,26 @@ export component FileMenuButton inherits Rectangle {
         anchor-width: root.width;
         anchor-height: root.height;
         menu-width: 192px;
-        content-height: 52px;
+        content-height: 44px;
         align: "end";
+        dismiss-requested => { root.toggle-menu(); }
 
         Rectangle {
             width: parent.width;
-            height: 52px;
+            height: 44px;
 
-            Rectangle {
-                x: 8px;
-                y: 8px;
-                width: parent.width - 16px;
-                height: 36px;
-                border-radius: 8px;
-                background: view-file-touch.has-hover
-                    ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
-                    : transparent;
-                Image {
-                    x: 16px;
-                    y: 10px;
-                    width: 16px;
-                    height: 16px;
-                    source: @image-url("../../assets/icons/octicon-eye-16.svg");
-                    image-fit: contain;
-                    colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
-                }
-                MaterialText {
-                    x: 48px;
-                    width: parent.width - 64px;
-                    height: parent.height;
-                    text: root.viewing-file ? "View diff" : "View file";
-                    vertical_alignment: center;
-                    font-size: 14px;
-                    font-weight: 400;
-                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-                }
-                view-file-touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.action();
-                    }
-                }
+            GitHubActionListItem {
+                y: 4px;
+                width: parent.width;
+                text: root.viewing-file ? "View diff" : "View file";
+                icon: @image-url("../../assets/icons/octicon-eye-16.svg");
+                activated => { root.action(); }
             }
-
         }
     }
 }
 
-export component DiffStatSegment inherits Rectangle {
+export component GitHubDiffStatSegment inherits Rectangle {
     in property <string> kind: "neutral";
     width: 8px;
     height: 8px;
@@ -1183,20 +1100,20 @@ export component DiffStatSegment inherits Rectangle {
         height: parent.height;
         image-fit: contain;
         source: root.kind == "added"
-            ? (AppState.effective-dark-mode
+            ? (GitHubTheme.dark-mode
                 ? @image-url("../../assets/icons/github-diffstat-added-dark-8.svg")
                 : @image-url("../../assets/icons/github-diffstat-added-8.svg"))
             : (root.kind == "deleted"
-                ? (AppState.effective-dark-mode
+                ? (GitHubTheme.dark-mode
                     ? @image-url("../../assets/icons/github-diffstat-deleted-dark-8.svg")
                     : @image-url("../../assets/icons/github-diffstat-deleted-8.svg"))
-                : (AppState.effective-dark-mode
+                : (GitHubTheme.dark-mode
                     ? @image-url("../../assets/icons/github-diffstat-neutral-dark-8.svg")
                     : @image-url("../../assets/icons/github-diffstat-neutral-8.svg")));
     }
 }
 
-export component DiffStatBar inherits Rectangle {
+export component GitHubDiffStatBar inherits Rectangle {
     in property <int> additions;
     in property <int> deletions;
     private property <int> total: root.additions + root.deletions;
@@ -1212,15 +1129,15 @@ export component DiffStatBar inherits Rectangle {
         width: parent.width;
         height: 8px;
         spacing: 1px;
-        DiffStatSegment { kind: root.added-blocks > 0 ? "added" : (root.deleted-blocks > 0 ? "deleted" : "neutral"); }
-        DiffStatSegment { kind: root.added-blocks > 1 ? "added" : (root.added-blocks + root.deleted-blocks > 1 ? "deleted" : "neutral"); }
-        DiffStatSegment { kind: root.added-blocks > 2 ? "added" : (root.added-blocks + root.deleted-blocks > 2 ? "deleted" : "neutral"); }
-        DiffStatSegment { kind: root.added-blocks > 3 ? "added" : (root.added-blocks + root.deleted-blocks > 3 ? "deleted" : "neutral"); }
-        DiffStatSegment { kind: root.added-blocks > 4 ? "added" : (root.added-blocks + root.deleted-blocks > 4 ? "deleted" : "neutral"); }
+        GitHubDiffStatSegment { kind: root.added-blocks > 0 ? "added" : (root.deleted-blocks > 0 ? "deleted" : "neutral"); }
+        GitHubDiffStatSegment { kind: root.added-blocks > 1 ? "added" : (root.added-blocks + root.deleted-blocks > 1 ? "deleted" : "neutral"); }
+        GitHubDiffStatSegment { kind: root.added-blocks > 2 ? "added" : (root.added-blocks + root.deleted-blocks > 2 ? "deleted" : "neutral"); }
+        GitHubDiffStatSegment { kind: root.added-blocks > 3 ? "added" : (root.added-blocks + root.deleted-blocks > 3 ? "deleted" : "neutral"); }
+        GitHubDiffStatSegment { kind: root.added-blocks > 4 ? "added" : (root.added-blocks + root.deleted-blocks > 4 ? "deleted" : "neutral"); }
     }
 }
 
-export component FileDiffStat inherits Rectangle {
+export component GitHubFileDiffStat inherits Rectangle {
     in property <int> additions;
     in property <int> deletions;
     in property <bool> has-selection: true;
@@ -1241,7 +1158,7 @@ export component FileDiffStat inherits Rectangle {
         vertical-alignment: center;
         font-size: 12px;
         font-weight: 600;
-        color: AppState.effective-dark-mode ? #3fb950 : #1f883d;
+        color: GitHubTheme.success-fg;
     }
 
     removed-stat := Text {
@@ -1253,10 +1170,10 @@ export component FileDiffStat inherits Rectangle {
         vertical-alignment: center;
         font-size: 12px;
         font-weight: 600;
-        color: AppState.effective-dark-mode ? #f85149 : #cf222e;
+        color: GitHubTheme.danger-fg;
     }
 
-    diffstat-bar := DiffStatBar {
+    diffstat-bar := GitHubDiffStatBar {
         x: removed-stat.x + removed-stat.width + 4px;
         y: (parent.height - self.height) / 2;
         additions: root.additions;
@@ -1264,15 +1181,15 @@ export component FileDiffStat inherits Rectangle {
     }
 }
 
-export component CodeRenderingIndicator inherits Rectangle {
+export component GitHubCodeRenderingIndicator inherits Rectangle {
     width: 166px;
     height: 36px;
     border-radius: 8px;
     border-width: 1px;
-    border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    background: AppState.effective-dark-mode ? #151b23 : #ffffff;
+    border-color: GitHubTheme.border-default;
+    background: GitHubTheme.canvas-overlay;
     drop-shadow-blur: 14px;
-    drop-shadow-color: AppState.effective-dark-mode ? #00000066 : #1f232826;
+    drop-shadow-color: GitHubTheme.shadow-floating-medium;
     drop-shadow-offset-y: 4px;
 
     HorizontalLayout {
@@ -1282,37 +1199,27 @@ export component CodeRenderingIndicator inherits Rectangle {
         padding-right: 14px;
         spacing: 9px;
         alignment: center;
+        cross-axis-alignment: center;
 
-        Rectangle {
+        GitHubSpinner {
             width: 16px;
-            height: parent.height;
-            background: transparent;
-
-            private property <float> rotation-progress: mod(animation-tick(), 900ms) / 900ms;
-
-            Image {
-                y: (parent.height - self.height) / 2;
-                width: parent.width;
-                height: 16px;
-                source: @image-url("../../assets/icons/loading.svg");
-                image-fit: contain;
-                colorize: MaterialPalette.primary;
-                transform-rotation: parent.rotation-progress * 360deg;
-                transform-origin: { x: self.width / 2, y: self.height / 2 };
-            }
+            height: 16px;
+            spinner-size: 16px;
+            foreground: GitHubTheme.success-emphasis;
         }
 
-        MaterialText {
+        Text {
+            height: 20px;
             text: "Rendering code";
             vertical-alignment: center;
             font-size: 12px;
             font-weight: 600;
-            color: MaterialPalette.on_surface;
+            color: GitHubTheme.fg-default;
         }
     }
 }
 
-export component LargeDiffPlaceholder inherits Rectangle {
+export component GitHubLargeDiffPlaceholder inherits Rectangle {
     in property <bool> loading: false;
     in property <color> bg-default;
     in property <color> bg-muted;
@@ -1341,7 +1248,7 @@ export component LargeDiffPlaceholder inherits Rectangle {
         width: load-label.preferred-width + 16px;
         height: 32px;
         background: transparent;
-        load-label := MaterialText {
+        load-label := Text {
             width: parent.width;
             height: parent.height;
             text: "Load diff";
@@ -1358,25 +1265,14 @@ export component LargeDiffPlaceholder inherits Rectangle {
         }
     }
 
-    if root.loading: Rectangle {
+    if root.loading: GitHubSpinner {
         x: (parent.width - self.width) / 2;
         y: max(26px, root.github-placeholder-height / 2 - 42px);
-        width: 32px;
-        height: 32px;
-        // GitHub Primer Spinner uses a 1000ms linear rotation.
-        private property <float> rotation-progress: mod(animation-tick(), 1000ms) / 1000ms;
-        Image {
-            width: parent.width;
-            height: parent.height;
-            source: @image-url("../../assets/icons/github-spinner-16.svg");
-            image-fit: contain;
-            colorize: root.fg-muted;
-            transform-rotation: parent.rotation-progress * 360deg;
-            transform-origin: { x: self.width / 2, y: self.height / 2 };
-        }
+        spinner-size: 32px;
+        foreground: root.fg-muted;
     }
 
-    MaterialText {
+    Text {
         x: 16px;
         y: max(62px, root.github-placeholder-height / 2);
         width: parent.width - 32px;
@@ -1397,9 +1293,9 @@ export component GitHubFileFilterField inherits Rectangle {
     border-radius: 6px;
     border-width: filter-input.has-focus ? 2px : 1px;
     border-color: filter-input.has-focus
-        ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
-        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
-    background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+        ? (GitHubTheme.accent-fg)
+        : (GitHubTheme.border-default);
+    background: GitHubTheme.canvas-default;
     clip: true;
 
     Image {
@@ -1409,7 +1305,7 @@ export component GitHubFileFilterField inherits Rectangle {
         height: 16px;
         source: @image-url("../../assets/icons/octicon-search-16.svg");
         image-fit: contain;
-        colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        colorize: GitHubTheme.fg-muted;
     }
 
     filter-input := TextInput {
@@ -1422,8 +1318,8 @@ export component GitHubFileFilterField inherits Rectangle {
         vertical-alignment: center;
         font-family: root.font-family;
         font-size: 14px;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-        selection-background-color: AppState.effective-dark-mode ? #388bfd66 : #0969da55;
+        color: GitHubTheme.fg-default;
+        selection-background-color: GitHubTheme.diff-selection-bg;
         selection-foreground-color: self.color;
     }
 
@@ -1435,7 +1331,7 @@ export component GitHubFileFilterField inherits Rectangle {
         vertical-alignment: center;
         font-family: root.font-family;
         font-size: 14px;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        color: GitHubTheme.fg-muted;
     }
 }
 
@@ -1443,7 +1339,7 @@ export component GitHubFileFilterField inherits Rectangle {
 // first-party find chrome (browser find-in-page fills that role). This docks an
 // editor-style panel (CodeMirror/GitHub file-editor ⌘/Ctrl+F) into the selected
 // file toolbar: query, match index/total, previous, next, and close.
-export component DiffFindBar inherits Rectangle {
+export component GitHubDiffFindBar inherits Rectangle {
     in-out property <string> query;
     in property <int> current-index: -1;
     in property <int> match-count: 0;
@@ -1472,9 +1368,9 @@ export component DiffFindBar inherits Rectangle {
         border-radius: 6px;
         border-width: find-input.has-focus ? 2px : 1px;
         border-color: find-input.has-focus
-            ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
-            : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
-        background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+            ? (GitHubTheme.accent-fg)
+            : (GitHubTheme.border-default);
+        background: GitHubTheme.canvas-default;
         clip: true;
 
         Image {
@@ -1484,7 +1380,7 @@ export component DiffFindBar inherits Rectangle {
             height: 16px;
             source: @image-url("../../assets/icons/octicon-search-16.svg");
             image-fit: contain;
-            colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            colorize: GitHubTheme.fg-muted;
         }
 
         find-input := TextInput {
@@ -1497,8 +1393,8 @@ export component DiffFindBar inherits Rectangle {
             vertical-alignment: center;
             font-family: root.font-family;
             font-size: 12px;
-            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-            selection-background-color: AppState.effective-dark-mode ? #388bfd66 : #0969da55;
+            color: GitHubTheme.fg-default;
+            selection-background-color: GitHubTheme.diff-selection-bg;
             selection-foreground-color: self.color;
             key-pressed(event) => {
                 if (event.text == Key.Escape) {
@@ -1521,7 +1417,7 @@ export component DiffFindBar inherits Rectangle {
             vertical-alignment: center;
             font-family: root.font-family;
             font-size: 12px;
-            color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            color: GitHubTheme.fg-muted;
         }
 
         Text {
@@ -1534,8 +1430,8 @@ export component DiffFindBar inherits Rectangle {
             font-family: root.font-family;
             font-size: 11px;
             color: root.query != "" && !root.has-matches
-                ? (AppState.effective-dark-mode ? #f85149 : #d1242f)
-                : (AppState.effective-dark-mode ? #9198a1 : #59636e);
+                ? (GitHubTheme.danger-fg-strong)
+                : (GitHubTheme.fg-muted);
             overflow: elide;
         }
 
@@ -1547,7 +1443,7 @@ export component DiffFindBar inherits Rectangle {
             height: 22px;
             border-radius: 4px;
             background: prev-touch.has-hover && root.has-matches
-                ? (AppState.effective-dark-mode ? #656c7633 : #e6eaef)
+                ? (GitHubTheme.control-soft-hover)
                 : transparent;
             opacity: root.has-matches ? 1 : 0.38;
             Image {
@@ -1557,7 +1453,7 @@ export component DiffFindBar inherits Rectangle {
                 height: 16px;
                 source: @image-url("../../assets/icons/octicon-chevron-up-16.svg");
                 image-fit: contain;
-                colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                colorize: GitHubTheme.fg-muted;
             }
             prev-touch := TouchArea {
                 mouse-cursor: root.has-matches ? pointer : default;
@@ -1571,7 +1467,7 @@ export component DiffFindBar inherits Rectangle {
             height: 22px;
             border-radius: 4px;
             background: next-touch.has-hover && root.has-matches
-                ? (AppState.effective-dark-mode ? #656c7633 : #e6eaef)
+                ? (GitHubTheme.control-soft-hover)
                 : transparent;
             opacity: root.has-matches ? 1 : 0.38;
             Image {
@@ -1581,7 +1477,7 @@ export component DiffFindBar inherits Rectangle {
                 height: 16px;
                 source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
                 image-fit: contain;
-                colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                colorize: GitHubTheme.fg-muted;
             }
             next-touch := TouchArea {
                 mouse-cursor: root.has-matches ? pointer : default;
@@ -1595,7 +1491,7 @@ export component DiffFindBar inherits Rectangle {
             height: 22px;
             border-radius: 4px;
             background: close-touch.has-hover
-                ? (AppState.effective-dark-mode ? #656c7633 : #e6eaef)
+                ? (GitHubTheme.control-soft-hover)
                 : transparent;
             Image {
                 x: 3px;
@@ -1604,7 +1500,7 @@ export component DiffFindBar inherits Rectangle {
                 height: 16px;
                 source: @image-url("../../assets/icons/octicon-x-16.svg");
                 image-fit: contain;
-                colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                colorize: GitHubTheme.fg-muted;
             }
             close-touch := TouchArea {
                 mouse-cursor: pointer;
@@ -1640,6 +1536,7 @@ export component GitHubFilterMenu inherits Rectangle {
     callback toggle-extension(string);
     callback toggle-manifest();
     callback toggle-viewed();
+    callback dismiss();
 
     // Header 53 + extension rows + divider 1 + two footer options 72.
     private property <length> extensions-height: root.extension-filters.length * 36px;
@@ -1664,6 +1561,7 @@ export component GitHubFilterMenu inherits Rectangle {
         menu-max-height: 432px;
         align: "start";
         side: "auto";
+        dismiss-requested => { root.dismiss(); }
 
         Rectangle {
             width: parent.width;
@@ -1679,7 +1577,7 @@ export component GitHubFilterMenu inherits Rectangle {
                 font-family: root.font-family;
                 font-size: 14px;
                 font-weight: 600;
-                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                color: GitHubTheme.fg-default;
             }
 
             for extension[index] in root.extension-filters: Rectangle {
@@ -1688,7 +1586,7 @@ export component GitHubFilterMenu inherits Rectangle {
                 width: parent.width;
                 height: 36px;
                 background: extension-touch.has-hover
-                    ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
+                    ? (GitHubTheme.control-neutral-hover)
                     : transparent;
                 Image {
                     x: 16px;
@@ -1697,7 +1595,7 @@ export component GitHubFilterMenu inherits Rectangle {
                     height: 16px;
                     source: @image-url("../../assets/icons/octicon-check-16.svg");
                     image-fit: contain;
-                    colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    colorize: GitHubTheme.fg-muted;
                     opacity: extension.selected ? 1 : 0;
                 }
                 Text {
@@ -1708,7 +1606,7 @@ export component GitHubFilterMenu inherits Rectangle {
                     vertical-alignment: center;
                     font-family: root.font-family;
                     font-size: 14px;
-                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                    color: GitHubTheme.fg-default;
                     overflow: elide;
                 }
                 Rectangle {
@@ -1717,7 +1615,7 @@ export component GitHubFilterMenu inherits Rectangle {
                     width: 32px;
                     height: 20px;
                     border-radius: 10px;
-                    background: AppState.effective-dark-mode ? #656c7633 : #818b981f;
+                    background: GitHubTheme.control-neutral-hover;
                     Text {
                         width: parent.width;
                         height: parent.height;
@@ -1727,7 +1625,7 @@ export component GitHubFilterMenu inherits Rectangle {
                         font-family: root.font-family;
                         font-size: 12px;
                         font-weight: 600;
-                        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                        color: GitHubTheme.fg-default;
                     }
                 }
                 extension-touch := TouchArea {
@@ -1741,7 +1639,7 @@ export component GitHubFilterMenu inherits Rectangle {
                 y: 53px + root.extensions-height;
                 width: parent.width;
                 height: 1px;
-                background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                background: GitHubTheme.border-default;
             }
 
             for option[index] in ["Only manifest files", "Viewed files"]: Rectangle {
@@ -1750,7 +1648,7 @@ export component GitHubFilterMenu inherits Rectangle {
                 width: parent.width;
                 height: 36px;
                 background: option-touch.has-hover
-                    ? (AppState.effective-dark-mode ? #656c7633 : #818b981f)
+                    ? (GitHubTheme.control-neutral-hover)
                     : transparent;
                 Image {
                     x: 16px;
@@ -1759,7 +1657,7 @@ export component GitHubFilterMenu inherits Rectangle {
                     height: 16px;
                     source: @image-url("../../assets/icons/octicon-check-16.svg");
                     image-fit: contain;
-                    colorize: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                    colorize: GitHubTheme.fg-muted;
                     opacity: (index == 0 ? root.only-manifest-files : root.show-viewed-files) ? 1 : 0;
                 }
                 Text {
@@ -1770,7 +1668,7 @@ export component GitHubFilterMenu inherits Rectangle {
                     vertical-alignment: center;
                     font-family: root.font-family;
                     font-size: 14px;
-                    color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                    color: GitHubTheme.fg-default;
                 }
                 option-touch := TouchArea {
                     mouse-cursor: pointer;

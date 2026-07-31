@@ -1,4 +1,6 @@
 import { AppState } from "../../state/app_state.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
 export struct JobLogLineItem {
     text: string,
@@ -28,27 +30,24 @@ export struct JobStepItem {
 
 // One GitHub Actions log source line. Long content wraps onto continuation
 // lines while the original source line number remains on the first visual row.
-component LogLineRow inherits Rectangle {
+component GitHubActionsLogLineRow inherits Rectangle {
     in property <JobLogLineItem> line;
     in property <int> line-number;
     in property <color> foreground;
     in property <color> muted-foreground;
-    private property <length> prefix-width: prefix-measure.preferred-width;
-    private property <length> text-width: max(1px, root.width - 80px - root.prefix-width);
-    private property <color> hover-background: AppState.effective-dark-mode ? #21262d : #eaeef2;
-    private property <color> attention-background: AppState.effective-dark-mode ? #bb800926 : #fff8c5;
-    private property <color> danger-background: AppState.effective-dark-mode ? #f851491a : #ffebe9;
-    private property <color> accent-background: AppState.effective-dark-mode ? #388bfd1a : #ddf4ff;
-    private property <color> attention-foreground: AppState.effective-dark-mode ? #d29922 : #9a6700;
-    private property <color> danger-foreground: AppState.effective-dark-mode ? #f85149 : #d1242f;
-    private property <color> accent-foreground: AppState.effective-dark-mode ? #58a6ff : #0969da;
+    private property <string> display-text: root.line.prefix + root.line.text;
+    private property <length> text-width: max(1px, root.width - 80px);
+    private property <color> hover-background: GitHubTheme.control-muted-rest;
+    private property <color> attention-background: GitHubTheme.attention-muted;
+    private property <color> danger-background: GitHubTheme.diff-deletion-bg;
+    private property <color> accent-background: GitHubTheme.accent-subtle;
     // GitHub Actions hover wash has clearer vertical padding than a bare
     // 20 px glyph box; 28 px min + measured centering matches that density.
     private property <length> min-line-height: 28px;
     private property <length> pad-y: 7px;
     private property <length> content-height: max(
         1px,
-        max(prefix-measure.preferred-height, line-measure.preferred-height)
+        line-measure.preferred-height
     );
     private property <length> single-line-height: max(1px, single-line-measure.preferred-height);
     private property <bool> wraps: root.content-height > root.single-line-height + 1px;
@@ -79,18 +78,9 @@ component LogLineRow inherits Rectangle {
     line-measure := Text {
         visible: false;
         width: root.text-width;
-        text: root.line.text;
+        text: root.display-text;
         wrap: word-wrap;
         font-size: 12px;
-        font-family: "monospace";
-    }
-
-    prefix-measure := Text {
-        visible: false;
-        text: root.line.prefix;
-        wrap: no-wrap;
-        font-size: 12px;
-        font-weight: 600;
         font-family: "monospace";
     }
 
@@ -108,29 +98,12 @@ component LogLineRow inherits Rectangle {
         font-family: "monospace";
     }
 
-    if root.line.prefix != "": Text {
-        x: 64px;
-        y: root.content-y;
-        width: root.prefix-width;
-        height: root.content-height;
-        text: root.line.prefix;
-        wrap: no-wrap;
-        vertical-alignment: top;
-        color: root.line.kind == "warning" ? root.attention-foreground
-            : (root.line.kind == "error" ? root.danger-foreground
-            : (root.line.kind == "notice" ? root.accent-foreground
-            : root.muted-foreground));
-        font-size: 12px;
-        font-weight: 600;
-        font-family: "monospace";
-    }
-
     Text {
-        x: 64px + root.prefix-width;
+        x: 64px;
         y: root.content-y;
         width: root.text-width;
         height: root.content-height;
-        text: root.line.text;
+        text: root.display-text;
         wrap: word-wrap;
         vertical-alignment: top;
         color: root.line.kind == "debug" ? root.muted-foreground : root.foreground;
@@ -148,13 +121,13 @@ component LogLineRow inherits Rectangle {
 // https://docs.github.com/assets/cb-95207/images/help/repository/actions-quickstart-logs.png.
 // Rows use its compact 40 px disclosure-list geometry and the matching Primer
 // canvas tokens for the active application theme.
-component JobStepRow inherits Rectangle {
+component GitHubActionsJobStepRow inherits Rectangle {
     in property <JobStepItem> step;
     in property <bool> expanded: false;
     in property <bool> animations-enabled: true;
-    private property <angle> spinner-angle: 0deg;
     private property <bool> expandable: !root.queued && (root.step.has-log || root.running);
     private property <bool> interactive: root.expandable;
+    private property <bool> keyboard-focus-visible: false;
     private property <bool> queued: root.step.status == "queued";
     private property <bool> running: root.step.status == "in_progress";
     private property <bool> succeeded:
@@ -163,22 +136,14 @@ component JobStepRow inherits Rectangle {
         root.step.status == "completed" && root.step.conclusion == "failure";
     private property <bool> cancelled:
         root.step.status == "completed" && root.step.conclusion == "cancelled";
-    private property <color> log-canvas: AppState.effective-dark-mode ? #0d1117 : #f6f8fa;
+    private property <color> log-canvas: GitHubTheme.code-canvas;
     // Expanded header is the stronger muted wash; collapsed hover is lighter.
     // GitHub Actions: idle rows are bare canvas; hover then expanded fill.
-    private property <color> step-header-expanded: AppState.effective-dark-mode ? #21262d : #eaeef2;
-    private property <color> step-header-hover: AppState.effective-dark-mode ? #161b22 : #f3f4f6;
-    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    private property <color> step-header-expanded: GitHubTheme.control-muted-rest;
+    private property <color> step-header-hover: GitHubTheme.code-row-hover;
+    private property <color> fg-default: GitHubTheme.fg-default;
+    private property <color> fg-muted: GitHubTheme.fg-muted;
     callback toggle();
-
-    spinner-timer := Timer {
-        interval: 60ms;
-        running: root.running && root.animations-enabled;
-        triggered => {
-            root.spinner-angle = root.spinner-angle + 30deg;
-        }
-    }
 
     width: 100%;
     height: step-layout.preferred-height;
@@ -196,6 +161,31 @@ component JobStepRow inherits Rectangle {
             vertical-stretch: 0;
             background: root.log-canvas;
 
+            header-focus := FocusScope {
+                width: 100%;
+                height: 100%;
+                accessible-role: button;
+                accessible-enabled: root.interactive;
+                accessible-label: root.step.name;
+                accessible-checkable: root.interactive;
+                accessible-checked: root.expanded;
+                key-pressed(event) => {
+                    root.keyboard-focus-visible = true;
+                    if (root.interactive
+                            && (event.text == Key.Return || event.text == " ")) {
+                        root.toggle();
+                        return accept;
+                    }
+                    return reject;
+                }
+                focus-gained(reason) => {
+                    root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+                }
+                focus-lost => {
+                    root.keyboard-focus-visible = false;
+                }
+            }
+
             Rectangle {
                 // Idle collapsed rows stay on the bare log canvas. Hover uses a
                 // lighter wash than the expanded header (GitHub Actions job logs).
@@ -209,6 +199,17 @@ component JobStepRow inherits Rectangle {
                     : (row-touch.has-hover && root.interactive
                         ? root.step-header-hover
                         : transparent);
+            }
+
+            if header-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+                x: 8px;
+                y: 2px;
+                width: parent.width - 16px;
+                height: parent.height - 4px;
+                border-radius: GitHubMetrics.radius-medium;
+                border-width: GitHubMetrics.focus-outline-width;
+                border-color: GitHubTheme.focus-outline;
+                background: transparent;
             }
 
             // Keep the disclosure column reserved for every row so all titles
@@ -256,7 +257,7 @@ component JobStepRow inherits Rectangle {
                     height: 16px;
                     source: @image-url("../../assets/icons/octicon-x-circle-fill-16.svg");
                     image-fit: contain;
-                    colorize: AppState.effective-dark-mode ? #f85149 : #cf222e;
+                    colorize: GitHubTheme.danger-fg;
                 }
 
                 if root.cancelled: Image {
@@ -266,19 +267,15 @@ component JobStepRow inherits Rectangle {
                     height: 16px;
                     source: @image-url("../../assets/icons/octicon-stop-16.svg");
                     image-fit: contain;
-                    colorize: AppState.effective-dark-mode ? #d29922 : #9a6700;
+                    colorize: GitHubTheme.attention-fg;
                 }
 
-                if root.running: Image {
+                if root.running: GitHubSpinner {
                     x: 1px;
                     y: 1px;
-                    width: 18px;
-                    height: 18px;
-                    source: @image-url("../../assets/icons/primer-spinner-16.svg");
-                    image-fit: contain;
-                    colorize: AppState.effective-dark-mode ? #d29922 : #9a6700;
-                    transform-rotation: root.animations-enabled ? root.spinner-angle : 0deg;
-                    transform-origin: { x: self.width / 2, y: self.height / 2 };
+                    spinner-size: 18px;
+                    foreground: GitHubTheme.attention-fg;
+                    spinning: root.animations-enabled;
                 }
 
                 if root.queued: Rectangle {
@@ -325,7 +322,11 @@ component JobStepRow inherits Rectangle {
                 height: parent.height;
                 enabled: root.interactive;
                 mouse-cursor: root.interactive ? pointer : default;
-                clicked => { root.toggle(); }
+                clicked => {
+                    root.keyboard-focus-visible = false;
+                    header-focus.focus();
+                    root.toggle();
+                }
             }
         }
 
@@ -356,7 +357,7 @@ component JobStepRow inherits Rectangle {
                     font-family: "monospace";
                 }
 
-                for line[index] in root.step.log-lines: LogLineRow {
+                for line[index] in root.step.log-lines: GitHubActionsLogLineRow {
                     width: parent.width;
                     line: line;
                     line-number: index + 1;
@@ -368,7 +369,7 @@ component JobStepRow inherits Rectangle {
     }
 }
 
-export component Job inherits Rectangle {
+export component GitHubActionsJob inherits Rectangle {
     in property <string> title: "Workflow steps";
     in property <string> summary: "";
     in property <string> empty-text: "No workflow steps yet.";
@@ -387,10 +388,10 @@ export component Job inherits Rectangle {
     callback step-toggled(int);
     // Fired once when a not-yet-loaded disclosure is first opened.
     callback load-step-log(int);
-    private property <color> log-canvas: AppState.effective-dark-mode ? #0d1117 : #f6f8fa;
-    private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
+    private property <color> log-canvas: GitHubTheme.code-canvas;
+    private property <color> border-default: GitHubTheme.border-default;
+    private property <color> fg-default: GitHubTheme.fg-default;
+    private property <color> fg-muted: GitHubTheme.fg-muted;
     pure function step-bit(index: int) -> int {
         return index == 0 ? 1 :
             index == 1 ? 2 :
@@ -485,7 +486,7 @@ export component Job inherits Rectangle {
             font-size: 12px;
         }
 
-        for step[index] in root.steps: JobStepRow {
+        for step[index] in root.steps: GitHubActionsJobStepRow {
             width: parent.width;
             vertical-stretch: 0;
             step: step;

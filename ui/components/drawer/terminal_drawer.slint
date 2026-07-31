@@ -1,4 +1,6 @@
-import { AppState } from "../../state/app_state.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubButton } from "../settings/github_settings_controls.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
 
 export struct TerminalSpan {
     start_col: int,
@@ -15,65 +17,19 @@ export struct TerminalLine {
     spans: [TerminalSpan],
 }
 
-component TerminalHeaderButton inherits Rectangle {
-    in property <image> icon;
+component GitHubTerminalHeaderButton inherits GitHubIconButton {
     in property <string> tooltip;
-    in property <bool> selected: false;
-    callback clicked();
 
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
-    border-width: root.selected ? 1px : 0px;
-    border-color: AppState.effective-dark-mode ? #6e7681 : #8c959f;
-    background: root.selected
-        ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
-        : (button-touch.pressed
-            ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
-            : (button-touch.has-hover
-                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
-                : transparent));
-
-    Image {
-        x: 8px;
-        y: 8px;
-        width: 16px;
-        height: 16px;
-        source: root.icon;
-        colorize: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-    }
-
-    button-touch := TouchArea {
-        width: 100%;
-        height: 100%;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-
-    if button-touch.has-hover: Rectangle {
-        x: (parent.width - self.width) / 2;
-        y: parent.height + 4px;
-        width: tooltip-text.preferred-width + 12px;
-        height: 24px;
-        border-radius: 6px;
-        background: AppState.effective-dark-mode ? #f0f6fc : #24292f;
-        z: 50;
-
-        tooltip-text := Text {
-            x: 6px;
-            width: parent.width - 12px;
-            height: parent.height;
-            text: root.tooltip;
-            font-size: 11px;
-            color: AppState.effective-dark-mode ? #1f2328 : #ffffff;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            wrap: no-wrap;
-        }
-    }
+    control-size: 32px;
+    glyph-size: 16px;
+    tooltip-text: root.tooltip;
+    tooltip-above: false;
+    tooltip-align-right: true;
+    invisible: true;
+    foreground: GitHubTheme.fg-default;
 }
 
-export component TerminalDrawer inherits Rectangle {
+export component GitHubTerminalDrawer inherits Rectangle {
     in property <bool> drawer-open: false;
     in property <bool> docked: false;
     in-out property <string> input-text: "";
@@ -140,12 +96,12 @@ export component TerminalDrawer inherits Rectangle {
     private property <int> selection-end-col: 0;
     private property <bool> has-selection: false;
     private property <bool> is-macos: Platform.os == OperatingSystemType.macos;
-    private property <color> canvas-default: AppState.effective-dark-mode ? #0d1117 : #ffffff;
-    private property <color> canvas-subtle: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
-    private property <color> border-default: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-    private property <color> fg-default: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-    private property <color> fg-muted: AppState.effective-dark-mode ? #9198a1 : #59636e;
-    private property <color> accent-fg: AppState.effective-dark-mode ? #4493f8 : #0969da;
+    private property <color> canvas-default: GitHubTheme.canvas-default;
+    private property <color> canvas-subtle: GitHubTheme.canvas-subtle;
+    private property <color> border-default: GitHubTheme.border-default;
+    private property <color> fg-default: GitHubTheme.fg-default;
+    private property <color> fg-muted: GitHubTheme.fg-muted;
+    private property <color> accent-fg: GitHubTheme.accent-fg;
 
     callback update-selection(length, length, bool);
     update-selection(mouse_x, mouse_y, reset) => {
@@ -274,7 +230,7 @@ export component TerminalDrawer inherits Rectangle {
         background: root.canvas-default;
         clip: true;
         drop-shadow-blur: root.docked ? 0px : 20px;
-        drop-shadow-color: root.docked ? transparent : #00000044;
+        drop-shadow-color: root.docked ? transparent : GitHubTheme.backdrop-subtle;
         drop-shadow-offset-y: root.docked ? 0px : 6px;
         opacity: root.docked ? 1 : (root.drawer-open ? 1 : 0);
         animate opacity { duration: 220ms; }
@@ -289,24 +245,22 @@ export component TerminalDrawer inherits Rectangle {
                 height: 40px;
                 background: root.canvas-subtle;
 
-                drag-icon := Image {
-                    width: 16px;
-                    height: 16px;
+                Rectangle {
                     x: (parent.width - self.width) / 2;
-                    y: -4px;
-                    source: @image-url("../../assets/icons/octicon-grabber-16.svg");
-                    colorize: resize-handle.has-hover || resize-handle.pressed
-                        ? root.fg-default
-                        : root.fg-muted;
-                    transform-rotation: 90deg;
-                    transform-origin: { x: self.width / 2, y: self.height / 2 };
+                    y: 2px;
+                    width: 40px;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: resize-handle.has-hover || resize-handle.pressed
+                        ? GitHubTheme.fg-muted
+                        : GitHubTheme.border-strong;
                 }
 
                 resize-handle := TouchArea {
                     x: (parent.width - 64px) / 2;
                     y: 0px;
                     width: 64px;
-                    height: 12px;
+                    height: 16px;
                     enabled: root.drawer-open;
                     mouse-cursor: n-resize;
                     moved => {
@@ -380,9 +334,9 @@ export component TerminalDrawer inherits Rectangle {
                             height: 6px;
                             border-radius: 3px;
                             background: root.connected
-                                ? (AppState.effective-dark-mode ? #3fb950 : #1a7f37)
+                                ? (GitHubTheme.success-fg)
                                 : (root.running
-                                    ? (AppState.effective-dark-mode ? #d29922 : #9a6700)
+                                    ? (GitHubTheme.attention-fg)
                                     : root.fg-muted);
                         }
 
@@ -403,41 +357,18 @@ export component TerminalDrawer inherits Rectangle {
 
                     // Primer btn-sm toggle: always bordered, selected uses muted
                     // canvas + default fg (not accent), ~28px tall.
-                    Rectangle {
-                        width: 56px;
+                    GitHubButton {
+                        width: 64px;
                         height: 28px;
-                        border-radius: 6px;
-                        border-width: 1px;
-                        border-color: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
-                        background: root.selection-mode
-                            ? (AppState.effective-dark-mode ? #21262d : #eaeef2)
-                            : (select-hover.has-hover
-                                ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
-                                : (AppState.effective-dark-mode ? #21262d : #f6f8fa));
+                        text: "Select";
+                        label-font-size: 11px;
+                        selected: root.selection-mode;
                         vertical-stretch: 0;
-
-                        // Full-height center + 1px down: SF Pro looks high in a
-                        // bordered 28px control when purely geometrically centered.
-                        Text {
-                            y: 1px;
-                            width: parent.width;
-                            height: parent.height - 1px;
-                            text: "Select";
-                            font-size: 12px;
-                            font-weight: 500;
-                            color: root.fg-default;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-
-                        select-hover := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.selection-mode = !root.selection-mode; }
-                        }
+                        clicked => { root.selection-mode = !root.selection-mode; }
                     }
                 }
 
-                TerminalHeaderButton {
+                GitHubTerminalHeaderButton {
                     x: parent.width - 72px;
                     y: 4px;
                     icon: root.fullscreen
@@ -448,7 +379,7 @@ export component TerminalDrawer inherits Rectangle {
                     clicked => { root.fullscreen = !root.fullscreen; }
                 }
 
-                TerminalHeaderButton {
+                GitHubTerminalHeaderButton {
                     x: parent.width - 36px;
                     y: 4px;
                     icon: @image-url("../../assets/icons/octicon-x-16.svg");
@@ -742,7 +673,7 @@ export component TerminalDrawer inherits Rectangle {
                                     width: parent.width;
                                     height: parent.thumb-height;
                                     border-radius: 2px;
-                                    background: AppState.effective-dark-mode ? #6e7681 : #8c959f;
+                                    background: GitHubTheme.border-strong;
                                 }
                             }
                         }

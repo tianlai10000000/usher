@@ -1,0 +1,236 @@
+import { AppState } from "../state/app_state.slint";
+
+// GitHub/Primer functional tokens for application-owned UI.
+//
+// Keep raw color values in this file. Product components and views consume
+// semantic roles so light/dark behavior cannot drift between features.
+// Sources:
+// - https://primer.style/product/getting-started/foundations/color-usage/
+// - https://primer.style/product/primitives/color/
+// - https://github.com/primer/primitives
+export global GitHubTheme {
+    out property <bool> dark-mode: AppState.effective-dark-mode;
+
+    // Canvas and foreground.
+    out property <color> canvas-default: root.dark-mode ? #0d1117 : #ffffff;
+    out property <color> canvas-subtle: root.dark-mode ? #151b23 : #f6f8fa;
+    out property <color> canvas-inset: root.dark-mode ? #010409 : #eff2f5;
+    out property <color> canvas-overlay: root.dark-mode ? #151b23 : #ffffff;
+    out property <color> fg-default: root.dark-mode ? #f0f6fc : #1f2328;
+    out property <color> fg-muted: root.dark-mode ? #9198a1 : #59636e;
+    out property <color> fg-subtle: root.dark-mode ? #6e7681 : #6e7781;
+    out property <color> fg-on-emphasis: #ffffff;
+
+    // Borders and focus.
+    out property <color> border-default: root.dark-mode ? #3d444d : #d1d9e0;
+    out property <color> border-muted: root.dark-mode ? #30363d : #d8dee4;
+    out property <color> border-subtle: root.dark-mode ? #21262d : #e6eaef;
+    out property <color> border-strong: root.dark-mode ? #6e7681 : #8c959f;
+    out property <color> focus-outline: root.dark-mode ? #4493f8 : #0969da;
+    out property <color> selection-bg: root.dark-mode ? #264f78 : #b6d7ff;
+
+    // Semantic roles.
+    out property <color> accent-fg: root.dark-mode ? #4493f8 : #0969da;
+    out property <color> accent-fg-strong: root.dark-mode ? #58a6ff : #0969da;
+    out property <color> accent-emphasis: root.dark-mode ? #1f6feb : #0969da;
+    out property <color> accent-muted: root.dark-mode ? #388bfd66 : #54aeff66;
+    out property <color> accent-border-strong:
+        root.dark-mode ? #388bfd66 : #54aeff;
+    out property <color> accent-subtle: root.dark-mode ? #388bfd1a : #ddf4ff;
+    out property <color> accent-subtle-hover: root.dark-mode ? #388bfd33 : #b6e3ff;
+    out property <color> accent-inset: root.dark-mode ? #0c2d6b : #ddf4ff;
+    out property <color> success-fg: root.dark-mode ? #3fb950 : #1a7f37;
+    out property <color> success-emphasis: root.dark-mode ? #238636 : #1f883d;
+    out property <color> success-muted: root.dark-mode ? #2ea04326 : #dafbe1;
+    out property <color> attention-fg: root.dark-mode ? #d29922 : #9a6700;
+    out property <color> attention-emphasis: root.dark-mode ? #9e6a03 : #bf8700;
+    out property <color> attention-muted: root.dark-mode ? #bb800926 : #fff8c5;
+    out property <color> danger-fg: root.dark-mode ? #f85149 : #cf222e;
+    out property <color> danger-fg-strong: root.dark-mode ? #f85149 : #d1242f;
+    out property <color> danger-emphasis: root.dark-mode ? #da3633 : #cf222e;
+    out property <color> danger-muted: root.dark-mode ? #f851491a : #ffebe9;
+    out property <color> danger-border-muted: root.dark-mode ? #f8514966 : #cf222e66;
+    out property <color> danger-inset: root.dark-mode ? #3d1117 : #ffebe9;
+    out property <color> done-fg: root.dark-mode ? #a371f7 : #8250df;
+    out property <color> done-fg-strong: root.dark-mode ? #ab7df8 : #8250df;
+    out property <color> done-emphasis: root.dark-mode ? #8957e5 : #8250df;
+    out property <color> done-muted: root.dark-mode ? #a371f71a : #fbefff;
+    out property <color> open-fg: root.success-fg;
+    out property <color> closed-fg: root.danger-fg;
+
+    // Default, primary, danger, and transparent control state layers.
+    out property <color> control-default-rest: root.dark-mode ? #21262d : #f6f8fa;
+    out property <color> control-default-hover: root.dark-mode ? #292e36 : #f3f4f6;
+    out property <color> control-default-active: root.dark-mode ? #343b43 : #d8dee4;
+    out property <color> control-muted-rest: root.dark-mode ? #21262d : #eaeef2;
+    out property <color> control-muted-hover: root.dark-mode ? #30363d : #eaeef2;
+    out property <color> control-raised-hover: root.dark-mode ? #262c36 : #f3f4f6;
+    out property <color> control-soft-hover: root.dark-mode ? #656c7633 : #e6eaef;
+    out property <color> control-soft-rest: root.dark-mode ? #656c7626 : #eff2f5;
+    out property <color> control-input-bg: root.dark-mode ? #21262d : #ffffff;
+    out property <color> control-divider-hover:
+        root.dark-mode ? #6e768166 : #818b9833;
+    out property <color> control-divider-rest:
+        root.dark-mode ? #6e768133 : #818b981f;
+    out property <color> control-copy-rest:
+        root.dark-mode ? #656c7626 : #818b981a;
+    out property <color> control-disabled-fg: root.dark-mode ? #6e7681 : #8c959f;
+    out property <color> control-inverse-bg: root.dark-mode ? #f0f6fc : #24292f;
+    out property <color> control-inverse-fg: root.dark-mode ? #1f2328 : #ffffff;
+    out property <color> control-primary-rest: root.success-emphasis;
+    out property <color> control-primary-hover: root.dark-mode ? #2ea043 : #1a7f37;
+    out property <color> control-primary-active: root.dark-mode ? #1f6f32 : #176f2c;
+    out property <color> control-primary-disabled:
+        root.dark-mode ? #23863666 : #94d3a2;
+    out property <color> control-danger-rest: root.control-default-rest;
+    out property <color> control-danger-hover: root.danger-emphasis;
+    out property <color> control-danger-active: root.dark-mode ? #b62324 : #a40e26;
+    out property <color> control-danger-selected:
+        root.dark-mode ? #f85149 : #a40e26;
+    out property <color> control-transparent-hover:
+        root.dark-mode ? #ffffff1a : #818b981f;
+    out property <color> control-transparent-active:
+        root.dark-mode ? #ffffff29 : #818b9833;
+    out property <color> control-transparent-selected:
+        root.dark-mode ? #ffffff1f : #818b9826;
+    out property <color> control-transparent-subtle:
+        root.dark-mode ? #ffffff14 : #1f23280f;
+    out property <color> control-neutral-hover:
+        root.dark-mode ? #656c7633 : #818b981f;
+    out property <color> control-neutral-active:
+        root.dark-mode ? #656c7633 : #818b9833;
+    out property <color> neutral-emphasis:
+        root.dark-mode ? #6e7681 : #57606a;
+
+    // Component/pattern tokens whose geometry is defined by Primer.
+    out property <color> underline-nav-hover: root.dark-mode ? #656c7633 : #eaedf0;
+    out property <color> underline-nav-selected: root.dark-mode ? #f78166 : #fd8c73;
+    out property <color> tooltip-bg: #25292e;
+    out property <color> tooltip-fg: #ffffff;
+    out property <color> backdrop: #00000066;
+    out property <color> backdrop-subtle: #00000040;
+    out property <color> backdrop-medium: #00000055;
+    out property <color> canvas-translucent:
+        root.dark-mode ? #0d1117df : #ffffffdf;
+    out property <color> scrollbar-track:
+        root.dark-mode ? #ffffff14 : #1f232814;
+    out property <color> scrollbar-thumb:
+        root.dark-mode ? #8c959f : #6e7781;
+    out property <color> drag-handle:
+        root.dark-mode ? #9198a180 : #59636e66;
+    out property <color> shadow-floating-small:
+        root.dark-mode ? #00000066 : #25292e1f;
+    out property <color> shadow-floating-medium:
+        root.dark-mode ? #00000080 : #1f232826;
+    out property <color> shadow-floating-subtle:
+        root.dark-mode ? #0000002a : #1f232814;
+    out property <color> code-canvas:
+        root.dark-mode ? #0d1117 : #f6f8fa;
+    out property <color> code-row-hover:
+        root.dark-mode ? #161b22 : #f3f4f6;
+    out property <color> overlay-handle:
+        root.dark-mode ? #6e768166 : #afb8c133;
+
+    // Diff and code-review roles used by the specialized PR workspace.
+    out property <color> diff-addition-fg: root.dark-mode ? #3fb950 : #1a7f37;
+    out property <color> diff-addition-bg: root.dark-mode ? #2ea04326 : #dafbe1;
+    out property <color> diff-deletion-fg: root.dark-mode ? #f85149 : #cf222e;
+    out property <color> diff-deletion-bg: root.dark-mode ? #f851491a : #ffebe9;
+    out property <color> diff-hunk-fg: root.dark-mode ? #58a6ff : #0969da;
+    out property <color> diff-hunk-bg: root.dark-mode ? #388bfd1a : #ddf4ff;
+    out property <color> diff-selection-bg: root.dark-mode ? #388bfd66 : #0969da55;
+    out property <color> diff-find-bg: root.dark-mode ? #bb800966 : #ffe66d99;
+    out property <color> diff-addition-gutter-bg:
+        root.dark-mode ? #3fb9504d : #aceebb;
+    out property <color> diff-deletion-gutter-bg:
+        root.dark-mode ? #f851494d : #ffcecb;
+    out property <color> diff-hunk-gutter-bg:
+        root.dark-mode ? #0c2d6b : #b6e3ff;
+    out property <color> diff-addition-stat:
+        root.dark-mode ? #2ea04366 : #aceebb;
+    out property <color> diff-deletion-stat:
+        root.dark-mode ? #f8514966 : #ffcecb;
+}
+
+// Primer size, radius, control, overlay, typography, and breakpoint tokens.
+// Values mirror the current Primer primitives table. Application-specific
+// limits are named explicitly instead of pretending to be Primer primitives.
+export global GitHubMetrics {
+    out property <length> size-2: 2px;
+    out property <length> size-4: 4px;
+    out property <length> size-6: 6px;
+    out property <length> size-8: 8px;
+    out property <length> size-12: 12px;
+    out property <length> size-16: 16px;
+    out property <length> size-20: 20px;
+    out property <length> size-24: 24px;
+    out property <length> size-28: 28px;
+    out property <length> size-32: 32px;
+    out property <length> size-36: 36px;
+    out property <length> size-40: 40px;
+    out property <length> size-44: 44px;
+    out property <length> size-48: 48px;
+    out property <length> size-64: 64px;
+    out property <length> size-80: 80px;
+    out property <length> size-96: 96px;
+
+    out property <length> border-thin: 1px;
+    out property <length> border-thick: 2px;
+    out property <length> radius-small: 3px;
+    out property <length> radius-medium: 6px;
+    out property <length> radius-large: 12px;
+    out property <length> radius-full: 9999px;
+    out property <length> focus-outline-width: 2px;
+    out property <length> focus-outline-offset: -2px;
+
+    out property <length> stack-gap-condensed: 8px;
+    out property <length> stack-gap-normal: 16px;
+    out property <length> stack-gap-spacious: 24px;
+    out property <length> stack-padding-condensed: 8px;
+    out property <length> stack-padding-normal: 16px;
+    out property <length> stack-padding-spacious: 24px;
+
+    out property <length> control-xsmall-size: 24px;
+    out property <length> control-small-size: 28px;
+    out property <length> control-medium-size: 32px;
+    out property <length> control-large-size: 40px;
+    out property <length> control-xlarge-size: 48px;
+    out property <length> control-medium-gap: 8px;
+    out property <length> control-medium-padding-inline: 12px;
+    out property <length> control-large-padding-block: 10px;
+
+    out property <length> icon-small: 12px;
+    out property <length> icon-medium: 16px;
+    out property <length> icon-large: 20px;
+    out property <length> icon-xlarge: 24px;
+
+    out property <length> text-small: 12px;
+    out property <length> text-medium: 14px;
+    out property <length> text-large: 16px;
+    out property <length> heading-small: 20px;
+    out property <length> heading-medium: 24px;
+    out property <length> heading-large: 32px;
+
+    out property <length> overlay-offset: 4px;
+    out property <length> overlay-width-xsmall: 192px;
+    out property <length> overlay-width-small: 320px;
+    out property <length> overlay-width-medium: 480px;
+    out property <length> overlay-width-large: 640px;
+    out property <length> overlay-width-xlarge: 960px;
+    out property <length> overlay-height-small: 256px;
+    out property <length> overlay-height-medium: 320px;
+    out property <length> overlay-height-large: 432px;
+    out property <length> overlay-height-xlarge: 600px;
+
+    out property <length> breakpoint-xsmall: 320px;
+    out property <length> breakpoint-small: 544px;
+    out property <length> breakpoint-medium: 768px;
+    out property <length> breakpoint-large: 1012px;
+    out property <length> breakpoint-xlarge: 1280px;
+    out property <length> breakpoint-xxlarge: 1400px;
+
+    // Usher product layout decisions built on Primer primitives.
+    out property <length> application-min-width: 640px;
+    out property <length> page-content-max-width: 1120px;
+    out property <length> page-wide-content-max-width: 1280px;
+}

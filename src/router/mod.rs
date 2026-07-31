@@ -3,24 +3,14 @@ use slint::Weak;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-const BREADCRUMB_HIDDEN_ROUTES: &[Route] = &[Route::Chat, Route::Login, Route::PrReview];
+const BREADCRUMB_HIDDEN_ROUTES: &[Route] = &[Route::Chat, Route::PrReview];
 const MAX_ROUTE_HISTORY: usize = 64;
-// Order must match `CustomNavDrawer` items in `ui/main.slint`.
-// Demo/dev routes are intentionally listed for local testing.
+// Order must match `GitHubNavigationRail` items in `ui/main.slint`.
 const NAVIGATION_ROUTES: &[Route] = &[
     Route::Home,
     Route::Chat,
     Route::Project,
-    // Temporarily hidden from the primary navigation rail. Uncomment these
-    // together with the matching items in `ui/main.slint` when the development
-    // routes should become visible again.
-    // Route::Search,
-    // Route::Notification,
-    // Route::Toast,
-    // Route::Dialog,
-    // Route::Tools,
-    // Route::List,
-    // Route::Detail,
+    Route::UiComponents,
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -29,22 +19,17 @@ pub struct RouteUiState {
     pub show_navigation_drawer: bool,
     pub navigation_current_index: i32,
     pub chat_route_visible: bool,
-    pub dialog_route_visible: bool,
     pub show_page_scroll_view: bool,
 }
 
 pub fn route_ui_state(route: Route) -> RouteUiState {
     let chat_route_visible = route == Route::Chat;
-    let dialog_route_visible = route == Route::Dialog;
     RouteUiState {
         show_breadcrumb: !BREADCRUMB_HIDDEN_ROUTES.contains(&route),
-        show_navigation_drawer: route != Route::Login && route != Route::PrReview,
+        show_navigation_drawer: route != Route::PrReview,
         navigation_current_index: navigation_index_for_route(route),
         chat_route_visible,
-        dialog_route_visible,
-        show_page_scroll_view: !chat_route_visible
-            && !dialog_route_visible
-            && route != Route::PrReview,
+        show_page_scroll_view: !chat_route_visible && route != Route::PrReview,
     }
 }
 
@@ -124,7 +109,6 @@ impl Router {
         window.set_show_navigation_drawer(state.show_navigation_drawer);
         window.set_navigation_current_index(state.navigation_current_index);
         window.set_show_chat_page(state.chat_route_visible);
-        window.set_show_dialog_page(state.dialog_route_visible);
         window.set_show_page_scroll_view(state.show_page_scroll_view);
         state
     }
@@ -192,18 +176,36 @@ fn is_workflow_route(route: Route) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_ROUTE_HISTORY, NavigationHistory, is_workflow_route, route_ui_state};
+    use super::{
+        MAX_ROUTE_HISTORY, NavigationHistory, is_workflow_route, route_for_navigation_index,
+        route_ui_state,
+    };
     use crate::Route;
 
     #[test]
-    fn pr_review_is_a_full_window_member_of_the_workflow_domain() {
+    fn full_window_review_stays_in_workflow_domain_but_job_run_is_global() {
         let state = route_ui_state(Route::PrReview);
         assert!(!state.show_breadcrumb);
         assert!(!state.show_navigation_drawer);
         assert!(!state.show_page_scroll_view);
+        let job_run = route_ui_state(Route::JobRun);
+        assert!(job_run.show_breadcrumb);
+        assert!(job_run.show_navigation_drawer);
+        assert!(job_run.show_page_scroll_view);
         assert!(is_workflow_route(Route::Workflow));
+        assert!(!is_workflow_route(Route::JobRun));
         assert!(is_workflow_route(Route::PrReview));
         assert!(!is_workflow_route(Route::Home));
+    }
+
+    #[test]
+    fn ui_components_is_a_primary_navigation_route() {
+        let state = route_ui_state(Route::UiComponents);
+        assert!(state.show_breadcrumb);
+        assert!(state.show_navigation_drawer);
+        assert!(state.show_page_scroll_view);
+        assert_eq!(state.navigation_current_index, 3);
+        assert_eq!(route_for_navigation_index(3), Some(Route::UiComponents));
     }
 
     #[test]

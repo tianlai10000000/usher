@@ -1,0 +1,386 @@
+import { GitHubActionsJob, JobStepItem } from "job.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubButton } from "../settings/github_settings_controls.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+component GitHubJobRunStatusIcon inherits Rectangle {
+    in property <string> execution-status: "queued";
+    in property <string> conclusion: "";
+    in property <bool> animations-enabled: true;
+    private property <bool> running: root.execution-status == "in_progress";
+    private property <bool> succeeded:
+        root.execution-status == "completed" && root.conclusion == "success";
+    private property <bool> failed:
+        root.execution-status == "completed" && root.conclusion == "failure";
+    private property <bool> cancelled:
+        root.execution-status == "completed" && root.conclusion == "cancelled";
+
+    width: GitHubMetrics.size-24;
+    height: GitHubMetrics.size-24;
+    border-radius: GitHubMetrics.radius-full;
+    border-width: root.execution-status == "queued" ? GitHubMetrics.border-thin : 0px;
+    border-color: GitHubTheme.fg-muted;
+    background: transparent;
+
+    if root.execution-status == "queued": Rectangle {
+        x: GitHubMetrics.size-8;
+        y: GitHubMetrics.size-8;
+        width: GitHubMetrics.size-8;
+        height: GitHubMetrics.size-8;
+        border-radius: GitHubMetrics.radius-full;
+        background: GitHubTheme.fg-muted;
+    }
+
+    if root.running: GitHubSpinner {
+        x: GitHubMetrics.size-2;
+        y: GitHubMetrics.size-2;
+        spinner-size: GitHubMetrics.icon-medium;
+        foreground: GitHubTheme.attention-fg;
+        spinning: root.animations-enabled;
+    }
+
+    if root.succeeded: Image {
+        x: GitHubMetrics.size-4;
+        y: GitHubMetrics.size-4;
+        width: GitHubMetrics.icon-medium;
+        height: GitHubMetrics.icon-medium;
+        source: @image-url("../../assets/icons/octicon-check-circle-fill-16.svg");
+        colorize: GitHubTheme.success-fg;
+    }
+
+    if root.failed: Image {
+        x: GitHubMetrics.size-4;
+        y: GitHubMetrics.size-4;
+        width: GitHubMetrics.icon-medium;
+        height: GitHubMetrics.icon-medium;
+        source: @image-url("../../assets/icons/octicon-x-circle-fill-16.svg");
+        colorize: GitHubTheme.danger-fg;
+    }
+
+    if root.cancelled: Image {
+        x: GitHubMetrics.size-4;
+        y: GitHubMetrics.size-4;
+        width: GitHubMetrics.icon-medium;
+        height: GitHubMetrics.icon-medium;
+        source: @image-url("../../assets/icons/octicon-stop-16.svg");
+        colorize: GitHubTheme.attention-fg;
+    }
+}
+
+component GitHubJobRunJobItem inherits Rectangle {
+    in property <string> job-name;
+    in property <string> execution-status: "queued";
+    in property <string> conclusion: "";
+    in property <string> total-duration: "";
+    in property <bool> animations-enabled: true;
+
+    width: 100%;
+    height: GitHubMetrics.control-medium-size;
+    border-radius: GitHubMetrics.radius-medium;
+    background: GitHubTheme.control-muted-rest;
+
+    Rectangle {
+        x: 0px;
+        y: GitHubMetrics.size-4;
+        width: GitHubMetrics.size-4;
+        height: GitHubMetrics.size-24;
+        border-radius: GitHubMetrics.size-2;
+        background: GitHubTheme.accent-fg;
+    }
+
+    GitHubJobRunStatusIcon {
+        x: GitHubMetrics.size-12;
+        y: GitHubMetrics.size-4;
+        execution-status: root.execution-status;
+        conclusion: root.conclusion;
+        animations-enabled: root.animations-enabled;
+    }
+
+    Text {
+        x: GitHubMetrics.size-40;
+        width: parent.width - self.x
+            - (root.total-duration == "" ? GitHubMetrics.size-12 : GitHubMetrics.size-64);
+        height: parent.height;
+        text: root.job-name;
+        font-size: GitHubMetrics.text-medium;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.total-duration != "": Text {
+        x: parent.width - GitHubMetrics.size-44 - GitHubMetrics.size-12;
+        width: GitHubMetrics.size-44;
+        height: parent.height;
+        text: root.total-duration;
+        font-size: GitHubMetrics.text-small;
+        color: GitHubTheme.fg-muted;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+component GitHubJobRunHeader inherits Rectangle {
+    in property <string> run-title;
+    in property <string> workflow-name;
+    in property <string> context-name;
+    in property <string> trigger-detail;
+    in property <string> execution-status: "queued";
+    in property <string> conclusion: "";
+    in property <bool> running: false;
+    in property <bool> animations-enabled: true;
+    in property <bool> compact: false;
+    callback stop();
+
+    private property <string> status-label:
+        root.execution-status == "in_progress" ? "In progress"
+        : root.execution-status == "completed" && root.conclusion == "success" ? "Success"
+        : root.execution-status == "completed" && root.conclusion == "failure" ? "Failure"
+        : root.execution-status == "completed" && root.conclusion == "cancelled" ? "Cancelled"
+        : "Queued";
+    private property <length> action-width: root.running ? 112px : 0px;
+
+    width: 100%;
+    height: root.compact && root.running ? 116px : 80px;
+    background: transparent;
+
+    GitHubJobRunStatusIcon {
+        x: 0px;
+        y: GitHubMetrics.size-4;
+        execution-status: root.execution-status;
+        conclusion: root.conclusion;
+        animations-enabled: root.animations-enabled;
+    }
+
+    Text {
+        x: GitHubMetrics.size-36;
+        y: 0px;
+        width: parent.width - self.x
+            - (root.compact ? 0px : root.action-width);
+        height: GitHubMetrics.size-32;
+        text: root.run-title;
+        font-size: GitHubMetrics.heading-medium;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: GitHubMetrics.size-36;
+        y: GitHubMetrics.size-32;
+        width: parent.width - self.x;
+        height: GitHubMetrics.size-20;
+        text: root.status-label + " · " + root.workflow-name + " · " + root.context-name;
+        font-size: GitHubMetrics.text-small;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: GitHubMetrics.size-36;
+        y: GitHubMetrics.size-48 + GitHubMetrics.size-4;
+        width: parent.width - self.x;
+        height: GitHubMetrics.size-20;
+        text: root.trigger-detail;
+        font-size: GitHubMetrics.text-small;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.running: GitHubButton {
+        x: root.compact ? GitHubMetrics.size-36 : parent.width - self.width;
+        y: root.compact ? GitHubMetrics.size-80 : GitHubMetrics.size-2;
+        text: "Stop job";
+        danger: true;
+        clicked => { root.stop(); }
+    }
+
+    Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-default;
+    }
+}
+
+component GitHubJobRunJobsNav inherits Rectangle {
+    in property <string> job-name;
+    in property <string> execution-status: "queued";
+    in property <string> conclusion: "";
+    in property <string> total-duration: "";
+    in property <bool> animations-enabled: true;
+
+    width: 216px;
+    height: 76px;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: GitHubMetrics.size-28;
+        text: "Jobs";
+        font-size: GitHubMetrics.text-medium;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+        vertical-alignment: center;
+    }
+
+    GitHubJobRunJobItem {
+        x: 0px;
+        y: GitHubMetrics.size-32;
+        width: parent.width;
+        job-name: root.job-name;
+        execution-status: root.execution-status;
+        conclusion: root.conclusion;
+        total-duration: root.total-duration;
+        animations-enabled: root.animations-enabled;
+    }
+}
+
+component GitHubJobRunJobFrame inherits Rectangle {
+    in property <string> job-name;
+    in property <string> summary;
+    in property <string> execution-status: "queued";
+    in property <string> conclusion: "";
+    in property <string> total-duration: "";
+    in property <[JobStepItem]> steps: [];
+    in property <bool> animations-enabled: true;
+    in-out property <int> expanded-step-overrides: 0;
+    callback load-step-log(int);
+
+    width: 100%;
+    height: run-job.height + GitHubMetrics.size-2;
+    border-radius: GitHubMetrics.radius-medium;
+    border-width: GitHubMetrics.border-thin;
+    border-color: GitHubTheme.border-default;
+    background: GitHubTheme.code-canvas;
+    clip: true;
+
+    run-job := GitHubActionsJob {
+        x: GitHubMetrics.border-thin;
+        y: GitHubMetrics.border-thin;
+        width: parent.width - GitHubMetrics.size-2;
+        title: root.job-name;
+        summary: root.summary;
+        execution-status: root.execution-status;
+        conclusion: root.conclusion;
+        total-duration: root.total-duration;
+        steps: root.steps;
+        animations-enabled: root.animations-enabled;
+        expanded-step-overrides <=> root.expanded-step-overrides;
+        load-step-log(index) => {
+            root.load-step-log(index);
+        }
+    }
+}
+
+export component GitHubJobRunSurface {
+    in property <string> run-title: "Workflow run";
+    in property <string> workflow-name: "Workflow";
+    in property <string> context-name: "Usher";
+    in property <string> job-name: "job";
+    in property <string> trigger-detail: "Started manually";
+    in property <string> summary: "";
+    in property <string> execution-status: "queued";
+    in property <string> conclusion: "";
+    in property <string> total-duration: "";
+    in property <[JobStepItem]> steps: [];
+    in property <bool> running: false;
+    in property <bool> animations-enabled: true;
+    callback stop();
+    callback load-step-log(int);
+
+    private property <bool> compact: root.width < GitHubMetrics.breakpoint-medium;
+    private property <int> expanded-step-overrides: 0;
+    private property <length> content-width:
+        min(root.width, GitHubMetrics.page-wide-content-max-width);
+
+    width: 100%;
+    height: run-layout.preferred-height;
+
+    run-layout := VerticalLayout {
+        x: (parent.width - root.content-width) / 2;
+        width: root.content-width;
+        spacing: GitHubMetrics.size-20;
+        alignment: start;
+
+        GitHubJobRunHeader {
+            run-title: root.run-title;
+            workflow-name: root.workflow-name;
+            context-name: root.context-name;
+            trigger-detail: root.trigger-detail;
+            execution-status: root.execution-status;
+            conclusion: root.conclusion;
+            running: root.running;
+            animations-enabled: root.animations-enabled;
+            compact: root.compact;
+            stop => { root.stop(); }
+        }
+
+        if !root.compact: Rectangle {
+            width: parent.width;
+            height: max(jobs-nav.height, job-frame.height);
+            background: transparent;
+
+            jobs-nav := GitHubJobRunJobsNav {
+                x: 0px;
+                y: 0px;
+                width: 216px;
+                job-name: root.job-name;
+                execution-status: root.execution-status;
+                conclusion: root.conclusion;
+                total-duration: root.total-duration;
+                animations-enabled: root.animations-enabled;
+            }
+
+            job-frame := GitHubJobRunJobFrame {
+                x: jobs-nav.width + GitHubMetrics.size-24;
+                y: 0px;
+                width: parent.width - self.x;
+                job-name: root.job-name;
+                summary: root.summary;
+                execution-status: root.execution-status;
+                conclusion: root.conclusion;
+                total-duration: root.total-duration;
+                steps: root.steps;
+                animations-enabled: root.animations-enabled;
+                expanded-step-overrides <=> root.expanded-step-overrides;
+                load-step-log(index) => { root.load-step-log(index); }
+            }
+        }
+
+        if root.compact: VerticalLayout {
+            width: parent.width;
+            spacing: GitHubMetrics.size-16;
+            alignment: start;
+
+            GitHubJobRunJobsNav {
+                width: parent.width;
+                job-name: root.job-name;
+                execution-status: root.execution-status;
+                conclusion: root.conclusion;
+                total-duration: root.total-duration;
+                animations-enabled: root.animations-enabled;
+            }
+
+            GitHubJobRunJobFrame {
+                width: parent.width;
+                job-name: root.job-name;
+                summary: root.summary;
+                execution-status: root.execution-status;
+                conclusion: root.conclusion;
+                total-duration: root.total-duration;
+                steps: root.steps;
+                animations-enabled: root.animations-enabled;
+                expanded-step-overrides <=> root.expanded-step-overrides;
+                load-step-log(index) => { root.load-step-log(index); }
+            }
+        }
+    }
+}

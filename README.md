@@ -8,7 +8,7 @@ Usher is an alpha-stage desktop workspace for managing local Git projects and re
 
 - Manage local repositories, aliases, tags, logos, and remote repository URLs.
 - Inspect open PR/MR counts for `fat`, `uat`, and `prod` across GitHub, GitLab, and Gitee-compatible servers.
-- Run guided Tag and PR workflows with per-project state. Branch and CD tabs are temporarily Coming soon.
+- Run project-scoped Branch validation, Tag automation, staged CD, and pull-request workflows.
 - Open a project-aware terminal drawer without leaving the current page.
 - Configure an independent OpenAI-compatible AI Agent provider (such as DeepSeek); the existing RAG chat view remains separate.
 - Receive update, toast, notification, tray, and network-status feedback.
@@ -46,9 +46,11 @@ cargo run
 Useful development commands:
 
 ```sh
+./scripts/check-ui-policy.sh
 cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
+git diff --check
 ```
 
 Everyday `dev` and `test` builds retain source line tables and incremental
@@ -133,6 +135,7 @@ src/main.rs
      -> src/http/mod.rs        shared HTTP clients and interceptors
      -> src/platform/          native appearance, title bar, window interaction, fonts
      -> src/project/           project registry, logos, PR summaries
+     -> src/jobs/              reusable Job model and application run route projection
      -> src/workflow/          Branch / Tag / PR / CD state and execution
      -> src/terminal/          PTY session and terminal rendering
      -> src/chat/              chat transport, history, Markdown, UI binding
@@ -178,6 +181,9 @@ The GitHub release workflow produces macOS archives/DMGs and Windows ZIP bundles
 - [Project structure audit and refactoring roadmap (中文)](docs/architecture-structure-audit.md)
 - [Coding-agent instructions](AGENTS.md)
 - [Specification index](docs/specs/README.md)
+- [GitHub/Primer UI design specification](docs/specs/ui-design.md)
+- [GitHub/Primer UI migration plan](docs/ui-github-migration-plan.md)
+- [UI bug history](bug-history.md)
 - [Pull request workflow specification](docs/specs/pr-review.md)
 - [Terminal behavior specification](docs/specs/terminal.md)
 - [Build performance and artifact policy](docs/build-performance.md)

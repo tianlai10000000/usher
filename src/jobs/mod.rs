@@ -1,0 +1,129 @@
+mod model;
+
+use crate::{JobStepItem, MainWindow};
+use slint::{ComponentHandle, ModelRc, VecModel};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+pub(crate) use model::{
+    JobConclusion, JobSnapshot, JobStepData, JobStepDefinition, JobStepStatus, format_duration,
+};
+
+#[derive(Debug, Clone)]
+pub(crate) struct JobRunDescriptor {
+    pub(crate) active: bool,
+    pub(crate) source: String,
+    pub(crate) run_title: String,
+    pub(crate) workflow_name: String,
+    pub(crate) context_name: String,
+    pub(crate) job_name: String,
+    pub(crate) trigger_detail: String,
+}
+
+impl Default for JobRunDescriptor {
+    fn default() -> Self {
+        Self {
+            active: false,
+            source: String::new(),
+            run_title: "Workflow run".to_string(),
+            workflow_name: "Workflow".to_string(),
+            context_name: "Usher".to_string(),
+            job_name: "job".to_string(),
+            trigger_detail: "Started manually".to_string(),
+        }
+    }
+}
+
+type StopHandler = Rc<dyn Fn()>;
+type LoadLogHandler = Rc<dyn Fn(i32)>;
+
+#[derive(Clone)]
+struct JobRunActions {
+    stop: StopHandler,
+    load_step_log: LoadLogHandler,
+}
+
+thread_local! {
+    static JOB_RUN_ACTIONS: RefCell<HashMap<String, JobRunActions>> =
+        RefCell::new(HashMap::new());
+}
+
+pub(crate) fn setup_job_run(ui: &MainWindow) {
+    let ui_weak = ui.as_weak();
+    ui.on_job_run_stop(move || {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        let source = ui.get_job_run_source().to_string();
+        JOB_RUN_ACTIONS.with(|registry| {
+            if let Some(actions) = registry.borrow().get(&source) {
+                (actions.stop)();
+            } else {
+                log::warn!("[Jobs] Stop ignored: no action source registered for '{source}'");
+            }
+        });
+    });
+
+    let ui_weak = ui.as_weak();
+    ui.on_job_run_load_step_log(move |index| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        let source = ui.get_job_run_source().to_string();
+        JOB_RUN_ACTIONS.with(|registry| {
+            if let Some(actions) = registry.borrow().get(&source) {
+                (actions.load_step_log)(index);
+            } else {
+                log::warn!(
+                    "[Jobs] Log request ignored: no action source registered for '{source}'"
+                );
+            }
+        });
+    });
+}
+
+pub(crate) fn register_job_run_source(
+    source: &str,
+    stop: impl Fn() + 'static,
+    load_step_log: impl Fn(i32) + 'static,
+) {
+    JOB_RUN_ACTIONS.with(|registry| {
+        registry.borrow_mut().insert(
+            source.to_string(),
+            JobRunActions {
+                stop: Rc::new(stop),
+                load_step_log: Rc::new(load_step_log),
+            },
+        );
+    });
+}
+
+pub(crate) fn apply_job_run(
+    ui: &MainWindow,
+    descriptor: &JobRunDescriptor,
+    snapshot: &JobSnapshot,
+    summary: &str,
+    running: bool,
+) {
+    ui.set_job_run_active(descriptor.active);
+    ui.set_job_run_source(descriptor.source.clone().into());
+    ui.set_job_run_title(descriptor.run_title.clone().into());
+    ui.set_job_run_workflow_name(descriptor.workflow_name.clone().into());
+    ui.set_job_run_context_name(descriptor.context_name.clone().into());
+    ui.set_job_run_job_name(descriptor.job_name.clone().into());
+    ui.set_job_run_trigger_detail(descriptor.trigger_detail.clone().into());
+    ui.set_job_run_summary(summary.into());
+    ui.set_job_run_status(snapshot.status.as_str().into());
+    ui.set_job_run_conclusion(
+        snapshot
+            .conclusion
+            .map(JobConclusion::as_str)
+            .unwrap_or_default()
+            .into(),
+    );
+    ui.set_job_run_total_duration(snapshot.total_duration.clone().into());
+    ui.set_job_run_running(running);
+    let steps: Vec<JobStepItem> = snapshot.steps.iter().map(JobStepData::to_slint).collect();
+    ui.set_job_run_steps(ModelRc::new(VecModel::from(steps)));
+}

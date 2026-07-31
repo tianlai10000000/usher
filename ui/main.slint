@@ -1,45 +1,38 @@
-import { 
-    FilledCard, AppBar, Horizontal, Vertical, MaterialText, IconButton, 
-    MaterialPalette, MaterialStyleMetrics, CircularProgressIndicator, Modal, TextButton,
-    FilledButton, HorizontalDivider } from "@material";
-import { CustomNavDrawer, NavItem } from "./components/navigation/custom_nav_drawer.slint";
-import { ScrollView } from "../material-1.7.1-fixed/ui/components/scroll_view.slint";
-import { Login as LoginPage } from "./views/login.slint";
-import { Home as HomePage } from "./views/home.slint";
-import { Search as SearchPage } from "./views/search.slint";
-import { Settings as SettingsPage } from "./views/settings.slint";
-import { About as AboutPage } from "./views/about.slint";
-import { Workflow as WorkflowPage } from "./views/workflow/workflow.slint";
-import { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
-import { PrReviewWorkspace } from "./views/workflow/pr_review_workspace.slint";
+import { GitHubNavigationRail, NavItem } from "./components/navigation/custom_nav_drawer.slint";
+import { GitHubHomePage as HomePage } from "./views/home.slint";
+import { GitHubSearchPage as SearchPage } from "./views/search.slint";
+import { GitHubSettingsPage as SettingsPage } from "./views/settings.slint";
+import { GitHubAboutPage as AboutPage } from "./views/about.slint";
+import { GitHubUiComponentsPage as UiComponentsPage } from "./views/ui_components.slint";
+import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.slint";
+import { GitHubJobRunPage as JobRunPage } from "./views/job_run.slint";
+import { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
+import { GitHubPullRequestReviewPage } from "./views/workflow/pr_review_workspace.slint";
 import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 
-import { List as ListPage } from "./views/list.slint";
-import { Detail as DetailPage } from "./views/detail.slint";
-import { Project as ProjectPage, ProjectItem, ProjectDialog } from "./views/project.slint";
-import { Tools as ToolsPage } from "./views/tools.slint";
-import { Chat as ChatPage, ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
-import { Notification as NotificationPage } from "./views/notification.slint";
-import { Toast as ToastPage } from "./views/toast.slint";
-import { Dialog as DialogPage } from "./views/dialog.slint";
+import { GitHubProjectPage as ProjectPage, ProjectItem } from "./views/project.slint";
+import { GitHubProjectDialog } from "./components/project/github_project_dialog.slint";
+import { GitHubChatPage as ChatPage, ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
 import { Route } from "./route/routeMap.slint";
 import { AppState } from "./state/app_state.slint";
 import { DebugLogger } from "./state/debug_logger.slint";
-import { Breadcrumb } from "views/breadcrumb.slint";
+import { GitHubBreadcrumb } from "./components/navigation/github_breadcrumb.slint";
 import { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
 import { NotificationIcons } from "./components/notify/icons.slint";
-import { NotificationItem } from "./components/notify/notification_item.slint";
-import { Toast } from "./components/toast/toast.slint";
+import { GitHubNotificationItem } from "./components/notify/notification_item.slint";
+import { GitHubToast } from "./components/toast/toast.slint";
 import { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
 import { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
-import { DialogEnhance } from "./components/dialog/dialog_enhance.slint";
-import { UpdateLogic, DownloadProgressModal } from "./components/update/update.slint";
-import { StatusBar } from "./components/status_bar.slint";
+import { GitHubDialogEnhance } from "./components/dialog/dialog_enhance.slint";
+import { UpdateLogic, GitHubDownloadProgressDialog } from "./components/update/update.slint";
+import { GitHubStatusBar } from "./components/status_bar.slint";
 import { LayoutConstants } from "./layout_constants.slint";
-import { PageScrollActions } from "./components/fab/page_scroll_actions.slint";
-import { TerminalDrawer, TerminalLine } from "./components/drawer/terminal_drawer.slint";
-import { MaterialPalette } from "../material-1.7.1-fixed/ui/styling/material_palette.slint";
+import { GitHubPageScrollActions } from "./components/fab/page_scroll_actions.slint";
+import { GitHubTerminalDrawer, TerminalLine } from "./components/drawer/terminal_drawer.slint";
+import { GitHubScrollView } from "./components/github_scroll_view.slint";
+import { GitHubTooltip } from "./components/github_tooltip.slint";
+import { GitHubTheme, GitHubMetrics } from "./theme/github_theme.slint";
 
 export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
@@ -51,17 +44,17 @@ export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager
 export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
 export { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
-export { WorkflowPullRequestItem } from "./views/workflow/pr.slint";
+export { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 
 export component MainWindow inherits Window {
     // Keep below Primer `$width-md` (768px) so the PR file tree can auto-collapse
     // at the same viewport threshold GitHub uses (`max-width: 767.98px`).
-    min-width: 640px;
+    min-width: GitHubMetrics.application-min-width;
     min-height: 600px;
     title: "Usher";
     // Use one shared surface color for the native title bar and the main content area.
-    private property <color> window-surface-color: MaterialPalette.surface_container_lowest;
+    private property <color> window-surface-color: GitHubTheme.canvas-default;
     background: root.window-surface-color;
     in-out property <bool> window-live-resizing: false;
     out property <length> chat-layout-window-width: self.width;
@@ -82,7 +75,6 @@ export component MainWindow inherits Window {
     // 页面可见性控制（由路由策略统一计算）
     in-out property <bool> show-page-scroll-view: true;
     in-out property <bool> show-chat-page: false;
-    in-out property <bool> show-dialog-page: false;
     
     // Router 历史栈顶部，仅供 UI 判断/展示；Back 必须调用 navigate-back。
     in-out property <Route> previous-route: Route.Home;
@@ -153,11 +145,22 @@ export component MainWindow inherits Window {
     in property <bool> workflow-tag-add-initializing: false;
     in property <bool> workflow-tag-remove-initializing: false;
     in property <bool> workflow-tag-running: false;
-    in property <bool> workflow-tag-loading-animated: true;
-    in property <string> workflow-tag-job-status: "queued";
-    in property <string> workflow-tag-job-conclusion: "";
-    in property <string> workflow-tag-job-total-duration: "";
-    in property <[JobStepItem]> workflow-tag-steps: [];
+    in property <bool> job-run-animations-enabled: true;
+    // Application-level Job Run presentation. Feature modules publish a source
+    // descriptor and snapshot without owning or embedding the route page.
+    in property <bool> job-run-active: false;
+    in property <string> job-run-source: "";
+    in property <string> job-run-title: "Workflow run";
+    in property <string> job-run-workflow-name: "Workflow";
+    in property <string> job-run-context-name: "Usher";
+    in property <string> job-run-job-name: "job";
+    in property <string> job-run-trigger-detail: "Started manually";
+    in property <string> job-run-summary: "";
+    in property <string> job-run-status: "queued";
+    in property <string> job-run-conclusion: "";
+    in property <string> job-run-total-duration: "";
+    in property <[JobStepItem]> job-run-steps: [];
+    in property <bool> job-run-running: false;
     in property <string> workflow-project-id: "default";
     in property <string> workflow-project-name: "Default Project";
     in property <string> workflow-project-alias: "";
@@ -182,6 +185,8 @@ export component MainWindow inherits Window {
     in-out property <string> project-modal-original-alias: "";
     in-out property <string> project-search-query: "";
     in-out property <string> project-view-mode: "grid";
+    in-out property <bool> project-list-loading: false;
+    in-out property <string> project-list-error: "";
     in-out property <bool> settings-git-tokens-saved: false;
     in-out property <bool> settings-git-hosting-config-saved: false;
     in-out property <bool> settings-ai-agent-saved: false;
@@ -326,6 +331,8 @@ export component MainWindow inherits Window {
     callback workflow-tag-open-remove();
     callback workflow-tag-stop();
     callback workflow-tag-load-step-log(int);
+    callback job-run-stop();
+    callback job-run-load-step-log(int);
     callback workflow-pr-list-state-change(string);
     callback workflow-pr-list-page-change(int);
     callback workflow-pr-list-review-filter-change(string);
@@ -460,17 +467,16 @@ export component MainWindow inherits Window {
     }
 
     // 主内容区域（菜单栏 + 右侧内容）- 使用原生标题栏，只减去状态栏高度
-    Horizontal {
+    HorizontalLayout {
         x: 0;
         y: 0;
         width: root.width;
         height: root.height - LayoutConstants.status-bar-height;
-        // Material Horizontal defaults to padding_8 + spacing_8; zero both so
-        // the nav rail sits flush against the main content (no white gutter).
+        // Keep the navigation rail flush against the main content.
         padding: 0px;
         spacing: 0px;
         
-        if root.show-navigation-drawer: Vertical {
+        if root.show-navigation-drawer: VerticalLayout {
             width: 48px;
             height: parent.height;
             padding: 0px;
@@ -480,7 +486,7 @@ export component MainWindow inherits Window {
             drawer_container := Rectangle {
                 width: parent.width;
                 height: parent.height;
-                background: AppState.effective-dark-mode ? #151b23 : #f6f8fa;
+                background: GitHubTheme.canvas-subtle;
                 clip: false;
                 z: 20;
 
@@ -488,10 +494,10 @@ export component MainWindow inherits Window {
                         x: parent.width - 1px;
                         width: 1px;
                         height: parent.height;
-                        background: AppState.effective-dark-mode ? #3d444d : #d1d9e0;
+                        background: GitHubTheme.border-default;
                     }
                     
-                    Vertical {
+                    VerticalLayout {
                         width: parent.width;
                         height: parent.height;
                         vertical-stretch: 1;
@@ -500,7 +506,7 @@ export component MainWindow inherits Window {
 
                         // Scroll inside the rail when items overflow. Tooltips
                         // mount on MainWindow and follow scroll-offset-y.
-                        custom_nav := CustomNavDrawer {
+                        custom_nav := GitHubNavigationRail {
                             width: parent.width;
                             height: parent.height;
                             hovered-tooltip-text <=> root.sidebar-hovered-tooltip-text;
@@ -512,20 +518,10 @@ export component MainWindow inherits Window {
 
                             // Order must match `NAVIGATION_ROUTES` in `src/router/mod.rs`.
                             items: [
-                                { icon: @image-url("./assets/icons/home.svg"), text: "Home" },
-                                { icon: @image-url("./assets/icons/chat.svg"), text: "Chat" },
-                                { icon: @image-url("./assets/icons/project.svg"), text: "Project" },
-                                // Temporarily hide development-only routes from the
-                                // primary rail. Keep these entries here (commented)
-                                // so they can be restored together with the matching
-                                // `NAVIGATION_ROUTES` entries in src/router/mod.rs.
-                                // { icon: @image-url("./assets/icons/search.svg"), text: "Search" },
-                                // { icon: @image-url("./assets/icons/info.svg"), text: "Notification" },
-                                // { icon: @image-url("./assets/icons/success.svg"), text: "Toast" },
-                                // { icon: @image-url("./assets/icons/warning.svg"), text: "Dialog" },
-                                // { icon: @image-url("./assets/icons/tools.svg"), text: "Tools" },
-                                // { icon: @image-url("./assets/icons/list.svg"), text: "List" },
-                                // { icon: @image-url("./assets/icons/detail.svg"), text: "Detail" },
+                                { icon: @image-url("./assets/icons/octicon-home-16.svg"), text: "Home" },
+                                { icon: @image-url("./assets/icons/octicon-comment-discussion-16.svg"), text: "Chat" },
+                                { icon: @image-url("./assets/icons/octicon-repo-16.svg"), text: "Project" },
+                                { icon: @image-url("./assets/icons/octicon-stack-16.svg"), text: "UI Components" },
                             ];
 
                             selected(item_index) => {
@@ -543,7 +539,7 @@ export component MainWindow inherits Window {
             height: parent.height;
             background: root.window-surface-color;
 
-            content := Vertical {
+            content := VerticalLayout {
                 width: parent.width;
                 height: parent.height;
                 padding: 0px;
@@ -557,7 +553,7 @@ export component MainWindow inherits Window {
                     clip: false;
 
                     // Page Views
-                    page-scroll-view := ScrollView {
+                    page-scroll-view := GitHubScrollView {
                         visible: root.show-page-scroll-view
                             && !(root.shell-drawer-docked-route
                                 && root.shell-drawer-visible
@@ -566,38 +562,31 @@ export component MainWindow inherits Window {
                         y: 0px;
                         width: parent.width;
                         height: parent.height;
-                        horizontal_scrollbar_policy: root.current-route == Route.Settings
-                            ? ScrollBarPolicy.always_off
-                            : ScrollBarPolicy.as_needed;
-                        vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
-
-                        Vertical {
+                        VerticalLayout {
                             width: page-scroll-view.visible_width;
                             spacing: 0px;
                             alignment: start;
-                            padding-left: MaterialStyleMetrics.padding_4;
-                            padding-right: MaterialStyleMetrics.padding_4;
+                            padding-left: GitHubMetrics.size-4;
+                            padding-right: GitHubMetrics.size-4;
                             // Breadcrumb bar is 40px; keep an extra 16px gap so
                             // page titles don't sit flush under the overlay.
                             padding-top: root.show-breadcrumb ? 56px : 0px;
                             padding-bottom: 1px;
 
-                        if root.current-route == Route.Login: LoginPage {
-                            navigate(route) => {
-                                root.navigate(route);
-                            }
-                            back => { root.navigate-back(); }
-                        }
                         if root.current-route == Route.Home: HomePage {
-                            viewport-height: page-scroll-view.visible-height - 2px;
+                            viewport-height: page-scroll-view.visible-height
+                                - (root.show-breadcrumb ? 58px : 2px);
+                            navigate(route) => { root.navigate(route); }
                         }
                         if root.current-route == Route.Search: SearchPage {
-                            viewport-height: page-scroll-view.visible-height - 2px;
+                            viewport-height: page-scroll-view.visible-height
+                                - (root.show-breadcrumb ? 58px : 2px);
+                            navigate(route) => { root.navigate(route); }
                         }
                         if root.current-route == Route.Settings: SettingsPage {
-                            // The surrounding Vertical already contributes 4px
+                            // The surrounding layout already contributes 4px
                             // padding on each side. Subtract it here so Settings
-                            // does not make the ScrollView content 8px too wide.
+                            // does not make the viewport content 8px too wide.
                             width: max(0px, page-scroll-view.visible_width - 8px);
                             viewport-height: page-scroll-view.visible-height - 2px;
                             viewport-width: self.width;
@@ -613,16 +602,35 @@ export component MainWindow inherits Window {
                                 root.simulate-crash();
                             }
                         }
-                        if root.current-route == Route.Notification: NotificationPage {}
-                        if root.current-route == Route.Toast: ToastPage {
-                            navigate(route) => {
-                                root.navigate(route);
-                            }
+                        if root.current-route == Route.UiComponents: UiComponentsPage {
+                            viewport-height: page-scroll-view.visible-height
+                                - (root.show-breadcrumb ? 58px : 2px);
+                            navigate(route) => { root.navigate(route); }
                         }
                         if root.current-route == Route.About: AboutPage {
                             viewport-height: page-scroll-view.visible-height - 2px;
                             navigate(route) => {
                                 root.navigate(route);
+                            }
+                        }
+                        if root.current-route == Route.JobRun: JobRunPage {
+                            viewport-height: page-scroll-view.visible-height
+                                - (root.show-breadcrumb ? 58px : 2px);
+                            run-title: root.job-run-title;
+                            workflow-name: root.job-run-workflow-name;
+                            context-name: root.job-run-context-name;
+                            job-name: root.job-run-job-name;
+                            trigger-detail: root.job-run-trigger-detail;
+                            summary: root.job-run-summary;
+                            execution-status: root.job-run-status;
+                            conclusion: root.job-run-conclusion;
+                            total-duration: root.job-run-total-duration;
+                            steps: root.job-run-steps;
+                            running: root.job-run-running;
+                            animations-enabled: root.job-run-animations-enabled;
+                            stop => { root.job-run-stop(); }
+                            load-step-log(index) => {
+                                root.job-run-load-step-log(index);
                             }
                         }
                         // The review workspace owns the whole window. Keep workflow
@@ -646,11 +654,8 @@ export component MainWindow inherits Window {
                             tag-add-initializing: root.workflow-tag-add-initializing;
                             tag-remove-initializing: root.workflow-tag-remove-initializing;
                             tag-running: root.workflow-tag-running;
-                            tag-job-status: root.workflow-tag-job-status;
-                            tag-job-conclusion: root.workflow-tag-job-conclusion;
-                            tag-job-total-duration: root.workflow-tag-job-total-duration;
-                            tag-loading-animated: root.workflow-tag-loading-animated;
-                            tag-steps: root.workflow-tag-steps;
+                            tag-has-run: root.job-run-active
+                                && root.job-run-source == "tag";
                             project-id: root.workflow-project-id;
                             project-name: root.workflow-project-name;
                             project-alias: root.workflow-project-alias;
@@ -711,12 +716,6 @@ export component MainWindow inherits Window {
                             tag-open-remove => {
                                 root.workflow-tag-open-remove();
                             }
-                            tag-stop => {
-                                root.workflow-tag-stop();
-                            }
-                            tag-load-step-log(index) => {
-                                root.workflow-tag-load-step-log(index);
-                            }
                             pr-list-state-change(state) => {
                                 root.workflow-pr-list-state-change(state);
                             }
@@ -748,8 +747,6 @@ export component MainWindow inherits Window {
                                 root.workflow-cd-rollback(commit-hash);
                             }
                         }
-                        if root.current-route == Route.List: ListPage {}
-                        if root.current-route == Route.Detail: DetailPage {}
                         if root.current-route == Route.Project: ProjectPage {
                             viewport-height: page-scroll-view.visible-height;
                             viewport-width: page-scroll-view.visible-width;
@@ -759,6 +756,8 @@ export component MainWindow inherits Window {
                             projects: root.project-items;
                             search-query <=> root.project-search-query;
                             view-mode <=> root.project-view-mode;
+                            loading: root.project-list-loading;
+                            load-error: root.project-list-error;
                             show-add-modal <=> root.project-show-add-modal;
                             new-project-name <=> root.project-new-name;
                             new-project-alias <=> root.project-new-alias;
@@ -790,12 +789,6 @@ export component MainWindow inherits Window {
                                 root.project-open-terminal(project-name, project-alias, local-repo);
                             }
                         }
-                        if root.current-route == Route.Tools: ToolsPage {
-                            viewport-height: page-scroll-view.visible-height;
-                            navigate(route) => {
-                                root.navigate(route);
-                            }
-                        }
                     }
                     }
 
@@ -808,7 +801,7 @@ export component MainWindow inherits Window {
                         clip: false;
                         z: 10;
 
-                        if root.show-breadcrumb: Breadcrumb {
+                        if root.show-breadcrumb: GitHubBreadcrumb {
                             width: parent.width;
                             height: parent.height;
                             current-route: root.current-route;
@@ -827,17 +820,17 @@ export component MainWindow inherits Window {
                     background: transparent;
 
                     if root.shell-drawer-docked-route && root.shell-drawer-visible: Rectangle {
-                        x: -MaterialStyleMetrics.padding_8;
+                        x: -GitHubMetrics.size-8;
                         y: 0px;
                         width: 1px;
                         height: parent.height;
-                        background: MaterialPalette.outline_variant;
+                        background: GitHubTheme.border-default;
                         z: 2;
                     }
 
-                    if root.shell-drawer-docked-route && root.shell-drawer-visible: TerminalDrawer {
-                        x: MaterialStyleMetrics.padding_4;
-                        width: max(320px, parent.width - MaterialStyleMetrics.padding_4 * 2);
+                    if root.shell-drawer-docked-route && root.shell-drawer-visible: GitHubTerminalDrawer {
+                        x: GitHubMetrics.size-4;
+                        width: max(320px, parent.width - GitHubMetrics.size-4 * 2);
                         height: parent.height;
                         docked: true;
                         drawer-open: true;
@@ -926,44 +919,25 @@ export component MainWindow inherits Window {
                 }
             }
 
-            dialog-page := DialogPage {
-                visible: root.show-dialog-page;
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: parent.height;
-                navigate(route) => {
-                    root.navigate(route);
-                }
-            }
         }
     }
 
-    if show-navigation-drawer && root.sidebar-hovered-tooltip-text != "": Rectangle {
-        x: 54px;
+    if show-navigation-drawer && root.sidebar-hovered-tooltip-text != "": GitHubTooltip {
+        x: GitHubMetrics.size-48 + GitHubMetrics.size-8;
         // 8px list padding + 44px item pitch; add Flickable viewport_y so the
         // tip tracks the icon after the rail scrolls.
-        y: 8px + root.sidebar-hovered-tooltip-index * 44px + 20px - self.height / 2
+        y: GitHubMetrics.size-8
+            + root.sidebar-hovered-tooltip-index * GitHubMetrics.size-44
+            + GitHubMetrics.size-20 - self.height / 2
             + root.sidebar-scroll-offset-y;
-        width: tooltip-label.preferred-width + 12px;
-        height: tooltip-label.preferred-height + 6px;
-        background: MaterialPalette.inverse_surface;
-        border-radius: 3px;
+        text: root.sidebar-hovered-tooltip-text;
         z: 2000;
-
-        tooltip-label := MaterialText {
-            x: 6px;
-            y: 3px;
-            text: root.sidebar-hovered-tooltip-text;
-            font-size: 11px;
-            color: MaterialPalette.inverse_on_surface;
-        }
     }
     // Compact Primer utility status bar fixed to the bottom edge.
-    // z must sit above PageScrollActions (500) so version/network popovers and
+    // z must sit above GitHubPageScrollActions (500) so version/network popovers and
     // click-outside dismiss paint over the terminal / back-to-top IconButtons.
     // Keep below full-page overlays (PrReview 800), Notify (900), and Toast (1000).
-    StatusBar {
+    GitHubStatusBar {
         x: 0;
         y: root.height - LayoutConstants.status-bar-height;
         width: root.width;
@@ -980,7 +954,7 @@ export component MainWindow inherits Window {
         z: 500;
         visible: !root.shell-drawer-fullscreen;
 
-        PageScrollActions {
+        GitHubPageScrollActions {
             container-width: parent.width;
             container-height: parent.height;
             right-offset: LayoutConstants.page-fab-right-offset;
@@ -1003,11 +977,14 @@ export component MainWindow inherits Window {
         }
     }
 
-    ProjectDialog {
+    GitHubProjectDialog {
         x: 0;
         y: 0;
         width: root.width;
-        height: root.height;
+        // The status bar paints above root-layer overlays. Keep the dialog
+        // viewport above it so a compact dialog retains matching visible top
+        // and bottom gutters instead of appearing flush with the status bar.
+        height: root.height - LayoutConstants.status-bar-height;
         modal-visible: root.project-show-add-modal;
         mode: root.project-modal-mode;
         original-alias: root.project-modal-original-alias;
@@ -1056,7 +1033,7 @@ export component MainWindow inherits Window {
         }
     }
 
-    if root.current-route == Route.PrReview: PrReviewWorkspace {
+    if root.current-route == Route.PrReview: GitHubPullRequestReviewPage {
         x: 0;
         y: 0;
         width: root.width;
@@ -1197,111 +1174,31 @@ export component MainWindow inherits Window {
         revert => { root.workflow-pr-revert(); }
     }
     
-    // Primer Banner-style application notifications stay in one bounded
-    // top-right stack. The 360px content width keeps titles, descriptions,
-    // dismiss controls, and stacked actions readable without a wide overlay.
+    // Primer recommends one Banner at a time. Keep the queue in the manager,
+    // but render only its head; dismissing it reveals the next notification.
     if NotificationManager.queue.length > 0: Rectangle {
-        x: root.width - self.width - 16px;
-        y: 16px;
-        width: min(368px, root.width - 32px);
+        x: root.width - self.width - GitHubMetrics.size-16;
+        y: GitHubMetrics.size-16;
+        width: min(400px, root.width - GitHubMetrics.size-32);
+        height: notification-overlay-item.height;
         z: 900;
-        // 最大可用高度
-        private property <length> max-available-height: root.height - 32px;
-        // 内容高度（通过隐藏的内容计算器获取）
-        private property <length> content-total-height: content-height-calculator.preferred-height;
-        // 高度自适应：取内容高度和最大可用高度的较小值
-        height: min(content-total-height, max-available-height);
         background: transparent;
-        clip: true;  // 裁剪超出部分
-        
-        // hover 状态跟踪（从消息项的 hover 状态获取）
-        private property <bool> any-item-hovered: false;
-        // 是否需要滚动（内容超过可视区域）
-        private property <bool> needs-scroll: content-total-height > max-available-height;
-        
-        // 滚动条预留宽度（与 Material ScrollView 内部一致：scroll_bar_size=8px）
-        private property <length> scrollbar-width: 8px;
-        // 内容固定宽度（始终固定，不受滚动条影响）
-        private property <length> content-fixed-width: self.width - scrollbar-width;
-        
-        // 隐藏的内容高度计算器（不可见，仅用于计算高度）
-        content-height-calculator := VerticalLayout {
-            x: -10000px;  // 移出可视区域
-            width: content-fixed-width;  // 使用相同的固定宽度计算高度
-            spacing: 0px;
-            
-            for notification[index] in NotificationManager.queue : NotificationItem {
-                notification: notification;
-                index: index;
+
+        notification-overlay-item := GitHubNotificationItem {
+            width: parent.width;
+            notification: NotificationManager.queue[0];
+            index: 0;
+            dismissed(id) => {
+                NotificationManager.dismiss-by-id(id);
             }
-        }
-        
-        // 内容区域容器：固定宽度，支持滚动
-        Rectangle {
-            width: content-fixed-width;
-            height: parent.height;
-            clip: true;
-            background: transparent;
-            
-            // 使用 Flickable 直接实现滚动，完全控制布局
-            notification-flickable := Flickable {
-                width: parent.width;
-                height: parent.height;
-                interactive: true;
-                
-                VerticalLayout {
-                    width: parent.width;
-                    spacing: 0px;  // 间距已包含在 NotificationItem 内部
-                    
-                    for notification[index] in NotificationManager.queue : NotificationItem {
-                        notification: notification;
-                        index: index;
-                        dismissed(id) => {
-                            NotificationManager.dismiss-by-id(id);
-                        }
-                        hovered(id, is-hovered) => {
-                            NotificationManager.set-hovered(id, is-hovered);
-                            // 当消息项 hover 时，设置容器的 hover 状态
-                            any-item-hovered = is-hovered;
-                        }
-                        action-clicked(notification-id, action-index) => {
-                            // 将 action-clicked 事件转发给 NotificationManager
-                            NotificationManager.action-clicked(notification-id, action-index);
-                        }
-                    }
-                }
+            hovered(id, is-hovered) => {
+                NotificationManager.set-hovered(id, is-hovered);
             }
-        }
-        
-        // 自定义滚动条：显示在预留空间内，不影响内容布局（仅视觉指示）
-        if needs-scroll: Rectangle {
-            x: content-fixed-width + 1px;  // 在内容右侧，padding 1px
-            y: 0;
-            width: scrollbar-width - 2px;
-            height: parent.height;
-            background: transparent;
-            z: 1;
-            
-            // 滚动条轨道
-            Rectangle {
-                width: parent.width;
-                height: parent.height;
-                background: AppState.effective-dark-mode ? #ffffff14 : #1f232814;
-                opacity: any-item-hovered ? 1 : 0;
-                animate opacity { duration: 150ms; }
-                border-radius: 4px;
-                
-                // 滚动条滑块（仅显示当前位置，交互通过 Flickable 处理）
-                Rectangle {
-                    x: (parent.width - self.width) / 2;
-                    y: max(0px, abs(notification-flickable.viewport-y) * (parent.height - self.height) / max(1px, notification-flickable.viewport-height - notification-flickable.height));
-                    width: 4px;
-                    height: max(32px, parent.height * notification-flickable.height / max(1px, notification-flickable.viewport-height));
-                    background: AppState.effective-dark-mode ? #8c959f : #6e7781;
-                    border-radius: 2px;
-                    opacity: any-item-hovered ? 1 : 0.5;
-                    animate opacity { duration: 150ms; }
-                }
+            action-clicked(notification-id, action-index) => {
+                NotificationManager.action-clicked(
+                    notification-id,
+                    action-index
+                );
             }
         }
     }
@@ -1313,7 +1210,7 @@ export component MainWindow inherits Window {
         background: transparent;
         z: 1000;
 
-        Toast {
+        GitHubToast {
             message: ToastManager.message;
             type: ToastManager.type == ToastType.Success ? "success" :
                   ToastManager.type == ToastType.Error ? "error" :
@@ -1332,23 +1229,19 @@ export component MainWindow inherits Window {
     }
 
     // Dialog 组件（从 dialog_enhance.slint 导入）
-    DialogEnhance {
+    GitHubDialogEnhance {
         width: 100%;
         height: 100%;
         on-default-action-clicked(id) => {
-            debug("DialogEnhance: on-default-action-clicked, id={}", id);
-            // 所有的 default-action 处理都交给 Rust 端通过 DialogManager 回调处理
-            dialog-page.default-action-clicked(id);
+            DialogManager.default-action-clicked(id);
         }
         on-action-clicked(id, index) => {
-            debug("DialogEnhance: on-action-clicked, id={}, index={}", id, index);
-            // 所有的 action 处理都交给 Rust 端通过 DialogManager 回调处理
-            dialog-page.action-clicked(id, index);
+            DialogManager.action-clicked(id, index);
         }
     }
     
     // 下载进度模态框
-    DownloadProgressModal {
+    GitHubDownloadProgressDialog {
         width: 100%;
         height: 100%;
         cancel-clicked => {

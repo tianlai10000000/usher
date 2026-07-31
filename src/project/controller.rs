@@ -282,27 +282,57 @@ pub fn setup_project(ui: &MainWindow) {
         };
 
         log::info!("[Project] Reload projects requested.");
-        let list = load_projects();
-
-        let mut guard = match state_reload.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                show_error(&ui, "Failed to reload projects.");
-                return;
-            }
-        };
-
-        *guard = list;
-        drop(guard);
         let query = ui.get_project_search_query();
-        refresh_project_items(
-            &ui,
-            &state_reload,
-            &pending_remote_logos_reload,
-            &pending_pr_overview_reload,
-            &query,
-        );
-        show_success(&ui, "Projects reloaded.");
+        ui.set_project_list_error("".into());
+        ui.set_project_list_loading(true);
+
+        let ui_weak_task = ui.as_weak();
+        let state_task = state_reload.clone();
+        let pending_remote_logos_task = pending_remote_logos_reload.clone();
+        let pending_pr_overview_task = pending_pr_overview_reload.clone();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let loaded = tokio::task::spawn_blocking(load_projects).await;
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = ui_weak_task.upgrade() else {
+                    return;
+                };
+                ui.set_project_list_loading(false);
+
+                let list = match loaded {
+                    Ok(list) => list,
+                    Err(error) => {
+                        log::error!("[Project] Reload task failed: {error}");
+                        ui.set_project_list_error(
+                            "The local project registry could not be read.".into(),
+                        );
+                        show_error(&ui, "Failed to reload projects.");
+                        return;
+                    }
+                };
+
+                let mut guard = match state_task.lock() {
+                    Ok(guard) => guard,
+                    Err(_) => {
+                        ui.set_project_list_error(
+                            "The project registry is temporarily unavailable.".into(),
+                        );
+                        show_error(&ui, "Failed to reload projects.");
+                        return;
+                    }
+                };
+
+                *guard = list;
+                drop(guard);
+                refresh_project_items(
+                    &ui,
+                    &state_task,
+                    &pending_remote_logos_task,
+                    &pending_pr_overview_task,
+                    &query,
+                );
+                show_success(&ui, "Projects reloaded.");
+            });
+        });
     });
 
     let ui_weak = ui.as_weak();

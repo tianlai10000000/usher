@@ -1,4 +1,5 @@
-import { AppState } from "../../state/app_state.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
 // Shared controls for Settings and About.
 //
@@ -8,16 +9,54 @@ import { AppState } from "../../state/app_state.slint";
 export component GitHubSettingsNavItem inherits Rectangle {
     in property <string> text;
     in property <bool> selected: false;
+    in property <bool> item-enabled: true;
+    private property <bool> keyboard-focus-visible: false;
     callback clicked();
 
     width: 100%;
     height: 32px;
     border-radius: 6px;
     background: root.selected
-        ? (AppState.effective-dark-mode ? #21262d : #eaeef2)
+        ? (GitHubTheme.control-muted-rest)
         : (nav-touch.has-hover
-            ? (AppState.effective-dark-mode ? #292e36 : #f6f8fa)
+            ? GitHubTheme.control-default-hover
             : transparent);
+    opacity: root.item-enabled ? 1 : 0.5;
+    accessible-role: tab;
+    accessible-enabled: root.item-enabled;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+
+    nav-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if (root.item-enabled && (event.text == Key.Return || event.text == " ")) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.keyboard-focus-visible = false;
+        }
+    }
+
+    if nav-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
 
     if root.selected: Rectangle {
         x: 0px;
@@ -25,7 +64,7 @@ export component GitHubSettingsNavItem inherits Rectangle {
         width: 4px;
         height: 24px;
         border-radius: 2px;
-        background: AppState.effective-dark-mode ? #4493f8 : #0969da;
+        background: GitHubTheme.accent-fg;
     }
 
     Text {
@@ -35,7 +74,7 @@ export component GitHubSettingsNavItem inherits Rectangle {
         text: root.text;
         font-size: 14px;
         font-weight: root.selected ? 600 : 400;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        color: GitHubTheme.fg-default;
         vertical-alignment: center;
         overflow: elide;
     }
@@ -43,8 +82,13 @@ export component GitHubSettingsNavItem inherits Rectangle {
     nav-touch := TouchArea {
         width: 100%;
         height: 100%;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        enabled: root.item-enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => {
+            root.keyboard-focus-visible = false;
+            nav-focus.focus();
+            root.clicked();
+        }
     }
 }
 
@@ -52,61 +96,103 @@ export component GitHubButton inherits Rectangle {
     in property <string> text;
     in property <bool> primary: false;
     in property <bool> danger: false;
+    in property <bool> selected: false;
     in property <bool> disabled: false;
     in property <bool> busy: false;
+    in property <length> label-font-size: GitHubMetrics.text-medium;
+    private property <bool> keyboard-focus-visible: false;
     callback clicked();
 
     label-measure := Text {
         visible: false;
         text: root.text;
-        font-size: 14px;
+        font-size: root.label-font-size;
         font-weight: 500;
         wrap: no-wrap;
     }
 
-    width: max(72px, label-measure.preferred-width + 24px + (root.busy ? 24px : 0px));
+    // Reserve a leading loading slot from the first frame so busy state never
+    // changes the button's measured width or truncates its visible label.
+    width: max(72px, label-measure.preferred-width + 48px);
     height: 32px;
     border-radius: 6px;
     border-width: 1px;
     border-color: root.primary
-        ? (AppState.effective-dark-mode ? #238636 : #1f883d)
+        ? (GitHubTheme.control-primary-rest)
         : root.danger
             ? (button-touch.has-hover
-                ? (AppState.effective-dark-mode ? #da3633 : #cf222e)
-                : (AppState.effective-dark-mode ? #3d444d : #d1d9e0))
-        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
+                ? (GitHubTheme.danger-emphasis)
+                : (GitHubTheme.border-default))
+        : (GitHubTheme.border-default);
     background: root.primary
         ? (button-touch.pressed
-            ? (AppState.effective-dark-mode ? #1f6f32 : #176f2c)
+            ? (GitHubTheme.control-primary-active)
             : (button-touch.has-hover
-                ? (AppState.effective-dark-mode ? #2ea043 : #1a7f37)
-                : (AppState.effective-dark-mode ? #238636 : #1f883d)))
+                ? (GitHubTheme.control-primary-hover)
+                : (GitHubTheme.control-primary-rest)))
         : root.danger
             ? (button-touch.pressed
-                ? (AppState.effective-dark-mode ? #b62324 : #a40e26)
+                ? (GitHubTheme.control-danger-active)
                 : (button-touch.has-hover
-                    ? (AppState.effective-dark-mode ? #da3633 : #cf222e)
-                    : (AppState.effective-dark-mode ? #21262d : #f6f8fa)))
+                    ? (GitHubTheme.danger-emphasis)
+                    : (GitHubTheme.control-default-rest)))
+            : root.selected
+                ? (button-touch.has-hover
+                    ? GitHubTheme.control-default-hover
+                    : GitHubTheme.control-default-active)
             : (button-touch.pressed
-                ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+                ? (GitHubTheme.control-default-active)
                 : (button-touch.has-hover
-                    ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
-                    : (AppState.effective-dark-mode ? #21262d : #f6f8fa)));
-    opacity: root.disabled || root.busy ? 0.6 : 1;
+                    ? (GitHubTheme.control-default-hover)
+                    : (GitHubTheme.control-default-rest)));
+    opacity: root.disabled ? 0.5 : 1;
+    clip: false;
+    accessible-role: button;
+    accessible-enabled: !root.disabled && !root.busy;
+    accessible-label: root.text;
+    accessible-checkable: root.selected;
+    accessible-checked: root.selected;
 
-    if root.busy: Image {
+    button-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if (!root.disabled && !root.busy
+                    && (event.text == Key.Return || event.text == " ")) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.keyboard-focus-visible = false;
+        }
+    }
+
+    if button-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
+
+    if root.busy: GitHubSpinner {
         x: 10px;
         y: 8px;
-        width: 16px;
-        height: 16px;
-        source: @image-url("../../assets/icons/github-spinner-16.svg");
-        colorize: root.primary || (root.danger && button-touch.has-hover)
-            ? #ffffff
+        spinner-size: GitHubMetrics.icon-medium;
+        foreground: root.primary || (root.danger && button-touch.has-hover)
+            ? GitHubTheme.fg-on-emphasis
             : root.danger
-                ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
-                : (AppState.effective-dark-mode ? #f0f6fc : #1f2328);
-        transform-rotation: mod(animation-tick(), 1s) / 1s * 360deg;
-        transform-origin: { x: self.width / 2, y: self.height / 2 };
+                ? (GitHubTheme.danger-fg)
+                : (GitHubTheme.fg-default);
     }
 
     Text {
@@ -114,13 +200,13 @@ export component GitHubButton inherits Rectangle {
         width: parent.width - self.x - 12px;
         height: parent.height;
         text: root.text;
-        font-size: 14px;
-        font-weight: 500;
+        font-size: root.label-font-size;
+        font-weight: 600;
         color: root.primary || (root.danger && button-touch.has-hover)
-            ? #ffffff
+            ? GitHubTheme.fg-on-emphasis
             : root.danger
-                ? (AppState.effective-dark-mode ? #f85149 : #cf222e)
-                : (AppState.effective-dark-mode ? #f0f6fc : #1f2328);
+                ? (GitHubTheme.danger-fg)
+                : (GitHubTheme.fg-default);
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
@@ -131,26 +217,70 @@ export component GitHubButton inherits Rectangle {
         height: 100%;
         enabled: !root.disabled && !root.busy;
         mouse-cursor: self.enabled ? pointer : default;
-        clicked => { root.clicked(); }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            button-focus.focus();
+            root.clicked();
+        }
     }
 }
 
 export component GitHubToggle inherits Rectangle {
     in-out property <bool> checked: false;
     in property <bool> enabled: true;
+    in property <bool> loading: false;
+    private property <bool> keyboard-focus-visible: false;
     callback toggled(bool);
+
+    private property <bool> interactive: root.enabled && !root.loading;
 
     width: 48px;
     height: 24px;
     border-radius: 12px;
     border-width: 1px;
     border-color: root.checked
-        ? (AppState.effective-dark-mode ? #238636 : #1f883d)
-        : (AppState.effective-dark-mode ? #6e7681 : #8c959f);
+        ? (GitHubTheme.control-primary-rest)
+        : (GitHubTheme.border-strong);
     background: root.checked
-        ? (AppState.effective-dark-mode ? #238636 : #1f883d)
-        : (AppState.effective-dark-mode ? #21262d : #ffffff);
+        ? (GitHubTheme.control-primary-rest)
+        : GitHubTheme.control-input-bg;
     opacity: root.enabled ? 1 : 0.5;
+    clip: false;
+    accessible-role: switch;
+    accessible-enabled: root.interactive;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+
+    toggle-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if (root.interactive && (event.text == Key.Return || event.text == " ")) {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.keyboard-focus-visible = false;
+        }
+    }
+
+    if toggle-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-full;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
 
     Text {
         x: root.checked ? 5px : 21px;
@@ -159,27 +289,38 @@ export component GitHubToggle inherits Rectangle {
         text: root.checked ? "On" : "Off";
         font-size: 9px;
         font-weight: 600;
-        color: root.checked ? #ffffff : (AppState.effective-dark-mode ? #9198a1 : #59636e);
+        color: root.checked ? GitHubTheme.fg-on-emphasis : (GitHubTheme.fg-muted);
         horizontal-alignment: center;
         vertical-alignment: center;
     }
 
-    Rectangle {
+    if !root.loading: Rectangle {
         x: root.checked ? 27px : 3px;
         y: 3px;
         width: 16px;
         height: 16px;
         border-radius: 8px;
-        background: root.checked ? #ffffff : (AppState.effective-dark-mode ? #9198a1 : #59636e);
+        background: root.checked ? GitHubTheme.fg-on-emphasis : (GitHubTheme.fg-muted);
         animate x { duration: 120ms; easing: ease-out; }
+    }
+
+    if root.loading: GitHubSpinner {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        spinner-size: GitHubMetrics.icon-medium;
+        foreground: root.checked
+            ? GitHubTheme.fg-on-emphasis
+            : GitHubTheme.fg-muted;
     }
 
     TouchArea {
         width: 100%;
         height: 100%;
-        enabled: root.enabled;
+        enabled: root.interactive;
         mouse-cursor: self.enabled ? pointer : default;
         clicked => {
+            root.keyboard-focus-visible = false;
+            toggle-focus.focus();
             root.checked = !root.checked;
             root.toggled(root.checked);
         }
@@ -193,6 +334,11 @@ export component GitHubTextField inherits Rectangle {
     in property <string> caption: "";
     in property <bool> secret: false;
     in property <bool> reveal: false;
+    in property <bool> enabled: true;
+    in property <bool> required: false;
+    in property <bool> loading: false;
+    in property <bool> validation-error: false;
+    in property <string> validation-message: "";
     callback edited(string);
 
     // Secret fields stay on Primer medium 14px body text when revealed.
@@ -202,18 +348,22 @@ export component GitHubTextField inherits Rectangle {
     private property <bool> masking: root.secret && !root.reveal;
 
     width: 100%;
-    height: root.caption == "" ? 58px : 78px;
+    private property <string> supporting-text:
+        root.validation-message != "" ? root.validation-message : root.caption;
+
+    height: root.supporting-text == "" ? 58px : 78px;
     background: transparent;
+    opacity: root.enabled ? 1 : 0.6;
 
     Text {
         x: 0px;
         y: 0px;
         width: parent.width;
         height: 20px;
-        text: root.label;
+        text: root.required ? root.label + " *" : root.label;
         font-size: 14px;
         font-weight: 600;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        color: GitHubTheme.fg-default;
         vertical-alignment: center;
     }
 
@@ -224,24 +374,33 @@ export component GitHubTextField inherits Rectangle {
         height: 32px;
         border-radius: 6px;
         border-width: field-input.has-focus ? 2px : 1px;
-        border-color: field-input.has-focus
-            ? (AppState.effective-dark-mode ? #4493f8 : #0969da)
-            : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
-        background: AppState.effective-dark-mode ? #0d1117 : #ffffff;
+        border-color: root.validation-error
+            ? GitHubTheme.danger-emphasis
+            : (field-input.has-focus
+                ? GitHubTheme.accent-fg
+                : GitHubTheme.border-default);
+        background: GitHubTheme.canvas-default;
         clip: true;
 
         field-input := TextInput {
             x: field-input.has-focus ? 11px : 12px;
             y: (parent.height - self.preferred-height) / 2;
-            width: parent.width - (field-input.has-focus ? 22px : 24px);
+            width: parent.width
+                - (field-input.has-focus ? 22px : 24px)
+                - (root.loading ? 24px : 0px);
             text <=> root.text;
+            enabled: root.enabled && !root.loading;
             input-type: root.masking ? InputType.password : InputType.text;
             single-line: true;
             font-size: root.masking ? 10px : 14px;
             letter-spacing: root.masking ? 1.5px : 0px;
-            color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
-            selection-background-color: AppState.effective-dark-mode ? #264f78 : #b6d7ff;
+            color: GitHubTheme.fg-default;
+            selection-background-color: GitHubTheme.selection-bg;
             selection-foreground-color: self.color;
+            accessible-role: text-input;
+            accessible-enabled: self.enabled;
+            accessible-label: root.label;
+            accessible-value <=> self.text;
             edited => { root.edited(self.text); }
         }
 
@@ -251,20 +410,28 @@ export component GitHubTextField inherits Rectangle {
             height: parent.height;
             text: root.placeholder;
             font-size: 14px;
-            color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+            color: GitHubTheme.fg-muted;
             vertical-alignment: center;
             overflow: elide;
         }
+
+        if root.loading: GitHubSpinner {
+            x: parent.width - 24px;
+            y: 8px;
+            spinner-size: GitHubMetrics.icon-medium;
+        }
     }
 
-    if root.caption != "": Text {
+    if root.supporting-text != "": Text {
         x: 0px;
         y: 62px;
         width: parent.width;
         height: 16px;
-        text: root.caption;
+        text: root.supporting-text;
         font-size: 12px;
-        color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+        color: root.validation-error
+            ? GitHubTheme.danger-fg
+            : GitHubTheme.fg-muted;
         vertical-alignment: center;
         overflow: elide;
     }
@@ -273,6 +440,7 @@ export component GitHubTextField inherits Rectangle {
 export component GitHubSegment inherits Rectangle {
     in property <string> text;
     in property <bool> selected: false;
+    private property <bool> keyboard-focus-visible: false;
     callback clicked();
 
     label-measure := Text {
@@ -288,13 +456,49 @@ export component GitHubSegment inherits Rectangle {
     border-radius: 6px;
     border-width: 1px;
     border-color: root.selected
-        ? (AppState.effective-dark-mode ? #6e7681 : #8c959f)
-        : (AppState.effective-dark-mode ? #3d444d : #d1d9e0);
+        ? (GitHubTheme.border-strong)
+        : (GitHubTheme.border-default);
     background: root.selected
-        ? (AppState.effective-dark-mode ? #343b43 : #d8dee4)
+        ? (GitHubTheme.control-default-active)
         : (segment-touch.has-hover
-            ? (AppState.effective-dark-mode ? #292e36 : #f3f4f6)
-            : (AppState.effective-dark-mode ? #21262d : #f6f8fa));
+            ? (GitHubTheme.control-default-hover)
+            : (GitHubTheme.control-default-rest));
+    clip: false;
+    accessible-role: tab;
+    accessible-enabled: true;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+
+    segment-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.keyboard-focus-visible = false;
+        }
+    }
+
+    if segment-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
 
     Text {
         width: parent.width;
@@ -302,7 +506,7 @@ export component GitHubSegment inherits Rectangle {
         text: root.text;
         font-size: 14px;
         font-weight: root.selected ? 600 : 400;
-        color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+        color: GitHubTheme.fg-default;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -311,6 +515,10 @@ export component GitHubSegment inherits Rectangle {
         width: 100%;
         height: 100%;
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            segment-focus.focus();
+            root.clicked();
+        }
     }
 }

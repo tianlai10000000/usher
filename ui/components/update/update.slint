@@ -1,6 +1,6 @@
-import { LinearProgressIndicator } from "@material";
-import { AppState } from "../../state/app_state.slint";
 import { GitHubDialog } from "../dialog/github_dialog.slint";
+import { GitHubProgressBar } from "../github_progress_bar.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
 
 export global UpdateLogic {
     in-out property <bool> update-available: false;
@@ -25,7 +25,7 @@ export global UpdateLogic {
 }
 
 // Download progress uses the same Primer Dialog shell as every other modal.
-export component DownloadProgressModal inherits Rectangle {
+export component GitHubDownloadProgressDialog inherits Rectangle {
     in-out property <bool> show-modal: UpdateLogic.is-downloading;
     in-out property <float> progress: UpdateLogic.download-progress;
     in-out property <string> status: UpdateLogic.download-status;
@@ -63,18 +63,19 @@ export component DownloadProgressModal inherits Rectangle {
                 height: 20px;
                 text: root.status == "" ? "Preparing download…" : root.status;
                 font-size: 14px;
-                color: AppState.effective-dark-mode ? #f0f6fc : #1f2328;
+                color: GitHubTheme.fg-default;
                 vertical-alignment: center;
                 overflow: elide;
             }
 
-            LinearProgressIndicator {
+            GitHubProgressBar {
                 x: 0px;
                 y: 44px;
                 width: parent.width;
                 height: 8px;
                 progress: root.progress;
                 indeterminate: root.progress <= 0;
+                foreground: GitHubTheme.accent-emphasis;
             }
 
             Text {
@@ -84,7 +85,7 @@ export component DownloadProgressModal inherits Rectangle {
                 height: 20px;
                 text: root.progress > 0 ? Math.round(root.progress * 100) + "%" : "";
                 font-size: 12px;
-                color: AppState.effective-dark-mode ? #9198a1 : #59636e;
+                color: GitHubTheme.fg-muted;
                 horizontal-alignment: right;
                 vertical-alignment: center;
             }

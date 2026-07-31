@@ -1,0 +1,121 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+// Shared Primer UnderlineNav/UnderlinePanels tab item. Route-changing and
+// in-page tab owners provide the navigation semantics; this component owns the
+// visual, pointer, keyboard, selected, disabled, and focus-visible states.
+export component GitHubUnderlineNavItem inherits FocusScope {
+    in property <string> label;
+    in property <image> icon;
+    in property <bool> selected: false;
+    in property <bool> item-enabled: true;
+    callback clicked();
+
+    private property <bool> has-icon:
+        root.icon.width > 0 && root.icon.height > 0;
+    private property <bool> keyboard-focus-visible: false;
+    private property <length> label-width:
+        max(GitHubMetrics.size-24, label-measure.preferred-width);
+    private property <length> leading-width:
+        root.has-icon ? GitHubMetrics.size-24 : 0px;
+
+    width: root.label-width + root.leading-width + GitHubMetrics.size-24;
+    height: GitHubMetrics.size-48;
+    accessible-role: tab;
+    accessible-enabled: root.item-enabled;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+
+    key-pressed(event) => {
+        root.keyboard-focus-visible = true;
+        if (root.item-enabled
+                && (event.text == Key.Return || event.text == " ")) {
+            root.clicked();
+            return accept;
+        }
+        return reject;
+    }
+    focus-gained(reason) => {
+        root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+    }
+    focus-lost => {
+        root.keyboard-focus-visible = false;
+    }
+
+    label-measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: GitHubMetrics.text-medium;
+        // Reserve the selected label width in every state so switching tabs
+        // cannot move neighboring items or flash the underline geometry.
+        font-weight: 600;
+        wrap: no-wrap;
+    }
+
+    if tab-touch.has-hover && root.item-enabled: Rectangle {
+        x: 0px;
+        y: GitHubMetrics.size-8;
+        width: parent.width;
+        height: GitHubMetrics.control-medium-size;
+        border-radius: GitHubMetrics.radius-medium;
+        background: GitHubTheme.underline-nav-hover;
+    }
+
+    if root.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: GitHubMetrics.size-2;
+        y: GitHubMetrics.size-6;
+        width: parent.width - GitHubMetrics.size-4;
+        height: GitHubMetrics.control-medium-size + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
+
+    if root.has-icon: Image {
+        x: GitHubMetrics.size-12;
+        y: GitHubMetrics.size-16;
+        width: GitHubMetrics.icon-medium;
+        height: GitHubMetrics.icon-medium;
+        source: root.icon;
+        colorize: root.item-enabled
+            ? GitHubTheme.fg-muted
+            : GitHubTheme.fg-subtle;
+    }
+
+    Text {
+        x: GitHubMetrics.size-12 + root.leading-width;
+        y: GitHubMetrics.size-8;
+        width: root.label-width;
+        height: GitHubMetrics.control-medium-size;
+        text: root.label;
+        font-size: GitHubMetrics.text-medium;
+        font-weight: root.selected ? 600 : 400;
+        color: root.item-enabled
+            ? GitHubTheme.fg-default
+            : GitHubTheme.fg-subtle;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.selected: Rectangle {
+        x: 0px;
+        y: parent.height - GitHubMetrics.size-2;
+        width: parent.width;
+        height: GitHubMetrics.size-2;
+        border-radius: GitHubMetrics.border-thin;
+        background: GitHubTheme.underline-nav-selected;
+    }
+
+    tab-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.item-enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => {
+            root.focus();
+            root.keyboard-focus-visible = false;
+            root.clicked();
+        }
+    }
+}

@@ -1,0 +1,159 @@
+import { GitHubTagField, GitHubTagReadonlyField } from "./fields.slint";
+import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubTagActionButton } from "./tag_controls.slint";
+import {
+    GitHubSegmentedControl,
+    GitHubSegmentedControlItem,
+    GitHubSegmentedControlDivider,
+} from "../github_segmented_control.slint";
+
+export component GitHubTagAddPanel {
+    in property <string> version-mode: "patch";
+    in property <string> scope-mode: "local";
+    in property <string> current-version: "v0.0.0";
+    in-out property <string> next-version: "v0.0.1";
+    in property <bool> initializing: false;
+    in property <bool> running: false;
+    in property <bool> has-run: false;
+    callback select-version-mode(string);
+    callback run(string, string);
+    callback view-run();
+
+    private property <string> description: "";
+    private property <bool> stacked-fields: root.width < 1020px;
+    width: 100%;
+    height: panel-content.preferred-height;
+    vertical-stretch: 0;
+
+    panel-content := VerticalLayout {
+        width: 100%;
+        spacing: 16px;
+        alignment: start;
+        padding: 8px;
+
+        // Primer SegmentedControl for bump size (replaces separate chips).
+        HorizontalLayout {
+            width: parent.width;
+            height: 28px;
+            spacing: 8px;
+            alignment: start;
+            cross-axis-alignment: center;
+
+            Text {
+                height: 28px;
+                text: "Bump";
+                font-size: 12px;
+                font-weight: 600;
+                color: GitHubTheme.fg-muted;
+                vertical-alignment: center;
+                vertical-stretch: 0;
+            }
+
+            GitHubSegmentedControl {
+                group-label: "Semantic version bump";
+
+                GitHubSegmentedControlItem {
+                    label: "Patch";
+                    selected: root.version-mode == "patch";
+                    item-enabled: !root.running && !root.initializing;
+                    clicked => {
+                        root.select-version-mode("patch");
+                    }
+                }
+                GitHubSegmentedControlDivider { }
+                GitHubSegmentedControlItem {
+                    label: "Minor";
+                    selected: root.version-mode == "minor";
+                    item-enabled: !root.running && !root.initializing;
+                    clicked => {
+                        root.select-version-mode("minor");
+                    }
+                }
+                GitHubSegmentedControlDivider { }
+                GitHubSegmentedControlItem {
+                    label: "Major";
+                    selected: root.version-mode == "major";
+                    item-enabled: !root.running && !root.initializing;
+                    clicked => {
+                        root.select-version-mode("major");
+                    }
+                }
+            }
+        }
+
+        if !root.stacked-fields: HorizontalLayout {
+            width: parent.width - 16px - 12px;
+            spacing: 12px;
+
+            GitHubTagReadonlyField {
+                width: parent.width / 2;
+                label: "Current tag version";
+                value: root.current-version;
+            }
+
+            GitHubTagField {
+                width: parent.width / 2;
+                label: "New tag version";
+                value <=> root.next-version;
+                placeholder: "v1.2.3";
+                enabled: !root.running && !root.initializing;
+                min-field-width: 160px;
+            }
+        }
+
+        if root.stacked-fields: VerticalLayout {
+            width: parent.width - 16px;
+            spacing: 12px;
+
+            GitHubTagReadonlyField {
+                width: parent.width;
+                label: "Current tag version";
+                value: root.current-version;
+            }
+
+            GitHubTagField {
+                width: parent.width;
+                label: "New tag version";
+                value <=> root.next-version;
+                placeholder: "v1.2.3";
+                enabled: !root.running && !root.initializing;
+                min-field-width: 160px;
+            }
+        }
+
+        GitHubTagField {
+            width: 100%;
+            label: "Tag description";
+            value <=> root.description;
+            placeholder: "";
+            enabled: !root.running && !root.initializing;
+        }
+
+        // alignment=start keeps Create on the left; Stop sits beside it while
+        // the run is latched so it does not jump to the trailing edge.
+        HorizontalLayout {
+            width: 100%;
+            spacing: 12px;
+            alignment: start;
+            cross-axis-alignment: center;
+            height: 32px;
+
+            GitHubTagActionButton {
+                enabled: !root.running && !root.initializing;
+                loading: root.initializing;
+                label: root.initializing ? "Loading…" : "Create tag";
+                clicked => {
+                    root.run(root.next-version, root.description);
+                }
+            }
+
+            if root.has-run: GitHubTagActionButton {
+                label: root.running ? "View running job" : "View latest job";
+                action-primary: false;
+                clicked => {
+                    root.view-run();
+                }
+            }
+        }
+    }
+}
