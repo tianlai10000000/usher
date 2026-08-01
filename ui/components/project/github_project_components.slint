@@ -221,6 +221,7 @@ export component GitHubProjectListRow inherits Rectangle {
     callback terminal-requested();
     callback edit-requested();
     callback delete-requested();
+    private property <bool> keyboard-focus-visible: false;
 
     // Identity + path metadata + topics (GitHub repo-row density with paths).
     height: 136px;
@@ -355,13 +356,48 @@ export component GitHubProjectListRow inherits Rectangle {
         }
     }
 
+    row-focus := FocusScope {
+        width: max(0px, parent.width - 120px);
+        height: parent.height;
+        accessible-role: button;
+        accessible-enabled: true;
+        accessible-label: "Open project " + root.project.project_name;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if event.text == Key.Return || event.text == " " {
+                root.open-requested();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => { root.keyboard-focus-visible = false; }
+    }
+
     row-touch := TouchArea {
         x: 0px;
         y: 0px;
         width: max(0px, parent.width - 120px);
         height: parent.height;
         mouse-cursor: pointer;
-        clicked => { root.open-requested(); }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            row-focus.focus();
+            root.open-requested();
+        }
+    }
+
+    if row-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: 3px;
+        y: 3px;
+        width: max(0px, parent.width - 126px);
+        height: parent.height - 6px;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
     }
 }
 
@@ -371,6 +407,7 @@ export component GitHubProjectGridCard inherits Rectangle {
     callback terminal-requested();
     callback edit-requested();
     callback delete-requested();
+    private property <bool> keyboard-focus-visible: false;
 
     // Primer repo card with path metadata filling the middle band.
     height: 204px;
@@ -479,13 +516,37 @@ export component GitHubProjectGridCard inherits Rectangle {
         overflow: elide;
     }
 
+    card-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        accessible-role: button;
+        accessible-enabled: true;
+        accessible-label: "Open project " + root.project.project_name;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if event.text == Key.Return || event.text == " " {
+                root.open-requested();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => { root.keyboard-focus-visible = false; }
+    }
+
     card-touch := TouchArea {
         x: 0px;
         y: 0px;
         width: parent.width;
         height: 160px;
         mouse-cursor: pointer;
-        clicked => { root.open-requested(); }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            card-focus.focus();
+            root.open-requested();
+        }
     }
 
     TouchArea {
@@ -494,7 +555,11 @@ export component GitHubProjectGridCard inherits Rectangle {
         width: max(0px, parent.width - 112px);
         height: 44px;
         mouse-cursor: pointer;
-        clicked => { root.open-requested(); }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            card-focus.focus();
+            root.open-requested();
+        }
     }
 
     HorizontalLayout {
@@ -527,5 +592,16 @@ export component GitHubProjectGridCard inherits Rectangle {
             danger: true;
             clicked => { root.delete-requested(); }
         }
+    }
+
+    if card-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: 3px;
+        y: 3px;
+        width: parent.width - 6px;
+        height: parent.height - 6px;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
     }
 }

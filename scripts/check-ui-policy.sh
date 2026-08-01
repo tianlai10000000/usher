@@ -26,13 +26,13 @@ if [ -n "$unexpected_material" ]; then
 fi
 
 legacy_icons=$(rg -n \
-    '@image-url\("[^"]*assets/icons/(?!octicon-|github-)[^"]+"\)' \
+    '@image-url\("[^"]*assets/icons/(?!octicon-|github-|lucide-sidebar-)[^"]+"\)' \
     ui --glob '*.slint' --pcre2 || true)
 unexpected_icons=$(echo "$legacy_icons" \
     | rg -v '^ui/components/title_bar\.slint:[0-9]+:.*assets/icons/(settings|about)\.svg' \
     || true)
 if [ -n "$unexpected_icons" ]; then
-    echo "UI policy: non-Octicon application icon usage is forbidden:" >&2
+    echo "UI policy: unregistered application icon usage is forbidden:" >&2
     echo "$unexpected_icons" >&2
     failed=1
 fi

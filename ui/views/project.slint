@@ -63,9 +63,13 @@ export component GitHubProjectPage {
     private property <length> available-width: max(320px, root.width - 32px);
     private property <length> content-width:
         min(GitHubMetrics.page-content-max-width, root.available-width);
-    private property <int> grid-columns: root.width >= 1000px ? 4
-        : root.width >= 720px ? 3
-        : root.width >= 480px ? 2
+    // Derive columns from the actual content width. A project card stays
+    // readable before another column is introduced.
+    private property <length> grid-card-min-width: 280px;
+    private property <int> grid-columns:
+        root.content-width >= root.grid-card-min-width * 4 + 48px ? 4
+        : root.content-width >= root.grid-card-min-width * 3 + 32px ? 3
+        : root.content-width >= root.grid-card-min-width * 2 + 16px ? 2
         : 1;
     private property <int> grid-rows: Math.ceil(root.projects.length / root.grid-columns);
     private property <length> grid-card-width:

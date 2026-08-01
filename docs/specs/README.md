@@ -19,7 +19,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 The UI design specification defines `GitHub*` component naming,
 `GitHubTheme`/`GitHubMetrics` ownership, Primer layout and interaction
 contracts, shared Button/IconButton/Link/Tooltip/Copy/Spinner/form-control
-foundations, shared shell/PageHeader/ScrollView/Progress foundations,
+foundations, shared shell/title-bar breadcrumb/PageHeader/ScrollView/Progress foundations,
 UnderlineNav/SegmentedControl/Actions Job foundations,
 Dialog/ActionMenu/Banner overlay contracts, the Material dependency boundary,
 the mandatory UI Components playground/property-matrix contract,
@@ -29,9 +29,10 @@ implementation sequence and current status live in
 [`docs/ui-github-migration-plan.md`](../ui-github-migration-plan.md); defects
 live in [`bug-history.md`](../../bug-history.md). / UI 设计规范定义
 `GitHub*` 组件命名、`GitHubTheme`/`GitHubMetrics` 归属、Primer 布局与交互
-契约、Shell/PageHeader/ScrollView/Progress、
+契约、Shell/标题栏面包屑/PageHeader/ScrollView/Progress、
 UnderlineNav/SegmentedControl/Actions Job 基础、Dialog/ActionMenu/Banner
-浮层契约、强制 UI Components 演练场/属性矩阵契约、
+浮层契约、通用 Filter ActionMenu、Project 可读卡片宽度、Chat 历史流内操作、
+PR 单一状态/窄屏 Tab 及 diff/文件树字体颜色保护约束、强制 UI Components 演练场/属性矩阵契约、
 Material 依赖边界、仓库级组件目录
 （`ui/components/<feature>/`）与路由页面编排（`ui/views/`）边界，以及逐批
 验收门禁；实施顺序和当前状态见

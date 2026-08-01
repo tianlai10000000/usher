@@ -37,7 +37,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum。 |
 | `src/app_runtime.rs` | 进程级多线程 Tokio runtime，并为 runtime 线程安装 tracing dispatch。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
-| `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观（强制浅色/深色，或 Auto 时跟随系统）、标题栏附件、窗口交互通知、macOS PR Review 字体注册、`NSSound` 点击音，以及用于 Auto 实时跟随的 `AppleInterfaceThemeChangedNotification`；`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
+| `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观（强制浅色/深色，或 Auto 时跟随系统）、标题栏附件、窗口交互通知、用于关闭可消隐临时弹层的原生标题栏点击桥接、macOS PR Review 字体注册、`NSSound` 点击音，以及用于 Auto 实时跟随的 `AppleInterfaceThemeChangedNotification`；`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
 | `src/shutdown.rs` | 按优先级协调关闭。 |
 | `src/single_instance.rs` | 单实例进程行为。 |
 | `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。 |
@@ -93,11 +93,11 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/components/navigation/github_underline_nav.slint` | Workflow 及其功能子页签共用的、支持键盘的 Primer UnderlineNav/UnderlinePanels Item。 |
 | `ui/components/github_segmented_control.slint` | 共用的紧凑 Primer SegmentedControl 外壳、Item、Divider 及焦点/禁用交互。 |
 | `ui/components/github_tooltip.slint` | 所有应用自有 Hover 提示共用的 GitHub TooltipV2 视觉契约。 |
-| `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面，统一焦点归属、Esc 关闭、视口碰撞定位、限高纵向滚动及 ActionList 行。 |
+| `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面，统一焦点归属、Esc 与窗口级空白点击关闭、视口碰撞定位、限高纵向滚动及 ActionList 行；`ui/state/transient_overlay_state.slint` 负责把原生或 Slint 窗口 Chrome 发出的关闭修订传递给共享临时弹层。 |
 | `ui/components/page/github_page_header.slint` | 标题、说明、前导视觉、分隔线和尾部操作共用的 Primer PageHeader 基础。 |
 | `ui/components/button/github_copy_button.slint` | 所有图标复制操作共用的 GitHub CopyToClipboardButton 交互；组件负责短时 Copy→Check 状态和 `Copied!` Tooltip，feature callback 返回剪贴板写入是否成功。 |
 | `ui/components/jobs/` | 可复用的 GitHub Actions 风格 Run/Job/Step/日志展示；只接收归一化快照，不执行流程命令。 |
-| `ui/components/dialog/github_dialog.slint` | 全局、项目、PR Review 和更新弹窗共用的响应式 Primer Dialog 外壳，统一遮罩输入归属、初始关闭按钮焦点、Header/Body/Footer 安全边距、Esc 关闭（`modal` 时禁用）、窄屏全窗口布局、关闭行为与操作状态；功能正文以 `@children` 嵌套。 |
+| `ui/components/dialog/github_dialog.slint` | 全局、项目、PR Review 和更新弹窗共用的响应式 Primer Dialog 外壳，统一遮罩输入归属、初始关闭按钮焦点、Header/Body/Footer 安全边距、Esc 关闭（`modal` 时禁用）、窄屏全窗口布局、关闭行为与操作状态；可选的外部视口使路由内弹窗始终按完整应用窗口居中，并跨固定 Shell Chrome 绘制连续遮罩；根状态继续把遮罩延伸到 macOS 标题栏 inset，`src/platform/macos.rs` 在保留 AppKit 交通灯可用的同时屏蔽应用自有标题栏附件；原生标题栏点击复用普通遮罩关闭语义，不会削弱不可关闭 Dialog；功能正文以 `@children` 嵌套。 |
 | `ui/components/toast/`、`ui/components/notify/` | 共用的紧凑 Primer Banner 风格瞬时/排队反馈；根层同一时刻只渲染一条排队通知。 |
 | `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在工作区视图。 |
 | `ui/theme/github_theme.slint` | 应用自有的 `GitHubTheme` 语义色，以及 `GitHubMetrics` Primer 几何、控件、字体、浮层与断点令牌；功能性 UI 原始颜色统一在此管理。 |
@@ -126,8 +126,15 @@ Review 工作区用于虚拟化的公开 `ListView`/`ScrollView`。
 选中态与 Tooltip 展示；状态工具栏负责更新、通知、网络连接及版本展示。
 各页面不得重复实现这两类 Shell Surface。
 
+导航侧栏及其内容边界装饰作为根 Shell 层挂载在包括 PR Review 在内的普通路由
+表面之上，同时仍低于 Modal 遮罩。固定侧栏使用清晰可见且贯穿完整高度的 1px
+边界与克制的内向 Elevation 阴影；临时 Hover 侧栏改为不透明白色、只有边框、尾部上下
+10px 圆角，使用 Codex 浅色 `#dfdfe0` 中性边框且没有右边界阴影的浮层。原生 Live Resize 期间，共享 Shell 几何直接收敛到当前固定
+目标，路由内容不能读取侧栏动画的中间位置，从而避免内容透过透明侧栏显示，并允许
+侧栏 Tooltip 越过边界覆盖当前页面。
+
 `src/platform/` 在启动时按平台选择一套清晰且支持中日韩文字的应用字体：
-macOS 使用 `Hiragino Sans GB`，Windows 使用 `Microsoft YaHei UI`，其他
+macOS 使用原生 `.AppleSystemUIFont`，Windows 使用 `Microsoft YaHei UI`，其他
 平台使用 `Noto Sans`。`ui/main.slint` 将该选择作为完整普通 UI 树的默认
 字体，页面和共享组件统一继承，不再自行选择其他字体。Terminal 内容完全
 保持独立，避免改变既有单元格和工具栏度量；PR Review 中仅 Diff 源码与
@@ -221,7 +228,9 @@ GitHub 控件。
 
 `WorkflowStore` 保存当前项目和各项目的 `WorkflowViewState`。切换项目必须重新绑定 UI，避免日志、步骤和 running 标记串到其他项目。`Route.Workflow` 与 `Route.PrReview` 构成同一生命周期域：两者之间切换保留 Workflow 列表/model 状态；临时进入域外路由时，只要仍可通过 Back 返回任一 Workflow 路由，也继续保留这些状态。
 
-跨页面返回由 `src/router/` 统一维护 LIFO 路由历史栈；Slint 只渲染当前路由并委托 Back，不再自行改写单槽位的 `previous-route`。不改变 Route 的页内下钻返回点由对应 feature controller 管理。Back 先消费 feature 页内返回点，再弹出全局路由历史。只要历史栈中仍保留 Workflow 路由，它就是可返回的活动目标，因此从 PR 详情临时打开设置、关于或其他页面时不得清理审核状态；只有 Workflow 域既不是当前路由、也无法通过 Back 返回时，才释放重状态。Router 通过注入 hook 报告该可达性 transition；后续跨 feature 清理由 `src/app_lifecycle.rs` 而不是 Router 负责。
+跨页面 Back/Forward 由 `src/router/` 统一维护有界双历史栈：直接导航把当前路由压入 Back 并清空 Forward；Back 把当前路由移入 Forward；Forward 执行相反操作。Slint 只渲染当前路由并委托历史动作，不再自行改写单槽位的 `previous-route`。不改变 Route 的页内下钻返回点由对应 feature controller 管理。Back 先消费 feature 页内返回点，再弹出全局路由历史。只要任一历史栈仍保留 Workflow 路由，它就是可恢复的活动目标，因此从 PR 详情临时打开设置、关于或其他页面时不得清理审核状态；只有 Workflow 域既不是当前路由、也无法通过历史导航恢复时，才释放重状态。Router 通过注入 hook 报告该可达性 transition；后续跨 feature 清理由 `src/app_lifecycle.rs` 而不是 Router 负责。
+
+应用 Shell 统一拥有一个 240px 桌面侧栏。持久化的固定状态参与页面布局；侧栏、内容区和状态栏由同一个按显示帧推进的阻尼弹簧进度驱动，参数对齐 Codex 的 0.5s / 0.1 bounce，原生材质在整个过程中保持挂载。连续点击标题栏按钮会在保留当前位置和速度的前提下重定向弹簧目标，并对偏好持久化去抖，只把最终稳定状态写盘，因此不会排队冗余 I/O 或让 Shell 停在中间状态。原生 Live Resize 会先把动画收敛到当前固定目标，再应用窗口宽度变化，避免独立求值的路由绑定显示半开 Shell。固定态边界 Elevation 由主内容面拥有，贯穿完整窗口高度，并以清晰描边、环境阴影和近端阴影只向侧栏方向投射。取消固定后，独立的窗口左侧 8px Hover 热区会把同一侧栏作为只有边框、尾部上下圆角的根层临时浮层打开，并在指针离开后短延迟关闭。macOS 通过原生左侧标题栏 accessory-bar 按钮提供侧栏开关、Back 和 Forward，并带仅悬停显示的背景、Tooltip 与辅助功能标签；侧栏收起时使用 Codex 的轮廓 `sidebar.left` 图标，展开时使用左侧三分之一填充图标，使两种状态保持明显区分。路由面包屑占用原生标题栏剩余安全区，不再额外占据一行内容；其空白区域保持输入透明以支持原生拖窗，并在侧栏移动期间始终避开红绿灯和原生附件。原生附件按钮、Slint 面包屑和尾部操作统一按完整 46px 标题栏 inset 的几何中轴线对齐；每个原生控件 frame 必须完整落在 accessory 容器内，避免 AppKit 裁切 hover、焦点或按下状态。标题栏与内容区的分割线从实时主内容边缘开始，不穿过固定侧栏页头。macOS 采用已从本机 Codex 桌面端 Electron 配置核实的实现：一个覆盖完整内容区、随宽高共同缩放的 `NSVisualEffectView` 使用 Menu 材质与 BehindWindow 混合；应用内容只在透明的 240px 侧栏中露出该背景，并把主内容面绘制为不透明。窗口成为 Key Window 时使用透明表面和 Menu Vibrancy；失去 Key 状态时关闭原生 Effect，并把表面切换为已从 Codex 核实的浅色 `#f9f9f9` 或深色 `#000000` 实色背景。按钮可用状态由 Router 历史驱动。Windows/Linux 在 Slint 侧栏页头和收起态紧凑控制条中提供同等操作，并使用共用的半透明材质回退。三端共享同一组 Router callback 和侧栏偏好，平台代码不持有路由历史。
 
 Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。所有列表、详情/diff、仓库文件、review state、review submit 和 merge 请求都根据当前项目持久化的 `repo_type` 选择实现，并在执行前校验其与 `remote_repo` 一致。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，并用独立 action 序列防止迟到的 review/merge 响应更新其他项目或 PR。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 在 adapter 边界解码，每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写都使用序列号防止迟到响应污染当前项目或 PR。
 
@@ -259,7 +268,7 @@ Files changed 的 `Diff view` 弹层统一持有与 Provider 无关的 Unified/S
 
 审核文件树使用 GitHub 的平台 UI 字体栈（macOS 使用 SF 系统 UI 字体，Windows 使用 Segoe UI），代码区使用平台等宽字体栈。变更文件树和 Diff 行都使用虚拟化 `ListView` delegate，只实例化当前可见行。分隔线实时调整面板宽度；移动手柄以当前宽度叠加剩余的局部指针位移，使分隔线贴合指针，同时避免重建完整文件树或 Diff。会话宽度限制为 220–520 px 且不超过审核区宽度的 45%，确保 Diff 仍是主要区域。可见性对齐 GitHub Primer `$width-md`（768px）：宽度越过临界值向下时自动折叠、向上时自动展开；工具栏开关在任意宽度下都可用，窄屏自动收起后仍可手动打开。主窗口最小宽度为 640px，保证 768px 临界值可以到达。
 
-审核页头使用紧凑的 36 px Primer 风格返回 IconButton 和官方 `arrow-left` Octicon。移除宽文字控件及分隔线后，换行标题获得更多空间；紧凑布局的操作区紧跟该图标开始。返回 Tooltip 仍在图标下方弹出，但挂在页头层并以高 z 绘制，避免被摘要行 Open 徽章或就绪控件遮挡。就绪详情、文件扩展名筛选和文件操作菜单由审核工作区统一管理为互斥的窗口内 popover；在触发器之间切换时必须保留 hover，并在第一次点击时直接打开目标 popover，不能依赖原生 popup 的鼠标 grab。
+审核工作区从 macOS 原生标题栏 inset 下方开始，不再重复渲染页面内返回按钮，而是复用 Shell 的原生 Back 控件。它的根渲染树固定在窗口 `x=0`；普通页头、Tab 和 Diff 内容在内部把持久化的固定侧栏状态作为离散左内缩。这样原生 Live Resize 不再移动整棵已冻结/虚拟化的审核树，同时 Dialog 仍使用全窗口坐标。原生侧栏按钮可以继续动画，而 PR 内容只能完整地位于 240px 侧栏之后或窗口左边，不能停在中间。Shell 会先把 Back 交给审核控制器，因此先消费 commit 详情页内返回点；真正离开审核页时仍会先使请求失效并清理 feature 状态，再由 Router 返回 Workflow。PR 操作位于标题栏；就绪状态 ActionMenu 仍锚定状态按钮，但在窗口根层渲染，避免被标题栏操作条裁剪或限制命中。文件扩展名筛选和文件操作菜单继续作为审核工作区内互斥的 popover；在触发器之间切换时必须保留 hover，并在第一次点击时直接打开目标 popover，不能依赖原生 popup 的鼠标 grab。
 
 Conversation adapter 归一化 GitHub、GitLab、Gitee 公有 v5 与 Gitee 企业 v8 的可选作者和 commit 作者头像 URL。控制器通过共享 HTTP pipeline 并发获取去重头像，整体超时 3 秒、单图上限 2 MiB，并限制解码尺寸；只有可跨线程发送的 RGBA 字节进入 event loop，再创建 Slint Image。头像缺失或加载失败时回退为作者首字母。时间线卡片和评论框共用 52 px 头像/内容网格。GitHub 风格活动使用一条贯穿头像中心的 Primer 时间线轨道（首尾按 clipSidebar 裁剪）。评论/描述卡片为 1px 边框盒子并随短正文收紧高度；commit 图标与紧凑作者头像落在同一轨道；所有活动行与卡片右边缘对齐。Rust 提供准确的行高总和。Conversation Tab 把时间线与评论框放在同一文档滚动里，Write 区域跟在最后一条事件之后，而不是钉在视口底部。
 
@@ -267,7 +276,7 @@ Conversation 提交批次使用 Primer 官方 `repo-push` Octicon；相对时间
 
 Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度，从而避免最右侧露出未绘制区域，并保持 Tab/双宽字符对齐。代码栏支持 GitHub 风格的跨 ListView 行拖拽选中（不含行号栏；hunk/meta 行不可选且不进入剪贴板）；双击按相同字符类扩展为单词选区（字母数字/`_`、空白、其余标点各自成组），三击选中整行代码列，连击状态由审核工作区持有以免 ListView 回收打断手势；软换行继续使用 Slint `TextInput.word-wrap` 自动换行，并采用它的原生 UTF-8 选区几何，因此续行双击会高亮完整逻辑单词，不再近似换行偏移。Unified 换行行的行号与 `+`/`-` 使用字体自然首行行盒，未换行行仍使用名义 22px 行槽。仅需 preferred-width 的探测 Text 保持零尺寸。⌘/Ctrl+F 在选中文件工具栏停靠紧凑的编辑器式查找栏（GitHub PR Files changed 无应用内查找；栏体对齐 CodeMirror/GitHub 文件编辑器：查询、序号/总数、上一个/下一个、关闭），对可复制代码列做不区分大小写匹配、滚动定位，并只高亮当前命中；review controller 的同步命中测试按投影 model 中每个逻辑行的实际换行高度遍历，因此正向或反向拖入软换行终点时都能精确落到字符。⌘/Ctrl+C 静默写入剪贴板。选中状态只保存两个端点，选区渲染只由已选且可见的 delegate 创建，因此保留有界懒加载 model 与普通 token-only 滚动路径。
 
-Conversation 与 Commits 的 commit 链接会按 SHA 定位并复用 Files changed 工作区，把当前 commit 应用为单项范围。审核控制器会把来源 Conversation 或 Commits Tab 记录为 feature 页内下钻返回点，因此页头 Back 会先恢复来源 Tab，下一次 Back 才返回 Workflow 的 PR 列表；如果 commits 尚未加载，控制器会在加载完成后应用待处理选择，复制 SHA 保持独立。
+Conversation 与 Commits 的 commit 链接会按 SHA 定位并复用 Files changed 工作区，把当前 commit 应用为单项范围。审核控制器会把来源 Conversation 或 Commits Tab 记录为 feature 页内下钻返回点，因此 Shell Back 会先恢复来源 Tab，下一次 Back 才返回 Workflow 的 PR 列表；如果 commits 尚未加载，控制器会在加载完成后应用待处理选择，复制 SHA 保持独立。
 
 合并成功会把保留的 PR 列表标记为过期。审核页顶层 Back 会重新加载当前列表筛选的第一页及状态总数，确保已合并请求不再留在 Open 列表中；页内 commit Back 仍只恢复来源 Tab，不会提前消费这次刷新。
 
@@ -409,6 +418,9 @@ Interceptor 按注册顺序执行。Request hook 可修改 header；Response hoo
 
 ## UI 组合规则
 
+- macOS 侧栏切换由 AppKit 主线程直接重定向 Slint 动画目标，不再排队跨
+  event-loop 回调；所有平台都即时更新同一个动画目标，运动期间页面宽度
+  保持冻结，并且只在最终稳定后写入配置。
 - Rust-facing property 和 callback 统一在 `ui/main.slint` 声明并保持命名一致。
 - Feature view 负责布局；Rust 负责 IO 和业务状态转换。
 - `ui/views/` 下的路由文件只声明 `GitHub*Page` 页面编排；视觉子组件统一放入

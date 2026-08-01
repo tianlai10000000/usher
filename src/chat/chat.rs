@@ -52,14 +52,16 @@ pub(crate) fn handle_api_error(error: &HttpError) -> String {
 
     match (error.kind, error.status.map(|status| status.as_u16())) {
         (HttpErrorKind::Timeout | HttpErrorKind::Connect, _) => {
-            "网络连接失败，请检查网络设置后重试。".to_string()
+            "Network connection failed. Check your network settings and try again.".to_string()
         }
-        (HttpErrorKind::Status, Some(429)) => "请求过于频繁，请稍后再试。".to_string(),
+        (HttpErrorKind::Status, Some(429)) => "Too many requests. Try again shortly.".to_string(),
         (HttpErrorKind::Status, Some(401 | 403)) => {
-            "认证失败，请检查 API 密钥或访问权限。".to_string()
+            "Authentication failed. Check the API key or access permissions.".to_string()
         }
-        (HttpErrorKind::Status, Some(500..=599)) => "服务器错误，请稍后重试。".to_string(),
-        (HttpErrorKind::Decode, _) => "服务返回了无法识别的数据。".to_string(),
-        _ => format!("发送消息失败：{}", error.user_message()),
+        (HttpErrorKind::Status, Some(500..=599)) => {
+            "The service is unavailable. Try again later.".to_string()
+        }
+        (HttpErrorKind::Decode, _) => "The service returned an unreadable response.".to_string(),
+        _ => "The message could not be sent. Try again.".to_string(),
     }
 }

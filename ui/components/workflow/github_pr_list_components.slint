@@ -1,6 +1,7 @@
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubFilterMenuFrame, GitHubFilterMenuItem, GitHubFilterMenuSectionLabel } from "../github_filter_menu.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
 
@@ -44,6 +45,11 @@ export component GitHubPullRequestStateButton inherits Rectangle {
     state-focus := FocusScope {
         width: 100%;
         height: 100%;
+        accessible-role: radio-button;
+        accessible-enabled: true;
+        accessible-label: root.caption;
+        accessible-checkable: true;
+        accessible-checked: root.active;
         key-pressed(event) => {
             root.keyboard-focus-visible = true;
             if event.text == Key.Return || event.text == " " {
@@ -125,195 +131,12 @@ export component GitHubPullRequestStateButton inherits Rectangle {
     }
 }
 
-export component GitHubPullRequestFilterButton inherits Rectangle {
-    in property <string> label;
-    in property <bool> selected: false;
-    callback clicked();
-    private property <bool> keyboard-focus-visible: false;
-
-    // GitHub content-sized filter button: 8px pad + label + 4px gap + 16px caret.
-    private property <length> label-width: label-measure.preferred-width;
-    width: root.label-width + 28px;
-    height: 32px;
-    border-radius: 6px;
-    background: filter-touch.has-hover || root.selected
-        ? (GitHubTheme.control-default-rest)
-        : transparent;
-
-    filter-focus := FocusScope {
-        width: 100%;
-        height: 100%;
-        key-pressed(event) => {
-            root.keyboard-focus-visible = true;
-            if event.text == Key.Return || event.text == " " {
-                root.clicked();
-                return accept;
-            }
-            return reject;
-        }
-        focus-gained(reason) => {
-            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
-        }
-        focus-lost => {
-            root.keyboard-focus-visible = false;
-        }
-    }
-
-    if filter-focus.has-focus && root.keyboard-focus-visible: Rectangle {
-        x: -GitHubMetrics.size-2;
-        y: -GitHubMetrics.size-2;
-        width: parent.width + GitHubMetrics.size-4;
-        height: parent.height + GitHubMetrics.size-4;
-        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
-        border-width: GitHubMetrics.focus-outline-width;
-        border-color: GitHubTheme.focus-outline;
-        background: transparent;
-    }
-
-    label-measure := Text {
-        visible: false;
-        text: root.label;
-        font-size: 12px;
-        wrap: no-wrap;
-    }
-
-    HorizontalLayout {
-        x: 8px;
-        width: root.label-width + 20px;
-        height: parent.height;
-        spacing: 4px;
-
-        Text {
-            width: root.label-width;
-            text: root.label;
-            font-size: 12px;
-            font-weight: 500;
-            color: GitHubTheme.fg-muted;
-            vertical-alignment: center;
-        }
-
-        Rectangle {
-            width: 16px;
-            height: parent.height;
-            background: transparent;
-
-            Image {
-                // The Octicon path sits about 1px below the 16px view-box
-                // center. Apply the same optical centering as GitHub's
-                // vertically-middle aligned dropdown caret.
-                y: (parent.height - self.height) / 2 - 1px;
-                width: 16px;
-                height: 16px;
-                source: @image-url("../../assets/icons/octicon-triangle-down-16.svg");
-                image-fit: contain;
-                colorize: GitHubTheme.fg-muted;
-            }
-        }
-    }
-
-    filter-touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => {
-            root.keyboard-focus-visible = false;
-            filter-focus.focus();
-            root.clicked();
-        }
-    }
-}
-
 export component GitHubPullRequestFilterMoreButton inherits GitHubIconButton {
     icon: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
     tooltip-text: "More filters";
     tooltip-above: false;
     tooltip-align-right: true;
     invisible: true;
-}
-
-export component GitHubPullRequestFilterMenuOption inherits Rectangle {
-    in property <string> label;
-    in property <string> value;
-    in property <string> selected-value;
-    callback selected(string);
-    private property <bool> keyboard-focus-visible: false;
-
-    // Primer ActionList medium row (~32px), matching GitHub SelectPanel density.
-    height: 32px;
-    background: transparent;
-
-    option-focus := FocusScope {
-        width: 100%;
-        height: 100%;
-        key-pressed(event) => {
-            root.keyboard-focus-visible = true;
-            if event.text == Key.Return || event.text == " " {
-                root.selected(root.value);
-                return accept;
-            }
-            return reject;
-        }
-        focus-gained(reason) => {
-            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
-        }
-        focus-lost => {
-            root.keyboard-focus-visible = false;
-        }
-    }
-
-    Rectangle {
-        x: GitHubMetrics.size-4;
-        y: GitHubMetrics.size-2;
-        width: parent.width - GitHubMetrics.size-8;
-        height: parent.height - GitHubMetrics.size-4;
-        border-radius: GitHubMetrics.radius-medium;
-        background: option-touch.pressed
-            ? GitHubTheme.control-transparent-active
-            : (option-touch.has-hover
-                ? GitHubTheme.control-transparent-hover
-                : transparent);
-    }
-
-    Text {
-        x: 8px;
-        width: 16px;
-        height: parent.height;
-        text: root.selected-value == root.value ? "✓" : "";
-        font-size: 12px;
-        font-weight: 600;
-        color: GitHubTheme.fg-default;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-
-    Text {
-        x: 28px;
-        width: parent.width - 36px;
-        height: parent.height;
-        text: root.label;
-        font-size: 12px;
-        color: GitHubTheme.fg-default;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    option-touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => {
-            root.keyboard-focus-visible = false;
-            option-focus.focus();
-            root.selected(root.value);
-        }
-    }
-
-    if option-focus.has-focus && root.keyboard-focus-visible: Rectangle {
-        x: GitHubMetrics.size-4;
-        y: GitHubMetrics.size-2;
-        width: parent.width - GitHubMetrics.size-8;
-        height: parent.height - GitHubMetrics.size-4;
-        border-radius: GitHubMetrics.radius-medium;
-        border-width: GitHubMetrics.focus-outline-width;
-        border-color: GitHubTheme.focus-outline;
-        background: transparent;
-    }
 }
 
 export component GitHubPullRequestFilterMenu inherits Rectangle {
@@ -334,130 +157,54 @@ export component GitHubPullRequestFilterMenu inherits Rectangle {
         : (root.menu-type == "more" ? 313px : 160px);
     background: transparent;
 
-    // Own the full popover hit area so blank regions (title band) cannot fall
-    // through to the full-window dismiss scrim underneath.
-    TouchArea {
-        mouse-cursor: default;
-    }
-
-    if root.menu-type != "more": Text {
-        x: 12px;
-        y: 0px;
-        width: parent.width - 40px;
-        height: 32px;
-        text: root.menu-type == "reviews"
+    GitHubFilterMenuFrame {
+        width: parent.width;
+        title: root.menu-type == "reviews"
             ? "Filter by reviews"
             : (root.menu-type == "assignee" ? "Filter by assignee" : "Sort by");
-        font-size: 12px;
-        font-weight: 600;
-        color: GitHubTheme.fg-default;
-        vertical-alignment: center;
-    }
+        show-header: root.menu-type != "more";
+        content-height: root.menu-type == "assignee"
+            ? 96px
+            : (root.menu-type == "more" ? 313px : 128px);
+        close => { root.close(); }
 
-    if root.menu-type != "more": Rectangle {
-        x: parent.width - 28px;
-        y: 4px;
-        width: 24px;
-        height: 24px;
-        border-radius: 6px;
-        background: close-touch.has-hover
-            ? (GitHubTheme.control-default-rest)
-            : transparent;
-
-        Image {
-            x: 4px;
-            y: 4px;
-            width: 16px;
-            height: 16px;
-            source: @image-url("../../assets/icons/octicon-x-16.svg");
-            colorize: GitHubTheme.fg-muted;
+        if root.menu-type == "reviews": VerticalLayout {
+            GitHubFilterMenuItem { text: "All reviews"; value: "all"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { text: "Review required"; value: "required"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { text: "Approved review"; value: "approved"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { text: "Changes requested"; value: "changes-requested"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
         }
 
-        close-touch := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { root.close(); }
+        if root.menu-type == "assignee": VerticalLayout {
+            GitHubFilterMenuItem { text: "Anyone"; value: "any"; selected-value: root.assignee-selected-value; chosen(value) => { root.selected("assignee", value); } }
+            GitHubFilterMenuItem { text: "Assigned to nobody"; value: "none"; selected-value: root.assignee-selected-value; chosen(value) => { root.selected("assignee", value); } }
+            GitHubFilterMenuItem { text: "Assigned to me"; value: "me"; selected-value: root.assignee-selected-value; chosen(value) => { root.selected("assignee", value); } }
         }
-    }
 
-    if root.menu-type != "more": Rectangle {
-        y: 31px;
-        width: parent.width;
-        height: 1px;
-        background: GitHubTheme.border-muted;
-    }
-
-    if root.menu-type == "reviews": VerticalLayout {
-        y: 32px;
-        width: parent.width;
-        height: parent.height - 32px;
-        GitHubPullRequestFilterMenuOption { label: "All reviews"; value: "all"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
-        GitHubPullRequestFilterMenuOption { label: "Review required"; value: "required"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
-        GitHubPullRequestFilterMenuOption { label: "Approved review"; value: "approved"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
-        GitHubPullRequestFilterMenuOption { label: "Changes requested"; value: "changes-requested"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
-    }
-
-    if root.menu-type == "assignee": VerticalLayout {
-        y: 32px;
-        width: parent.width;
-        height: parent.height - 32px;
-        GitHubPullRequestFilterMenuOption { label: "Anyone"; value: "any"; selected-value: root.assignee-selected-value; selected(value) => { root.selected("assignee", value); } }
-        GitHubPullRequestFilterMenuOption { label: "Assigned to nobody"; value: "none"; selected-value: root.assignee-selected-value; selected(value) => { root.selected("assignee", value); } }
-        GitHubPullRequestFilterMenuOption { label: "Assigned to me"; value: "me"; selected-value: root.assignee-selected-value; selected(value) => { root.selected("assignee", value); } }
-    }
-
-    if root.menu-type == "sort": VerticalLayout {
-        y: 32px;
-        width: parent.width;
-        height: parent.height - 32px;
-        GitHubPullRequestFilterMenuOption { label: "Newest"; value: "newest"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
-        GitHubPullRequestFilterMenuOption { label: "Oldest"; value: "oldest"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
-        GitHubPullRequestFilterMenuOption { label: "Recently updated"; value: "updated-desc"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
-        GitHubPullRequestFilterMenuOption { label: "Least recently updated"; value: "updated-asc"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
-    }
-
-    if root.menu-type == "more": Rectangle {
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
-
-        // GitHub overflow ActionMenu: muted section labels, then compact rows.
-        Text {
-            x: 12px;
-            y: 0px;
-            width: parent.width - 24px;
-            height: 28px;
-            text: "Filter by reviews";
-            font-size: 12px;
-            font-weight: 600;
-            color: GitHubTheme.fg-muted;
-            vertical-alignment: center;
+        if root.menu-type == "sort": VerticalLayout {
+            GitHubFilterMenuItem { text: "Newest"; value: "newest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { text: "Oldest"; value: "oldest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { text: "Recently updated"; value: "updated-desc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { text: "Least recently updated"; value: "updated-asc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
         }
-        GitHubPullRequestFilterMenuOption { y: 28px; width: parent.width; label: "All reviews"; value: "all"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
-        GitHubPullRequestFilterMenuOption { y: 60px; width: parent.width; label: "Review required"; value: "required"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
-        GitHubPullRequestFilterMenuOption { y: 92px; width: parent.width; label: "Approved review"; value: "approved"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
-        GitHubPullRequestFilterMenuOption { y: 124px; width: parent.width; label: "Changes requested"; value: "changes-requested"; selected-value: root.review-selected-value; selected(value) => { root.selected("reviews", value); } }
 
-        Rectangle {
-            y: 156px;
+        if root.menu-type == "more": Rectangle {
             width: parent.width;
-            height: 1px;
-            background: GitHubTheme.border-muted;
+            height: parent.height;
+
+            GitHubFilterMenuSectionLabel { x: 12px; y: 0px; width: parent.width - 24px; label: "Filter by reviews"; }
+            GitHubFilterMenuItem { y: 28px; width: parent.width; text: "All reviews"; value: "all"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { y: 60px; width: parent.width; text: "Review required"; value: "required"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { y: 92px; width: parent.width; text: "Approved review"; value: "approved"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { y: 124px; width: parent.width; text: "Changes requested"; value: "changes-requested"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+
+            Rectangle { y: 156px; width: parent.width; height: 1px; background: GitHubTheme.border-muted; }
+            GitHubFilterMenuSectionLabel { x: 12px; y: 157px; width: parent.width - 24px; label: "Sort by"; }
+            GitHubFilterMenuItem { y: 185px; width: parent.width; text: "Newest"; value: "newest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { y: 217px; width: parent.width; text: "Oldest"; value: "oldest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { y: 249px; width: parent.width; text: "Recently updated"; value: "updated-desc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { y: 281px; width: parent.width; text: "Least recently updated"; value: "updated-asc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
         }
-        Text {
-            x: 12px;
-            y: 157px;
-            width: parent.width - 24px;
-            height: 28px;
-            text: "Sort by";
-            font-size: 12px;
-            font-weight: 600;
-            color: GitHubTheme.fg-muted;
-            vertical-alignment: center;
-        }
-        GitHubPullRequestFilterMenuOption { y: 185px; width: parent.width; label: "Newest"; value: "newest"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
-        GitHubPullRequestFilterMenuOption { y: 217px; width: parent.width; label: "Oldest"; value: "oldest"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
-        GitHubPullRequestFilterMenuOption { y: 249px; width: parent.width; label: "Recently updated"; value: "updated-desc"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
-        GitHubPullRequestFilterMenuOption { y: 281px; width: parent.width; label: "Least recently updated"; value: "updated-asc"; selected-value: root.sort-selected-value; selected(value) => { root.selected("sort", value); } }
     }
 }
 

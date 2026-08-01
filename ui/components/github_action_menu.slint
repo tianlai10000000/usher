@@ -1,4 +1,5 @@
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+import { TransientOverlayState } from "../state/transient_overlay_state.slint";
 
 // Primer ActionMenu is an ActionList inside AnchoredOverlay. This shell owns
 // the shared Overlay surface and collision-aware placement. Coordinates are in
@@ -46,6 +47,7 @@ export component GitHubActionMenu inherits FocusScope {
                 ? root.anchor-x + (root.anchor-width - root.desired-width) / 2
                 : root.anchor-x);
     private property <length> scroll-offset-y: 0px;
+    private property <int> dismiss-revision: TransientOverlayState.dismiss-revision;
 
     accessible-role: list;
 
@@ -55,6 +57,12 @@ export component GitHubActionMenu inherits FocusScope {
             root.focus();
         } else if root.has-focus {
             root.clear-focus();
+        }
+    }
+
+    changed dismiss-revision => {
+        if root.open {
+            root.dismiss-requested();
         }
     }
 
@@ -140,6 +148,7 @@ export component GitHubActionListItem inherits FocusScope {
     in property <string> trailing-text: "";
     in property <image> icon;
     in property <bool> selected: false;
+    in property <bool> selectable: false;
     in property <bool> item-enabled: true;
     in property <bool> danger: false;
     in property <length> bottom-padding: 0px;
@@ -151,7 +160,10 @@ export component GitHubActionListItem inherits FocusScope {
     private property <length> row-height:
         (root.description == "" ? GitHubMetrics.size-32 : GitHubMetrics.size-48)
         + root.bottom-padding;
-    private property <bool> has-leading-visual: root.selected || root.has-icon;
+    // Single-select lists reserve the Check slot for every row so selection
+    // never shifts labels or changes the menu's perceived geometry.
+    private property <bool> has-leading-visual:
+        root.selectable || root.selected || root.has-icon;
     private property <length> content-x:
         root.has-leading-visual ? GitHubMetrics.size-32 : GitHubMetrics.size-8;
 
@@ -163,7 +175,7 @@ export component GitHubActionListItem inherits FocusScope {
     accessible-label: root.description == ""
         ? root.text
         : root.text + ". " + root.description;
-    accessible-checkable: root.selected;
+    accessible-checkable: root.selectable;
     accessible-checked: root.selected;
 
     key-pressed(event) => {
@@ -194,18 +206,7 @@ export component GitHubActionListItem inherits FocusScope {
                     ? (root.danger
                         ? GitHubTheme.danger-muted
                         : GitHubTheme.control-transparent-hover)
-                    : (root.selected
-                        ? GitHubTheme.control-transparent-selected
-                        : transparent)));
-    }
-
-    if root.selected: Rectangle {
-        x: -GitHubMetrics.size-4;
-        y: GitHubMetrics.size-8;
-        width: GitHubMetrics.size-4;
-        height: parent.height - GitHubMetrics.size-16;
-        border-radius: GitHubMetrics.radius-medium;
-        background: GitHubTheme.accent-emphasis;
+                    : transparent));
     }
 
     if root.selected: Image {

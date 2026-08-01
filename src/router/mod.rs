@@ -26,7 +26,10 @@ pub fn route_ui_state(route: Route) -> RouteUiState {
     let chat_route_visible = route == Route::Chat;
     RouteUiState {
         show_breadcrumb: !BREADCRUMB_HIDDEN_ROUTES.contains(&route),
-        show_navigation_drawer: route != Route::PrReview,
+        // PR review remains in the Workflow shell and must preserve the
+        // user's existing docked-sidebar state. The dedicated page still owns
+        // its content scrolling, but it no longer forces navigation closed.
+        show_navigation_drawer: true,
         navigation_current_index: navigation_index_for_route(route),
         chat_route_visible,
         show_page_scroll_view: !chat_route_visible && route != Route::PrReview,
@@ -62,32 +65,66 @@ pub(crate) struct RouteLifecycleEvent {
 
 #[derive(Debug, Default)]
 struct NavigationHistory {
-    entries: Vec<Route>,
+    back_entries: Vec<Route>,
+    forward_entries: Vec<Route>,
 }
 
 impl NavigationHistory {
-    fn record_forward(&mut self, current: Route, target: Route) {
-        if current != target && self.entries.last().copied() != Some(current) {
-            if self.entries.len() == MAX_ROUTE_HISTORY {
-                self.entries.remove(0);
-            }
-            self.entries.push(current);
+    fn push_bounded(entries: &mut Vec<Route>, route: Route) {
+        if entries.last().copied() == Some(route) {
+            return;
         }
+        if entries.len() == MAX_ROUTE_HISTORY {
+            entries.remove(0);
+        }
+        entries.push(route);
+    }
+
+    fn take_distinct_target(entries: &mut Vec<Route>, current: Route) -> Option<Route> {
+        while entries.last().copied() == Some(current) {
+            entries.pop();
+        }
+        entries.pop()
+    }
+
+    fn record_navigation(&mut self, current: Route, target: Route) {
+        if current == target {
+            return;
+        }
+        Self::push_bounded(&mut self.back_entries, current);
+        self.forward_entries.clear();
     }
 
     fn take_back_target(&mut self, current: Route) -> Option<Route> {
-        while self.entries.last().copied() == Some(current) {
-            self.entries.pop();
-        }
-        self.entries.pop()
+        let target = Self::take_distinct_target(&mut self.back_entries, current)?;
+        Self::push_bounded(&mut self.forward_entries, current);
+        Some(target)
+    }
+
+    fn take_forward_target(&mut self, current: Route) -> Option<Route> {
+        let target = Self::take_distinct_target(&mut self.forward_entries, current)?;
+        Self::push_bounded(&mut self.back_entries, current);
+        Some(target)
     }
 
     fn previous_or(&self, fallback: Route) -> Route {
-        self.entries.last().copied().unwrap_or(fallback)
+        self.back_entries.last().copied().unwrap_or(fallback)
+    }
+
+    fn can_go_back(&self) -> bool {
+        !self.back_entries.is_empty()
+    }
+
+    fn can_go_forward(&self) -> bool {
+        !self.forward_entries.is_empty()
     }
 
     fn contains_workflow_route(&self) -> bool {
-        self.entries.iter().copied().any(is_workflow_route)
+        self.back_entries
+            .iter()
+            .chain(self.forward_entries.iter())
+            .copied()
+            .any(is_workflow_route)
     }
 }
 
@@ -118,7 +155,7 @@ impl Router {
             let previous = win.get_current_route();
             if previous != route {
                 if let Ok(mut history) = self.history.lock() {
-                    history.record_forward(previous, route);
+                    history.record_navigation(previous, route);
                 }
             }
             self.apply_transition(&win, previous, route)
@@ -137,15 +174,35 @@ impl Router {
         })
     }
 
+    pub fn forward(&self) -> Option<RouteUiState> {
+        self.window.upgrade().and_then(|win| {
+            let current = win.get_current_route();
+            let target = self
+                .history
+                .lock()
+                .ok()
+                .and_then(|mut history| history.take_forward_target(current))?;
+            Some(self.apply_transition(&win, current, target))
+        })
+    }
+
     fn apply_transition(&self, win: &MainWindow, previous: Route, route: Route) -> RouteUiState {
         win.set_current_route(route);
-        let history_top = self
+        let (history_top, can_go_back, can_go_forward) = self
             .history
             .lock()
             .ok()
-            .map(|history| history.previous_or(route))
-            .unwrap_or(route);
+            .map(|history| {
+                (
+                    history.previous_or(route),
+                    history.can_go_back(),
+                    history.can_go_forward(),
+                )
+            })
+            .unwrap_or((route, false, false));
         win.set_previous_route(history_top);
+        win.set_navigation_can_go_back(can_go_back);
+        win.set_navigation_can_go_forward(can_go_forward);
         let state = Self::apply_route_ui_state(win, route);
 
         // Keep Workflow/PR state while a route remains reachable through Back.
@@ -165,6 +222,7 @@ impl Router {
                 workflow_became_unreachable: is_workflow_route(previous) && !workflow_reachable,
             },
         );
+        crate::platform::update_titlebar_navigation_controls(win);
         log::debug!("→ Navigate to: {:?}", route);
         state
     }
@@ -186,7 +244,7 @@ mod tests {
     fn full_window_review_stays_in_workflow_domain_but_job_run_is_global() {
         let state = route_ui_state(Route::PrReview);
         assert!(!state.show_breadcrumb);
-        assert!(!state.show_navigation_drawer);
+        assert!(state.show_navigation_drawer);
         assert!(!state.show_page_scroll_view);
         let job_run = route_ui_state(Route::JobRun);
         assert!(job_run.show_breadcrumb);
@@ -211,10 +269,10 @@ mod tests {
     #[test]
     fn route_history_returns_from_utility_pages_without_creating_a_bounce() {
         let mut history = NavigationHistory::default();
-        history.record_forward(Route::Home, Route::Project);
-        history.record_forward(Route::Project, Route::Workflow);
-        history.record_forward(Route::Workflow, Route::PrReview);
-        history.record_forward(Route::PrReview, Route::Settings);
+        history.record_navigation(Route::Home, Route::Project);
+        history.record_navigation(Route::Project, Route::Workflow);
+        history.record_navigation(Route::Workflow, Route::PrReview);
+        history.record_navigation(Route::PrReview, Route::Settings);
 
         assert_eq!(
             history.take_back_target(Route::Settings),
@@ -233,8 +291,37 @@ mod tests {
     #[test]
     fn repeated_navigation_to_the_current_route_does_not_add_history() {
         let mut history = NavigationHistory::default();
-        history.record_forward(Route::Home, Route::Home);
+        history.record_navigation(Route::Home, Route::Home);
         assert_eq!(history.take_back_target(Route::Home), None);
+    }
+
+    #[test]
+    fn back_and_forward_move_between_independent_stacks() {
+        let mut history = NavigationHistory::default();
+        history.record_navigation(Route::Home, Route::Chat);
+        history.record_navigation(Route::Chat, Route::Project);
+
+        assert_eq!(history.take_back_target(Route::Project), Some(Route::Chat));
+        assert!(history.can_go_back());
+        assert!(history.can_go_forward());
+        assert_eq!(
+            history.take_forward_target(Route::Chat),
+            Some(Route::Project)
+        );
+        assert!(history.can_go_back());
+        assert!(!history.can_go_forward());
+    }
+
+    #[test]
+    fn direct_navigation_after_back_clears_forward_history() {
+        let mut history = NavigationHistory::default();
+        history.record_navigation(Route::Home, Route::Chat);
+        history.record_navigation(Route::Chat, Route::Project);
+        assert_eq!(history.take_back_target(Route::Project), Some(Route::Chat));
+
+        history.record_navigation(Route::Chat, Route::Settings);
+        assert!(!history.can_go_forward());
+        assert_eq!(history.take_back_target(Route::Settings), Some(Route::Chat));
     }
 
     #[test]
@@ -246,8 +333,8 @@ mod tests {
             } else {
                 (Route::Settings, Route::Home)
             };
-            history.record_forward(current, target);
+            history.record_navigation(current, target);
         }
-        assert_eq!(history.entries.len(), MAX_ROUTE_HISTORY);
+        assert_eq!(history.back_entries.len(), MAX_ROUTE_HISTORY);
     }
 }

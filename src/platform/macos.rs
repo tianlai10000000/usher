@@ -2,6 +2,7 @@ use std::ffi::CString;
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use block::ConcreteBlock;
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, Object, Sel};
 use raw_window_handle::HasWindowHandle;
@@ -15,20 +16,34 @@ static WINDOW_INTERACTING: AtomicBool = AtomicBool::new(false);
 
 static mut TITLEBAR_DELEGATE: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_INSTALLED: bool = false;
+static mut TITLEBAR_TOGGLE_BUTTON: *mut Object = std::ptr::null_mut();
+static mut TITLEBAR_BACK_BUTTON: *mut Object = std::ptr::null_mut();
+static mut TITLEBAR_FORWARD_BUTTON: *mut Object = std::ptr::null_mut();
+static mut TITLEBAR_ACCESSORY_ANCHOR: *mut Object = std::ptr::null_mut();
+static mut TITLEBAR_CONTROLS_CONTAINER: *mut Object = std::ptr::null_mut();
+static mut TITLEBAR_MODAL_SHIELD: *mut Object = std::ptr::null_mut();
+static mut TITLEBAR_EVENT_MONITOR: *mut Object = std::ptr::null_mut();
+static mut TRAFFIC_LIGHT_BASE_Y: [f64; 3] = [f64::NAN; 3];
+static mut SIDEBAR_VIBRANCY_INSTALLED: bool = false;
+static mut SIDEBAR_VIBRANCY_VIEW: *mut Object = std::ptr::null_mut();
+static mut SIDEBAR_DARK_MODE: bool = false;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct NSPoint {
     x: f64,
     y: f64,
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct NSSize {
     width: f64,
     height: f64,
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct NSRect {
     origin: NSPoint,
     size: NSSize,
@@ -115,21 +130,50 @@ pub(crate) fn detect_system_dark_mode() -> bool {
     unsafe { msg_send![value, isEqualToString: dark] }
 }
 
-fn native_window(window: &MainWindow) -> Option<*mut Object> {
+fn native_view(window: &MainWindow) -> Option<*mut Object> {
     let window_handle = window.window().window_handle();
     let handle = window_handle.window_handle().ok()?;
     let raw_window_handle::RawWindowHandle::AppKit(appkit_handle) = handle.as_ref() else {
         return None;
     };
     let view = appkit_handle.ns_view.as_ptr() as *mut Object;
-    if view.is_null() {
-        return None;
-    }
+    (!view.is_null()).then_some(view)
+}
+
+fn native_window(window: &MainWindow) -> Option<*mut Object> {
+    let view = native_view(window)?;
     let window: *mut Object = unsafe { msg_send![view, window] };
     (!window.is_null()).then_some(window)
 }
 
+unsafe fn configured_system_symbol(image: *mut Object, point_size: f64) -> *mut Object {
+    let Some(configuration_class) = Class::get("NSImageSymbolConfiguration") else {
+        return image;
+    };
+    let configuration: *mut Object = unsafe {
+        msg_send![
+            configuration_class,
+            configurationWithPointSize: point_size
+            weight: 0.0f64
+            scale: 2isize
+        ]
+    };
+    if configuration.is_null() {
+        return image;
+    }
+    let configured: *mut Object =
+        unsafe { msg_send![image, imageWithSymbolConfiguration: configuration] };
+    if configured.is_null() {
+        image
+    } else {
+        configured
+    }
+}
+
 pub(crate) fn set_title_bar_color(window: &MainWindow, is_dark: bool) {
+    unsafe {
+        SIDEBAR_DARK_MODE = is_dark;
+    }
     let Some(window) = native_window(window) else {
         return;
     };
@@ -147,6 +191,13 @@ pub(crate) fn set_title_bar_color(window: &MainWindow, is_dark: bool) {
     }
 
     if let Some(color_class) = Class::get("NSColor") {
+        if unsafe { SIDEBAR_VIBRANCY_INSTALLED } {
+            unsafe {
+                let is_key: bool = msg_send![window, isKeyWindow];
+                update_sidebar_window_surface(window, is_key);
+            }
+            return;
+        }
         let (red, green, blue) = if is_dark {
             (12.0 / 255.0, 14.0 / 255.0, 19.0 / 255.0)
         } else {
@@ -195,6 +246,24 @@ fn register_titlebar_delegate_class() -> &'static Class {
             navigate(Route::About);
         }
 
+        extern "C" fn toggle_sidebar(_this: &Object, _cmd: Sel, _sender: *mut Object) {
+            // NSControl actions are delivered on the AppKit main thread, which
+            // is also Slint's owning event-loop thread. Invoke the callback
+            // directly so rapid clicks retarget the current motion value
+            // instead of building an invoke_from_event_loop backlog.
+            if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
+                ui.invoke_toggle_navigation_drawer();
+            }
+        }
+
+        extern "C" fn navigate_back(_this: &Object, _cmd: Sel, _sender: *mut Object) {
+            invoke_titlebar_action(|ui| ui.invoke_navigate_back());
+        }
+
+        extern "C" fn navigate_forward(_this: &Object, _cmd: Sel, _sender: *mut Object) {
+            invoke_titlebar_action(|ui| ui.invoke_navigate_forward());
+        }
+
         extern "C" fn interaction_begin(_this: &Object, _cmd: Sel, _notification: *mut Object) {
             WINDOW_INTERACTING.store(true, Ordering::SeqCst);
         }
@@ -224,6 +293,38 @@ fn register_titlebar_delegate_class() -> &'static Class {
             set_window_live_resizing(false);
         }
 
+        extern "C" fn align_traffic_lights(_this: &Object, _cmd: Sel, window: *mut Object) {
+            unsafe { align_standard_window_buttons(window) };
+        }
+
+        extern "C" fn window_did_resize(_this: &Object, _cmd: Sel, notification: *mut Object) {
+            if notification.is_null() {
+                return;
+            }
+            let window: *mut Object = unsafe { msg_send![notification, object] };
+            unsafe { align_standard_window_buttons(window) };
+        }
+
+        extern "C" fn window_did_become_key(_this: &Object, _cmd: Sel, notification: *mut Object) {
+            if notification.is_null() {
+                return;
+            }
+            let window: *mut Object = unsafe { msg_send![notification, object] };
+            if !window.is_null() {
+                unsafe { update_sidebar_window_surface(window, true) };
+            }
+        }
+
+        extern "C" fn window_did_resign_key(_this: &Object, _cmd: Sel, notification: *mut Object) {
+            if notification.is_null() {
+                return;
+            }
+            let window: *mut Object = unsafe { msg_send![notification, object] };
+            if !window.is_null() {
+                unsafe { update_sidebar_window_surface(window, false) };
+            }
+        }
+
         unsafe {
             declaration.add_method(
                 sel!(usherOpenSettings:),
@@ -232,6 +333,18 @@ fn register_titlebar_delegate_class() -> &'static Class {
             declaration.add_method(
                 sel!(usherOpenAbout:),
                 open_about as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            declaration.add_method(
+                sel!(usherToggleSidebar:),
+                toggle_sidebar as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            declaration.add_method(
+                sel!(usherNavigateBack:),
+                navigate_back as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            declaration.add_method(
+                sel!(usherNavigateForward:),
+                navigate_forward as extern "C" fn(&Object, Sel, *mut Object),
             );
             declaration.add_method(
                 sel!(usherWindowInteractionBegin:),
@@ -253,6 +366,22 @@ fn register_titlebar_delegate_class() -> &'static Class {
                 sel!(usherWindowLiveResizeEnd:),
                 live_resize_end as extern "C" fn(&Object, Sel, *mut Object),
             );
+            declaration.add_method(
+                sel!(usherAlignTrafficLights:),
+                align_traffic_lights as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            declaration.add_method(
+                sel!(usherWindowDidResize:),
+                window_did_resize as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            declaration.add_method(
+                sel!(usherWindowDidBecomeKey:),
+                window_did_become_key as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            declaration.add_method(
+                sel!(usherWindowDidResignKey:),
+                window_did_resign_key as extern "C" fn(&Object, Sel, *mut Object),
+            );
             DELEGATE_CLASS = declaration.register();
         }
     });
@@ -268,6 +397,18 @@ fn navigate(route: Route) {
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(ui) = ui_weak.upgrade() {
             ui.invoke_navigate(route);
+        }
+    });
+}
+
+fn invoke_titlebar_action(action: impl FnOnce(&MainWindow) + Send + 'static) {
+    let Some(ui_weak) = TITLEBAR_UI.get() else {
+        return;
+    };
+    let ui_weak = ui_weak.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(ui) = ui_weak.upgrade() {
+            action(&ui);
         }
     });
 }
@@ -295,6 +436,15 @@ fn observe_window_interaction(window: *mut Object, delegate: *mut Object) {
             "NSWindowDidEndLiveResizeNotification",
             sel!(usherWindowLiveResizeEnd:),
         ),
+        ("NSWindowDidResizeNotification", sel!(usherWindowDidResize:)),
+        (
+            "NSWindowDidBecomeKeyNotification",
+            sel!(usherWindowDidBecomeKey:),
+        ),
+        (
+            "NSWindowDidResignKeyNotification",
+            sel!(usherWindowDidResignKey:),
+        ),
     ];
     for (name, selector) in notifications {
         let Some(name) = nsstring(name) else {
@@ -319,6 +469,58 @@ unsafe fn create_view(class_name: &str, frame: NSRect) -> Option<*mut Object> {
     (!view.is_null()).then_some(view)
 }
 
+fn install_titlebar_event_monitor(window: *mut Object) {
+    unsafe {
+        if !TITLEBAR_EVENT_MONITOR.is_null() {
+            return;
+        }
+    }
+    let Some(event_class) = Class::get("NSEvent") else {
+        log::warn!(
+            "[TitleBar] NSEvent unavailable; transient overlays cannot observe title-bar clicks"
+        );
+        return;
+    };
+
+    // NSEventMaskLeftMouseDown = 1 << NSEventTypeLeftMouseDown (1).
+    let handler = ConcreteBlock::new(move |event: *mut Object| -> *mut Object {
+        if event.is_null() {
+            return event;
+        }
+        let event_window: *mut Object = unsafe { msg_send![event, window] };
+        if event_window != window {
+            return event;
+        }
+        let location: NSPoint = unsafe { msg_send![event, locationInWindow] };
+        let content_layout: NSRect = unsafe { msg_send![window, contentLayoutRect] };
+        let titlebar_start = content_layout.origin.y + content_layout.size.height;
+        if location.y >= titlebar_start {
+            let _ = slint::invoke_from_event_loop(|| {
+                if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
+                    ui.invoke_dismiss_transient_overlays();
+                }
+            });
+        }
+        event
+    })
+    .copy();
+
+    let monitor: *mut Object = unsafe {
+        msg_send![
+            event_class,
+            addLocalMonitorForEventsMatchingMask: 2u64
+            handler: &*handler
+        ]
+    };
+    if monitor.is_null() {
+        log::warn!("[TitleBar] Failed to install native click bridge for transient overlays");
+        return;
+    }
+    unsafe {
+        TITLEBAR_EVENT_MONITOR = monitor;
+    }
+}
+
 unsafe fn configure_icon_button(
     button: *mut Object,
     image_names: &[&str],
@@ -330,20 +532,39 @@ unsafe fn configure_icon_button(
     let mut image_set = false;
     if let Some(image_class) = Class::get("NSImage") {
         for image_name in image_names {
+            let (image_name, system_symbol) = image_name
+                .strip_prefix("symbol:")
+                .map_or((*image_name, false), |name| (name, true));
             let Some(image_name) = nsstring(image_name) else {
                 continue;
             };
-            let image: *mut Object = unsafe { msg_send![image_class, imageNamed: image_name] };
+            let image: *mut Object = if system_symbol {
+                let nil: *mut Object = std::ptr::null_mut();
+                unsafe {
+                    msg_send![
+                        image_class,
+                        imageWithSystemSymbolName: image_name
+                        accessibilityDescription: nil
+                    ]
+                }
+            } else {
+                unsafe { msg_send![image_class, imageNamed: image_name] }
+            };
             if image.is_null() {
                 continue;
             }
+            let image = if system_symbol {
+                unsafe { configured_system_symbol(image, 12.5) }
+            } else {
+                image
+            };
             unsafe {
                 let _: () = msg_send![button, setImage: image];
                 if let Some(empty) = nsstring("") {
                     let _: () = msg_send![button, setTitle: empty];
                 }
                 let _: () = msg_send![button, setImagePosition: 2u64];
-                let _: () = msg_send![button, setImageScaling: 3u64];
+                let _: () = msg_send![button, setImageScaling: 0u64];
             }
             image_set = true;
             break;
@@ -358,7 +579,7 @@ unsafe fn configure_icon_button(
     }
 
     if let Some(font_class) = Class::get("NSFont") {
-        let font: *mut Object = unsafe { msg_send![font_class, systemFontOfSize: 24.0f64] };
+        let font: *mut Object = unsafe { msg_send![font_class, systemFontOfSize: 16.0f64] };
         if !font.is_null() {
             unsafe {
                 let _: () = msg_send![button, setFont: font];
@@ -367,12 +588,209 @@ unsafe fn configure_icon_button(
     }
 
     unsafe {
-        let _: () = msg_send![button, setBordered: false];
+        // Native accessory-bar buttons supply the same hover-only rounded
+        // background used by Codex's title-bar controls.
+        let _: () = msg_send![button, setBordered: true];
+        let _: () = msg_send![button, setBezelStyle: 12u64];
+        let _: () = msg_send![button, setShowsBorderOnlyWhileMouseInside: true];
         if let Some(tooltip) = nsstring(tooltip) {
             let _: () = msg_send![button, setToolTip: tooltip];
+            let _: () = msg_send![button, setAccessibilityLabel: tooltip];
         }
         let _: () = msg_send![button, setTarget: delegate];
         let _: () = msg_send![button, setAction: action];
+    }
+}
+
+fn sidebar_toggle_image_names(expanded: bool) -> &'static [&'static str] {
+    if expanded {
+        &[
+            "symbol:rectangle.leftthird.inset.filled",
+            "symbol:sidebar.left",
+            "NSImageNameTouchBarSidebarTemplate",
+            "NSImageNameListViewTemplate",
+        ]
+    } else {
+        &[
+            "symbol:sidebar.left",
+            "NSImageNameTouchBarSidebarTemplate",
+            "NSImageNameListViewTemplate",
+        ]
+    }
+}
+
+fn sidebar_toggle_tooltip(expanded: bool) -> &'static str {
+    if expanded {
+        "Hide sidebar (⌘B)"
+    } else {
+        "Show sidebar (⌘B)"
+    }
+}
+
+unsafe fn install_sidebar_vibrancy(window: *mut Object, render_view: *mut Object) -> bool {
+    if unsafe { SIDEBAR_VIBRANCY_INSTALLED } {
+        return true;
+    }
+    unsafe {
+        // Full-size transparent content lets either native material extend
+        // behind the traffic lights and title-bar accessories.
+        let style_mask: u64 = msg_send![window, styleMask];
+        let _: () = msg_send![window, setStyleMask: style_mask | (1u64 << 15)];
+        let _: () = msg_send![window, setTitlebarAppearsTransparent: true];
+        let _: () = msg_send![window, setOpaque: false];
+    }
+
+    let parent_view: *mut Object = unsafe { msg_send![render_view, superview] };
+    if parent_view.is_null() {
+        log::warn!("[TitleBar] Native render view has no parent for sidebar vibrancy");
+        return false;
+    }
+    let frame: NSRect = unsafe { msg_send![render_view, frame] };
+
+    let Some(effect_class) = Class::get("NSVisualEffectView") else {
+        log::warn!("[TitleBar] NSVisualEffectView is unavailable");
+        return false;
+    };
+    let effect: *mut Object = unsafe { msg_send![effect_class, alloc] };
+    let effect: *mut Object = unsafe { msg_send![effect, initWithFrame: frame] };
+    if effect.is_null() {
+        return false;
+    }
+    unsafe {
+        // Match Electron's native implementation: its backdrop spans the full
+        // content view and resizes in both dimensions. Slint exposes it only
+        // through the transparent 240 pt sidebar; the main surface stays opaque.
+        let _: () = msg_send![effect, setMaterial: 5isize];
+        let _: () = msg_send![effect, setBlendingMode: 0isize];
+        let _: () = msg_send![effect, setState: 0isize];
+        let _: () = msg_send![effect, setAutoresizingMask: 18u64];
+    }
+
+    unsafe {
+        // Keep Slint/winit's render view as the NSWindow content view. Replacing
+        // or reparenting it invalidates the renderer after the first frame.
+        // A sibling ordered below the render view supplies the native material
+        // while the transparent Slint surface remains fully interactive.
+        let _: () = msg_send![
+            parent_view,
+            addSubview: effect
+            positioned: -1isize
+            relativeTo: render_view
+        ];
+
+        SIDEBAR_VIBRANCY_VIEW = effect;
+        SIDEBAR_VIBRANCY_INSTALLED = true;
+        let is_key: bool = msg_send![window, isKeyWindow];
+        update_sidebar_window_surface(window, is_key);
+    }
+    log::info!("[TitleBar] Installed Codex-style Menu vibrancy backdrop");
+    true
+}
+
+unsafe fn update_sidebar_window_surface(window: *mut Object, is_focused: bool) {
+    if window.is_null() || unsafe { SIDEBAR_VIBRANCY_VIEW.is_null() } {
+        return;
+    }
+
+    unsafe {
+        // Codex disables Menu vibrancy when its macOS window loses focus and
+        // switches the transparent window surface to #f9f9f9 / #000000.
+        // Hiding the retained view is the bounded-sidebar equivalent of
+        // Electron's setVibrancy(null), without rebuilding AppKit hierarchy.
+        let _: () = msg_send![SIDEBAR_VIBRANCY_VIEW, setHidden: !is_focused];
+    }
+
+    let Some(color_class) = Class::get("NSColor") else {
+        return;
+    };
+    let color: *mut Object = if is_focused {
+        unsafe { msg_send![color_class, clearColor] }
+    } else {
+        let component = if unsafe { SIDEBAR_DARK_MODE } {
+            0.0
+        } else {
+            249.0 / 255.0
+        };
+        unsafe {
+            msg_send![
+                color_class,
+                colorWithSRGBRed: component
+                green: component
+                blue: component
+                alpha: 1.0
+            ]
+        }
+    };
+    if !color.is_null() {
+        unsafe {
+            let _: () = msg_send![window, setBackgroundColor: color];
+        }
+    }
+}
+
+/// AppKit keeps the standard traffic lights in its compact default control
+/// band even when the content/title-bar inset is taller. Usher's breadcrumb
+/// and accessory controls use the geometric center of the full 46 pt inset,
+/// so lower the three standard buttons by the same 7 pt delta.
+unsafe fn align_standard_window_buttons(window: *mut Object) {
+    if window.is_null() {
+        return;
+    }
+
+    for button_kind in 0u64..=2u64 {
+        let button: *mut Object = unsafe { msg_send![window, standardWindowButton: button_kind] };
+        if button.is_null() {
+            continue;
+        }
+        let frame: NSRect = unsafe { msg_send![button, frame] };
+        let index = button_kind as usize;
+        let stored_base = unsafe { TRAFFIC_LIGHT_BASE_Y[index] };
+        let target = stored_base - 7.0;
+        if stored_base.is_finite() && (frame.origin.y - target).abs() < 0.1 {
+            continue;
+        }
+        // If AppKit laid the title bar out again, the current position is the
+        // new system baseline. Save it and apply the optical delta exactly
+        // once instead of accumulating offsets across notifications.
+        unsafe {
+            TRAFFIC_LIGHT_BASE_Y[index] = frame.origin.y;
+        }
+        let origin = NSPoint {
+            x: frame.origin.x,
+            y: frame.origin.y - 7.0,
+        };
+        unsafe {
+            let _: () = msg_send![button, setFrameOrigin: origin];
+        }
+    }
+
+    let anchor = unsafe { TITLEBAR_ACCESSORY_ANCHOR };
+    let controls = unsafe { TITLEBAR_CONTROLS_CONTAINER };
+    if anchor.is_null() || controls.is_null() {
+        return;
+    }
+    let traffic: *mut Object = unsafe { msg_send![window, standardWindowButton: 0u64] };
+    if traffic.is_null() {
+        return;
+    }
+    let titlebar_view: *mut Object = unsafe { msg_send![traffic, superview] };
+    if titlebar_view.is_null() {
+        return;
+    }
+    let traffic_frame: NSRect = unsafe { msg_send![traffic, frame] };
+    let anchor_origin: NSPoint = unsafe {
+        msg_send![
+            anchor,
+            convertPoint: NSPoint { x: 0.0, y: 0.0 }
+            toView: titlebar_view
+        ]
+    };
+    let origin = NSPoint {
+        x: anchor_origin.x,
+        y: traffic_frame.origin.y + (traffic_frame.size.height - 28.0) / 2.0,
+    };
+    unsafe {
+        let _: () = msg_send![controls, setFrameOrigin: origin];
     }
 }
 
@@ -385,6 +803,10 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
         }
     }
 
+    let Some(render_view) = native_view(window) else {
+        log::warn!("[TitleBar] native render view is unavailable, skip install this round");
+        return;
+    };
     let Some(window) = native_window(window) else {
         log::warn!("[TitleBar] native window is unavailable, skip install this round");
         return;
@@ -402,6 +824,13 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
     };
     observe_window_interaction(window, delegate);
 
+    unsafe {
+        // Match ChatGPT's compact macOS shell: the title remains available to
+        // the system, while the visible title-bar label is replaced by controls.
+        let _: () = msg_send![window, setTitleVisibility: 1u64];
+        install_sidebar_vibrancy(window, render_view);
+    }
+
     let Some(accessory_class) = Class::get("NSTitlebarAccessoryViewController") else {
         return;
     };
@@ -417,72 +846,224 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
             NSRect {
                 origin: NSPoint { x: 0.0, y: 0.0 },
                 size: NSSize {
-                    width: 104.0,
-                    height: 32.0,
+                    width: 92.0,
+                    // Use the full title-bar inset instead of AppKit's compact
+                    // accessory baseline. This lets the 28 px controls sit on
+                    // the same visual center as the traffic lights and
+                    // breadcrumb without extending outside their container.
+                    height: 46.0,
                 },
             },
         )
     };
-    let settings_button = unsafe {
+    let controls_container = unsafe {
+        create_view(
+            "NSView",
+            NSRect {
+                origin: NSPoint { x: 0.0, y: 0.0 },
+                size: NSSize {
+                    width: 92.0,
+                    height: 28.0,
+                },
+            },
+        )
+    };
+    let toggle_button = unsafe {
         create_view(
             "NSButton",
             NSRect {
-                origin: NSPoint { x: 20.0, y: -2.0 },
+                origin: NSPoint { x: 0.0, y: 0.0 },
                 size: NSSize {
-                    width: 48.0,
-                    height: 36.0,
+                    width: 28.0,
+                    height: 28.0,
                 },
             },
         )
     };
-    let about_button = unsafe {
+    let back_button = unsafe {
         create_view(
             "NSButton",
             NSRect {
-                origin: NSPoint { x: 52.0, y: -1.0 },
+                origin: NSPoint { x: 32.0, y: 0.0 },
                 size: NSSize {
-                    width: 48.0,
-                    height: 36.0,
+                    width: 28.0,
+                    height: 28.0,
                 },
             },
         )
     };
-    let (Some(container), Some(settings_button), Some(about_button)) =
-        (container, settings_button, about_button)
+    let forward_button = unsafe {
+        create_view(
+            "NSButton",
+            NSRect {
+                origin: NSPoint { x: 64.0, y: 0.0 },
+                size: NSSize {
+                    width: 28.0,
+                    height: 28.0,
+                },
+            },
+        )
+    };
+    let modal_shield = unsafe {
+        create_view(
+            "NSView",
+            NSRect {
+                origin: NSPoint { x: 0.0, y: 0.0 },
+                size: NSSize {
+                    width: 92.0,
+                    height: 28.0,
+                },
+            },
+        )
+    };
+    let (
+        Some(container),
+        Some(controls_container),
+        Some(toggle_button),
+        Some(back_button),
+        Some(forward_button),
+        Some(modal_shield),
+    ) = (
+        container,
+        controls_container,
+        toggle_button,
+        back_button,
+        forward_button,
+        modal_shield,
+    )
     else {
         return;
     };
 
     unsafe {
         configure_icon_button(
-            settings_button,
-            &[
-                "NSImageNamePreferencesGeneral",
-                "NSImageNameAdvanced",
-                "NSImageNameActionTemplate",
-            ],
-            "⚙︎",
-            "Settings",
+            toggle_button,
+            sidebar_toggle_image_names(false),
+            "◫",
+            "Toggle sidebar (⌘B)",
             delegate,
-            sel!(usherOpenSettings:),
+            sel!(usherToggleSidebar:),
         );
         configure_icon_button(
-            about_button,
-            &["NSImageNameInfo", "NSImageNameActionTemplate"],
-            "ℹ︎",
-            "About",
+            back_button,
+            &["symbol:arrow.left", "NSImageNameGoLeftTemplate"],
+            "‹",
+            "Back (⌘[)",
             delegate,
-            sel!(usherOpenAbout:),
+            sel!(usherNavigateBack:),
         );
-        let _: () = msg_send![container, addSubview: settings_button];
-        let _: () = msg_send![container, addSubview: about_button];
+        configure_icon_button(
+            forward_button,
+            &["symbol:arrow.right", "NSImageNameGoRightTemplate"],
+            "›",
+            "Forward (⌘])",
+            delegate,
+            sel!(usherNavigateForward:),
+        );
+        let _: () = msg_send![controls_container, addSubview: toggle_button];
+        let _: () = msg_send![controls_container, addSubview: back_button];
+        let _: () = msg_send![controls_container, addSubview: forward_button];
+        // This transparent native shield sits above application-owned title-bar
+        // controls while a modal backdrop is visible. It intercepts hover,
+        // Tooltip and click handling without covering AppKit's traffic lights.
+        let _: () = msg_send![modal_shield, setHidden: true];
+        let _: () = msg_send![controls_container, addSubview: modal_shield];
         let _: () = msg_send![accessory, setView: container];
-        // NSTitlebarAccessoryLayoutAttributeRight in the current target SDK.
-        let _: () = msg_send![accessory, setLayoutAttribute: 2u64];
+        // NSTitlebarAccessoryLayoutAttributeLeft in the current target SDK.
+        let _: () = msg_send![accessory, setLayoutAttribute: 1u64];
         let _: () = msg_send![window, addTitlebarAccessoryViewController: accessory];
+        let traffic: *mut Object = msg_send![window, standardWindowButton: 0u64];
+        if traffic.is_null() {
+            return;
+        }
+        let titlebar_view: *mut Object = msg_send![traffic, superview];
+        if titlebar_view.is_null() {
+            return;
+        }
+        let _: () = msg_send![titlebar_view, addSubview: controls_container];
+        TITLEBAR_ACCESSORY_ANCHOR = container;
+        TITLEBAR_CONTROLS_CONTAINER = controls_container;
+        // AppKit performs another title-bar layout after accessories are
+        // attached. Defer alignment to the run loop, then repeat once after
+        // the window has fully presented; resize notifications keep it stable.
+        let _: () = msg_send![
+            delegate,
+            performSelector: sel!(usherAlignTrafficLights:)
+            withObject: window
+            afterDelay: 0.0f64
+        ];
+        let _: () = msg_send![
+            delegate,
+            performSelector: sel!(usherAlignTrafficLights:)
+            withObject: window
+            afterDelay: 0.25f64
+        ];
+        TITLEBAR_TOGGLE_BUTTON = toggle_button;
+        TITLEBAR_BACK_BUTTON = back_button;
+        TITLEBAR_FORWARD_BUTTON = forward_button;
+        TITLEBAR_MODAL_SHIELD = modal_shield;
         TITLEBAR_INSTALLED = true;
+        align_standard_window_buttons(window);
     }
-    log::info!("[TitleBar] Added native Settings/About buttons to macOS title bar");
+    install_titlebar_event_monitor(window);
+    if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
+        update_titlebar_navigation_controls(&ui);
+    }
+    log::info!("[TitleBar] Added native sidebar and history controls to macOS title bar");
+}
+
+pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
+    unsafe {
+        if TITLEBAR_TOGGLE_BUTTON.is_null()
+            || TITLEBAR_BACK_BUTTON.is_null()
+            || TITLEBAR_FORWARD_BUTTON.is_null()
+        {
+            return;
+        }
+
+        let modal_visible = window.get_modal_overlay_visible();
+        let _: () = msg_send![TITLEBAR_TOGGLE_BUTTON, setEnabled: !modal_visible];
+        let _: () = msg_send![
+            TITLEBAR_BACK_BUTTON,
+            setEnabled: !modal_visible && window.get_navigation_can_go_back()
+        ];
+        let _: () = msg_send![
+            TITLEBAR_FORWARD_BUTTON,
+            setEnabled: !modal_visible && window.get_navigation_can_go_forward()
+        ];
+        if !TITLEBAR_MODAL_SHIELD.is_null() {
+            let _: () = msg_send![TITLEBAR_MODAL_SHIELD, setHidden: !modal_visible];
+        }
+        let expanded = window.get_navigation_drawer_expanded();
+        configure_icon_button(
+            TITLEBAR_TOGGLE_BUTTON,
+            sidebar_toggle_image_names(expanded),
+            "◫",
+            sidebar_toggle_tooltip(expanded),
+            TITLEBAR_DELEGATE,
+            sel!(usherToggleSidebar:),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{sidebar_toggle_image_names, sidebar_toggle_tooltip};
+
+    #[test]
+    fn sidebar_toggle_uses_distinct_open_and_closed_symbols() {
+        assert_eq!(sidebar_toggle_image_names(false)[0], "symbol:sidebar.left");
+        assert_eq!(
+            sidebar_toggle_image_names(true)[0],
+            "symbol:rectangle.leftthird.inset.filled"
+        );
+        assert_ne!(
+            sidebar_toggle_image_names(false)[0],
+            sidebar_toggle_image_names(true)[0]
+        );
+        assert_eq!(sidebar_toggle_tooltip(false), "Show sidebar (⌘B)");
+        assert_eq!(sidebar_toggle_tooltip(true), "Hide sidebar (⌘B)");
+    }
 }
 
 /// Register GitHub's macOS UI and monospace faces without bundling Apple fonts.

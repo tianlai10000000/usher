@@ -112,6 +112,33 @@ export global GitHubTheme {
     out property <color> backdrop-medium: #00000055;
     out property <color> canvas-translucent:
         root.dark-mode ? #0d1117df : #ffffffdf;
+    // Desktop sidebar treatment follows the restrained macOS SwiftUI List
+    // hierarchy used by Codex while retaining cross-platform semantic colors.
+    out property <color> sidebar-canvas:
+        root.dark-mode ? #151b23f2 : #f4f6f8f2;
+    out property <color> sidebar-overlay-canvas:
+        root.dark-mode ? #151b23fe : #f4f6f8fe;
+    // The temporary macOS hover sheet is a solid white Codex surface, not the
+    // blue-gray translucency used as the docked-sidebar fallback.
+    out property <color> sidebar-preview-canvas:
+        root.dark-mode ? #151b23 : #ffffff;
+    out property <color> sidebar-preview-border:
+        root.dark-mode ? #3d444d : #dfdfe0;
+    out property <color> sidebar-item-hover:
+        root.dark-mode ? #ffffff12 : #1f23280a;
+    out property <color> sidebar-item-selected:
+        root.dark-mode ? #ffffff1a : #1f23280f;
+    out property <color> sidebar-item-active:
+        root.dark-mode ? #ffffff24 : #1f23281a;
+    out property <color> sidebar-divider:
+        root.dark-mode ? #ffffff14 : #1f232810;
+    // Codex content elevation: 20 px ambient lobe, 7.5 px near lobe, then the
+    // existing half-alpha divider stroke at the content boundary. A blur kernel
+    // contributes roughly half its declared alpha at the source edge.
+    out property <color> sidebar-content-shadow-wide:
+        root.dark-mode ? #0000000b : #00000007;
+    out property <color> sidebar-content-shadow-near:
+        root.dark-mode ? #00000010 : #00000005;
     out property <color> scrollbar-track:
         root.dark-mode ? #ffffff14 : #1f232814;
     out property <color> scrollbar-thumb:
@@ -170,6 +197,7 @@ export global GitHubMetrics {
     out property <length> size-40: 40px;
     out property <length> size-44: 44px;
     out property <length> size-48: 48px;
+    out property <length> size-56: 56px;
     out property <length> size-64: 64px;
     out property <length> size-80: 80px;
     out property <length> size-96: 96px;
@@ -231,6 +259,7 @@ export global GitHubMetrics {
 
     // Usher product layout decisions built on Primer primitives.
     out property <length> application-min-width: 640px;
+    out property <length> application-sidebar-width: 240px;
     out property <length> page-content-max-width: 1120px;
     out property <length> page-wide-content-max-width: 1280px;
 }

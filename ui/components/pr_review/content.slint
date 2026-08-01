@@ -1,4 +1,5 @@
 import { GitHubTheme } from "../../theme/github_theme.slint";
+import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
 import { WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffTextSlice, WorkflowPrFileExtensionFilter } from "./shell.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
@@ -844,6 +845,14 @@ export component GitHubDiffSettingsPopover inherits Rectangle {
     in property <color> addition-color;
     in property <color> deletion-color;
     callback apply(string, bool);
+    callback dismiss-requested();
+    private property <int> dismiss-revision: TransientOverlayState.dismiss-revision;
+
+    changed dismiss-revision => {
+        if root.open {
+            root.dismiss-requested();
+        }
+    }
 
     visible: root.open;
     width: 232px;
@@ -1030,6 +1039,9 @@ export component GitHubFileTreeToggleButton inherits Rectangle {
             : @image-url("../../assets/icons/octicon-sidebar-expand-16.svg");
         tooltip-text: root.file-tree-visible ? "Hide file tree" : "Show file tree";
         tooltip-above: false;
+        // This is the first Files changed control. Keep its downward tooltip
+        // inside the review surface so it cannot overlap the sidebar divider.
+        tooltip-align-left: true;
         selected: root.file-tree-visible;
         clicked => { root.clicked(); }
     }
@@ -1150,8 +1162,9 @@ export component GitHubFileDiffStat inherits Rectangle {
 
     added-stat := Text {
         x: 0px;
-        // Align the rendered glyph bounds with the centered 8px diff-stat blocks.
-        y: (parent.height - self.height) / 2 - 1px;
+        // Text glyphs sit optically high when their line box is geometrically
+        // centered. Nudge them down to share the diff-stat blocks' midline.
+        y: (parent.height - self.height) / 2 + 1px;
         width: self.preferred-width;
         height: 16px;
         text: root.has-selection ? "+" + root.additions : "";
@@ -1163,7 +1176,7 @@ export component GitHubFileDiffStat inherits Rectangle {
 
     removed-stat := Text {
         x: added-stat.x + added-stat.width + 4px;
-        y: (parent.height - self.height) / 2 - 1px;
+        y: (parent.height - self.height) / 2 + 1px;
         width: self.preferred-width;
         height: 16px;
         text: root.has-selection ? "−" + root.deletions : "";

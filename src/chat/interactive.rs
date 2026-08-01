@@ -38,9 +38,9 @@ fn compute_wrap_width_px(ui: &MainWindow) -> i32 {
     // 与 chat.slint 的断点策略保持一致，按窗口可用宽度估算气泡宽度
     let window_width = ui.get_chat_layout_window_width();
     let nav_width = if ui.get_navigation_drawer_expanded() {
-        120.0
+        240.0
     } else {
-        56.0
+        0.0
     };
     let chat_content_width = (window_width - nav_width - 24.0).max(320.0);
 

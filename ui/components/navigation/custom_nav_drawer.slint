@@ -1,36 +1,63 @@
+import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { Route } from "../../route/routeMap.slint";
 
-// 导航菜单项数据结构
 export struct NavItem {
     icon: image,
     text: string,
 }
 
-// 自定义导航菜单项模板
-// Primer ActionList/NavList compact geometry: 32px control, 6px radius,
-// 16–20px leading visual, semantic transparent-control interaction colors.
+// Codex-style docked sidebar/content boundary. The temporary hover sidebar is
+// a bordered, rounded overlay and intentionally does not reuse these inward
+// elevation lobes.
+export component GitHubSidebarRightEdge inherits Rectangle {
+    width: 21px;
+    background: transparent;
+
+    Rectangle {
+        width: 20px;
+        height: parent.height;
+        background: @linear-gradient(90deg,
+            transparent 0%,
+            #00000001 40%,
+            #00000003 72%,
+            GitHubTheme.sidebar-content-shadow-wide 100%);
+    }
+
+    Rectangle {
+        x: GitHubMetrics.size-12;
+        width: GitHubMetrics.size-8;
+        height: parent.height;
+        background: @linear-gradient(90deg,
+            transparent 0%,
+            #00000002 55%,
+            GitHubTheme.sidebar-content-shadow-near 100%);
+    }
+
+    Rectangle {
+        x: 20px;
+        width: GitHubMetrics.border-thin;
+        height: parent.height;
+        background: GitHubTheme.border-default;
+    }
+
+}
+
 component GitHubNavigationItem {
     in property <image> icon;
     in property <string> text;
     in property <bool> selected: false;
-    in property <int> index;
-    private property <bool> keyboard-focus-visible: false;
-    
-    callback clicked();
-    callback hovered(string, int, bool);
-    
-    property <bool> has-icon: root.icon.width > 0 && root.icon.height > 0;
-    property <color> fg-default: GitHubTheme.fg-default;
-    property <color> fg-muted: GitHubTheme.fg-muted;
-    property <color> control-hover: GitHubTheme.control-transparent-hover;
-    property <color> control-selected: GitHubTheme.control-transparent-selected;
-    property <color> control-active: GitHubTheme.control-transparent-active;
-    property <color> item-color: selected ? root.fg-default : root.fg-muted;
-    
-    property <length> icon-size: GitHubMetrics.icon-large;
-    property <length> item-height: GitHubMetrics.size-44;
+    in property <int> label-weight: 400;
+    in property <length> label-y-offset: 0px;
 
-    height: item-height;
+    callback clicked();
+
+    private property <bool> keyboard-focus-visible: false;
+    private property <color> item-foreground: root.selected
+        ? GitHubTheme.fg-default
+        : GitHubTheme.fg-muted;
+
+    height: 30px;
     accessible-role: tab;
     accessible-enabled: true;
     accessible-label: root.text;
@@ -42,7 +69,7 @@ component GitHubNavigationItem {
         height: 100%;
         key-pressed(event) => {
             root.keyboard-focus-visible = true;
-            if (event.text == Key.Return || event.text == " ") {
+            if event.text == Key.Return || event.text == " " {
                 root.clicked();
                 return accept;
             }
@@ -56,121 +83,259 @@ component GitHubNavigationItem {
         }
     }
 
-    Rectangle {
-        width: root.width;
-        height: root.item-height;
-        background: transparent;
+    item-background := Rectangle {
+        x: GitHubMetrics.size-8;
+        width: parent.width - GitHubMetrics.size-16;
+        height: parent.height;
+        border-radius: 10px;
+        background: item-touch.pressed
+            ? GitHubTheme.sidebar-item-active
+            : root.selected
+                ? GitHubTheme.sidebar-item-selected
+                : item-touch.has-hover
+                    ? GitHubTheme.sidebar-item-hover
+                    : transparent;
+        animate background { duration: 150ms; easing: ease-in-out; }
 
-        hover-bg := Rectangle {
-            width: GitHubMetrics.size-36;
-            height: GitHubMetrics.size-36;
-            x: (root.width - self.width) / 2;
-            y: (root.height - self.height) / 2;
-            border-radius: GitHubMetrics.radius-medium;
-            background: hover-area.pressed
-                ? root.control-active
-                : root.selected
-                    ? root.control-selected
-                    : hover-area.has-hover ? root.control-hover : transparent;
-            animate background { duration: 120ms; easing: ease-out; }
-        }
-
-        if root.has-icon : Image {
-            x: (root.width - self.width) / 2;
-            y: (root.height - self.height) / 2;
-            width: root.icon-size;
-            height: root.icon-size;
+        Image {
+            x: GitHubMetrics.size-8;
+            y: (parent.height - self.height) / 2;
+            width: 15px;
+            height: 15px;
             source: root.icon;
-            colorize: root.item-color;
+            colorize: root.item-foreground;
         }
 
-        hover-area := TouchArea {
+        Text {
+            x: GitHubMetrics.size-32;
+            y: root.label-y-offset;
+            width: parent.width - self.x - GitHubMetrics.size-8;
+            height: parent.height;
+            text: root.text;
+            color: root.item-foreground;
+            font-size: 13px;
+            font-weight: root.label-weight;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        item-touch := TouchArea {
             width: 100%;
             height: 100%;
             mouse-cursor: pointer;
-
             clicked => {
                 navigation-focus.focus();
-                // Some platforms report programmatic focus as tab navigation.
-                // Pointer activation must never leave a keyboard focus ring.
                 root.keyboard-focus-visible = false;
                 root.clicked();
             }
-
-            changed has-hover => {
-                root.hovered(root.text, root.index, self.has-hover);
-            }
-        }
-
-        if navigation-focus.has-focus && root.keyboard-focus-visible: Rectangle {
-            x: (root.width - GitHubMetrics.size-40) / 2;
-            y: (root.height - GitHubMetrics.size-40) / 2;
-            width: GitHubMetrics.size-40;
-            height: GitHubMetrics.size-40;
-            border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
-            border-width: GitHubMetrics.focus-outline-width;
-            border-color: GitHubTheme.focus-outline;
-            background: transparent;
         }
     }
 
-    animate item-color { duration: 120ms; easing: ease-out; }
+    if navigation-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: GitHubMetrics.size-8;
+        width: parent.width - GitHubMetrics.size-16;
+        height: parent.height;
+        border-radius: 10px;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
 }
 
-// 自定义导航抽屉组件
-export component GitHubNavigationRail {
+// Desktop application sidebar inspired by ChatGPT's macOS shell. The owner
+// decides whether this surface is docked or temporarily overlaid.
+export component GitHubNavigationSidebar inherits Rectangle {
     in property <[NavItem]> items;
-    in property <int> current_index: -1;  // -1 表示无选中项
-    in-out property <string> hovered-tooltip-text: "";
-    in-out property <int> hovered-tooltip-index: -1;
-    // Negative when scrolled down; MainWindow tooltip Y must add this offset.
-    in-out property <length> scroll-offset-y <=> nav-scroll.viewport-y;
+    in property <int> current-index: -1;
+    in property <Route> current-route: Route.Home;
+    in property <bool> can-go-back: false;
+    in property <bool> can-go-forward: false;
+    in property <bool> show-sidebar-control: true;
+    in property <bool> show-history-controls: true;
+    in property <bool> native-vibrancy: false;
+    in property <length> titlebar-inset: 0px;
+    in property <image> header-chevron-icon: @image-url("../../assets/icons/lucide-sidebar-chevron-down.svg");
+    in property <image> search-icon: @image-url("../../assets/icons/lucide-sidebar-search.svg");
+    in property <image> notification-icon: @image-url("../../assets/icons/lucide-sidebar-bell.svg");
+    in property <image> settings-icon: @image-url("../../assets/icons/lucide-sidebar-settings.svg");
+    in property <image> about-icon: @image-url("../../assets/icons/lucide-sidebar-help.svg");
 
-    callback selected(item_index: int);
-    width: 100%;
-    // Fill the rail so Flickable can clip and scroll when items overflow.
+    callback selected(item-index: int);
+    callback navigate(Route);
+    callback toggle-docked();
+    callback back();
+    callback forward();
+
+    width: GitHubMetrics.application-sidebar-width;
     height: 100%;
+    background: root.native-vibrancy ? transparent : GitHubTheme.sidebar-canvas;
     accessible-role: tab-list;
     accessible-label: "Primary navigation";
 
-    // Wheel/trackpad scroll only — no scrollbar chrome in the 48px rail.
-    // Tooltips stay on MainWindow (outside this clip) and use scroll-offset-y.
-    nav-scroll := Flickable {
+    VerticalLayout {
         width: parent.width;
         height: parent.height;
-        viewport-width: parent.width;
-        interactive: true;
+        spacing: 0px;
+        padding: 0px;
 
-        VerticalLayout {
+        native-control-row := Rectangle {
             width: parent.width;
-            alignment: start;
-            spacing: 4px;
-            padding-left: 0px;
-            padding-right: 0px;
-            padding-top: GitHubMetrics.size-8;
-            padding-bottom: GitHubMetrics.size-8;
+            height: root.native-vibrancy
+                ? root.titlebar-inset
+                : (root.show-sidebar-control || root.show-history-controls
+                    ? GitHubMetrics.size-40
+                    : 0px);
+            background: transparent;
 
-            for item[index] in root.items : GitHubNavigationItem {
+            if root.show-sidebar-control: GitHubIconButton {
+                x: GitHubMetrics.size-8;
+                y: (parent.height - self.height) / 2;
+                control-size: GitHubMetrics.control-medium-size;
+                icon: @image-url("../../assets/icons/octicon-sidebar-collapse-16.svg");
+                tooltip-text: "Hide sidebar";
+                tooltip-above: false;
+                foreground: GitHubTheme.fg-muted;
+                clicked => { root.toggle-docked(); }
+            }
+
+            if root.show-history-controls: GitHubIconButton {
+                x: 44px;
+                y: (parent.height - self.height) / 2;
+                control-size: GitHubMetrics.control-medium-size;
+                icon: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
+                tooltip-text: "Back";
+                tooltip-above: false;
+                foreground: GitHubTheme.fg-muted;
+                button-enabled: root.can-go-back;
+                clicked => { root.back(); }
+            }
+
+            if root.show-history-controls: GitHubIconButton {
+                x: GitHubMetrics.size-80;
+                y: (parent.height - self.height) / 2;
+                control-size: GitHubMetrics.control-medium-size;
+                icon: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
+                tooltip-text: "Forward";
+                tooltip-above: false;
+                foreground: GitHubTheme.fg-muted;
+                button-enabled: root.can-go-forward;
+                clicked => { root.forward(); }
+            }
+        }
+
+        product-header := Rectangle {
+            width: parent.width;
+            height: 52px;
+            background: transparent;
+
+            Text {
+                x: GitHubMetrics.size-16;
+                width: 58px;
+                height: parent.height;
+                text: "Usher";
+                color: GitHubTheme.fg-default;
+                font-size: GitHubMetrics.text-large;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+
+            Image {
+                x: 72px;
+                y: (parent.height - self.height) / 2;
+                width: 14px;
+                height: 14px;
+                source: root.header-chevron-icon;
+                colorize: GitHubTheme.fg-muted;
+            }
+
+            GitHubIconButton {
+                x: parent.width - 64px;
+                y: (parent.height - self.height) / 2;
+                control-size: GitHubMetrics.size-24;
+                glyph-size: 15px;
+                icon: root.search-icon;
+                tooltip-text: "Search";
+                tooltip-above: false;
+                foreground: GitHubTheme.fg-muted;
+                clicked => { root.navigate(Route.Search); }
+            }
+
+            GitHubIconButton {
+                x: parent.width - GitHubMetrics.size-32;
+                y: (parent.height - self.height) / 2;
+                control-size: GitHubMetrics.size-24;
+                glyph-size: 15px;
+                icon: root.notification-icon;
+                tooltip-text: "Notifications";
+                tooltip-above: false;
+                tooltip-align-right: true;
+                foreground: GitHubTheme.fg-muted;
+            }
+        }
+
+        nav-scroll := Flickable {
+            width: parent.width;
+            height: parent.height
+                - native-control-row.height
+                - product-header.height
+                - GitHubMetrics.size-48
+                - 1px;
+            viewport-width: parent.width;
+            interactive: true;
+
+            VerticalLayout {
                 width: parent.width;
-                icon: item.icon;
-                text: item.text;
-                selected: index == root.current_index;
-                index: index;
+                spacing: GitHubMetrics.size-2;
+                padding-top: GitHubMetrics.size-2;
+                padding-bottom: GitHubMetrics.size-12;
 
-                clicked => {
-                    root.selected(index);
-                }
-
-                hovered(text, item-index, visible) => {
-                    if visible {
-                        root.hovered-tooltip-text = text;
-                        root.hovered-tooltip-index = item-index;
-                    } else if root.hovered-tooltip-text == text {
-                        root.hovered-tooltip-text = "";
-                        root.hovered-tooltip-index = -1;
-                    }
+                for item[index] in root.items: GitHubNavigationItem {
+                    width: parent.width;
+                    icon: item.icon;
+                    text: item.text;
+                    selected: index == root.current-index;
+                    clicked => { root.selected(index); }
                 }
             }
         }
+
+        Rectangle {
+            width: parent.width;
+            height: 1px;
+            background: GitHubTheme.sidebar-divider;
+        }
+
+        Rectangle {
+            width: parent.width;
+            height: GitHubMetrics.size-48;
+            background: transparent;
+
+            GitHubNavigationItem {
+                x: 0px;
+                y: 9px;
+                width: parent.width - GitHubMetrics.size-40;
+                icon: root.settings-icon;
+                text: "Settings";
+                label-weight: 400;
+                label-y-offset: 1px;
+                selected: root.current-route == Route.Settings;
+                clicked => { root.navigate(Route.Settings); }
+            }
+
+            GitHubIconButton {
+                x: parent.width - GitHubMetrics.size-32;
+                y: GitHubMetrics.size-12;
+                control-size: GitHubMetrics.size-24;
+                glyph-size: 15px;
+                icon: root.about-icon;
+                tooltip-text: "About Usher";
+                show-tooltip: false;
+                tooltip-above: true;
+                foreground: GitHubTheme.fg-muted;
+                selected: root.current-route == Route.About;
+                clicked => { root.navigate(Route.About); }
+            }
+        }
     }
+
 }

@@ -165,6 +165,7 @@ fn ui() -> Result<MainWindow> {
     // Now create the MainWindow (will inherit app appearance)
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
+    app.set_platform_is_macos(cfg!(target_os = "macos"));
     setup_application_font(&app);
     setup_pr_review_fonts(&app);
 
@@ -441,9 +442,65 @@ fn ui() -> Result<MainWindow> {
             if AppState::get(&ui).get_ui_sound_effects() {
                 play_ui_click();
             }
+            if ui.get_current_route() == Route::PrReview {
+                ui.invoke_workflow_pr_review_back();
+                return;
+            }
             if let Some(state) = router_for_back.back() {
                 ui.invoke_chat_route_visible_changed(state.chat_route_visible);
             }
+        }
+    });
+
+    let router_for_feature_back = router.clone();
+    let app_for_feature_back = app.as_weak();
+    app.on_router_back(move || {
+        if let Some(state) = router_for_feature_back.back() {
+            if let Some(ui) = app_for_feature_back.upgrade() {
+                ui.invoke_chat_route_visible_changed(state.chat_route_visible);
+            }
+        }
+    });
+
+    let router_for_forward = router.clone();
+    let app_for_forward = app.as_weak();
+    app.on_navigate_forward(move || {
+        if let Some(ui) = app_for_forward.upgrade() {
+            if AppState::get(&ui).get_ui_sound_effects() {
+                play_ui_click();
+            }
+            if let Some(state) = router_for_forward.forward() {
+                ui.invoke_chat_route_visible_changed(state.chat_route_visible);
+            }
+        }
+    });
+
+    let sidebar_toggle_target =
+        std::rc::Rc::new(std::cell::Cell::new(app.get_navigation_drawer_expanded()));
+    let app_for_sidebar_toggle = app.as_weak();
+    app.on_toggle_navigation_drawer(move || {
+        sidebar_toggle_target.set(!sidebar_toggle_target.get());
+        let Some(ui) = app_for_sidebar_toggle.upgrade() else {
+            return;
+        };
+        let expanded = sidebar_toggle_target.get();
+        if ui.get_navigation_drawer_expanded() != expanded {
+            // Retarget the one in-flight spring immediately. The page tree
+            // keeps a fixed width while motion is active, so this property
+            // update does not introduce a full-page layout pass per click.
+            ui.set_navigation_drawer_expanded(expanded);
+            platform::update_titlebar_navigation_controls(&ui);
+        }
+    });
+
+    app.on_navigation_drawer_motion_settled(|expanded| {
+        settings::save_navigation_drawer_expanded(expanded);
+    });
+
+    let app_for_modal_overlay = app.as_weak();
+    app.on_modal_overlay_visibility_changed(move |_| {
+        if let Some(ui) = app_for_modal_overlay.upgrade() {
+            platform::update_titlebar_navigation_controls(&ui);
         }
     });
 

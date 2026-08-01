@@ -60,6 +60,10 @@ This specification covers provider metadata resolved on the Project page and the
     FAT/UAT/PROD overview while it is loaded or rebuilt, and Workflow fetches
     the same overview when that project is opened. The current implementation
     has no polling interval or automatic retry timer.
+16. Project grid columns are calculated from the constrained page content
+    width. Each card keeps at least 280 px before another column is added, and
+    both grid cards and list rows expose keyboard activation with an accessible
+    project label.
 
 1. `remote_repo` 决定 Provider，支持 `gitee`、`gitlab`、`github`。
 2. 支持 HTTPS 或 SSH Git URL，且必须包含 owner/group 与仓库路径。
@@ -83,6 +87,8 @@ This specification covers provider metadata resolved on the Project page and the
 15. `is_pr_auto_update` 当前表示“一次性预取 PR 数量”，而不是后台周期刷新。
     开启后，Project 列表加载或重建时会请求 FAT/UAT/PROD 概览；打开该项目的
     Workflow 时也会请求同一概览。当前实现没有轮询间隔或自动重试定时器。
+16. Project 网格必须按受约束的页面内容宽度计算列数；新增一列前每张卡片至少保留
+    280px 可读宽度。网格卡片和列表行都必须提供带项目名称的无障碍标签及键盘激活。
 
 ## Deferred enhancement / 后续优化
 
@@ -125,6 +131,8 @@ The enterprise Gitee search result is selected by exact namespace/path where ava
 - At the minimum supported width, verify the Project header/toolbar/cards and
   add/edit dialog remain usable, fields scroll inside the dialog body, and
   footer actions remain visible.
+- Resize across grid column changes and verify no card becomes narrower than
+  280 px; open both a list row and grid card with Enter/Space.
 - Enter Workflow and verify the PR tab shows the saved provider/id and the first 10 open requests.
 - For a GitHub PR page, verify every available `head.ref → base.ref` pair is shown and a failed row-detail request does not hide the rest of the page.
 - Switch open/closed/merged/all and paginate rapidly; verify only the latest response updates the list.

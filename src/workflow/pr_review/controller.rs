@@ -179,7 +179,6 @@ pub(crate) fn bind_pr_review(
             if let Ok(mut return_tab) = tab_controller.commit_detail_return_tab.lock() {
                 *return_tab = None;
             }
-            ui.set_workflow_pr_review_back_label("Back to pull requests".into());
         }
         tab_controller.load_tab(&ui, tab);
     });
@@ -625,7 +624,6 @@ impl WorkflowPrReviewController {
             .and_then(|mut return_tab| return_tab.take());
         if let Some(tab) = return_tab {
             ui.set_workflow_pr_review_tab(tab);
-            ui.set_workflow_pr_review_back_label("Back to pull requests".into());
             self.load_tab(ui, tab);
             return;
         }
@@ -683,7 +681,7 @@ impl WorkflowPrReviewController {
             *return_tab = None;
         }
         reset_review_ui(ui);
-        ui.invoke_navigate_back();
+        ui.invoke_router_back();
         if self.pr_list_refresh_pending.swap(false, Ordering::SeqCst) {
             self.pr_list_controller.refresh_after_remote_mutation(ui);
         }
@@ -1168,14 +1166,6 @@ impl WorkflowPrReviewController {
             if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
                 *return_tab = Some(source_tab);
             }
-            ui.set_workflow_pr_review_back_label(
-                if source_tab == 0 {
-                    "Back to Conversation"
-                } else {
-                    "Back to Commits"
-                }
-                .into(),
-            );
         }
         ui.set_workflow_pr_review_tab(2);
         let commit_index = self.commits.lock().ok().and_then(|commits| {
@@ -2768,7 +2758,6 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_head_sha("".into());
     ui.set_workflow_pr_review_too_many_commits(false);
     ui.set_workflow_pr_review_tab(2);
-    ui.set_workflow_pr_review_back_label("Back to pull requests".into());
     ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
     ui.set_workflow_pr_review_conversation_content_height(0);
     ui.set_workflow_pr_review_expanded_commit_body_height(0);

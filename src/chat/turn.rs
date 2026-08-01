@@ -110,7 +110,8 @@ pub fn serialize_server_response(response: String) -> Result<ChatMessage, String
 /// # Returns
 /// * `ChatMessage` - 用户友好的错误消息
 pub fn handle_error_response(error: String) -> ChatMessage {
-    create_error_message(format!("发送消息失败：{}", error))
+    log::error!("[Chat] Turn failed: {}", error);
+    create_error_message("The message could not be sent. Try again.".to_string())
 }
 
 /// 获取当前时间戳（格式化）

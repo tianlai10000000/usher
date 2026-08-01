@@ -126,17 +126,25 @@ to be a Primer primitive.
 ## 5. Typography and icons / 字体与图标
 
 - Normal UI inherits the platform CJK-capable family selected by
-  `MainWindow`: `Hiragino Sans GB` on macOS, `Microsoft YaHei UI` on Windows,
-  and `Noto Sans` elsewhere.
+  `MainWindow`: the native `.AppleSystemUIFont` on macOS,
+  `Microsoft YaHei UI` on Windows, and `Noto Sans` elsewhere.
 - Terminal content keeps its terminal font. Diff source and file-tree code may
   keep their documented monospace/platform fonts; other PR-review UI inherits
   the application family.
+- PR shell, header, navigation, and interaction fixes must not implicitly
+  restyle the Files changed source or file tree. Their colors and fonts are an
+  independent review-content contract and may change only through an explicit
+  diff/file-tree design decision with dedicated visual regression coverage.
 - Default body text is 14 px. Use 12 px for secondary labels and 16 px or the
   documented heading tokens for hierarchy. Control labels normally use weight
   600; body text uses 400.
 - Use the matching official Octicon from `ui/assets/icons/`. Do not substitute
   Unicode glyphs, emoji, Material icons, or hand-drawn approximations. Register
   new upstream assets in `ui/assets/icons/OCTICONS.md`.
+- The Codex-style application sidebar is the documented exception: it uses
+  the official round-stroke Lucide assets registered in
+  `ui/assets/icons/LUCIDE.md`, because filled Octicons have a visibly heavier
+  optical weight than the desktop reference at this size.
 - `ui/components/title_bar.slint` may retain `settings.svg` and `about.svg` as
   the two explicit native-title-bar product exceptions. No other component may
   introduce a non-Octicon command icon without a documented product decision.
@@ -149,6 +157,16 @@ to be a Primer primitive.
   reference component's internal 4/6/8/12 px geometry where specified.
 - Content should adapt at Primer breakpoints. Do not rely on one fixed desktop
   width; verify the application minimum width and at least one wide layout.
+- Project grid columns are derived from the constrained content width, not the
+  outer window width. A card keeps at least 280 px of readable width before a
+  new column is introduced.
+- Chat history pagination is part of the message flow after the virtual top
+  spacer. It reserves layout height and must never float over the oldest
+  mounted message.
+- PR review exposes one visible state source in the summary row. The header
+  action strip must not repeat the same Open/Closed/Merged readiness label.
+  At narrow widths, the three counted tabs divide the available row equally
+  and nonessential trailing diff statistics yield before tabs overflow.
 - Text must follow the reference wrapping/truncation rule. Lists and scroll
   views must not rebuild large models while scrolling or resizing.
 - Keep hover hit targets mounted. Change opacity/state instead of
@@ -170,7 +188,10 @@ expanded/collapsed, and success confirmation.
   focus (`focus-visible` behavior), not as a persistent pointer-click
   selection border. Focus must not rely on color change alone and must not be
   clipped.
-- Icon-only controls require an accessible tooltip and a persistent hit target.
+- Icon-only controls require an accessible action label and a persistent hit
+  target. They show that label in a tooltip except for the sidebar About
+  action and the familiar Dialog, Notification, and Toast dismiss controls,
+  which keep the accessible label without showing a visual tooltip.
 - Destructive actions use danger semantics and require confirmation when the
   consequence is difficult to reverse.
 - Loading prevents duplicate starts and preserves the control's dimensions.
@@ -189,7 +210,88 @@ expanded/collapsed, and success confirmation.
 - `GitHubIconButton`: the shared basis for every icon-only action; centered
   Octicon, default/primary/danger/invisible states, small/medium/large control
   geometry, loading support, Enter/Space activation, focus outline, and an
-  action-label tooltip on hover or focus.
+  accessible action label. It shows the label as a tooltip on hover or focus
+  unless the caller selects the documented About/dismiss exception.
+- `GitHubNavigationSidebar`: one 240 px desktop application sidebar with full
+  labels, selected-route state, pinned Settings/About actions, and a persisted
+  docked mode. Its menu rows follow the Codex/macOS SwiftUI sidebar hierarchy:
+  compact 30 px rows, 8 px inline inset, 10 px selection radius, 15 px Lucide
+  icons inside 24 px slots, 13 px native system body typography, a neutral
+  low-contrast selection surface, and no accent outline. The footer uses a
+  sidebar-specific translucent hairline. The right edge is owned by the root
+  shell as a content-boundary decoration: a visible 1 px stroke plus
+  Codex-compatible 20 px ambient and 8 px near elevation lobes project only
+  toward the sidebar. Docked close
+  drives the sidebar, content pane, and status bar from one interruptible
+  damped-spring progress value tuned to Codex's 0.5 s / 0.1 bounce transition;
+  reopening retargets it without resetting position or velocity. Rendering is
+  frame-paced, and repeated toggles debounce persistence so only the final
+  settled preference is written. Native title-bar actions retarget that motion
+  value directly on the owning event-loop thread, so click bursts cannot queue
+  stale cross-event-loop callbacks or delayed target commits.
+  Settings uses the same regular label weight as navigation rows, with a 1 px
+  optical baseline correction against its 15 px icon.
+  The sidebar body itself must not paint an independent container shadow.
+  The docked state uses the root-mounted visible border plus restrained inward
+  elevation. The temporary hover state uses an opaque white (`#ffffff` light
+  mode) border-only overlay with a restrained 10 px rounded trailing edge, no
+  right-edge shadow, and Codex's neutral `#dfdfe0` light-mode hairline. Both remain above ordinary route
+  surfaces; modal backdrops remain above them.
+  Native live resize settles shared shell geometry to the current docked target
+  instead of exposing an intermediate sidebar animation position.
+  Route content must never cover the sidebar, this edge, or an escaping
+  sidebar Tooltip during resize or route-specific composition.
+  On macOS the docked sidebar matches Codex desktop's verified Electron
+  configuration: one full-content native effect view uses Menu material,
+  BehindWindow blending, and width-plus-height autoresizing. The opaque main
+  surface covers that backdrop, leaving it visible only through the transparent
+  240 px sidebar. The key-window state uses Menu vibrancy over a transparent
+  surface. On resign-key, the effect is disabled and the surface uses Codex's
+  verified `#f9f9f9` light or `#000000` dark opaque background.
+  Undocked mode removes it from page layout; an 8 px left-edge hover target
+  opens the same component as a rounded, border-only root-layer overlay with a
+  short pointer-exit delay. macOS places Toggle/Back/Forward in a native
+  left title-bar accessory. Windows and Linux expose equivalent controls in
+  the sidebar header and collapsed-state control strip. Back/Forward enabled
+  state always comes from Router history; the visual shell must not invent or
+  mutate route history.
+  On macOS, the route breadcrumb fills the remaining 46 px native title-bar
+  inset instead of creating a second row above page content. Its blank area
+  must remain free of hit targets for native window dragging, and its leading
+  edge must stay clear of traffic lights and native accessories throughout the
+  sidebar transition. A stable trailing action slot is excluded from the
+  breadcrumb's clipping width; title-bar actions use shared IconButtons and
+  must never overlay the route hierarchy or native drag region. One root-owned
+  hairline spans the native left region, breadcrumb, and trailing action slot
+  without seams. Compact title-bar actions use 28 px controls, 14 px Lucide
+  glyphs, and the subtle foreground role. Native control frames must remain
+  wholly inside their title-bar accessory container so hover, focus, and
+  pressed chrome cannot be clipped.
+- `GitHubNavigationSidebar` 是统一的 240px 桌面应用侧栏，展示完整标签、当前
+  路由选中态和固定在底部的 Settings/About，并持久化固定状态。取消固定时侧栏不
+  占页面布局，窗口左侧 8px Hover 热区在根层以圆角、仅边框浮层打开同一组件，指针离开
+  后短延迟关闭。菜单行高 30px、左右内缩 8px、选中圆角 10px，15px Lucide 线性图标放在
+  24px 槽位中，正文使用 13px 原生系统字体；底部使用侧栏专用半透明 Hairline。右边界
+  由根 Shell 作为内容边界装饰拥有：可见的 1px 描边加 20px 环境阴影和 8px 近端阴影
+  只向侧栏方向投射。
+  固定侧栏关闭时，侧栏、内容区和状态栏由同一个可中断的阻尼弹簧进度驱动；参数对齐
+  Codex 的 0.5s / 0.1 bounce。期间重新打开会保留当前位置和速度并重定向目标。
+  Settings 与普通导航行使用相同的常规字重，并针对 15px 图标做 1px 视觉基线校正。
+  侧栏主体自身不得绘制独立的右侧容器阴影；固定态使用根层清晰边框与克制的内向
+  Elevation，临时 Hover 态使用不透明白色（浅色模式 `#ffffff`）、只有边框、尾部上下
+  10px 圆角且没有右边界阴影的浮层；浅色边框使用 Codex 的中性 `#dfdfe0`。
+  两者均位于普通路由表面之上、Modal 遮罩之下。原生 Live Resize 期间，共享 Shell
+  几何必须收敛到当前固定目标，不得暴露侧栏动画中间位置。窗口 Resize 或路由专属组合期间，页面内容
+  不得覆盖侧栏、右边界或越过侧栏边界显示的 Tooltip。
+  macOS 固定侧栏采用已从 Codex 桌面端 Electron 配置核实的实现：覆盖完整内容区、
+  随宽高共同缩放的原生 Effect View 使用 Menu 材质与 BehindWindow 混合；不透明
+  主内容面盖住右侧背景，只在透明的 240px 侧栏中露出材质。Key Window 使用透明
+  表面与 Menu Vibrancy；失去 Key 状态时关闭 Effect，并切换为已从 Codex 核实的
+  浅色 `#f9f9f9` 或深色 `#000000` 实色背景。
+  macOS 使用原生左侧标题栏附件，Windows/Linux 使用侧栏页头和收起态
+  控制条；macOS 侧栏按钮在收起态使用轮廓 `sidebar.left`，展开态使用左侧
+  三分之一填充图标，两种状态不得共用同一视觉；Back/Forward 可用状态只能来自
+  Router 历史。
 - `GitHubLink`: default, inline, and muted text-link states with visible
   underline and keyboard focus behavior.
 - `GitHubTooltip`: TooltipV2 pattern; tooltip canvas/foreground tokens, 12 px
@@ -205,7 +307,16 @@ expanded/collapsed, and success confirmation.
   geometry (6 px block padding around a 20 px label); block descriptions use
   48 px rows with a 16 px secondary line. Single selections use a leading
   Check Octicon; selected state must not be represented by persistent hover
-  fill or heavier label weight.
+  fill or heavier label weight. A click in the native title bar dispatches the
+  same application-wide outside-dismiss request as a click on blank page
+  content, so an open ActionMenu must close without consuming the native
+  title-bar action.
+- `GitHubFilterMenuButton`, `GitHubFilterMenuFrame`, and
+  `GitHubFilterMenuItem` are the generic single-select filter/sort ActionMenu
+  composition. They own trigger, header/close, checked-row, keyboard, and
+  accessibility behavior. Feature menus provide only labels, values, grouping,
+  and anchored state; the UI Components demonstration uses provider-neutral
+  examples and lives in the ActionMenu section.
 - `GitHubPageHeader`: the shared Primer PageHeader foundation for page title,
   description, leading visual, optional divider, and trailing actions.
 - `GitHubUnderlineNavItem`: the shared UnderlineNav/UnderlinePanels tab item
@@ -255,12 +366,26 @@ expanded/collapsed, and success confirmation.
 - `GitHubDialog`: root-layer modal/non-modal overlay with owned backdrop input,
   stable header/body/footer safe areas, visible close control, close/Esc
   semantics, initial focus ownership, consistent action ordering, and a
-  full-window narrow layout at the small breakpoint. When a persistent status
-  bar sits above the overlay, regular dialogs use the visible content viewport
-  so compact-height top and bottom gutters remain equal.
+  full-window narrow layout at the small breakpoint. Root Dialog hosts paint
+  above application chrome, so a modal backdrop covers the complete window,
+  including the native-title-bar inset and any persistent status bar. A route
+  host that occupies only the main content column supplies the complete window
+  viewport in host-local coordinates; both the surface and backdrop use that
+  viewport, so docked navigation cannot shift the Dialog center or create a
+  backdrop seam. On
+  macOS, the standard close/minimize/zoom traffic lights remain above the
+  backdrop and clickable; application-owned sidebar/back/forward title-bar
+  accessories remain below it and must expose no hover, Tooltip, or click
+  interaction while the backdrop is visible. Native-title-bar clicks also
+  participate in the shared outside-dismiss contract: a Dialog closes only if
+  its ordinary backdrop click would close it; hard/modal forms keep their
+  existing non-dismissible behavior.
 - `GitHubToast`: compact transient feedback using the current Primer Banner
   anatomy and semantic status icon/background/border, never the retired
-  rail-style Toast pattern.
+  rail-style Toast pattern. A single-line message, leading icon/spinner, and
+  dismiss glyph share one visual centerline. When a message wraps, the leading
+  icon/spinner and dismiss glyph align with its first line; the message block
+  must never be centered against its complete multi-line height.
 - `GitHubNotificationBanner`: queued persistent feedback with at most two
   shared GitHub actions plus a dismiss control. Render only the queue head so
   one Banner is visible at a time; dismissing it reveals the next item.
@@ -285,7 +410,9 @@ expanded/collapsed, and success confirmation.
 - Chat uses an unframed work surface, bounded virtual history,
   `GitHubScrollView`, compact bordered message surfaces, and a responsive
   bordered composer. Suggestions are standard GitHub buttons and sending is a
-  medium IconButton, not a floating circular action.
+  medium IconButton, not a floating circular action. User-facing Chat failures
+  use one application language and concise recovery text; technical HTTP
+  details remain in bounded logs rather than message bubbles.
 - Terminal chrome reuses shared GitHub controls, but terminal cells retain
   their dedicated monospace/ANSI rendering contract. Product theme changes
   must not recolor or reflow PTY-provided cell content.
@@ -322,6 +449,22 @@ prefix until their implementation satisfies this specification.
 前缀。`MainWindow` 以及非视觉 struct、enum、global、路由和 callback 继续
 使用领域命名。尚未迁移的 legacy/demo 路由页面必须明确登记为欠债，在实现满足
 本规范之前不得仅靠加前缀伪装成合规组件。
+
+补充强制约束：通用单选筛选/排序弹层统一归入 ActionMenu，由
+`GitHubFilterMenuButton`、`GitHubFilterMenuFrame` 和
+`GitHubFilterMenuItem` 负责触发器、标题/关闭、选中标记、键盘及无障碍行为；
+业务层只提供中性的 label、value、分组与锚点状态，UI Components 页面必须在
+ActionMenu 区域使用无 Provider/Workflow/PR 字样的通用数据演示。Project 网格
+必须按受约束内容区计算列数，新增一列前保证每张卡片至少 280px 可读宽度。Chat
+历史分页入口必须位于 virtual top spacer 之后的消息流内并占据真实高度，禁止覆盖
+最早一条已挂载消息；用户可见错误统一使用应用语言，HTTP 技术详情仅写有界日志。
+PR 审核摘要是 Open/Closed/Merged 的唯一可见状态来源，页头操作条不得重复状态；
+窄屏下三个带计数 Tab 等分整行，尾部 diff 统计必须先让位。PR 页头、导航和交互
+调整不得顺带修改 Files changed 代码区或文件树的字体与颜色；两者属于独立的审核
+内容契约，只有明确提出并带专门视觉回归的 diff/文件树设计变更才可调整。
+原生标题栏点击必须进入应用级空白点击关闭通道：所有共享 ActionMenu 和其他本来
+可通过页面空白关闭的临时弹层都应关闭，但不得吞掉原生标题栏操作；Dialog 仅在
+普通遮罩点击本就允许关闭时响应，硬模态表单仍保持不可消隐语义。
 
 ## 9. Material dependency boundary / Material 依赖边界
 

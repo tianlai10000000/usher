@@ -12,7 +12,7 @@ import { GitHubBlankslate } from "../github_blankslate.slint";
 import { GitHubSegmentedControl, GitHubSegmentedControlItem, GitHubSegmentedControlDivider } from "../github_segmented_control.slint";
 import { GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
 import { GitHubActionMenu, GitHubActionListItem } from "../github_action_menu.slint";
-import { GitHubPullRequestFilterButton, GitHubPullRequestFilterMenu } from "../workflow/github_pr_list_components.slint";
+import { GitHubFilterMenuButton, GitHubFilterMenuFrame, GitHubFilterMenuItem } from "../github_filter_menu.slint";
 import { ToastManager, ToastType } from "../toast/toast_manager.slint";
 import { NotificationManager, NotificationType, CustomComponentType } from "../notify/notification.slint";
 import { DialogManager } from "../dialog/dialog_manager.slint";
@@ -140,10 +140,10 @@ export component GitHubUiComponentsGallery inherits Rectangle {
     private property <bool> action-menu-open: false;
     private property <string> action-menu-align: "start";
     private property <string> action-menu-side: "bottom";
-    private property <string> pr-filter-menu: "";
-    private property <string> pr-filter-review: "all";
-    private property <string> pr-filter-assignee: "any";
-    private property <string> pr-filter-sort: "newest";
+    private property <string> filter-menu: "";
+    private property <string> filter-status: "all";
+    private property <string> filter-owner: "any";
+    private property <string> filter-sort: "newest";
 
     height: gallery-content.preferred-height;
     background: transparent;
@@ -420,7 +420,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         }
 
         GitHubShowcaseSection {
-            title: "Action menu";
+            title: "ActionMenu";
             description: "AnchoredOverlay placement, start/end alignment, above/below side selection, ActionList rows, and Escape dismissal.";
             content-height: root.action-menu-open ? 204px : 48px;
 
@@ -516,87 +516,95 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         }
 
         GitHubShowcaseSection {
-            title: "Action menu - filter menu";
+            title: "ActionMenu - filter menu";
             description: "Anchored single-select filter menu with a title, close control, selected options, and dismissal behavior.";
-            content-height: root.pr-filter-menu == "" ? 48px : 216px;
+            content-height: root.filter-menu == "" ? 48px : 216px;
 
-            reviews-filter-button := GitHubPullRequestFilterButton {
+            status-filter-button := GitHubFilterMenuButton {
                 x: 0px;
                 y: 0px;
-                label: "Reviews";
-                selected: root.pr-filter-menu == "reviews"
-                    || root.pr-filter-review != "all";
+                label: "Status";
+                selected: root.filter-menu == "status"
+                    || root.filter-status != "all";
                 clicked => {
-                    root.pr-filter-menu = root.pr-filter-menu == "reviews"
+                    root.filter-menu = root.filter-menu == "status"
                         ? ""
-                        : "reviews";
+                        : "status";
                 }
             }
-            assignee-filter-button := GitHubPullRequestFilterButton {
-                x: reviews-filter-button.width;
+            owner-filter-button := GitHubFilterMenuButton {
+                x: status-filter-button.width;
                 y: 0px;
-                label: "Assignee";
-                selected: root.pr-filter-menu == "assignee"
-                    || root.pr-filter-assignee != "any";
+                label: "Owner";
+                selected: root.filter-menu == "owner"
+                    || root.filter-owner != "any";
                 clicked => {
-                    root.pr-filter-menu = root.pr-filter-menu == "assignee"
+                    root.filter-menu = root.filter-menu == "owner"
                         ? ""
-                        : "assignee";
+                        : "owner";
                 }
             }
-            sort-filter-button := GitHubPullRequestFilterButton {
-                x: assignee-filter-button.x + assignee-filter-button.width;
+            sort-filter-button := GitHubFilterMenuButton {
+                x: owner-filter-button.x + owner-filter-button.width;
                 y: 0px;
                 label: "Sort";
-                selected: root.pr-filter-menu == "sort"
-                    || root.pr-filter-sort != "newest";
+                selected: root.filter-menu == "sort"
+                    || root.filter-sort != "newest";
                 clicked => {
-                    root.pr-filter-menu = root.pr-filter-menu == "sort"
+                    root.filter-menu = root.filter-menu == "sort"
                         ? ""
                         : "sort";
                 }
             }
 
-            if root.pr-filter-menu != "": GitHubActionMenu {
+            if root.filter-menu != "": GitHubActionMenu {
                 open: true;
                 viewport-x: 0px;
                 viewport-y: 0px;
                 viewport-width: parent.width;
                 viewport-height: parent.height;
-                anchor-x: root.pr-filter-menu == "reviews"
-                    ? reviews-filter-button.x
-                    : (root.pr-filter-menu == "assignee"
-                        ? assignee-filter-button.x
+                anchor-x: root.filter-menu == "status"
+                    ? status-filter-button.x
+                    : (root.filter-menu == "owner"
+                        ? owner-filter-button.x
                         : sort-filter-button.x);
                 anchor-y: 0px;
-                anchor-width: root.pr-filter-menu == "reviews"
-                    ? reviews-filter-button.width
-                    : (root.pr-filter-menu == "assignee"
-                        ? assignee-filter-button.width
+                anchor-width: root.filter-menu == "status"
+                    ? status-filter-button.width
+                    : (root.filter-menu == "owner"
+                        ? owner-filter-button.width
                         : sort-filter-button.width);
                 anchor-height: GitHubMetrics.size-32;
                 menu-width: 200px;
-                content-height: root.pr-filter-menu == "assignee" ? 128px : 160px;
+                content-height: root.filter-menu == "owner" ? 128px : 160px;
                 align: "start";
-                dismiss-requested => { root.pr-filter-menu = ""; }
+                dismiss-requested => { root.filter-menu = ""; }
 
-                GitHubPullRequestFilterMenu {
+                GitHubFilterMenuFrame {
                     width: parent.width;
-                    menu-type: root.pr-filter-menu;
-                    review-selected-value: root.pr-filter-review;
-                    assignee-selected-value: root.pr-filter-assignee;
-                    sort-selected-value: root.pr-filter-sort;
-                    selected(kind, value) => {
-                        if kind == "reviews" {
-                            root.pr-filter-review = value;
-                        } else if kind == "assignee" {
-                            root.pr-filter-assignee = value;
-                        } else {
-                            root.pr-filter-sort = value;
-                        }
-                        root.pr-filter-menu = "";
+                    title: root.filter-menu == "status"
+                        ? "Filter by status"
+                        : (root.filter-menu == "owner" ? "Filter by owner" : "Sort by");
+                    content-height: root.filter-menu == "owner" ? 96px : 128px;
+                    close => { root.filter-menu = ""; }
+
+                    if root.filter-menu == "status": VerticalLayout {
+                        GitHubFilterMenuItem { text: "All statuses"; value: "all"; selected-value: root.filter-status; chosen(value) => { root.filter-status = value; root.filter-menu = ""; } }
+                        GitHubFilterMenuItem { text: "Active"; value: "active"; selected-value: root.filter-status; chosen(value) => { root.filter-status = value; root.filter-menu = ""; } }
+                        GitHubFilterMenuItem { text: "Paused"; value: "paused"; selected-value: root.filter-status; chosen(value) => { root.filter-status = value; root.filter-menu = ""; } }
+                        GitHubFilterMenuItem { text: "Archived"; value: "archived"; selected-value: root.filter-status; chosen(value) => { root.filter-status = value; root.filter-menu = ""; } }
                     }
-                    close => { root.pr-filter-menu = ""; }
+                    if root.filter-menu == "owner": VerticalLayout {
+                        GitHubFilterMenuItem { text: "Anyone"; value: "any"; selected-value: root.filter-owner; chosen(value) => { root.filter-owner = value; root.filter-menu = ""; } }
+                        GitHubFilterMenuItem { text: "Owned by me"; value: "me"; selected-value: root.filter-owner; chosen(value) => { root.filter-owner = value; root.filter-menu = ""; } }
+                        GitHubFilterMenuItem { text: "Unassigned"; value: "none"; selected-value: root.filter-owner; chosen(value) => { root.filter-owner = value; root.filter-menu = ""; } }
+                    }
+                    if root.filter-menu == "sort": VerticalLayout {
+                        GitHubFilterMenuItem { text: "Newest"; value: "newest"; selected-value: root.filter-sort; chosen(value) => { root.filter-sort = value; root.filter-menu = ""; } }
+                        GitHubFilterMenuItem { text: "Oldest"; value: "oldest"; selected-value: root.filter-sort; chosen(value) => { root.filter-sort = value; root.filter-menu = ""; } }
+                        GitHubFilterMenuItem { text: "Recently updated"; value: "updated-desc"; selected-value: root.filter-sort; chosen(value) => { root.filter-sort = value; root.filter-menu = ""; } }
+                        GitHubFilterMenuItem { text: "Least recently updated"; value: "updated-asc"; selected-value: root.filter-sort; chosen(value) => { root.filter-sort = value; root.filter-menu = ""; } }
+                    }
                 }
             }
         }

@@ -38,6 +38,12 @@ This is the stable contract for persisted Chat history, message presentation, vi
 12. The composer adapts to available width, retains resize behavior, and keeps
     its model mounted while sending. Loading does not duplicate or reorder the
     bounded message window.
+13. The history pagination action is mounted in the message flow immediately
+    after the virtual top spacer. It reserves its own height and never overlays
+    the oldest mounted message.
+14. New user-facing request errors use concise English recovery text. Provider,
+    HTTP status, and decode details remain in logs and are not exposed verbatim
+    in message bubbles.
 
 1. Chat 历史继续使用 JSONL；缺少 `status` 字段的旧记录按普通消息兼容读取。
 2. 应用生成的错误/成功状态与正文分开保存，并使用矢量图标展示；禁止重新加入会触发彩色字体回退的固定 Emoji 前缀。
@@ -55,6 +61,10 @@ This is the stable contract for persisted Chat history, message presentation, vi
     键盘激活与仅键盘可见的焦点状态。
 12. 编辑器必须随可用宽度自适应，保留拖拽调高能力，发送期间保持 model 常驻；
     loading 不得复制或重排有界消息窗口。
+13. 历史分页操作必须挂在 virtual top spacer 之后的消息流内并占据自身高度，
+    不得覆盖最早一条已挂载消息。
+14. 新产生的用户可见请求错误统一使用简洁英文恢复文案；Provider、HTTP 状态和
+    解码技术详情只写日志，不得原样暴露在消息气泡中。
 
 ## Regression checklist / 回归检查
 
@@ -62,6 +72,8 @@ This is the stable contract for persisted Chat history, message presentation, vi
 - Verify a legacy `❌ message` renders as an error icon plus `message`, and copying returns text without the Emoji prefix.
 - Trigger a new request error, restart, and verify its status and plain text persist.
 - Open enough history to exceed the virtual window and verify scrolling loads the expected rows without linear UI-model growth.
+- Verify the history action occupies a row above the oldest message at minimum
+  width and while loading; it must not overlap message content.
 - Navigate Chat -> Home -> Chat and verify the previous scroll state and messages remain correct.
 - While a request or history page is loading, leave Chat and verify the response persists without recreating the Chat component/model; re-enter and verify the completed content appears.
 - Resize the window on a non-Chat route with existing Chat history and verify Chat delegates/text layout do not appear in the resize profile.

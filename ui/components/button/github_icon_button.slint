@@ -8,6 +8,9 @@ import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 export component GitHubIconButton inherits FocusScope {
     in property <image> icon;
     in property <string> tooltip-text;
+    // Some familiar dismiss controls keep their accessible name without
+    // showing a redundant visual tooltip.
+    in property <bool> show-tooltip: true;
     in property <bool> primary: false;
     in property <bool> danger: false;
     in property <bool> invisible: true;
@@ -20,6 +23,9 @@ export component GitHubIconButton inherits FocusScope {
     in property <bool> force-tooltip: false;
     in property <bool> tooltip-above: true;
     in property <bool> tooltip-align-right: false;
+    // Edge controls can keep their tooltip inside the content surface instead
+    // of centering it across an adjacent sidebar or window boundary.
+    in property <bool> tooltip-align-left: false;
     in property <length> control-size: GitHubMetrics.control-medium-size;
     in property <length> glyph-size: GitHubMetrics.icon-medium;
     in property <color> foreground:
@@ -102,6 +108,7 @@ export component GitHubIconButton inherits FocusScope {
                                 ? GitHubTheme.control-transparent-hover
                                 : GitHubTheme.control-default-hover)
                             : (root.invisible ? transparent : GitHubTheme.control-default-rest)));
+        animate background { duration: 100ms; easing: ease-out; }
         opacity: root.button-enabled ? 1 : 0.5;
         drop-shadow-blur: root.floating ? GitHubMetrics.size-12 : 0px;
         drop-shadow-color: root.floating
@@ -141,9 +148,12 @@ export component GitHubIconButton inherits FocusScope {
         }
     }
 
-    if (button-touch.has-hover || root.keyboard-focus-visible || root.force-tooltip) && root.tooltip-text != "": GitHubTooltip {
+    if root.show-tooltip
+            && (button-touch.has-hover || root.keyboard-focus-visible || root.force-tooltip)
+            && root.tooltip-text != "": GitHubTooltip {
         z: 10001;
-        x: root.tooltip-align-right ? root.width - self.width : (root.width - self.width) / 2;
+        x: root.tooltip-align-right ? root.width - self.width
+            : (root.tooltip-align-left ? 0px : (root.width - self.width) / 2);
         y: root.tooltip-above
             ? -self.height - GitHubMetrics.overlay-offset
             : root.height + GitHubMetrics.overlay-offset;

@@ -1,6 +1,7 @@
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
 
 // Compact floating feedback surface built from the current Primer Banner
 // anatomy: semantic leading visual, concise text, optional dismiss action, and
@@ -16,6 +17,13 @@ export component GitHubToast inherits Rectangle {
     in property <float> toast-width-percent: 0.0;
     in property <bool> toast-width-is-auto: false;
     callback dismiss();
+    private property <int> dismiss-revision: TransientOverlayState.dismiss-revision;
+
+    changed dismiss-revision => {
+        if root.toast-visible && root.overlay && root.close-on-click {
+            root.dismiss();
+        }
+    }
 
     private property <length> viewport-margin:
         root.width < GitHubMetrics.breakpoint-small
@@ -24,7 +32,10 @@ export component GitHubToast inherits Rectangle {
     private property <length> available-width:
         max(1px, root.width - root.viewport-margin * 2);
     private property <length> natural-width:
-        message-measure.preferred-width + GitHubMetrics.size-80;
+        // 16px inset + 16px leading visual + 12px gap, then the 48px
+        // dismiss-control column. This mirrors Primer Banner's three-part
+        // content grid instead of deriving width from an unrelated constant.
+        message-measure.preferred-width + GitHubMetrics.size-96;
     private property <length> automatic-width:
         min(root.available-width, max(240px, min(450px, root.natural-width)));
     private property <length> resolved-width: root.toast-width-is-auto
@@ -79,12 +90,33 @@ export component GitHubToast inherits Rectangle {
     }
 
     if root.toast-visible: toast-card := Rectangle {
+        // Primer Banner is a three-column grid. The leading visual and the
+        // dismiss control occupy their own cells; the content cell gets a
+        // 20px text line box for a single line and becomes first-line aligned
+        // once it wraps.
+        private property <length> banner-text-line-height: GitHubMetrics.size-20;
+        private property <length> message-content-height:
+            message-content-measure.preferred-height;
+        private property <bool> message-is-multiline:
+            self.message-content-height > message-line-measure.preferred-height + 1px;
+        private property <length> message-display-height:
+            self.message-is-multiline
+                ? self.message-content-height
+                : max(self.banner-text-line-height, self.message-content-height);
+        private property <length> message-y: self.message-is-multiline
+            ? GitHubMetrics.size-16
+            : (self.height - self.message-display-height) / 2;
+        private property <length> leading-visual-y: self.message-is-multiline
+            ? GitHubMetrics.size-16
+            : (self.height - GitHubMetrics.icon-medium) / 2;
         z: 1;
         width: root.resolved-width;
         min-height: GitHubMetrics.size-48;
         height: max(
             GitHubMetrics.size-48,
-            message-label.preferred-height + GitHubMetrics.size-24
+            self.message-is-multiline
+                ? self.message-content-height + GitHubMetrics.size-32
+                : GitHubMetrics.size-48
         );
         x: (parent.width - self.width) / 2;
         y: root.position == "top" ? root.viewport-margin
@@ -101,14 +133,14 @@ export component GitHubToast inherits Rectangle {
 
         if root.type == "loading": GitHubSpinner {
             x: GitHubMetrics.size-16;
-            y: (parent.height - self.height) / 2;
+            y: parent.leading-visual-y;
             spinner-size: GitHubMetrics.icon-medium;
             foreground: root.semantic-foreground;
         }
 
         if root.type != "loading": Image {
             x: GitHubMetrics.size-16;
-            y: (parent.height - self.height) / 2;
+            y: parent.leading-visual-y;
             width: GitHubMetrics.icon-medium;
             height: GitHubMetrics.icon-medium;
             source: root.type == "success"
@@ -121,16 +153,32 @@ export component GitHubToast inherits Rectangle {
 
         message-label := Text {
             x: GitHubMetrics.size-44;
-            y: GitHubMetrics.size-12;
+            y: parent.message-y;
             width: parent.width - self.x
                 - (root.type == "loading"
                     ? GitHubMetrics.size-16
                     : GitHubMetrics.size-48);
+            height: parent.message-display-height;
             text: root.message;
             font-size: GitHubMetrics.text-medium;
             color: GitHubTheme.fg-default;
             wrap: word-wrap;
-            vertical-alignment: center;
+            vertical-alignment: parent.message-is-multiline ? top : center;
+        }
+
+        message-line-measure := Text {
+            visible: false;
+            text: "Ag";
+            font-size: GitHubMetrics.text-medium;
+            wrap: no-wrap;
+        }
+
+        message-content-measure := Text {
+            visible: false;
+            width: message-label.width;
+            text: root.message;
+            font-size: GitHubMetrics.text-medium;
+            wrap: word-wrap;
         }
 
         if root.type != "loading": GitHubIconButton {
@@ -138,6 +186,7 @@ export component GitHubToast inherits Rectangle {
             y: GitHubMetrics.size-8;
             icon: @image-url("../../assets/icons/octicon-x-16.svg");
             tooltip-text: "Dismiss";
+            show-tooltip: false;
             tooltip-align-right: true;
             tooltip-above: root.position != "top";
             foreground: GitHubTheme.fg-muted;

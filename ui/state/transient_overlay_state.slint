@@ -1,0 +1,11 @@
+// Window-wide dismissal bridge for transient UI surfaces. Page content clicks
+// keep their local outside-click handling; native title-bar clicks advance this
+// revision so shared overlays receive the same dismissal request.
+export global TransientOverlayState {
+    out property <int> dismiss-revision: 0;
+    callback dismiss-all();
+
+    dismiss-all => {
+        root.dismiss-revision += 1;
+    }
+}

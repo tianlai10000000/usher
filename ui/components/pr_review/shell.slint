@@ -189,6 +189,7 @@ export component GitHubReviewActionButton inherits Rectangle {
     in property <bool> danger: false;
     in property <bool> button-enabled: true;
     in property <bool> show-chevron: false;
+    in property <bool> titlebar-mode: false;
     // When true, width follows Primer Button medium inline padding (12px×2)
     // plus the label, matching GitHub's content-sized secondary actions.
     in property <bool> hug-content: false;
@@ -201,6 +202,7 @@ export component GitHubReviewActionButton inherits Rectangle {
     in property <string> tooltip-text: "";
     out property <bool> has-hover: action-touch.has-hover;
     callback clicked();
+    private property <bool> keyboard-focus-visible: false;
 
     // Primer default Button tokens (not Material surfaces) so header actions
     // like "Create revert PR" match GitHub's secondary btn.
@@ -263,13 +265,50 @@ export component GitHubReviewActionButton inherits Rectangle {
         }
     }
 
+    action-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        accessible-role: button;
+        accessible-enabled: root.button-enabled;
+        accessible-label: root.text;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if root.button-enabled && (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => { root.keyboard-focus-visible = false; }
+    }
+
     action-touch := TouchArea {
         mouse-cursor: root.button-enabled ? pointer : default;
-        clicked => { if (root.button-enabled) { root.clicked(); } }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            action-focus.focus();
+            if (root.button-enabled) { root.clicked(); }
+        }
+    }
+    if action-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
     }
     if root.embed-tooltip && action-touch.has-hover && root.tooltip-text != "": GitHubTooltip {
+        z: 10001;
         x: root.tooltip-align-start ? 0px : root.width - self.width;
-        y: root.height + 4px;
+        // Title-bar tips must clear the native/content divider before they
+        // begin; otherwise the divider crosses the tooltip's first line.
+        y: root.height + (root.titlebar-mode ? 10px : 4px);
         text: root.tooltip-text;
     }
 }
@@ -280,6 +319,7 @@ export component GitHubCommentButton inherits Rectangle {
     in property <bool> button-enabled: true;
     in property <string> tooltip-text: "";
     callback clicked();
+    private property <bool> keyboard-focus-visible: false;
 
     width: 96px;
     height: 32px;
@@ -307,9 +347,42 @@ export component GitHubCommentButton inherits Rectangle {
             vertical-alignment: center;
         }
     }
+    comment-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        accessible-role: button;
+        accessible-enabled: root.button-enabled;
+        accessible-label: root.text;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if root.button-enabled && (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => { root.keyboard-focus-visible = false; }
+    }
     action-touch := TouchArea {
         mouse-cursor: root.button-enabled ? pointer : default;
-        clicked => { if (root.button-enabled) { root.clicked(); } }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            comment-focus.focus();
+            if (root.button-enabled) { root.clicked(); }
+        }
+    }
+    if comment-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
     }
     if action-touch.has-hover && root.tooltip-text != "": GitHubTooltip {
         // Composer card clips descendants; keep the tip above the footer button.
@@ -747,6 +820,11 @@ export component GitHubPullRequestTabButton inherits Rectangle {
     tab-focus := FocusScope {
         width: 100%;
         height: 100%;
+        accessible-role: tab;
+        accessible-enabled: true;
+        accessible-label: root.label + ", " + root.count;
+        accessible-checkable: true;
+        accessible-checked: root.selected;
         key-pressed(event) => {
             root.keyboard-focus-visible = true;
             if event.text == Key.Return || event.text == " " {
@@ -929,6 +1007,7 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
     in property <string> kind;
     in property <string> label;
     in property <string> detail;
+    in property <bool> titlebar-mode: false;
     // Trailing-edge badges open with ActionMenu `align: end`. Leading-edge
     // compact headers use `align: start` so a wide overlay does not flush the
     // window's left margin.
@@ -937,6 +1016,10 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
     // in-window popover cannot outlive the scrim.
     in property <bool> interactions-enabled: true;
     in property <bool> popup-open: false;
+    // Title-bar callers mount overlays at the window root. Keeping the badge's
+    // local menu disabled there avoids relying on overflow through a 46px
+    // title-bar ancestor for rendering and pointer hit-testing.
+    in property <bool> render-popup: true;
     in property <length> viewport-global-x: 0px;
     in property <length> viewport-global-y: 0px;
     in property <length> viewport-width: 0px;
@@ -949,6 +1032,7 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
     in property <color> attention-color;
     in property <color> danger-color;
     in property <color> done-color;
+    private property <bool> keyboard-focus-visible: false;
     private property <color> state-color: root.kind == "ready"
         ? root.success-color
         : (root.kind == "merged"
@@ -958,20 +1042,24 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
                 : ((root.kind == "review_required" || root.kind == "checks_pending" || root.kind == "branch_out_of_date" || root.kind == "discussions_unresolved" || root.kind == "blocked")
                     ? root.attention-color
                     : root.muted-color)));
-    private property <string> state-symbol: root.kind == "ready" || root.kind == "merged"
-        ? "✓"
+    private property <image> state-icon: root.kind == "ready" || root.kind == "merged"
+        ? @image-url("../../assets/icons/octicon-check-16.svg")
         : ((root.kind == "conflicts" || root.kind == "changes_requested" || root.kind == "checks_failed" || root.kind == "closed")
-            ? "×"
-            : ((root.kind == "checking" || root.kind == "unavailable") ? "…" : "!"));
+            ? @image-url("../../assets/icons/octicon-x-16.svg")
+            : ((root.kind == "checking" || root.kind == "unavailable")
+                ? @image-url("../../assets/icons/octicon-sync-16.svg")
+                : @image-url("../../assets/icons/octicon-alert-16.svg")));
 
     // Primer Button medium + leadingVisual geometry: 12px inline padding, 16px
     // icon, 8px gap. Do not floor the width — GitHub hugs the label ("Merged").
     width: min(320px, label-text.preferred-width + 48px);
-    height: 36px;
+    height: root.titlebar-mode ? 28px : 36px;
     border-radius: 6px;
     border-width: 1px;
     border-color: root.badge-border-color;
-    background: badge-touch.has-hover ? (GitHubTheme.control-neutral-hover) : root.background-color;
+    background: badge-touch.has-hover && root.interactions-enabled
+        ? (GitHubTheme.control-neutral-hover)
+        : root.background-color;
 
     Rectangle {
         x: 12px;
@@ -980,15 +1068,14 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
         height: 16px;
         border-radius: 8px;
         background: root.state-color;
-        Text {
-            width: parent.width;
-            height: parent.height;
-            text: root.state-symbol;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            font-size: 11px;
-            font-weight: 700;
-            color: GitHubTheme.fg-on-emphasis;
+        Image {
+            x: 2px;
+            y: 2px;
+            width: 12px;
+            height: 12px;
+            source: root.state-icon;
+            image-fit: contain;
+            colorize: GitHubTheme.fg-on-emphasis;
         }
     }
     // Match GitHubReviewActionButton: fill the badge height and center the glyph
@@ -1006,10 +1093,43 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
         color: root.foreground-color;
         overflow: elide;
     }
+    badge-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        accessible-role: button;
+        accessible-enabled: root.interactions-enabled;
+        accessible-label: root.label + ". " + root.detail;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if root.interactions-enabled && (event.text == Key.Return || event.text == " ") {
+                root.toggle-popup();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => { root.keyboard-focus-visible = false; }
+    }
     badge-touch := TouchArea {
         enabled: root.interactions-enabled;
         mouse-cursor: root.interactions-enabled ? pointer : default;
-        clicked => { root.toggle-popup(); }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            badge-focus.focus();
+            root.toggle-popup();
+        }
+    }
+    if badge-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
     }
     callback toggle-popup();
 
@@ -1054,7 +1174,7 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
     private property <length> popup-height: 16px + 28px + 8px + max(20px, popup-measure-detail-wrapped.preferred-height) + 16px;
 
     readiness-popup := GitHubActionMenu {
-        open: root.popup-open && root.interactions-enabled;
+        open: root.render-popup && root.popup-open && root.interactions-enabled;
         viewport-x: root.viewport-global-x - root.absolute-position.x;
         viewport-y: root.viewport-global-y - root.absolute-position.y;
         viewport-width: root.viewport-width;
@@ -1079,15 +1199,14 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
                 height: 18px;
                 border-radius: 9px;
                 background: root.state-color;
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.state-symbol;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    font-size: 13px;
-                    font-weight: 700;
-                    color: GitHubTheme.fg-on-emphasis;
+                Image {
+                    x: 2px;
+                    y: 2px;
+                    width: 14px;
+                    height: 14px;
+                    source: root.state-icon;
+                    image-fit: contain;
+                    colorize: GitHubTheme.fg-on-emphasis;
                 }
             }
             Text {
@@ -1116,54 +1235,6 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
     }
 }
 
-export component GitHubPullRequestReviewBackButton inherits Rectangle {
-    // Parents host the tip as a later, high-z sibling. A nested tip still loses
-    // to following header chrome (summary Open badge, readiness strip) even when
-    // this root has a higher z—overflow is not elevated with the button box.
-    in property <bool> embed-tooltip: true;
-    in property <string> tooltip-text: "Back to pull requests";
-    out property <bool> has-hover: back-touch.has-hover;
-    callback clicked();
-
-    z: 2;
-    width: 36px;
-    height: 36px;
-    background: transparent;
-    clip: false;
-
-    button-surface := Rectangle {
-        width: 36px;
-        height: 36px;
-        border-radius: 8px;
-        background: back-touch.has-hover
-            ? GitHubTheme.control-default-hover
-            : transparent;
-
-        Image {
-            x: 10px;
-            y: 10px;
-            width: 16px;
-            height: 16px;
-            source: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
-            colorize: GitHubTheme.fg-default;
-        }
-    }
-
-    back-touch := TouchArea {
-        width: button-surface.width;
-        height: button-surface.height;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-
-    // Optional embedded tip for callers that already elevate their own host.
-    if root.embed-tooltip && back-touch.has-hover: GitHubTooltip {
-        x: 0px;
-        y: root.height + 4px;
-        text: root.tooltip-text;
-    }
-}
-
 export component GitHubHeaderActionStrip inherits Rectangle {
     in property <string> readiness-kind;
     in property <string> readiness-label;
@@ -1179,10 +1250,12 @@ export component GitHubHeaderActionStrip inherits Rectangle {
     in property <bool> can-request-changes: false;
     in property <bool> can-merge: false;
     in property <bool> can-revert: false;
+    in property <bool> titlebar-mode: false;
     // When a workspace modal is open, freeze header actions so popovers and
     // hover tips cannot outlive the scrim.
     in property <bool> actions-enabled: true;
     in property <bool> readiness-popup-open: false;
+    in property <bool> render-readiness-popup: true;
     in property <length> viewport-global-x: 0px;
     in property <length> viewport-global-y: 0px;
     in property <length> viewport-width: 0px;
@@ -1201,16 +1274,18 @@ export component GitHubHeaderActionStrip inherits Rectangle {
     callback merge();
     callback revert();
     callback toggle-readiness-popup();
+    callback readiness-anchor-changed(length, length, length, length);
 
     private property <bool> terminal-state:
         root.readiness-kind == "merged" || root.readiness-kind == "closed";
 
-    height: 36px;
+    height: root.titlebar-mode ? 28px : 36px;
+    clip: false;
 
     HorizontalLayout {
         width: parent.width;
         height: parent.height;
-        spacing: 12px;
+        spacing: root.titlebar-mode ? 8px : 12px;
         // Wide strips need stretch so the leading spacer pushes all actions
         // against the trailing edge. Compact strips intentionally retain
         // start alignment beside the back link.
@@ -1221,6 +1296,7 @@ export component GitHubHeaderActionStrip inherits Rectangle {
             height: parent.height;
             readiness-badge := GitHubMergeReadinessBadge {
                 y: (parent.height - self.height) / 2;
+                titlebar-mode: root.titlebar-mode;
                 kind: root.readiness-kind;
                 label: root.readiness-label;
                 detail: root.readiness-detail;
@@ -1230,6 +1306,7 @@ export component GitHubHeaderActionStrip inherits Rectangle {
                 popup-align-end: !root.align-start;
                 interactions-enabled: root.actions-enabled;
                 popup-open: root.readiness-popup-open;
+                render-popup: root.render-readiness-popup;
                 viewport-global-x: root.viewport-global-x;
                 viewport-global-y: root.viewport-global-y;
                 viewport-width: root.viewport-width;
@@ -1243,16 +1320,49 @@ export component GitHubHeaderActionStrip inherits Rectangle {
                 danger-color: root.danger-color;
                 done-color: root.done-color;
                 toggle-popup => { root.toggle-readiness-popup(); }
+                changed absolute-position => {
+                    root.readiness-anchor-changed(
+                        self.absolute-position.x,
+                        self.absolute-position.y,
+                        self.width,
+                        self.height
+                    );
+                }
+                changed width => {
+                    root.readiness-anchor-changed(
+                        self.absolute-position.x,
+                        self.absolute-position.y,
+                        self.width,
+                        self.height
+                    );
+                }
+                changed height => {
+                    root.readiness-anchor-changed(
+                        self.absolute-position.x,
+                        self.absolute-position.y,
+                        self.width,
+                        self.height
+                    );
+                }
             }
         }
         if !root.terminal-state && (root.remote-review-state == "review_approved" || root.remote-review-state == "approved"): Rectangle {
-            width: 88px;
+            width: root.titlebar-mode ? 72px : 88px;
             height: parent.height;
+            Image {
+                x: 8px;
+                y: 10px;
+                width: 16px;
+                height: 16px;
+                source: @image-url("../../assets/icons/octicon-check-16.svg");
+                colorize: root.success-color;
+            }
             Text {
-                width: parent.width;
+                x: 28px;
+                width: parent.width - 28px;
                 height: parent.height;
-                text: "✓  Approved";
-                horizontal-alignment: center;
+                text: "Approved";
+                horizontal-alignment: left;
                 vertical-alignment: center;
                 font-size: 12px;
                 font-weight: 600;
@@ -1260,11 +1370,13 @@ export component GitHubHeaderActionStrip inherits Rectangle {
             }
         }
         if !root.terminal-state: Rectangle {
-            width: 120px;
+            width: root.titlebar-mode ? 112px : 120px;
             height: parent.height;
             GitHubReviewActionButton {
                 y: (parent.height - self.height) / 2;
+                height: root.titlebar-mode ? 28px : 36px;
                 width: parent.width;
+                titlebar-mode: root.titlebar-mode;
                 text: "Review changes";
                 tooltip-align-start: root.align-start;
                 button-enabled: root.actions-enabled && !root.action-loading && (root.can-comment || root.can-approve || root.can-request-changes);
@@ -1275,11 +1387,13 @@ export component GitHubHeaderActionStrip inherits Rectangle {
             }
         }
         if !root.terminal-state: Rectangle {
-            width: 172px;
+            width: root.titlebar-mode ? 148px : 172px;
             height: parent.height;
             GitHubReviewActionButton {
                 y: (parent.height - self.height) / 2;
+                height: root.titlebar-mode ? 28px : 36px;
                 width: parent.width;
+                titlebar-mode: root.titlebar-mode;
                 text: root.action-loading ? "Working…" : "Merge pull request";
                 success: true;
                 show-chevron: true;
@@ -1297,6 +1411,8 @@ export component GitHubHeaderActionStrip inherits Rectangle {
             height: parent.height;
             revert-action := GitHubReviewActionButton {
                 y: (parent.height - self.height) / 2;
+                height: root.titlebar-mode ? 28px : 36px;
+                titlebar-mode: root.titlebar-mode;
                 hug-content: true;
                 tooltip-align-start: root.align-start;
                 text: root.action-loading ? "Working…" : root.revert-action-label;
@@ -1314,6 +1430,7 @@ export component GitHubReviewChoice inherits Rectangle {
     in property <bool> selected: false;
     in property <bool> choice-enabled: true;
     callback chosen();
+    private property <bool> keyboard-focus-visible: false;
 
     height: 58px;
     border-radius: 6px;
@@ -1362,9 +1479,44 @@ export component GitHubReviewChoice inherits Rectangle {
         vertical-alignment: center;
         overflow: elide;
     }
+    choice-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        accessible-role: radio-button;
+        accessible-enabled: root.choice-enabled;
+        accessible-label: root.title + ". " + root.description;
+        accessible-checkable: true;
+        accessible-checked: root.selected;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if root.choice-enabled && (event.text == Key.Return || event.text == " ") {
+                root.chosen();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => { root.keyboard-focus-visible = false; }
+    }
     choice-touch := TouchArea {
         enabled: root.choice-enabled;
         mouse-cursor: pointer;
-        clicked => { root.chosen(); }
+        clicked => {
+            root.keyboard-focus-visible = false;
+            choice-focus.focus();
+            root.chosen();
+        }
+    }
+    if choice-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
     }
 }

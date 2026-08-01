@@ -140,7 +140,7 @@ fn default_ui_sound_effects() -> bool {
 }
 
 fn default_navigation_drawer_expanded() -> bool {
-    true // Default to expanded
+    false // Match the compact desktop shell; reveal from the left edge on demand
 }
 
 impl Default for AppSettings {
@@ -299,6 +299,13 @@ impl SettingsManager {
         }
     }
 
+    /// Update the docked application-sidebar preference.
+    pub fn set_navigation_drawer_expanded(&self, expanded: bool) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.navigation_drawer_expanded = expanded;
+        }
+    }
+
     /// Update git platform tokens
     pub fn set_git_platform_tokens(
         &self,
@@ -410,6 +417,22 @@ pub fn save_ui_sound_effects(enabled: bool) {
     Timer::single_shot(std::time::Duration::from_millis(100), || {
         if let Err(e) = get_settings_manager().save() {
             log::error!("[Settings] Failed to save settings: {}", e);
+        }
+    });
+}
+
+/// Persist sidebar docking without blocking the Slint event loop.
+pub fn save_navigation_drawer_expanded(expanded: bool) {
+    get_settings_manager().set_navigation_drawer_expanded(expanded);
+    crate::app_runtime::shared_runtime().spawn(async {
+        match tokio::task::spawn_blocking(|| get_settings_manager().save()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                log::error!("[Settings] Failed to save sidebar state: {error}");
+            }
+            Err(error) => {
+                log::error!("[Settings] Sidebar state worker failed: {error}");
+            }
         }
     });
 }

@@ -2,6 +2,7 @@ import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubActionMenu } from "../github_action_menu.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
+import { GitHubFilterMenuButton } from "../github_filter_menu.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 
 
@@ -20,7 +21,7 @@ import { GitHubTheme } from "../../theme/github_theme.slint";
 
 
 
-import { GitHubPullRequestStateButton, GitHubPullRequestFilterButton, GitHubPullRequestFilterMoreButton, GitHubPullRequestFilterMenuOption, GitHubPullRequestFilterMenu, GitHubPullRequestListStatePanel, WorkflowPullRequestItem } from "./github_pr_list_components.slint";
+import { GitHubPullRequestStateButton, GitHubPullRequestFilterMoreButton, GitHubPullRequestFilterMenu, GitHubPullRequestListStatePanel, WorkflowPullRequestItem } from "./github_pr_list_components.slint";
 export { WorkflowPullRequestItem } from "./github_pr_list_components.slint";
 export component GitHubPullRequestFlow {
     in property <length> viewport-global-x: 0px;
@@ -177,22 +178,22 @@ export component GitHubPullRequestFlow {
                     spacing: 0px;
                     alignment: end;
 
-                    if !root.compact-filters && root.supports-review-filter: reviews-btn := GitHubPullRequestFilterButton {
+                    if !root.compact-filters && root.supports-review-filter: reviews-btn := GitHubFilterMenuButton {
                         label: "Reviews";
                         selected: root.active-menu == "reviews" || root.pr-review-filter != "all";
                         clicked => { root.active-menu = root.active-menu == "reviews" ? "" : "reviews"; }
                     }
-                    if !root.compact-filters && root.supports-assignee-filter: assignee-btn := GitHubPullRequestFilterButton {
+                    if !root.compact-filters && root.supports-assignee-filter: assignee-btn := GitHubFilterMenuButton {
                         label: "Assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
                     }
-                    if !root.compact-filters: sort-btn := GitHubPullRequestFilterButton {
+                    if !root.compact-filters: sort-btn := GitHubFilterMenuButton {
                         label: "Sort";
                         selected: root.active-menu == "sort" || root.pr-sort-filter != "newest";
                         clicked => { root.active-menu = root.active-menu == "sort" ? "" : "sort"; }
                     }
-                    if root.compact-filters && root.supports-assignee-filter: GitHubPullRequestFilterButton {
+                    if root.compact-filters && root.supports-assignee-filter: GitHubFilterMenuButton {
                         label: "Assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
@@ -260,7 +261,7 @@ export component GitHubPullRequestFlow {
             height: root.pr-items.length * 72px;
             background: transparent;
 
-            for item[index] in root.pr-items: Rectangle {
+            for item[index] in root.pr-items: pr-row := Rectangle {
                 y: index * 72px;
                 width: parent.width;
                 height: 72px;
@@ -270,6 +271,34 @@ export component GitHubPullRequestFlow {
                 background: transparent;
                 private property <length> title-max-width: parent.width - 58px;
                 private property <length> title-draw-width: min(title-measure.preferred-width, self.title-max-width);
+                private property <bool> keyboard-focus-visible: false;
+
+                row-focus := FocusScope {
+                    width: 100%;
+                    height: 100%;
+                    accessible-role: button;
+                    accessible-enabled: true;
+                    accessible-label: item.title + ". Pull request " + item.number;
+                    key-pressed(event) => {
+                        pr-row.keyboard-focus-visible = true;
+                        if event.text == Key.Return || event.text == " " {
+                            root.open-detail(
+                                item.number,
+                                item.title,
+                                item.author,
+                                item.source-branch,
+                                item.target-branch,
+                                item.updated-at-raw,
+                            );
+                            return accept;
+                        }
+                        return reject;
+                    }
+                    focus-gained(reason) => {
+                        pr-row.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+                    }
+                    focus-lost => { pr-row.keyboard-focus-visible = false; }
+                }
 
                 if index > 0: Rectangle {
                     y: 0px;
@@ -393,6 +422,8 @@ export component GitHubPullRequestFlow {
                     z: 1;
                     mouse-cursor: pointer;
                     clicked => {
+                        pr-row.keyboard-focus-visible = false;
+                        row-focus.focus();
                         root.open-detail(
                             item.number,
                             item.title,
@@ -402,6 +433,18 @@ export component GitHubPullRequestFlow {
                             item.updated-at-raw,
                         );
                     }
+                }
+
+                if row-focus.has-focus && pr-row.keyboard-focus-visible: Rectangle {
+                    x: 3px;
+                    y: 3px;
+                    width: parent.width - 6px;
+                    height: parent.height - 6px;
+                    border-radius: 6px;
+                    border-width: 2px;
+                    border-color: GitHubTheme.focus-outline;
+                    background: transparent;
+                    z: 3;
                 }
             }
         }

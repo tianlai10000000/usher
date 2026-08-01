@@ -2,7 +2,7 @@ import { Route } from "../route/routeMap.slint";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 import { GitHubIconButton } from "../components/button/github_icon_button.slint";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
-import { GitHubSpinner } from "../components/github_spinner.slint";
+import { GitHubButton } from "../components/settings/github_settings_controls.slint";
 import { GitHubMessageBubble, GitHubChatWelcomeView, MessageRole, MessageStatus, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineLine, MarkdownBlock, ChatMessage } from "../components/chat/github_chat_components.slint";
 
 export { MessageRole, MessageStatus, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineLine, MarkdownBlock, ChatMessage } from "../components/chat/github_chat_components.slint";
@@ -89,6 +89,23 @@ export component GitHubChatPage inherits Rectangle {
                         background: transparent;
                     }
 
+                    if root.loading-history || root.can-load-more-history: Rectangle {
+                        width: parent.width;
+                        height: GitHubMetrics.size-40;
+                        background: transparent;
+
+                        GitHubButton {
+                            x: (parent.width - self.width) / 2;
+                            y: GitHubMetrics.size-4;
+                            text: root.loading-history
+                                ? "Loading history"
+                                : "Load earlier messages";
+                            busy: root.loading-history;
+                            disabled: root.loading-history;
+                            clicked => { root.load-more-history(); }
+                        }
+                    }
+
                     for message[index] in root.messages: GitHubMessageBubble {
                         role: message.role;
                         status: message.status;
@@ -145,49 +162,6 @@ export component GitHubChatPage inherits Rectangle {
                 }
             }
 
-            if root.loading-history || root.can-load-more-history: history-control := Rectangle {
-                x: (parent.width - self.width) / 2;
-                y: GitHubMetrics.size-8;
-                width: root.loading-history ? 148px : 174px;
-                height: GitHubMetrics.size-32;
-                border-radius: GitHubMetrics.radius-medium;
-                border-width: GitHubMetrics.border-thin;
-                border-color: GitHubTheme.border-default;
-                background: history-touch.has-hover && !root.loading-history
-                    ? GitHubTheme.control-default-hover
-                    : GitHubTheme.canvas-overlay;
-                drop-shadow-blur: GitHubMetrics.size-8;
-                drop-shadow-color: GitHubTheme.shadow-floating-small;
-                drop-shadow-offset-y: GitHubMetrics.size-2;
-                z: 100;
-
-                if root.loading-history: GitHubSpinner {
-                    x: GitHubMetrics.size-12;
-                    y: GitHubMetrics.size-8;
-                    spinner-size: GitHubMetrics.icon-medium;
-                    foreground: GitHubTheme.fg-muted;
-                }
-
-                Text {
-                    x: root.loading-history ? GitHubMetrics.size-36 : GitHubMetrics.size-12;
-                    width: parent.width - self.x - GitHubMetrics.size-12;
-                    height: parent.height;
-                    text: root.loading-history
-                        ? "Loading history"
-                        : "Load earlier messages";
-                    font-size: GitHubMetrics.text-small;
-                    font-weight: 600;
-                    color: GitHubTheme.fg-default;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                history-touch := TouchArea {
-                    enabled: !root.loading-history;
-                    mouse-cursor: self.enabled ? pointer : default;
-                    clicked => { root.load-more-history(); }
-                }
-            }
         }
 
         composer := Rectangle {

@@ -2,11 +2,17 @@ import { ListView, ScrollView } from "@material";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import { AppState } from "../../state/app_state.slint";
 import { GitHubDialog } from "../../components/dialog/github_dialog.slint";
-import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubPullRequestReviewBackButton, GitHubHeaderActionStrip, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
 import { GitHubTreeIndentGuides, GitHubCommitMessageToggleButton, GitHubFileToolbarButton, GitHubCommitSummaryNavButton, GitHubFileChangeTypeIcon, GitHubSelectableDiffCode, GitHubSplitDiffSide, GitHubDiffViewPreview, GitHubDiffViewChoice, GitHubDiffSettingsPopover, GitHubFileTreeToggleButton, GitHubFileMenuButton, GitHubDiffStatSegment, GitHubDiffStatBar, GitHubFileDiffStat, GitHubCodeRenderingIndicator, GitHubLargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, GitHubDiffFindBar } from "../../components/pr_review/content.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
 export component GitHubPullRequestReviewPage inherits FocusScope {
+    // Full application viewport used by route-owned root overlays. The page
+    // root stays at x=0; ordinary review content applies shell-leading-inset
+    // internally so native live resize never moves this large render tree.
+    in property <length> application-width: root.width;
+    in property <length> application-height: root.height;
+    in property <length> shell-leading-inset: 0px;
     in property <bool> live-resizing: false;
     in property <string> project-name;
     in property <string> provider;
@@ -25,7 +31,6 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     in property <string> head-sha;
     in property <bool> too-many-commits: false;
     in-out property <int> selected-tab: 2;
-    in property <string> back-label: "Back to pull requests";
     in property <[WorkflowPrConversationItem]> conversation-items: [];
     in property <int> conversation-content-height: 0;
     in property <[WorkflowPrCommit]> commits: [];
@@ -93,7 +98,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     in-out property <length> file-list-preferred-width: 286px;
     in property <string> tree-font-family: ".SF NS";
     private property <length> file-list-min-width: 220px;
-    private property <length> file-list-max-width: max(root.file-list-min-width, min(520px, root.width * 0.45));
+    private property <length> file-list-max-width: max(root.file-list-min-width, min(520px, root.content-width * 0.45));
     // Preserve the session preference while clamping the rendered width when
     // the window becomes narrower.
     private property <length> file-list-width: max(root.file-list-min-width, min(root.file-list-max-width, root.file-list-preferred-width));
@@ -227,10 +232,6 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     private property <bool> remove-source-branch: false;
     private property <int> draft-range-start: -1;
     private property <int> draft-range-end: -1;
-    // Back tip is hosted on the header layer (not nested in the button) so the
-    // summary Open badge and readiness strip cannot cover it.
-    private property <bool> back-button-hovered: false;
-    private property <length> back-button-size: 36px;
     private property <bool> modal-open:
         root.review-dialog-open
             || root.merge-dialog-open
@@ -242,7 +243,8 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     private property <string> active-popover: "";
     private property <string> pending-diff-view: root.diff-view;
     private property <bool> pending-ignore-whitespace: root.ignore-whitespace;
-    private property <length> stable-layout-width: root.width;
+    private property <length> content-width: max(0px, root.width - root.shell-leading-inset);
+    private property <length> stable-layout-width: root.content-width;
     private property <length> stable-layout-height: root.height;
     // File-filter ActionMenu mounts on the workspace root (above the
     // files-changed-toolbar z:80 band). These track the filter IconButton in
@@ -254,29 +256,29 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     // `.Layout-sidebar { display: none }` under `max-width: 767.98px`.
     // Crossing the threshold auto-collapses / auto-expands; the toolbar
     // toggle always overrides so the tree can be reopened while narrow.
-    // Use live `root.width` (not frozen `stable-layout-width`); MainWindow
-    // min-width is 640px so this threshold is reachable.
+    // Use the live content width (not frozen `stable-layout-width`); the shell
+    // inset is excluded so the breakpoint matches the actual review column.
     private property <length> file-tree-collapse-breakpoint: 768px;
     private property <bool> file-list-below-breakpoint:
-        root.width < root.file-tree-collapse-breakpoint;
+        root.content-width < root.file-tree-collapse-breakpoint;
     private property <bool> file-list-visible: root.file-list-user-visible;
     private property <bool> compact-title-wraps:
-        root.stable-layout-width - 48px < compact-title-measure.preferred-width;
+        root.stable-layout-width - 32px < compact-title-measure.preferred-width;
     private property <bool> compact-summary-wraps:
-        root.stable-layout-width - 48px < compact-summary-metrics.inline-width;
-    // Wide header column: Primer back icon(36) + actions(640) +
-    // padding(48) + two 16px gaps.
+        root.stable-layout-width - 32px < compact-summary-metrics.inline-width;
+    // Keep the PR header compact while leaving the content below on its
+    // established 24px grid.
     private property <bool> wide-title-wraps:
-        root.stable-layout-width - 756px < compact-title-measure.preferred-width;
+        root.stable-layout-width - 32px < compact-title-measure.preferred-width;
     private property <bool> wide-summary-wraps:
-        root.stable-layout-width - 756px < compact-summary-metrics.inline-width;
+        root.stable-layout-width - 32px < compact-summary-metrics.inline-width;
     // Estimate wrapped line count from the single-line preferred width. Do not
     // use Text.preferred-height for the visible title: it can stay on the
     // single-line metric and let the summary row cover later title lines.
-    private property <length> compact-title-avail-width: max(1px, root.stable-layout-width - 48px);
+    private property <length> compact-title-avail-width: max(1px, root.stable-layout-width - 32px);
     private property <int> compact-title-line-count: !root.compact-title-wraps ? 1
         : (compact-title-measure.preferred-width <= root.compact-title-avail-width * 2 ? 2 : 3);
-    private property <length> wide-title-avail-width: max(1px, root.stable-layout-width - 756px);
+    private property <length> wide-title-avail-width: max(1px, root.stable-layout-width - 32px);
     private property <int> wide-title-line-count: !root.wide-title-wraps ? 1
         : (compact-title-measure.preferred-width <= root.wide-title-avail-width * 2 ? 2 : 3);
     // ~30px per line for 22px Hiragino; 52px was short enough to clip "#N".
@@ -289,7 +291,6 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     private property <length> wide-title-height-extra: root.wide-title-line-count == 1 ? 0px
         : (root.wide-title-line-count == 2 ? 36px : 64px);
 
-    callback back();
     callback select-tab(int);
     callback ensure-commits();
     callback apply-commit-range(int, int);
@@ -585,12 +586,17 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     changed live-resizing => {
         // Snapshot the final pre-resize geometry before AppKit begins sending
         // continuous size updates. When resizing ends, adopt the final size once.
-        root.stable-layout-width = root.width;
+        root.stable-layout-width = root.content-width;
         root.stable-layout-height = root.height;
     }
     changed width => {
         if !root.live-resizing {
-            root.stable-layout-width = root.width;
+            root.stable-layout-width = root.content-width;
+        }
+    }
+    changed shell-leading-inset => {
+        if !root.live-resizing {
+            root.stable-layout-width = root.content-width;
         }
     }
     changed height => {
@@ -629,7 +635,8 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     }
 
     Rectangle {
-        width: 100%;
+        x: root.shell-leading-inset;
+        width: root.content-width;
         height: 100%;
         background: root.github-bg-default;
     }
@@ -731,12 +738,14 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     // Consume clicks on non-interactive workspace areas so they cannot reach
     // the pull-request list retained underneath this full-window overlay.
     TouchArea {
-        width: root.width;
+        x: root.shell-leading-inset;
+        width: root.content-width;
         height: root.height;
         clicked => { root.active-popover = ""; }
     }
 
     VerticalLayout {
+        x: root.shell-leading-inset;
         width: root.stable-layout-width;
         height: root.stable-layout-height;
         spacing: 0px;
@@ -744,10 +753,10 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
         Rectangle {
             width: parent.width;
             height: root.stable-layout-width < 1500px
-                ? 124px
+                ? 92px
                     + root.compact-title-height-extra
                     + (root.compact-summary-wraps ? 32px : 0px)
-                : (104px
+                : (76px
                     + root.wide-title-height-extra
                     + (root.wide-summary-wraps ? 32px : 0px));
             // Keep action-button tooltips above the following files toolbar and
@@ -760,26 +769,15 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
             if root.stable-layout-width >= 1500px: HorizontalLayout {
                 width: parent.width;
                 height: parent.height;
-                padding-left: 24px;
-                padding-right: 24px;
+                padding-left: 16px;
+                padding-right: 16px;
                 // Pin actions to the title's first line (GitHub wide header).
                 padding-top: 16px;
                 spacing: 16px;
                 // Keep default main-axis stretch so the title column expands;
                 // alignment:start would collapse preferred-width:0 siblings and
-                // leave Merged/Review/Merge stuck beside the back link.
+                // leave Merged/Review/Merge stuck beside the title.
                 cross-axis-alignment: start;
-                GitHubPullRequestReviewBackButton {
-                    // Tip is painted on the header layer below so Open/summary
-                    // chrome cannot cover it; keep position under the icon.
-                    embed-tooltip: false;
-                    tooltip-text: root.back-label;
-                    changed has-hover => {
-                        root.back-button-hovered = self.has-hover;
-                    }
-                    clicked => { root.back(); }
-                }
-
                 Rectangle {
                     horizontal-stretch: 1;
                     min-width: 200px;
@@ -823,46 +821,6 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                     }
                 }
 
-                GitHubHeaderActionStrip {
-                    // Trailing-edge strip: internal leading spacer pins controls
-                    // to the window right on the title's first line. z above the
-                    // title column so downward action tips are not covered.
-                    z: 2;
-                    width: 640px;
-                    height: 36px;
-                    readiness-kind: root.merge-readiness-kind;
-                    readiness-label: root.merge-readiness-label;
-                    readiness-detail: root.merge-readiness-detail;
-                    remote-review-state: root.remote-review-state;
-                    action-loading: root.action-loading;
-                    actions-enabled: !root.modal-open;
-                    readiness-popup-open: root.active-popover == "readiness";
-                    viewport-global-x: root.absolute-position.x;
-                    viewport-global-y: root.absolute-position.y;
-                    viewport-width: root.width;
-                    viewport-height: root.height;
-                    can-comment: root.can-comment;
-                    can-approve: root.can-approve;
-                    can-request-changes: root.can-request-changes;
-                    can-merge: root.can-merge;
-                    can-revert: root.can-revert;
-                    revert-action-label: root.revert-action-label;
-                    merge-block-reason: root.merge-block-reason;
-                    background-color: root.github-bg-default;
-                    outline-color: root.github-border-default;
-                    foreground-color: root.github-fg-default;
-                    muted-color: root.github-fg-muted;
-                    success-color: root.github-success-fg;
-                    attention-color: root.github-attention-fg;
-                    danger-color: root.github-danger-fg;
-                    done-color: root.github-done-fg;
-                    review => { root.review-dialog-open = true; }
-                    merge => { root.merge-dialog-open = true; }
-                    revert => { root.revert-dialog-open = true; }
-                    toggle-readiness-popup => {
-                        root.active-popover = root.active-popover == "readiness" ? "" : "readiness";
-                    }
-                }
             }
 
             if root.stable-layout-width < 1500px: Rectangle {
@@ -870,73 +828,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 height: parent.height;
                 clip: false;
 
-                // One shared action row so the back control and readiness /
-                // review / merge / revert buttons share the same vertical
-                // centerline (the previous absolute y:-8 / y:2 offsets drifted).
-                // z above title/summary so nested action ToolTips stay complete.
-                HorizontalLayout {
-                    z: 2;
-                    x: 24px;
-                    y: 8px;
-                    width: parent.width - 48px;
-                    height: 36px;
-                    spacing: 12px;
-                    cross-axis-alignment: center;
-
-                    GitHubPullRequestReviewBackButton {
-                        // Tip is painted on the header layer below so Open/summary
-                        // chrome cannot cover it; keep position under the icon.
-                        embed-tooltip: false;
-                        tooltip-text: root.back-label;
-                        changed has-hover => {
-                            root.back-button-hovered = self.has-hover;
-                        }
-                        clicked => { root.back(); }
-                    }
-                    GitHubHeaderActionStrip {
-                        height: 36px;
-                        horizontal-stretch: 1;
-                        align-start: true;
-                        show-readiness: true;
-                        readiness-kind: root.merge-readiness-kind;
-                        readiness-label: root.merge-readiness-label;
-                        readiness-detail: root.merge-readiness-detail;
-                        remote-review-state: root.remote-review-state;
-                        action-loading: root.action-loading;
-                        actions-enabled: !root.modal-open;
-                        readiness-popup-open: root.active-popover == "readiness";
-                        viewport-global-x: root.absolute-position.x;
-                        viewport-global-y: root.absolute-position.y;
-                        viewport-width: root.width;
-                        viewport-height: root.height;
-                        can-comment: root.can-comment;
-                        can-approve: root.can-approve;
-                        can-request-changes: root.can-request-changes;
-                        can-merge: root.can-merge;
-                        can-revert: root.can-revert;
-                        revert-action-label: root.revert-action-label;
-                        merge-block-reason: root.merge-block-reason;
-                        background-color: root.github-bg-default;
-                        outline-color: root.github-border-default;
-                        foreground-color: root.github-fg-default;
-                        muted-color: root.github-fg-muted;
-                        success-color: root.github-success-fg;
-                        attention-color: root.github-attention-fg;
-                        danger-color: root.github-danger-fg;
-                        done-color: root.github-done-fg;
-                        review => { root.review-dialog-open = true; }
-                        merge => { root.merge-dialog-open = true; }
-                        revert => { root.revert-dialog-open = true; }
-                        toggle-readiness-popup => {
-                            root.active-popover = root.active-popover == "readiness" ? "" : "readiness";
-                        }
-                    }
-                }
                 compact-title := Text {
                     z: 0;
-                    x: 24px;
-                    y: 50px;
-                    width: parent.width - 48px;
+                    x: 16px;
+                    y: 16px;
+                    width: parent.width - 32px;
                     height: root.compact-title-block-height;
                     text: root.pull-request-title + " #" + root.pull-request-number;
                     font-size: 22px;
@@ -948,9 +844,9 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 }
                 compact-summary-row := GitHubPullRequestSummaryRow {
                     z: 0;
-                    x: 24px;
-                    y: 50px + root.compact-title-block-height + 6px;
-                    width: parent.width - 48px;
+                    x: 16px;
+                    y: 16px + root.compact-title-block-height + 6px;
+                    width: parent.width - 32px;
                     state-kind: root.merge-readiness-kind;
                     author: root.author;
                     commit-count: root.commit-count;
@@ -970,30 +866,24 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 }
             }
 
-            // Header-layer tip: same below-icon placement, but declared last with
-            // a high z so summary/readiness siblings cannot occlude it.
-            if root.back-button-hovered: GitHubTooltip {
-                z: 200;
-                x: 24px;
-                y: root.stable-layout-width >= 1500px
-                    ? 16px + root.back-button-size + 4px
-                    : 8px + root.back-button-size + 4px;
-                text: root.back-label;
-            }
         }
 
         Rectangle { width: parent.width; height: 1px; background: root.github-border-default; }
 
-        Rectangle {
+        review-tabs := Rectangle {
             width: parent.width;
             height: 48px;
             background: root.github-bg-default;
+            private property <bool> compact-tabs: root.content-width < 840px;
+            // GitHub's UnderlineNav starts inside the page gutter on desktop;
+            // compact tabs keep the full-width three-way split instead.
+            private property <length> leading-inset: self.compact-tabs ? 0px : 16px;
             HorizontalLayout {
-                padding-left: 0px;
+                padding-left: review-tabs.leading-inset;
                 spacing: 0px;
                 GitHubPullRequestTabButton {
                     label: "Conversation";
-                    tab-width: 200px;
+                    tab-width: review-tabs.compact-tabs ? parent.width / 3 : 200px;
                     // Badge summaries load with the PR detail. Keep them independent
                     // from the lazily mounted Conversation payload.
                     count: root.conversation-count;
@@ -1007,7 +897,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 }
                 GitHubPullRequestTabButton {
                     label: "Commits";
-                    tab-width: 170px;
+                    tab-width: review-tabs.compact-tabs ? parent.width / 3 : 170px;
                     // Loading this tab must not be what makes its badge appear.
                     count: root.commit-count;
                     icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
@@ -1020,7 +910,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 }
                 GitHubPullRequestTabButton {
                     label: "Files changed";
-                    tab-width: 210px;
+                    tab-width: review-tabs.compact-tabs ? parent.width / 3 : 210px;
                     count: root.files.length;
                     icon: @image-url("../../assets/icons/octicon-file-diff-16.svg");
                     selected: root.selected-tab == 2;
@@ -1030,14 +920,14 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                         root.select-tab(2);
                     }
                 }
-                Rectangle { horizontal-stretch: 1; }
-                GitHubFileDiffStat {
+                if !review-tabs.compact-tabs: Rectangle { horizontal-stretch: 1; }
+                if !review-tabs.compact-tabs: GitHubFileDiffStat {
                     height: parent.height;
                     additions: root.added-lines;
                     deletions: root.removed-lines;
                     has-selection: true;
                 }
-                Rectangle { width: 24px; }
+                if !review-tabs.compact-tabs: Rectangle { width: 24px; }
             }
         }
 
@@ -1183,13 +1073,13 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                         }
                     }
 
-                    if root.width >= 1100px: GitHubConversationAvatar {
+                    if root.content-width >= 1100px: GitHubConversationAvatar {
                         avatar-size: 22px;
                         label-size: 9px;
                         avatar: root.commits[root.commit-range-start].avatar;
                         fallback-label: root.commits[root.commit-range-start].avatar-label;
                     }
-                    if root.width >= 1100px: single-commit-author := Text {
+                    if root.content-width >= 1100px: single-commit-author := Text {
                         width: min(190px, self.preferred-width);
                         height: parent.height;
                         text: root.commits[root.commit-range-start].author
@@ -1245,6 +1135,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                     root.active-popover = "";
                     root.apply-diff-settings(view, ignore-whitespace);
                 }
+                dismiss-requested => { root.active-popover = ""; }
             }
 
         }
@@ -2907,9 +2798,9 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                     button-enabled: root.selected-file-index >= 0 && !root.code-loading;
                                     viewing-file: root.viewing-file;
                                     open: root.active-popover == "file-menu";
-                                    viewport-global-x: root.absolute-position.x;
+                                    viewport-global-x: root.absolute-position.x + root.shell-leading-inset;
                                     viewport-global-y: root.absolute-position.y;
-                                    viewport-width: root.width;
+                                    viewport-width: root.content-width;
                                     viewport-height: root.height;
                                     toggle-menu => {
                                         root.active-popover = root.active-popover == "file-menu" ? "" : "file-menu";
@@ -3552,9 +3443,9 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
         x: root.filter-menu-anchor-x;
         y: root.filter-menu-anchor-y;
         open: root.active-popover == "file-filter";
-        viewport-global-x: root.absolute-position.x;
+        viewport-global-x: root.absolute-position.x + root.shell-leading-inset;
         viewport-global-y: root.absolute-position.y;
-        viewport-width: root.width;
+        viewport-width: root.content-width;
         viewport-height: root.height;
         extension-filters: root.extension-filters;
         only-manifest-files: root.only-manifest-files;
@@ -3567,6 +3458,12 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     }
 
     commit-dialog-frame := GitHubDialog {
+        viewport-x: -root.absolute-position.x;
+        viewport-y: -root.absolute-position.y;
+        viewport-width: root.application-width;
+        viewport-height: root.application-height;
+        backdrop-y: 0px;
+        backdrop-height: root.height;
         dialog-visible: root.commit-range-dialog-open;
         modal: false;
         title: "Select commits to view";
@@ -3797,6 +3694,12 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     }
 
     review-dialog-frame := GitHubDialog {
+        viewport-x: -root.absolute-position.x;
+        viewport-y: -root.absolute-position.y;
+        viewport-width: root.application-width;
+        viewport-height: root.application-height;
+        backdrop-y: 0px;
+        backdrop-height: root.height;
         dialog-visible: root.review-dialog-open;
         modal: false;
         title: "Review changes";
@@ -3882,6 +3785,12 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     }
 
     merge-dialog-frame := GitHubDialog {
+        viewport-x: -root.absolute-position.x;
+        viewport-y: -root.absolute-position.y;
+        viewport-width: root.application-width;
+        viewport-height: root.application-height;
+        backdrop-y: 0px;
+        backdrop-height: root.height;
         dialog-visible: root.merge-dialog-open;
         modal: false;
         title: "Merge pull request #" + root.pull-request-number;
@@ -3989,6 +3898,12 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     }
 
     revert-dialog-frame := GitHubDialog {
+        viewport-x: -root.absolute-position.x;
+        viewport-y: -root.absolute-position.y;
+        viewport-width: root.application-width;
+        viewport-height: root.application-height;
+        backdrop-y: 0px;
+        backdrop-height: root.height;
         dialog-visible: root.revert-dialog-open;
         modal: false;
         title: "Revert pull request #" + root.pull-request-number;

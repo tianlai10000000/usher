@@ -1,4 +1,4 @@
-import { GitHubNavigationRail, NavItem } from "./components/navigation/custom_nav_drawer.slint";
+import { GitHubNavigationSidebar, GitHubSidebarRightEdge, NavItem } from "./components/navigation/custom_nav_drawer.slint";
 import { GitHubHomePage as HomePage } from "./views/home.slint";
 import { GitHubSearchPage as SearchPage } from "./views/search.slint";
 import { GitHubSettingsPage as SettingsPage } from "./views/settings.slint";
@@ -8,7 +8,7 @@ import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.sl
 import { GitHubJobRunPage as JobRunPage } from "./views/job_run.slint";
 import { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 import { GitHubPullRequestReviewPage } from "./views/workflow/pr_review_workspace.slint";
-import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit, GitHubHeaderActionStrip } from "./components/pr_review/shell.slint";
 import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 
 import { GitHubProjectPage as ProjectPage, ProjectItem } from "./views/project.slint";
@@ -17,6 +17,7 @@ import { GitHubChatPage as ChatPage, ChatMessage, MessageRole, MessageStatus } f
 import { Route } from "./route/routeMap.slint";
 import { AppState } from "./state/app_state.slint";
 import { DebugLogger } from "./state/debug_logger.slint";
+import { TransientOverlayState } from "./state/transient_overlay_state.slint";
 import { GitHubBreadcrumb } from "./components/navigation/github_breadcrumb.slint";
 import { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
 import { NotificationIcons } from "./components/notify/icons.slint";
@@ -31,12 +32,14 @@ import { LayoutConstants } from "./layout_constants.slint";
 import { GitHubPageScrollActions } from "./components/fab/page_scroll_actions.slint";
 import { GitHubTerminalDrawer, TerminalLine } from "./components/drawer/terminal_drawer.slint";
 import { GitHubScrollView } from "./components/github_scroll_view.slint";
-import { GitHubTooltip } from "./components/github_tooltip.slint";
+import { GitHubActionMenu } from "./components/github_action_menu.slint";
+import { GitHubIconButton } from "./components/button/github_icon_button.slint";
 import { GitHubTheme, GitHubMetrics } from "./theme/github_theme.slint";
 
 export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
 export { DebugLogger } from "./state/debug_logger.slint";
+export { TransientOverlayState } from "./state/transient_overlay_state.slint";
 export { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
 export { NotificationIcons } from "./components/notify/icons.slint";
 export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
@@ -55,13 +58,19 @@ export component MainWindow inherits Window {
     title: "Usher";
     // Use one shared surface color for the native title bar and the main content area.
     private property <color> window-surface-color: GitHubTheme.canvas-default;
-    background: root.window-surface-color;
+    private property <length> native-titlebar-inset: root.platform-is-macos ? 46px : 0px;
+    private property <length> page-breadcrumb-height:
+        root.show-breadcrumb && !root.platform-is-macos ? 40px : 0px;
+    private property <length> page-content-top-padding:
+        root.show-breadcrumb ? (root.platform-is-macos ? 16px : 56px) : 0px;
+    private property <length> page-content-height-offset: root.page-content-top-padding + 2px;
+    background: transparent;
     in-out property <bool> window-live-resizing: false;
     out property <length> chat-layout-window-width: self.width;
     out property <length> chat-layout-window-height: self.height;
     // Rust selects a clear CJK-capable family for each desktop platform.
     // Terminal content plus PR diff code/file-tree content keep their own fonts.
-    in property <string> application-font-family: "Hiragino Sans GB";
+    in property <string> application-font-family: ".AppleSystemUIFont";
     default-font-family: root.application-font-family;
 
     // 路由状态 - 对外暴露
@@ -76,14 +85,22 @@ export component MainWindow inherits Window {
     in-out property <bool> show-page-scroll-view: true;
     in-out property <bool> show-chat-page: false;
     
-    // Router 历史栈顶部，仅供 UI 判断/展示；Back 必须调用 navigate-back。
+    // Router history is authoritative. UI controls only invoke Back/Forward.
     in-out property <Route> previous-route: Route.Home;
+    in-out property <bool> navigation-can-go-back: false;
+    in-out property <bool> navigation-can-go-forward: false;
     private property <bool> shell-drawer-docked-route: root.current-route == Route.Workflow || root.current-route == Route.Project;
     private property <length> page-scroll-offset: (root.current-route == Route.Workflow || root.current-route == Route.Project)
         ? max(0px, -page-scroll-view.viewport_y)
         : 0px;
-    private property <length> workflow-terminal-max-height: max(180px, main-content-host.height - breadcrumb-host.height - 32px);
-    private property <length> workflow-terminal-fullscreen-height: max(180px, main-content-host.height - breadcrumb-host.height);
+    private property <length> workflow-terminal-max-height: max(
+        180px,
+        main-content-host.height - root.native-titlebar-inset - root.page-breadcrumb-height - 32px
+    );
+    private property <length> workflow-terminal-fullscreen-height: max(
+        180px,
+        main-content-host.height - root.native-titlebar-inset - root.page-breadcrumb-height
+    );
     private property <length> workflow-fab-bottom-offset: root.shell-drawer-visible ? 24px : 16px;
     private property <length> workflow-terminal-docked-height: root.shell-drawer-docked-route && root.shell-drawer-visible
         ? (root.shell-drawer-fullscreen
@@ -92,14 +109,63 @@ export component MainWindow inherits Window {
         : 0px;
     private property <bool> page-memory-diag-pending: false;
     private property <bool> page-scroll-reset-pending: false;
-    private property <string> sidebar-hovered-tooltip-text: "";
-    private property <int> sidebar-hovered-tooltip-index: -1;
-    private property <length> sidebar-scroll-offset-y: 0px;
+    private property <bool> sidebar-preview-visible: false;
+    private property <bool> sidebar-preview-dismiss-pending: false;
+    // Codex drives the docked sidebar from one interruptible Motion value. Keep
+    // the equivalent scalar and velocity here so repeated toggles retarget the
+    // in-flight spring instead of starting competing x/width animations.
+    private property <float> sidebar-motion-progress: 0.0;
+    private property <float> sidebar-motion-velocity: 0.0;
+    private property <bool> sidebar-motion-running: false;
+    // AppKit can deliver several width commits inside one native live-resize
+    // frame. Do not let independently evaluated x/width bindings observe an
+    // in-flight sidebar position in that window: snap all shell geometry to
+    // the persisted docked target until live resize finishes.
+    private property <float> sidebar-layout-progress: root.window-live-resizing
+        ? (root.show-navigation-drawer && root.navigation-drawer-expanded ? 1.0 : 0.0)
+        : min(1.0, max(0.0, root.sidebar-motion-progress));
+    // Keep the expensive page tree at a fixed width while the shell moves.
+    // Opening clips a wide page until the spring settles; closing expands it
+    // once before movement starts. Rapid retargets do not reflow the page.
+    private property <bool> sidebar-content-wide: true;
+    private property <length> sidebar-content-width: root.width
+        - (root.sidebar-content-wide ? 0px : GitHubMetrics.application-sidebar-width);
+    // PR Review contains several frozen/virtualized subregions during native
+    // resize. Its outer content column must never inherit the visual sidebar
+    // spring: use the persisted docked target as one discrete geometry value.
+    private property <length> pr-content-x: root.show-navigation-drawer
+            && root.navigation-drawer-expanded
+        ? GitHubMetrics.application-sidebar-width
+        : 0px;
+    private property <length> pr-content-width: root.width - root.pr-content-x;
+    private property <bool> docked-sidebar-column-visible:
+        root.sidebar-layout-progress > 0.001 || root.sidebar-motion-running;
+    private property <length> pr-readiness-anchor-x: 0px;
+    private property <length> pr-readiness-anchor-y: 0px;
+    private property <length> pr-readiness-anchor-width: 0px;
+    private property <length> pr-readiness-anchor-height: 0px;
+    out property <bool> modal-overlay-visible:
+        root.project-show-add-modal
+            || (root.current-route == Route.PrReview
+                && (root.workflow-pr-review-dialog-open
+                    || root.workflow-pr-merge-dialog-open
+                    || root.workflow-pr-revert-dialog-open
+                    || root.workflow-pr-commit-range-dialog-open))
+            || (DialogManager.visible && DialogManager.overlay)
+            || UpdateLogic.is-downloading
+            || (ToastManager.visible && ToastManager.overlay);
 
     // 导航信号（方便 Rust 端调用）
     callback navigate(Route);
     callback navigate-back();
+    // Feature controllers call this after consuming any page-local Back state.
+    callback router-back();
+    callback navigate-forward();
     callback navigate-from-nav-index(int);
+    callback toggle-navigation-drawer();
+    callback navigation-drawer-motion-settled(bool);
+    callback modal-overlay-visibility-changed(bool);
+    callback dismiss-transient-overlays();
 
     // 更新相关回调
     callback install();
@@ -107,7 +173,8 @@ export component MainWindow inherits Window {
     callback check-update();
     callback cancel-download();
     
-    // 保留该属性仅用于兼容已有设置；侧栏固定为窄栏，不再提供展开/收起交互。
+    // Docked state is persisted. A collapsed sidebar can still open as a
+    // temporary overlay from the left-edge hover target.
     in-out property <bool> navigation-drawer-expanded: false;
 
     // Update Checker
@@ -193,6 +260,15 @@ export component MainWindow inherits Window {
     in-out property <bool> settings-ai-agent-testing: false;
     in-out property <int> settings-ai-agent-provider-index: -1;
     in property <bool> platform-is-macos: false;
+    in property <image> navigation-home-icon: @image-url("./assets/icons/lucide-sidebar-home.svg");
+    in property <image> navigation-chat-icon: @image-url("./assets/icons/lucide-sidebar-chat.svg");
+    in property <image> navigation-project-icon: @image-url("./assets/icons/lucide-sidebar-projects.svg");
+    in property <image> navigation-components-icon: @image-url("./assets/icons/lucide-sidebar-components.svg");
+    in property <image> navigation-settings-icon: @image-url("./assets/icons/lucide-sidebar-settings.svg");
+    in property <image> navigation-about-icon: @image-url("./assets/icons/lucide-sidebar-help.svg");
+    in property <image> navigation-chevron-icon: @image-url("./assets/icons/lucide-sidebar-chevron-down.svg");
+    in property <image> navigation-search-icon: @image-url("./assets/icons/lucide-sidebar-search.svg");
+    in property <image> navigation-notification-icon: @image-url("./assets/icons/lucide-sidebar-bell.svg");
     in property <string> workflow-pr-repo-project-id: "";
     in property <string> workflow-pr-repo-type: "";
     in property <[WorkflowPullRequestItem]> workflow-pr-list-items: [];
@@ -229,7 +305,6 @@ export component MainWindow inherits Window {
     in property <string> workflow-pr-review-head-sha: "";
     in property <bool> workflow-pr-review-too-many-commits: false;
     in-out property <int> workflow-pr-review-tab: 2;
-    in property <string> workflow-pr-review-back-label: "Back to pull requests";
     in property <[WorkflowPrConversationItem]> workflow-pr-review-conversation-items: [];
     in property <int> workflow-pr-review-conversation-content-height: 0;
     in property <int> workflow-pr-review-expanded-commit-body-height: 0;
@@ -271,6 +346,8 @@ export component MainWindow inherits Window {
     in-out property <bool> workflow-pr-review-dialog-open: false;
     in-out property <bool> workflow-pr-merge-dialog-open: false;
     in-out property <bool> workflow-pr-revert-dialog-open: false;
+    in-out property <bool> workflow-pr-readiness-popup-open: false;
+    private property <bool> workflow-pr-commit-range-dialog-open: false;
     in property <bool> workflow-pr-action-loading: false;
     in property <bool> workflow-pr-can-comment: false;
     in property <bool> workflow-pr-can-approve: false;
@@ -421,6 +498,38 @@ export component MainWindow inherits Window {
         }
     }
 
+    sidebar-preview-dismiss-timer := Timer {
+        interval: 180ms;
+        running: root.sidebar-preview-dismiss-pending;
+        triggered => {
+            root.sidebar-preview-dismiss-pending = false;
+            root.sidebar-preview-visible = false;
+        }
+    }
+
+    sidebar-motion-timer := Timer {
+        // Drive one layout update per display frame. An 8 ms timer can queue a
+        // second full-tree layout before FemtoVG presents the first frame.
+        interval: 16ms;
+        running: root.sidebar-motion-running;
+        triggered => {
+            let target = root.show-navigation-drawer && root.navigation-drawer-expanded ? 1.0 : 0.0;
+            let displacement = target - root.sidebar-motion-progress;
+            let acceleration = displacement * 300.0 - root.sidebar-motion-velocity * 31.0;
+            root.sidebar-motion-velocity = root.sidebar-motion-velocity + acceleration * 0.016;
+            root.sidebar-motion-progress = root.sidebar-motion-progress + root.sidebar-motion-velocity * 0.016;
+
+            if Math.abs(target - root.sidebar-motion-progress) < 0.0005
+                    && Math.abs(root.sidebar-motion-velocity) < 0.001 {
+                root.sidebar-motion-progress = target;
+                root.sidebar-motion-velocity = 0.0;
+                root.sidebar-motion-running = false;
+                root.sidebar-content-wide = target < 0.5;
+                root.navigation-drawer-motion-settled(target >= 0.5);
+            }
+        }
+    }
+
     changed width => {
         root.page-memory-diag-pending = true;
     }
@@ -429,13 +538,43 @@ export component MainWindow inherits Window {
         root.page-memory-diag-pending = true;
     }
 
+    changed window-live-resizing => {
+        if root.window-live-resizing {
+            let target = root.show-navigation-drawer && root.navigation-drawer-expanded ? 1.0 : 0.0;
+            root.sidebar-motion-progress = target;
+            root.sidebar-motion-velocity = 0.0;
+            root.sidebar-motion-running = false;
+            root.sidebar-content-wide = target < 0.5;
+        }
+    }
+
     changed current-route => {
         root.page-memory-diag-pending = true;
+        root.sidebar-preview-visible = false;
+        root.sidebar-preview-dismiss-pending = false;
+        root.workflow-pr-readiness-popup-open = false;
         if root.current-route == Route.Settings {
             page-scroll-view.viewport_x = 0px;
         }
         page-scroll-view.viewport_y = 0px;
         root.page-scroll-reset-pending = true;
+    }
+
+    changed workflow-pr-review-number => {
+        root.workflow-pr-readiness-popup-open = false;
+    }
+
+    changed navigation-drawer-expanded => {
+        root.sidebar-preview-visible = false;
+        root.sidebar-preview-dismiss-pending = false;
+        if !root.navigation-drawer-expanded {
+            root.sidebar-content-wide = true;
+        }
+        root.sidebar-motion-running = true;
+    }
+
+    changed show-navigation-drawer => {
+        root.sidebar-motion-running = true;
     }
 
     changed workflow-selected-flow => {
@@ -447,6 +586,14 @@ export component MainWindow inherits Window {
 
     changed shell-drawer-visible => {
         root.page-memory-diag-pending = true;
+    }
+
+    changed modal-overlay-visible => {
+        root.modal-overlay-visibility-changed(root.modal-overlay-visible);
+    }
+
+    dismiss-transient-overlays => {
+        TransientOverlayState.dismiss-all();
     }
     
     show-update-dialog(latest-version, current-version) => {
@@ -466,82 +613,117 @@ export component MainWindow inherits Window {
 
     }
 
-    // 主内容区域（菜单栏 + 右侧内容）- 使用原生标题栏，只减去状态栏高度
-    HorizontalLayout {
+    // Page content participates in the sidebar's live layout geometry. The
+    // sidebar itself is mounted later at the window root so it always paints
+    // above route content during resize and spring transitions.
+    Rectangle {
         x: 0;
         y: 0;
         width: root.width;
-        height: root.height - LayoutConstants.status-bar-height;
-        // Keep the navigation rail flush against the main content.
-        padding: 0px;
-        spacing: 0px;
-        
-        if root.show-navigation-drawer: VerticalLayout {
-            width: 48px;
-            height: parent.height;
-            padding: 0px;
-            spacing: 0px;
-            
-            // 容器：包含 navigation_drawer 和 toggle_button，背景色与 NavigationDrawer 一致
-            drawer_container := Rectangle {
-                width: parent.width;
-                height: parent.height;
-                background: GitHubTheme.canvas-subtle;
-                clip: false;
-                z: 20;
+        height: root.height;
 
-                    Rectangle {
-                        x: parent.width - 1px;
-                        width: 1px;
-                        height: parent.height;
-                        background: GitHubTheme.border-default;
+        // Keep the main canvas painted through the whole transition. Slint can
+        // commit the translated x before a dependent width binding, so a
+        // full-width underlay prevents the native window material from flashing
+        // at the trailing edge while the content pane is being re-laid out.
+        main-surface-underlay := Rectangle {
+            x: GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress;
+            y: 0px;
+            width: root.width;
+            height: root.height;
+            background: root.window-surface-color;
+            z: 0;
+        }
+
+        main-content-host := Rectangle  {
+            x: GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress;
+            y: 0px;
+            width: root.sidebar-content-width;
+            height: parent.height - LayoutConstants.status-bar-height;
+            background: root.window-surface-color;
+            z: 1;
+
+            // macOS hosts these actions in the native title bar. Other desktop
+            // platforms keep an equivalent compact control strip in content.
+            if !root.platform-is-macos && root.show-navigation-drawer
+                    && !root.navigation-drawer-expanded: Rectangle {
+                x: GitHubMetrics.size-8;
+                y: GitHubMetrics.size-8;
+                width: 112px;
+                height: GitHubMetrics.size-40;
+                border-radius: GitHubMetrics.radius-large;
+                background: GitHubTheme.canvas-overlay;
+                drop-shadow-blur: GitHubMetrics.size-12;
+                drop-shadow-color: GitHubTheme.shadow-floating-small;
+                z: 30;
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: GitHubMetrics.size-4;
+                    padding-right: GitHubMetrics.size-4;
+                    spacing: GitHubMetrics.size-4;
+                    alignment: center;
+
+                    GitHubIconButton {
+                        icon: @image-url("./assets/icons/octicon-sidebar-expand-16.svg");
+                        tooltip-text: "Show sidebar";
+                        tooltip-above: false;
+                        clicked => { root.toggle-navigation-drawer(); }
                     }
-                    
-                    VerticalLayout {
-                        width: parent.width;
-                        height: parent.height;
-                        vertical-stretch: 1;
-                        padding: 0px;
-                        spacing: 0px;
-
-                        // Scroll inside the rail when items overflow. Tooltips
-                        // mount on MainWindow and follow scroll-offset-y.
-                        custom_nav := GitHubNavigationRail {
-                            width: parent.width;
-                            height: parent.height;
-                            hovered-tooltip-text <=> root.sidebar-hovered-tooltip-text;
-                            hovered-tooltip-index <=> root.sidebar-hovered-tooltip-index;
-                            scroll-offset-y <=> root.sidebar-scroll-offset-y;
-
-                            // 当前菜单选中索引由路由策略统一计算
-                            current_index: root.navigation-current-index;
-
-                            // Order must match `NAVIGATION_ROUTES` in `src/router/mod.rs`.
-                            items: [
-                                { icon: @image-url("./assets/icons/octicon-home-16.svg"), text: "Home" },
-                                { icon: @image-url("./assets/icons/octicon-comment-discussion-16.svg"), text: "Chat" },
-                                { icon: @image-url("./assets/icons/octicon-repo-16.svg"), text: "Project" },
-                                { icon: @image-url("./assets/icons/octicon-stack-16.svg"), text: "UI Components" },
-                            ];
-
-                            selected(item_index) => {
-                                if item_index >= 0 {
-                                    root.navigate-from-nav-index(item_index);
-                                }
-                            }
-                        }
+                    GitHubIconButton {
+                        icon: @image-url("./assets/icons/octicon-arrow-left-16.svg");
+                        tooltip-text: "Back";
+                        tooltip-above: false;
+                        button-enabled: root.navigation-can-go-back;
+                        clicked => { root.navigate-back(); }
+                    }
+                    GitHubIconButton {
+                        icon: @image-url("./assets/icons/octicon-chevron-right-16.svg");
+                        tooltip-text: "Forward";
+                        tooltip-above: false;
+                        button-enabled: root.navigation-can-go-forward;
+                        clicked => { root.navigate-forward(); }
                     }
                 }
             }
 
-        main-content-host := Rectangle  {
-            horizontal-stretch: 1;
-            height: parent.height;
-            background: root.window-surface-color;
+            // On macOS the breadcrumb occupies the title-bar inset instead of
+            // consuming a second row above the page, matching the Codex shell.
+            // When the sidebar is hidden, leave room for traffic lights and the
+            // native sidebar/history accessory before starting the breadcrumb.
+            if root.platform-is-macos
+                    && (root.show-breadcrumb || root.current-route == Route.PrReview): Rectangle {
+                x: max(0px, 184px - main-content-host.x);
+                y: 0px;
+                width: max(0px, parent.width - self.x);
+                height: root.native-titlebar-inset;
+                background: transparent;
+                clip: false;
+                z: 30;
+
+                if root.show-breadcrumb: GitHubBreadcrumb {
+                    width: parent.width;
+                    height: parent.height;
+                    titlebar-mode: true;
+                    trailing-reserved-width: root.current-route == Route.PrReview
+                        ? 520px
+                        : GitHubMetrics.size-48;
+                    show-bottom-divider: false;
+                    current-route: root.current-route;
+                    previous-route: root.previous-route;
+                    navigation-can-go-back: root.navigation-can-go-back;
+                    show-back-button: false;
+                    navigate(route) => { root.navigate(route); }
+                    back => { root.navigate-back(); }
+                }
+
+            }
 
             content := VerticalLayout {
+                y: root.native-titlebar-inset;
                 width: parent.width;
-                height: parent.height;
+                height: parent.height - root.native-titlebar-inset;
                 padding: 0px;
                 
                 // Page region: scroll fills the stack; breadcrumb overlays so a
@@ -568,19 +750,20 @@ export component MainWindow inherits Window {
                             alignment: start;
                             padding-left: GitHubMetrics.size-4;
                             padding-right: GitHubMetrics.size-4;
-                            // Breadcrumb bar is 40px; keep an extra 16px gap so
-                            // page titles don't sit flush under the overlay.
-                            padding-top: root.show-breadcrumb ? 56px : 0px;
+                            // Non-macOS keeps the 40px overlay plus a 16px gap.
+                            // macOS only needs the gap because the breadcrumb is
+                            // mounted in the native title-bar inset above.
+                            padding-top: root.page-content-top-padding;
                             padding-bottom: 1px;
 
                         if root.current-route == Route.Home: HomePage {
                             viewport-height: page-scroll-view.visible-height
-                                - (root.show-breadcrumb ? 58px : 2px);
+                                - root.page-content-height-offset;
                             navigate(route) => { root.navigate(route); }
                         }
                         if root.current-route == Route.Search: SearchPage {
                             viewport-height: page-scroll-view.visible-height
-                                - (root.show-breadcrumb ? 58px : 2px);
+                                - root.page-content-height-offset;
                             navigate(route) => { root.navigate(route); }
                         }
                         if root.current-route == Route.Settings: SettingsPage {
@@ -604,7 +787,7 @@ export component MainWindow inherits Window {
                         }
                         if root.current-route == Route.UiComponents: UiComponentsPage {
                             viewport-height: page-scroll-view.visible-height
-                                - (root.show-breadcrumb ? 58px : 2px);
+                                - root.page-content-height-offset;
                             navigate(route) => { root.navigate(route); }
                         }
                         if root.current-route == Route.About: AboutPage {
@@ -615,7 +798,7 @@ export component MainWindow inherits Window {
                         }
                         if root.current-route == Route.JobRun: JobRunPage {
                             viewport-height: page-scroll-view.visible-height
-                                - (root.show-breadcrumb ? 58px : 2px);
+                                - root.page-content-height-offset;
                             run-title: root.job-run-title;
                             workflow-name: root.job-run-workflow-name;
                             context-name: root.job-run-context-name;
@@ -796,16 +979,18 @@ export component MainWindow inherits Window {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
-                        height: root.show-breadcrumb ? 40px : 0px;
+                        height: root.page-breadcrumb-height;
                         background: transparent;
                         clip: false;
                         z: 10;
 
-                        if root.show-breadcrumb: GitHubBreadcrumb {
+                        if root.show-breadcrumb && !root.platform-is-macos: GitHubBreadcrumb {
                             width: parent.width;
                             height: parent.height;
                             current-route: root.current-route;
                             previous-route: root.previous-route;
+                            navigation-can-go-back: root.navigation-can-go-back;
+                            show-back-button: !root.platform-is-macos;
                             navigate(route) => {
                                 root.navigate(route);
                             }
@@ -818,15 +1003,6 @@ export component MainWindow inherits Window {
                     horizontal-stretch: 1;
                     height: root.workflow-terminal-docked-height;
                     background: transparent;
-
-                    if root.shell-drawer-docked-route && root.shell-drawer-visible: Rectangle {
-                        x: -GitHubMetrics.size-8;
-                        y: 0px;
-                        width: 1px;
-                        height: parent.height;
-                        background: GitHubTheme.border-default;
-                        z: 2;
-                    }
 
                     if root.shell-drawer-docked-route && root.shell-drawer-visible: GitHubTerminalDrawer {
                         x: GitHubMetrics.size-4;
@@ -922,25 +1098,233 @@ export component MainWindow inherits Window {
         }
     }
 
-    if show-navigation-drawer && root.sidebar-hovered-tooltip-text != "": GitHubTooltip {
-        x: GitHubMetrics.size-48 + GitHubMetrics.size-8;
-        // 8px list padding + 44px item pitch; add Flickable viewport_y so the
-        // tip tracks the icon after the rail scrolls.
-        y: GitHubMetrics.size-8
-            + root.sidebar-hovered-tooltip-index * GitHubMetrics.size-44
-            + GitHubMetrics.size-20 - self.height / 2
-            + root.sidebar-scroll-offset-y;
-        text: root.sidebar-hovered-tooltip-text;
-        z: 2000;
+    navigation-sidebar-host := Rectangle {
+        x: -GitHubMetrics.application-sidebar-width
+            * (1.0 - root.sidebar-layout-progress);
+        y: 0px;
+        width: GitHubMetrics.application-sidebar-width;
+        height: root.height;
+        background: transparent;
+        clip: false;
+        // Route-owned full-window overlays (PR review uses z:800) must be able
+        // to paint dialog surfaces across the docked sidebar. The temporary
+        // sidebar preview remains a separate z:880 root overlay.
+        z: 700;
+
+        GitHubNavigationSidebar {
+            width: GitHubMetrics.application-sidebar-width;
+            height: parent.height;
+            current-index: root.navigation-current-index;
+            current-route: root.current-route;
+            can-go-back: root.navigation-can-go-back;
+            can-go-forward: root.navigation-can-go-forward;
+            show-sidebar-control: !root.platform-is-macos;
+            show-history-controls: !root.platform-is-macos;
+            native-vibrancy: root.platform-is-macos;
+            titlebar-inset: root.native-titlebar-inset;
+            header-chevron-icon: root.navigation-chevron-icon;
+            search-icon: root.navigation-search-icon;
+            notification-icon: root.navigation-notification-icon;
+            settings-icon: root.navigation-settings-icon;
+            about-icon: root.navigation-about-icon;
+            items: [
+                { icon: root.navigation-home-icon, text: "Home" },
+                { icon: root.navigation-chat-icon, text: "Chat" },
+                { icon: root.navigation-project-icon, text: "Projects" },
+                { icon: root.navigation-components-icon, text: "UI Components" },
+            ];
+            selected(item-index) => {
+                if item-index >= 0 {
+                    root.navigate-from-nav-index(item-index);
+                }
+            }
+            navigate(route) => { root.navigate(route); }
+            toggle-docked => { root.toggle-navigation-drawer(); }
+            back => { root.navigate-back(); }
+            forward => { root.navigate-forward(); }
+        }
+
+        GitHubSidebarRightEdge {
+            x: parent.width - 20px;
+            // PR review owns a continuous native title-bar surface. Do not
+            // project the sidebar's vertical edge through that title-bar
+            // strip; retain the normal boundary below the review content.
+            y: root.current-route == Route.PrReview ? root.native-titlebar-inset : 0px;
+            height: parent.height - self.y;
+            visible: root.sidebar-layout-progress > 0.001;
+            z: 1;
+        }
     }
+
+    // Keep the trailing title-bar action at the window root. If it remains
+    // inside main-content-host (z:1), its tooltip cannot rise above the root
+    // title-bar divider even when the button itself uses a large local z.
+    if root.platform-is-macos
+            && root.show-breadcrumb
+            && root.current-route != Route.PrReview: Rectangle {
+        x: root.width - GitHubMetrics.size-48;
+        y: 0px;
+        width: GitHubMetrics.size-48;
+        height: root.native-titlebar-inset;
+        background: transparent;
+        clip: false;
+        z: 70;
+
+        GitHubIconButton {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            control-size: 28px;
+            glyph-size: 14px;
+            icon: @image-url("./assets/icons/lucide-sidebar-settings.svg");
+            tooltip-text: "Settings";
+            tooltip-above: false;
+            tooltip-align-right: true;
+            foreground: GitHubTheme.fg-subtle;
+            selected: root.current-route == Route.Settings;
+            clicked => { root.navigate(Route.Settings); }
+        }
+    }
+
+    // The native left title bar, breadcrumb, and trailing action slot share one
+    // continuous boundary. Component-local rules would leave seams between
+    // these independently owned regions.
+    if root.platform-is-macos
+            && (root.show-breadcrumb || root.current-route == Route.PrReview): Rectangle {
+        // Codex keeps the native sidebar material visually continuous with its
+        // header. Start the title/content boundary at the live content edge
+        // instead of drawing it through the docked sidebar.
+        x: GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress;
+        y: root.native-titlebar-inset - 1px;
+        width: root.width - self.x;
+        height: 1px;
+        background: GitHubTheme.border-default;
+        z: 50;
+    }
+
+    edge-hover-target := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: root.show-navigation-drawer
+                && !root.navigation-drawer-expanded
+                && !root.docked-sidebar-column-visible
+            ? GitHubMetrics.size-8
+            : 0px;
+        height: root.height;
+        enabled: root.show-navigation-drawer
+            && !root.navigation-drawer-expanded
+            && !root.docked-sidebar-column-visible;
+        z: 878;
+        changed has-hover => {
+            if self.has-hover {
+                root.sidebar-preview-dismiss-pending = false;
+                root.sidebar-preview-visible = true;
+            } else {
+                root.sidebar-preview-dismiss-pending = true;
+            }
+        }
+    }
+
+    sidebar-preview := Rectangle {
+        x: root.show-navigation-drawer
+                && !root.navigation-drawer-expanded
+                && !root.docked-sidebar-column-visible
+                && root.sidebar-preview-visible
+            ? 0px
+            : -GitHubMetrics.application-sidebar-width;
+        y: 0px;
+        width: GitHubMetrics.application-sidebar-width;
+        height: root.height;
+        // Codex renders the temporary sheet as opaque white, not the
+        // blue-gray translucent fallback used by docked sidebar material.
+        background: GitHubTheme.sidebar-preview-canvas;
+        border-radius: 10px;
+        opacity: root.show-navigation-drawer
+                && !root.navigation-drawer-expanded
+                && !root.docked-sidebar-column-visible
+                && root.sidebar-preview-visible
+            ? 1
+            : 0;
+        z: 880;
+        animate x { duration: 300ms; easing: cubic-bezier(0.19, 1, 0.22, 1); }
+        animate opacity { duration: 150ms; easing: ease-in-out; }
+
+        preview-hover-region := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            enabled: root.show-navigation-drawer
+                && !root.navigation-drawer-expanded
+                && !root.docked-sidebar-column-visible
+                && root.sidebar-preview-visible;
+            changed has-hover => {
+                if self.has-hover {
+                    root.sidebar-preview-dismiss-pending = false;
+                } else {
+                    root.sidebar-preview-dismiss-pending = true;
+                }
+            }
+
+            GitHubNavigationSidebar {
+                width: parent.width;
+                height: parent.height;
+                current-index: root.navigation-current-index;
+                current-route: root.current-route;
+                can-go-back: root.navigation-can-go-back;
+                can-go-forward: root.navigation-can-go-forward;
+                show-sidebar-control: !root.platform-is-macos;
+                show-history-controls: !root.platform-is-macos;
+                native-vibrancy: root.platform-is-macos;
+                titlebar-inset: root.native-titlebar-inset;
+                header-chevron-icon: root.navigation-chevron-icon;
+                search-icon: root.navigation-search-icon;
+                notification-icon: root.navigation-notification-icon;
+                settings-icon: root.navigation-settings-icon;
+                about-icon: root.navigation-about-icon;
+                items: [
+                    { icon: root.navigation-home-icon, text: "Home" },
+                    { icon: root.navigation-chat-icon, text: "Chat" },
+                    { icon: root.navigation-project-icon, text: "Projects" },
+                    { icon: root.navigation-components-icon, text: "UI Components" },
+                ];
+                selected(item-index) => {
+                    root.sidebar-preview-visible = false;
+                    root.navigate-from-nav-index(item-index);
+                }
+                navigate(route) => {
+                    root.sidebar-preview-visible = false;
+                    root.navigate(route);
+                }
+                toggle-docked => {
+                    root.sidebar-preview-visible = false;
+                    root.toggle-navigation-drawer();
+                }
+                back => { root.navigate-back(); }
+                forward => { root.navigate-forward(); }
+            }
+
+            // Codex's temporary sidebar is a bordered sheet: no right-edge
+            // shadow, with the top-right and bottom-right corners rounded.
+            Rectangle {
+                x: -10px;
+                y: 0px;
+                width: parent.width + 10px;
+                height: parent.height;
+                background: transparent;
+                border-width: GitHubMetrics.border-thin;
+                border-color: GitHubTheme.sidebar-preview-border;
+                border-radius: 10px;
+                z: 1;
+            }
+        }
+    }
+
     // Compact Primer utility status bar fixed to the bottom edge.
     // z must sit above GitHubPageScrollActions (500) so version/network popovers and
     // click-outside dismiss paint over the terminal / back-to-top IconButtons.
     // Keep below full-page overlays (PrReview 800), Notify (900), and Toast (1000).
     GitHubStatusBar {
-        x: 0;
+        x: GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress;
         y: root.height - LayoutConstants.status-bar-height;
-        width: root.width;
+        width: root.sidebar-content-width;
         height: LayoutConstants.status-bar-height;
         z: 600;
     }
@@ -981,10 +1365,10 @@ export component MainWindow inherits Window {
         x: 0;
         y: 0;
         width: root.width;
-        // The status bar paints above root-layer overlays. Keep the dialog
-        // viewport above it so a compact dialog retains matching visible top
-        // and bottom gutters instead of appearing flush with the status bar.
-        height: root.height - LayoutConstants.status-bar-height;
+        z: 1200;
+        // Modal backdrops cover the complete application window, including
+        // the persistent bottom status bar.
+        height: root.height;
         modal-visible: root.project-show-add-modal;
         mode: root.project-modal-mode;
         original-alias: root.project-modal-original-alias;
@@ -1034,11 +1418,18 @@ export component MainWindow inherits Window {
     }
 
     if root.current-route == Route.PrReview: GitHubPullRequestReviewPage {
-        x: 0;
-        y: 0;
+        // Keep the large PR render tree fixed at the window origin. Moving the
+        // complete frozen diff tree during native live resize can retain a
+        // stale compositor transform; ordinary content applies the discrete
+        // sidebar inset inside the component instead.
+        x: 0px;
+        y: root.native-titlebar-inset;
         width: root.width;
-        height: root.height;
+        height: root.height - root.native-titlebar-inset;
         z: 800;
+        application-width: root.width;
+        application-height: root.height;
+        shell-leading-inset: root.pr-content-x;
         live-resizing: root.window-live-resizing;
         project-name: root.workflow-project-name;
         provider: root.workflow-pr-repo-type;
@@ -1057,7 +1448,6 @@ export component MainWindow inherits Window {
         head-sha: root.workflow-pr-review-head-sha;
         too-many-commits: root.workflow-pr-review-too-many-commits;
         selected-tab <=> root.workflow-pr-review-tab;
-        back-label: root.workflow-pr-review-back-label;
         conversation-items: root.workflow-pr-review-conversation-items;
         conversation-content-height: root.workflow-pr-review-conversation-content-height;
         expanded-commit-body-height: root.workflow-pr-review-expanded-commit-body-height;
@@ -1103,6 +1493,7 @@ export component MainWindow inherits Window {
         review-dialog-open <=> root.workflow-pr-review-dialog-open;
         merge-dialog-open <=> root.workflow-pr-merge-dialog-open;
         revert-dialog-open <=> root.workflow-pr-revert-dialog-open;
+        commit-range-dialog-open <=> root.workflow-pr-commit-range-dialog-open;
         action-loading: root.workflow-pr-action-loading;
         can-comment: root.workflow-pr-can-comment;
         can-approve: root.workflow-pr-can-approve;
@@ -1121,7 +1512,6 @@ export component MainWindow inherits Window {
         merge-method-squash: root.workflow-pr-merge-method-squash;
         merge-method-rebase: root.workflow-pr-merge-method-rebase;
         merge-method-fast-forward: root.workflow-pr-merge-method-fast-forward;
-        back => { root.workflow-pr-review-back(); }
         select-tab(tab) => { root.workflow-pr-review-select-tab(tab); }
         ensure-commits => { root.workflow-pr-review-ensure-commits(); }
         apply-commit-range(start, end) => { root.workflow-pr-review-apply-commit-range(start, end); }
@@ -1173,6 +1563,261 @@ export component MainWindow inherits Window {
         merge(method, remove-source-branch) => { root.workflow-pr-merge(method, remove-source-branch); }
         revert => { root.workflow-pr-revert(); }
     }
+
+    // PR actions live above the PR surface so the readiness ActionMenu can
+    // expand below the title bar without being covered by the page layer.
+    if root.platform-is-macos && root.current-route == Route.PrReview: Rectangle {
+        x: max(0px, root.width - 520px);
+        y: 0px;
+        width: min(520px, root.width);
+        height: root.native-titlebar-inset;
+        background: transparent;
+        clip: false;
+        z: 850;
+
+        pr-titlebar-actions := GitHubHeaderActionStrip {
+            x: 8px;
+            y: (parent.height - self.height) / 2;
+            width: max(0px, parent.width - 16px);
+            height: 28px;
+            titlebar-mode: true;
+            show-readiness: true;
+            readiness-kind: root.workflow-pr-merge-readiness-kind;
+            readiness-label: root.workflow-pr-merge-readiness-label;
+            readiness-detail: root.workflow-pr-merge-readiness-detail;
+            remote-review-state: root.workflow-pr-remote-review-state;
+            action-loading: root.workflow-pr-action-loading;
+            actions-enabled: !root.workflow-pr-review-dialog-open
+                && !root.workflow-pr-merge-dialog-open
+                && !root.workflow-pr-revert-dialog-open;
+            readiness-popup-open: root.workflow-pr-readiness-popup-open;
+            render-readiness-popup: false;
+            viewport-global-x: 0px;
+            viewport-global-y: 0px;
+            viewport-width: root.width;
+            viewport-height: root.height;
+            can-comment: root.workflow-pr-can-comment;
+            can-approve: root.workflow-pr-can-approve;
+            can-request-changes: root.workflow-pr-can-request-changes;
+            can-merge: root.workflow-pr-can-merge;
+            can-revert: root.workflow-pr-can-revert;
+            revert-action-label: root.workflow-pr-revert-action-label;
+            merge-block-reason: root.workflow-pr-merge-block-reason;
+            background-color: GitHubTheme.canvas-default;
+            outline-color: GitHubTheme.border-default;
+            foreground-color: GitHubTheme.fg-default;
+            muted-color: GitHubTheme.fg-muted;
+            success-color: GitHubTheme.success-fg;
+            attention-color: GitHubTheme.attention-fg;
+            danger-color: GitHubTheme.danger-fg-strong;
+            done-color: GitHubTheme.done-fg-strong;
+            review => {
+                root.workflow-pr-readiness-popup-open = false;
+                root.workflow-pr-review-dialog-open = true;
+            }
+            merge => {
+                root.workflow-pr-readiness-popup-open = false;
+                root.workflow-pr-merge-dialog-open = true;
+            }
+            revert => {
+                root.workflow-pr-readiness-popup-open = false;
+                root.workflow-pr-revert-dialog-open = true;
+            }
+            toggle-readiness-popup => {
+                root.workflow-pr-readiness-popup-open = !root.workflow-pr-readiness-popup-open;
+            }
+            readiness-anchor-changed(x, y, width, height) => {
+                root.pr-readiness-anchor-x = x;
+                root.pr-readiness-anchor-y = y;
+                root.pr-readiness-anchor-width = width;
+                root.pr-readiness-anchor-height = height;
+            }
+        }
+    }
+
+    // A title-bar ActionMenu must live at the window root. Rendering it as a
+    // descendant of the 46px action strip makes the menu depend on overflow
+    // across the PR page's stacking layer and can leave it invisible or
+    // non-interactive on macOS.
+    pr-readiness-overlay := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        visible: root.platform-is-macos && root.current-route == Route.PrReview;
+        z: 860;
+
+        private property <color> state-color:
+            root.workflow-pr-merge-readiness-kind == "ready"
+                ? GitHubTheme.success-fg
+                : (root.workflow-pr-merge-readiness-kind == "merged"
+                    ? GitHubTheme.done-fg-strong
+                    : ((root.workflow-pr-merge-readiness-kind == "conflicts"
+                            || root.workflow-pr-merge-readiness-kind == "changes_requested"
+                            || root.workflow-pr-merge-readiness-kind == "checks_failed"
+                            || root.workflow-pr-merge-readiness-kind == "closed")
+                        ? GitHubTheme.danger-fg-strong
+                        : ((root.workflow-pr-merge-readiness-kind == "review_required"
+                                || root.workflow-pr-merge-readiness-kind == "checks_pending"
+                                || root.workflow-pr-merge-readiness-kind == "branch_out_of_date"
+                                || root.workflow-pr-merge-readiness-kind == "discussions_unresolved"
+                                || root.workflow-pr-merge-readiness-kind == "blocked")
+                            ? GitHubTheme.attention-fg
+                            : GitHubTheme.fg-muted)));
+        private property <image> state-icon:
+            root.workflow-pr-merge-readiness-kind == "ready"
+                    || root.workflow-pr-merge-readiness-kind == "merged"
+                ? @image-url("./assets/icons/octicon-check-16.svg")
+                : ((root.workflow-pr-merge-readiness-kind == "conflicts"
+                        || root.workflow-pr-merge-readiness-kind == "changes_requested"
+                        || root.workflow-pr-merge-readiness-kind == "checks_failed"
+                        || root.workflow-pr-merge-readiness-kind == "closed")
+                    ? @image-url("./assets/icons/octicon-x-16.svg")
+                    : ((root.workflow-pr-merge-readiness-kind == "checking"
+                            || root.workflow-pr-merge-readiness-kind == "unavailable")
+                        ? @image-url("./assets/icons/octicon-sync-16.svg")
+                        : @image-url("./assets/icons/octicon-alert-16.svg")));
+
+        popup-title-measure := Text {
+            width: 0px;
+            height: 0px;
+            opacity: 0;
+            text: root.workflow-pr-merge-readiness-label;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        popup-detail-measure := Text {
+            width: 0px;
+            height: 0px;
+            opacity: 0;
+            text: root.workflow-pr-merge-readiness-detail;
+            font-size: 12px;
+        }
+        private property <length> popup-width: min(
+            320px,
+            max(
+                popup-title-measure.preferred-width + 52px,
+                popup-detail-measure.preferred-width + 32px
+            )
+        );
+        popup-detail-wrapped-measure := Text {
+            width: pr-readiness-overlay.popup-width - 32px;
+            height: self.preferred-height;
+            opacity: 0;
+            text: root.workflow-pr-merge-readiness-detail;
+            wrap: word-wrap;
+            font-size: 12px;
+        }
+        private property <length> popup-height:
+            16px + 28px + 8px + max(20px, popup-detail-wrapped-measure.preferred-height) + 16px;
+
+        GitHubActionMenu {
+            open: pr-readiness-overlay.visible && root.workflow-pr-readiness-popup-open;
+            viewport-x: 0px;
+            viewport-y: 0px;
+            viewport-width: root.width;
+            viewport-height: root.height;
+            anchor-x: root.pr-readiness-anchor-x;
+            anchor-y: root.pr-readiness-anchor-y;
+            anchor-width: root.pr-readiness-anchor-width;
+            anchor-height: root.pr-readiness-anchor-height;
+            menu-width: pr-readiness-overlay.popup-width;
+            content-height: pr-readiness-overlay.popup-height;
+            align: "end";
+            dismiss-requested => { root.workflow-pr-readiness-popup-open = false; }
+
+            Rectangle {
+                width: parent.width;
+                height: pr-readiness-overlay.popup-height;
+                Rectangle {
+                    x: 16px;
+                    y: 18px;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: pr-readiness-overlay.state-color;
+                    Image {
+                        x: 2px;
+                        y: 2px;
+                        width: 14px;
+                        height: 14px;
+                        source: pr-readiness-overlay.state-icon;
+                        image-fit: contain;
+                        colorize: GitHubTheme.fg-on-emphasis;
+                    }
+                }
+                Text {
+                    x: 44px;
+                    y: 12px;
+                    width: parent.width - 60px;
+                    height: 28px;
+                    text: root.workflow-pr-merge-readiness-label;
+                    vertical-alignment: center;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: GitHubTheme.fg-default;
+                }
+                Text {
+                    x: 16px;
+                    y: 48px;
+                    width: parent.width - 32px;
+                    height: parent.height - 64px;
+                    text: root.workflow-pr-merge-readiness-detail;
+                    vertical-alignment: top;
+                    wrap: word-wrap;
+                    font-size: 12px;
+                    color: GitHubTheme.fg-muted;
+                }
+            }
+        }
+    }
+
+    // PR review starts below the native macOS title-bar inset, so its local
+    // Dialog backdrop cannot paint that final strip. Continue the same backdrop
+    // at the window root. AppKit's standard traffic-light buttons remain above
+    // the Slint content view and therefore stay visible and clickable.
+    if root.platform-is-macos
+            && root.current-route == Route.PrReview
+            && (root.workflow-pr-review-dialog-open
+                || root.workflow-pr-merge-dialog-open
+                || root.workflow-pr-revert-dialog-open
+                || root.workflow-pr-commit-range-dialog-open): Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.native-titlebar-inset;
+        background: GitHubTheme.backdrop;
+        z: 2999;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+        }
+    }
+
+    // PR Dialog backdrops now paint the complete window from the shared
+    // component. Keep only a root input shield over the sidebar because hit
+    // testing outside a route component's own bounds is not guaranteed.
+    if root.current-route == Route.PrReview
+            && (root.workflow-pr-review-dialog-open
+                || root.workflow-pr-merge-dialog-open
+                || root.workflow-pr-revert-dialog-open
+                || root.workflow-pr-commit-range-dialog-open): Rectangle {
+        x: 0px;
+        y: root.native-titlebar-inset;
+        width: max(0px, main-content-host.x);
+        height: root.height - root.native-titlebar-inset;
+        background: transparent;
+        z: 2999;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+        }
+    }
     
     // Primer recommends one Banner at a time. Keep the queue in the manager,
     // but render only its head; dismissing it reveals the next notification.
@@ -1211,6 +1856,8 @@ export component MainWindow inherits Window {
         z: 1000;
 
         GitHubToast {
+            width: parent.width;
+            height: parent.height;
             message: ToastManager.message;
             type: ToastManager.type == ToastType.Success ? "success" :
                   ToastManager.type == ToastType.Error ? "error" :
@@ -1232,6 +1879,7 @@ export component MainWindow inherits Window {
     GitHubDialogEnhance {
         width: 100%;
         height: 100%;
+        z: 1200;
         on-default-action-clicked(id) => {
             DialogManager.default-action-clicked(id);
         }
@@ -1244,6 +1892,7 @@ export component MainWindow inherits Window {
     GitHubDownloadProgressDialog {
         width: 100%;
         height: 100%;
+        z: 1200;
         cancel-clicked => {
             root.cancel-download();
         }

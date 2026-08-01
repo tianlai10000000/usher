@@ -1,0 +1,172 @@
+import { GitHubActionListItem } from "./github_action_menu.slint";
+import { GitHubIconButton } from "./button/github_icon_button.slint";
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+
+// Generic ActionMenu trigger for compact filter and sort choices.
+export component GitHubFilterMenuButton inherits FocusScope {
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked();
+
+    private property <bool> keyboard-focus-visible: false;
+    private property <length> label-width: label-measure.preferred-width;
+
+    width: root.label-width + GitHubMetrics.size-28;
+    height: GitHubMetrics.control-medium-size;
+    accessible-role: button;
+    accessible-enabled: true;
+    accessible-label: root.label + (root.selected ? ", active filter" : "");
+
+    key-pressed(event) => {
+        root.keyboard-focus-visible = true;
+        if event.text == Key.Return || event.text == " " {
+            root.clicked();
+            return accept;
+        }
+        return reject;
+    }
+    focus-gained(reason) => {
+        root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+    }
+    focus-lost => {
+        root.keyboard-focus-visible = false;
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: GitHubMetrics.radius-medium;
+        background: filter-touch.pressed
+            ? GitHubTheme.control-transparent-active
+            : (filter-touch.has-hover || root.selected
+                ? GitHubTheme.control-default-rest
+                : transparent);
+    }
+
+    label-measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: GitHubMetrics.text-small;
+        wrap: no-wrap;
+    }
+
+    HorizontalLayout {
+        x: GitHubMetrics.size-8;
+        width: root.label-width + GitHubMetrics.size-20;
+        height: parent.height;
+        spacing: GitHubMetrics.size-4;
+
+        Text {
+            width: root.label-width;
+            text: root.label;
+            font-size: GitHubMetrics.text-small;
+            font-weight: 500;
+            color: GitHubTheme.fg-muted;
+            vertical-alignment: center;
+        }
+
+        Image {
+            y: (parent.height - self.height) / 2 - 1px;
+            width: GitHubMetrics.icon-medium;
+            height: GitHubMetrics.icon-medium;
+            source: @image-url("../assets/icons/octicon-triangle-down-16.svg");
+            image-fit: contain;
+            colorize: GitHubTheme.fg-muted;
+        }
+    }
+
+    filter-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.keyboard-focus-visible = false;
+            root.focus();
+            root.clicked();
+        }
+    }
+
+    if root.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -GitHubMetrics.size-2;
+        y: -GitHubMetrics.size-2;
+        width: parent.width + GitHubMetrics.size-4;
+        height: parent.height + GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
+}
+
+export component GitHubFilterMenuItem inherits GitHubActionListItem {
+    in property <string> value;
+    in property <string> selected-value;
+    callback chosen(string);
+
+    selectable: true;
+    selected: root.value == root.selected-value;
+    activated => { root.chosen(root.value); }
+}
+
+// Header and body frame for a single-select filter ActionMenu. Owners provide
+// the option model as GitHubFilterMenuItem children and own the anchored overlay.
+export component GitHubFilterMenuFrame inherits Rectangle {
+    in property <string> title;
+    in property <bool> show-header: true;
+    in property <length> content-height;
+    callback close();
+
+    width: GitHubMetrics.overlay-width-small + GitHubMetrics.size-8;
+    height: root.content-height + (root.show-header ? GitHubMetrics.size-32 : 0px);
+    background: transparent;
+
+    TouchArea { mouse-cursor: default; }
+
+    if root.show-header: Text {
+        x: GitHubMetrics.size-12;
+        y: 0px;
+        width: parent.width - GitHubMetrics.size-48;
+        height: GitHubMetrics.size-32;
+        text: root.title;
+        font-size: GitHubMetrics.text-small;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.show-header: GitHubIconButton {
+        x: parent.width - GitHubMetrics.size-28;
+        y: GitHubMetrics.size-4;
+        control-size: GitHubMetrics.size-24;
+        glyph-size: GitHubMetrics.icon-medium;
+        icon: @image-url("../assets/icons/octicon-x-16.svg");
+        tooltip-text: "Close menu";
+        invisible: true;
+        clicked => { root.close(); }
+    }
+
+    if root.show-header: Rectangle {
+        y: GitHubMetrics.size-32 - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+
+    content-host := Rectangle {
+        y: root.show-header ? GitHubMetrics.size-32 : 0px;
+        width: parent.width;
+        height: root.content-height;
+        background: transparent;
+        @children
+    }
+}
+
+export component GitHubFilterMenuSectionLabel inherits Text {
+    in property <string> label;
+    height: GitHubMetrics.size-28;
+    text: root.label;
+    font-size: GitHubMetrics.text-small;
+    font-weight: 600;
+    color: GitHubTheme.fg-muted;
+    vertical-alignment: center;
+    overflow: elide;
+}
