@@ -1,0 +1,63 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+export enum GitHubCounterScheme {
+    Default,
+    Primary,
+    Secondary,
+}
+
+// Application-owned Primer CounterLabel counterpart. It adds a compact count
+// to adjacent navigation/action text; icon-only hosts must provide the meaning
+// through their accessible label and Tooltip.
+export component GitHubCounterLabel inherits Rectangle {
+    in property <int> count: 0;
+    // A zero limit displays the complete count.
+    in property <int> limit: 0;
+    in property <bool> hide-if-zero: false;
+    in property <bool> compact: false;
+    in property <GitHubCounterScheme> scheme: GitHubCounterScheme.Default;
+
+    private property <int> normalized-count: max(0, root.count);
+    private property <string> display-text:
+        root.limit > 0 && root.normalized-count > root.limit
+            ? root.limit + "+"
+            : root.normalized-count;
+    private property <length> horizontal-padding:
+        root.compact ? GitHubMetrics.size-4 : GitHubMetrics.size-8;
+    private property <color> counter-background:
+        root.scheme == GitHubCounterScheme.Primary
+            ? GitHubTheme.neutral-emphasis
+            : (root.scheme == GitHubCounterScheme.Secondary
+                ? GitHubTheme.canvas-subtle
+                : GitHubTheme.control-muted-rest);
+    private property <color> counter-foreground:
+        root.scheme == GitHubCounterScheme.Primary
+            ? GitHubTheme.fg-on-emphasis
+            : (root.scheme == GitHubCounterScheme.Secondary
+                ? GitHubTheme.fg-default
+                : GitHubTheme.fg-muted);
+
+    visible: !root.hide-if-zero || root.normalized-count > 0;
+    width: max(root.height, counter-text.preferred-width + root.horizontal-padding);
+    height: root.compact ? 12px : GitHubMetrics.size-20;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: root.height / 2;
+    border-width: GitHubMetrics.border-thin;
+    border-color: root.scheme == GitHubCounterScheme.Primary
+        ? GitHubTheme.canvas-subtle
+        : GitHubTheme.border-default;
+    background: root.counter-background;
+
+    counter-text := Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.display-text;
+        font-size: root.compact ? 8px : GitHubMetrics.text-small;
+        font-weight: 600;
+        color: root.counter-foreground;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        wrap: no-wrap;
+    }
+}

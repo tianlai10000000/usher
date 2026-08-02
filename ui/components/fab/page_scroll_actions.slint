@@ -14,6 +14,7 @@ export component GitHubPageScrollActions inherits Rectangle {
     in property <bool> terminal-active: false;
     in property <bool> terminal-interactive: true;
     in property <string> terminal-tooltip-text: "Open terminal";
+    in property <string> terminal-active-tooltip-text: "Close terminal";
     callback request-scroll-to-top();
     callback request-open-terminal();
 
@@ -51,7 +52,7 @@ export component GitHubPageScrollActions inherits Rectangle {
         primary: true;
         selected: root.terminal-active;
         tooltip-text: root.terminal-active
-            ? "Close terminal"
+            ? root.terminal-active-tooltip-text
             : root.terminal-tooltip-text;
         tooltip-align-right: true;
         button-enabled: root.terminal-interactive;

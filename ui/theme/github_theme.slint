@@ -12,13 +12,19 @@ export global GitHubTheme {
     out property <bool> dark-mode: AppState.effective-dark-mode;
 
     // Canvas and foreground.
-    out property <color> canvas-default: root.dark-mode ? #0d1117 : #ffffff;
-    out property <color> canvas-subtle: root.dark-mode ? #151b23 : #f6f8fa;
-    out property <color> canvas-inset: root.dark-mode ? #010409 : #eff2f5;
-    out property <color> canvas-overlay: root.dark-mode ? #151b23 : #ffffff;
+    // Codex uses a neutral charcoal content canvas in dark mode. Keep the
+    // supporting surfaces neutral too so the app does not read blue-black.
+    out property <color> canvas-default: root.dark-mode ? #181818 : #ffffff;
+    out property <color> canvas-subtle: root.dark-mode ? #212121 : #f6f8fa;
+    out property <color> canvas-inset: root.dark-mode ? #101010 : #eff2f5;
+    out property <color> canvas-overlay: root.dark-mode ? #212121 : #ffffff;
     out property <color> fg-default: root.dark-mode ? #f0f6fc : #1f2328;
     out property <color> fg-muted: root.dark-mode ? #9198a1 : #59636e;
     out property <color> fg-subtle: root.dark-mode ? #6e7681 : #6e7781;
+    // Primary sidebar destinations need stronger contrast than muted body
+    // metadata, matching Codex's navigation hierarchy.
+    out property <color> sidebar-navigation-fg:
+        root.dark-mode ? #d0d7de : #59636e;
     out property <color> fg-on-emphasis: #ffffff;
 
     // Borders and focus.
@@ -26,6 +32,9 @@ export global GitHubTheme {
     out property <color> border-muted: root.dark-mode ? #30363d : #d8dee4;
     out property <color> border-subtle: root.dark-mode ? #21262d : #e6eaef;
     out property <color> border-strong: root.dark-mode ? #6e7681 : #8c959f;
+    // App-shell separators are softer than content/component borders, matching
+    // the low-contrast chrome dividers used by Codex on macOS.
+    out property <color> shell-divider: root.dark-mode ? #30363d : #e6e8eb;
     out property <color> focus-outline: root.dark-mode ? #4493f8 : #0969da;
     out property <color> selection-bg: root.dark-mode ? #264f78 : #b6d7ff;
 
@@ -116,6 +125,13 @@ export global GitHubTheme {
     // hierarchy used by Codex while retaining cross-platform semantic colors.
     out property <color> sidebar-canvas:
         root.dark-mode ? #151b23f2 : #f4f6f8f2;
+    // The native Menu backdrop is only the lower layer of Codex's sidebar.
+    // Its rendered sidebar surface neutralizes the wallpaper while focused
+    // and becomes opaque when the window resigns key.
+    out property <color> sidebar-native-active-canvas:
+        root.dark-mode ? #2b2b2ba3 : #ffffffa6;
+    out property <color> sidebar-native-inactive-canvas:
+        root.dark-mode ? #212121 : #fdfdfd;
     out property <color> sidebar-overlay-canvas:
         root.dark-mode ? #151b23fe : #f4f6f8fe;
     // The temporary macOS hover sheet is a solid white Codex surface, not the
@@ -130,6 +146,18 @@ export global GitHubTheme {
         root.dark-mode ? #ffffff1a : #1f23280f;
     out property <color> sidebar-item-active:
         root.dark-mode ? #ffffff24 : #1f23281a;
+    // Codex title-bar icon control states. The light values are sampled from
+    // the native shell reference; dark mode keeps the same contrast ordering.
+    out property <color> titlebar-control-hover-bg:
+        root.dark-mode ? #ffffff14 : #f5f5f5;
+    out property <color> titlebar-control-selected-bg:
+        root.dark-mode ? #ffffff1f : #f5f5f6;
+    out property <color> titlebar-control-selected-hover-bg:
+        root.dark-mode ? #ffffff29 : #ededed;
+    out property <color> titlebar-control-hover-fg:
+        root.dark-mode ? #9198a1 : #9a9b9c;
+    out property <color> titlebar-control-selected-fg:
+        root.dark-mode ? #f0f6fc : #212529;
     out property <color> sidebar-divider:
         root.dark-mode ? #ffffff14 : #1f232810;
     // Codex content elevation: 20 px ambient lobe, 7.5 px near lobe, then the
@@ -258,7 +286,7 @@ export global GitHubMetrics {
     out property <length> breakpoint-xxlarge: 1400px;
 
     // Usher product layout decisions built on Primer primitives.
-    out property <length> application-min-width: 640px;
+    out property <length> application-min-width: 800px;
     out property <length> application-sidebar-width: 240px;
     out property <length> page-content-max-width: 1120px;
     out property <length> page-wide-content-max-width: 1280px;

@@ -9,10 +9,13 @@ import { GitHubTooltip } from "../../components/github_tooltip.slint";
 export component GitHubPullRequestReviewPage inherits FocusScope {
     // Full application viewport used by route-owned root overlays. The page
     // root stays at x=0; ordinary review content applies shell-leading-inset
-    // internally so native live resize never moves this large render tree.
+    // internally so the sidebar can translate it without moving the large
+    // render-tree root. shell-content-width changes only at motion boundaries,
+    // avoiding a full diff-tree reflow on every animation frame.
     in property <length> application-width: root.width;
     in property <length> application-height: root.height;
     in property <length> shell-leading-inset: 0px;
+    in property <length> shell-content-width: max(0px, root.width - root.shell-leading-inset);
     in property <bool> live-resizing: false;
     in property <string> project-name;
     in property <string> provider;
@@ -243,7 +246,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     private property <string> active-popover: "";
     private property <string> pending-diff-view: root.diff-view;
     private property <bool> pending-ignore-whitespace: root.ignore-whitespace;
-    private property <length> content-width: max(0px, root.width - root.shell-leading-inset);
+    private property <length> content-width: max(0px, root.shell-content-width);
     private property <length> stable-layout-width: root.content-width;
     private property <length> stable-layout-height: root.height;
     // File-filter ActionMenu mounts on the workspace root (above the
@@ -594,7 +597,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
             root.stable-layout-width = root.content-width;
         }
     }
-    changed shell-leading-inset => {
+    changed shell-content-width => {
         if !root.live-resizing {
             root.stable-layout-width = root.content-width;
         }
@@ -879,8 +882,15 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
             // compact tabs keep the full-width three-way split instead.
             private property <length> leading-inset: self.compact-tabs ? 0px : 16px;
             HorizontalLayout {
-                padding-left: review-tabs.leading-inset;
+                padding-left: 0px;
                 spacing: 0px;
+                // HorizontalLayout padding does not offset fixed-width tab
+                // delegates consistently. A real leading spacer does.
+                if !review-tabs.compact-tabs: Rectangle {
+                    width: review-tabs.leading-inset;
+                    height: parent.height;
+                    background: transparent;
+                }
                 GitHubPullRequestTabButton {
                     label: "Conversation";
                     tab-width: review-tabs.compact-tabs ? parent.width / 3 : 200px;
@@ -2820,9 +2830,12 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                             // A Flickable normally steals vertical drags after
                             // 8px and cancels the code TouchArea. GitHub treats
                             // dragging code as selection; wheel/touchpad and
-                            // both scrollbars continue to scroll this ListView.
+                            // the vertical scrollbar continue to scroll this ListView.
                             interactive: false;
-                            horizontal_scrollbar_policy: ScrollBarPolicy.as_needed;
+                            // Diff rows calculate their wrapped height from the
+                            // available code column. Never reserve or expose a
+                            // horizontal track for content that already wraps.
+                            horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
                             vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
 
                             for line[line-index] in root.lines: diff-line-row := Rectangle {

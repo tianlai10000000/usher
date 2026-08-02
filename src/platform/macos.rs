@@ -229,6 +229,13 @@ fn set_window_live_resizing(active: bool) {
     }
 }
 
+fn set_native_window_active(active: bool) {
+    if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
+        // AppKit key-window notifications run on Slint's owning event loop.
+        ui.set_native_window_active(active);
+    }
+}
+
 fn register_titlebar_delegate_class() -> &'static Class {
     static mut DELEGATE_CLASS: *const Class = std::ptr::null();
     static REGISTER: Once = Once::new();
@@ -469,26 +476,67 @@ unsafe fn create_view(class_name: &str, frame: NSRect) -> Option<*mut Object> {
     (!view.is_null()).then_some(view)
 }
 
-fn install_titlebar_event_monitor(window: *mut Object) {
+fn macos_shortcut_key(key_code: u16) -> Option<&'static str> {
+    // Hardware-independent virtual key codes used by NSEvent on macOS. This is
+    // platform normalization only; executable bindings remain exclusively in
+    // `src/shortcuts/mod.rs`.
+    match key_code {
+        11 => Some("b"),
+        38 => Some("j"),
+        33 => Some("["),
+        30 => Some("]"),
+        43 => Some(","),
+        _ => None,
+    }
+}
+
+fn install_app_event_monitor(window: *mut Object) -> bool {
     unsafe {
         if !TITLEBAR_EVENT_MONITOR.is_null() {
-            return;
+            return true;
         }
     }
     let Some(event_class) = Class::get("NSEvent") else {
         log::warn!(
             "[TitleBar] NSEvent unavailable; transient overlays cannot observe title-bar clicks"
         );
-        return;
+        return false;
     };
 
-    // NSEventMaskLeftMouseDown = 1 << NSEventTypeLeftMouseDown (1).
+    // Observe title-bar clicks and key-down events in one application-local
+    // monitor. Key codes avoid input-method-dependent logical punctuation.
+    // NSEventMaskLeftMouseDown = 1 << 1; NSEventMaskKeyDown = 1 << 10.
     let handler = ConcreteBlock::new(move |event: *mut Object| -> *mut Object {
         if event.is_null() {
             return event;
         }
         let event_window: *mut Object = unsafe { msg_send![event, window] };
         if event_window != window {
+            return event;
+        }
+        let event_type: u64 = unsafe { msg_send![event, type] };
+        if event_type == 10 {
+            let key_code: u16 = unsafe { msg_send![event, keyCode] };
+            let Some(key) = macos_shortcut_key(key_code) else {
+                return event;
+            };
+            let flags: u64 = unsafe { msg_send![event, modifierFlags] };
+            let handled = TITLEBAR_UI
+                .get()
+                .and_then(slint::Weak::upgrade)
+                .is_some_and(|ui| {
+                    crate::shortcuts::handle_key_pressed(
+                        &ui,
+                        key,
+                        flags & (1 << 20) != 0, // NSEventModifierFlagCommand
+                        flags & (1 << 19) != 0, // NSEventModifierFlagOption
+                        flags & (1 << 17) != 0, // NSEventModifierFlagShift
+                        flags & (1 << 18) != 0, // NSEventModifierFlagControl
+                    )
+                });
+            if handled {
+                return std::ptr::null_mut();
+            }
             return event;
         }
         let location: NSPoint = unsafe { msg_send![event, locationInWindow] };
@@ -508,17 +556,31 @@ fn install_titlebar_event_monitor(window: *mut Object) {
     let monitor: *mut Object = unsafe {
         msg_send![
             event_class,
-            addLocalMonitorForEventsMatchingMask: 2u64
+            addLocalMonitorForEventsMatchingMask: 2u64 | (1u64 << 10)
             handler: &*handler
         ]
     };
     if monitor.is_null() {
         log::warn!("[TitleBar] Failed to install native click bridge for transient overlays");
-        return;
+        return false;
     }
     unsafe {
         TITLEBAR_EVENT_MONITOR = monitor;
     }
+    true
+}
+
+/// Install the input-method-independent macOS shortcut bridge.
+///
+/// The native window may not exist until after `show()`, so shortcut startup
+/// retries this readiness boundary before reporting completion in the status
+/// bar.
+pub(crate) fn install_shortcut_input_bridge(window: &MainWindow) -> bool {
+    let _ = TITLEBAR_UI.set(window.as_weak());
+    let Some(native_window) = native_window(window) else {
+        return false;
+    };
+    install_app_event_monitor(native_window)
 }
 
 unsafe fn configure_icon_button(
@@ -619,12 +681,21 @@ fn sidebar_toggle_image_names(expanded: bool) -> &'static [&'static str] {
     }
 }
 
-fn sidebar_toggle_tooltip(expanded: bool) -> &'static str {
-    if expanded {
-        "Hide sidebar (⌘B)"
-    } else {
-        "Show sidebar (⌘B)"
-    }
+fn shortcut_tooltip(action: &str, command: crate::shortcuts::CommandId) -> String {
+    crate::shortcuts::display_binding(command)
+        .map(|binding| format!("{action} ({binding})"))
+        .unwrap_or_else(|| action.to_string())
+}
+
+fn sidebar_toggle_tooltip(expanded: bool) -> String {
+    shortcut_tooltip(
+        if expanded {
+            "Hide sidebar"
+        } else {
+            "Show sidebar"
+        },
+        crate::shortcuts::CommandId::ToggleSidebar,
+    )
 }
 
 unsafe fn install_sidebar_vibrancy(window: *mut Object, render_view: *mut Object) -> bool {
@@ -688,6 +759,8 @@ unsafe fn install_sidebar_vibrancy(window: *mut Object, render_view: *mut Object
 }
 
 unsafe fn update_sidebar_window_surface(window: *mut Object, is_focused: bool) {
+    set_native_window_active(is_focused);
+
     if window.is_null() || unsafe { SIDEBAR_VIBRANCY_VIEW.is_null() } {
         return;
     }
@@ -935,12 +1008,16 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
         return;
     };
 
+    let toggle_tooltip =
+        shortcut_tooltip("Toggle sidebar", crate::shortcuts::CommandId::ToggleSidebar);
+    let back_tooltip = shortcut_tooltip("Back", crate::shortcuts::CommandId::NavigateBack);
+    let forward_tooltip = shortcut_tooltip("Forward", crate::shortcuts::CommandId::NavigateForward);
     unsafe {
         configure_icon_button(
             toggle_button,
             sidebar_toggle_image_names(false),
             "◫",
-            "Toggle sidebar (⌘B)",
+            &toggle_tooltip,
             delegate,
             sel!(usherToggleSidebar:),
         );
@@ -948,7 +1025,7 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
             back_button,
             &["symbol:arrow.left", "NSImageNameGoLeftTemplate"],
             "‹",
-            "Back (⌘[)",
+            &back_tooltip,
             delegate,
             sel!(usherNavigateBack:),
         );
@@ -956,7 +1033,7 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
             forward_button,
             &["symbol:arrow.right", "NSImageNameGoRightTemplate"],
             "›",
-            "Forward (⌘])",
+            &forward_tooltip,
             delegate,
             sel!(usherNavigateForward:),
         );
@@ -1005,7 +1082,7 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
         TITLEBAR_INSTALLED = true;
         align_standard_window_buttons(window);
     }
-    install_titlebar_event_monitor(window);
+    install_app_event_monitor(window);
     if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
         update_titlebar_navigation_controls(&ui);
     }
@@ -1039,7 +1116,7 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
             TITLEBAR_TOGGLE_BUTTON,
             sidebar_toggle_image_names(expanded),
             "◫",
-            sidebar_toggle_tooltip(expanded),
+            &sidebar_toggle_tooltip(expanded),
             TITLEBAR_DELEGATE,
             sel!(usherToggleSidebar:),
         );
@@ -1048,7 +1125,17 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::{sidebar_toggle_image_names, sidebar_toggle_tooltip};
+    use super::{macos_shortcut_key, sidebar_toggle_image_names, sidebar_toggle_tooltip};
+
+    #[test]
+    fn physical_shortcut_keys_are_input_method_independent() {
+        assert_eq!(macos_shortcut_key(11), Some("b"));
+        assert_eq!(macos_shortcut_key(38), Some("j"));
+        assert_eq!(macos_shortcut_key(33), Some("["));
+        assert_eq!(macos_shortcut_key(30), Some("]"));
+        assert_eq!(macos_shortcut_key(43), Some(","));
+        assert_eq!(macos_shortcut_key(0), None);
+    }
 
     #[test]
     fn sidebar_toggle_uses_distinct_open_and_closed_symbols() {

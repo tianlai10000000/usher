@@ -5,6 +5,7 @@ import { LayoutConstants } from "../layout_constants.slint";
 import { GitHubTooltip } from "./github_tooltip.slint";
 import { GitHubActionMenu } from "./github_action_menu.slint";
 import { GitHubProgressBar } from "./github_progress_bar.slint";
+import { GitHubCounterLabel, GitHubCounterScheme } from "./label/github_counter_label.slint";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 
 // Enum to identify which popup is active
@@ -12,6 +13,7 @@ enum ActivePopup {
     None,
     UpdateCheck,
     DownloadProgress,
+    Shortcut,
     Notification,
     Network,
     Version,
@@ -21,15 +23,21 @@ enum ActivePopup {
 component GitHubStatusBarItem inherits Rectangle {
     in property <string> label;
     in property <string> tooltip-text;
+    in property <bool> tooltip-align-end: false;
     in property <bool> clickable: true;
     in property <bool> active: false;
     in property <bool> show-icon: false;
     in property <image> icon;
     in property <color> icon-color: GitHubTheme.fg-muted;
+    in property <int> badge-count: 0;
+    in property <length> fixed-width: 0px;
     private property <bool> keyboard-focus-visible: false;
     property <color> fg-muted: GitHubTheme.fg-muted;
     property <color> control-hover: GitHubTheme.control-transparent-hover;
     property <color> control-active: GitHubTheme.control-transparent-active;
+    private property <length> resolved-width: root.fixed-width > 0px
+        ? root.fixed-width
+        : max(28px, 16px + status-label.preferred-width + (root.show-icon ? 18px : 0px));
     
     // Output: item's absolute x position and width for popup positioning
     out property <length> item-x: self.absolute-position.x;
@@ -37,8 +45,12 @@ component GitHubStatusBarItem inherits Rectangle {
     
     callback clicked();
     
+    accessible-role: button;
+    accessible-enabled: root.clickable;
+    accessible-label: root.tooltip-text;
     height: LayoutConstants.status-bar-height - 1px;
-    min-width: 28px;
+    width: root.resolved-width;
+    horizontal-stretch: 0;
     border-radius: 6px;
     background: hover-area.pressed ? root.control-active :
                 hover-area.has-hover || root.active ? root.control-hover : transparent;
@@ -77,7 +89,7 @@ component GitHubStatusBarItem inherits Rectangle {
         }
     }
     
-    HorizontalLayout {
+    item-content := HorizontalLayout {
         width: 100%;
         height: 100%;
         spacing: 4px;
@@ -99,12 +111,23 @@ component GitHubStatusBarItem inherits Rectangle {
             }
         }
         
-        if root.label != "" : Text {
+        status-label := Text {
+            visible: root.label != "";
             text: root.label;
             font-size: 12px;
             color: root.fg-muted;
             vertical-alignment: center;
         }
+    }
+
+    if root.badge-count > 0: GitHubCounterLabel {
+        x: parent.width - self.width - 1px;
+        y: 1px;
+        count: root.badge-count;
+        limit: 99;
+        hide-if-zero: true;
+        compact: true;
+        scheme: GitHubCounterScheme.Primary;
     }
 
     if status-focus.has-focus && root.keyboard-focus-visible: Rectangle {
@@ -120,6 +143,7 @@ component GitHubStatusBarItem inherits Rectangle {
     
     // Tooltip
     if hover-area.has-hover && tooltip-text != "" : GitHubTooltip {
+        x: root.tooltip-align-end ? parent.width - self.width : 0px;
         y: -24px;
         text: root.tooltip-text;
     }
@@ -128,28 +152,49 @@ component GitHubStatusBarItem inherits Rectangle {
 // GitHub has no persistent web status bar equivalent. This desktop utility
 // surface composes Primer canvas, border, typography, control and overlay tokens.
 export component GitHubStatusBar inherits Rectangle {
+    in property <bool> shortcut-initialization-visible: false;
+    in property <bool> shortcut-initialization-failed: false;
+    in property <float> shortcut-initialization-progress: 0;
+    in property <string> shortcut-initialization-status: "";
+    in property <string> shortcut-initialization-detail: "";
     // Internal popup state - using enum to track which popup is active
     property <ActivePopup> active-popup: ActivePopup.None;
     property <string> popup-title: "";
     property <string> popup-content: "";
     
     // Popup dimensions
-    property <length> popup-width: 220px;
+    property <length> popup-width: root.active-popup == ActivePopup.Shortcut ? 360px : 220px;
     property <color> canvas-default: GitHubTheme.canvas-default;
     property <color> canvas-subtle: GitHubTheme.canvas-subtle;
     property <color> fg-default: GitHubTheme.fg-default;
     property <color> fg-muted: GitHubTheme.fg-muted;
     property <color> border-default: GitHubTheme.border-default;
+    property <color> shell-divider: GitHubTheme.shell-divider;
     property <color> accent-fg: GitHubTheme.accent-fg;
     property <color> success-fg: GitHubTheme.success-fg;
     property <color> danger-fg: GitHubTheme.danger-fg;
     property <color> control-hover: GitHubTheme.control-transparent-hover;
     property <color> control-active: GitHubTheme.control-transparent-active;
+    // Keep the utility cluster deterministic. These items use explicit
+    // geometry inside a plain container because a nested HorizontalLayout can
+    // redistribute component widths and push trailing items past the window.
+    private property <length> status-item-gap: 4px;
+    private property <length> shortcut-status-width: 28px;
+    private property <length> notification-status-width: 28px;
+    private property <length> network-status-width: 28px;
+    private property <length> version-status-width: 104px;
+    private property <length> status-items-right-width:
+        root.shortcut-status-width
+        + root.notification-status-width
+        + root.network-status-width
+        + root.version-status-width
+        + root.status-item-gap * 3;
     
     // Dynamic anchor position - binds to the currently active item's real-time position
     property <length> popup-anchor-x: 
         active-popup == ActivePopup.UpdateCheck ? update-check-item.item-x :
         active-popup == ActivePopup.DownloadProgress ? download-progress-item.item-x :
+        active-popup == ActivePopup.Shortcut ? shortcut-status-item.item-x :
         active-popup == ActivePopup.Notification ? notification-item.item-x :
         active-popup == ActivePopup.Network ? network-item.item-x :
         active-popup == ActivePopup.Version ? version-item.item-x : 0px;
@@ -157,6 +202,7 @@ export component GitHubStatusBar inherits Rectangle {
     property <length> popup-anchor-width:
         active-popup == ActivePopup.UpdateCheck ? update-check-item.item-width :
         active-popup == ActivePopup.DownloadProgress ? download-progress-item.item-width :
+        active-popup == ActivePopup.Shortcut ? shortcut-status-item.item-width :
         active-popup == ActivePopup.Notification ? notification-item.item-width :
         active-popup == ActivePopup.Network ? network-item.item-width :
         active-popup == ActivePopup.Version ? version-item.item-width : 0px;
@@ -177,7 +223,7 @@ export component GitHubStatusBar inherits Rectangle {
         Rectangle {
             width: 100%;
             height: 1px;
-            background: root.border-default;
+            background: root.shell-divider;
         }
         
         HorizontalLayout {
@@ -192,7 +238,48 @@ export component GitHubStatusBar inherits Rectangle {
                 horizontal-stretch: 0;
                 spacing: 0px;
                 alignment: start;
-                
+
+                // Completion is published only after the registry, root
+                // callback, and native platform bridge are all usable.
+                shortcut-initialization-item := Rectangle {
+                    height: LayoutConstants.status-bar-height - 1px;
+                    width: shortcut-initialization-layout.preferred-width;
+                    visible: root.shortcut-initialization-visible
+                        && !root.shortcut-initialization-failed
+                        && root.shortcut-initialization-progress < 1;
+                    background: transparent;
+
+                    shortcut-initialization-layout := HorizontalLayout {
+                        height: parent.height;
+                        spacing: GitHubMetrics.size-8;
+                        padding-left: GitHubMetrics.size-8;
+                        padding-right: GitHubMetrics.size-8;
+                        alignment: center;
+
+                        Text {
+                            text: root.shortcut-initialization-status;
+                            font-size: 12px;
+                            color: root.shortcut-initialization-failed
+                                ? root.danger-fg
+                                : (root.shortcut-initialization-progress >= 1
+                                    ? root.success-fg
+                                    : root.accent-fg);
+                            vertical-alignment: center;
+                        }
+
+                        GitHubProgressBar {
+                            width: 64px;
+                            height: GitHubMetrics.size-4;
+                            progress: root.shortcut-initialization-progress;
+                            foreground: root.shortcut-initialization-failed
+                                ? root.danger-fg
+                                : (root.shortcut-initialization-progress >= 1
+                                    ? root.success-fg
+                                    : root.accent-fg);
+                        }
+                    }
+                }
+
                 // Update check status
                 update-check-item := GitHubStatusBarItem {
                     label: UpdateLogic.checking-update ? "Update Checking..." : "";
@@ -267,45 +354,94 @@ export component GitHubStatusBar inherits Rectangle {
                     }
                 }
                 
-                // Notification status
-                notification-item := GitHubStatusBarItem {
-                    label: "Notifications " + NotificationManager.queue.length;
-                    tooltip-text: NotificationManager.queue.length > 0 ? 
-                                (NotificationManager.queue.length + " unread notifications") : 
-                                "No notifications";
-                    active: NotificationManager.queue.length > 0;
-                    visible: true;
-                    
-                    clicked => {
-                        if (root.active-popup == ActivePopup.Notification) {
-                            root.active-popup = ActivePopup.None;
-                        } else {
-                            root.popup-title = "Notifications";
-                            root.popup-content = NotificationManager.queue.length > 0 ? 
-                                ("Currently " + NotificationManager.queue.length + " unread notifications") :
-                                "No notifications";
-                            root.active-popup = ActivePopup.Notification;
-                        }
-                    }
-                }
             }
-            
+
             // Middle spacer (for left/right alignment)
             Rectangle {
                 horizontal-stretch: 1;
                 background: transparent;
             }
-            
-            // Right status item container
-            status-items-right := HorizontalLayout {
-                horizontal-stretch: 0;
-                spacing: 0px;
-                alignment: end;
+        }
+    }
+
+            // Right status item container. Keep it outside the row layout so
+            // the utility cluster cannot be compressed when the sidebar opens.
+            status-items-right := Rectangle {
+                x: root.width - root.status-items-right-width - 8px;
+                y: 1px;
+                width: root.status-items-right-width;
+                height: root.height - 1px;
+                background: transparent;
+
+                shortcut-status-item := GitHubStatusBarItem {
+                    x: 0px;
+                    fixed-width: root.shortcut-status-width;
+                    label: "";
+                    tooltip-text: root.shortcut-initialization-failed
+                        ? "Shortcut initialization failed"
+                        : "Shortcuts ready";
+                    tooltip-align-end: true;
+                    active: root.active-popup == ActivePopup.Shortcut;
+                    visible: root.shortcut-initialization-visible
+                        && (root.shortcut-initialization-failed
+                            || root.shortcut-initialization-progress >= 1);
+                    show-icon: true;
+                    icon: @image-url("../assets/icons/lucide-keyboard.svg");
+                    icon-color: root.shortcut-initialization-failed
+                        ? root.danger-fg
+                        : root.success-fg;
+
+                    clicked => {
+                        if (root.active-popup == ActivePopup.Shortcut) {
+                            root.active-popup = ActivePopup.None;
+                        } else {
+                            root.popup-title = "Shortcut Status";
+                            root.popup-content = root.shortcut-initialization-detail;
+                            root.active-popup = ActivePopup.Shortcut;
+                        }
+                    }
+                }
+
+                notification-item := GitHubStatusBarItem {
+                    x: root.shortcut-status-width + root.status-item-gap;
+                    fixed-width: root.notification-status-width;
+                    label: "";
+                    tooltip-text: NotificationManager.queue.length > 0
+                        ? (NotificationManager.queue.length + " unread notifications")
+                        : "No notifications";
+                    tooltip-align-end: true;
+                    active: NotificationManager.queue.length > 0;
+                    visible: true;
+                    show-icon: true;
+                    icon: @image-url("../assets/icons/octicon-bell-16.svg");
+                    badge-count: NotificationManager.queue.length;
+                    icon-color: NotificationManager.queue.length > 0
+                        ? root.accent-fg
+                        : root.fg-muted;
+
+                    clicked => {
+                        if (root.active-popup == ActivePopup.Notification) {
+                            root.active-popup = ActivePopup.None;
+                        } else {
+                            root.popup-title = "Notifications";
+                            root.popup-content = NotificationManager.queue.length > 0
+                                ? ("Currently " + NotificationManager.queue.length + " unread notifications")
+                                : "No notifications";
+                            root.active-popup = ActivePopup.Notification;
+                        }
+                    }
+                }
                 
                 // Network status (simple online indicator)
                 network-item := GitHubStatusBarItem {
+                    x: root.shortcut-status-width
+                        + root.status-item-gap
+                        + root.notification-status-width
+                        + root.status-item-gap;
+                    fixed-width: root.network-status-width;
                     label: "";
                     tooltip-text: AppState.network-online ? "Network connected" : "Network disconnected";
+                    tooltip-align-end: true;
                     active: root.active-popup == ActivePopup.Network;
                     visible: true;
                     show-icon: true;
@@ -327,8 +463,16 @@ export component GitHubStatusBar inherits Rectangle {
                 
                 // Application version info
                 version-item := GitHubStatusBarItem {
+                    x: root.shortcut-status-width
+                        + root.status-item-gap
+                        + root.notification-status-width
+                        + root.status-item-gap
+                        + root.network-status-width
+                        + root.status-item-gap;
+                    fixed-width: root.version-status-width;
                     label: "v" + AppState.version;
                     tooltip-text: "Version: " + AppState.version;
+                    tooltip-align-end: true;
                     active: root.active-popup == ActivePopup.Version;
                     visible: AppState.version != "";
                     clickable: true;
@@ -344,8 +488,6 @@ export component GitHubStatusBar inherits Rectangle {
                     }
                 }
             }
-        }
-    }
     
     // Click-outside-to-close overlay (covers area above status bar only)
     if active-popup != ActivePopup.None : Rectangle {
@@ -368,7 +510,10 @@ export component GitHubStatusBar inherits Rectangle {
     // scrolls internally if the window is shorter than its content.
     if active-popup != ActivePopup.None : GitHubActionMenu {
         open: true;
-        viewport-x: -root.absolute-position.x;
+        // This overlay is already a child of the status bar. Keep viewport and
+        // anchor in that parent coordinate space; subtracting the absolute x
+        // here would convert the horizontal coordinate twice.
+        viewport-x: 0px;
         viewport-y: -root.absolute-position.y;
         viewport-width: root.width;
         viewport-height: root.absolute-position.y + root.height;

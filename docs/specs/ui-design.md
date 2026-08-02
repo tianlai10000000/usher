@@ -212,6 +212,21 @@ expanded/collapsed, and success confirmation.
   geometry, loading support, Enter/Space activation, focus outline, and an
   accessible action label. It shows the label as a tooltip on hover or focus
   unless the caller selects the documented About/dismiss exception.
+- A Codex-style title-bar toggle built on `GitHubIconButton` must keep hover,
+  selected, and selected-plus-hover visually distinct. In light mode the
+  sampled reference values are: hover uses `#f5f5f5` background with
+  `#9a9b9c` foreground; selected uses `#f5f5f6` background with `#212529`
+  foreground; selected-plus-hover uses `#ededed` background with `#212529`
+  foreground. State resolution is selected-plus-hover, then selected, then
+  hover, then rest. Dark mode uses semantic counterparts with the same
+  contrast ordering; it must not collapse the three states into one active
+  color.
+- 基于 `GitHubIconButton` 的 Codex 风格标题栏切换按钮必须区分 hover、激活、
+  激活并 hover 三种视觉状态。浅色模式采用参考界面取样值：hover 背景为
+  `#f5f5f5`、前景为 `#9a9b9c`；激活背景为 `#f5f5f6`、前景为
+  `#212529`；激活并 hover 背景为 `#ededed`、前景保持 `#212529`。
+  状态解析优先级固定为“激活并 hover > 激活 > hover > 默认”。暗色模式使用
+  保持相同对比层级的语义色，不得把三种状态合并为单一 active 颜色。
 - `GitHubNavigationSidebar`: one 240 px desktop application sidebar with full
   labels, selected-route state, pinned Settings/About actions, and a persisted
   docked mode. Its menu rows follow the Codex/macOS SwiftUI sidebar hierarchy:
@@ -244,10 +259,14 @@ expanded/collapsed, and success confirmation.
   On macOS the docked sidebar matches Codex desktop's verified Electron
   configuration: one full-content native effect view uses Menu material,
   BehindWindow blending, and width-plus-height autoresizing. The opaque main
-  surface covers that backdrop, leaving it visible only through the transparent
-  240 px sidebar. The key-window state uses Menu vibrancy over a transparent
-  surface. On resign-key, the effect is disabled and the surface uses Codex's
-  verified `#f9f9f9` light or `#000000` dark opaque background.
+  surface covers that backdrop. The docked 240 px sidebar paints Codex's final
+  renderer surface above the native effect instead of exposing the raw Menu
+  material: while key it uses `#ffffffa6` in light mode or `#2b2b2ba3` in dark
+  mode, preserving blur while neutralizing wallpaper saturation. On resign-key,
+  the effect is disabled, the native window keeps Codex's `#f9f9f9` light or
+  `#000000` dark fallback, and the rendered sidebar becomes opaque `#fdfdfd`
+  light or `#212121` dark. The temporary hover sidebar continues to use its
+  independent opaque overlay surface.
   Undocked mode removes it from page layout; an 8 px left-edge hover target
   opens the same component as a rounded, border-only root-layer overlay with a
   short pointer-exit delay. macOS places Toggle/Back/Forward in a native
@@ -285,9 +304,12 @@ expanded/collapsed, and success confirmation.
   不得覆盖侧栏、右边界或越过侧栏边界显示的 Tooltip。
   macOS 固定侧栏采用已从 Codex 桌面端 Electron 配置核实的实现：覆盖完整内容区、
   随宽高共同缩放的原生 Effect View 使用 Menu 材质与 BehindWindow 混合；不透明
-  主内容面盖住右侧背景，只在透明的 240px 侧栏中露出材质。Key Window 使用透明
-  表面与 Menu Vibrancy；失去 Key 状态时关闭 Effect，并切换为已从 Codex 核实的
-  浅色 `#f9f9f9` 或深色 `#000000` 实色背景。
+  主内容面盖住右侧背景。固定的 240px 侧栏不会直接露出原始 Menu 材质，而是在原生
+  Effect 上绘制 Codex 最终的渲染表面：Key Window 在浅色模式使用 `#ffffffa6`，
+  深色模式使用 `#2b2b2ba3`，保留模糊并压低壁纸饱和度。失去 Key 状态时关闭
+  Effect，原生窗口继续使用 Codex 的浅色 `#f9f9f9` 或深色 `#000000` fallback，
+  渲染侧栏则切换为浅色 `#fdfdfd` 或深色 `#212121` 不透明表面。临时 Hover
+  侧栏继续使用自己独立的不透明浮层表面。
   macOS 使用原生左侧标题栏附件，Windows/Linux 使用侧栏页头和收起态
   控制条；macOS 侧栏按钮在收起态使用轮廓 `sidebar.left`，展开态使用左侧
   三分之一填充图标，两种状态不得共用同一视觉；Back/Forward 可用状态只能来自
@@ -297,6 +319,33 @@ expanded/collapsed, and success confirmation.
 - `GitHubTooltip`: TooltipV2 pattern; tooltip canvas/foreground tokens, 12 px
   text, 4 px vertical and 8 px horizontal padding, 6 px radius, and a 4 px
   host gap.
+- `GitHubCounterLabel`: the typed Primer CounterLabel counterpart for counts
+  adjacent to navigation text or actions. It provides Default, Primary, and
+  Secondary schemes, optional upper-limit formatting, a compact overlay mode,
+  and explicit zero hiding. The component remains content-sized in layouts.
+  Icon-only hosts must include count meaning in their accessible label and
+  Tooltip. Its property matrix lives under `Labels and counters` in UI
+  Components.
+- `GitHubCounterLabel`：导航文字或操作旁计数统一使用的强类型 Primer CounterLabel，
+  提供 Default、Primary、Secondary Scheme、可选上限格式、紧凑叠加模式与明确的
+  零值隐藏，并在 Layout 中保持内容宽度。仅图标宿主必须在无障碍名称和 Tooltip 中
+  包含计数语义；其属性矩阵归入 UI Components 的 `Labels and counters` 分类。
+- `GitHubStatusBar`: one 28 px root-shell utility surface. Its persistent
+  keyboard, bell, network, and version cluster is anchored 8 px from the right
+  edge with 4 px gaps and must not participate in a width-distributing layout.
+  The bell is icon-only and overlays a Primer primary-style numeric unread
+  counter only when count is positive (`99+` cap); zero mounts no counter.
+  Green is reserved for ready/online state, unread notification uses accent,
+  and version remains muted. Right-edge tooltips align to their host's trailing
+  edge and expand leftward. Shared popups use one status-bar parent coordinate
+  space and must leave the version item visible. The complete behavior contract
+  is [status-bar.md](status-bar.md).
+- `GitHubStatusBar`：根 Shell 唯一的 28px 工具栏。常驻键盘、铃铛、网络与版本
+  工具组距右边缘 8px、条目间距 4px，禁止参与会重新分配宽度的 Layout。铃铛只显示
+  图标；未读数大于 0 时叠加 Primer Primary 风格数字 Counter（上限显示 `99+`），
+  为 0 时不挂载 Counter。绿色只表示就绪/在线，未读通知使用强调色，版本保持弱化色。
+  右侧 Tooltip 与宿主尾边对齐并向左展开；共享浮层只使用一套状态栏父坐标系，且不得
+  遮挡版本项。完整契约见 [status-bar.md](status-bar.md)。
 - `GitHubCopyButton`: 32×32 invisible icon button, centered 16 px Copy
   Octicon, persistent tooltip, and Copy→Check confirmation only after the
   clipboard callback returns success.
@@ -507,7 +556,7 @@ For every UI batch:
    colors, unprefixed GitHub-style components across the complete `ui/` tree,
    and component declarations incorrectly placed outside `ui/components/`
    (route page entries are the only exception).
-6. Manually inspect affected routes at `640x600`, a representative working
+6. Manually inspect affected routes at `800x600`, a representative working
    size, and `1280x900`, in light and dark mode, including keyboard focus and
    applicable interaction states.
 7. Record discovered defects in `bug-history.md` and update the migration

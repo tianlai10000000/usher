@@ -13,6 +13,9 @@ import { GitHubWorkflowProjectDetails } from "../../components/workflow/github_w
 
 
 export component GitHubWorkflowPage inherits GitHubPageView {
+    // The root scroll view already contributes the title-bar gap. Avoid a
+    // second 16px inset before the repository header.
+    content-top-padding: 0px;
     callback branch-submit(string, string, bool);
     callback tag-change-mode(string);
     callback tag-select-version-mode(string);

@@ -32,8 +32,25 @@ export component GitHubIconButton inherits FocusScope {
         root.primary
             ? GitHubTheme.fg-on-emphasis
             : (root.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-muted);
+    // Callers that mirror native shell chrome can provide distinct hover and
+    // selected colors while ordinary Primer IconButtons retain their defaults.
+    in property <color> hover-foreground: root.foreground;
+    in property <color> selected-foreground: root.foreground;
+    in property <color> selected-hover-foreground: root.selected-foreground;
+    in property <color> hover-background: root.invisible
+        ? GitHubTheme.control-transparent-hover
+        : GitHubTheme.control-default-hover;
+    in property <color> selected-background: root.invisible
+        ? GitHubTheme.control-transparent-selected
+        : GitHubTheme.control-default-active;
+    in property <color> selected-hover-background: root.selected-background;
     out property <bool> has-hover: button-touch.has-hover;
     private property <bool> keyboard-focus-visible: false;
+    private property <color> resolved-foreground: root.selected
+        ? (button-touch.has-hover
+            ? root.selected-hover-foreground
+            : root.selected-foreground)
+        : (button-touch.has-hover ? root.hover-foreground : root.foreground);
     callback clicked();
 
     // Let TouchArea own the press. Default focus-on-click consumes the first
@@ -98,15 +115,15 @@ export component GitHubIconButton inherits FocusScope {
                         ? GitHubTheme.danger-muted
                         : (root.invisible ? transparent : GitHubTheme.control-default-rest)))
                 : root.selected
-                    ? GitHubTheme.control-default-active
+                    ? (button-touch.has-hover
+                        ? root.selected-hover-background
+                        : root.selected-background)
                     : (button-touch.pressed
                         ? (root.invisible
                             ? GitHubTheme.control-transparent-active
                             : GitHubTheme.control-default-active)
                         : (button-touch.has-hover
-                            ? (root.invisible
-                                ? GitHubTheme.control-transparent-hover
-                                : GitHubTheme.control-default-hover)
+                            ? root.hover-background
                             : (root.invisible ? transparent : GitHubTheme.control-default-rest)));
         animate background { duration: 100ms; easing: ease-out; }
         opacity: root.button-enabled ? 1 : 0.5;
@@ -120,7 +137,7 @@ export component GitHubIconButton inherits FocusScope {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             spinner-size: root.glyph-size;
-            foreground: root.foreground;
+            foreground: root.resolved-foreground;
         }
 
         if !root.loading: Image {
@@ -130,7 +147,7 @@ export component GitHubIconButton inherits FocusScope {
             height: root.glyph-size;
             source: root.icon;
             image-fit: contain;
-            colorize: root.foreground;
+            colorize: root.resolved-foreground;
         }
     }
 

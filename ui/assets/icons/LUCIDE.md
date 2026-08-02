@@ -1,8 +1,9 @@
 # Lucide sidebar icons
 
-Files named `lucide-sidebar-*.svg` are unchanged path geometry from Lucide's
-open-source icon collection and are used by the Codex-style application shell,
-including the sidebar and compact title-bar actions.
+Files named `lucide-*.svg` are unchanged path geometry from Lucide's open-source
+icon collection and are used by the Codex-style application shell, including
+the sidebar, compact title-bar actions, and the persistent shortcut status
+indicator.
 
 - Source: <https://github.com/lucide-icons/lucide>
 - License: ISC

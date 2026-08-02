@@ -1,5 +1,6 @@
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubMetadataLabel } from "../github_metadata_label.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
 
@@ -122,45 +123,6 @@ export component GitHubProjectViewSwitcher inherits Rectangle {
     }
 }
 
-export component GitHubProjectLabel inherits Rectangle {
-    in property <string> text;
-    // 0px keeps content-sized chips (tags). Alias pills pass a max so long
-    // names elide instead of stretching the title row or card header.
-    in property <length> max-label-width: 0px;
-
-    label-measure := Text {
-        visible: false;
-        text: root.text;
-        font-size: 12px;
-        font-weight: 500;
-        wrap: no-wrap;
-    }
-
-    private property <length> natural-width: label-measure.preferred-width + 16px;
-    width: root.max-label-width > 0px
-        ? min(root.natural-width, root.max-label-width)
-        : root.natural-width;
-    height: 20px;
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: GitHubTheme.border-default;
-    background: transparent;
-
-    Text {
-        x: 8px;
-        width: parent.width - 16px;
-        height: parent.height;
-        text: root.text;
-        font-size: 12px;
-        font-weight: 500;
-        color: GitHubTheme.fg-muted;
-        horizontal-alignment: left;
-        vertical-alignment: center;
-        wrap: no-wrap;
-        overflow: elide;
-    }
-}
-
 export component GitHubPullRequestSummary inherits Rectangle {
     in property <ProjectItem> project;
 
@@ -267,6 +229,7 @@ export component GitHubProjectListRow inherits Rectangle {
         height: 24px;
         spacing: 8px;
         alignment: start;
+        cross-axis-alignment: center;
 
         Text {
             text: root.project.project_name;
@@ -277,10 +240,20 @@ export component GitHubProjectListRow inherits Rectangle {
             overflow: elide;
         }
 
-        if root.project.project_alias != "": GitHubProjectLabel {
-            // ~24 Latin chars / ~12 CJK at 12px before ellipsis.
-            max-label-width: 168px;
-            text: root.project.project_alias;
+        if root.project.project_alias != "": Rectangle {
+            width: alias-label.width;
+            height: parent.height;
+            background: transparent;
+
+            alias-label := GitHubMetadataLabel {
+                // The 16px project name rasterizes lower than the 12px label.
+                // Apply the title-row-only optical correction while keeping
+                // the shared metadata label unchanged for other call sites.
+                y: (parent.height - self.height) / 2 + GitHubMetrics.size-2;
+                // ~24 Latin chars / ~12 CJK at 12px before ellipsis.
+                max-label-width: 168px;
+                text: root.project.project_alias;
+            }
         }
     }
 
@@ -316,7 +289,7 @@ export component GitHubProjectListRow inherits Rectangle {
         spacing: 6px;
         alignment: start;
 
-        for project-tag in root.project.project_tags: GitHubProjectLabel {
+        for project-tag in root.project.project_tags: GitHubMetadataLabel {
             text: project-tag;
         }
     }
@@ -452,7 +425,7 @@ export component GitHubProjectGridCard inherits Rectangle {
         overflow: elide;
     }
 
-    if root.project.project_alias != "": GitHubProjectLabel {
+    if root.project.project_alias != "": GitHubMetadataLabel {
         x: 68px;
         y: 40px;
         max-label-width: min(168px, max(48px, parent.width - 84px));
@@ -491,7 +464,7 @@ export component GitHubProjectGridCard inherits Rectangle {
         spacing: 6px;
         alignment: start;
 
-        for project-tag in root.project.project_tags: GitHubProjectLabel {
+        for project-tag in root.project.project_tags: GitHubMetadataLabel {
             text: project-tag;
         }
     }

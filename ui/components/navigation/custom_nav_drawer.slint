@@ -38,7 +38,7 @@ export component GitHubSidebarRightEdge inherits Rectangle {
         x: 20px;
         width: GitHubMetrics.border-thin;
         height: parent.height;
-        background: GitHubTheme.border-default;
+        background: GitHubTheme.shell-divider;
     }
 
 }
@@ -55,7 +55,7 @@ component GitHubNavigationItem {
     private property <bool> keyboard-focus-visible: false;
     private property <color> item-foreground: root.selected
         ? GitHubTheme.fg-default
-        : GitHubTheme.fg-muted;
+        : GitHubTheme.sidebar-navigation-fg;
 
     height: 30px;
     accessible-role: tab;
@@ -153,24 +153,46 @@ export component GitHubNavigationSidebar inherits Rectangle {
     in property <bool> show-sidebar-control: true;
     in property <bool> show-history-controls: true;
     in property <bool> native-vibrancy: false;
+    in property <bool> native-window-active: true;
+    // Docked macOS sidebars paint the surface that Codex composites above its
+    // Menu backdrop. Temporary hover sidebars already own an opaque parent.
+    in property <bool> paint-native-surface: true;
     in property <length> titlebar-inset: 0px;
     in property <image> header-chevron-icon: @image-url("../../assets/icons/lucide-sidebar-chevron-down.svg");
     in property <image> search-icon: @image-url("../../assets/icons/lucide-sidebar-search.svg");
     in property <image> notification-icon: @image-url("../../assets/icons/lucide-sidebar-bell.svg");
     in property <image> settings-icon: @image-url("../../assets/icons/lucide-sidebar-settings.svg");
     in property <image> about-icon: @image-url("../../assets/icons/lucide-sidebar-help.svg");
+    in property <string> toggle-shortcut-label: "";
+    in property <string> back-shortcut-label: "";
+    in property <string> forward-shortcut-label: "";
 
     callback selected(item-index: int);
     callback navigate(Route);
     callback toggle-docked();
     callback back();
     callback forward();
+    // The host uses this to dismiss any window-scoped transient overlay before
+    // applying a navigation or chrome action.
+    callback interaction-started();
 
     width: GitHubMetrics.application-sidebar-width;
     height: 100%;
-    background: root.native-vibrancy ? transparent : GitHubTheme.sidebar-canvas;
+    background: root.native-vibrancy
+        ? (root.paint-native-surface
+            ? (root.native-window-active
+                ? GitHubTheme.sidebar-native-active-canvas
+                : GitHubTheme.sidebar-native-inactive-canvas)
+            : transparent)
+        : GitHubTheme.sidebar-canvas;
     accessible-role: tab-list;
     accessible-label: "Primary navigation";
+
+    // Receive clicks on sidebar chrome that is not occupied by a control.
+    // Interactive children are painted later and keep their own hit targets.
+    TouchArea {
+        clicked => { root.interaction-started(); }
+    }
 
     VerticalLayout {
         width: parent.width;
@@ -192,10 +214,15 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 y: (parent.height - self.height) / 2;
                 control-size: GitHubMetrics.control-medium-size;
                 icon: @image-url("../../assets/icons/octicon-sidebar-collapse-16.svg");
-                tooltip-text: "Hide sidebar";
+                tooltip-text: root.toggle-shortcut-label == ""
+                    ? "Hide sidebar"
+                    : "Hide sidebar (" + root.toggle-shortcut-label + ")";
                 tooltip-above: false;
                 foreground: GitHubTheme.fg-muted;
-                clicked => { root.toggle-docked(); }
+                clicked => {
+                    root.interaction-started();
+                    root.toggle-docked();
+                }
             }
 
             if root.show-history-controls: GitHubIconButton {
@@ -203,11 +230,16 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 y: (parent.height - self.height) / 2;
                 control-size: GitHubMetrics.control-medium-size;
                 icon: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
-                tooltip-text: "Back";
+                tooltip-text: root.back-shortcut-label == ""
+                    ? "Back"
+                    : "Back (" + root.back-shortcut-label + ")";
                 tooltip-above: false;
                 foreground: GitHubTheme.fg-muted;
                 button-enabled: root.can-go-back;
-                clicked => { root.back(); }
+                clicked => {
+                    root.interaction-started();
+                    root.back();
+                }
             }
 
             if root.show-history-controls: GitHubIconButton {
@@ -215,11 +247,16 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 y: (parent.height - self.height) / 2;
                 control-size: GitHubMetrics.control-medium-size;
                 icon: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
-                tooltip-text: "Forward";
+                tooltip-text: root.forward-shortcut-label == ""
+                    ? "Forward"
+                    : "Forward (" + root.forward-shortcut-label + ")";
                 tooltip-above: false;
                 foreground: GitHubTheme.fg-muted;
                 button-enabled: root.can-go-forward;
-                clicked => { root.forward(); }
+                clicked => {
+                    root.interaction-started();
+                    root.forward();
+                }
             }
         }
 
@@ -257,7 +294,10 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 tooltip-text: "Search";
                 tooltip-above: false;
                 foreground: GitHubTheme.fg-muted;
-                clicked => { root.navigate(Route.Search); }
+                clicked => {
+                    root.interaction-started();
+                    root.navigate(Route.Search);
+                }
             }
 
             GitHubIconButton {
@@ -270,6 +310,7 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 tooltip-above: false;
                 tooltip-align-right: true;
                 foreground: GitHubTheme.fg-muted;
+                clicked => { root.interaction-started(); }
             }
         }
 
@@ -283,6 +324,15 @@ export component GitHubNavigationSidebar inherits Rectangle {
             viewport-width: parent.width;
             interactive: true;
 
+            // Flickable owns pointer input across its viewport, so its empty
+            // area needs a local dismiss target instead of relying on the
+            // sidebar background behind it.
+            TouchArea {
+                width: nav-scroll.width;
+                height: nav-scroll.height;
+                clicked => { root.interaction-started(); }
+            }
+
             VerticalLayout {
                 width: parent.width;
                 spacing: GitHubMetrics.size-2;
@@ -294,7 +344,10 @@ export component GitHubNavigationSidebar inherits Rectangle {
                     icon: item.icon;
                     text: item.text;
                     selected: index == root.current-index;
-                    clicked => { root.selected(index); }
+                    clicked => {
+                        root.interaction-started();
+                        root.selected(index);
+                    }
                 }
             }
         }
@@ -319,7 +372,10 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 label-weight: 400;
                 label-y-offset: 1px;
                 selected: root.current-route == Route.Settings;
-                clicked => { root.navigate(Route.Settings); }
+                clicked => {
+                    root.interaction-started();
+                    root.navigate(Route.Settings);
+                }
             }
 
             GitHubIconButton {
@@ -333,7 +389,10 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 tooltip-above: true;
                 foreground: GitHubTheme.fg-muted;
                 selected: root.current-route == Route.About;
-                clicked => { root.navigate(Route.About); }
+                clicked => {
+                    root.interaction-started();
+                    root.navigate(Route.About);
+                }
             }
         }
     }

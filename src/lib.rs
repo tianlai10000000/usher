@@ -52,6 +52,7 @@ mod app_lifecycle;
 mod app_runtime;
 mod memory_diagnostics;
 mod platform;
+mod shortcuts;
 use platform::{
     THEME_MODE_AUTO, apply_native_appearance_for_mode, apply_native_chrome_for_mode,
     effective_dark_mode as get_effective_dark_mode, install_system_theme_watch,
@@ -748,6 +749,7 @@ pub fn main() {
     ui.show().unwrap();
     memory_diagnostics::log_checkpoint("startup.window_shown");
     memory_diagnostics::start_periodic_logging();
+    shortcuts::start_initialization(&ui);
     install_titlebar_settings_button(&ui);
     let ui_weak_titlebar_retry_1 = ui.as_weak();
     Timer::single_shot(std::time::Duration::from_millis(300), move || {

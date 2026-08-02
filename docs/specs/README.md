@@ -14,11 +14,13 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Reusable job runs](jobs.md) | Current / 当前 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
 | [Tag workflow](tag.md) | Current / 当前 | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `ui/views/workflow/` |
 | [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
+| [Application keyboard shortcuts](shortcuts.md) | Current / 当前 | `src/shortcuts/`, `ui/main.slint`, `src/platform/` |
+| [Application status bar](status-bar.md) | Current / 当前 | `ui/components/status_bar.slint`, `ui/main.slint`, shortcut/notification/network/update state owners |
 | [GitHub/Primer UI design](ui-design.md) | Current / 当前 | `ui/theme/github_theme.slint`, `ui/`, `ui/assets/icons/`, all UI contributors |
 
 The UI design specification defines `GitHub*` component naming,
 `GitHubTheme`/`GitHubMetrics` ownership, Primer layout and interaction
-contracts, shared Button/IconButton/Link/Tooltip/Copy/Spinner/form-control
+contracts, shared Button/IconButton/Link/Tooltip/CounterLabel/Copy/Spinner/form-control
 foundations, shared shell/title-bar breadcrumb/PageHeader/ScrollView/Progress foundations,
 UnderlineNav/SegmentedControl/Actions Job foundations,
 Dialog/ActionMenu/Banner overlay contracts, the Material dependency boundary,
@@ -29,7 +31,7 @@ implementation sequence and current status live in
 [`docs/ui-github-migration-plan.md`](../ui-github-migration-plan.md); defects
 live in [`bug-history.md`](../../bug-history.md). / UI 设计规范定义
 `GitHub*` 组件命名、`GitHubTheme`/`GitHubMetrics` 归属、Primer 布局与交互
-契约、Shell/标题栏面包屑/PageHeader/ScrollView/Progress、
+契约、CounterLabel、Shell/标题栏面包屑/PageHeader/ScrollView/Progress、
 UnderlineNav/SegmentedControl/Actions Job 基础、Dialog/ActionMenu/Banner
 浮层契约、通用 Filter ActionMenu、Project 可读卡片宽度、Chat 历史流内操作、
 PR 单一状态/窄屏 Tab 及 diff/文件树字体颜色保护约束、强制 UI Components 演练场/属性矩阵契约、

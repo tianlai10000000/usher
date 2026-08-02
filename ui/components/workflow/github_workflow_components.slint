@@ -1,42 +1,7 @@
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
+import { GitHubMetadataLabel } from "../github_metadata_label.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
-
-export component GitHubWorkflowMetaLabel inherits Rectangle {
-    in property <string> text: "";
-    private property <length> chip-width: max(28px, label-measure.preferred-width + 14px);
-
-    width: root.chip-width;
-    height: 20px;
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: GitHubTheme.border-default;
-    background: GitHubTheme.control-default-rest;
-    vertical-stretch: 0;
-
-    label-measure := Text {
-        visible: false;
-        text: root.text;
-        font-size: 12px;
-        font-weight: 500;
-        wrap: no-wrap;
-    }
-
-    // Keep the compact label centered within its nominal line box.
-    Text {
-        x: 0px;
-        y: (parent.height - self.height) / 2;
-        width: parent.width;
-        height: 18px;
-        text: root.text;
-        font-size: 12px;
-        font-weight: 500;
-        color: GitHubTheme.fg-default;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-}
 
 export component GitHubWorkflowProjectDetails inherits Rectangle {
     in property <string> project-name: "";
@@ -132,8 +97,8 @@ export component GitHubWorkflowProjectDetails inherits Rectangle {
         0px,
         root.width - root.meta-left - (root.compact ? 52px : 16px),
     );
-    private property <length> provider-label-width: max(28px, provider-measure.preferred-width + 14px);
-    private property <length> id-label-width: max(28px, id-measure.preferred-width + 14px);
+    private property <length> provider-label-width: max(28px, provider-measure.preferred-width + 16px);
+    private property <length> id-label-width: max(28px, id-measure.preferred-width + 16px);
     private property <length> labels-width: root.provider-label-width + 8px + root.id-label-width;
     private property <length> alias-gap: root.has-alias ? 8px : 0px;
     private property <length> labels-gap: 12px;
@@ -245,13 +210,13 @@ export component GitHubWorkflowProjectDetails inherits Rectangle {
         overflow: elide;
     }
 
-    GitHubWorkflowMetaLabel {
+    GitHubMetadataLabel {
         x: root.labels-left;
         y: root.chip-y;
         text: root.provider-label;
     }
 
-    GitHubWorkflowMetaLabel {
+    GitHubMetadataLabel {
         x: root.labels-left + root.provider-label-width + 8px;
         y: root.chip-y;
         text: root.id-label;

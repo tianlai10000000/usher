@@ -6,6 +6,8 @@ import { GitHubCompactTextField } from "../input/compact_text_field.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
 import { GitHubLink } from "../github_link.slint";
+import { GitHubMetadataLabel } from "../github_metadata_label.slint";
+import { GitHubCounterLabel, GitHubCounterScheme } from "../label/github_counter_label.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubProgressBar } from "../github_progress_bar.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
@@ -263,6 +265,81 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 GitHubLink { text: "Inline link"; inline: true; }
                 GitHubLink { text: "Muted link"; muted: true; }
                 GitHubLink { text: "Disabled link"; link-enabled: false; }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "Labels and counters";
+            description: "Metadata labels and Primer CounterLabel schemes, limits, and zero-count behavior.";
+            content-height: 252px;
+
+            GitHubShowcaseLabel { x: 0px; y: 0px; width: 180px; height: 20px; label: "Neutral metadata"; }
+            HorizontalLayout {
+                x: 0px;
+                y: 28px;
+                width: parent.width;
+                height: 24px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                GitHubMetadataLabel { text: "GitHub"; }
+                GitHubMetadataLabel { text: "ID 1130209340"; }
+                GitHubMetadataLabel { text: "production"; }
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 68px; width: 180px; height: 20px; label: "Bounded metadata"; }
+            GitHubMetadataLabel {
+                x: 0px;
+                y: 96px;
+                max-label-width: 168px;
+                text: "Repository identifier 1130209340";
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 132px; width: 180px; height: 20px; label: "Counter schemes"; }
+            HorizontalLayout {
+                x: 0px;
+                y: 160px;
+                width: parent.width;
+                height: 20px;
+                spacing: GitHubMetrics.size-20;
+                alignment: start;
+
+                HorizontalLayout {
+                    spacing: GitHubMetrics.size-6;
+                    Text { text: "Issues"; color: GitHubTheme.fg-default; vertical-alignment: center; }
+                    GitHubCounterLabel { count: 12; }
+                }
+                HorizontalLayout {
+                    spacing: GitHubMetrics.size-6;
+                    Text { text: "Pull requests"; color: GitHubTheme.fg-default; vertical-alignment: center; }
+                    GitHubCounterLabel { count: 7; scheme: GitHubCounterScheme.Primary; }
+                }
+                HorizontalLayout {
+                    spacing: GitHubMetrics.size-6;
+                    Text { text: "Checks"; color: GitHubTheme.fg-default; vertical-alignment: center; }
+                    GitHubCounterLabel { count: 3; scheme: GitHubCounterScheme.Secondary; }
+                }
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 196px; width: 180px; height: 20px; label: "Limit and zero"; }
+            HorizontalLayout {
+                x: 0px;
+                y: 224px;
+                width: parent.width;
+                height: 20px;
+                spacing: GitHubMetrics.size-20;
+                alignment: start;
+
+                HorizontalLayout {
+                    spacing: GitHubMetrics.size-6;
+                    Text { text: "Notifications"; color: GitHubTheme.fg-default; vertical-alignment: center; }
+                    GitHubCounterLabel { count: 128; limit: 99; scheme: GitHubCounterScheme.Primary; }
+                }
+                HorizontalLayout {
+                    spacing: GitHubMetrics.size-6;
+                    Text { text: "Zero hidden"; color: GitHubTheme.fg-muted; vertical-alignment: center; }
+                    GitHubCounterLabel { count: 0; hide-if-zero: true; }
+                }
             }
         }
 

@@ -51,8 +51,8 @@ export { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.sl
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 
 export component MainWindow inherits Window {
-    // Keep below Primer `$width-md` (768px) so the PR file tree can auto-collapse
-    // at the same viewport threshold GitHub uses (`max-width: 767.98px`).
+    // Keep the application wide enough for the primary navigation and workspace
+    // while preserving the shared application-level layout constraint.
     min-width: GitHubMetrics.application-min-width;
     min-height: 600px;
     title: "Usher";
@@ -66,6 +66,19 @@ export component MainWindow inherits Window {
     private property <length> page-content-height-offset: root.page-content-top-padding + 2px;
     background: transparent;
     in-out property <bool> window-live-resizing: false;
+    in-out property <bool> native-window-active: true;
+    // Display-only labels come from the Rust shortcut registry so tooltips and
+    // executable bindings cannot drift apart.
+    in property <string> shortcut-toggle-sidebar-label: "";
+    in property <string> shortcut-toggle-terminal-label: "";
+    in property <string> shortcut-navigate-back-label: "";
+    in property <string> shortcut-navigate-forward-label: "";
+    in property <string> shortcut-open-settings-label: "";
+    in-out property <bool> shortcut-initialization-visible: false;
+    in-out property <bool> shortcut-initialization-failed: false;
+    in-out property <float> shortcut-initialization-progress: 0;
+    in-out property <string> shortcut-initialization-status: "";
+    in-out property <string> shortcut-initialization-detail: "";
     out property <length> chat-layout-window-width: self.width;
     out property <length> chat-layout-window-height: self.height;
     // Rust selects a clear CJK-capable family for each desktop platform.
@@ -130,14 +143,13 @@ export component MainWindow inherits Window {
     private property <bool> sidebar-content-wide: true;
     private property <length> sidebar-content-width: root.width
         - (root.sidebar-content-wide ? 0px : GitHubMetrics.application-sidebar-width);
-    // PR Review contains several frozen/virtualized subregions during native
-    // resize. Its outer content column must never inherit the visual sidebar
-    // spring: use the persisted docked target as one discrete geometry value.
-    private property <length> pr-content-x: root.show-navigation-drawer
-            && root.navigation-drawer-expanded
-        ? GitHubMetrics.application-sidebar-width
-        : 0px;
-    private property <length> pr-content-width: root.width - root.pr-content-x;
+    // Keep the large PR Review tree mounted at the window origin, but translate
+    // its ordinary content with the same shell motion as the sidebar and title
+    // bar. Its layout width follows the shell's one-shot width policy so the
+    // diff tree does not reflow on every animation frame.
+    private property <length> pr-content-x:
+        GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress;
+    private property <length> pr-content-width: root.sidebar-content-width;
     private property <bool> docked-sidebar-column-visible:
         root.sidebar-layout-progress > 0.001 || root.sidebar-motion-running;
     private property <length> pr-readiness-anchor-x: 0px;
@@ -166,6 +178,9 @@ export component MainWindow inherits Window {
     callback navigation-drawer-motion-settled(bool);
     callback modal-overlay-visibility-changed(bool);
     callback dismiss-transient-overlays();
+    // One root-window key boundary. Rust owns normalization, scope, conflict
+    // detection, command lookup, and dispatch for application shortcuts.
+    callback app-shortcut-key-pressed(string, bool, bool, bool, bool) -> bool;
 
     // 更新相关回调
     callback install();
@@ -613,10 +628,29 @@ export component MainWindow inherits Window {
 
     }
 
-    // Page content participates in the sidebar's live layout geometry. The
-    // sidebar itself is mounted later at the window root so it always paints
-    // above route content during resize and spring transitions.
-    Rectangle {
+    // Every interactive route and overlay lives under this one FocusScope so
+    // application shortcuts are captured before the currently focused child.
+    app-shortcut-scope := FocusScope {
+        width: root.width;
+        height: root.height;
+
+        capture-key-pressed(event) => {
+            if root.app-shortcut-key-pressed(
+                event.text,
+                event.modifiers.control,
+                event.modifiers.alt,
+                event.modifiers.shift,
+                event.modifiers.meta
+            ) {
+                return accept;
+            }
+            return reject;
+        }
+
+        // Page content participates in the sidebar's live layout geometry. The
+        // sidebar itself is mounted later at the window root so it always paints
+        // above route content during resize and spring transitions.
+        Rectangle {
         x: 0;
         y: 0;
         width: root.width;
@@ -667,20 +701,20 @@ export component MainWindow inherits Window {
 
                     GitHubIconButton {
                         icon: @image-url("./assets/icons/octicon-sidebar-expand-16.svg");
-                        tooltip-text: "Show sidebar";
+                        tooltip-text: "Show sidebar (" + root.shortcut-toggle-sidebar-label + ")";
                         tooltip-above: false;
                         clicked => { root.toggle-navigation-drawer(); }
                     }
                     GitHubIconButton {
                         icon: @image-url("./assets/icons/octicon-arrow-left-16.svg");
-                        tooltip-text: "Back";
+                        tooltip-text: "Back (" + root.shortcut-navigate-back-label + ")";
                         tooltip-above: false;
                         button-enabled: root.navigation-can-go-back;
                         clicked => { root.navigate-back(); }
                     }
                     GitHubIconButton {
                         icon: @image-url("./assets/icons/octicon-chevron-right-16.svg");
-                        tooltip-text: "Forward";
+                        tooltip-text: "Forward (" + root.shortcut-navigate-forward-label + ")";
                         tooltip-above: false;
                         button-enabled: root.navigation-can-go-forward;
                         clicked => { root.navigate-forward(); }
@@ -1121,12 +1155,16 @@ export component MainWindow inherits Window {
             show-sidebar-control: !root.platform-is-macos;
             show-history-controls: !root.platform-is-macos;
             native-vibrancy: root.platform-is-macos;
+            native-window-active: root.native-window-active;
             titlebar-inset: root.native-titlebar-inset;
             header-chevron-icon: root.navigation-chevron-icon;
             search-icon: root.navigation-search-icon;
             notification-icon: root.navigation-notification-icon;
             settings-icon: root.navigation-settings-icon;
             about-icon: root.navigation-about-icon;
+            toggle-shortcut-label: root.shortcut-toggle-sidebar-label;
+            back-shortcut-label: root.shortcut-navigate-back-label;
+            forward-shortcut-label: root.shortcut-navigate-forward-label;
             items: [
                 { icon: root.navigation-home-icon, text: "Home" },
                 { icon: root.navigation-chat-icon, text: "Chat" },
@@ -1138,6 +1176,7 @@ export component MainWindow inherits Window {
                     root.navigate-from-nav-index(item-index);
                 }
             }
+            interaction-started => { root.dismiss-transient-overlays(); }
             navigate(route) => { root.navigate(route); }
             toggle-docked => { root.toggle-navigation-drawer(); }
             back => { root.navigate-back(); }
@@ -1145,12 +1184,16 @@ export component MainWindow inherits Window {
         }
 
         GitHubSidebarRightEdge {
-            x: parent.width - 20px;
-            // PR review owns a continuous native title-bar surface. Do not
-            // project the sidebar's vertical edge through that title-bar
-            // strip; retain the normal boundary below the review content.
-            y: root.current-route == Route.PrReview ? root.native-titlebar-inset : 0px;
-            height: parent.height - self.y;
+            // Keep the 1 px stroke inside the sidebar's final pixel instead of
+            // extending it into route content. PR Review paints its ordinary
+            // surface above this host below the title bar, so an outside stroke
+            // would otherwise appear one logical pixel farther right only in
+            // the uncovered native-title-bar segment.
+            x: parent.width - self.width;
+            // The docked sidebar boundary is one continuous window-height
+            // edge, including the native title-bar segment in PR Review.
+            y: 0px;
+            height: parent.height;
             visible: root.sidebar-layout-progress > 0.001;
             z: 1;
         }
@@ -1176,10 +1219,16 @@ export component MainWindow inherits Window {
             control-size: 28px;
             glyph-size: 14px;
             icon: @image-url("./assets/icons/lucide-sidebar-settings.svg");
-            tooltip-text: "Settings";
+            tooltip-text: "Settings (" + root.shortcut-open-settings-label + ")";
             tooltip-above: false;
             tooltip-align-right: true;
             foreground: GitHubTheme.fg-subtle;
+            hover-foreground: GitHubTheme.titlebar-control-hover-fg;
+            selected-foreground: GitHubTheme.titlebar-control-selected-fg;
+            selected-hover-foreground: GitHubTheme.titlebar-control-selected-fg;
+            hover-background: GitHubTheme.titlebar-control-hover-bg;
+            selected-background: GitHubTheme.titlebar-control-selected-bg;
+            selected-hover-background: GitHubTheme.titlebar-control-selected-hover-bg;
             selected: root.current-route == Route.Settings;
             clicked => { root.navigate(Route.Settings); }
         }
@@ -1197,7 +1246,7 @@ export component MainWindow inherits Window {
         y: root.native-titlebar-inset - 1px;
         width: root.width - self.x;
         height: 1px;
-        background: GitHubTheme.border-default;
+        background: GitHubTheme.shell-divider;
         z: 50;
     }
 
@@ -1273,12 +1322,17 @@ export component MainWindow inherits Window {
                 show-sidebar-control: !root.platform-is-macos;
                 show-history-controls: !root.platform-is-macos;
                 native-vibrancy: root.platform-is-macos;
+                native-window-active: root.native-window-active;
+                paint-native-surface: false;
                 titlebar-inset: root.native-titlebar-inset;
                 header-chevron-icon: root.navigation-chevron-icon;
                 search-icon: root.navigation-search-icon;
                 notification-icon: root.navigation-notification-icon;
                 settings-icon: root.navigation-settings-icon;
                 about-icon: root.navigation-about-icon;
+                toggle-shortcut-label: root.shortcut-toggle-sidebar-label;
+                back-shortcut-label: root.shortcut-navigate-back-label;
+                forward-shortcut-label: root.shortcut-navigate-forward-label;
                 items: [
                     { icon: root.navigation-home-icon, text: "Home" },
                     { icon: root.navigation-chat-icon, text: "Chat" },
@@ -1289,6 +1343,7 @@ export component MainWindow inherits Window {
                     root.sidebar-preview-visible = false;
                     root.navigate-from-nav-index(item-index);
                 }
+                interaction-started => { root.dismiss-transient-overlays(); }
                 navigate(route) => {
                     root.sidebar-preview-visible = false;
                     root.navigate(route);
@@ -1326,6 +1381,11 @@ export component MainWindow inherits Window {
         y: root.height - LayoutConstants.status-bar-height;
         width: root.sidebar-content-width;
         height: LayoutConstants.status-bar-height;
+        shortcut-initialization-visible: root.shortcut-initialization-visible;
+        shortcut-initialization-failed: root.shortcut-initialization-failed;
+        shortcut-initialization-progress: root.shortcut-initialization-progress;
+        shortcut-initialization-status: root.shortcut-initialization-status;
+        shortcut-initialization-detail: root.shortcut-initialization-detail;
         z: 600;
     }
 
@@ -1345,7 +1405,8 @@ export component MainWindow inherits Window {
             enable-terminal: root.current-route == Route.Workflow;
             terminal-bottom-offset: root.workflow-fab-bottom-offset;
             terminal-active: root.shell-drawer-visible;
-            terminal-tooltip-text: "Open terminal";
+            terminal-tooltip-text: "Open terminal (" + root.shortcut-toggle-terminal-label + ")";
+            terminal-active-tooltip-text: "Close terminal (" + root.shortcut-toggle-terminal-label + ")";
             enable-to-top: true;
             to-top-bottom-offset: root.current-route == Route.Workflow
                 ? root.workflow-fab-bottom-offset + LayoutConstants.page-fab-stack-spacing
@@ -1430,6 +1491,7 @@ export component MainWindow inherits Window {
         application-width: root.width;
         application-height: root.height;
         shell-leading-inset: root.pr-content-x;
+        shell-content-width: root.pr-content-width;
         live-resizing: root.window-live-resizing;
         project-name: root.workflow-project-name;
         provider: root.workflow-pr-repo-type;
@@ -1889,13 +1951,13 @@ export component MainWindow inherits Window {
     }
     
     // 下载进度模态框
-    GitHubDownloadProgressDialog {
-        width: 100%;
-        height: 100%;
-        z: 1200;
-        cancel-clicked => {
-            root.cancel-download();
+        GitHubDownloadProgressDialog {
+            width: 100%;
+            height: 100%;
+            z: 1200;
+            cancel-clicked => {
+                root.cancel-download();
+            }
         }
     }
-    
 }

@@ -10,6 +10,8 @@ export component GitHubPageView {
     in property <string> page-description: "";
     in property <image> page-icon;
     in property <bool> page-header-border: true;
+    // Pages with a full-bleed header can opt out of the generic top inset.
+    in property <length> content-top-padding: GitHubMetrics.size-16;
 
     property <length> page_viewport_height: viewport-height > 0px ? viewport-height : LayoutConstants.default-page-viewport-height;
 
@@ -18,7 +20,10 @@ export component GitHubPageView {
         min-height: page_viewport_height;
 
         VerticalLayout {
-            padding: GitHubMetrics.size-16;
+            padding-left: GitHubMetrics.size-16;
+            padding-right: GitHubMetrics.size-16;
+            padding-bottom: GitHubMetrics.size-16;
+            padding-top: root.content-top-padding;
             spacing: GitHubMetrics.size-16;
             alignment: start;
 

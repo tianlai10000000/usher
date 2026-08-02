@@ -39,9 +39,9 @@ pub use macos::is_window_interacting;
 
 #[cfg(target_os = "macos")]
 pub(crate) use macos::{
-    detect_system_dark_mode, follow_system_appearance, install_titlebar_settings_button,
-    play_ui_click, set_app_appearance, set_title_bar_color, setup_pr_review_fonts,
-    update_titlebar_navigation_controls,
+    detect_system_dark_mode, follow_system_appearance, install_shortcut_input_bridge,
+    install_titlebar_settings_button, play_ui_click, set_app_appearance, set_title_bar_color,
+    setup_pr_review_fonts, update_titlebar_navigation_controls,
 };
 
 #[cfg(target_os = "windows")]
@@ -71,6 +71,11 @@ pub(crate) fn set_title_bar_color(_window: &MainWindow, _is_dark: bool) {}
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn install_titlebar_settings_button(_window: &MainWindow) {}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn install_shortcut_input_bridge(_window: &MainWindow) -> bool {
+    true
+}
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn update_titlebar_navigation_controls(_window: &MainWindow) {}
