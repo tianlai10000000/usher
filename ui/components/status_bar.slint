@@ -152,6 +152,9 @@ component GitHubStatusBarItem inherits Rectangle {
 // GitHub has no persistent web status bar equivalent. This desktop utility
 // surface composes Primer canvas, border, typography, control and overlay tokens.
 export component GitHubStatusBar inherits Rectangle {
+    // The host always uses window coordinates. Only the painted surface and
+    // transient left lane follow the live main-content edge.
+    in property <length> content-leading-inset: 0px;
     in property <bool> shortcut-initialization-visible: false;
     in property <bool> shortcut-initialization-failed: false;
     in property <float> shortcut-initialization-progress: 0;
@@ -175,6 +178,8 @@ export component GitHubStatusBar inherits Rectangle {
     property <color> danger-fg: GitHubTheme.danger-fg;
     property <color> control-hover: GitHubTheme.control-transparent-hover;
     property <color> control-active: GitHubTheme.control-transparent-active;
+    private property <length> resolved-content-leading-inset:
+        min(root.width, max(0px, root.content-leading-inset));
     // Keep the utility cluster deterministic. These items use explicit
     // geometry inside a plain container because a nested HorizontalLayout can
     // redistribute component widths and push trailing items past the window.
@@ -211,33 +216,39 @@ export component GitHubStatusBar inherits Rectangle {
     property <length> popup-anchor-rel-x: popup-anchor-x - root.absolute-position.x;
     
     height: LayoutConstants.status-bar-height;
-    background: root.canvas-subtle;
+    background: transparent;
 
-    VerticalLayout {
-        width: 100%;
+    status-surface := Rectangle {
+        x: root.resolved-content-leading-inset;
+        y: 0px;
+        width: root.width - root.resolved-content-leading-inset;
         height: 100%;
-        spacing: 0px;
-        padding: 0px;
+        background: root.canvas-subtle;
 
-        // Top border
+        // The divider belongs only to the painted content-column surface.
         Rectangle {
+            x: 0px;
+            y: 0px;
             width: 100%;
             height: 1px;
             background: root.shell-divider;
         }
-        
-        HorizontalLayout {
-            width: 100%;
-            vertical-stretch: 1;
+    }
+
+    HorizontalLayout {
+        x: root.resolved-content-leading-inset;
+        y: 1px;
+        width: root.width - root.resolved-content-leading-inset;
+        height: root.height - 1px;
+        spacing: 0px;
+        padding-left: 8px;
+        padding-right: 8px;
+
+        // Left status item container
+        status-items-left := HorizontalLayout {
+            horizontal-stretch: 0;
             spacing: 0px;
-            padding-left: 8px;
-            padding-right: 8px;
-                
-            // Left status item container
-            status-items-left := HorizontalLayout {
-                horizontal-stretch: 0;
-                spacing: 0px;
-                alignment: start;
+            alignment: start;
 
                 // Completion is published only after the registry, root
                 // callback, and native platform bridge are all usable.
@@ -354,19 +365,20 @@ export component GitHubStatusBar inherits Rectangle {
                     }
                 }
                 
-            }
+        }
 
-            // Middle spacer (for left/right alignment)
-            Rectangle {
-                horizontal-stretch: 1;
-                background: transparent;
-            }
+        // Reserve the rest of the painted row without participating in the
+        // root-anchored persistent utility cluster.
+        Rectangle {
+            horizontal-stretch: 1;
+            background: transparent;
         }
     }
 
-            // Right status item container. Keep it outside the row layout so
-            // the utility cluster cannot be compressed when the sidebar opens.
-            status-items-right := Rectangle {
+    // Keep the persistent cluster outside the moving painted surface. It is
+    // anchored to the stable window-coordinate host, so sidebar motion cannot
+    // move, compress, or reorder these items.
+    status-items-right := Rectangle {
                 x: root.width - root.status-items-right-width - 8px;
                 y: 1px;
                 width: root.status-items-right-width;

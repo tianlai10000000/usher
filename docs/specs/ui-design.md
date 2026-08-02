@@ -236,10 +236,11 @@ expanded/collapsed, and success confirmation.
   sidebar-specific translucent hairline. The right edge is owned by the root
   shell as a content-boundary decoration: a visible 1 px stroke plus
   Codex-compatible 20 px ambient and 8 px near elevation lobes project only
-  toward the sidebar. Docked close
-  drives the sidebar, content pane, and status bar from one interruptible
-  damped-spring progress value tuned to Codex's 0.5 s / 0.1 bounce transition;
-  reopening retargets it without resetting position or velocity. Rendering is
+  toward the sidebar. Docked close drives the sidebar, content pane, and only
+  the status bar's painted leading edge from one interruptible damped-spring
+  progress value tuned to Codex's 0.5 s / 0.1 bounce transition; the transparent
+  status host and persistent right cluster remain in window coordinates.
+  Reopening retargets it without resetting position or velocity. Rendering is
   frame-paced, and repeated toggles debounce persistence so only the final
   settled preference is written. Native title-bar actions retarget that motion
   value directly on the owning event-loop thread, so click bursts cannot queue
@@ -293,8 +294,9 @@ expanded/collapsed, and success confirmation.
   24px 槽位中，正文使用 13px 原生系统字体；底部使用侧栏专用半透明 Hairline。右边界
   由根 Shell 作为内容边界装饰拥有：可见的 1px 描边加 20px 环境阴影和 8px 近端阴影
   只向侧栏方向投射。
-  固定侧栏关闭时，侧栏、内容区和状态栏由同一个可中断的阻尼弹簧进度驱动；参数对齐
-  Codex 的 0.5s / 0.1 bounce。期间重新打开会保留当前位置和速度并重定向目标。
+  固定侧栏关闭时，同一个可中断的阻尼弹簧进度只移动侧栏、内容区和状态栏可见表面
+  的左边缘；状态栏透明宿主与右侧常驻工具组保持窗口坐标。参数对齐 Codex 的
+  0.5s / 0.1 bounce；期间重新打开会保留当前位置和速度并重定向目标。
   Settings 与普通导航行使用相同的常规字重，并针对 15px 图标做 1px 视觉基线校正。
   侧栏主体自身不得绘制独立的右侧容器阴影；固定态使用根层清晰边框与克制的内向
   Elevation，临时 Hover 态使用不透明白色（浅色模式 `#ffffff`）、只有边框、尾部上下
@@ -330,9 +332,11 @@ expanded/collapsed, and success confirmation.
   提供 Default、Primary、Secondary Scheme、可选上限格式、紧凑叠加模式与明确的
   零值隐藏，并在 Layout 中保持内容宽度。仅图标宿主必须在无障碍名称和 Tooltip 中
   包含计数语义；其属性矩阵归入 UI Components 的 `Labels and counters` 分类。
-- `GitHubStatusBar`: one 28 px root-shell utility surface. Its persistent
-  keyboard, bell, network, and version cluster is anchored 8 px from the right
-  edge with 4 px gaps and must not participate in a width-distributing layout.
+- `GitHubStatusBar`: one 28 px transparent, full-window root-shell host whose
+  painted surface starts at the live main-content edge, leaving no status-bar
+  surface below an open sidebar. Its persistent keyboard, bell, network, and
+  version cluster is anchored 8 px from the window-right edge with 4 px gaps,
+  outside both the moving painted surface and any width-distributing layout.
   The bell is icon-only and overlays a Primer primary-style numeric unread
   counter only when count is positive (`99+` cap); zero mounts no counter.
   Green is reserved for ready/online state, unread notification uses accent,
@@ -340,8 +344,10 @@ expanded/collapsed, and success confirmation.
   edge and expand leftward. Shared popups use one status-bar parent coordinate
   space and must leave the version item visible. The complete behavior contract
   is [status-bar.md](status-bar.md).
-- `GitHubStatusBar`：根 Shell 唯一的 28px 工具栏。常驻键盘、铃铛、网络与版本
-  工具组距右边缘 8px、条目间距 4px，禁止参与会重新分配宽度的 Layout。铃铛只显示
+- `GitHubStatusBar`：根 Shell 唯一的 28px 全窗口透明宿主；可见表面从实时主内容
+  边缘开始，侧栏展开后其正下方不得出现状态栏表面。常驻键盘、铃铛、网络与版本
+  工具组距窗口右边缘 8px、条目间距 4px，位于移动可见表面之外，并禁止参与会重新
+  分配宽度的 Layout。铃铛只显示
   图标；未读数大于 0 时叠加 Primer Primary 风格数字 Counter（上限显示 `99+`），
   为 0 时不挂载 Counter。绿色只表示就绪/在线，未读通知使用强调色，版本保持弱化色。
   右侧 Tooltip 与宿主尾边对齐并向左展开；共享浮层只使用一套状态栏父坐标系，且不得

@@ -1377,10 +1377,12 @@ export component MainWindow inherits Window {
     // click-outside dismiss paint over the terminal / back-to-top IconButtons.
     // Keep below full-page overlays (PrReview 800), Notify (900), and Toast (1000).
     GitHubStatusBar {
-        x: GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress;
+        x: 0px;
         y: root.height - LayoutConstants.status-bar-height;
-        width: root.sidebar-content-width;
+        width: root.width;
         height: LayoutConstants.status-bar-height;
+        content-leading-inset:
+            GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress;
         shortcut-initialization-visible: root.shortcut-initialization-visible;
         shortcut-initialization-failed: root.shortcut-initialization-failed;
         shortcut-initialization-progress: root.shortcut-initialization-progress;

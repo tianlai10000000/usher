@@ -126,8 +126,10 @@ Review 工作区用于虚拟化的公开 `ListView`/`ScrollView`。
 `ui/components/navigation/custom_nav_drawer.slint` 的仅图标路由栏，以及
 位于 `ui/components/status_bar.slint` 的运行状态工具栏。路由栏负责路由
 选中态与 Tooltip 展示；状态工具栏负责更新、通知、网络连接及版本展示。
-其右侧常驻工具组直接锚定在根状态栏，不参与会重新分配宽度的 Layout，因此打开
-侧栏时不得压缩快捷键、通知、网络或版本条目。通知数量仅在非零时显示为铃铛徽标；
+其透明宿主始终使用窗口坐标，只有可见表面与左侧临时状态区跟随实时内容边缘；右侧
+常驻工具组直接锚定在根状态栏，不参与会重新分配宽度的 Layout。因此侧栏展开后其
+正下方不显示状态栏表面，也不得移动或压缩快捷键、通知、网络或版本条目。通知数量
+仅在非零时显示为铃铛徽标；
 快捷键/网络健康色由对应 Feature 状态驱动，通知与版本不作为健康指标。右边缘
 Tooltip 向左展开，状态浮层共享同一父坐标系。各页面不得重复实现这两类 Shell
 Surface。详见 [specs/status-bar.md](specs/status-bar.md)。
@@ -251,7 +253,7 @@ GitHub 控件。
 徽标。所有底栏 Overlay 必须在同一父级坐标系中计算 viewport 与 anchor，保证各条目
 在任何宽度下对齐。
 
-应用 Shell 统一拥有一个 240px 桌面侧栏。持久化的固定状态参与页面布局；侧栏、内容区和状态栏由同一个按显示帧推进的阻尼弹簧进度驱动，参数对齐 Codex 的 0.5s / 0.1 bounce，原生材质在整个过程中保持挂载。连续点击标题栏按钮会在保留当前位置和速度的前提下重定向弹簧目标，并对偏好持久化去抖，只把最终稳定状态写盘，因此不会排队冗余 I/O 或让 Shell 停在中间状态。原生 Live Resize 会先把动画收敛到当前固定目标，再应用窗口宽度变化，避免独立求值的路由绑定显示半开 Shell。固定态边界 Elevation 由主内容面拥有，贯穿完整窗口高度，并以清晰描边、环境阴影和近端阴影只向侧栏方向投射。取消固定后，独立的窗口左侧 8px Hover 热区会把同一侧栏作为只有边框、尾部上下圆角的根层临时浮层打开，并在指针离开后短延迟关闭。macOS 通过原生左侧标题栏 accessory-bar 按钮提供侧栏开关、Back 和 Forward，并带仅悬停显示的背景、Tooltip 与辅助功能标签；侧栏收起时使用 Codex 的轮廓 `sidebar.left` 图标，展开时使用左侧三分之一填充图标，使两种状态保持明显区分。路由面包屑占用原生标题栏剩余安全区，不再额外占据一行内容；其空白区域保持输入透明以支持原生拖窗，并在侧栏移动期间始终避开红绿灯和原生附件。原生附件按钮、Slint 面包屑和尾部操作统一按完整 46px 标题栏 inset 的几何中轴线对齐；每个原生控件 frame 必须完整落在 accessory 容器内，避免 AppKit 裁切 hover、焦点或按下状态。标题栏与内容区的分割线从实时主内容边缘开始，不穿过固定侧栏页头。macOS 采用已从本机 Codex 桌面端 Electron 配置核实的实现：一个覆盖完整内容区、随宽高共同缩放的 `NSVisualEffectView` 使用 Menu 材质与 BehindWindow 混合，主内容面保持不透明。现有固定侧栏 Rectangle 在原生 Effect 上绘制随焦点变化的渲染表面：窗口为 Key 时使用浅色 `#ffffffa6` 或深色 `#2b2b2ba3` 半透明表面，失去 Key 后切换为浅色 `#fdfdfd` 或深色 `#212121` 不透明表面。失去 Key 时同时隐藏 Effect，并在渲染表面下保留 Codex 的浅色 `#f9f9f9` 或深色 `#000000` 原生窗口 fallback。临时 Hover 侧栏继续使用自己独立的不透明浮层表面。按钮可用状态由 Router 历史驱动。Windows/Linux 在 Slint 侧栏页头和收起态紧凑控制条中提供同等操作，并使用共用的半透明材质回退。三端共享同一组 Router callback 和侧栏偏好，平台代码不持有路由历史。
+应用 Shell 统一拥有一个 240px 桌面侧栏。持久化的固定状态参与页面布局；同一个按显示帧推进的阻尼弹簧进度只移动侧栏、内容区和状态栏可见表面的左边缘，参数对齐 Codex 的 0.5s / 0.1 bounce，原生材质在整个过程中保持挂载。状态栏的全窗口透明宿主与右侧常驻工具组始终使用窗口坐标。连续点击标题栏按钮会在保留当前位置和速度的前提下重定向弹簧目标，并对偏好持久化去抖，只把最终稳定状态写盘，因此不会排队冗余 I/O 或让 Shell 停在中间状态。原生 Live Resize 会先把动画收敛到当前固定目标，再应用窗口宽度变化，避免独立求值的路由绑定显示半开 Shell。固定态边界 Elevation 由主内容面拥有，贯穿完整窗口高度，并以清晰描边、环境阴影和近端阴影只向侧栏方向投射。取消固定后，独立的窗口左侧 8px Hover 热区会把同一侧栏作为只有边框、尾部上下圆角的根层临时浮层打开，并在指针离开后短延迟关闭。macOS 通过原生左侧标题栏 accessory-bar 按钮提供侧栏开关、Back 和 Forward，并带仅悬停显示的背景、Tooltip 与辅助功能标签；侧栏收起时使用 Codex 的轮廓 `sidebar.left` 图标，展开时使用左侧三分之一填充图标，使两种状态保持明显区分。路由面包屑占用原生标题栏剩余安全区，不再额外占据一行内容；其空白区域保持输入透明以支持原生拖窗，并在侧栏移动期间始终避开红绿灯和原生附件。原生附件按钮、Slint 面包屑和尾部操作统一按完整 46px 标题栏 inset 的几何中轴线对齐；每个原生控件 frame 必须完整落在 accessory 容器内，避免 AppKit 裁切 hover、焦点或按下状态。标题栏与内容区的分割线从实时主内容边缘开始，不穿过固定侧栏页头。macOS 采用已从本机 Codex 桌面端 Electron 配置核实的实现：一个覆盖完整内容区、随宽高共同缩放的 `NSVisualEffectView` 使用 Menu 材质与 BehindWindow 混合，主内容面保持不透明。现有固定侧栏 Rectangle 在原生 Effect 上绘制随焦点变化的渲染表面：窗口为 Key 时使用浅色 `#ffffffa6` 或深色 `#2b2b2ba3` 半透明表面，失去 Key 后切换为浅色 `#fdfdfd` 或深色 `#212121` 不透明表面。失去 Key 时同时隐藏 Effect，并在渲染表面下保留 Codex 的浅色 `#f9f9f9` 或深色 `#000000` 原生窗口 fallback。临时 Hover 侧栏继续使用自己独立的不透明浮层表面。按钮可用状态由 Router 历史驱动。Windows/Linux 在 Slint 侧栏页头和收起态紧凑控制条中提供同等操作，并使用共用的半透明材质回退。三端共享同一组 Router callback 和侧栏偏好，平台代码不持有路由历史。
 
 Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。所有列表、详情/diff、仓库文件、review state、review submit 和 merge 请求都根据当前项目持久化的 `repo_type` 选择实现，并在执行前校验其与 `remote_repo` 一致。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，并用独立 action 序列防止迟到的 review/merge 响应更新其他项目或 PR。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 在 adapter 边界解码，每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写都使用序列号防止迟到响应污染当前项目或 PR。
 

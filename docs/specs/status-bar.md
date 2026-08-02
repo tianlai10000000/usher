@@ -20,8 +20,9 @@ surface.
   CounterLabel schemes, limit formatting, compact badge geometry, and
   hide-if-zero behavior used by the notification trigger.
 - `ui/main.slint` mounts one status bar at the root shell, below ordinary route
-  content and above route-local floating controls. Its x/width follow the live
-  main-content edge while the docked sidebar moves.
+  content and above route-local floating controls. Its transparent host remains
+  in window coordinates; only the painted surface and transient left lane follow
+  the live main-content edge while the docked sidebar moves.
 - `src/shortcuts/` owns shortcut initialization stages, failure/readiness, and
   the binding detail shown by the shortcut popup.
 - `src/notification.rs` and `NotificationManager` own the notification queue.
@@ -36,7 +37,8 @@ surface.
 - `ui/components/label/github_counter_label.slint` 持有通知入口复用的 Primer
   CounterLabel Scheme、上限格式、紧凑徽标几何与零值隐藏行为。
 - `ui/main.slint` 在根 Shell 只挂载一个状态栏；它位于普通路由内容之下、路由局部
-  浮动控件之上，并在固定侧栏移动时跟随主内容区实时 x/width。
+  浮动控件之上。透明宿主始终使用窗口坐标；固定侧栏移动时，只有可见表面与左侧
+  临时状态区跟随主内容区实时左边缘。
 - `src/shortcuts/` 持有快捷键初始化阶段、失败/就绪状态，以及快捷键浮层显示的
   键位详情。
 - `src/notification.rs` 与 `NotificationManager` 持有通知队列。
@@ -46,13 +48,16 @@ surface.
 
 ## Geometry and order / 几何与顺序
 
-1. The bar is 28 px high and remains attached to the bottom edge of the main
-   content column.
-2. Update checks, downloads, and shortcut initialization progress occupy the
+1. The 28 px transparent host spans the window bottom with stable `x=0` and
+   window width. It must not use the sidebar-dependent content width.
+2. The painted background and top divider begin at the live main-content edge,
+   so no status-bar surface is visible below an open sidebar. Update checks,
+   downloads, and shortcut initialization progress occupy this surface's
    transient left status area.
 3. After shortcut initialization settles, the persistent utility cluster is
-   anchored directly to the status bar's right edge with an 8 px inset. It is
-   not a child of a width-distributing layout.
+   anchored directly to the stable host's window-right edge with an 8 px inset.
+   It is neither a child of the moving painted surface nor of a
+   width-distributing layout.
 4. Persistent items appear in this fixed order: shortcut status, notification,
    network, version.
 5. Shortcut, notification, and network use 28 px icon hit targets. Version uses
@@ -60,21 +65,28 @@ surface.
    cluster is 200 px wide.
 6. Opening the 240 px sidebar or resizing down to the 800 px application
    minimum must not clip, overlap, reorder, or hide the version item.
-7. The notification trigger is icon-only. A top-right numeric badge displays
+7. Sidebar motion, including a rapid mid-flight retarget, must not change the
+   persistent cluster's absolute x positions. Window resize moves the complete
+   cluster directly with the window-right edge without changing item widths.
+8. The notification trigger is icon-only. A top-right numeric badge displays
    unread count from 1 through 99 and caps larger values at `99+`; count 0
    mounts no badge. Tooltip and popup retain the complete count. A persistent
    `Notifications N` label is not rendered.
 
-1. 状态栏高度为 28px，并始终贴在主内容列底边。
-2. 更新检查、下载与快捷键初始化进度使用左侧临时状态区域。
-3. 快捷键初始化结束后，常驻工具组以 8px 内缩直接锚定到状态栏右边缘，不得再作为
-   会分配宽度的 Layout 子节点。
+1. 28px 高的透明宿主覆盖窗口底边，始终保持 `x=0` 和窗口宽度，不得使用受侧栏
+   影响的内容区宽度。
+2. 可见背景和顶部分隔线从实时主内容区左边缘开始，因此侧栏展开后其正下方不得出现
+   状态栏表面。更新检查、下载与快捷键初始化进度使用该表面的左侧临时状态区域。
+3. 快捷键初始化结束后，常驻工具组以 8px 内缩直接锚定到稳定宿主的窗口右边缘；
+   它既不是移动可见表面的子节点，也不得作为会分配宽度的 Layout 子节点。
 4. 常驻条目固定顺序为：快捷键状态、通知、网络、版本。
 5. 快捷键、通知和网络使用 28px 图标命中区；版本使用稳定的 104px 文字命中区；
    相邻条目间距为 4px，完整工具组宽度为 200px。
 6. 打开 240px 侧栏或把窗口缩小到应用 800px 最小宽度时，不得裁切、重叠、重排或
    隐藏版本号。
-7. 通知入口只显示铃铛图标；右上角数字徽标显示 1–99 条未读数量，更大值显示
+7. 侧栏动画及动画中快速反向切换不得改变常驻工具组的绝对 x 坐标。窗口 Resize 时
+   整组只直接跟随窗口右边缘移动，条目宽度不得改变。
+8. 通知入口只显示铃铛图标；右上角数字徽标显示 1–99 条未读数量，更大值显示
    `99+`，数量为 0 时不挂载徽标。Tooltip 与浮层保留完整数量，不显示常驻
    `Notifications N` 文字。
 
@@ -149,6 +161,10 @@ Tooltip 与浮层详情。
 
 - Verify all four persistent items at 800 px and at a wide window, with the
   sidebar both open and closed.
+- During open, close, and rapid retargeting, verify that the painted surface
+  follows the content edge while the persistent right cluster does not move.
+- With the sidebar open, verify that its bottom area retains the sidebar surface
+  and has no status-bar background or top divider.
 - Verify the version remains visible while every status popup is open.
 - Verify notification uses a bell icon with muted empty and accent unread
   states; count 0 has no badge, positive counts have a numeric badge, and no
@@ -162,6 +178,9 @@ Tooltip 与浮层详情。
 - Run the full Slint compile and the repository standard checks.
 
 - 在 800px 与宽窗口下分别检查侧栏展开/收起时的四个常驻条目。
+- 展开、收起及动画中快速反向切换时，确认可见表面跟随内容边缘，而右侧常驻工具组
+  不发生移动。
+- 侧栏展开时确认其底部保留侧栏表面，不出现状态栏背景或顶部分隔线。
 - 打开每一种状态栏浮层时确认版本号仍可见。
 - 确认通知只使用铃铛图标：空队列为弱化色且不显示数字徽标，未读为强调色并显示
   数字徽标，不显示常驻通知文字。
