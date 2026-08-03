@@ -187,6 +187,8 @@ The GitHub release workflow produces macOS archives/DMGs and Windows ZIP bundles
 - [Pull request workflow specification](docs/specs/pr-review.md)
 - [Terminal behavior specification](docs/specs/terminal.md)
 - [Build performance and artifact policy](docs/build-performance.md)
+- [Memory optimization backlog](docs/memory_optimization_backlog.md)
+- [内存优化待办](docs/memory_optimization_backlog.zh.md)
 - [Historical terminal investigation notes](docs/terminal_viewport_iteration_notes.md)
 
 ## License

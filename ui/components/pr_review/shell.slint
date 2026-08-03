@@ -1,6 +1,6 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
-import { GitHubActionMenu } from "../github_action_menu.slint";
+import { GitHubActionMenu, GitHubActionMenuTriggerArea } from "../github_action_menu.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
 
@@ -490,21 +490,25 @@ export component GitHubRelativeTimestamp inherits Rectangle {
         mouse-cursor: default;
     }
     if time-touch.has-hover && root.tooltip-text != "" && (root.tooltip-after || root.tooltip-beside): Rectangle {
+        // Keep the inline tip on the same 18px line box as GitHubTooltip so
+        // descenders are not clipped when this path cannot mount the shared tip.
         z: 10000;
         x: root.tooltip-after ? root.width + 4px : -self.width - 4px;
         y: (root.height - self.height) / 2;
         width: tip-label.preferred-width + 16px;
-        height: tip-label.preferred-height + 8px;
+        height: max(tip-label.preferred-height, GitHubMetrics.size-16 + GitHubMetrics.size-2) + GitHubMetrics.size-8;
         border-radius: 4px;
         background: GitHubTheme.tooltip-bg;
+        clip: false;
         tip-label := Text {
-            x: 8px;
-            y: 4px;
+            x: GitHubMetrics.size-8;
+            y: GitHubMetrics.size-4;
             width: self.preferred-width;
-            height: self.preferred-height;
+            height: max(self.preferred-height, GitHubMetrics.size-16 + GitHubMetrics.size-2);
             text: root.tooltip-text;
             font-size: 12px;
             color: GitHubTheme.tooltip-fg;
+            vertical-alignment: center;
             wrap: no-wrap;
         }
     }
@@ -1112,13 +1116,25 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
         }
         focus-lost => { root.keyboard-focus-visible = false; }
     }
-    badge-touch := TouchArea {
-        enabled: root.interactions-enabled;
-        mouse-cursor: root.interactions-enabled ? pointer : default;
-        clicked => {
+    // Title-bar chrome dismiss may close this menu on the same pointer event;
+    // use press-state reconciliation so a second click closes instead of
+    // dismiss→toggle-reopen.
+    badge-touch := GitHubActionMenuTriggerArea {
+        trigger-enabled: root.interactions-enabled;
+        menu-open: root.popup-open;
+        activated => {
             root.keyboard-focus-visible = false;
             badge-focus.focus();
-            root.toggle-popup();
+        }
+        request-open => {
+            if !root.popup-open {
+                root.toggle-popup();
+            }
+        }
+        request-close => {
+            if root.popup-open {
+                root.toggle-popup();
+            }
         }
     }
     if badge-focus.has-focus && root.keyboard-focus-visible: Rectangle {
@@ -1186,7 +1202,12 @@ export component GitHubMergeReadinessBadge inherits Rectangle {
         menu-width: root.popup-width;
         content-height: root.popup-height;
         align: root.popup-align-end ? "end" : "start";
-        dismiss-requested => { root.toggle-popup(); }
+        // Dismiss must close, never toggle — a closed menu must stay closed.
+        dismiss-requested => {
+            if root.popup-open {
+                root.toggle-popup();
+            }
+        }
 
         Rectangle {
             width: parent.width;

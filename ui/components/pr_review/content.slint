@@ -36,8 +36,8 @@ export component GitHubCommitMessageToggleButton inherits Rectangle {
 
     // Above sibling title/row hit targets in the commit row.
     z: 2;
-    width: 28px;
-    height: 20px;
+    width: 26px;
+    height: 16px;
     border-radius: 6px;
     border-width: 1px;
     border-color: root.expanded ? root.accent-border : root.idle-border;
@@ -847,9 +847,27 @@ export component GitHubDiffSettingsPopover inherits Rectangle {
     callback apply(string, bool);
     callback dismiss-requested();
     private property <int> dismiss-revision: TransientOverlayState.dismiss-revision;
+    private property <int> exclusive-generation: TransientOverlayState.exclusive-generation;
+    private property <int> exclusive-token: 0;
+
+    changed open => {
+        if root.open {
+            // Share ActionMenu exclusivity so Diff view / readiness / file menus
+            // switch on the first click at the component layer.
+            root.exclusive-token = TransientOverlayState.exclusive-generation + 1;
+            TransientOverlayState.claim-exclusive();
+        }
+    }
 
     changed dismiss-revision => {
         if root.open {
+            TransientOverlayState.note-closed-open-menu();
+            root.dismiss-requested();
+        }
+    }
+
+    changed exclusive-generation => {
+        if root.open && root.exclusive-token != TransientOverlayState.exclusive-generation {
             root.dismiss-requested();
         }
     }
@@ -1057,6 +1075,7 @@ export component GitHubFileMenuButton inherits Rectangle {
     in property <length> viewport-height: 0px;
     callback action();
     callback toggle-menu();
+    callback close-menu();
 
     width: 30px;
     height: 46px;
@@ -1085,7 +1104,7 @@ export component GitHubFileMenuButton inherits Rectangle {
         menu-width: 192px;
         content-height: 44px;
         align: "end";
-        dismiss-requested => { root.toggle-menu(); }
+        dismiss-requested => { root.close-menu(); }
 
         Rectangle {
             width: parent.width;

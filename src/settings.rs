@@ -140,7 +140,7 @@ fn default_ui_sound_effects() -> bool {
 }
 
 fn default_navigation_drawer_expanded() -> bool {
-    false // Match the compact desktop shell; reveal from the left edge on demand
+    true // Start with the primary navigation visible on first launch
 }
 
 impl Default for AppSettings {
@@ -544,8 +544,10 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app_state.set_ai_agent_provider(settings.ai.agent.provider.clone().into());
     app.set_settings_ai_agent_provider_index(provider_index(&settings.ai.agent));
 
-    // Apply drawer expanded state to MainWindow
-    app.set_navigation_drawer_expanded(settings.navigation_drawer_expanded);
+    // Restore the persisted drawer state before the first frame. This snaps
+    // shell geometry to its final position instead of running the interactive
+    // toggle animation during startup.
+    app.invoke_restore_navigation_drawer_state(settings.navigation_drawer_expanded);
 
     log::info!(
         "[Settings] Applied settings: theme_mode={}, auto_update={}, tracing_logger_active={}, terminal_verbose_logging={}, ui_sound_effects={}, navigation_drawer_expanded={}, git_tokens=({}/{}/{}), ai.agent=({}/{}/{})",
@@ -616,6 +618,11 @@ fn provider_index(settings: &AiAgentSettings) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_drawer_is_expanded_by_default() {
+        assert!(AppSettings::default().navigation_drawer_expanded);
+    }
 
     #[test]
     fn writes_ai_agent_as_nested_toml_table() {

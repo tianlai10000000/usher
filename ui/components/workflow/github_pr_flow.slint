@@ -1,6 +1,6 @@
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubActionMenu } from "../github_action_menu.slint";
-import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubCenteredLoadingState } from "../github_spinner.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubFilterMenuButton } from "../github_filter_menu.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
@@ -180,21 +180,25 @@ export component GitHubPullRequestFlow {
 
                     if !root.compact-filters && root.supports-review-filter: reviews-btn := GitHubFilterMenuButton {
                         label: "Reviews";
+                        menu-open: root.active-menu == "reviews";
                         selected: root.active-menu == "reviews" || root.pr-review-filter != "all";
                         clicked => { root.active-menu = root.active-menu == "reviews" ? "" : "reviews"; }
                     }
                     if !root.compact-filters && root.supports-assignee-filter: assignee-btn := GitHubFilterMenuButton {
                         label: "Assignee";
+                        menu-open: root.active-menu == "assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
                     }
                     if !root.compact-filters: sort-btn := GitHubFilterMenuButton {
                         label: "Sort";
+                        menu-open: root.active-menu == "sort";
                         selected: root.active-menu == "sort" || root.pr-sort-filter != "newest";
                         clicked => { root.active-menu = root.active-menu == "sort" ? "" : "sort"; }
                     }
                     if root.compact-filters && root.supports-assignee-filter: GitHubFilterMenuButton {
                         label: "Assignee";
+                        menu-open: root.active-menu == "assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => { root.active-menu = root.active-menu == "assignee" ? "" : "assignee"; }
                     }
@@ -213,29 +217,12 @@ export component GitHubPullRequestFlow {
             }
         }
 
-        if root.pr-loading: Rectangle {
+        if root.pr-loading: GitHubCenteredLoadingState {
             y: root.header-height;
             width: parent.width;
             height: parent.height - root.header-height;
-
-            GitHubSpinner {
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - 64px) / 2;
-                spinner-size: 32px;
-                foreground: root.fg-muted;
-            }
-
-            Text {
-                x: 24px;
-                y: (parent.height - 64px) / 2 + 42px;
-                width: parent.width - 48px;
-                height: 22px;
-                text: "Loading pull requests…";
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                font-size: 13px;
-                color: root.fg-muted;
-            }
+            label: "Loading pull requests…";
+            foreground: root.fg-muted;
         }
 
         if !root.pr-loading && root.pr-error != "": GitHubPullRequestListStatePanel {

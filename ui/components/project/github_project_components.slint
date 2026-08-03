@@ -9,6 +9,7 @@ export struct ProjectItem {
     project_alias: string,
     local_repo: string,
     remote_repo: string,
+    repo_type: string,
     logo: string,
     logo_image: image,
     is_pr_auto_update: bool,
@@ -19,6 +20,89 @@ export struct ProjectItem {
     pr_prod_count_text: string,
     project_tags: [string],
     project_tags_text: string,
+}
+
+// A true corner ribbon crosses the card's upper-right corner at 45 degrees.
+// The card clips its ends, producing the same top-edge/right-edge attachment
+// as the selected design reference without consuming a metadata row.
+export component GitHubProjectProviderRibbon inherits Rectangle {
+    in property <string> repo-type: "";
+    in property <bool> compact: false;
+
+    private property <string> normalized-type: root.repo-type.to-lowercase();
+    private property <string> provider-name: root.normalized-type == "gitlab"
+        ? "GitLab"
+        : root.normalized-type == "gitee"
+            ? "Gitee"
+            : "GitHub";
+    private property <image> provider-icon: root.normalized-type == "gitlab"
+        ? @image-url("../../assets/icons/provider-gitlab.svg")
+        : root.normalized-type == "gitee"
+            ? @image-url("../../assets/icons/provider-gitee.svg")
+            : @image-url("../../assets/icons/provider-github.svg");
+    private property <color> provider-color: root.normalized-type == "gitlab"
+        ? GitHubTheme.provider-gitlab-emphasis
+        : root.normalized-type == "gitee"
+            ? GitHubTheme.provider-gitee-emphasis
+            : GitHubTheme.provider-github-emphasis;
+    // Keep the corner footprint deliberately small. The long band extends
+    // beyond this host and the card clips it into the final corner shape.
+    width: root.compact ? 48px : 54px;
+    height: self.width;
+    background: transparent;
+    clip: false;
+    accessible-role: text;
+    accessible-label: "Repository provider: " + root.provider-name;
+
+    Image {
+        x: root.compact ? -21px : -23px;
+        y: root.compact ? 6px : 7px;
+        width: root.compact ? 90px : 100px;
+        height: root.compact ? 16px : 18px;
+        transform-origin: { x: self.width / 2, y: self.height / 2 };
+        transform-rotation: 45deg;
+
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: root.provider-color;
+            clip: true;
+
+            // Place the provider identity in the part of the diagonal band
+            // that remains visible after the card clips it. Centering against
+            // the full off-card rectangle would make the content look shifted.
+            // Keep local x/y unshifted so cross-band centering matches Gitee;
+            // provider-specific optical nudges previously over-corrected.
+            provider-identity := HorizontalLayout {
+                x: root.compact ? 39px : 43px;
+                y: 0;
+                width: root.compact ? 50px : 55px;
+                height: parent.height;
+                spacing: 3px;
+                alignment: center;
+                cross-axis-alignment: center;
+
+                Image {
+                    width: root.compact ? 9px : 10px;
+                    height: self.width;
+                    source: root.provider-icon;
+                    colorize: GitHubTheme.provider-ribbon-foreground;
+                }
+
+                Text {
+                    width: root.compact ? 38px : 42px;
+                    height: parent.height;
+                    text: root.provider-name;
+                    font-size: 7px;
+                    font-weight: 700;
+                    color: GitHubTheme.provider-ribbon-foreground;
+                    vertical-alignment: center;
+                    horizontal-alignment: left;
+                    overflow: elide;
+                }
+            }
+        }
+    }
 }
 
 export component GitHubProjectIconButton inherits GitHubIconButton {
@@ -187,6 +271,7 @@ export component GitHubProjectListRow inherits Rectangle {
 
     // Identity + path metadata + topics (GitHub repo-row density with paths).
     height: 136px;
+    clip: true;
     background: row-touch.has-hover
         ? (GitHubTheme.canvas-subtle)
         : transparent;
@@ -222,10 +307,18 @@ export component GitHubProjectListRow inherits Rectangle {
         }
     }
 
+    if root.project.repo_type != "": GitHubProjectProviderRibbon {
+        x: parent.width - self.width;
+        y: 0px;
+        repo-type: root.project.repo_type;
+        compact: true;
+        z: 3;
+    }
+
     title-line := HorizontalLayout {
         x: 72px;
         y: 14px;
-        width: max(40px, parent.width - 72px - 116px);
+        width: max(40px, parent.width - 72px - 184px);
         height: 24px;
         spacing: 8px;
         alignment: start;
@@ -260,7 +353,7 @@ export component GitHubProjectListRow inherits Rectangle {
     Text {
         x: 72px;
         y: 42px;
-        width: max(40px, parent.width - 72px - 116px);
+        width: max(40px, parent.width - 72px - 184px);
         height: 20px;
         text: root.project.remote_repo;
         font-size: 12px;
@@ -272,7 +365,7 @@ export component GitHubProjectListRow inherits Rectangle {
     Text {
         x: 72px;
         y: 64px;
-        width: max(40px, parent.width - 72px - 116px);
+        width: max(40px, parent.width - 72px - 184px);
         height: 20px;
         text: root.project.local_repo;
         font-size: 12px;
@@ -301,7 +394,7 @@ export component GitHubProjectListRow inherits Rectangle {
     }
 
     actions := HorizontalLayout {
-        x: parent.width - 112px;
+        x: parent.width - 176px;
         y: 12px;
         width: 96px;
         height: 32px;
@@ -330,7 +423,7 @@ export component GitHubProjectListRow inherits Rectangle {
     }
 
     row-focus := FocusScope {
-        width: max(0px, parent.width - 120px);
+        width: max(0px, parent.width - 184px);
         height: parent.height;
         accessible-role: button;
         accessible-enabled: true;
@@ -352,7 +445,7 @@ export component GitHubProjectListRow inherits Rectangle {
     row-touch := TouchArea {
         x: 0px;
         y: 0px;
-        width: max(0px, parent.width - 120px);
+        width: max(0px, parent.width - 184px);
         height: parent.height;
         mouse-cursor: pointer;
         clicked => {
@@ -365,7 +458,7 @@ export component GitHubProjectListRow inherits Rectangle {
     if row-focus.has-focus && root.keyboard-focus-visible: Rectangle {
         x: 3px;
         y: 3px;
-        width: max(0px, parent.width - 126px);
+        width: max(0px, parent.width - 190px);
         height: parent.height - 6px;
         border-radius: GitHubMetrics.radius-medium;
         border-width: GitHubMetrics.focus-outline-width;
@@ -412,10 +505,17 @@ export component GitHubProjectGridCard inherits Rectangle {
         }
     }
 
+    if root.project.repo_type != "": GitHubProjectProviderRibbon {
+        x: parent.width - self.width;
+        y: 0px;
+        repo-type: root.project.repo_type;
+        compact: parent.width < 320px;
+    }
+
     Text {
         x: 68px;
         y: 14px;
-        width: max(32px, parent.width - 84px);
+        width: max(32px, parent.width - 152px);
         height: 24px;
         text: root.project.project_name;
         font-size: 16px;
@@ -428,7 +528,7 @@ export component GitHubProjectGridCard inherits Rectangle {
     if root.project.project_alias != "": GitHubMetadataLabel {
         x: 68px;
         y: 40px;
-        max-label-width: min(168px, max(48px, parent.width - 84px));
+        max-label-width: min(168px, max(48px, parent.width - 152px));
         text: root.project.project_alias;
     }
 

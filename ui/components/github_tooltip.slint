@@ -1,25 +1,102 @@
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+import { TooltipOverlayState } from "../state/tooltip_overlay_state.slint";
 
-// Application-owned counterpart to GitHub's TooltipV2. Keep every tooltip in
-// the app on these shared geometry and Primer color tokens.
-export component GitHubTooltip inherits Rectangle {
+// Painted tip surface. Only the window-root overlay host mounts this; call
+// sites use GitHubTooltip, which is a locator that portals here.
+export component GitHubTooltipSurface inherits Rectangle {
     in property <string> text;
 
+    // Primer body-small uses an 18px line box for 12px type. Slint Text has no
+    // line-height, and preferred-height alone can clip descenders (g/y/p).
+    private property <length> label-height: max(
+        tip-label.preferred-height,
+        GitHubMetrics.size-16 + GitHubMetrics.size-2
+    );
+
     width: tip-label.preferred-width + GitHubMetrics.size-16;
-    height: tip-label.preferred-height + GitHubMetrics.size-8;
+    height: root.label-height + GitHubMetrics.size-8;
     border-radius: GitHubMetrics.radius-medium;
     border-width: 0px;
     background: GitHubTheme.tooltip-bg;
+    clip: false;
 
     tip-label := Text {
         x: GitHubMetrics.size-8;
         y: GitHubMetrics.size-4;
         width: self.preferred-width;
-        height: self.preferred-height;
+        height: root.label-height;
         text: root.text;
         color: GitHubTheme.tooltip-fg;
         font-size: GitHubMetrics.text-small;
         vertical-alignment: center;
         wrap: no-wrap;
+    }
+}
+
+// Application-owned counterpart to GitHub's TooltipV2. Call sites keep their
+// relative x/y formulas (using self.width / self.height); this locator stays
+// transparent and publishes window coordinates so scroll/clip ancestors cannot
+// truncate the painted tip.
+export component GitHubTooltip inherits Rectangle {
+    in property <string> text;
+
+    private property <length> label-height: max(
+        tip-measure.preferred-height,
+        GitHubMetrics.size-16 + GitHubMetrics.size-2
+    );
+    private property <int> tip-token: 0;
+
+    width: tip-measure.preferred-width + GitHubMetrics.size-16;
+    height: root.label-height + GitHubMetrics.size-8;
+    border-width: 0px;
+    background: transparent;
+    clip: false;
+
+    tip-measure := Text {
+        visible: false;
+        text: root.text;
+        font-size: GitHubMetrics.text-small;
+        wrap: no-wrap;
+    }
+
+    init => {
+        root.publish-tip();
+    }
+
+    changed text => {
+        root.publish-tip();
+    }
+
+    changed absolute-position => {
+        root.publish-tip();
+    }
+
+    // Conditional `if hover: GitHubTooltip` hosts drop this element without a
+    // destructor. Renew the lease while mounted so the root host can clear a
+    // stale tip shortly after unmount.
+    lease-timer := Timer {
+        interval: 32ms;
+        running: root.text != "";
+        triggered => {
+            TooltipOverlayState.renew(
+                root.tip-token,
+                root.text,
+                root.absolute-position.x,
+                root.absolute-position.y,
+            );
+        }
+    }
+
+    function publish-tip() {
+        if root.text == "" {
+            TooltipOverlayState.hide(root.tip-token);
+        } else {
+            TooltipOverlayState.show(
+                root.text,
+                root.absolute-position.x,
+                root.absolute-position.y,
+            );
+            root.tip-token = TooltipOverlayState.token;
+        }
     }
 }

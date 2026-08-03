@@ -159,14 +159,18 @@ to be a Primer primitive.
   width; verify the application minimum width and at least one wide layout.
 - Project grid columns are derived from the constrained content width, not the
   outer window width. A card keeps at least 280 px of readable width before a
-  new column is introduced.
+  new column is introduced. Project mounts only the active list or grid visual
+  representation; switching modes may replace that visual tree once, but native
+  resize must not keep evaluating both representations.
 - Chat history pagination is part of the message flow after the virtual top
   spacer. It reserves layout height and must never float over the oldest
   mounted message.
 - PR review exposes one visible state source in the summary row. The header
   action strip must not repeat the same Open/Closed/Merged readiness label.
-  At narrow widths, the three counted tabs divide the available row equally
-  and nonessential trailing diff statistics yield before tabs overflow.
+  At narrow widths, the three counted tabs divide the available inner row
+  equally after a 16 px inset on both sides and explicit 4 px inter-item gaps;
+  the full-width baseline remains edge-to-edge, and nonessential trailing diff
+  statistics yield before tabs overflow.
 - Text must follow the reference wrapping/truncation rule. Lists and scroll
   views must not rebuild large models while scrolling or resizing.
 - Keep hover hit targets mounted. Change opacity/state instead of
@@ -229,22 +233,26 @@ expanded/collapsed, and success confirmation.
   保持相同对比层级的语义色，不得把三种状态合并为单一 active 颜色。
 - `GitHubNavigationSidebar`: one 240 px desktop application sidebar with full
   labels, selected-route state, pinned Settings/About actions, and a persisted
-  docked mode. Its menu rows follow the Codex/macOS SwiftUI sidebar hierarchy:
+  docked mode. Before the first rendered frame, the persisted docked state is
+  restored by snapping the toggle, spring progress, and route width to one
+  consistent final geometry; startup must never run the interactive sidebar
+  transition. When no persisted value exists, the default is expanded. Its menu
+  rows follow the Codex/macOS SwiftUI sidebar hierarchy:
   compact 30 px rows, 8 px inline inset, 10 px selection radius, 15 px Lucide
   icons inside 24 px slots, 13 px native system body typography, a neutral
   low-contrast selection surface, and no accent outline. The footer uses a
   sidebar-specific translucent hairline. The right edge is owned by the root
   shell as a content-boundary decoration: a visible 1 px stroke plus
   Codex-compatible 20 px ambient and 8 px near elevation lobes project only
-  toward the sidebar. Docked close drives the sidebar, content pane, and only
-  the status bar's painted leading edge from one interruptible damped-spring
-  progress value tuned to Codex's 0.5 s / 0.1 bounce transition; the transparent
-  status host and persistent right cluster remain in window coordinates.
-  Reopening retargets it without resetting position or velocity. Rendering is
-  frame-paced, and repeated toggles debounce persistence so only the final
-  settled preference is written. Native title-bar actions retarget that motion
-  value directly on the owning event-loop thread, so click bursts cannot queue
-  stale cross-event-loop callbacks or delayed target commits.
+  toward the sidebar. One interruptible frame-paced spring moves the sidebar,
+  content surface, title-bar divider, and the status bar's painted leading edge;
+  ordinary routes adopt the target width once when motion begins instead of
+  reflowing on every animation frame. The transparent status host and persistent
+  right cluster remain in window coordinates. Native live resize snaps sidebar
+  motion to its target, freezes mounted route width, and commits the exact final
+  width at drag end. PR Review also preserves its stable internal diff geometry.
+  Native title-bar actions retarget the motion directly on the owning event-loop
+  thread, so click bursts cannot queue stale callbacks.
   Settings uses the same regular label weight as navigation rows, with a 1 px
   optical baseline correction against its 15 px icon.
   The sidebar body itself must not paint an independent container shadow.
@@ -257,17 +265,29 @@ expanded/collapsed, and success confirmation.
   instead of exposing an intermediate sidebar animation position.
   Route content must never cover the sidebar, this edge, or an escaping
   sidebar Tooltip during resize or route-specific composition.
-  On macOS the docked sidebar matches Codex desktop's verified Electron
-  configuration: one full-content native effect view uses Menu material,
-  BehindWindow blending, and width-plus-height autoresizing. The opaque main
-  surface covers that backdrop. The docked 240 px sidebar paints Codex's final
-  renderer surface above the native effect instead of exposing the raw Menu
-  material: while key it uses `#ffffffa6` in light mode or `#2b2b2ba3` in dark
-  mode, preserving blur while neutralizing wallpaper saturation. On resign-key,
-  the effect is disabled, the native window keeps Codex's `#f9f9f9` light or
-  `#000000` dark fallback, and the rendered sidebar becomes opaque `#fdfdfd`
-  light or `#212121` dark. The temporary hover sidebar continues to use its
-  independent opaque overlay surface.
+  On macOS the docked sidebar uses a width-fixed 240 px native effect view with
+  Menu material, BehindWindow blending, and height autoresizing. A full-window
+  opaque native canvas matching the theme sits below Slint, so a late GPU resize
+  cannot expose wallpaper tint in the content region. Native vibrancy adopts
+  the final full-size transparent-title-bar style before inserting underlays,
+  attaches them while the window is still opaque, and only then opens the
+  transparent window path with a near-clear background rather than
+  `clearColor`. The startup window stays alpha-gated until this native chrome
+  is confirmed installed plus a short settle so the effect's first unblurred
+  behind-window sample commits while invisible; a deadline still guarantees the
+  window appears. Startup therefore never reveals desktop content or a staged
+  transition through the translucent Slint sidebar. Until native
+  installation reports ready, both the Slint window root and docked sidebar use
+  opaque theme fallbacks. The effect frame is derived from its full-size native
+  parent bounds, not the pre-full-size render-view frame, and is refreshed after
+  style changes and native resize so it covers the title-bar strip. The docked
+  sidebar paints Codex's final renderer surface above the native effect instead
+  of exposing the raw Menu material: while key it uses `#ffffffa6` in light mode
+  or `#2b2b2ba3` in dark mode, preserving blur while neutralizing wallpaper
+  saturation. On resign-key, the effect is disabled, the native window keeps
+  Codex's `#f9f9f9` light or `#000000` dark fallback, and the rendered sidebar
+  becomes opaque `#fdfdfd` light or `#212121` dark. The temporary hover sidebar
+  continues to use its independent opaque overlay surface.
   Undocked mode removes it from page layout; an 8 px left-edge hover target
   opens the same component as a rounded, border-only root-layer overlay with a
   short pointer-exit delay. macOS places Toggle/Back/Forward in a native
@@ -286,17 +306,24 @@ expanded/collapsed, and success confirmation.
   without seams. Compact title-bar actions use 28 px controls, 14 px Lucide
   glyphs, and the subtle foreground role. Native control frames must remain
   wholly inside their title-bar accessory container so hover, focus, and
-  pressed chrome cannot be clipped.
+  pressed chrome cannot be clipped. The initial Slint window title is empty so
+  AppKit cannot flash the standard product label before accessory installation;
+  Rust restores the metadata title only after hiding native title presentation.
+  macOS must not render substitute Slint title-bar controls while the native
+  accessory is pending; only the final AppKit controls may appear there.
 - `GitHubNavigationSidebar` 是统一的 240px 桌面应用侧栏，展示完整标签、当前
-  路由选中态和固定在底部的 Settings/About，并持久化固定状态。取消固定时侧栏不
+  路由选中态和固定在底部的 Settings/About，并持久化固定状态。首帧渲染前必须把
+  持久化开关、弹簧进度和路由宽度一次性吸附到同一个最终几何，启动恢复不得播放用户
+  交互使用的侧栏动画；没有持久化值时默认展开。取消固定时侧栏不
   占页面布局，窗口左侧 8px Hover 热区在根层以圆角、仅边框浮层打开同一组件，指针离开
   后短延迟关闭。菜单行高 30px、左右内缩 8px、选中圆角 10px，15px Lucide 线性图标放在
   24px 槽位中，正文使用 13px 原生系统字体；底部使用侧栏专用半透明 Hairline。右边界
   由根 Shell 作为内容边界装饰拥有：可见的 1px 描边加 20px 环境阴影和 8px 近端阴影
   只向侧栏方向投射。
-  固定侧栏关闭时，同一个可中断的阻尼弹簧进度只移动侧栏、内容区和状态栏可见表面
-  的左边缘；状态栏透明宿主与右侧常驻工具组保持窗口坐标。参数对齐 Codex 的
-  0.5s / 0.1 bounce；期间重新打开会保留当前位置和速度并重定向目标。
+  固定侧栏使用同一个可中断、按显示帧推进的弹簧移动侧栏、内容表面、标题栏分割线和
+  状态栏绘制起点；普通路由在运动开始时只采用一次目标宽度，不逐帧重排。状态栏透明
+  宿主与右侧常驻工具组保持窗口坐标。原生 Live Resize 会把侧栏运动吸附到目标，冻结
+  已挂载路由宽度，并在结束时提交精确最终宽度；PR Review 同时保持稳定内部 Diff 几何。
   Settings 与普通导航行使用相同的常规字重，并针对 15px 图标做 1px 视觉基线校正。
   侧栏主体自身不得绘制独立的右侧容器阴影；固定态使用根层清晰边框与克制的内向
   Elevation，临时 Hover 态使用不透明白色（浅色模式 `#ffffff`）、只有边框、尾部上下
@@ -304,23 +331,38 @@ expanded/collapsed, and success confirmation.
   两者均位于普通路由表面之上、Modal 遮罩之下。原生 Live Resize 期间，共享 Shell
   几何必须收敛到当前固定目标，不得暴露侧栏动画中间位置。窗口 Resize 或路由专属组合期间，页面内容
   不得覆盖侧栏、右边界或越过侧栏边界显示的 Tooltip。
-  macOS 固定侧栏采用已从 Codex 桌面端 Electron 配置核实的实现：覆盖完整内容区、
-  随宽高共同缩放的原生 Effect View 使用 Menu 材质与 BehindWindow 混合；不透明
-  主内容面盖住右侧背景。固定的 240px 侧栏不会直接露出原始 Menu 材质，而是在原生
-  Effect 上绘制 Codex 最终的渲染表面：Key Window 在浅色模式使用 `#ffffffa6`，
-  深色模式使用 `#2b2b2ba3`，保留模糊并压低壁纸饱和度。失去 Key 状态时关闭
-  Effect，原生窗口继续使用 Codex 的浅色 `#f9f9f9` 或深色 `#000000` fallback，
-  渲染侧栏则切换为浅色 `#fdfdfd` 或深色 `#212121` 不透明表面。临时 Hover
+  macOS 固定侧栏使用固定 240px 宽、仅随高度缩放的原生 Effect View，材质为 Menu、
+  混合为 BehindWindow；Slint 下方保留与主题一致的全窗口不透明原生 Canvas，GPU
+  Resize 晚一帧时右侧也不会露出壁纸色。原生 Vibrancy 先切换到最终的全尺寸透明
+  标题栏样式，再在窗口仍不透明时插入底层视图，最后才打开透明窗口路径并使用近透明
+  背景而不是 `clearColor`；启动窗口保持 alpha 门控，直到确认原生 Chrome 安装完成，
+  并再等待短暂 settle，让 Effect 第一次未模糊的 Behind-Window 采样在不可见期间提交；
+  兜底时限保证窗口一定出现。启动阶段不得透出桌面内容或出现分阶段过渡。原生安装报告 Ready
+  前，Slint 窗口根层与固定侧栏都必须使用主题对应的不透明 fallback。Effect 几何取自
+  全尺寸原生父视图 bounds，而不是启用 FullSizeContentView 前的 Render View frame；
+  应用样式与原生 resize 后都要重新同步，确保覆盖标题栏带。固定侧栏不会直接
+  露出原始 Menu 材质，而是在原生 Effect 上绘制 Codex 最终的渲染表面：Key Window
+  在浅色模式使用 `#ffffffa6`，深色模式使用 `#2b2b2ba3`，保留模糊并压低壁纸饱和度。
+  失去 Key 状态时关闭 Effect，原生窗口继续使用 Codex 的浅色 `#f9f9f9` 或深色
+  `#000000` fallback，渲染侧栏则切换为浅色 `#fdfdfd` 或深色 `#212121` 不透明表面。
+  临时 Hover
   侧栏继续使用自己独立的不透明浮层表面。
   macOS 使用原生左侧标题栏附件，Windows/Linux 使用侧栏页头和收起态
   控制条；macOS 侧栏按钮在收起态使用轮廓 `sidebar.left`，展开态使用左侧
   三分之一填充图标，两种状态不得共用同一视觉；Back/Forward 可用状态只能来自
-  Router 历史。
+  Router 历史。Slint 窗口初始标题必须为空，避免原生附件安装前由 AppKit 闪现标准
+  产品标题；Rust 只有在隐藏原生标题展示后才恢复系统元数据中的 `Usher`。原生附件
+  尚未就绪时，macOS 不得绘制替代的 Slint 标题栏控件；该区域只允许最终 AppKit
+  控件出现。
 - `GitHubLink`: default, inline, and muted text-link states with visible
   underline and keyboard focus behavior.
 - `GitHubTooltip`: TooltipV2 pattern; tooltip canvas/foreground tokens, 12 px
-  text, 4 px vertical and 8 px horizontal padding, 6 px radius, and a 4 px
-  host gap.
+  text in an 18 px line box (so descenders are not clipped), 4 px vertical and
+  8 px horizontal padding, 6 px radius, and a 4 px host gap. Call sites keep
+  relative host geometry; the painted tip always portals through
+  `TooltipOverlayState` to the window-root `GitHubTooltipOverlayHost` so
+  ancestor `clip` (scroll views, cards, menus) cannot truncate it. Local `z`
+  alone is not a valid escape from clip.
 - `GitHubCounterLabel`: the typed Primer CounterLabel counterpart for counts
   adjacent to navigation text or actions. It provides Default, Primary, and
   Secondary schemes, optional upper-limit formatting, a compact overlay mode,
@@ -362,10 +404,19 @@ expanded/collapsed, and success confirmation.
   geometry (6 px block padding around a 20 px label); block descriptions use
   48 px rows with a 16 px secondary line. Single selections use a leading
   Check Octicon; selected state must not be represented by persistent hover
-  fill or heavier label weight. A click in the native title bar dispatches the
-  same application-wide outside-dismiss request as a click on blank page
-  content, so an open ActionMenu must close without consuming the native
-  title-bar action.
+  fill or heavier label weight.   Outside dismissal is split on purpose: the menu owns Escape and chrome
+  `dismiss-revision` (native title-bar / docked-shell); opening also
+  `claim-exclusive` so peer ActionMenu/Diff-settings popovers close on the same
+  click without page-local dismiss wiring. Each host still mounts a sibling
+  blank outside-click TouchArea under the menu—and under chrome that must keep
+  receiving clicks. ActionMenu itself must not paint a full-viewport hit target
+  at its overlay z, or filter/popover switching would only close instead of
+  retargeting. A click in the native title bar advances `dismiss-revision` so
+  an open ActionMenu closes without consuming the native title-bar action.
+  Triggers that live in that chrome dismiss zone must use
+  `GitHubActionMenuTriggerArea` (press-state open/close) so the same click
+  cannot dismiss then toggle-reopen; `dismiss-requested` must close, never
+  toggle.
 - `GitHubFilterMenuButton`, `GitHubFilterMenuFrame`, and
   `GitHubFilterMenuItem` are the generic single-select filter/sort ActionMenu
   composition. They own trigger, header/close, checked-row, keyboard, and
@@ -378,6 +429,10 @@ expanded/collapsed, and success confirmation.
   for route and in-page navigation. It owns optional leading Octicon,
   descriptive label, selected underline, hover, disabled, Enter/Space, and
   keyboard-visible focus states; page owners retain selected-panel semantics.
+  `GitHubUnderlineNav` owns the full-width baseline and accessible tab-list,
+  keeps the first and last items inside a 16 px horizontal safe area, and uses
+  an explicit 4 px gap between items. Pages must not recreate that baseline or
+  pin shared tab items directly to a container edge.
 - `GitHubSegmentedControl`, `GitHubSegmentedControlItem`, and
   `GitHubSegmentedControlDivider`: the shared compact, mutually exclusive
   choice group. Items own selected, hover, disabled, Enter/Space, and
@@ -393,7 +448,9 @@ expanded/collapsed, and success confirmation.
   track; callers provide the visible operation label and status.
 - `GitHubSpinner`: the only indeterminate spinner implementation; callers
   retain a visible loading label/status and must not shift layout when it
-  appears.
+  appears. `GitHubCenteredLoadingState` is the shared compact spinner+13px
+  muted label panel used by PR list and PR review Conversation/Commits/Files
+  changed loading.
 - `GitHubActionsJob`: the shared GitHub Actions-style Job/Step presenter for
   ordered workflow state, semantic lifecycle/conclusion, bounded disclosure
   logs, duration cells, and running animation. It remains presentation-only;
@@ -517,8 +574,11 @@ PR 审核摘要是 Open/Closed/Merged 的唯一可见状态来源，页头操作
 窄屏下三个带计数 Tab 等分整行，尾部 diff 统计必须先让位。PR 页头、导航和交互
 调整不得顺带修改 Files changed 代码区或文件树的字体与颜色；两者属于独立的审核
 内容契约，只有明确提出并带专门视觉回归的 diff/文件树设计变更才可调整。
-原生标题栏点击必须进入应用级空白点击关闭通道：所有共享 ActionMenu 和其他本来
-可通过页面空白关闭的临时弹层都应关闭，但不得吞掉原生标题栏操作；Dialog 仅在
+原生标题栏点击必须进入应用级 Chrome 关闭通道（`dismiss-revision`）：所有共享
+ActionMenu 和其他本来可通过页面空白关闭的临时弹层都应关闭，但不得吞掉原生标
+题栏操作。弹层互斥由组件在打开时 `claim-exclusive` 完成，业务页不得再为切换
+首击散落调用 dismiss-all。页面内容区的空白点击关闭由各宿主自行挂载在菜单之
+下的 TouchArea 承担，不能依赖 ActionMenu 在 overlay z 上铺满视口。Dialog 仅在
 普通遮罩点击本就允许关闭时响应，硬模态表单仍保持不可消隐语义。
 
 ## 9. Material dependency boundary / Material 依赖边界

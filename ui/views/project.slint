@@ -224,7 +224,10 @@ export component GitHubProjectPage {
                     }
                 }
 
-                for project[index] in root.projects: GitHubProjectListRow {
+                // Only mount the active representation. Keeping both the list
+                // rows and grid cards alive made every window resize evaluate
+                // two complete project trees even though one was never painted.
+                for project[index] in (root.view-mode == "list" ? root.projects : []): GitHubProjectListRow {
                     y: index * 136px;
                     width: parent.width;
                     visible: root.view-mode == "list";
@@ -266,7 +269,7 @@ export component GitHubProjectPage {
                     }
                 }
 
-                for row-index in root.grid-rows: grid-row := HorizontalLayout {
+                for row-index in (root.view-mode == "grid" ? root.grid-rows : 0): grid-row := HorizontalLayout {
                     y: row-index * 220px;
                     width: parent.width;
                     height: 204px;

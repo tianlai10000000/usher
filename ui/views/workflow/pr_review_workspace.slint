@@ -1,11 +1,13 @@
 import { ListView, ScrollView } from "@material";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import { AppState } from "../../state/app_state.slint";
+import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
 import { GitHubDialog } from "../../components/dialog/github_dialog.slint";
 import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
 import { GitHubTreeIndentGuides, GitHubCommitMessageToggleButton, GitHubFileToolbarButton, GitHubCommitSummaryNavButton, GitHubFileChangeTypeIcon, GitHubSelectableDiffCode, GitHubSplitDiffSide, GitHubDiffViewPreview, GitHubDiffViewChoice, GitHubDiffSettingsPopover, GitHubFileTreeToggleButton, GitHubFileMenuButton, GitHubDiffStatSegment, GitHubDiffStatBar, GitHubFileDiffStat, GitHubCodeRenderingIndicator, GitHubLargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, GitHubDiffFindBar } from "../../components/pr_review/content.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
+import { GitHubCenteredLoadingState } from "../../components/github_spinner.slint";
 export component GitHubPullRequestReviewPage inherits FocusScope {
     // Full application viewport used by route-owned root overlays. The page
     // root stays at x=0; ordinary review content applies shell-leading-inset
@@ -740,11 +742,16 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
 
     // Consume clicks on non-interactive workspace areas so they cannot reach
     // the pull-request list retained underneath this full-window overlay.
+    // Also dismiss the root-mounted readiness ActionMenu via the shared chrome
+    // channel so blank clicks close it without a page-covering root scrim.
     TouchArea {
         x: root.shell-leading-inset;
         width: root.content-width;
         height: root.height;
-        clicked => { root.active-popover = ""; }
+        clicked => {
+            root.active-popover = "";
+            TransientOverlayState.dismiss-all();
+        }
     }
 
     VerticalLayout {
@@ -1170,13 +1177,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
             vertical-stretch: 1;
             background: root.github-bg-default;
 
-            if root.conversation-loading: Text {
+            if root.conversation-loading: GitHubCenteredLoadingState {
                 width: parent.width;
                 height: parent.height;
-                text: "Loading conversation…";
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                color: root.github-fg-muted;
+                label: "Loading conversation…";
+                foreground: root.github-fg-muted;
             }
             if !root.conversation-loading && root.conversation-error != "": GitHubCenteredErrorState {
                 width: parent.width;
@@ -1895,13 +1900,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
             width: parent.width;
             vertical-stretch: 1;
             background: root.github-bg-default;
-            if root.commits-loading: Text {
+            if root.commits-loading: GitHubCenteredLoadingState {
                 width: parent.width;
                 height: parent.height;
-                text: "Loading commits…";
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                color: root.github-fg-muted;
+                label: "Loading commits…";
+                foreground: root.github-fg-muted;
             }
             if !root.commits-loading && root.commits-error != "": GitHubCenteredErrorState {
                 width: parent.width;
@@ -2030,6 +2033,10 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                         private property <length> title-end-x: self.title-hit-width;
                         private property <length> title-line-height:
                             max(20px, tab-commit-title-natural.preferred-height);
+                        // True when the title wraps past one line — kebab Y is
+                        // tuned separately for single-line vs multi-line.
+                        private property <bool> title-wrapped:
+                            commit-item.title-block-height > self.title-line-height + 1px;
                         // Child TouchAreas steal hover from the full-row area;
                         // OR them so chrome fill stays while title/SHA/copy/time
                         // (and kebab) are hovered. Title underline + SHA chip
@@ -2320,10 +2327,17 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                 root.commit-tab-content-x + parent.title-end-x + 8px,
                                 root.commit-tab-content-x + commit-item.title-max-width + 8px
                             );
-                            // Mid-line of the final wrapped title line (Text metrics).
-                            y: root.commit-tab-content-y
-                                + commit-item.title-block-height
-                                - (parent.title-line-height + self.height) / 2;
+                            // Single-line and multi-line kebabs use separate Y
+                            // nudges — tune each branch independently.
+                            y: parent.title-wrapped
+                                ? (root.commit-tab-content-y
+                                    + commit-item.title-block-height
+                                    - (parent.title-line-height + self.height) / 2
+                                    + 3px)
+                                : (root.commit-tab-content-y
+                                    + commit-item.title-block-height
+                                    - (parent.title-line-height + self.height) / 2
+                                    - 3px);
                             expanded: commit-item.commit-expanded;
                             clicked => { root.toggle-commit-message(commit.sha); }
                         }
@@ -2348,14 +2362,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
             clip: false;
             background: root.github-bg-default;
 
-            if root.loading: Text {
+            if root.loading: GitHubCenteredLoadingState {
                 width: parent.width;
                 height: parent.height;
-                text: "Loading changed files…";
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                font-size: 14px;
-                color: GitHubTheme.fg-muted;
+                label: "Loading changed files…";
+                foreground: root.github-fg-muted;
             }
 
             if !root.loading && root.error-text != "": GitHubCenteredErrorState {
@@ -2815,6 +2826,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                     toggle-menu => {
                                         root.active-popover = root.active-popover == "file-menu" ? "" : "file-menu";
                                     }
+                                    close-menu => { root.active-popover = ""; }
                                     action => {
                                         root.active-popover = "";
                                         root.view-file();
@@ -3597,17 +3609,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                         }
                     }
 
-                    if root.commits-loading: Rectangle {
+                    if root.commits-loading: GitHubCenteredLoadingState {
                         width: parent.width;
                         height: 180px;
-                        Text {
-                            width: parent.width;
-                            height: parent.height;
-                            text: "Loading commits…";
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            color: root.github-fg-muted;
-                        }
+                        label: "Loading commits…";
+                        foreground: root.github-fg-muted;
                     }
                     if !root.commits-loading && root.commits-error != "": Rectangle {
                         width: parent.width;

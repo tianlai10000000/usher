@@ -182,6 +182,8 @@ GitHub Release 工作流会生成 macOS 压缩包/DMG 和 Windows ZIP Bundle。
 - [Pull Request 工作流规格](docs/specs/pr-review.md)
 - [终端行为规格](docs/specs/terminal.md)
 - [构建性能与产物策略](docs/build-performance.md)
+- [内存优化待办](docs/memory_optimization_backlog.zh.md)
+- [Memory optimization backlog](docs/memory_optimization_backlog.md)
 - [终端历史排障记录](docs/terminal_viewport_iteration_notes.md)
 
 ## 许可证

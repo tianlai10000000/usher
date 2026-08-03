@@ -4,6 +4,14 @@ import { TransientOverlayState } from "../state/transient_overlay_state.slint";
 // Primer ActionMenu is an ActionList inside AnchoredOverlay. This shell owns
 // the shared Overlay surface and collision-aware placement. Coordinates are in
 // the component's parent space so callers can anchor from any page layer.
+//
+// Dismissal contract:
+// 1. Escape, chrome dismiss-revision, and peer exclusive-generation are owned
+//    here via dismiss-requested. Opening claims exclusivity so readiness /
+//    filter / file menus switch on the first click without page-local wiring.
+// 2. Page blank outside clicks stay on each host's sibling TouchArea under the
+//    menu and under chrome that must keep receiving clicks. A full-viewport
+//    hit target inside this z:10000 surface would swallow those triggers.
 export component GitHubActionMenu inherits FocusScope {
     in property <bool> open: false;
     in property <length> viewport-x: 0px;
@@ -48,11 +56,17 @@ export component GitHubActionMenu inherits FocusScope {
                 : root.anchor-x);
     private property <length> scroll-offset-y: 0px;
     private property <int> dismiss-revision: TransientOverlayState.dismiss-revision;
+    private property <int> exclusive-generation: TransientOverlayState.exclusive-generation;
+    private property <int> exclusive-token: 0;
 
     accessible-role: list;
 
     changed open => {
         if root.open {
+            // Claim after stamping the next generation so the synchronous
+            // exclusive-generation notification cannot dismiss this opener.
+            root.exclusive-token = TransientOverlayState.exclusive-generation + 1;
+            TransientOverlayState.claim-exclusive();
             root.scroll-offset-y = 0px;
             root.focus();
         } else if root.has-focus {
@@ -62,6 +76,13 @@ export component GitHubActionMenu inherits FocusScope {
 
     changed dismiss-revision => {
         if root.open {
+            TransientOverlayState.note-closed-open-menu();
+            root.dismiss-requested();
+        }
+    }
+
+    changed exclusive-generation => {
+        if root.open && root.exclusive-token != TransientOverlayState.exclusive-generation {
             root.dismiss-requested();
         }
     }
@@ -136,6 +157,47 @@ export component GitHubActionMenu inherits FocusScope {
             height: max(24px, (parent.height - 4px) * parent.height / root.content-height);
             border-radius: 3px;
             background: GitHubTheme.drag-handle;
+        }
+    }
+}
+
+// Press/click reconciler for ActionMenu triggers that may share one pointer
+// event with TransientOverlayState.dismiss-all (native title-bar / shell
+// chrome). Combines press-time open state with closed-open-menu so a gesture
+// that chrome-dismisses an open menu ends closed, while a gesture that starts
+// from a closed menu can still open.
+export component GitHubActionMenuTriggerArea inherits TouchArea {
+    in property <bool> menu-open: false;
+    in property <bool> trigger-enabled: true;
+    callback request-open();
+    callback request-close();
+    callback activated();
+
+    private property <bool> open-on-press: false;
+
+    enabled: root.trigger-enabled;
+    mouse-cursor: root.trigger-enabled ? pointer : default;
+
+    pointer-event(event) => {
+        if event.kind == PointerEventKind.down {
+            root.open-on-press = root.menu-open;
+            // Drop a stale latch from an earlier blank-area dismiss so the next
+            // intentional open is not blocked.
+            if !root.menu-open {
+                TransientOverlayState.consume-closed-open-menu();
+            }
+        }
+    }
+
+    clicked => {
+        root.activated();
+        if root.open-on-press || TransientOverlayState.closed-open-menu {
+            TransientOverlayState.consume-closed-open-menu();
+            if root.menu-open {
+                root.request-close();
+            }
+        } else if !root.menu-open {
+            root.request-open();
         }
     }
 }

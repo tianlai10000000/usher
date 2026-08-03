@@ -64,6 +64,13 @@ This specification covers provider metadata resolved on the Project page and the
     width. Each card keeps at least 280 px before another column is added, and
     both grid cards and list rows expose keyboard activation with an accessible
     project label.
+17. Each project grid card and list row presents persisted `repo_type` as a
+    compact 45-degree upper-right corner ribbon with the provider logo and
+    readable GitHub, GitLab, or Gitee name. Both ends are clipped by the card
+    edges. The ribbon must reserve no metadata row and scale down before a
+    responsive host would crowd the project identity or paths. Brand
+    backgrounds remain fixed across themes: GitHub `#24292E`, GitLab
+    `#FC6D26`, and Gitee `#C71D23`, with white provider artwork and text.
 
 1. `remote_repo` 决定 Provider，支持 `gitee`、`gitlab`、`github`。
 2. 支持 HTTPS 或 SSH Git URL，且必须包含 owner/group 与仓库路径。
@@ -89,6 +96,11 @@ This specification covers provider metadata resolved on the Project page and the
     Workflow 时也会请求同一概览。当前实现没有轮询间隔或自动重试定时器。
 16. Project 网格必须按受约束的页面内容宽度计算列数；新增一列前每张卡片至少保留
     280px 可读宽度。网格卡片和列表行都必须提供带项目名称的无障碍标签及键盘激活。
+17. 每个项目网格卡片和列表行必须将持久化的 `repo_type` 呈现为紧凑的右上角
+    45° 对角缎带，包含 Provider Logo 以及可读的 GitHub、GitLab 或 Gitee 名称，
+    缎带两端由卡片边缘裁切。缎带不得占用独立元数据行；响应式宿主空间不足时必须
+    先缩小，不能挤压项目身份或路径。品牌底色在明暗主题下保持固定：GitHub
+    `#24292E`、GitLab `#FC6D26`、Gitee `#C71D23`，Provider 图形与文字统一使用白色。
 
 ## Deferred enhancement / 后续优化
 

@@ -1,4 +1,4 @@
-import { GitHubActionListItem } from "./github_action_menu.slint";
+import { GitHubActionListItem, GitHubActionMenuTriggerArea } from "./github_action_menu.slint";
 import { GitHubIconButton } from "./button/github_icon_button.slint";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 
@@ -6,6 +6,9 @@ import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 export component GitHubFilterMenuButton inherits FocusScope {
     in property <string> label;
     in property <bool> selected: false;
+    // When wired to the open menu identity, trigger clicks reconcile with
+    // same-event chrome dismiss instead of dismiss→toggle-reopen.
+    in property <bool> menu-open: false;
     callback clicked();
 
     private property <bool> keyboard-focus-visible: false;
@@ -75,13 +78,16 @@ export component GitHubFilterMenuButton inherits FocusScope {
         }
     }
 
-    filter-touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => {
+    filter-touch := GitHubActionMenuTriggerArea {
+        menu-open: root.menu-open;
+        activated => {
             root.keyboard-focus-visible = false;
             root.focus();
-            root.clicked();
         }
+        // Callers still use toggle semantics in clicked(); request-open/close
+        // only fire when the press/click reconciliation wants a state change.
+        request-open => { root.clicked(); }
+        request-close => { root.clicked(); }
     }
 
     if root.has-focus && root.keyboard-focus-visible: Rectangle {

@@ -27,3 +27,34 @@ export component GitHubSpinner inherits Rectangle {
         transform-origin: { x: self.width / 2, y: self.height / 2 };
     }
 }
+
+// Centered spinner + status label used by PR list and PR review loading panels.
+// Geometry matches the Workflow pull-request list: 32px spinner, 13px muted
+// label, 42px vertical gap from spinner top to label top inside a 64px stack.
+export component GitHubCenteredLoadingState inherits Rectangle {
+    in property <string> label;
+    in property <color> foreground: GitHubTheme.fg-muted;
+
+    background: transparent;
+    accessible-role: progress-indicator;
+    accessible-label: root.label;
+
+    GitHubSpinner {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - 64px) / 2;
+        spinner-size: 32px;
+        foreground: root.foreground;
+    }
+
+    Text {
+        x: 24px;
+        y: (parent.height - 64px) / 2 + 42px;
+        width: parent.width - 48px;
+        height: 22px;
+        text: root.label;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-size: 13px;
+        color: root.foreground;
+    }
+}

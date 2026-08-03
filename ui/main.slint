@@ -18,6 +18,8 @@ import { Route } from "./route/routeMap.slint";
 import { AppState } from "./state/app_state.slint";
 import { DebugLogger } from "./state/debug_logger.slint";
 import { TransientOverlayState } from "./state/transient_overlay_state.slint";
+import { TooltipOverlayState } from "./state/tooltip_overlay_state.slint";
+import { GitHubTooltipOverlayHost } from "./components/github_tooltip_overlay.slint";
 import { GitHubBreadcrumb } from "./components/navigation/github_breadcrumb.slint";
 import { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
 import { NotificationIcons } from "./components/notify/icons.slint";
@@ -40,6 +42,7 @@ export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
 export { DebugLogger } from "./state/debug_logger.slint";
 export { TransientOverlayState } from "./state/transient_overlay_state.slint";
+export { TooltipOverlayState } from "./state/tooltip_overlay_state.slint";
 export { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
 export { NotificationIcons } from "./components/notify/icons.slint";
 export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
@@ -64,9 +67,15 @@ export component MainWindow inherits Window {
     private property <length> page-content-top-padding:
         root.show-breadcrumb ? (root.platform-is-macos ? 16px : 56px) : 0px;
     private property <length> page-content-height-offset: root.page-content-top-padding + 2px;
-    background: transparent;
+    // Until AppKit confirms that Menu vibrancy is mounted, keep the complete
+    // first frame opaque. Otherwise the transparent root and translucent
+    // sidebar can reveal another window before the native effect is ready.
+    background: root.platform-is-macos && !root.native-sidebar-vibrancy-ready
+        ? root.window-surface-color
+        : transparent;
     in-out property <bool> window-live-resizing: false;
     in-out property <bool> native-window-active: true;
+    in-out property <bool> native-sidebar-vibrancy-ready: false;
     // Display-only labels come from the Rust shortcut registry so tooltips and
     // executable bindings cannot drift apart.
     in property <string> shortcut-toggle-sidebar-label: "";
@@ -174,6 +183,9 @@ export component MainWindow inherits Window {
     callback router-back();
     callback navigate-forward();
     callback navigate-from-nav-index(int);
+    // Startup restores the persisted state before the first frame without
+    // treating it as an interactive toggle.
+    callback restore-navigation-drawer-state(bool);
     callback toggle-navigation-drawer();
     callback navigation-drawer-motion-settled(bool);
     callback modal-overlay-visibility-changed(bool);
@@ -609,6 +621,14 @@ export component MainWindow inherits Window {
 
     dismiss-transient-overlays => {
         TransientOverlayState.dismiss-all();
+    }
+
+    restore-navigation-drawer-state(expanded) => {
+        root.navigation-drawer-expanded = expanded;
+        root.sidebar-motion-progress = expanded ? 1.0 : 0.0;
+        root.sidebar-motion-velocity = 0.0;
+        root.sidebar-motion-running = false;
+        root.sidebar-content-wide = !expanded;
     }
     
     show-update-dialog(latest-version, current-version) => {
@@ -1155,7 +1175,10 @@ export component MainWindow inherits Window {
             show-sidebar-control: !root.platform-is-macos;
             show-history-controls: !root.platform-is-macos;
             native-vibrancy: root.platform-is-macos;
-            native-window-active: root.native-window-active;
+            // The inactive native surface is opaque and doubles as the startup
+            // fallback until Rust has attached the native effect hierarchy.
+            native-window-active: root.native-window-active
+                && root.native-sidebar-vibrancy-ready;
             titlebar-inset: root.native-titlebar-inset;
             header-chevron-icon: root.navigation-chevron-icon;
             search-icon: root.navigation-search-icon;
@@ -1322,7 +1345,8 @@ export component MainWindow inherits Window {
                 show-sidebar-control: !root.platform-is-macos;
                 show-history-controls: !root.platform-is-macos;
                 native-vibrancy: root.platform-is-macos;
-                native-window-active: root.native-window-active;
+                native-window-active: root.native-window-active
+                    && root.native-sidebar-vibrancy-ready;
                 paint-native-surface: false;
                 titlebar-inset: root.native-titlebar-inset;
                 header-chevron-icon: root.navigation-chevron-icon;
@@ -1688,6 +1712,8 @@ export component MainWindow inherits Window {
                 root.workflow-pr-revert-dialog-open = true;
             }
             toggle-readiness-popup => {
+                // Peer Diff/file menus close via ActionMenu exclusive-claim when
+                // this root-mounted menu opens; no page-local dismiss-all here.
                 root.workflow-pr-readiness-popup-open = !root.workflow-pr-readiness-popup-open;
             }
             readiness-anchor-changed(x, y, width, height) => {
@@ -1702,7 +1728,10 @@ export component MainWindow inherits Window {
     // A title-bar ActionMenu must live at the window root. Rendering it as a
     // descendant of the 46px action strip makes the menu depend on overflow
     // across the PR page's stacking layer and can leave it invisible or
-    // non-interactive on macOS.
+    // non-interactive on macOS. Page outside-click and mutual-exclusive first
+    // clicks are owned by the PR workspace (under its chrome) plus
+    // TransientOverlayState for title-bar/shell chrome — not a root scrim above
+    // the page, which would consume the switching click on Diff/file menus.
     pr-readiness-overlay := Rectangle {
         x: 0px;
         y: 0px;
@@ -1961,5 +1990,14 @@ export component MainWindow inherits Window {
                 root.cancel-download();
             }
         }
+    }
+
+    // Shared tooltip portal: locators inside clipped page/scroll hosts publish
+    // here so tips are never truncated by ancestor clip (z alone cannot escape).
+    // Host stays zero-sized; only the tip child paints (no full-window hit target).
+    GitHubTooltipOverlayHost {
+        x: 0px;
+        y: 0px;
+        z: 1500;
     }
 }

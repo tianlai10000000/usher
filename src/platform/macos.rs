@@ -26,6 +26,7 @@ static mut TITLEBAR_EVENT_MONITOR: *mut Object = std::ptr::null_mut();
 static mut TRAFFIC_LIGHT_BASE_Y: [f64; 3] = [f64::NAN; 3];
 static mut SIDEBAR_VIBRANCY_INSTALLED: bool = false;
 static mut SIDEBAR_VIBRANCY_VIEW: *mut Object = std::ptr::null_mut();
+static mut WINDOW_SURFACE_BACKDROP_VIEW: *mut Object = std::ptr::null_mut();
 static mut SIDEBAR_DARK_MODE: bool = false;
 
 #[repr(C)]
@@ -179,7 +180,12 @@ pub(crate) fn set_title_bar_color(window: &MainWindow, is_dark: bool) {
     };
     unsafe {
         let _: () = msg_send![window, setTitlebarAppearsTransparent: true];
-        let _: () = msg_send![window, setOpaque: false];
+        // Stay opaque until Menu vibrancy and the content backdrop are installed.
+        // Opening the transparent path earlier lets the translucent Slint sidebar
+        // flash desktop content on the first ordered frame.
+        if SIDEBAR_VIBRANCY_INSTALLED {
+            let _: () = msg_send![window, setOpaque: false];
+        }
         // Do not let terminal/diff drag surfaces move the native window.
         let _: () = msg_send![window, setMovableByWindowBackground: false];
     }
@@ -190,32 +196,23 @@ pub(crate) fn set_title_bar_color(window: &MainWindow, is_dark: bool) {
         }
     }
 
-    if let Some(color_class) = Class::get("NSColor") {
-        if unsafe { SIDEBAR_VIBRANCY_INSTALLED } {
-            unsafe {
-                let is_key: bool = msg_send![window, isKeyWindow];
-                update_sidebar_window_surface(window, is_key);
-            }
-            return;
+    if unsafe { SIDEBAR_VIBRANCY_INSTALLED } {
+        unsafe {
+            let is_key: bool = msg_send![window, isKeyWindow];
+            update_sidebar_window_surface(window, is_key);
         }
-        let (red, green, blue) = if is_dark {
-            (12.0 / 255.0, 14.0 / 255.0, 19.0 / 255.0)
-        } else {
-            (1.0, 1.0, 1.0)
-        };
-        let color: *mut Object = unsafe {
-            msg_send![
-                color_class,
-                colorWithSRGBRed: red
-                green: green
-                blue: blue
-                alpha: 1.0
-            ]
-        };
-        if !color.is_null() {
-            unsafe {
-                let _: () = msg_send![window, setBackgroundColor: color];
-            }
+        return;
+    }
+
+    let (red, green, blue) = if is_dark {
+        (12.0 / 255.0, 14.0 / 255.0, 19.0 / 255.0)
+    } else {
+        (1.0, 1.0, 1.0)
+    };
+    let color = unsafe { nscolor_srgb(red, green, blue, 1.0) };
+    if !color.is_null() {
+        unsafe {
+            let _: () = msg_send![window, setBackgroundColor: color];
         }
     }
 
@@ -309,7 +306,42 @@ fn register_titlebar_delegate_class() -> &'static Class {
                 return;
             }
             let window: *mut Object = unsafe { msg_send![notification, object] };
-            unsafe { align_standard_window_buttons(window) };
+            unsafe {
+                align_standard_window_buttons(window);
+                layout_sidebar_vibrancy_views();
+            }
+        }
+
+        extern "C" fn fullscreen_transition_completed(
+            this: &Object,
+            _cmd: Sel,
+            notification: *mut Object,
+        ) {
+            if notification.is_null() {
+                return;
+            }
+            let window: *mut Object = unsafe { msg_send![notification, object] };
+            if window.is_null() {
+                return;
+            }
+            unsafe {
+                align_standard_window_buttons(window);
+                // Full-screen transitions can perform one more private title-bar
+                // layout after the did-enter/did-exit notification. Recheck on
+                // the next run-loop turn and once after the animation settles.
+                let _: () = msg_send![
+                    this,
+                    performSelector: sel!(usherAlignTrafficLights:)
+                    withObject: window
+                    afterDelay: 0.0f64
+                ];
+                let _: () = msg_send![
+                    this,
+                    performSelector: sel!(usherAlignTrafficLights:)
+                    withObject: window
+                    afterDelay: 0.25f64
+                ];
+            }
         }
 
         extern "C" fn window_did_become_key(_this: &Object, _cmd: Sel, notification: *mut Object) {
@@ -382,6 +414,10 @@ fn register_titlebar_delegate_class() -> &'static Class {
                 window_did_resize as extern "C" fn(&Object, Sel, *mut Object),
             );
             declaration.add_method(
+                sel!(usherFullscreenTransitionCompleted:),
+                fullscreen_transition_completed as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            declaration.add_method(
                 sel!(usherWindowDidBecomeKey:),
                 window_did_become_key as extern "C" fn(&Object, Sel, *mut Object),
             );
@@ -444,6 +480,14 @@ fn observe_window_interaction(window: *mut Object, delegate: *mut Object) {
             sel!(usherWindowLiveResizeEnd:),
         ),
         ("NSWindowDidResizeNotification", sel!(usherWindowDidResize:)),
+        (
+            "NSWindowDidEnterFullScreenNotification",
+            sel!(usherFullscreenTransitionCompleted:),
+        ),
+        (
+            "NSWindowDidExitFullScreenNotification",
+            sel!(usherFullscreenTransitionCompleted:),
+        ),
         (
             "NSWindowDidBecomeKeyNotification",
             sel!(usherWindowDidBecomeKey:),
@@ -698,17 +742,73 @@ fn sidebar_toggle_tooltip(expanded: bool) -> String {
     )
 }
 
+fn sidebar_content_surface_components() -> (f64, f64, f64) {
+    if unsafe { SIDEBAR_DARK_MODE } {
+        (12.0 / 255.0, 14.0 / 255.0, 19.0 / 255.0)
+    } else {
+        (1.0, 1.0, 1.0)
+    }
+}
+
+unsafe fn nscolor_srgb(red: f64, green: f64, blue: f64, alpha: f64) -> *mut Object {
+    let Some(color_class) = Class::get("NSColor") else {
+        return std::ptr::null_mut();
+    };
+    unsafe {
+        msg_send![
+            color_class,
+            colorWithSRGBRed: red
+            green: green
+            blue: blue
+            alpha: alpha
+        ]
+    }
+}
+
+unsafe fn apply_content_surface_backdrop_fill() {
+    if unsafe { WINDOW_SURFACE_BACKDROP_VIEW.is_null() } {
+        return;
+    }
+    let (red, green, blue) = sidebar_content_surface_components();
+    let surface_color = unsafe { nscolor_srgb(red, green, blue, 1.0) };
+    if surface_color.is_null() {
+        return;
+    }
+    unsafe {
+        let _: () = msg_send![WINDOW_SURFACE_BACKDROP_VIEW, setFillColor: surface_color];
+    }
+}
+
+unsafe fn layout_sidebar_vibrancy_views() {
+    let effect = unsafe { SIDEBAR_VIBRANCY_VIEW };
+    let backdrop = unsafe { WINDOW_SURFACE_BACKDROP_VIEW };
+    if effect.is_null() || backdrop.is_null() {
+        return;
+    }
+    let parent_view: *mut Object = unsafe { msg_send![effect, superview] };
+    if parent_view.is_null() {
+        return;
+    }
+    // Use the sibling host's bounds, not the render view's pre-full-size frame.
+    // Before FullSizeContentView is enabled the render frame excludes the
+    // title bar, which leaves a permanently transparent strip above the effect.
+    let bounds: NSRect = unsafe { msg_send![parent_view, bounds] };
+    let sidebar_frame = NSRect {
+        origin: bounds.origin,
+        size: NSSize {
+            width: 240.0,
+            height: bounds.size.height,
+        },
+    };
+    unsafe {
+        let _: () = msg_send![backdrop, setFrame: bounds];
+        let _: () = msg_send![effect, setFrame: sidebar_frame];
+    }
+}
+
 unsafe fn install_sidebar_vibrancy(window: *mut Object, render_view: *mut Object) -> bool {
     if unsafe { SIDEBAR_VIBRANCY_INSTALLED } {
         return true;
-    }
-    unsafe {
-        // Full-size transparent content lets either native material extend
-        // behind the traffic lights and title-bar accessories.
-        let style_mask: u64 = msg_send![window, styleMask];
-        let _: () = msg_send![window, setStyleMask: style_mask | (1u64 << 15)];
-        let _: () = msg_send![window, setTitlebarAppearsTransparent: true];
-        let _: () = msg_send![window, setOpaque: false];
     }
 
     let parent_view: *mut Object = unsafe { msg_send![render_view, superview] };
@@ -716,25 +816,70 @@ unsafe fn install_sidebar_vibrancy(window: *mut Object, render_view: *mut Object
         log::warn!("[TitleBar] Native render view has no parent for sidebar vibrancy");
         return false;
     }
-    let frame: NSRect = unsafe { msg_send![render_view, frame] };
+
+    unsafe {
+        // Adopt the final full-size transparent-title-bar style before adding
+        // native underlays. A later styleMask change can rebuild AppKit's
+        // border-view hierarchy and drop or reorder manually inserted siblings,
+        // which briefly exposed desktop content through the translucent shell.
+        let style_mask: u64 = msg_send![window, styleMask];
+        let _: () = msg_send![window, setStyleMask: style_mask | (1u64 << 15)];
+        let _: () = msg_send![window, setTitlebarAppearsTransparent: true];
+    }
+
+    // The parent bounds include the full-size title-bar area. The render view
+    // frame can still exclude that strip at this point in window creation.
+    let frame: NSRect = unsafe { msg_send![parent_view, bounds] };
+
+    // The Slint GPU surface can be resized one compositor frame after AppKit
+    // changes the native window. Keep an opaque native canvas below it so a
+    // rapid shrink never exposes the desktop through the transparent window.
+    let Some(backdrop) = (unsafe { create_view("NSBox", frame) }) else {
+        log::warn!("[TitleBar] Native window-surface backdrop is unavailable");
+        return false;
+    };
+    unsafe {
+        let _: () = msg_send![backdrop, setBoxType: 4u64];
+        let _: () = msg_send![backdrop, setBorderType: 0u64];
+        let _: () = msg_send![backdrop, setBorderWidth: 0.0f64];
+        let _: () = msg_send![backdrop, setAutoresizingMask: 18u64];
+        // Fill before the window becomes non-opaque. An empty custom NSBox is
+        // transparent and would otherwise flash desktop content through the
+        // translucent Slint sidebar on the first ordered frame.
+        WINDOW_SURFACE_BACKDROP_VIEW = backdrop;
+        apply_content_surface_backdrop_fill();
+    }
 
     let Some(effect_class) = Class::get("NSVisualEffectView") else {
         log::warn!("[TitleBar] NSVisualEffectView is unavailable");
+        unsafe {
+            WINDOW_SURFACE_BACKDROP_VIEW = std::ptr::null_mut();
+        }
         return false;
     };
     let effect: *mut Object = unsafe { msg_send![effect_class, alloc] };
-    let effect: *mut Object = unsafe { msg_send![effect, initWithFrame: frame] };
+    let sidebar_frame = NSRect {
+        origin: frame.origin,
+        size: NSSize {
+            width: 240.0,
+            height: frame.size.height,
+        },
+    };
+    let effect: *mut Object = unsafe { msg_send![effect, initWithFrame: sidebar_frame] };
     if effect.is_null() {
+        unsafe {
+            WINDOW_SURFACE_BACKDROP_VIEW = std::ptr::null_mut();
+        }
         return false;
     }
     unsafe {
-        // Match Electron's native implementation: its backdrop spans the full
-        // content view and resizes in both dimensions. Slint exposes it only
-        // through the transparent 240 pt sidebar; the main surface stays opaque.
+        // The material belongs only to the 240 pt navigation column. Keeping it
+        // out of the right content region prevents a late GPU resize from
+        // exposing a wallpaper-tinted rectangle there.
         let _: () = msg_send![effect, setMaterial: 5isize];
         let _: () = msg_send![effect, setBlendingMode: 0isize];
         let _: () = msg_send![effect, setState: 0isize];
-        let _: () = msg_send![effect, setAutoresizingMask: 18u64];
+        let _: () = msg_send![effect, setAutoresizingMask: 16u64];
     }
 
     unsafe {
@@ -744,6 +889,12 @@ unsafe fn install_sidebar_vibrancy(window: *mut Object, render_view: *mut Object
         // while the transparent Slint surface remains fully interactive.
         let _: () = msg_send![
             parent_view,
+            addSubview: backdrop
+            positioned: -1isize
+            relativeTo: render_view
+        ];
+        let _: () = msg_send![
+            parent_view,
             addSubview: effect
             positioned: -1isize
             relativeTo: render_view
@@ -751,10 +902,20 @@ unsafe fn install_sidebar_vibrancy(window: *mut Object, render_view: *mut Object
 
         SIDEBAR_VIBRANCY_VIEW = effect;
         SIDEBAR_VIBRANCY_INSTALLED = true;
+        // Re-read the host bounds so the effect and canvas include the
+        // title-bar strip of the already-final full-size hierarchy.
+        layout_sidebar_vibrancy_views();
+        // Only open the transparent window path after the opaque canvas and
+        // Menu material are part of the hierarchy; everything commits in one
+        // AppKit transaction, so no frame can sample through to the desktop.
+        let _: () = msg_send![window, setOpaque: false];
         let is_key: bool = msg_send![window, isKeyWindow];
         update_sidebar_window_surface(window, is_key);
     }
-    log::info!("[TitleBar] Installed Codex-style Menu vibrancy backdrop");
+    if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
+        ui.set_native_sidebar_vibrancy_ready(true);
+    }
+    log::info!("[TitleBar] Installed bounded Menu vibrancy and opaque content backdrop");
     true
 }
 
@@ -773,31 +934,28 @@ unsafe fn update_sidebar_window_surface(window: *mut Object, is_focused: bool) {
         let _: () = msg_send![SIDEBAR_VIBRANCY_VIEW, setHidden: !is_focused];
     }
 
-    let Some(color_class) = Class::get("NSColor") else {
-        return;
-    };
-    let color: *mut Object = if is_focused {
-        unsafe { msg_send![color_class, clearColor] }
+    // AppKit treats true clearColor as a special case that can disable corner
+    // masking and briefly expose desktop content before the backdrop layer is
+    // ready. A near-clear color keeps BehindWindow sampling without that flash.
+    let color = if is_focused {
+        let (red, green, blue) = sidebar_content_surface_components();
+        unsafe { nscolor_srgb(red, green, blue, 0.001) }
     } else {
         let component = if unsafe { SIDEBAR_DARK_MODE } {
             0.0
         } else {
             249.0 / 255.0
         };
-        unsafe {
-            msg_send![
-                color_class,
-                colorWithSRGBRed: component
-                green: component
-                blue: component
-                alpha: 1.0
-            ]
-        }
+        unsafe { nscolor_srgb(component, component, component, 1.0) }
     };
     if !color.is_null() {
         unsafe {
             let _: () = msg_send![window, setBackgroundColor: color];
         }
+    }
+
+    unsafe {
+        apply_content_surface_backdrop_fill();
     }
 }
 
@@ -805,6 +963,18 @@ unsafe fn update_sidebar_window_surface(window: *mut Object, is_focused: bool) {
 /// band even when the content/title-bar inset is taller. Usher's breadcrumb
 /// and accessory controls use the geometric center of the full 46 pt inset,
 /// so lower the three standard buttons by the same 7 pt delta.
+fn titlebar_controls_x(anchor_x: f64, traffic_right: f64) -> f64 {
+    anchor_x.max(traffic_right + 8.0)
+}
+
+fn titlebar_controls_y(traffic_y: f64, traffic_height: f64, fullscreen: bool) -> f64 {
+    // Full-screen AppKit uses a different title-bar host whose RoundRect
+    // NSButton content sits about 7 pt below the traffic-light center. The
+    // ordinary accessory host is already centered and must not be adjusted.
+    let fullscreen_content_offset = if fullscreen { 7.0 } else { 0.0 };
+    traffic_y + (traffic_height - 28.0) / 2.0 + fullscreen_content_offset
+}
+
 unsafe fn align_standard_window_buttons(window: *mut Object) {
     if window.is_null() {
         return;
@@ -858,12 +1028,84 @@ unsafe fn align_standard_window_buttons(window: *mut Object) {
             toView: titlebar_view
         ]
     };
-    let origin = NSPoint {
-        x: anchor_origin.x,
-        y: traffic_frame.origin.y + (traffic_frame.size.height - 28.0) / 2.0,
+    // During a full-screen transition AppKit can temporarily place the left
+    // accessory anchor at the title-bar origin. Never allow the detached
+    // controls container to overlap the system traffic-light cluster.
+    let mut traffic_right = traffic_frame.origin.x + traffic_frame.size.width;
+    for button_kind in 1u64..=2u64 {
+        let button: *mut Object = unsafe { msg_send![window, standardWindowButton: button_kind] };
+        if button.is_null() {
+            continue;
+        }
+        let frame: NSRect = unsafe { msg_send![button, frame] };
+        traffic_right = traffic_right.max(frame.origin.x + frame.size.width);
+    }
+    let style_mask: u64 = unsafe { msg_send![window, styleMask] };
+    let fullscreen = style_mask & (1u64 << 14) != 0;
+    let titlebar_origin = NSPoint {
+        x: titlebar_controls_x(anchor_origin.x, traffic_right),
+        y: titlebar_controls_y(
+            traffic_frame.origin.y,
+            traffic_frame.size.height,
+            fullscreen,
+        ),
+    };
+    // Full-screen AppKit may rebuild the title-bar hierarchy. The standard
+    // buttons then report coordinates in the new titlebar view while our
+    // detached controls container can remain attached to the previous
+    // superview. Convert through the actual host before assigning the frame;
+    // writing titlebar-view coordinates directly causes the 7.5 pt vertical
+    // offset visible on Retina displays.
+    let controls_superview: *mut Object = unsafe { msg_send![controls, superview] };
+    if controls_superview.is_null() {
+        return;
+    }
+    let origin: NSPoint = unsafe {
+        msg_send![
+            titlebar_view,
+            convertPoint: titlebar_origin
+            toView: controls_superview
+        ]
     };
     unsafe {
         let _: () = msg_send![controls, setFrameOrigin: origin];
+    }
+}
+
+/// Whether the startup-critical native chrome is fully installed: the Menu
+/// vibrancy underlays plus the title-bar accessory controls.
+pub(crate) fn startup_native_chrome_ready() -> bool {
+    unsafe { TITLEBAR_INSTALLED && SIDEBAR_VIBRANCY_INSTALLED }
+}
+
+/// Re-apply the traffic-light and accessory alignment synchronously.
+///
+/// AppKit performs another title-bar layout shortly after accessories are
+/// attached, which resets the standard buttons to their compact default band.
+/// The startup reveal must run this realignment first so the first visible
+/// frame already shows the traffic lights on the accessory-button centerline.
+pub(crate) fn prepare_startup_reveal(window: &MainWindow) {
+    let Some(window) = native_window(window) else {
+        return;
+    };
+    unsafe {
+        align_standard_window_buttons(window);
+    }
+}
+
+/// Hide or reveal the native window during startup configuration.
+///
+/// `show()` presents the window on the next run-loop commit. Keeping the
+/// window at alpha 0 until native chrome (vibrancy, backdrop, title-bar
+/// accessories) and the first themed Slint frame are ready means the first
+/// visible frame is already the final shell instead of a staged transition.
+pub(crate) fn set_startup_presentation_hidden(window: &MainWindow, hidden: bool) {
+    let Some(window) = native_window(window) else {
+        return;
+    };
+    unsafe {
+        let alpha: f64 = if hidden { 0.0 } else { 1.0 };
+        let _: () = msg_send![window, setAlphaValue: alpha];
     }
 }
 
@@ -898,9 +1140,13 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
     observe_window_interaction(window, delegate);
 
     unsafe {
-        // Match ChatGPT's compact macOS shell: the title remains available to
-        // the system, while the visible title-bar label is replaced by controls.
+        // The Slint window starts with an empty title so AppKit cannot flash a
+        // visible "Usher" label before this installation pass. Restore the
+        // metadata title only after hiding the standard title presentation.
         let _: () = msg_send![window, setTitleVisibility: 1u64];
+        if let Some(title) = nsstring("Usher") {
+            let _: () = msg_send![window, setTitle: title];
+        }
         install_sidebar_vibrancy(window, render_view);
     }
 
@@ -1125,7 +1371,11 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::{macos_shortcut_key, sidebar_toggle_image_names, sidebar_toggle_tooltip};
+    use super::{
+        SIDEBAR_DARK_MODE, macos_shortcut_key, sidebar_content_surface_components,
+        sidebar_toggle_image_names, sidebar_toggle_tooltip, titlebar_controls_x,
+        titlebar_controls_y,
+    };
 
     #[test]
     fn physical_shortcut_keys_are_input_method_independent() {
@@ -1150,6 +1400,32 @@ mod tests {
         );
         assert_eq!(sidebar_toggle_tooltip(false), "Show sidebar (⌘B)");
         assert_eq!(sidebar_toggle_tooltip(true), "Hide sidebar (⌘B)");
+    }
+
+    #[test]
+    fn titlebar_controls_stay_beyond_traffic_lights_when_fullscreen_resets_anchor() {
+        assert_eq!(titlebar_controls_x(7.0, 69.0), 77.0);
+        assert_eq!(titlebar_controls_x(82.0, 69.0), 82.0);
+    }
+
+    #[test]
+    fn titlebar_controls_compensate_for_native_button_image_baseline() {
+        assert_eq!(titlebar_controls_y(10.0, 14.0, true), 10.0);
+        assert_eq!(titlebar_controls_y(10.0, 14.0, false), 3.0);
+    }
+
+    #[test]
+    fn content_surface_components_follow_sidebar_theme() {
+        unsafe {
+            SIDEBAR_DARK_MODE = false;
+            assert_eq!(sidebar_content_surface_components(), (1.0, 1.0, 1.0));
+            SIDEBAR_DARK_MODE = true;
+            assert_eq!(
+                sidebar_content_surface_components(),
+                (12.0 / 255.0, 14.0 / 255.0, 19.0 / 255.0)
+            );
+            SIDEBAR_DARK_MODE = false;
+        }
     }
 }
 

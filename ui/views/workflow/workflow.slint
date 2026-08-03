@@ -2,12 +2,13 @@
 import { GitHubActionMenu } from "../../components/github_action_menu.slint";
 import { GitHubPageView } from "../../components/page/page_view.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
-import { GitHubUnderlineNavItem } from "../../components/navigation/github_underline_nav.slint";
+import { GitHubUnderlineNav, GitHubUnderlineNavItem } from "../../components/navigation/github_underline_nav.slint";
 import { Route } from "../../route/routeMap.slint";
 import { GitHubPullRequestFlow, WorkflowPullRequestItem } from "../../components/workflow/github_pr_flow.slint";
 import { GitHubBranchFlow } from "../../components/workflow/github_branch_flow.slint";
 import { GitHubCdFlow } from "../../components/workflow/github_cd_flow.slint";
 import { GitHubTagFlow } from "../../components/workflow/github_tag_flow.slint";
+import { GitHubTooltip } from "../../components/github_tooltip.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import { GitHubWorkflowProjectDetails } from "../../components/workflow/github_workflow_components.slint";
 
@@ -165,50 +166,35 @@ export component GitHubWorkflowPage inherits GitHubPageView {
             }
         }
 
-        Rectangle {
+        GitHubUnderlineNav {
             y: root.project-header-height;
             width: parent.width;
             height: root.workflow-nav-height;
-            background: root.canvas-default;
+            group-label: "Workflow sections";
 
-            Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: root.border-default;
+            GitHubUnderlineNavItem {
+                label: "Pull requests";
+                icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
+                selected: root.selected-flow == 2;
+                clicked => { root.selected-flow = 2; }
             }
-
-            HorizontalLayout {
-                x: 0px;
-                width: parent.width;
-                height: parent.height;
-                spacing: 4px;
-                alignment: start;
-
-                GitHubUnderlineNavItem {
-                    label: "Pull requests";
-                    icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
-                    selected: root.selected-flow == 2;
-                    clicked => { root.selected-flow = 2; }
-                }
-                GitHubUnderlineNavItem {
-                    label: "Tags";
-                    icon: @image-url("../../assets/icons/octicon-stack-16.svg");
-                    selected: root.selected-flow == 3;
-                    clicked => { root.selected-flow = 3; }
-                }
-                GitHubUnderlineNavItem {
-                    label: "Branch";
-                    icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
-                    selected: root.selected-flow == 0;
-                    clicked => { root.selected-flow = 0; }
-                }
-                GitHubUnderlineNavItem {
-                    label: "CD";
-                    icon: @image-url("../../assets/icons/octicon-repo-push-16.svg");
-                    selected: root.selected-flow == 1;
-                    clicked => { root.selected-flow = 1; }
-                }
+            GitHubUnderlineNavItem {
+                label: "Tags";
+                icon: @image-url("../../assets/icons/octicon-stack-16.svg");
+                selected: root.selected-flow == 3;
+                clicked => { root.selected-flow = 3; }
+            }
+            GitHubUnderlineNavItem {
+                label: "Branch";
+                icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
+                selected: root.selected-flow == 0;
+                clicked => { root.selected-flow = 0; }
+            }
+            GitHubUnderlineNavItem {
+                label: "CD";
+                icon: @image-url("../../assets/icons/octicon-repo-push-16.svg");
+                selected: root.selected-flow == 1;
+                clicked => { root.selected-flow = 1; }
             }
         }
 
@@ -431,6 +417,8 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 background: shell-open-touch.has-hover
                     ? (GitHubTheme.control-muted-hover)
                     : transparent;
+                clip: false;
+                z: 10000;
                 Image {
                     x: 6px;
                     y: 6px;
@@ -443,6 +431,15 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                     enabled: root.has-local;
                     mouse-cursor: pointer;
                     clicked => { root.open-local-repo(root.project-local-repo); }
+                }
+                // Match the expanded header's Show in Finder/Explorer tooltip.
+                // Keep it inside the ActionMenu surface so clip:true does not
+                // hide an above-tooltip that would otherwise escape the panel.
+                if shell-open-touch.has-hover && root.has-local: GitHubTooltip {
+                    x: parent.width - self.width;
+                    y: -self.height - 4px;
+                    z: 10001;
+                    text: root.open-local-folder-tooltip;
                 }
                 }
             }

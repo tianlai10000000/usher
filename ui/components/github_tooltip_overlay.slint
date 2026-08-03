@@ -1,0 +1,31 @@
+import { TooltipOverlayState } from "../state/tooltip_overlay_state.slint";
+import { GitHubTooltipSurface } from "./github_tooltip.slint";
+
+// Window-root host for the shared tooltip portal. Stay zero-sized so the host
+// never steals hits; the painted tip is a child with clip:false overflow.
+export component GitHubTooltipOverlayHost inherits Rectangle {
+    private property <int> observed-lease: 0;
+
+    width: 0px;
+    height: 0px;
+    background: transparent;
+    clip: false;
+
+    if TooltipOverlayState.open && TooltipOverlayState.text != "": GitHubTooltipSurface {
+        x: TooltipOverlayState.x - root.absolute-position.x;
+        y: TooltipOverlayState.y - root.absolute-position.y;
+        text: TooltipOverlayState.text;
+    }
+
+    lease-watch := Timer {
+        interval: 48ms;
+        running: TooltipOverlayState.open;
+        triggered => {
+            if TooltipOverlayState.lease == root.observed-lease {
+                TooltipOverlayState.hide(TooltipOverlayState.token);
+            } else {
+                root.observed-lease = TooltipOverlayState.lease;
+            }
+        }
+    }
+}

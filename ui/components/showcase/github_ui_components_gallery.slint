@@ -12,7 +12,7 @@ import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubProgressBar } from "../github_progress_bar.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
 import { GitHubSegmentedControl, GitHubSegmentedControlItem, GitHubSegmentedControlDivider } from "../github_segmented_control.slint";
-import { GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
+import { GitHubUnderlineNav, GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
 import { GitHubActionMenu, GitHubActionListItem } from "../github_action_menu.slint";
 import { GitHubFilterMenuButton, GitHubFilterMenuFrame, GitHubFilterMenuItem } from "../github_filter_menu.slint";
 import { ToastManager, ToastType } from "../toast/toast_manager.slint";
@@ -441,13 +441,12 @@ export component GitHubUiComponentsGallery inherits Rectangle {
             }
 
             GitHubShowcaseLabel { x: 0px; y: 144px; width: 160px; height: 20px; label: "UnderlineNav"; }
-            HorizontalLayout {
+            GitHubUnderlineNav {
                 x: 0px;
                 y: 172px;
                 width: parent.width;
                 height: 48px;
-                spacing: 0px;
-                alignment: start;
+                group-label: "Underline navigation examples";
 
                 GitHubUnderlineNavItem {
                     label: "Overview";
@@ -498,7 +497,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
 
         GitHubShowcaseSection {
             title: "ActionMenu";
-            description: "AnchoredOverlay placement, start/end alignment, above/below side selection, ActionList rows, and Escape dismissal.";
+            description: "AnchoredOverlay placement, start/end alignment, above/below side selection, ActionList rows, Escape, and caller-owned outside-click dismiss.";
             content-height: root.action-menu-open ? 204px : 48px;
 
             HorizontalLayout {
@@ -506,6 +505,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 y: 0px;
                 width: parent.width;
                 height: 32px;
+                z: 2;
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
@@ -547,7 +547,23 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 }
             }
 
+            // Demonstrate the caller-owned outside-click layer ActionMenu
+            // expects under the menu surface.
+            if root.action-menu-open: Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                z: 0;
+                background: transparent;
+                TouchArea {
+                    mouse-cursor: default;
+                    clicked => { root.action-menu-open = false; }
+                }
+            }
+
             GitHubActionMenu {
+                z: 1;
                 open: root.action-menu-open;
                 viewport-x: 0px;
                 viewport-y: 0px;
@@ -600,7 +616,9 @@ export component GitHubUiComponentsGallery inherits Rectangle {
             status-filter-button := GitHubFilterMenuButton {
                 x: 0px;
                 y: 0px;
+                z: 2;
                 label: "Status";
+                menu-open: root.filter-menu == "status";
                 selected: root.filter-menu == "status"
                     || root.filter-status != "all";
                 clicked => {
@@ -612,7 +630,9 @@ export component GitHubUiComponentsGallery inherits Rectangle {
             owner-filter-button := GitHubFilterMenuButton {
                 x: status-filter-button.width;
                 y: 0px;
+                z: 2;
                 label: "Owner";
+                menu-open: root.filter-menu == "owner";
                 selected: root.filter-menu == "owner"
                     || root.filter-owner != "any";
                 clicked => {
@@ -624,7 +644,9 @@ export component GitHubUiComponentsGallery inherits Rectangle {
             sort-filter-button := GitHubFilterMenuButton {
                 x: owner-filter-button.x + owner-filter-button.width;
                 y: 0px;
+                z: 2;
                 label: "Sort";
+                menu-open: root.filter-menu == "sort";
                 selected: root.filter-menu == "sort"
                     || root.filter-sort != "newest";
                 clicked => {
@@ -634,7 +656,23 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 }
             }
 
+            // Under-chrome dismiss so the first click on another filter switches
+            // menus instead of only closing (same stacking as Workflow PR list).
+            if root.filter-menu != "": Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                z: 0;
+                background: transparent;
+                TouchArea {
+                    mouse-cursor: default;
+                    clicked => { root.filter-menu = ""; }
+                }
+            }
+
             if root.filter-menu != "": GitHubActionMenu {
+                z: 1;
                 open: true;
                 viewport-x: 0px;
                 viewport-y: 0px;

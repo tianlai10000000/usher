@@ -111,6 +111,13 @@ export global GitHubTheme {
     out property <color> neutral-emphasis:
         root.dark-mode ? #6e7681 : #57606a;
 
+    // Repository provider marks remain identifiable without turning project
+    // cards into a collection of ordinary status labels.
+    out property <color> provider-github-emphasis: #24292e;
+    out property <color> provider-gitlab-emphasis: #fc6d26;
+    out property <color> provider-gitee-emphasis: #c71d23;
+    out property <color> provider-ribbon-foreground: #ffffff;
+
     // Component/pattern tokens whose geometry is defined by Primer.
     out property <color> underline-nav-hover: root.dark-mode ? #656c7633 : #eaedf0;
     out property <color> underline-nav-selected: root.dark-mode ? #f78166 : #fd8c73;

@@ -6,7 +6,7 @@ import {
     GitHubSegmentedControlItem,
     GitHubSegmentedControlDivider,
 } from "../github_segmented_control.slint";
-import { GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
+import { GitHubUnderlineNav, GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
 // GitHub Primer UnderlineNav item. Durable contract:
 // docs/specs/ui-design.md “UnderlineNav tabs”.
 
@@ -86,48 +86,30 @@ export component GitHubTagFlow {
         }
 
         // GitHub UnderlineNav for the actual tag operations.
-        tabs-row := Rectangle {
+        tabs-row := GitHubUnderlineNav {
             width: parent.width;
             height: 48px;
-            background: root.canvas-default;
-            clip: false;
+            group-label: "Tag operations";
 
-            // Shared nav border; selected coral underline covers it.
-            Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: root.border-default;
+            GitHubUnderlineNavItem {
+                label: "Add Tag";
+                selected: root.selected-tab == 0;
+                clicked => {
+                    root.selected-tab = 0;
+                    root.open-add-tab();
+                }
             }
 
-            HorizontalLayout {
-                x: 0px;
-                width: parent.width;
-                height: parent.height;
-                spacing: 4px;
-                alignment: start;
-                cross-axis-alignment: center;
-
-                GitHubUnderlineNavItem {
-                    label: "Add Tag";
-                    selected: root.selected-tab == 0;
-                    clicked => {
-                        root.selected-tab = 0;
-                        root.open-add-tab();
-                    }
+            GitHubUnderlineNavItem {
+                label: "Remove Tag";
+                selected: root.selected-tab == 1;
+                clicked => {
+                    root.selected-tab = 1;
+                    root.open-remove-tab();
                 }
-
-                GitHubUnderlineNavItem {
-                    label: "Remove Tag";
-                    selected: root.selected-tab == 1;
-                    clicked => {
-                        root.selected-tab = 1;
-                        root.open-remove-tab();
-                    }
-                }
-
-                Rectangle { horizontal-stretch: 1; }
             }
+
+            Rectangle { horizontal-stretch: 1; }
         }
 
         Rectangle { width: parent.width; height: 12px; background: transparent; }

@@ -1,0 +1,43 @@
+// Window-root bridge for GitHubTooltip. Locators inside clipped scroll/page
+// hosts publish geometry here; MainWindow paints one tip above every clip
+// ancestor. Raising local z cannot escape clip — this portal is the shared fix.
+export global TooltipOverlayState {
+    in-out property <bool> open: false;
+    in-out property <string> text: "";
+    in-out property <length> x: 0px;
+    in-out property <length> y: 0px;
+    // Monotonic claim id so a stale hide/renew cannot clear a newer tip.
+    in-out property <int> token: 0;
+    // Heartbeat from the active locator; the root host clears when it stalls
+    // after a conditional `if hover:` element is destroyed without a destructor.
+    in-out property <int> lease: 0;
+
+    callback show(string, length, length);
+    callback renew(int, string, length, length);
+    callback hide(int);
+
+    show(text, x, y) => {
+        root.token += 1;
+        root.text = text;
+        root.x = x;
+        root.y = y;
+        root.open = true;
+        root.lease += 1;
+    }
+
+    renew(token, text, x, y) => {
+        if token == root.token {
+            root.text = text;
+            root.x = x;
+            root.y = y;
+            root.open = true;
+            root.lease += 1;
+        }
+    }
+
+    hide(token) => {
+        if token == root.token {
+            root.open = false;
+        }
+    }
+}

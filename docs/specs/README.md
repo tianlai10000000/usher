@@ -46,7 +46,7 @@ Documents that are not specs:
 - `docs/architecture.md`, `docs/architecture.zh.md`: canonical architecture.
 - `docs/architecture-structure-audit.md`: dated structure audit and refactoring roadmap.
 - `docs/ARCHITECTURE_FOR_AI.md`: compatibility entry point for older agent prompts.
-- `docs/memory_optimization_backlog.md`: measured memory baseline and phased optimization backlog.
+- `docs/memory_optimization_backlog.md`, `docs/memory_optimization_backlog.zh.md`: measured memory baseline and phased optimization backlog.
 - `docs/ui-github-migration-plan.md`: staged UI implementation checklist and
   user-acceptance gate.
 - `bug-history.md`: append-only migration defect ledger.

@@ -56,8 +56,9 @@ mod shortcuts;
 use platform::{
     THEME_MODE_AUTO, apply_native_appearance_for_mode, apply_native_chrome_for_mode,
     effective_dark_mode as get_effective_dark_mode, install_system_theme_watch,
-    install_titlebar_settings_button, play_ui_click, set_auto_theme_watch_enabled,
-    set_title_bar_color, setup_application_font, setup_pr_review_fonts,
+    install_titlebar_settings_button, play_ui_click, prepare_startup_reveal,
+    set_auto_theme_watch_enabled, set_startup_presentation_hidden, set_title_bar_color,
+    setup_application_font, setup_pr_review_fonts, startup_native_chrome_ready,
 };
 mod terminal;
 
@@ -189,6 +190,8 @@ fn ui() -> Result<MainWindow> {
     // Apply loaded settings to AppState
     setup_settings(&app, &loaded_settings);
     set_terminal_dark_mode(&app, is_dark);
+    // Seed native chrome / sidebar material colors before the first ordered frame.
+    set_title_bar_color(&app, is_dark);
     Router::apply_route_ui_state(&app, app.get_current_route());
     memory_diagnostics::log_checkpoint("startup.settings_and_initial_route_ready");
 
@@ -486,9 +489,9 @@ fn ui() -> Result<MainWindow> {
         };
         let expanded = sidebar_toggle_target.get();
         if ui.get_navigation_drawer_expanded() != expanded {
-            // Retarget the one in-flight spring immediately. The page tree
-            // keeps a fixed width while motion is active, so this property
-            // update does not introduce a full-page layout pass per click.
+            // Retarget the one in-flight spring. The route adopts the target
+            // width once, then shell surfaces move without per-frame width
+            // reflow; PR Review keeps its extra stable internal geometry.
             ui.set_navigation_drawer_expanded(expanded);
             platform::update_titlebar_navigation_controls(&ui);
         }
@@ -746,23 +749,80 @@ pub fn main() {
     }
 
     let ui: MainWindow = ui().unwrap();
+    // The winit window is created only once the event loop runs, so hiding
+    // after show() is too late for the very first frame. Arm a one-shot hook
+    // on the first render pass: at that point the native window exists and the
+    // alpha change commits in the same transaction as the first frame.
+    let ui_weak_first_frame = ui.as_weak();
+    let first_frame_gate = std::cell::Cell::new(false);
+    if let Err(error) = ui.window().set_rendering_notifier(move |state, _| {
+        if matches!(state, slint::RenderingState::BeforeRendering) && !first_frame_gate.get() {
+            first_frame_gate.set(true);
+            if let Some(win) = ui_weak_first_frame.upgrade() {
+                set_startup_presentation_hidden(&win, true);
+                install_titlebar_settings_button(&win);
+            }
+        }
+    }) {
+        log::warn!("[Startup] Rendering notifier unavailable: {error:?}");
+    }
+    // Prefer installing Menu vibrancy before the first ordered frame so the
+    // translucent macOS sidebar never reveals desktop content at startup.
+    install_titlebar_settings_button(&ui);
     ui.show().unwrap();
+    // Keep the window invisible while native chrome is attached so the first
+    // visible frame is the final shell rather than a staged transition.
+    set_startup_presentation_hidden(&ui, true);
     memory_diagnostics::log_checkpoint("startup.window_shown");
     memory_diagnostics::start_periodic_logging();
     shortcuts::start_initialization(&ui);
+    // The native handle may still be unavailable this early; retry below.
     install_titlebar_settings_button(&ui);
-    let ui_weak_titlebar_retry_1 = ui.as_weak();
-    Timer::single_shot(std::time::Duration::from_millis(300), move || {
-        if let Some(win) = ui_weak_titlebar_retry_1.upgrade() {
-            install_titlebar_settings_button(&win);
-        }
-    });
-    let ui_weak_titlebar_retry_2 = ui.as_weak();
-    Timer::single_shot(std::time::Duration::from_millis(900), move || {
-        if let Some(win) = ui_weak_titlebar_retry_2.upgrade() {
-            install_titlebar_settings_button(&win);
-        }
-    });
+
+    // Reveal the window only after the native chrome is confirmed installed.
+    // The native handle can lag the first event-loop turns, so a fixed delay
+    // may fire before installation and expose staged startup states. After
+    // readiness, wait a few extra ticks: a just-attached NSVisualEffectView
+    // composites its first behind-window sample unblurred, and AppKit's
+    // post-accessory title-bar layout resets the traffic lights; both must
+    // settle while the window is still invisible. Each settle tick and the
+    // reveal itself re-run the traffic-light alignment so the first visible
+    // frame matches the accessory-button centerline. A deadline guarantees the
+    // window always appears even if a native step failed.
+    let reveal_timer = std::rc::Rc::new(Timer::default());
+    let reveal_timer_handle = reveal_timer.clone();
+    let ui_weak_reveal = ui.as_weak();
+    let reveal_started = std::time::Instant::now();
+    let reveal_settle_ticks = std::cell::Cell::new(0u32);
+    reveal_timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(30),
+        move || {
+            let Some(win) = ui_weak_reveal.upgrade() else {
+                reveal_timer_handle.stop();
+                return;
+            };
+            let deadline_passed =
+                reveal_started.elapsed() >= std::time::Duration::from_millis(1200);
+            if !startup_native_chrome_ready() && !deadline_passed {
+                set_startup_presentation_hidden(&win, true);
+                install_titlebar_settings_button(&win);
+                return;
+            }
+            if !deadline_passed && reveal_settle_ticks.get() < 4 {
+                reveal_settle_ticks.set(reveal_settle_ticks.get() + 1);
+                prepare_startup_reveal(&win);
+                return;
+            }
+            prepare_startup_reveal(&win);
+            set_startup_presentation_hidden(&win, false);
+            reveal_timer_handle.stop();
+            log::info!(
+                "[Startup] Window revealed (native chrome ready: {})",
+                startup_native_chrome_ready()
+            );
+        },
+    );
     slint::run_event_loop_until_quit().unwrap();
     shutdown::run_cleanup_once("event-loop-exit");
     drop(ui);

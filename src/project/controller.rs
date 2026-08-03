@@ -677,6 +677,7 @@ fn to_ui_items_filtered(items: &[ProjectConfig], query: &str) -> Vec<ProjectItem
                 project_alias: item.project_alias.into(),
                 local_repo: item.local_repo.into(),
                 remote_repo: item.remote_repo.into(),
+                repo_type: item.repo_type.into(),
                 logo: logo.clone().into(),
                 logo_image: resolve_project_logo_image(logo.as_str()),
                 is_pr_auto_update: item.is_pr_auto_update,

@@ -34,6 +34,8 @@ export component GitHubPageScrollActions inherits Rectangle {
             : parent.height - self.height - root.to-top-bottom-offset + 28px;
         icon: @image-url("../../assets/icons/octicon-arrow-up-16.svg");
         tooltip-text: "Back to top";
+        // Same right-edge pin as the terminal FAB so the label is not clipped.
+        tooltip-align-right: true;
         invisible: false;
         floating: true;
         opacity: root.to-top-visible ? 1 : 0;

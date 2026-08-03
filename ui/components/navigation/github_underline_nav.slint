@@ -1,5 +1,39 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
+// Shared Primer UnderlineNav/UnderlinePanels tab-list shell. The baseline
+// belongs to the complete list rather than an individual item, so it always
+// spans the available container width. The content inset and explicit gap
+// match GitHub's compact tab rows without pinning edge items to the surface.
+export component GitHubUnderlineNav inherits Rectangle {
+    in property <string> group-label;
+    in property <length> content-inset: GitHubMetrics.size-16;
+    in property <length> item-spacing: GitHubMetrics.size-4;
+
+    width: 100%;
+    height: GitHubMetrics.size-48;
+    background: transparent;
+    clip: false;
+    accessible-role: tab-list;
+    accessible-label: root.group-label;
+
+    Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-default;
+    }
+
+    tabs := HorizontalLayout {
+        x: root.content-inset;
+        width: parent.width - root.content-inset * 2;
+        height: parent.height;
+        spacing: root.item-spacing;
+        alignment: start;
+        cross-axis-alignment: center;
+        @children
+    }
+}
+
 // Shared Primer UnderlineNav/UnderlinePanels tab item. Route-changing and
 // in-page tab owners provide the navigation semantics; this component owns the
 // visual, pointer, keyboard, selected, disabled, and focus-visible states.
@@ -18,7 +52,7 @@ export component GitHubUnderlineNavItem inherits FocusScope {
     private property <length> leading-width:
         root.has-icon ? GitHubMetrics.size-24 : 0px;
 
-    width: root.label-width + root.leading-width + GitHubMetrics.size-24;
+    width: root.label-width + root.leading-width + GitHubMetrics.size-16;
     height: GitHubMetrics.size-48;
     accessible-role: tab;
     accessible-enabled: root.item-enabled;
@@ -73,7 +107,7 @@ export component GitHubUnderlineNavItem inherits FocusScope {
     }
 
     if root.has-icon: Image {
-        x: GitHubMetrics.size-12;
+        x: GitHubMetrics.size-8;
         y: GitHubMetrics.size-16;
         width: GitHubMetrics.icon-medium;
         height: GitHubMetrics.icon-medium;
@@ -84,7 +118,7 @@ export component GitHubUnderlineNavItem inherits FocusScope {
     }
 
     Text {
-        x: GitHubMetrics.size-12 + root.leading-width;
+        x: GitHubMetrics.size-8 + root.leading-width;
         y: GitHubMetrics.size-8;
         width: root.label-width;
         height: GitHubMetrics.control-medium-size;
