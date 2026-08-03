@@ -8,7 +8,7 @@
 
 Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态；Rust 负责持久化、进程执行、网络请求和应用装配。
 
-生产构建在编译期固定选择 Winit + FemtoVG/OpenGL。Skia 和 FemtoVG/WGPU 作为显式启用的 Cargo feature，仅用于渲染器诊断和 A/B 对比，避免常规构建因同时链接多个实现而静默切换渲染器。Slint 应用内实时预览同样是显式启用的 `live-preview` 开发 feature，默认构建和生产构建不会编译它。当前 macOS 测试中 WGPU 虽降低 physical footprint，但会增加 RSS，因此不作为生产默认配置。
+生产构建在编译期固定选择 Winit + FemtoVG/OpenGL。Skia 和 FemtoVG/WGPU 作为显式启用的 Cargo feature，仅用于渲染器诊断和 A/B 对比，避免常规构建因同时链接多个实现而静默切换渲染器。Slint 应用内实时预览和 UI Components 演练场分别由显式的 `live-preview`、`ui-components` 开发 feature 控制，默认构建和生产构建都不会编译它们。当前 macOS 测试中 WGPU 虽降低 physical footprint，但会增加 RSS，因此不作为生产默认配置。
 
 在 macOS 上，进入或退出全屏后会在 AppKit 最终标题栏布局完成时重新对齐原生控件；应用自有控件始终位于系统红黄绿按钮右侧。
 
@@ -76,7 +76,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 
 | 路径 | 职责 |
 | --- | --- |
-| `crates/usher-ui/build.rs` | 编译根 Slint 源码树，并将内置 Material 库映射为 `@material`。 |
+| `crates/usher-ui/build.rs` | 编译根 Slint 源码树，将内置 Material 映射为 `@material`，并把 `@ui-components` 映射到真实开发演练场或契约兼容的关闭 stub。 |
 | `crates/usher-ui/src/lib.rs` | 包含并公开导出 Slint 生成模块。 |
 | `ui/main.slint` | 根窗口、路由装配、Rust-facing property/callback、Modal 层和 Terminal Dock。 |
 | `ui/route/routeMap.slint` | 完整 `Route` 枚举；主导航只开放其中一部分。 |
@@ -366,11 +366,13 @@ Terminal 状态感知项目；同一项目重新打开时复用，切换项目�
 页头/选择操作复用共享 GitHub 控件。终端单元格几何、等宽字体、ANSI 色、PTY
 归属与 scrollback 独立于产品排版。
 
-主菜单公开 `Route.UiComponents` 作为应用自有组件演练场。它使用真实共享控件和
+启用非默认 Cargo feature `ui-components` 时，主菜单公开 `Route.UiComponents`
+作为应用自有组件演练场。它使用真实共享控件和
 根层 Toast、Notification、Dialog Manager 演练属性状态。依赖业务 model 的组合
 组件继续在 Project、Workflow、Chat、Settings、Shell 或 PR Review 真实路由中
 测试，并由演练场登记表链接过去。原 Login、Tools、List、Detail、Notification、
-Toast、Dialog demo 路由已删除。
+Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不显示入口，直接
+导航到该路由会回退到 Home，展示页也不进入 Slint 编译和 live preview 依赖图。
 
 ## 主要数据流
 
@@ -492,7 +494,7 @@ Terminal viewport/session、更新取消、托盘关闭和路由布局需要做�
 ## 已知技术债
 
 - `src/logger/debug_logger.rs` 有一个无法编译的 doctest。
-- `Route.UiComponents` 是长期维护的组件演练场；旧 Login/Tools/List/Detail/
-  Notification/Toast/Dialog demo 路由已删除。
+- `Route.UiComponents` 是由 `ui-components` 控制的长期维护开发演练场；旧
+  Login/Tools/List/Detail/Notification/Toast/Dialog demo 路由已删除。
 - 应用为专有/非开源软件，见根目录 `LICENSE.txt`；第三方 vendored 组件仍保留各自许可证。
 - `docs/terminal_viewport_iteration_notes.md` 是历史证据，不是当前规格。

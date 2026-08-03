@@ -146,6 +146,7 @@ component GitHubNavigationItem {
 // decides whether this surface is docked or temporarily overlaid.
 export component GitHubNavigationSidebar inherits Rectangle {
     in property <[NavItem]> items;
+    in property <int> item-count: root.items.length;
     in property <int> current-index: -1;
     in property <Route> current-route: Route.Home;
     in property <bool> can-go-back: false;
@@ -341,6 +342,8 @@ export component GitHubNavigationSidebar inherits Rectangle {
 
                 for item[index] in root.items: GitHubNavigationItem {
                     width: parent.width;
+                    visible: index < root.item-count;
+                    height: self.visible ? 30px : 0px;
                     icon: item.icon;
                     text: item.text;
                     selected: index == root.current-index;

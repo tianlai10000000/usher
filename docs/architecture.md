@@ -8,7 +8,7 @@ This document describes the current codebase, ownership boundaries, runtime life
 
 Usher is a desktop-first Rust application. Slint owns presentation and declarative UI state; Rust owns persistence, process execution, networking, and application orchestration.
 
-Production builds select Winit with FemtoVG/OpenGL at compile time. Skia and FemtoVG/WGPU are opt-in Cargo features used for renderer diagnostics and A/B comparisons, so normal builds cannot silently change renderer because multiple implementations were linked. Slint's in-process live preview is also an explicit `live-preview` development feature and is not compiled into default or production builds. The WGPU path is not a production default because current macOS tests reduce physical footprint but increase RSS.
+Production builds select Winit with FemtoVG/OpenGL at compile time. Skia and FemtoVG/WGPU are opt-in Cargo features used for renderer diagnostics and A/B comparisons, so normal builds cannot silently change renderer because multiple implementations were linked. Slint's in-process live preview and the UI Components playground are explicit `live-preview` and `ui-components` development features; neither is compiled into default or production builds. The WGPU path is not a production default because current macOS tests reduce physical footprint but increase RSS.
 
 On macOS, entering or leaving full screen re-aligns native title-bar controls after AppKit's final layout; application-owned controls are always placed beyond the system traffic lights.
 
@@ -76,7 +76,7 @@ Repository endpoint definitions and executable behavior are intentionally separa
 
 | Path | Responsibility |
 | --- | --- |
-| `crates/usher-ui/build.rs` | Compiles the root Slint source tree and maps the vendored Material library to `@material`. |
+| `crates/usher-ui/build.rs` | Compiles the root Slint source tree, maps vendored Material to `@material`, and maps `@ui-components` to the real development playground or a contract-compatible disabled stub. |
 | `crates/usher-ui/src/lib.rs` | Includes and publicly exports the generated Slint module. |
 | `ui/main.slint` | Root window, route composition, Rust-facing properties/callbacks, modal layers, and terminal docking. |
 | `ui/route/routeMap.slint` | Complete `Route` enum. Only a subset is exposed in main navigation. |
@@ -409,13 +409,15 @@ cell presentation. Header/selection actions reuse shared GitHub controls;
 terminal cell geometry, monospace font, ANSI colors, PTY ownership, and
 scrollback remain independent of product typography.
 
-The primary rail exposes `Route.UiComponents` as the application-owned
-component playground. It exercises shared control properties and the real
+With the non-default `ui-components` Cargo feature enabled, the primary rail
+exposes `Route.UiComponents` as the application-owned component playground. It exercises shared control properties and the real
 root-layer Toast, Notification, and Dialog managers. Model-dependent feature
 components remain tested on their owning Project, Workflow, Chat, Settings,
 shell, or PR Review route and are linked from the playground registry. The
 former Login, Tools, List, Detail, Notification, Toast, and Dialog demo routes
-have been removed.
+have been removed. Without the feature, both sidebar variants omit the entry,
+direct attempts to enter the route return to Home, and the showcase stays out
+of the Slint compile and live-preview dependency graph.
 
 ## Main data flows
 
@@ -541,7 +543,8 @@ Run targeted manual checks for terminal viewport/session changes, update cancell
 ## Known technical debt
 
 - `src/logger/debug_logger.rs` contains a doctest that does not compile.
-- `Route.UiComponents` is the maintained component playground; obsolete
-  Login/Tools/List/Detail/Notification/Toast/Dialog demo routes are removed.
+- `Route.UiComponents` is the maintained, `ui-components`-gated development
+  playground; obsolete Login/Tools/List/Detail/Notification/Toast/Dialog demo
+  routes are removed.
 - The application is proprietary / non-open-source; see root `LICENSE.txt`. Third-party vendored components keep their own licenses.
 - `docs/terminal_viewport_iteration_notes.md` is historical evidence, not a current specification.

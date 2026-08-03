@@ -7,11 +7,14 @@ publish = false
 build = "build.rs"
 
 [features]
+# Keep direct package builds usable. The application root disables these
+# defaults and forwards its selected renderer explicitly.
 default = ["renderer-femtovg"]
 renderer-femtovg = ["slint/renderer-femtovg"]
 renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu"]
 renderer-skia = ["slint/renderer-skia"]
 live-preview = ["slint/live-preview"]
+ui-components = []
 
 [dependencies]
 slint = { version = "1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }

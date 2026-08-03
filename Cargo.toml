@@ -13,7 +13,6 @@ default-members = ["."]
 resolver = "3"
 
 [lib]
-crate-type = ["lib", "cdylib"]
 path = "src/lib.rs"
 name = "usher_lib"
 
@@ -27,6 +26,9 @@ renderer-skia = ["slint/renderer-skia", "usher-ui/renderer-skia"]
 # Development-only in-process UI hot reload. Production builds must leave this
 # feature disabled so the live-preview interpreter and watcher are not built.
 live-preview = ["slint/live-preview", "usher-ui/live-preview"]
+# Development-only component playground. Keep this out of the default feature
+# set so normal and production builds do not compile the large showcase page.
+ui-components = ["usher-ui/ui-components"]
 
 [[bin]]
 path = "src/main.rs"
@@ -112,10 +114,18 @@ debug = "line-tables-only"
 split-debuginfo = "off"
 incremental = true
 
+# Generated Slint code is not a useful LLDB source surface. Keep line tables for
+# application-owned Rust while avoiding debug metadata for the very large UI crate.
+[profile.dev.package.usher-ui]
+debug = "none"
+
 [profile.test]
 debug = "line-tables-only"
 split-debuginfo = "off"
 incremental = true
+
+[profile.test.package.usher-ui]
+debug = "none"
 
 # IDE background analysis checks every workspace target frequently. Keep those
 # disposable artifacts small and stable instead of duplicating dev incremental

@@ -145,6 +145,9 @@ to be a Primer primitive.
   the official round-stroke Lucide assets registered in
   `ui/assets/icons/LUCIDE.md`, because filled Octicons have a visibly heavier
   optical weight than the desktop reference at this size.
+- Repository-host provider marks registered in `ui/assets/icons/PROVIDERS.md`
+  are identity assets rather than command icons. They may only identify the
+  corresponding provider and do not create a general non-Octicon exception.
 - `ui/components/title_bar.slint` may retain `settings.svg` and `about.svg` as
   the two explicit native-title-bar product exceptions. No other component may
   introduce a non-Octicon command icon without a documented product decision.
@@ -528,7 +531,11 @@ expanded/collapsed, and success confirmation.
 - Terminal chrome reuses shared GitHub controls, but terminal cells retain
   their dedicated monospace/ANSI rendering contract. Product theme changes
   must not recolor or reflow PTY-provided cell content.
-- `Route.UiComponents` is the mandatory interactive component playground.
+- `Route.UiComponents` is the mandatory interactive component playground for
+  development builds and is compiled only with the non-default
+  `ui-components` Cargo feature. Default and production builds omit its menu
+  entry and page implementation; live-preview UI work must enable both
+  `live-preview` and `ui-components`.
   Every application-owned GitHub/Primer component must be registered there
   when it is introduced or materially changed. Reusable foundations must show
   every applicable public-property contrast, including intent, selected,
@@ -541,7 +548,10 @@ expanded/collapsed, and success confirmation.
   component validation. Notification, Toast, and Dialog behavior is exercised
   from this route; they do not own standalone demo routes.
 
-- `Route.UiComponents` 是强制性的交互式组件演练场。每个应用自有
+- `Route.UiComponents` 是开发构建中强制维护的交互式组件演练场，仅在启用非默认
+  Cargo feature `ui-components` 时编译。默认和生产构建不显示菜单入口，也不编译
+  页面实现；使用 live preview 开发 UI 时必须同时启用 `live-preview` 和
+  `ui-components`。每个应用自有
   GitHub/Primer 组件在新增或发生实质变更时，都必须同步登记。复用基础组件必须
   对比展示所有适用的公开属性，包括意图、选中、禁用、加载、错误、尺寸、位置、
   遮罩和关闭行为。

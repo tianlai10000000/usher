@@ -26,7 +26,7 @@ if [ -n "$unexpected_material" ]; then
 fi
 
 legacy_icons=$(rg -n \
-    '@image-url\("[^"]*assets/icons/(?!octicon-|github-|lucide-sidebar-)[^"]+"\)' \
+    '@image-url\("[^"]*assets/icons/(?!octicon-|github-|lucide-|provider-)[^"]+"\)' \
     ui --glob '*.slint' --pcre2 || true)
 unexpected_icons=$(echo "$legacy_icons" \
     | rg -v '^ui/components/title_bar\.slint:[0-9]+:.*assets/icons/(settings|about)\.svg' \

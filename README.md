@@ -77,14 +77,31 @@ existing `target/` still contains historical unpacked objects. See
 measured trade-offs and cleanup guidance.
 
 In-process Slint live preview is development-only and excluded from normal and
-release builds. Enable it explicitly when needed:
+release builds. Use the project scripts for fast UI validation and visual
+iteration:
 
 ```sh
-SLINT_LIVE_PREVIEW=1 cargo run --features live-preview
+./scripts/ui-check.sh
+./scripts/ui-live-preview.sh
 ```
 
-On macOS this opt-in path uses the documented local Slint watcher patch under
+PowerShell equivalents are `scripts/ui-check.ps1` and
+`scripts/ui-live-preview.ps1`. The check validates the complete root UI without
+starting the application. Live preview keeps application callbacks and state,
+but UI edits are interpreted at runtime; use a normal `cargo run --locked` for
+the final static-build and route/layout check. Repeated reloads can retain
+substantial diagnostic state, so restart the preview process during long UI
+sessions. On macOS the opt-in preview path
+uses the documented local Slint watcher patch under
 `vendor/i-slint-live-preview`; default and release builds do not select it.
+
+The UI Components playground is also development-only. Normal `cargo run` and
+all existing release scripts omit its menu entry and compile graph. The live
+preview script enables it automatically; the equivalent direct command is:
+
+```sh
+SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components
+```
 
 The full `cargo test --locked` command currently exposes a pre-existing failing doctest in `src/logger/debug_logger.rs`; the library unit tests pass.
 

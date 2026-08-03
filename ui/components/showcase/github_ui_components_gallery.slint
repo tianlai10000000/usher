@@ -147,6 +147,97 @@ export component GitHubUiComponentsGallery inherits Rectangle {
     private property <string> filter-owner: "any";
     private property <string> filter-sort: "newest";
 
+    function show-toast-example(action: int) {
+        if action == 0 {
+            ToastManager.info({ message: "Informational Toast", position: "bottom" });
+        } else if action == 1 {
+            ToastManager.success({ message: "Operation completed", position: "bottom" });
+        } else if action == 2 {
+            ToastManager.error({ message: "Operation failed", position: "bottom" });
+        } else if action == 3 {
+            ToastManager.loading({ message: "Loading with overlay", overlay: true, close-on-click: true });
+        } else if action == 4 {
+            ToastManager.success({ message: "Top position", position: "top" });
+        } else if action == 5 {
+            ToastManager.info({ message: "Middle position", position: "middle" });
+        } else if action == 6 {
+            ToastManager.error({ message: "Bottom position", position: "bottom" });
+        } else if action == 7 {
+            ToastManager.success({ message: "Closes after five seconds", duration: 5000 });
+        } else {
+            ToastManager.show(ToastType.Success, {
+                message: "Click the overlay to dismiss",
+                overlay: true,
+                close-on-click: true,
+                width: "360px"
+            });
+        }
+    }
+
+    function show-notification-example(action: int) {
+        if action == 0 {
+            NotificationManager.info({ title: "Information", message: "Review the current settings." });
+        } else if action == 1 {
+            NotificationManager.success({ title: "Saved", message: "Configuration was saved." });
+        } else if action == 2 {
+            NotificationManager.warn({ title: "Attention", message: "A follow-up action is required." });
+        } else if action == 3 {
+            NotificationManager.error({ title: "Failed", message: "The request could not be completed." });
+        } else if action == 4 {
+            NotificationManager.show(NotificationType.Info, {
+                title: "Update available",
+                message: "Choose an action to exercise Banner callbacks.",
+                component: CustomComponentType.ActionsNotify,
+                actions: ["Later", "Install"],
+                tag: "ui-components"
+            });
+        } else if action == 5 {
+            NotificationManager.remove-all();
+        } else {
+            NotificationManager.clear();
+        }
+    }
+
+    function show-dialog-example(action: int) {
+        if action == 0 {
+            DialogManager.show({
+                id: "gallery-confirm",
+                title: "Confirm change",
+                content: "This modal dialog uses fixed dimensions, a backdrop, one secondary action, and one primary action.",
+                actions: ["Cancel"],
+                default-action: "Confirm",
+                overlay: true,
+                modal: true,
+                width: "440px",
+                height: "280px"
+            });
+        } else if action == 1 {
+            DialogManager.show({
+                id: "gallery-non-modal",
+                title: "Non-modal example",
+                content: "Press Escape, use the close button, or click the backdrop to dismiss this percentage-sized dialog.",
+                actions: [],
+                default-action: "Done",
+                overlay: true,
+                modal: false,
+                width: "52%",
+                height: "42%"
+            });
+        } else {
+            DialogManager.show({
+                id: "gallery-no-backdrop",
+                title: "Dialog without backdrop",
+                content: "This variant keeps the underlying page visible and exercises the overlay property.",
+                actions: ["Close"],
+                default-action: "",
+                overlay: false,
+                modal: false,
+                width: "400px",
+                height: "240px"
+            });
+        }
+    }
+
     height: gallery-content.preferred-height;
     background: transparent;
 
@@ -176,10 +267,17 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                GitHubButton { text: "Default"; }
-                GitHubButton { text: "Primary"; primary: true; }
-                GitHubButton { text: "Danger"; danger: true; }
-                GitHubButton { text: "Selected"; selected: true; }
+                for button-state in [
+                    { label: "Default", primary: false, danger: false, selected: false },
+                    { label: "Primary", primary: true, danger: false, selected: false },
+                    { label: "Danger", primary: false, danger: true, selected: false },
+                    { label: "Selected", primary: false, danger: false, selected: true }
+                ]: GitHubButton {
+                    text: button-state.label;
+                    primary: button-state.primary;
+                    danger: button-state.danger;
+                    selected: button-state.selected;
+                }
             }
 
             GitHubShowcaseLabel { x: 0px; y: 76px; width: 120px; height: 20px; label: "Availability"; }
@@ -191,8 +289,15 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                GitHubButton { text: "Disabled"; disabled: true; }
-                GitHubButton { text: "Loading"; busy: true; primary: true; }
+                for button-state in [
+                    { label: "Disabled", disabled: true, busy: false, primary: false },
+                    { label: "Loading", disabled: false, busy: true, primary: true }
+                ]: GitHubButton {
+                    text: button-state.label;
+                    disabled: button-state.disabled;
+                    busy: button-state.busy;
+                    primary: button-state.primary;
+                }
                 GitHubButton {
                     text: "Try action";
                     clicked => {
@@ -219,32 +324,19 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-12;
                 alignment: start;
 
-                GitHubIconButton {
-                    icon: @image-url("../../assets/icons/octicon-plus-16.svg");
-                    tooltip-text: "Invisible icon button";
-                }
-                GitHubIconButton {
-                    icon: @image-url("../../assets/icons/octicon-sync-16.svg");
-                    tooltip-text: "Bordered icon button";
-                    invisible: false;
-                }
-                GitHubIconButton {
-                    icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-                    tooltip-text: "Danger icon button";
-                    danger: true;
-                    invisible: false;
-                }
-                GitHubIconButton {
-                    icon: @image-url("../../assets/icons/octicon-sync-16.svg");
-                    tooltip-text: "Loading";
-                    loading: true;
-                    invisible: false;
-                }
-                GitHubIconButton {
-                    icon: @image-url("../../assets/icons/octicon-plus-16.svg");
-                    tooltip-text: "Disabled";
-                    button-enabled: false;
-                    invisible: false;
+                for button-state in [
+                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: "Invisible icon button", invisible: true, danger: false, loading: false, enabled: true },
+                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: "Bordered icon button", invisible: false, danger: false, loading: false, enabled: true },
+                    { icon: @image-url("../../assets/icons/octicon-trash-16.svg"), label: "Danger icon button", invisible: false, danger: true, loading: false, enabled: true },
+                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: "Loading", invisible: false, danger: false, loading: true, enabled: true },
+                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: "Disabled", invisible: false, danger: false, loading: false, enabled: false }
+                ]: GitHubIconButton {
+                    icon: button-state.icon;
+                    tooltip-text: button-state.label;
+                    invisible: button-state.invisible;
+                    danger: button-state.danger;
+                    loading: button-state.loading;
+                    button-enabled: button-state.enabled;
                 }
                 GitHubCopyButton {
                     tooltip-above: false;
@@ -261,10 +353,17 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-20;
                 alignment: start;
 
-                GitHubLink { text: "Standalone link"; }
-                GitHubLink { text: "Inline link"; inline: true; }
-                GitHubLink { text: "Muted link"; muted: true; }
-                GitHubLink { text: "Disabled link"; link-enabled: false; }
+                for link-state in [
+                    { label: "Standalone link", inline: false, muted: false, enabled: true },
+                    { label: "Inline link", inline: true, muted: false, enabled: true },
+                    { label: "Muted link", inline: false, muted: true, enabled: true },
+                    { label: "Disabled link", inline: false, muted: false, enabled: false }
+                ]: GitHubLink {
+                    text: link-state.label;
+                    inline: link-state.inline;
+                    muted: link-state.muted;
+                    link-enabled: link-state.enabled;
+                }
             }
         }
 
@@ -282,9 +381,9 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                GitHubMetadataLabel { text: "GitHub"; }
-                GitHubMetadataLabel { text: "ID 1130209340"; }
-                GitHubMetadataLabel { text: "production"; }
+                for label-text in ["GitHub", "ID 1130209340", "production"]: GitHubMetadataLabel {
+                    text: label-text;
+                }
             }
 
             GitHubShowcaseLabel { x: 0px; y: 68px; width: 180px; height: 20px; label: "Bounded metadata"; }
@@ -509,41 +608,27 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                GitHubButton {
-                    text: "Start / below";
-                    selected: root.action-menu-open
-                        && root.action-menu-align == "start"
-                        && root.action-menu-side == "bottom";
+                for menu-action in [
+                    { label: "Start / below", align: "start", side: "bottom", close: false },
+                    { label: "End / below", align: "end", side: "bottom", close: false },
+                    { label: "Start / above", align: "start", side: "top", close: false },
+                    { label: "Close", align: "start", side: "bottom", close: true }
+                ]: GitHubButton {
+                    text: menu-action.label;
+                    selected: !menu-action.close
+                        && root.action-menu-open
+                        && root.action-menu-align == menu-action.align
+                        && root.action-menu-side == menu-action.side;
+                    disabled: menu-action.close && !root.action-menu-open;
                     clicked => {
-                        root.action-menu-align = "start";
-                        root.action-menu-side = "bottom";
-                        root.action-menu-open = true;
+                        if menu-action.close {
+                            root.action-menu-open = false;
+                        } else {
+                            root.action-menu-align = menu-action.align;
+                            root.action-menu-side = menu-action.side;
+                            root.action-menu-open = true;
+                        }
                     }
-                }
-                GitHubButton {
-                    text: "End / below";
-                    selected: root.action-menu-open
-                        && root.action-menu-align == "end"
-                        && root.action-menu-side == "bottom";
-                    clicked => {
-                        root.action-menu-align = "end";
-                        root.action-menu-side = "bottom";
-                        root.action-menu-open = true;
-                    }
-                }
-                GitHubButton {
-                    text: "Start / above";
-                    selected: root.action-menu-open && root.action-menu-side == "top";
-                    clicked => {
-                        root.action-menu-align = "start";
-                        root.action-menu-side = "top";
-                        root.action-menu-open = true;
-                    }
-                }
-                GitHubButton {
-                    text: "Close";
-                    disabled: !root.action-menu-open;
-                    clicked => { root.action-menu-open = false; }
                 }
             }
 
@@ -588,20 +673,17 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     spacing: 0px;
                     alignment: start;
 
-                    GitHubActionListItem {
-                        text: "Selected option";
-                        description: "Current ActionList state";
-                        selected: true;
-                        activated => { root.action-menu-open = false; }
-                    }
-                    GitHubActionListItem {
-                        text: "Disabled option";
-                        item-enabled: false;
-                    }
-                    GitHubActionListItem {
-                        text: "Danger option";
-                        icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-                        danger: true;
+                    for menu-item in [
+                        { label: "Selected option", description: "Current ActionList state", selected: true, enabled: true, danger: false, icon: @image-url("") },
+                        { label: "Disabled option", description: "", selected: false, enabled: false, danger: false, icon: @image-url("") },
+                        { label: "Danger option", description: "", selected: false, enabled: true, danger: true, icon: @image-url("../../assets/icons/octicon-trash-16.svg") }
+                    ]: GitHubActionListItem {
+                        text: menu-item.label;
+                        description: menu-item.description;
+                        selected: menu-item.selected;
+                        item-enabled: menu-item.enabled;
+                        danger: menu-item.danger;
+                        icon: menu-item.icon;
                         activated => { root.action-menu-open = false; }
                     }
                 }
@@ -704,21 +786,42 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     close => { root.filter-menu = ""; }
 
                     if root.filter-menu == "status": VerticalLayout {
-                        GitHubFilterMenuItem { text: "All statuses"; value: "all"; selected-value: root.filter-status; chosen(value) => { root.filter-status = value; root.filter-menu = ""; } }
-                        GitHubFilterMenuItem { text: "Active"; value: "active"; selected-value: root.filter-status; chosen(value) => { root.filter-status = value; root.filter-menu = ""; } }
-                        GitHubFilterMenuItem { text: "Paused"; value: "paused"; selected-value: root.filter-status; chosen(value) => { root.filter-status = value; root.filter-menu = ""; } }
-                        GitHubFilterMenuItem { text: "Archived"; value: "archived"; selected-value: root.filter-status; chosen(value) => { root.filter-status = value; root.filter-menu = ""; } }
+                        for option in [
+                            { label: "All statuses", value: "all" },
+                            { label: "Active", value: "active" },
+                            { label: "Paused", value: "paused" },
+                            { label: "Archived", value: "archived" }
+                        ]: GitHubFilterMenuItem {
+                            text: option.label;
+                            value: option.value;
+                            selected-value: root.filter-status;
+                            chosen(value) => { root.filter-status = value; root.filter-menu = ""; }
+                        }
                     }
                     if root.filter-menu == "owner": VerticalLayout {
-                        GitHubFilterMenuItem { text: "Anyone"; value: "any"; selected-value: root.filter-owner; chosen(value) => { root.filter-owner = value; root.filter-menu = ""; } }
-                        GitHubFilterMenuItem { text: "Owned by me"; value: "me"; selected-value: root.filter-owner; chosen(value) => { root.filter-owner = value; root.filter-menu = ""; } }
-                        GitHubFilterMenuItem { text: "Unassigned"; value: "none"; selected-value: root.filter-owner; chosen(value) => { root.filter-owner = value; root.filter-menu = ""; } }
+                        for option in [
+                            { label: "Anyone", value: "any" },
+                            { label: "Owned by me", value: "me" },
+                            { label: "Unassigned", value: "none" }
+                        ]: GitHubFilterMenuItem {
+                            text: option.label;
+                            value: option.value;
+                            selected-value: root.filter-owner;
+                            chosen(value) => { root.filter-owner = value; root.filter-menu = ""; }
+                        }
                     }
                     if root.filter-menu == "sort": VerticalLayout {
-                        GitHubFilterMenuItem { text: "Newest"; value: "newest"; selected-value: root.filter-sort; chosen(value) => { root.filter-sort = value; root.filter-menu = ""; } }
-                        GitHubFilterMenuItem { text: "Oldest"; value: "oldest"; selected-value: root.filter-sort; chosen(value) => { root.filter-sort = value; root.filter-menu = ""; } }
-                        GitHubFilterMenuItem { text: "Recently updated"; value: "updated-desc"; selected-value: root.filter-sort; chosen(value) => { root.filter-sort = value; root.filter-menu = ""; } }
-                        GitHubFilterMenuItem { text: "Least recently updated"; value: "updated-asc"; selected-value: root.filter-sort; chosen(value) => { root.filter-sort = value; root.filter-menu = ""; } }
+                        for option in [
+                            { label: "Newest", value: "newest" },
+                            { label: "Oldest", value: "oldest" },
+                            { label: "Recently updated", value: "updated-desc" },
+                            { label: "Least recently updated", value: "updated-asc" }
+                        ]: GitHubFilterMenuItem {
+                            text: option.label;
+                            value: option.value;
+                            selected-value: root.filter-sort;
+                            chosen(value) => { root.filter-sort = value; root.filter-menu = ""; }
+                        }
                     }
                 }
             }
@@ -737,29 +840,16 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                GitHubButton {
-                    text: "Info";
-                    clicked => { ToastManager.info({ message: "Informational Toast", position: "bottom" }); }
-                }
-                GitHubButton {
-                    text: "Success";
-                    primary: true;
-                    clicked => { ToastManager.success({ message: "Operation completed", position: "bottom" }); }
-                }
-                GitHubButton {
-                    text: "Error";
-                    danger: true;
-                    clicked => { ToastManager.error({ message: "Operation failed", position: "bottom" }); }
-                }
-                GitHubButton {
-                    text: "Loading";
-                    clicked => {
-                        ToastManager.loading({
-                            message: "Loading with overlay",
-                            overlay: true,
-                            close-on-click: true
-                        });
-                    }
+                for action in [
+                    { label: "Info", id: 0, primary: false, danger: false },
+                    { label: "Success", id: 1, primary: true, danger: false },
+                    { label: "Error", id: 2, primary: false, danger: true },
+                    { label: "Loading", id: 3, primary: false, danger: false }
+                ]: GitHubButton {
+                    text: action.label;
+                    primary: action.primary;
+                    danger: action.danger;
+                    clicked => { root.show-toast-example(action.id); }
                 }
             }
 
@@ -772,17 +862,13 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                GitHubButton {
-                    text: "Top";
-                    clicked => { ToastManager.success({ message: "Top position", position: "top" }); }
-                }
-                GitHubButton {
-                    text: "Middle";
-                    clicked => { ToastManager.info({ message: "Middle position", position: "middle" }); }
-                }
-                GitHubButton {
-                    text: "Bottom";
-                    clicked => { ToastManager.error({ message: "Bottom position", position: "bottom" }); }
+                for action in [
+                    { label: "Top", id: 4 },
+                    { label: "Middle", id: 5 },
+                    { label: "Bottom", id: 6 }
+                ]: GitHubButton {
+                    text: action.label;
+                    clicked => { root.show-toast-example(action.id); }
                 }
             }
 
@@ -795,20 +881,12 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                GitHubButton {
-                    text: "5 seconds";
-                    clicked => { ToastManager.success({ message: "Closes after five seconds", duration: 5000 }); }
-                }
-                GitHubButton {
-                    text: "Overlay + dismiss";
-                    clicked => {
-                        ToastManager.show(ToastType.Success, {
-                            message: "Click the overlay to dismiss",
-                            overlay: true,
-                            close-on-click: true,
-                            width: "360px"
-                        });
-                    }
+                for action in [
+                    { label: "5 seconds", id: 7 },
+                    { label: "Overlay + dismiss", id: 8 }
+                ]: GitHubButton {
+                    text: action.label;
+                    clicked => { root.show-toast-example(action.id); }
                 }
             }
         }
@@ -826,23 +904,16 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                GitHubButton {
-                    text: "Info";
-                    clicked => { NotificationManager.info({ title: "Information", message: "Review the current settings." }); }
-                }
-                GitHubButton {
-                    text: "Success";
-                    primary: true;
-                    clicked => { NotificationManager.success({ title: "Saved", message: "Configuration was saved." }); }
-                }
-                GitHubButton {
-                    text: "Warning";
-                    clicked => { NotificationManager.warn({ title: "Attention", message: "A follow-up action is required." }); }
-                }
-                GitHubButton {
-                    text: "Error";
-                    danger: true;
-                    clicked => { NotificationManager.error({ title: "Failed", message: "The request could not be completed." }); }
+                for action in [
+                    { label: "Info", id: 0, primary: false, danger: false },
+                    { label: "Success", id: 1, primary: true, danger: false },
+                    { label: "Warning", id: 2, primary: false, danger: false },
+                    { label: "Error", id: 3, primary: false, danger: true }
+                ]: GitHubButton {
+                    text: action.label;
+                    primary: action.primary;
+                    danger: action.danger;
+                    clicked => { root.show-notification-example(action.id); }
                 }
             }
 
@@ -854,20 +925,15 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                GitHubButton {
-                    text: "Action Banner";
-                    clicked => {
-                        NotificationManager.show(NotificationType.Info, {
-                            title: "Update available",
-                            message: "Choose an action to exercise Banner callbacks.",
-                            component: CustomComponentType.ActionsNotify,
-                            actions: ["Later", "Install"],
-                            tag: "ui-components"
-                        });
-                    }
+                for action in [
+                    { label: "Action Banner", id: 4, danger: false },
+                    { label: "Remove all", id: 5, danger: false },
+                    { label: "Clear queue", id: 6, danger: true }
+                ]: GitHubButton {
+                    text: action.label;
+                    danger: action.danger;
+                    clicked => { root.show-notification-example(action.id); }
                 }
-                GitHubButton { text: "Remove all"; clicked => { NotificationManager.remove-all(); } }
-                GitHubButton { text: "Clear queue"; danger: true; clicked => { NotificationManager.clear(); } }
             }
         }
 
@@ -884,54 +950,14 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
 
-                GitHubButton {
-                    text: "Confirmation";
-                    primary: true;
-                    clicked => {
-                        DialogManager.show({
-                            id: "gallery-confirm",
-                            title: "Confirm change",
-                            content: "This modal dialog uses fixed dimensions, a backdrop, one secondary action, and one primary action.",
-                            actions: ["Cancel"],
-                            default-action: "Confirm",
-                            overlay: true,
-                            modal: true,
-                            width: "440px",
-                            height: "280px"
-                        });
-                    }
-                }
-                GitHubButton {
-                    text: "Non-modal";
-                    clicked => {
-                        DialogManager.show({
-                            id: "gallery-non-modal",
-                            title: "Non-modal example",
-                            content: "Press Escape, use the close button, or click the backdrop to dismiss this percentage-sized dialog.",
-                            actions: [],
-                            default-action: "Done",
-                            overlay: true,
-                            modal: false,
-                            width: "52%",
-                            height: "42%"
-                        });
-                    }
-                }
-                GitHubButton {
-                    text: "No backdrop";
-                    clicked => {
-                        DialogManager.show({
-                            id: "gallery-no-backdrop",
-                            title: "Dialog without backdrop",
-                            content: "This variant keeps the underlying page visible and exercises the overlay property.",
-                            actions: ["Close"],
-                            default-action: "",
-                            overlay: false,
-                            modal: false,
-                            width: "400px",
-                            height: "240px"
-                        });
-                    }
+                for action in [
+                    { label: "Confirmation", id: 0, primary: true },
+                    { label: "Non-modal", id: 1, primary: false },
+                    { label: "No backdrop", id: 2, primary: false }
+                ]: GitHubButton {
+                    text: action.label;
+                    primary: action.primary;
+                    clicked => { root.show-dialog-example(action.id); }
                 }
             }
         }
@@ -949,10 +975,16 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 height: 32px;
                 spacing: GitHubMetrics.size-16;
                 alignment: start;
-                GitHubSpinner { spinner-size: 16px; }
-                GitHubSpinner { spinner-size: 24px; }
-                GitHubSpinner { spinner-size: 32px; foreground: GitHubTheme.accent-fg; }
-                GitHubSpinner { spinner-size: 24px; spinning: false; }
+                for spinner-state in [
+                    { size: 16px, foreground: GitHubTheme.fg-muted, spinning: true },
+                    { size: 24px, foreground: GitHubTheme.fg-muted, spinning: true },
+                    { size: 32px, foreground: GitHubTheme.accent-fg, spinning: true },
+                    { size: 24px, foreground: GitHubTheme.fg-muted, spinning: false }
+                ]: GitHubSpinner {
+                    spinner-size: spinner-state.size;
+                    foreground: spinner-state.foreground;
+                    spinning: spinner-state.spinning;
+                }
             }
 
             GitHubButton {
@@ -1077,9 +1109,14 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 height: 24px;
                 spacing: GitHubMetrics.size-8;
                 alignment: start;
-                GitHubShowcaseStateBadge { text: "Neutral"; }
-                GitHubShowcaseStateBadge { text: "Success"; kind: "success"; }
-                GitHubShowcaseStateBadge { text: "Danger"; kind: "danger"; }
+                for badge-state in [
+                    { label: "Neutral", kind: "neutral" },
+                    { label: "Success", kind: "success" },
+                    { label: "Danger", kind: "danger" }
+                ]: GitHubShowcaseStateBadge {
+                    text: badge-state.label;
+                    kind: badge-state.kind;
+                }
             }
         }
 
@@ -1102,61 +1139,26 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     spacing: 0px;
                     alignment: start;
 
-                    GitHubActionListItem {
+                    for feature in [
+                        { label: "Project components", description: "Grid/List cards, search, view switcher, card actions, and project dialog variants", trailing: "Open", icon: @image-url("../../assets/icons/octicon-repo-16.svg"), route: Route.Project, selected: false },
+                        { label: "Workflow components", description: "Branch, tag, pull request, deployment, filters, and pagination states", trailing: "Open", icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg"), route: Route.Workflow, selected: false },
+                        { label: "Pull request filter menu", description: "Reviews, Assignee, and Sort popovers with selected options and dismissal", trailing: "Open", icon: @image-url("../../assets/icons/octicon-filter-16.svg"), route: Route.Workflow, selected: false },
+                        { label: "Job Run components", description: "Application-level run header, Jobs navigation, status, steps, logs, and Stop action", trailing: "Open", icon: @image-url("../../assets/icons/octicon-terminal-16.svg"), route: Route.JobRun, selected: false },
+                        { label: "Chat components", description: "Welcome suggestions, message roles/status, Markdown blocks, composer, and history loading", trailing: "Open", icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg"), route: Route.Chat, selected: false },
+                        { label: "Settings components", description: "Responsive section navigation, provider navigation, fields, toggles, panes, and update actions", trailing: "Open", icon: @image-url("../../assets/icons/octicon-gear-16.svg"), route: Route.Settings, selected: false },
+                        { label: "Shell and review components", description: "Navigation rail, breadcrumb, status bar, terminal drawer, pull-request review and diff controls", trailing: "Live", icon: @image-url("../../assets/icons/octicon-stack-16.svg"), route: Route.UiComponents, selected: true }
+                    ]: GitHubActionListItem {
                         bottom-padding: GitHubMetrics.size-8;
-                        text: "Project components";
-                        description: "Grid/List cards, search, view switcher, card actions, and project dialog variants";
-                        trailing-text: "Open";
-                        icon: @image-url("../../assets/icons/octicon-repo-16.svg");
-                        activated => { root.navigate(Route.Project); }
-                    }
-                    GitHubActionListItem {
-                        bottom-padding: GitHubMetrics.size-8;
-                        text: "Workflow components";
-                        description: "Branch, tag, pull request, deployment, filters, and pagination states";
-                        trailing-text: "Open";
-                        icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
-                        activated => { root.navigate(Route.Workflow); }
-                    }
-                    GitHubActionListItem {
-                        bottom-padding: GitHubMetrics.size-8;
-                        text: "Pull request filter menu";
-                        description: "Reviews, Assignee, and Sort popovers with selected options and dismissal";
-                        trailing-text: "Open";
-                        icon: @image-url("../../assets/icons/octicon-filter-16.svg");
-                        activated => { root.navigate(Route.Workflow); }
-                    }
-                    GitHubActionListItem {
-                        bottom-padding: GitHubMetrics.size-8;
-                        text: "Job Run components";
-                        description: "Application-level run header, Jobs navigation, status, steps, logs, and Stop action";
-                        trailing-text: "Open";
-                        icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
-                        activated => { root.navigate(Route.JobRun); }
-                    }
-                    GitHubActionListItem {
-                        bottom-padding: GitHubMetrics.size-8;
-                        text: "Chat components";
-                        description: "Welcome suggestions, message roles/status, Markdown blocks, composer, and history loading";
-                        trailing-text: "Open";
-                        icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg");
-                        activated => { root.navigate(Route.Chat); }
-                    }
-                    GitHubActionListItem {
-                        bottom-padding: GitHubMetrics.size-8;
-                        text: "Settings components";
-                        description: "Responsive section navigation, provider navigation, fields, toggles, panes, and update actions";
-                        trailing-text: "Open";
-                        icon: @image-url("../../assets/icons/octicon-gear-16.svg");
-                        activated => { root.navigate(Route.Settings); }
-                    }
-                    GitHubActionListItem {
-                        bottom-padding: GitHubMetrics.size-8;
-                        text: "Shell and review components";
-                        description: "Navigation rail, breadcrumb, status bar, terminal drawer, pull-request review and diff controls";
-                        trailing-text: "Live";
-                        icon: @image-url("../../assets/icons/octicon-stack-16.svg");
-                        selected: true;
+                        text: feature.label;
+                        description: feature.description;
+                        trailing-text: feature.trailing;
+                        icon: feature.icon;
+                        selected: feature.selected;
+                        activated => {
+                            if !feature.selected {
+                                root.navigate(feature.route);
+                            }
+                        }
                     }
                 }
             }

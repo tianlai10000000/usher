@@ -73,13 +73,29 @@ cargo ide-check
 `cargo clean`。实测取舍和清理建议见
 [构建性能与产物策略](docs/build-performance.md)。
 
-应用内 Slint 实时预览仅用于开发，常规构建和 Release 构建默认不包含它。需要时显式启用：
+应用内 Slint 实时预览仅用于开发，常规构建和 Release 构建默认不包含它。UI 快速
+校验和可视化迭代统一使用项目脚本：
 
 ```sh
-SLINT_LIVE_PREVIEW=1 cargo run --features live-preview
+./scripts/ui-check.sh
+./scripts/ui-live-preview.sh
 ```
 
-在 macOS 上，该显式开发路径使用 `vendor/i-slint-live-preview` 中有文档记录的 Slint 文件监听补丁；默认构建和 Release 构建不会选择它。
+PowerShell 对应入口为 `scripts/ui-check.ps1` 和 `scripts/ui-live-preview.ps1`。
+`ui-check` 不启动应用，只校验完整根 UI；live preview 保留应用 callback 和状态，
+但在运行时解释 UI 改动。交付前仍需使用普通 `cargo run --locked` 验证静态构建和
+受影响路由/布局。重复热重载可能保留较多诊断状态，长时间 UI 迭代期间应定期重启
+preview 进程。在 macOS 上，该显式开发路径使用
+`vendor/i-slint-live-preview` 中有文档记录的 Slint 文件监听补丁；默认构建和
+Release 构建不会选择它。
+
+UI Components 演练场同样只用于开发。普通 `cargo run` 和现有 Release 脚本不会
+显示其菜单入口，也不会把该页面纳入编译图。上述 live preview 脚本会自动启用它；
+等价的直接命令为：
+
+```sh
+SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components
+```
 
 完整的 `cargo test --locked` 当前会暴露 `src/logger/debug_logger.rs` 中已有的 doctest 问题；库单元测试本身可以通过。
 

@@ -3,7 +3,7 @@ import { GitHubHomePage as HomePage } from "./views/home.slint";
 import { GitHubSearchPage as SearchPage } from "./views/search.slint";
 import { GitHubSettingsPage as SettingsPage } from "./views/settings.slint";
 import { GitHubAboutPage as AboutPage } from "./views/about.slint";
-import { GitHubUiComponentsPage as UiComponentsPage } from "./views/ui_components.slint";
+import { UiComponentsFeature, UiComponentsPage } from "@ui-components";
 import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.slint";
 import { GitHubJobRunPage as JobRunPage } from "./views/job_run.slint";
 import { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
@@ -1188,6 +1188,7 @@ export component MainWindow inherits Window {
             toggle-shortcut-label: root.shortcut-toggle-sidebar-label;
             back-shortcut-label: root.shortcut-navigate-back-label;
             forward-shortcut-label: root.shortcut-navigate-forward-label;
+            item-count: UiComponentsFeature.enabled ? 4 : 3;
             items: [
                 { icon: root.navigation-home-icon, text: "Home" },
                 { icon: root.navigation-chat-icon, text: "Chat" },
@@ -1357,6 +1358,7 @@ export component MainWindow inherits Window {
                 toggle-shortcut-label: root.shortcut-toggle-sidebar-label;
                 back-shortcut-label: root.shortcut-navigate-back-label;
                 forward-shortcut-label: root.shortcut-navigate-forward-label;
+                item-count: UiComponentsFeature.enabled ? 4 : 3;
                 items: [
                     { icon: root.navigation-home-icon, text: "Home" },
                     { icon: root.navigation-chat-icon, text: "Chat" },

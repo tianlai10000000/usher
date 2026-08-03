@@ -1,0 +1,12 @@
+import { Route } from "../route/routeMap.slint";
+
+export global UiComponentsFeature {
+    out property <bool> enabled: false;
+}
+
+// Keep the root UI contract stable while excluding the real showcase import
+// graph. Rust also normalizes direct attempts to enter this unavailable route.
+export component UiComponentsPage inherits Rectangle {
+    in property <length> viewport-height;
+    callback navigate(Route);
+}

@@ -10,6 +10,7 @@ const NAVIGATION_ROUTES: &[Route] = &[
     Route::Home,
     Route::Chat,
     Route::Project,
+    #[cfg(feature = "ui-components")]
     Route::UiComponents,
 ];
 
@@ -41,6 +42,15 @@ fn navigation_index_for_route(route: Route) -> i32 {
         .iter()
         .position(|&nav_route| nav_route == route)
         .map_or(-1, |index| index as i32)
+}
+
+fn available_route(route: Route) -> Route {
+    #[cfg(not(feature = "ui-components"))]
+    if route == Route::UiComponents {
+        return Route::Home;
+    }
+
+    route
 }
 
 pub fn route_for_navigation_index(index: i32) -> Option<Route> {
@@ -152,6 +162,7 @@ impl Router {
 
     pub fn navigate(&self, route: Route) -> Option<RouteUiState> {
         self.window.upgrade().map(|win| {
+            let route = available_route(route);
             let previous = win.get_current_route();
             if previous != route {
                 if let Ok(mut history) = self.history.lock() {
@@ -235,8 +246,8 @@ fn is_workflow_route(route: Route) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_ROUTE_HISTORY, NavigationHistory, is_workflow_route, route_for_navigation_index,
-        route_ui_state,
+        MAX_ROUTE_HISTORY, NavigationHistory, available_route, is_workflow_route,
+        route_for_navigation_index, route_ui_state,
     };
     use crate::Route;
 
@@ -257,13 +268,24 @@ mod tests {
     }
 
     #[test]
-    fn ui_components_is_a_primary_navigation_route() {
+    #[cfg(feature = "ui-components")]
+    fn ui_components_is_a_primary_navigation_route_when_enabled() {
+        assert_eq!(available_route(Route::UiComponents), Route::UiComponents);
         let state = route_ui_state(Route::UiComponents);
         assert!(state.show_breadcrumb);
         assert!(state.show_navigation_drawer);
         assert!(state.show_page_scroll_view);
         assert_eq!(state.navigation_current_index, 3);
         assert_eq!(route_for_navigation_index(3), Some(Route::UiComponents));
+    }
+
+    #[test]
+    #[cfg(not(feature = "ui-components"))]
+    fn ui_components_is_not_a_primary_navigation_route_when_disabled() {
+        assert_eq!(available_route(Route::UiComponents), Route::Home);
+        let state = route_ui_state(Route::UiComponents);
+        assert_eq!(state.navigation_current_index, -1);
+        assert_eq!(route_for_navigation_index(3), None);
     }
 
     #[test]
