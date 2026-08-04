@@ -21,3 +21,6 @@ slint = { version = "1.17.1", default-features = false, features = ["std", "comp
 
 [build-dependencies]
 slint-build = { version = "1.17.1" }
+
+[dev-dependencies]
+slint-build = { version = "1.17.1" }

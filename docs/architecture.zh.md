@@ -153,7 +153,23 @@ macOS 使用原生 `.AppleSystemUIFont`，Windows 使用 `Microsoft YaHei UI`，
 保持独立，避免改变既有单元格和工具栏度量；PR Review 中仅 Diff 源码与
 文件树内容保留几何所需的平台专用字体，其余控件和正文继承应用字体。
 
-UI 源码继续保留在仓库根目录的 `ui/` 下，但生成的 Rust 只由 `usher-ui` workspace crate 编译。应用 crate 重新导出这套公开 API，使现有功能模块仍可通过 `crate::{MainWindow, Route, ...}` 引用类型，而不再拥有生成模块。这个边界保证普通 Rust 功能逻辑变化不会迫使 Slint 生成 crate 重编；UI 源码变化则先重编 `usher-ui`，再检查应用绑定。
+UI 源码继续保留在仓库根目录的 `ui/` 下。主窗口与普通路由树由
+`usher-ui` workspace crate 生成；Settings 路由由 `usher-ui-settings` 独立生成，
+再通过 Slint 实验性的 `ComponentContainer`/component-factory 边界挂载。应用
+crate 继续重新导出主 UI API，并由 `src/settings_page.rs` 显式桥接 Settings。
+跨 crate factory 创建的组件拥有独立 Slint global 图，因此桥接层必须复制初始
+`AppState`、把 callback 转发给 `MainWindow`，并同步后续状态变化，不能假定两边
+global 自动共享。修改 `settings.slint` 不得重新生成或编译 `usher-ui`；修改主壳仍会
+重编主生成 crate。启用 `SLINT_LIVE_PREVIEW` 时，Settings build script 会刻意保持
+factory 产品为静态生成，因为 Slint 1.17 的 `ComponentFactory` 不能接收 live
+preview 动态 handle；主窗口与 UI Components 路由仍可正常热更新。
+
+独立挂载的路由只能拥有一个 viewport 和一条滚动链：它必须作为主壳 `Flickable`
+的同级节点挂载，接收宿主真实宽高，显式绘制 `GitHubTheme.canvas-default`，把内容
+宽度限制在可视区内，并避免主壳 padding 与页面 padding 重叠。主壳专用的预留几何
+也必须从独立路由视口中扣除或补回，包括普通页面统一保留的 4px page-stack 底部
+间隔。该约束用于避免嵌套滚轮抢占、底部内容裁剪、伪横向留白，以及透明页面透出
+不同主壳底色。
 
 ## 构建产物策略
 

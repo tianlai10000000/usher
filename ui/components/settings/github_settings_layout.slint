@@ -1,5 +1,4 @@
 import { AppState } from "../../state/app_state.slint";
-import { UpdateLogic } from "../update/update.slint";
 import { GitHubPageView } from "../page/page_view.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import {
@@ -214,6 +213,7 @@ export component GitHubSettingsPane inherits Rectangle {
     in-out property <bool> ai-agent-testing: false;
     in-out property <int> ai-agent-provider-index: -1;
     in-out property <int> hosting-config-tab: 0;
+    in-out property <bool> update-checking: false;
     callback check-update();
     callback simulate-crash();
 
@@ -344,10 +344,10 @@ export component GitHubSettingsPane inherits Rectangle {
                     GitHubButton {
                         x: parent.width - self.width;
                         y: 8px;
-                        text: UpdateLogic.checking-update ? "Checking…" : "Check for updates";
-                        busy: UpdateLogic.checking-update;
+                        text: root.update-checking ? "Checking…" : "Check for updates";
+                        busy: root.update-checking;
                         clicked => {
-                            UpdateLogic.checking-update = true;
+                            root.update-checking = true;
                             root.check-update();
                         }
                     }

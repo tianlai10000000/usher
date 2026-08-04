@@ -630,12 +630,7 @@ mod other {
                 if event.id == show_hide_id {
                     slint::invoke_from_event_loop(move || {
                         if let Some(ui) = ui_weak_clone.upgrade() {
-                            let window = ui.window();
-                            if window.is_visible() {
-                                window.hide();
-                            } else {
-                                window.show();
-                            }
+                            toggle_window_visibility(&ui);
                         }
                     })
                     .ok();
@@ -648,18 +643,25 @@ mod other {
                 let ui_weak_clone = ui_weak.clone();
                 slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak_clone.upgrade() {
-                        let window = ui.window();
-                        if window.is_visible() {
-                            window.hide();
-                        } else {
-                            window.show();
-                        }
+                        toggle_window_visibility(&ui);
                     }
                 })
                 .ok();
             }
 
             thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    fn toggle_window_visibility(ui: &MainWindow) {
+        let window = ui.window();
+        let result = if window.is_visible() {
+            window.hide()
+        } else {
+            window.show()
+        };
+        if let Err(error) = result {
+            log::warn!("Failed to toggle the window from the tray: {error}");
         }
     }
 
@@ -672,7 +674,9 @@ mod other {
     pub fn update_tray_tooltip_other(tooltip: &str) {
         TRAY_ICON.with(|tray| {
             if let Some(ref mut icon) = *tray.borrow_mut() {
-                icon.set_tooltip(Some(tooltip.to_string()));
+                if let Err(error) = icon.set_tooltip(Some(tooltip.to_string())) {
+                    log::warn!("Failed to update the tray tooltip: {error}");
+                }
             }
         });
     }

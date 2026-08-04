@@ -4,6 +4,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $projectRoot
 
 try {
+    $env:SLINT_ENABLE_EXPERIMENTAL_FEATURES = "1"
     if (-not (Get-Command slint-viewer -ErrorAction SilentlyContinue)) {
         throw "slint-viewer is required for the fast UI check; install the Slint 1.17.1 viewer, then retry"
     }

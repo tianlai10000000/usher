@@ -1,18 +1,22 @@
 import { AppState } from "../state/app_state.slint";
-import { GitHubPageView } from "../components/page/page_view.slint";
+export { AppState } from "../state/app_state.slint";
+import { GitHubScrollView } from "../components/github_scroll_view.slint";
 import { GitHubTheme } from "../theme/github_theme.slint";
 import { GitHubSettingsNavItem } from "../components/settings/github_settings_controls.slint";
+import {
+    GitHubSettingsPane,
+    GitHubSettingsSectionMenuButton
+} from "../components/settings/github_settings_layout.slint";
 
-
-
-
-
-
-
-
-
-import { GitHubSettingsPane, GitHubSettingsSectionMenuButton } from "../components/settings/github_settings_layout.slint";
-export component GitHubSettingsPage inherits GitHubPageView {
+export component GitHubSettingsPage inherits Rectangle {
+    // ComponentContainer clips an external tree but does not rewrite these
+    // public geometry properties. The Rust bridge keeps them synchronized with
+    // the host viewport so responsive layout and scrolling use the real size.
+    in-out property <length> viewport-width: 800px;
+    in-out property <length> viewport-height: 768px;
+    width: root.viewport-width;
+    height: root.viewport-height;
+    background: GitHubTheme.canvas-default;
     callback check-update();
     callback simulate-crash();
 
@@ -24,158 +28,171 @@ export component GitHubSettingsPage inherits GitHubPageView {
     in-out property <bool> ai-agent-saved: false;
     in-out property <bool> ai-agent-testing: false;
     in-out property <int> ai-agent-provider-index: -1;
-    in property <length> viewport-width: 0px;
+    in-out property <bool> update-checking: false;
 
     private property <int> selected-section: 0;
     private property <int> hosting-config-tab: 0;
     private property <bool> compact-navigation-open: false;
-    // GitHubPageView already contributes a thin outer pad. On wide windows use a
-    // larger Settings gutter so the form column keeps clearer right spacing.
     private property <length> page-gutter: root.width >= 1000px ? 48px : 16px;
     private property <length> available-width: max(0px, root.width - root.page-gutter * 2);
     private property <length> page-width: min(1120px, root.available-width);
     private property <bool> compact-layout: root.page-width < 768px;
-    // Compact NavList: labels are short; keep the pane tighter than 224px.
     private property <length> nav-width: 180px;
     private property <length> nav-content-gap: 32px;
 
-    page-host := Rectangle {
-        width: root.available-width;
-        height: page-column.preferred-height;
-        background: transparent;
+    settings-scroll := GitHubScrollView {
+        width: root.width;
+        height: root.height;
+        viewport_x: 0px;
 
-        page-column := VerticalLayout {
-            x: max(0px, (parent.width - root.page-width) / 2);
-            width: root.page-width;
-            spacing: 24px;
-            alignment: start;
+        content-host := Rectangle {
+            width: settings-scroll.visible_width;
+            // Keep the 16px top inset plus a deliberate 24px end margin. This
+            // is vertical breathing room below the final setting, not a
+            // horizontal-scroll gutter.
+            height: max(settings-scroll.visible_height, page-column.preferred-height + 40px);
+            background: GitHubTheme.canvas-default;
 
-            Text {
-                width: parent.width;
-                text: "Settings";
-                font-size: 24px;
-                font-weight: 600;
-                color: GitHubTheme.fg-default;
-            }
+                    page-column := VerticalLayout {
+                        x: root.page-gutter
+                            + max(0px, (root.available-width - root.page-width) / 2);
+                        y: 16px;
+                        width: root.page-width;
+                        spacing: 24px;
+                        alignment: start;
 
-            if !root.compact-layout: HorizontalLayout {
-                width: parent.width;
-                spacing: root.nav-content-gap;
-                alignment: start;
-
-                VerticalLayout {
-                    width: root.nav-width;
-                    spacing: 4px;
-                    alignment: start;
-
-                    GitHubSettingsNavItem {
-                        text: "General";
-                        selected: root.selected-section == 0;
-                        clicked => { root.selected-section = 0; }
-                    }
-                    GitHubSettingsNavItem {
-                        text: "Code hosting";
-                        selected: root.selected-section == 1;
-                        clicked => { root.selected-section = 1; }
-                    }
-                    GitHubSettingsNavItem {
-                        text: "AI Agent";
-                        selected: root.selected-section == 2;
-                        clicked => { root.selected-section = 2; }
-                    }
-                    GitHubSettingsNavItem {
-                        text: "Diagnostics";
-                        selected: root.selected-section == 3;
-                        clicked => { root.selected-section = 3; }
-                    }
-                }
-
-                GitHubSettingsPane {
-                    width: root.page-width - root.nav-width - root.nav-content-gap;
-                    selected-section: root.selected-section;
-                    simulate-crash-active <=> root.simulate-crash-active;
-                    reveal-git-tokens <=> root.reveal-git-tokens;
-                    git-tokens-saved <=> root.git-tokens-saved;
-                    git-hosting-config-saved <=> root.git-hosting-config-saved;
-                    reveal-ai-agent-api-key <=> root.reveal-ai-agent-api-key;
-                    ai-agent-saved <=> root.ai-agent-saved;
-                    ai-agent-testing <=> root.ai-agent-testing;
-                    ai-agent-provider-index <=> root.ai-agent-provider-index;
-                    hosting-config-tab <=> root.hosting-config-tab;
-                    check-update => { root.check-update(); }
-                    simulate-crash => { root.simulate-crash(); }
-                }
-            }
-
-            if root.compact-layout: VerticalLayout {
-                width: parent.width;
-                spacing: 16px;
-                alignment: start;
-
-                GitHubSettingsSectionMenuButton {
-                    width: parent.width;
-                    text: root.selected-section == 0 ? "General"
-                        : (root.selected-section == 1 ? "Code hosting"
-                            : (root.selected-section == 2 ? "AI Agent" : "Diagnostics"));
-                    open: root.compact-navigation-open;
-                    clicked => {
-                        root.compact-navigation-open = !root.compact-navigation-open;
-                    }
-                }
-
-                if root.compact-navigation-open: Rectangle {
-                    width: parent.width;
-                    height: 136px;
-                    border-radius: 6px;
-                    border-width: 1px;
-                    border-color: GitHubTheme.border-default;
-                    background: GitHubTheme.canvas-default;
-
-                    VerticalLayout {
-                        x: 4px;
-                        y: 4px;
-                        width: parent.width - 8px;
-                        spacing: 0px;
-
-                        GitHubSettingsNavItem {
-                            text: "General";
-                            selected: root.selected-section == 0;
-                            clicked => { root.selected-section = 0; root.compact-navigation-open = false; }
+                        Text {
+                            width: parent.width;
+                            text: "Settings";
+                            font-size: 24px;
+                            font-weight: 600;
+                            color: GitHubTheme.fg-default;
                         }
-                        GitHubSettingsNavItem {
-                            text: "Code hosting";
-                            selected: root.selected-section == 1;
-                            clicked => { root.selected-section = 1; root.compact-navigation-open = false; }
+
+                        if !root.compact-layout: HorizontalLayout {
+                            width: parent.width;
+                            height: max(140px, wide-settings-pane.height);
+                            spacing: root.nav-content-gap;
+                            alignment: start;
+
+                            VerticalLayout {
+                                width: root.nav-width;
+                                spacing: 4px;
+                                alignment: start;
+
+                                GitHubSettingsNavItem {
+                                    text: "General";
+                                    selected: root.selected-section == 0;
+                                    clicked => { root.selected-section = 0; }
+                                }
+                                GitHubSettingsNavItem {
+                                    text: "Code hosting";
+                                    selected: root.selected-section == 1;
+                                    clicked => { root.selected-section = 1; }
+                                }
+                                GitHubSettingsNavItem {
+                                    text: "AI Agent";
+                                    selected: root.selected-section == 2;
+                                    clicked => { root.selected-section = 2; }
+                                }
+                                GitHubSettingsNavItem {
+                                    text: "Diagnostics";
+                                    selected: root.selected-section == 3;
+                                    clicked => { root.selected-section = 3; }
+                                }
+                            }
+
+                            wide-settings-pane := GitHubSettingsPane {
+                                width: root.page-width - root.nav-width - root.nav-content-gap;
+                                selected-section: root.selected-section;
+                                simulate-crash-active <=> root.simulate-crash-active;
+                                reveal-git-tokens <=> root.reveal-git-tokens;
+                                git-tokens-saved <=> root.git-tokens-saved;
+                                git-hosting-config-saved <=> root.git-hosting-config-saved;
+                                reveal-ai-agent-api-key <=> root.reveal-ai-agent-api-key;
+                                ai-agent-saved <=> root.ai-agent-saved;
+                                ai-agent-testing <=> root.ai-agent-testing;
+                                ai-agent-provider-index <=> root.ai-agent-provider-index;
+                                hosting-config-tab <=> root.hosting-config-tab;
+                                update-checking <=> root.update-checking;
+                                check-update => { root.check-update(); }
+                                simulate-crash => { root.simulate-crash(); }
+                            }
                         }
-                        GitHubSettingsNavItem {
-                            text: "AI Agent";
-                            selected: root.selected-section == 2;
-                            clicked => { root.selected-section = 2; root.compact-navigation-open = false; }
-                        }
-                        GitHubSettingsNavItem {
-                            text: "Diagnostics";
-                            selected: root.selected-section == 3;
-                            clicked => { root.selected-section = 3; root.compact-navigation-open = false; }
+
+                        if root.compact-layout: VerticalLayout {
+                            width: parent.width;
+                            height: compact-settings-pane.height
+                                + (root.compact-navigation-open ? 208px : 56px);
+                            spacing: 16px;
+                            alignment: start;
+
+                            GitHubSettingsSectionMenuButton {
+                                width: parent.width;
+                                text: root.selected-section == 0 ? "General"
+                                    : (root.selected-section == 1 ? "Code hosting"
+                                        : (root.selected-section == 2 ? "AI Agent" : "Diagnostics"));
+                                open: root.compact-navigation-open;
+                                clicked => {
+                                    root.compact-navigation-open = !root.compact-navigation-open;
+                                }
+                            }
+
+                            if root.compact-navigation-open: Rectangle {
+                                width: parent.width;
+                                height: 136px;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: GitHubTheme.border-default;
+                                background: GitHubTheme.canvas-default;
+
+                                VerticalLayout {
+                                    x: 4px;
+                                    y: 4px;
+                                    width: parent.width - 8px;
+                                    spacing: 0px;
+
+                                    GitHubSettingsNavItem {
+                                        text: "General";
+                                        selected: root.selected-section == 0;
+                                        clicked => { root.selected-section = 0; root.compact-navigation-open = false; }
+                                    }
+                                    GitHubSettingsNavItem {
+                                        text: "Code hosting";
+                                        selected: root.selected-section == 1;
+                                        clicked => { root.selected-section = 1; root.compact-navigation-open = false; }
+                                    }
+                                    GitHubSettingsNavItem {
+                                        text: "AI Agent";
+                                        selected: root.selected-section == 2;
+                                        clicked => { root.selected-section = 2; root.compact-navigation-open = false; }
+                                    }
+                                    GitHubSettingsNavItem {
+                                        text: "Diagnostics";
+                                        selected: root.selected-section == 3;
+                                        clicked => { root.selected-section = 3; root.compact-navigation-open = false; }
+                                    }
+                                }
+                            }
+
+                            compact-settings-pane := GitHubSettingsPane {
+                                width: root.page-width;
+                                selected-section: root.selected-section;
+                                simulate-crash-active <=> root.simulate-crash-active;
+                                reveal-git-tokens <=> root.reveal-git-tokens;
+                                git-tokens-saved <=> root.git-tokens-saved;
+                                git-hosting-config-saved <=> root.git-hosting-config-saved;
+                                reveal-ai-agent-api-key <=> root.reveal-ai-agent-api-key;
+                                ai-agent-saved <=> root.ai-agent-saved;
+                                ai-agent-testing <=> root.ai-agent-testing;
+                                ai-agent-provider-index <=> root.ai-agent-provider-index;
+                                hosting-config-tab <=> root.hosting-config-tab;
+                                update-checking <=> root.update-checking;
+                                check-update => { root.check-update(); }
+                                simulate-crash => { root.simulate-crash(); }
+                            }
                         }
                     }
-                }
-
-                GitHubSettingsPane {
-                    width: root.page-width;
-                    selected-section: root.selected-section;
-                    simulate-crash-active <=> root.simulate-crash-active;
-                    reveal-git-tokens <=> root.reveal-git-tokens;
-                    git-tokens-saved <=> root.git-tokens-saved;
-                    git-hosting-config-saved <=> root.git-hosting-config-saved;
-                    reveal-ai-agent-api-key <=> root.reveal-ai-agent-api-key;
-                    ai-agent-saved <=> root.ai-agent-saved;
-                    ai-agent-testing <=> root.ai-agent-testing;
-                    ai-agent-provider-index <=> root.ai-agent-provider-index;
-                    hosting-config-tab <=> root.hosting-config-tab;
-                    check-update => { root.check-update(); }
-                    simulate-crash => { root.simulate-crash(); }
-                }
-            }
         }
     }
 }

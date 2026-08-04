@@ -5,6 +5,8 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
 
+export SLINT_ENABLE_EXPERIMENTAL_FEATURES=1
+
 if ! command -v slint-viewer >/dev/null 2>&1; then
     echo "error: slint-viewer is required for the fast UI check" >&2
     echo "install the Slint 1.17.1 viewer, then retry" >&2

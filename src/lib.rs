@@ -39,6 +39,8 @@ use http::setup_http;
 
 mod settings;
 use settings::setup_settings;
+mod settings_page;
+use settings_page::SettingsPageBridge;
 
 mod constants;
 use constants::shutdown_priority::PRIORITY_HIGH;
@@ -90,11 +92,25 @@ enum SettingsSaveTarget {
     AiAgent,
 }
 
-fn set_settings_saved(ui: &MainWindow, target: SettingsSaveTarget, saved: bool) {
+fn set_settings_saved(
+    ui: &MainWindow,
+    page: &SettingsPageBridge,
+    target: SettingsSaveTarget,
+    saved: bool,
+) {
     match target {
-        SettingsSaveTarget::GitTokens => ui.set_settings_git_tokens_saved(saved),
-        SettingsSaveTarget::GitHosting => ui.set_settings_git_hosting_config_saved(saved),
-        SettingsSaveTarget::AiAgent => ui.set_settings_ai_agent_saved(saved),
+        SettingsSaveTarget::GitTokens => {
+            ui.set_settings_git_tokens_saved(saved);
+            page.set_git_tokens_saved(saved);
+        }
+        SettingsSaveTarget::GitHosting => {
+            ui.set_settings_git_hosting_config_saved(saved);
+            page.set_git_hosting_config_saved(saved);
+        }
+        SettingsSaveTarget::AiAgent => {
+            ui.set_settings_ai_agent_saved(saved);
+            page.set_ai_agent_saved(saved);
+        }
     }
 }
 
@@ -113,6 +129,7 @@ fn settings_toast(message: &str) -> ToastOptions {
 
 fn save_settings_with_feedback<F>(
     ui_weak: slint::Weak<MainWindow>,
+    settings_page: SettingsPageBridge,
     target: SettingsSaveTarget,
     operation: &'static str,
     success_message: &'static str,
@@ -130,18 +147,19 @@ fn save_settings_with_feedback<F>(
             };
             match result {
                 Ok(()) => {
-                    set_settings_saved(&ui, target, true);
+                    set_settings_saved(&ui, &settings_page, target, true);
                     ToastManager::get(&ui).invoke_success(settings_toast(success_message));
                     let reset_weak = ui.as_weak();
+                    let reset_settings_page = settings_page.clone();
                     Timer::single_shot(std::time::Duration::from_secs(2), move || {
                         if let Some(ui) = reset_weak.upgrade() {
-                            set_settings_saved(&ui, target, false);
+                            set_settings_saved(&ui, &reset_settings_page, target, false);
                         }
                     });
                     log::info!("[Settings] {operation} saved");
                 }
                 Err(error) => {
-                    set_settings_saved(&ui, target, false);
+                    set_settings_saved(&ui, &settings_page, target, false);
                     ToastManager::get(&ui)
                         .invoke_error(settings_toast(&format!("Failed to save {operation}.")));
                     log::error!("[Settings] Failed to save {operation}: {error}");
@@ -167,6 +185,7 @@ fn ui() -> Result<MainWindow> {
     // Now create the MainWindow (will inherit app appearance)
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
+    let settings_page = SettingsPageBridge::default();
     app.set_platform_is_macos(cfg!(target_os = "macos"));
     setup_application_font(&app);
     setup_pr_review_fonts(&app);
@@ -266,6 +285,7 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Git Tokens ========= //
     let app_weak_git_tokens = app.as_weak();
+    let settings_page_for_git_tokens = settings_page.clone();
     AppState::get(&app).on_save_git_tokens(
         move |github_token, gitlab_token, gitee_token, gitee_enterprise_token| {
             let github_token = github_token.to_string();
@@ -274,6 +294,7 @@ fn ui() -> Result<MainWindow> {
             let gitee_enterprise_token = gitee_enterprise_token.to_string();
             save_settings_with_feedback(
                 app_weak_git_tokens.clone(),
+                settings_page_for_git_tokens.clone(),
                 SettingsSaveTarget::GitTokens,
                 "code hosting tokens",
                 "Code hosting tokens saved.",
@@ -291,6 +312,7 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Code Hosting API Configuration ========= //
     let app_weak_git_hosting_config = app.as_weak();
+    let settings_page_for_git_hosting = settings_page.clone();
     AppState::get(&app).on_save_git_hosting_config(
         move |github_api_base_url,
               github_enterprise,
@@ -306,6 +328,7 @@ fn ui() -> Result<MainWindow> {
             let gitee_enterprise = gitee_enterprise.to_string();
             save_settings_with_feedback(
                 app_weak_git_hosting_config.clone(),
+                settings_page_for_git_hosting.clone(),
                 SettingsSaveTarget::GitHosting,
                 "code hosting API configuration",
                 "Code hosting API configuration saved.",
@@ -325,6 +348,7 @@ fn ui() -> Result<MainWindow> {
 
     // ========= AI Agent Settings ========= //
     let app_weak_ai_agent_save = app.as_weak();
+    let settings_page_for_ai_save = settings_page.clone();
     AppState::get(&app).on_save_ai_agent_settings(move |provider, base_url, api_key, model| {
         let provider = provider.to_string();
         let base_url = base_url.to_string();
@@ -332,6 +356,7 @@ fn ui() -> Result<MainWindow> {
         let model = model.to_string();
         save_settings_with_feedback(
             app_weak_ai_agent_save.clone(),
+            settings_page_for_ai_save.clone(),
             SettingsSaveTarget::AiAgent,
             "AI Agent settings",
             "AI Agent settings saved.",
@@ -340,6 +365,7 @@ fn ui() -> Result<MainWindow> {
     });
 
     let app_weak_ai_agent_test = app.as_weak();
+    let settings_page_for_ai_test = settings_page.clone();
     AppState::get(&app).on_test_ai_agent_connection(move |base_url, api_key, model| {
         let settings = settings::AiAgentSettings {
             provider: "custom".to_string(),
@@ -348,6 +374,7 @@ fn ui() -> Result<MainWindow> {
             model: model.to_string(),
         };
         let ui_weak = app_weak_ai_agent_test.clone();
+        let settings_page = settings_page_for_ai_test.clone();
         app_runtime::shared_runtime().spawn(async move {
             let result = ai::agent::test_connection(&settings).await;
             let _ = slint::invoke_from_event_loop(move || {
@@ -355,6 +382,7 @@ fn ui() -> Result<MainWindow> {
                     return;
                 };
                 ui.set_settings_ai_agent_testing(false);
+                settings_page.set_ai_agent_testing(false);
                 match result {
                     Ok(result) => {
                         let message = if result.model_listed {
@@ -412,6 +440,7 @@ fn ui() -> Result<MainWindow> {
     let router_clone = router.clone();
     let app_for_chat_route = app.as_weak();
     let app_for_ai_agent_provider = app.as_weak();
+    let settings_page_for_navigation = settings_page.clone();
     app.on_navigate(move |route| {
         if let Some(state) = router_clone.navigate(route) {
             if let Some(ui) = app_for_chat_route.upgrade() {
@@ -429,10 +458,13 @@ fn ui() -> Result<MainWindow> {
                 // SettingsPage is conditionally created by the route. Force a
                 // transition after it exists so the native dropdown populates.
                 ui.set_settings_ai_agent_provider_index(-1);
+                settings_page_for_navigation.set_ai_agent_provider_index(-1);
                 let ui_weak = ui.as_weak();
+                let settings_page = settings_page_for_navigation.clone();
                 Timer::single_shot(std::time::Duration::from_millis(1), move || {
                     if let Some(ui) = ui_weak.upgrade() {
                         ui.set_settings_ai_agent_provider_index(index);
+                        settings_page.set_ai_agent_provider_index(index);
                     }
                 });
             }
@@ -510,6 +542,7 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Theme ========= //
     let app_weak = app.as_weak();
+    let settings_page_for_theme = settings_page.clone();
     AppState::get(&app).on_toggle_theme(move |mode| {
         if let Some(win) = app_weak.upgrade() {
             let app_state = AppState::get(&win);
@@ -525,6 +558,7 @@ fn ui() -> Result<MainWindow> {
             #[cfg(target_os = "linux")]
             if mode == THEME_MODE_AUTO {
                 let win_weak = win.as_weak();
+                let settings_page = settings_page_for_theme.clone();
                 if let Err(error) = std::thread::Builder::new()
                     .name("system-theme-detect".to_string())
                     .spawn(move || {
@@ -538,6 +572,7 @@ fn ui() -> Result<MainWindow> {
                                 return;
                             }
                             app_state.set_effective_dark_mode(is_dark);
+                            settings_page.sync_theme(THEME_MODE_AUTO, is_dark);
                             set_title_bar_color(&win, is_dark);
                             set_terminal_dark_mode(&win, is_dark);
                             log::info!(
@@ -555,6 +590,7 @@ fn ui() -> Result<MainWindow> {
             if mode == THEME_MODE_AUTO {
                 app_state.set_effective_dark_mode(is_dark);
             }
+            settings_page_for_theme.sync_theme(mode, is_dark);
             set_title_bar_color(&win, is_dark);
             set_terminal_dark_mode(&win, is_dark);
 
@@ -569,6 +605,7 @@ fn ui() -> Result<MainWindow> {
         AppState::get(&app).set_effective_dark_mode(is_dark);
     }
     let app_weak_theme_watch = app.as_weak();
+    let settings_page_for_theme_watch = settings_page.clone();
     install_system_theme_watch(move |is_dark| {
         let Some(win) = app_weak_theme_watch.upgrade() else {
             return;
@@ -578,6 +615,7 @@ fn ui() -> Result<MainWindow> {
             return;
         }
         app_state.set_effective_dark_mode(is_dark);
+        settings_page_for_theme_watch.sync_theme(THEME_MODE_AUTO, is_dark);
         set_title_bar_color(&win, is_dark);
         set_terminal_dark_mode(&win, is_dark);
         log::info!("[Theme] System appearance changed (effective dark: {is_dark})");
@@ -728,6 +766,7 @@ fn ui() -> Result<MainWindow> {
     shutdown::register_ui_shutdown_task_with_priority("remove_tray", PRIORITY_HIGH, || {
         tray::remove_tray();
     });
+    settings_page.install(&app);
     memory_diagnostics::log_checkpoint("startup.ui_bindings_complete");
 
     Ok(app)

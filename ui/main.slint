@@ -1,7 +1,6 @@
 import { GitHubNavigationSidebar, GitHubSidebarRightEdge, NavItem } from "./components/navigation/custom_nav_drawer.slint";
 import { GitHubHomePage as HomePage } from "./views/home.slint";
 import { GitHubSearchPage as SearchPage } from "./views/search.slint";
-import { GitHubSettingsPage as SettingsPage } from "./views/settings.slint";
 import { GitHubAboutPage as AboutPage } from "./views/about.slint";
 import { UiComponentsFeature, UiComponentsPage } from "@ui-components";
 import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.slint";
@@ -286,6 +285,32 @@ export component MainWindow inherits Window {
     in-out property <bool> settings-ai-agent-saved: false;
     in-out property <bool> settings-ai-agent-testing: false;
     in-out property <int> settings-ai-agent-provider-index: -1;
+    in property <component-factory> settings-page-factory;
+    out property <length> settings-page-viewport-width:
+        page-stack.width;
+    out property <length> settings-page-viewport-height:
+        // page-stack reserves 4px below ordinary shell-scrolled pages. The
+        // isolated Settings viewport owns its edge and should meet the fixed
+        // status bar without exposing that spacer.
+        page-stack.height + 4px;
+    callback settings-page-viewport-changed(length, length);
+    changed settings-page-viewport-width => {
+        root.settings-page-viewport-changed(
+            root.settings-page-viewport-width,
+            root.settings-page-viewport-height
+        );
+    }
+    changed settings-page-viewport-height => {
+        root.settings-page-viewport-changed(
+            root.settings-page-viewport-width,
+            root.settings-page-viewport-height
+        );
+    }
+    out property <bool> settings-update-checking <=> UpdateLogic.checking-update;
+    callback settings-update-checking-changed(bool);
+    changed settings-update-checking => {
+        root.settings-update-checking-changed(root.settings-update-checking);
+    }
     in property <bool> platform-is-macos: false;
     in property <image> navigation-home-icon: @image-url("./assets/icons/lucide-sidebar-home.svg");
     in property <image> navigation-chat-icon: @image-url("./assets/icons/lucide-sidebar-chat.svg");
@@ -791,6 +816,7 @@ export component MainWindow inherits Window {
                     // Page Views
                     page-scroll-view := GitHubScrollView {
                         visible: root.show-page-scroll-view
+                            && root.current-route != Route.Settings
                             && !(root.shell-drawer-docked-route
                                 && root.shell-drawer-visible
                                 && root.shell-drawer-fullscreen);
@@ -819,25 +845,6 @@ export component MainWindow inherits Window {
                             viewport-height: page-scroll-view.visible-height
                                 - root.page-content-height-offset;
                             navigate(route) => { root.navigate(route); }
-                        }
-                        if root.current-route == Route.Settings: SettingsPage {
-                            // The surrounding layout already contributes 4px
-                            // padding on each side. Subtract it here so Settings
-                            // does not make the viewport content 8px too wide.
-                            width: max(0px, page-scroll-view.visible_width - 8px);
-                            viewport-height: page-scroll-view.visible-height - 2px;
-                            viewport-width: self.width;
-                            git-tokens-saved <=> root.settings-git-tokens-saved;
-                            git-hosting-config-saved <=> root.settings-git-hosting-config-saved;
-                            ai-agent-saved <=> root.settings-ai-agent-saved;
-                            ai-agent-testing <=> root.settings-ai-agent-testing;
-                            ai-agent-provider-index <=> root.settings-ai-agent-provider-index;
-                            check-update => {
-                                root.check-update();
-                            }
-                            simulate-crash => {
-                                root.simulate-crash();
-                            }
                         }
                         if root.current-route == Route.UiComponents: UiComponentsPage {
                             viewport-height: page-scroll-view.visible-height
@@ -1027,6 +1034,18 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
+                    }
+
+                    // Settings owns its own scroll viewport in an independently
+                    // generated crate. Mount it beside (not inside) the shell
+                    // Flickable so wheel events cannot bubble into a nested
+                    // outer scroller and move the whole page container.
+                    if root.current-route == Route.Settings && root.show-page-scroll-view: ComponentContainer {
+                        x: 0px;
+                        y: 0px;
+                        width: root.settings-page-viewport-width;
+                        height: root.settings-page-viewport-height;
+                        component-factory: root.settings-page-factory;
                     }
 
                     breadcrumb-host := Rectangle {

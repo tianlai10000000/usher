@@ -635,6 +635,58 @@ UI 校验和 live preview 脚本会显式启用真实演练场；等价命令为
 演练场不会使默认 UI crate 失效。切换 feature 仍会产生独立 Cargo identity 并支付
 一次重建成本；只有开发组件登记表时才应开启。
 
+### P5：用 ComponentContainer 拆分生产页面
+
+Slint 1.17.1 的 `ComponentContainer`/component-factory 虽然仍标记为实验能力，
+但与此前失败的 `experimental-module-builds` 不同：它可以在运行时挂载另一个 Rust
+crate 生成的组件，而不把组件实现再次展开进 `usher-ui`。首个落地边界是 Settings：
+`usher-ui-settings` 独立编译 `ui/views/settings.slint`，`src/settings_page.rs` 负责
+状态同步和 callback 转发，`ui/main.slint` 只保留 factory、viewport 与更新状态的
+小型宿主协议。
+
+Settings 拆出后，默认根生成 Rust 从 39,131,311 字节、420,331 行、924 个
+`item_tree` 降到 34,969,310 字节、374,472 行、819 个 `item_tree`；分别减少
+10.64%、10.91% 和 11.36%。独立 Settings 根为 4,224,055 字节、46,909 行、
+104 个 `item_tree`。一次真实 Settings UI 增量构建只编译
+`usher-ui-settings` 与应用根，耗时 16.67 秒，没有出现 `Compiling usher-ui`；
+修改主壳仍会重编 `usher-ui`，最近两次实测为 49.85 秒和 47.00 秒。当前根体积尚未
+达到 P2 的 30% 减少门槛，因此下一候选仍是约占旧根 23.7% 的 PR Review。
+
+后续页面拆分必须复用以下回归清单：
+
+1. 跨 crate factory 组件的 Slint globals 不共享；必须显式复制初值、转发 callback，
+   并同步主题、异步状态和保存反馈。
+2. 独立页面必须作为主壳 `Flickable` 的同级节点，不能嵌套在主滚动器中；同一路由
+   只允许一个滚动所有者。
+3. factory 产品必须接收宿主真实 viewport 宽高；固定默认尺寸会破坏响应式布局并
+   让内部滚动范围与实际裁剪区不一致。
+4. 主壳与独立页面不能重复添加 padding。页面根必须显式绘制
+   `GitHubTheme.canvas-default`、把内容宽度限制在可视宽度并固定横向 viewport，避免
+   灰色透底和伪横向滚动留白。
+5. 检查主壳为普通页面预留的特殊几何。Settings 需要补回 page-stack 统一减掉的
+   4px 底部间隔，否则固定状态栏上方会残留空条。
+6. 至少在最小宽度和宽窗口中逐个检查 General、Code hosting、AI Agent、
+   Diagnostics 的顶部、最底部、滚动条、主题和 callback；不能只确认“滚动条出现”。
+7. `SLINT_LIVE_PREVIEW` 只能动态生成主窗口。Slint 1.17 的 `ComponentFactory`
+   要求静态 `VWeak`，因此独立 factory 产品的 build script 必须屏蔽该环境变量；
+   否则 `live-preview,ui-components` 组合会在 Rust 类型检查阶段失败。
+
+三次可还原的 Settings 注释热改样本为 9.26 / 6.94 / 6.50 秒，中位数
+6.94 秒；每次都只出现 `Compiling usher-ui-settings` 和 `Compiling usher`。
+`SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components` 首次暴露了
+动态 handle 与 `ComponentFactory` 的类型冲突；独立 build script 屏蔽
+`SLINT_LIVE_PREVIEW` 后，组合构建在 17.39 秒完成。修改和还原
+`github_ui_components_gallery.slint` 各触发一次 `Reloaded component MainWindow`，
+期间没有 Cargo/rustc。与既有结论一致，连续两次 live reload 将 RSS 推高至约
+1,011 MiB，因此该模式只用于短时 UI 迭代。
+
+P5 的 Settings 边界判定为**采用**：它把该页面热改反馈稳定压到 10 秒内，并建立了
+可复用的真实跨 crate 页面协议。单独的根体积 30% 门槛尚未满足，下一批应优先审计
+Workflow（8,455,237 字节）而不是 PR Review（11,587,636 字节）：Workflow 只有一类
+小型 PR list model，而 PR Review 有多类大型 diff/conversation model，跨边界转换和
+回归风险明显更高。Home、Search、About、Job Run、Project、Chat 六页独立根合计约
+6.86 MB，考虑共享 import 后不足以单独补齐门槛，不作为下一批的优先组合。
+
 每批统一记录工具链、硬件、commit、feature/profile、无改动/Rust/Slint 三类样本、
 Cargo timing、生成文件体积、target/incremental 体积。合并前至少执行三次热样本，
 冷构建使用独立 target，并完成 `cargo fmt --all`、`cargo check --locked`、

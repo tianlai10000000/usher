@@ -8,7 +8,7 @@ license = "LicenseRef-Proprietary"
 publish = false
 
 [workspace]
-members = [".", "crates/usher-ui"]
+members = [".", "crates/usher-ui", "crates/usher-ui-settings"]
 default-members = ["."]
 resolver = "3"
 
@@ -20,9 +20,9 @@ name = "usher_lib"
 # Production builds use one deterministic renderer. Skia remains available for
 # diagnostics and renderer comparisons without being linked into normal builds.
 default = ["renderer-femtovg"]
-renderer-femtovg = ["slint/renderer-femtovg", "usher-ui/renderer-femtovg"]
-renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu", "usher-ui/renderer-femtovg-wgpu"]
-renderer-skia = ["slint/renderer-skia", "usher-ui/renderer-skia"]
+renderer-femtovg = ["slint/renderer-femtovg", "usher-ui/renderer-femtovg", "usher-ui-settings/renderer-femtovg"]
+renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu", "usher-ui/renderer-femtovg-wgpu", "usher-ui-settings/renderer-femtovg-wgpu"]
+renderer-skia = ["slint/renderer-skia", "usher-ui/renderer-skia", "usher-ui-settings/renderer-skia"]
 # Development-only in-process UI hot reload. Production builds must leave this
 # feature disabled so the live-preview interpreter and watcher are not built.
 live-preview = ["slint/live-preview", "usher-ui/live-preview"]
@@ -41,35 +41,36 @@ name = "usher"
 #   SLINT_BACKEND=winit-femtovg-wgpu cargo run --no-default-features --features renderer-femtovg-wgpu
 slint = { version = "1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
 usher-ui = { path = "crates/usher-ui", default-features = false }
+usher-ui-settings = { path = "crates/usher-ui-settings", default-features = false }
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
 chrono = "0.4"
-self_update = { version = "0.41.0", features = ["archive-tar", "archive-zip", "compression-flate2", "rustls"] }
+self_update = { version = "0.44", default-features = false, features = ["reqwest", "archive-tar", "archive-zip", "compression-flate2", "rustls"] }
 tokio = { version = "1.40", features = ["full"] }
 anyhow = "1.0"
-reqwest = { version = "0.12", features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "query", "rustls", "stream", "system-proxy"] }
 semver = "1.0.27"
 futures-util = "0.3.31"
 tar = "0.4"
 flate2 = "1.0"
-tray-icon = "0.12"
+tray-icon = "0.24"
 image = "0.25"
-config = "0.14.0"
-directories = "5.0.1"
+config = { version = "0.15", default-features = false, features = ["toml"] }
+directories = "6.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 pulldown-cmark = "0.13"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 webbrowser = "1.0"
-toml = "0.8"  # 用于 TOML 序列化
+toml = "1.1"  # 用于 TOML 序列化
 arboard = "3.6.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "std"] }
-rand = "0.9.2"
+rand = "0.10"
 signal-hook = "0.4.3"
 fs2 = "0.4.3"
-base64 = "0.22"
+base64 = "0.23"
 portable-pty = "0.9.0"
 vt100 = "0.16.2"
 libc = "0.2"
@@ -119,12 +120,18 @@ incremental = true
 [profile.dev.package.usher-ui]
 debug = "none"
 
+[profile.dev.package.usher-ui-settings]
+debug = "none"
+
 [profile.test]
 debug = "line-tables-only"
 split-debuginfo = "off"
 incremental = true
 
 [profile.test.package.usher-ui]
+debug = "none"
+
+[profile.test.package.usher-ui-settings]
 debug = "none"
 
 # IDE background analysis checks every workspace target frequently. Keep those
