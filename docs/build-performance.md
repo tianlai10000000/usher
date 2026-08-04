@@ -670,7 +670,6 @@ Settings 拆出后，默认根生成 Rust 从 39,131,311 字节、420,331 行、
 7. `SLINT_LIVE_PREVIEW` 只能动态生成主窗口。Slint 1.17 的 `ComponentFactory`
    要求静态 `VWeak`，因此独立 factory 产品的 build script 必须屏蔽该环境变量；
    否则 `live-preview,ui-components` 组合会在 Rust 类型检查阶段失败。
-
 三次可还原的 Settings 注释热改样本为 9.26 / 6.94 / 6.50 秒，中位数
 6.94 秒；每次都只出现 `Compiling usher-ui-settings` 和 `Compiling usher`。
 `SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components` 首次暴露了
@@ -686,6 +685,22 @@ Workflow（8,455,237 字节）而不是 PR Review（11,587,636 字节）：Workf
 小型 PR list model，而 PR Review 有多类大型 diff/conversation model，跨边界转换和
 回归风险明显更高。Home、Search、About、Job Run、Project、Chat 六页独立根合计约
 6.86 MB，考虑共享 import 后不足以单独补齐门槛，不作为下一批的优先组合。
+
+#### Workflow 边界实验（已回滚）
+
+后续实验曾让 `usher-ui-workflow` 独立生成 Workflow 页面，并通过
+`src/workflow_page.rs` 桥接 MainWindow 状态。实验数据本身有效：主生成 Rust 从
+34,969,310 字节、374,472 行降到 26,914,095 字节、286,604 行，分别减少 23.04%
+与 23.46%；独立 Workflow 根为 8,561,867 字节、94,364 行；三次 Workflow 注释热改
+为 6.84 / 6.14 / 5.90 秒，中位数 6.14 秒，且没有重编 `usher-ui`。
+
+但是该实验引入了跨 crate global/viewport/滚动/浮层桥接复杂度，并在 Workflow
+筛选菜单、仓库详情弹窗和 Tooltip 上产生多轮可见回归。编译和单元测试无法覆盖这些
+交互错误，实验未通过人工 UI 验收。2026-08-04 已按用户要求完整回滚：删除独立
+Workflow crate、Rust 桥接、临时模型和相关 UI 协议，Workflow 恢复到 Settings
+间距调整完成时的主 `usher-ui` 内联实现。以上数字只保留为否决实验的历史对比，不代表
+当前编译图，也不得据此继续拆分 Workflow 或 PR Review。详细问题与回滚范围见
+[`workflow-optimization-rollback.md`](workflow-optimization-rollback.md)。
 
 每批统一记录工具链、硬件、commit、feature/profile、无改动/Rust/Slint 三类样本、
 Cargo timing、生成文件体积、target/incremental 体积。合并前至少执行三次热样本，

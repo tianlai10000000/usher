@@ -51,5 +51,7 @@ Documents that are not specs:
   user-acceptance gate.
 - `bug-history.md`: append-only migration defect ledger.
 - `docs/terminal_viewport_iteration_notes.md`: historical terminal investigation log.
+- `docs/workflow-optimization-rollback.md`: rejected Workflow compile-boundary
+  experiment, UI regression history, measurements, and rollback scope.
 
 When adding a spec, include scope, invariants, ownership, failure behavior, and a regression checklist. Update this index in the same change.
