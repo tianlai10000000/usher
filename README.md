@@ -11,7 +11,7 @@ Usher is an alpha-stage desktop workspace for managing local Git projects and re
 - Run project-scoped Branch validation, Tag automation, staged CD, and pull-request workflows.
 - Open a project-aware terminal drawer without leaving the current page.
 - Configure an independent OpenAI-compatible AI Agent provider (such as DeepSeek); the existing RAG chat view remains separate.
-- Receive update, toast, notification, tray, and network-status feedback.
+- Receive durable in-app messages plus native OS notifications, alongside toast, tray, update, and network-status feedback.
 - Switch between light, dark, and system theme modes.
 - Route all application HTTP traffic through a shared reqwest-based interception pipeline.
 
@@ -134,6 +134,7 @@ Usher uses `directories::ProjectDirs::from("com", "usher", "app")` to select pla
 | Settings, Git platform tokens/API roots, and AI Agent credentials | config directory: `settings.toml` |
 | Project registry | local data directory: `project/projects.json` |
 | Chat history | local data directory: `im/chat_history.jsonl` |
+| Durable notification inbox and read state | local data directory: `messages/messages.json` |
 | Logs | local data directory: `logs/<date>/usher.log` |
 | Cached remote project logos | temporary directory: `usher-logo-cache/` |
 
@@ -156,8 +157,9 @@ src/main.rs
      -> src/workflow/          Branch / Tag / PR / CD state and execution
      -> src/terminal/          PTY session and terminal rendering
      -> src/chat/              chat transport, history, Markdown, UI binding
+     -> crates/usher-messages/ durable message center, OS delivery, isolated inbox UI
      -> src/update/            update checks, download, install
-     -> src/{toast,notification,dialog}.rs
+     -> src/{toast,notification,message_center,dialog}.rs
 material-1.7.1-fixed/            vendored Slint v1.17.1 Material library
 ```
 

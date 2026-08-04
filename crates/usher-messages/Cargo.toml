@@ -1,0 +1,25 @@
+[package]
+name = "usher-messages"
+version = "0.0.8-alpha.1"
+edition = "2024"
+license = "LicenseRef-Proprietary"
+publish = false
+build = "build.rs"
+
+[features]
+default = ["renderer-femtovg"]
+renderer-femtovg = ["slint/renderer-femtovg"]
+renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu"]
+renderer-skia = ["slint/renderer-skia"]
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+directories = "6.0"
+log = "0.4"
+notify-rust = "4.18.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+slint = { version = "1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
+
+[build-dependencies]
+slint-build = { version = "1.17.1" }

@@ -37,6 +37,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `src/main.rs` | 最小二进制入口，转发到库入口。 |
 | `src/lib.rs` | 导入并重新导出生成的 UI API，创建 `MainWindow`、初始化模块、绑定跨模块 callback，并管理窗口和关闭流程。 |
 | `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum。 |
+| `crates/usher-messages/` | 独立编译的消息中心包：持久领域/存储服务、快照订阅、后台持久化/原生投递 Worker、`notify-rust` OS 适配器及生成的 Inbox 页面 API。 |
 | `src/app_runtime.rs` | 进程级多线程 Tokio runtime，并为 runtime 线程安装 tracing dispatch。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观（强制浅色/深色，或 Auto 时跟随系统）、标题栏附件、窗口交互通知、用于关闭可消隐临时弹层的原生标题栏点击桥接、macOS PR Review 字体注册、`NSSound` 点击音，以及用于 Auto 实时跟随的 `AppleInterfaceThemeChangedNotification`；`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
@@ -68,6 +69,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `src/logger/` | Debug 日志、tracing 和 panic/error 支持。 |
 | `src/toast.rs` | 单条短时 Toast 管理器绑定。 |
 | `src/notification.rs` | 通知队列、计时器、Hover 暂停、操作按钮和图标。 |
+| `src/message_center.rs` | 主窗口与 `usher-messages` 之间的薄桥接层；同步主题/视口、下发 All/Unread/Read 计数，并把不可变快照转换为独立页面 Slint model。 |
 | `src/dialog.rs` | 命令式 `DialogManager` 绑定与操作分发；不再拥有独立视觉变体。 |
 
 仓库接口地址与可执行行为必须保持分离：`src/git/` 可以引用 `src/codereview/api/` 中的常量，但 `src/codereview/api/` 不得依赖 `src/git/`、`src/http/`、reqwest 或 serde。
@@ -104,6 +106,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/components/jobs/` | 可复用的 GitHub Actions 风格 Run/Job/Step/日志展示；只接收归一化快照，不执行流程命令。 |
 | `ui/components/dialog/github_dialog.slint` | 全局、项目、PR Review 和更新弹窗共用的响应式 Primer Dialog 外壳，统一遮罩输入归属、初始关闭按钮焦点、Header/Body/Footer 安全边距、Esc 关闭（`modal` 时禁用）、窄屏全窗口布局、关闭行为与操作状态；可选的外部视口使路由内弹窗始终按完整应用窗口居中，并跨固定 Shell Chrome 绘制连续遮罩；根状态继续把遮罩延伸到 macOS 标题栏 inset，`src/platform/macos.rs` 在保留 AppKit 交通灯可用的同时屏蔽应用自有标题栏附件；原生标题栏点击复用普通遮罩关闭语义，不会削弱不可关闭 Dialog；功能正文以 `@children` 嵌套。 |
 | `ui/components/toast/`、`ui/components/notify/` | 共用的紧凑 Primer Banner 风格瞬时/排队反馈；根层同一时刻只渲染一条排队通知。 |
+| `ui/components/messages/` | 可复用 GitHub Inbox 消息行，统一已读/未读、语义级别、元数据和常驻行操作，并登记到 UI Components。 |
 | `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在工作区视图。 |
 | `ui/theme/github_theme.slint` | 应用自有的 `GitHubTheme` 语义色，以及 `GitHubMetrics` Primer 几何、控件、字体、浮层与断点令牌；功能性 UI 原始颜色统一在此管理。 |
 | `material-1.7.1-fixed/` | 与 Slint v1.17.1 对齐的 Material 源码。 |
@@ -132,7 +135,7 @@ Review 工作区用于虚拟化的公开 `ListView`/`ScrollView`。
 其透明宿主始终使用窗口坐标，只有可见表面与左侧临时状态区跟随实时内容边缘；右侧
 常驻工具组直接锚定在根状态栏，不参与会重新分配宽度的 Layout。因此侧栏展开后其
 正下方不显示状态栏表面，也不得移动或压缩快捷键、通知、网络或版本条目。通知数量
-仅在非零时显示为铃铛徽标；
+来自持久消息中心，仅在非零时显示为铃铛徽标；激活后打开 `Route.Messages`。
 快捷键/网络健康色由对应 Feature 状态驱动，通知与版本不作为健康指标。右边缘
 Tooltip 向左展开，状态浮层共享同一父坐标系。各页面不得重复实现这两类 Shell
 Surface。详见 [specs/status-bar.md](specs/status-bar.md)。
@@ -154,14 +157,18 @@ macOS 使用原生 `.AppleSystemUIFont`，Windows 使用 `Microsoft YaHei UI`，
 文件树内容保留几何所需的平台专用字体，其余控件和正文继承应用字体。
 
 UI 源码继续保留在仓库根目录的 `ui/` 下。主窗口与普通路由树由
-`usher-ui` workspace crate 生成；Settings 路由由 `usher-ui-settings` 独立生成，
-再通过 Slint 实验性的 `ComponentContainer`/component-factory 边界挂载。应用
-crate 继续重新导出主 UI API，并由 `src/settings_page.rs` 显式桥接 Settings。
+`usher-ui` workspace crate 生成；Settings 与 Messages 路由分别由
+`usher-ui-settings` 和 `usher-messages` 独立生成，再通过 Slint 实验性的
+`ComponentContainer`/component-factory 边界挂载。应用 crate 继续重新导出主 UI
+API，并由 `src/settings_page.rs` 与 `src/message_center.rs` 显式桥接。
 跨 crate factory 创建的组件拥有独立 Slint global 图，因此桥接层必须复制初始
 `AppState`、把 callback 转发给 `MainWindow`，并同步后续状态变化，不能假定两边
-global 自动共享。修改 `settings.slint` 不得重新生成或编译 `usher-ui`；修改主壳仍会
-重编主生成 crate。启用 `SLINT_LIVE_PREVIEW` 时，Settings build script 会刻意保持
-factory 产品为静态生成，因为 Slint 1.17 的 `ComponentFactory` 不能接收 live
+global 自动共享。Messages Inbox 的行只上报 hover owner、文案和位置，由页面唯一的
+`GitHubTooltipSurface` 直接用最新值覆盖旧值。修改 `settings.slint` 或
+`messages.slint` 不得重新生成或编译
+`usher-ui`；修改主壳仍会重编主生成 crate。启用 `SLINT_LIVE_PREVIEW` 时，两套独立
+build script 都会刻意保持 factory 产品为静态生成，因为 Slint 1.17 的
+`ComponentFactory` 不能接收 live
 preview 动态 handle；主窗口与 UI Components 路由仍可正常热更新。
 
 独立挂载的路由只能拥有一个 viewport 和一条滚动链：它必须作为主壳 `Flickable`
@@ -201,7 +208,7 @@ unpacked 策略升级后，开发者应执行一次完整 `cargo clean`；后续
 2. 创建 `MainWindow`，初始化 debug/tracing logger。
 3. 应用设置并配置 updater 状态。
 4. 绑定主题、路由、导航、应用快捷键和窗口 callback。
-5. 初始化 Notification 和 Toast manager。
+5. 打开持久消息中心并安装独立页面桥接，再初始化 Notification 和 Toast manager；排队 Banner 会镜像到消息中心。
 6. 将统一 HTTP 模块绑定到 UI 错误反馈，然后启动网络监测。
 7. 初始化 Dialog、Project、Chat、Terminal 和 Workflow。
 8. 在 macOS 上，若原生窗口句柄已可用，则在 `show()` 前安装标题栏附件与 Menu Vibrancy；否则在 `show()` 后重试。winit 窗口在事件循环启动后才创建，因此由首帧渲染钩子在与首帧同一事务内隐藏窗口并安装原生 Chrome；随后短轮询持续重试安装，确认就绪后再等若干 settle tick，让 Effect 第一次（未模糊的）Behind-Window 采样提交、并把 AppKit 挂载附件后的标题栏布局重置重新校正，最后同步校正交通灯位置才显示窗口；兜底时限保证窗口一定出现。因此首个可见帧就是最终 Shell，而不是分阶段过渡。
@@ -241,6 +248,28 @@ Settings 与 About 路由文件只负责组合；可复用导航、字段、Togg
 详情行分别位于 `ui/components/settings/` 与 `ui/components/about/`，视觉组件
 符号使用 `GitHub` 前缀。紧凑 Settings 导航与常规 NavList 暴露相同 Section
 model 和键盘交互契约。
+
+### 消息
+
+`usher-messages` 在平台本地数据目录的 `messages/messages.json` 中保存最新 1,000
+条应用消息。发布操作立即更新小型内存快照；唯一 Worker 在 Slint event loop 之外
+执行 JSON 持久化和 `notify-rust` 系统投递。原生投递失败不影响应用内持久消息。
+投递策略与分类、语义级别正交：普通事件使用 `WhenUnfocused`，明确的应用内事件使用
+`Never`，严重或诊断事件可使用 `Always`。Shell 把窗口活动状态传给消息服务，避免
+应用聚焦时 Banner 与系统通知重复。
+已读状态、单条删除和批量操作都会发布不可变快照；根桥接层在 event loop 更新未读数
+和独立页面 model。关闭短时 Banner 不得修改持久 Inbox。详见
+[specs/messages.md](specs/messages.md)。
+
+消息契约把入口 `channel` 与业务 `category` 分开。内置键覆盖通用、Webhook、软件更新
+和 CD 流程消息，但分类使用开放字符串词表，因此 Feature 新增分类无需修改消息中心。
+软件更新 Banner 在镜像时完成分类；CD 部署/回滚完成后通过共享 Notification manager
+发布分类消息。UI Components 提供独立 Message center 测试分类，覆盖分类与投递策略。
+
+未来 Webhook 接收器应位于单独入口适配器中，负责鉴权并把提供方 Payload 归一化为
+`MessageDraft`，不得改变存储、订阅、系统投递或 Inbox。按入口通道限定的外部幂等键
+用于消除提供方重试，只有有界且非敏感的元数据能够跨越适配器边界。当前实现不包含
+Webhook HTTP Listener 或任何提供方专属 Schema。
 
 ### 项目
 

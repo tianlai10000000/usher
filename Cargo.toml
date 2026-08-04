@@ -8,7 +8,7 @@ license = "LicenseRef-Proprietary"
 publish = false
 
 [workspace]
-members = [".", "crates/usher-ui", "crates/usher-ui-settings"]
+members = [".", "crates/usher-messages", "crates/usher-ui", "crates/usher-ui-settings"]
 default-members = ["."]
 resolver = "3"
 
@@ -20,9 +20,9 @@ name = "usher_lib"
 # Production builds use one deterministic renderer. Skia remains available for
 # diagnostics and renderer comparisons without being linked into normal builds.
 default = ["renderer-femtovg"]
-renderer-femtovg = ["slint/renderer-femtovg", "usher-ui/renderer-femtovg", "usher-ui-settings/renderer-femtovg"]
-renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu", "usher-ui/renderer-femtovg-wgpu", "usher-ui-settings/renderer-femtovg-wgpu"]
-renderer-skia = ["slint/renderer-skia", "usher-ui/renderer-skia", "usher-ui-settings/renderer-skia"]
+renderer-femtovg = ["slint/renderer-femtovg", "usher-messages/renderer-femtovg", "usher-ui/renderer-femtovg", "usher-ui-settings/renderer-femtovg"]
+renderer-femtovg-wgpu = ["slint/renderer-femtovg-wgpu", "usher-messages/renderer-femtovg-wgpu", "usher-ui/renderer-femtovg-wgpu", "usher-ui-settings/renderer-femtovg-wgpu"]
+renderer-skia = ["slint/renderer-skia", "usher-messages/renderer-skia", "usher-ui/renderer-skia", "usher-ui-settings/renderer-skia"]
 # Development-only in-process UI hot reload. Production builds must leave this
 # feature disabled so the live-preview interpreter and watcher are not built.
 live-preview = ["slint/live-preview", "usher-ui/live-preview"]
@@ -42,6 +42,7 @@ name = "usher"
 slint = { version = "1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
 usher-ui = { path = "crates/usher-ui", default-features = false }
 usher-ui-settings = { path = "crates/usher-ui-settings", default-features = false }
+usher-messages = { path = "crates/usher-messages", default-features = false }
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
@@ -123,6 +124,9 @@ debug = "none"
 [profile.dev.package.usher-ui-settings]
 debug = "none"
 
+[profile.dev.package.usher-messages]
+debug = "none"
+
 [profile.test]
 debug = "line-tables-only"
 split-debuginfo = "off"
@@ -132,6 +136,9 @@ incremental = true
 debug = "none"
 
 [profile.test.package.usher-ui-settings]
+debug = "none"
+
+[profile.test.package.usher-messages]
 debug = "none"
 
 # IDE background analysis checks every workspace target frequently. Keep those

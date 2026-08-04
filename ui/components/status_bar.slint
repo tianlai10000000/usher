@@ -1,5 +1,4 @@
 import { UpdateLogic } from "./update/update.slint";
-import { NotificationManager } from "./notify/notification.slint";
 import { AppState } from "../state/app_state.slint";
 import { LayoutConstants } from "../layout_constants.slint";
 import { GitHubTooltip } from "./github_tooltip.slint";
@@ -14,7 +13,6 @@ enum ActivePopup {
     UpdateCheck,
     DownloadProgress,
     Shortcut,
-    Notification,
     Network,
     Version,
 }
@@ -160,6 +158,10 @@ export component GitHubStatusBar inherits Rectangle {
     in property <float> shortcut-initialization-progress: 0;
     in property <string> shortcut-initialization-status: "";
     in property <string> shortcut-initialization-detail: "";
+    in property <int> unread-message-count: 0;
+    // Selected chrome tracks the Messages route, not unread presence.
+    in property <bool> messages-route-active: false;
+    callback open-messages();
     // Internal popup state - using enum to track which popup is active
     property <ActivePopup> active-popup: ActivePopup.None;
     property <string> popup-title: "";
@@ -200,7 +202,6 @@ export component GitHubStatusBar inherits Rectangle {
         active-popup == ActivePopup.UpdateCheck ? update-check-item.item-x :
         active-popup == ActivePopup.DownloadProgress ? download-progress-item.item-x :
         active-popup == ActivePopup.Shortcut ? shortcut-status-item.item-x :
-        active-popup == ActivePopup.Notification ? notification-item.item-x :
         active-popup == ActivePopup.Network ? network-item.item-x :
         active-popup == ActivePopup.Version ? version-item.item-x : 0px;
     
@@ -208,7 +209,6 @@ export component GitHubStatusBar inherits Rectangle {
         active-popup == ActivePopup.UpdateCheck ? update-check-item.item-width :
         active-popup == ActivePopup.DownloadProgress ? download-progress-item.item-width :
         active-popup == ActivePopup.Shortcut ? shortcut-status-item.item-width :
-        active-popup == ActivePopup.Notification ? notification-item.item-width :
         active-popup == ActivePopup.Network ? network-item.item-width :
         active-popup == ActivePopup.Version ? version-item.item-width : 0px;
     
@@ -418,29 +418,22 @@ export component GitHubStatusBar inherits Rectangle {
                     x: root.shortcut-status-width + root.status-item-gap;
                     fixed-width: root.notification-status-width;
                     label: "";
-                    tooltip-text: NotificationManager.queue.length > 0
-                        ? (NotificationManager.queue.length + " unread notifications")
+                    tooltip-text: root.unread-message-count > 0
+                        ? (root.unread-message-count + " unread notifications")
                         : "No notifications";
                     tooltip-align-end: true;
-                    active: NotificationManager.queue.length > 0;
+                    active: root.messages-route-active;
                     visible: true;
                     show-icon: true;
                     icon: @image-url("../assets/icons/octicon-bell-16.svg");
-                    badge-count: NotificationManager.queue.length;
-                    icon-color: NotificationManager.queue.length > 0
+                    badge-count: root.unread-message-count;
+                    icon-color: root.unread-message-count > 0
                         ? root.accent-fg
                         : root.fg-muted;
 
                     clicked => {
-                        if (root.active-popup == ActivePopup.Notification) {
-                            root.active-popup = ActivePopup.None;
-                        } else {
-                            root.popup-title = "Notifications";
-                            root.popup-content = NotificationManager.queue.length > 0
-                                ? ("Currently " + NotificationManager.queue.length + " unread notifications")
-                                : "No notifications";
-                            root.active-popup = ActivePopup.Notification;
-                        }
+                        root.active-popup = ActivePopup.None;
+                        root.open-messages();
                     }
                 }
                 

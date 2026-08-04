@@ -41,6 +41,9 @@ mod settings;
 use settings::setup_settings;
 mod settings_page;
 use settings_page::SettingsPageBridge;
+mod message_center;
+use message_center::MessagePageBridge;
+use usher_messages::MessageCenter;
 
 mod constants;
 use constants::shutdown_priority::PRIORITY_HIGH;
@@ -186,7 +189,14 @@ fn ui() -> Result<MainWindow> {
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
     let settings_page = SettingsPageBridge::default();
+    let message_center = MessageCenter::open_default().context("Failed to open message center")?;
+    let message_page = MessagePageBridge::new(message_center.clone());
     app.set_platform_is_macos(cfg!(target_os = "macos"));
+    message_center.set_application_active(app.get_native_window_active());
+    let message_center_for_activity = message_center.clone();
+    app.on_message_window_activity_changed(move |active| {
+        message_center_for_activity.set_application_active(active);
+    });
     setup_application_font(&app);
     setup_pr_review_fonts(&app);
 
@@ -543,6 +553,7 @@ fn ui() -> Result<MainWindow> {
     // ========= Theme ========= //
     let app_weak = app.as_weak();
     let settings_page_for_theme = settings_page.clone();
+    let message_page_for_theme = message_page.clone();
     AppState::get(&app).on_toggle_theme(move |mode| {
         if let Some(win) = app_weak.upgrade() {
             let app_state = AppState::get(&win);
@@ -559,6 +570,7 @@ fn ui() -> Result<MainWindow> {
             if mode == THEME_MODE_AUTO {
                 let win_weak = win.as_weak();
                 let settings_page = settings_page_for_theme.clone();
+                let message_page = message_page_for_theme.clone();
                 if let Err(error) = std::thread::Builder::new()
                     .name("system-theme-detect".to_string())
                     .spawn(move || {
@@ -573,6 +585,7 @@ fn ui() -> Result<MainWindow> {
                             }
                             app_state.set_effective_dark_mode(is_dark);
                             settings_page.sync_theme(THEME_MODE_AUTO, is_dark);
+                            message_page.sync_theme(THEME_MODE_AUTO, is_dark);
                             set_title_bar_color(&win, is_dark);
                             set_terminal_dark_mode(&win, is_dark);
                             log::info!(
@@ -591,6 +604,7 @@ fn ui() -> Result<MainWindow> {
                 app_state.set_effective_dark_mode(is_dark);
             }
             settings_page_for_theme.sync_theme(mode, is_dark);
+            message_page_for_theme.sync_theme(mode, is_dark);
             set_title_bar_color(&win, is_dark);
             set_terminal_dark_mode(&win, is_dark);
 
@@ -606,6 +620,7 @@ fn ui() -> Result<MainWindow> {
     }
     let app_weak_theme_watch = app.as_weak();
     let settings_page_for_theme_watch = settings_page.clone();
+    let message_page_for_theme_watch = message_page.clone();
     install_system_theme_watch(move |is_dark| {
         let Some(win) = app_weak_theme_watch.upgrade() else {
             return;
@@ -616,6 +631,7 @@ fn ui() -> Result<MainWindow> {
         }
         app_state.set_effective_dark_mode(is_dark);
         settings_page_for_theme_watch.sync_theme(THEME_MODE_AUTO, is_dark);
+        message_page_for_theme_watch.sync_theme(THEME_MODE_AUTO, is_dark);
         set_title_bar_color(&win, is_dark);
         set_terminal_dark_mode(&win, is_dark);
         log::info!("[Theme] System appearance changed (effective dark: {is_dark})");
@@ -627,7 +643,7 @@ fn ui() -> Result<MainWindow> {
 
     // ========= Notification ========= //
     // Single window: don't pass shared queue (use None)
-    setup_notifications(&app, None);
+    setup_notifications(&app, None, message_center.clone());
     memory_diagnostics::log_checkpoint("startup.notifications_ready");
 
     // If multi-window application, want to truly share queue:
@@ -763,10 +779,17 @@ fn ui() -> Result<MainWindow> {
     shutdown::register_pre_shutdown_task_with_priority("shutdown_terminal", PRIORITY_HIGH, || {
         shutdown_terminal();
     });
+    let message_center_for_shutdown = message_center.clone();
+    shutdown::register_pre_shutdown_task_with_priority(
+        "shutdown_message_center",
+        PRIORITY_HIGH,
+        move || message_center_for_shutdown.shutdown(),
+    );
     shutdown::register_ui_shutdown_task_with_priority("remove_tray", PRIORITY_HIGH, || {
         tray::remove_tray();
     });
     settings_page.install(&app);
+    message_page.install(&app);
     memory_diagnostics::log_checkpoint("startup.ui_bindings_complete");
 
     Ok(app)

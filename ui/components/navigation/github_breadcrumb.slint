@@ -126,6 +126,7 @@ export component GitHubBreadcrumb inherits Rectangle {
 
     private property <bool> is-about-page: current-route == Route.About;
     private property <bool> is-settings-page: current-route == Route.Settings;
+    private property <bool> is-messages-page: current-route == Route.Messages;
     private property <bool> is-ui-components-page: current-route == Route.UiComponents;
     private property <bool> is-home: current-route == Route.Home;
 
@@ -202,6 +203,13 @@ export component GitHubBreadcrumb inherits Rectangle {
                 if root.current-route == Route.Search: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-search.svg");
                     text: "Search";
+                    is-current: true;
+                }
+
+                if root.is-messages-page: GitHubBreadcrumbSeparator {}
+                if root.is-messages-page: GitHubBreadcrumbItem {
+                    icon: @image-url("../../assets/icons/lucide-sidebar-bell.svg");
+                    text: "Notifications";
                     is-current: true;
                 }
 

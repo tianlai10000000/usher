@@ -11,7 +11,7 @@ Usher 是一个处于 Alpha 阶段的桌面 Git 项目工作台，用于管理�
 - 按项目隔离执行 Branch 校验、Tag 自动化、分阶段 CD 与 Pull Request 流程。
 - 在当前页面打开项目感知的终端抽屉。
 - 配置独立的 OpenAI-compatible AI Agent Provider（如 DeepSeek）；既有 RAG Chat 页面保持独立。
-- 提供更新、Toast、通知、托盘和网络状态反馈。
+- 提供可持久化应用内消息与操作系统原生通知，以及 Toast、托盘、更新和网络状态反馈。
 - 支持亮色、暗色和跟随系统主题。
 - 通过统一的 reqwest HTTP 拦截管线发送应用网络请求。
 
@@ -128,6 +128,7 @@ Usher 使用 `directories::ProjectDirs::from("com", "usher", "app")` 选择各�
 | 设置、Git 平台 Token/API 根地址和 AI Agent 凭据 | 配置目录：`settings.toml` |
 | 项目列表 | 本地数据目录：`project/projects.json` |
 | 聊天历史 | 本地数据目录：`im/chat_history.jsonl` |
+| 持久通知 Inbox 与已读状态 | 本地数据目录：`messages/messages.json` |
 | 日志 | 本地数据目录：`logs/<date>/usher.log` |
 | 远程项目 Logo 缓存 | 临时目录：`usher-logo-cache/` |
 
@@ -150,8 +151,9 @@ src/main.rs
      -> src/workflow/          Branch / Tag / PR / CD 状态与执行
      -> src/terminal/          PTY 会话和终端渲染
      -> src/chat/              聊天请求、历史、Markdown、UI 绑定
+     -> crates/usher-messages/ 持久消息中心、系统投递与独立 Inbox UI
      -> src/update/            更新检查、下载和安装
-     -> src/{toast,notification,dialog}.rs
+     -> src/{toast,notification,message_center,dialog}.rs
 material-1.7.1-fixed/            内置 Slint v1.17.1 Material 库
 ```
 

@@ -6,7 +6,10 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 
-use crate::{CustomComponentType, NotificationManager, NotificationOptions, UpdateLogic};
+use crate::{
+    CustomComponentType, NotificationDelivery, NotificationManager, NotificationOptions,
+    UpdateLogic,
+};
 
 // Thread-local timer for auto-update (Timer is not thread-safe)
 thread_local! {
@@ -91,6 +94,9 @@ fn perform_startup_check(
                                 component: CustomComponentType::ActionsNotify,
                                 actions,
                                 tag: "auto-update".into(),
+                                source: "Updater".into(),
+                                category: "software_update".into(),
+                                native_delivery: NotificationDelivery::WhenUnfocused,
                             });
                         }
                     })
@@ -124,7 +130,10 @@ fn perform_startup_check(
                             icon: "".into(),
                             component: CustomComponentType::None,
                             actions: Default::default(),
-                            tag: Default::default(),
+                            tag: "software-update".into(),
+                            source: "Updater".into(),
+                            category: "software_update".into(),
+                            native_delivery: NotificationDelivery::WhenUnfocused,
                         });
                     }
                 }).ok();
@@ -218,7 +227,10 @@ pub fn start_auto_update(
                                     icon: "".into(),
                                     component: CustomComponentType::None,
                                     actions: Default::default(),
-                                    tag: Default::default(),
+                                    tag: "software-update".into(),
+                                    source: "Updater".into(),
+                                    category: "software_update".into(),
+                                    native_delivery: NotificationDelivery::WhenUnfocused,
                                 });
                             }
                         })

@@ -1,0 +1,232 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+// Inbox row actions must NOT share `in property <image>` or tip-label strings.
+// Slint list rows alias those bindings. Tips paint locally with literal labels.
+
+component MessageActionChrome inherits FocusScope {
+    in property <bool> tip-enabled: true;
+    in property <length> control-size: GitHubMetrics.control-medium-size;
+    in property <length> glyph-size: GitHubMetrics.icon-medium;
+    in property <color> foreground: GitHubTheme.fg-muted;
+    in property <color> hover-foreground: root.foreground;
+    in property <bool> danger-hover: false;
+    out property <bool> has-hover: button-touch.has-hover;
+    out property <bool> tip-active:
+        root.tip-enabled
+        && (button-touch.has-hover || root.keyboard-focus-visible);
+    out property <color> glyph-color: button-touch.has-hover
+        ? root.hover-foreground
+        : root.foreground;
+    private property <bool> keyboard-focus-visible: false;
+    callback clicked();
+
+    focus-on-click: false;
+    width: root.control-size;
+    height: root.control-size;
+    accessible-role: button;
+
+    key-pressed(event) => {
+        root.keyboard-focus-visible = true;
+        if event.text == Key.Return || event.text == " " {
+            root.clicked();
+            return accept;
+        }
+        return reject;
+    }
+    focus-gained(reason) => {
+        root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+    }
+    focus-lost => {
+        root.keyboard-focus-visible = false;
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: GitHubMetrics.radius-medium;
+        background: button-touch.pressed
+            ? GitHubTheme.control-transparent-active
+            : (button-touch.has-hover
+                ? (root.danger-hover
+                    ? GitHubTheme.danger-muted
+                    : GitHubTheme.control-transparent-hover)
+                : transparent);
+        animate background { duration: 100ms; easing: ease-out; }
+
+        @children
+    }
+
+    button-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => {
+            root.keyboard-focus-visible = false;
+            root.focus();
+            root.clicked();
+        }
+    }
+}
+
+component MessageMarkReadTip inherits Rectangle {
+    in property <bool> open: false;
+    private property <length> label-height: max(
+        tip-measure.preferred-height,
+        GitHubMetrics.size-16 + GitHubMetrics.size-2
+    );
+
+    width: tip-measure.preferred-width + GitHubMetrics.size-16;
+    height: root.label-height + GitHubMetrics.size-8;
+    visible: root.open;
+    border-radius: GitHubMetrics.radius-medium;
+    background: GitHubTheme.tooltip-bg;
+
+    tip-measure := Text {
+        visible: false;
+        text: "Mark as read";
+        font-size: GitHubMetrics.text-small;
+        wrap: no-wrap;
+    }
+
+    Text {
+        x: GitHubMetrics.size-8;
+        y: GitHubMetrics.size-4;
+        width: self.preferred-width;
+        height: root.label-height;
+        text: "Mark as read";
+        color: GitHubTheme.tooltip-fg;
+        font-size: GitHubMetrics.text-small;
+        vertical-alignment: center;
+        wrap: no-wrap;
+    }
+}
+
+component MessageMarkUnreadTip inherits Rectangle {
+    in property <bool> open: false;
+    private property <length> label-height: max(
+        tip-measure.preferred-height,
+        GitHubMetrics.size-16 + GitHubMetrics.size-2
+    );
+
+    width: tip-measure.preferred-width + GitHubMetrics.size-16;
+    height: root.label-height + GitHubMetrics.size-8;
+    visible: root.open;
+    border-radius: GitHubMetrics.radius-medium;
+    background: GitHubTheme.tooltip-bg;
+
+    tip-measure := Text {
+        visible: false;
+        text: "Mark as unread";
+        font-size: GitHubMetrics.text-small;
+        wrap: no-wrap;
+    }
+
+    Text {
+        x: GitHubMetrics.size-8;
+        y: GitHubMetrics.size-4;
+        width: self.preferred-width;
+        height: root.label-height;
+        text: "Mark as unread";
+        color: GitHubTheme.tooltip-fg;
+        font-size: GitHubMetrics.text-small;
+        vertical-alignment: center;
+        wrap: no-wrap;
+    }
+}
+
+component MessageDeleteTip inherits Rectangle {
+    in property <bool> open: false;
+    private property <length> label-height: max(
+        tip-measure.preferred-height,
+        GitHubMetrics.size-16 + GitHubMetrics.size-2
+    );
+
+    width: tip-measure.preferred-width + GitHubMetrics.size-16;
+    height: root.label-height + GitHubMetrics.size-8;
+    visible: root.open;
+    border-radius: GitHubMetrics.radius-medium;
+    background: GitHubTheme.tooltip-bg;
+
+    tip-measure := Text {
+        visible: false;
+        text: "Delete";
+        font-size: GitHubMetrics.text-small;
+        wrap: no-wrap;
+    }
+
+    Text {
+        x: GitHubMetrics.size-8;
+        y: GitHubMetrics.size-4;
+        width: self.preferred-width;
+        height: root.label-height;
+        text: "Delete";
+        color: GitHubTheme.tooltip-fg;
+        font-size: GitHubMetrics.text-small;
+        vertical-alignment: center;
+        wrap: no-wrap;
+    }
+}
+
+export component MessageMarkToggleAction inherits MessageActionChrome {
+    in property <bool> read: false;
+    accessible-label: root.read ? "Mark as unread" : "Mark as read";
+
+    Image {
+        x: (parent.width - root.glyph-size) / 2;
+        y: (parent.height - root.glyph-size) / 2;
+        width: root.glyph-size;
+        height: root.glyph-size;
+        opacity: root.read ? 0 : 1;
+        source: @image-url("../../assets/icons/octicon-check-16.svg");
+        image-fit: contain;
+        colorize: root.glyph-color;
+    }
+
+    Image {
+        x: (parent.width - root.glyph-size) / 2;
+        y: (parent.height - root.glyph-size) / 2;
+        width: root.glyph-size;
+        height: root.glyph-size;
+        opacity: root.read ? 1 : 0;
+        source: @image-url("../../assets/icons/octicon-unread-16.svg");
+        image-fit: contain;
+        colorize: root.glyph-color;
+    }
+
+    MessageMarkReadTip {
+        z: 100;
+        x: parent.width - self.width;
+        y: parent.height - 6px;
+        open: root.tip-active && !root.read;
+    }
+
+    MessageMarkUnreadTip {
+        z: 100;
+        x: parent.width - self.width;
+        y: parent.height  - 6px; 
+        open: root.tip-active && root.read;
+    }
+}
+
+export component MessageDeleteAction inherits MessageActionChrome {
+    danger-hover: true;
+    hover-foreground: GitHubTheme.danger-fg;
+    accessible-label: "Delete";
+
+    Image {
+        x: (parent.width - root.glyph-size) / 2;
+        y: (parent.height - root.glyph-size) / 2;
+        width: root.glyph-size;
+        height: root.glyph-size;
+        source: @image-url("../../assets/icons/octicon-trash-16.svg");
+        image-fit: contain;
+        colorize: root.glyph-color;
+    }
+
+    MessageDeleteTip {
+        z: 100;
+        x: parent.width - self.width;
+        y: parent.height - 6px;
+        open: root.tip-active;
+    }
+}

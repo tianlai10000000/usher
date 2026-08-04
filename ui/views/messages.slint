@@ -1,0 +1,223 @@
+import { AppState } from "../state/app_state.slint";
+export { AppState } from "../state/app_state.slint";
+import { GitHubScrollView } from "../components/github_scroll_view.slint";
+import { GitHubBlankslate } from "../components/github_blankslate.slint";
+import { GitHubButton } from "../components/settings/github_settings_controls.slint";
+import {
+    GitHubSegmentedControl,
+    GitHubSegmentedControlDivider,
+    GitHubSegmentedControlItem
+} from "../components/github_segmented_control.slint";
+import { GitHubPageHeader } from "../components/page/github_page_header.slint";
+import {
+    GitHubMessageListItem,
+    MessageListItem,
+    MessageLevel
+} from "../components/messages/github_message_components.slint";
+import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+
+export { MessageListItem, MessageLevel } from "../components/messages/github_message_components.slint";
+
+export component GitHubMessagesPage inherits Rectangle {
+    in-out property <length> viewport-width: 800px;
+    in-out property <length> viewport-height: 768px;
+    in property <[MessageListItem]> messages: [];
+    // Counts are pushed from Rust on every snapshot. Do not derive tab badges
+    // from `messages.length` string concat inside SegmentedControlItem — that
+    // binding can freeze after the first paint on this ComponentFactory page.
+    in property <int> total-count: 0;
+    in property <int> unread-count: 0;
+    in property <int> read-count: 0;
+    callback set-read(string, bool);
+    callback mark-all-read();
+    callback delete-message(string);
+    callback clear-messages();
+    callback activate-target(string);
+
+    private property <int> selected-filter: 0;
+    private property <bool> clear-confirmation: false;
+    private property <bool> unread-filter: root.selected-filter == 1;
+    private property <bool> read-filter: root.selected-filter == 2;
+    private property <bool> filtered-empty:
+        root.unread-filter ? root.unread-count == 0
+        : root.read-filter ? root.read-count == 0
+        : root.total-count == 0;
+    private property <int> visible-count:
+        root.unread-filter ? root.unread-count
+        : root.read-filter ? root.read-count
+        : root.total-count;
+    private property <length> row-height: root.width < 720px ? 76px : 84px;
+    private property <length> page-gutter: root.width >= 1000px ? 48px : 20px;
+    private property <length> available-width: max(0px, root.width - root.page-gutter * 2);
+    private property <length> page-width: min(1040px, root.available-width);
+    private property <bool> compact-actions: root.page-width < 720px;
+    private property <length> actions-y: root.compact-actions ? 100px : 20px;
+    private property <length> filters-y: root.compact-actions ? 148px : 100px;
+    private property <length> list-y: root.filters-y + 44px;
+
+    width: root.viewport-width;
+    height: root.viewport-height;
+    background: GitHubTheme.canvas-default;
+    clip: false;
+
+    clear-confirmation-reset := Timer {
+        interval: 3000ms;
+        running: root.clear-confirmation;
+        triggered => { root.clear-confirmation = false; }
+    }
+
+    message-scroll := GitHubScrollView {
+        width: root.width;
+        height: root.height;
+        viewport_x: 0px;
+
+        page-content := Rectangle {
+            x: root.page-gutter + max(0px, (root.available-width - root.page-width) / 2);
+            width: root.page-width;
+            height: max(
+                message-scroll.visible-height,
+                message-list.preferred-height + root.list-y + GitHubMetrics.size-8
+            );
+            background: transparent;
+            clip: false;
+
+            GitHubPageHeader {
+                x: 0px;
+                y: GitHubMetrics.size-16;
+                width: parent.width;
+                title: "Notifications";
+                description: root.unread-count == 0
+                    ? "You're all caught up."
+                    : root.unread-count + " unread notification" + (root.unread-count == 1 ? "" : "s");
+                leading-icon: @image-url("../assets/icons/octicon-inbox-16.svg");
+                large-title: true;
+                actions-width: root.compact-actions ? 0px : header-actions.width;
+            }
+
+            header-actions := HorizontalLayout {
+                x: root.compact-actions ? 0px : parent.width - self.width;
+                y: root.actions-y;
+                width: mark-read-button.width + clear-button.width + GitHubMetrics.size-8;
+                height: GitHubMetrics.size-32;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                mark-read-button := GitHubButton {
+                    text: "Mark all as read";
+                    disabled: root.unread-count == 0;
+                    clicked => { root.mark-all-read(); }
+                }
+
+                clear-button := GitHubButton {
+                    text: root.clear-confirmation ? "Confirm clear" : "Clear all";
+                    danger: true;
+                    disabled: root.total-count == 0;
+                    clicked => {
+                        if root.clear-confirmation {
+                            root.clear-messages();
+                            root.clear-confirmation = false;
+                        } else {
+                            root.clear-confirmation = true;
+                        }
+                    }
+                }
+            }
+
+            GitHubSegmentedControl {
+                x: 0px;
+                y: root.filters-y;
+                group-label: "Notification filter";
+
+                GitHubSegmentedControlItem {
+                    label: "All";
+                    count: root.total-count;
+                    selected: root.selected-filter == 0;
+                    clicked => { root.selected-filter = 0; }
+                }
+                GitHubSegmentedControlDivider {}
+                GitHubSegmentedControlItem {
+                    label: "Unread";
+                    count: root.unread-count;
+                    selected: root.selected-filter == 1;
+                    clicked => { root.selected-filter = 1; }
+                }
+                GitHubSegmentedControlDivider {}
+                GitHubSegmentedControlItem {
+                    label: "Read";
+                    count: root.read-count;
+                    selected: root.selected-filter == 2;
+                    clicked => { root.selected-filter = 2; }
+                }
+            }
+
+            message-list := VerticalLayout {
+                x: 0px;
+                y: root.list-y;
+                width: parent.width;
+                spacing: 0px;
+                alignment: start;
+
+                if root.filtered-empty: GitHubBlankslate {
+                    width: parent.width;
+                    heading: root.unread-filter
+                        ? "No unread notifications"
+                        : (root.read-filter ? "No read notifications" : "No notifications yet");
+                    description: root.unread-filter
+                        ? "New notifications will appear here until you mark them as read."
+                        : (root.read-filter
+                            ? "Notifications you have reviewed will appear here."
+                            : "Application updates and completed background work will appear here.");
+                    icon: @image-url("../assets/icons/octicon-inbox-16.svg");
+                    bordered: true;
+                    spacious: true;
+                }
+
+                // Single bordered list chrome (GitHub Inbox).
+                if !root.filtered-empty: Rectangle {
+                    width: parent.width;
+                    height: root.visible-count * root.row-height;
+                    border-radius: GitHubMetrics.radius-medium;
+                    border-width: GitHubMetrics.border-thin;
+                    border-color: GitHubTheme.border-default;
+                    background: GitHubTheme.canvas-default;
+                    clip: true;
+
+                    visible-messages := VerticalLayout {
+                        width: parent.width;
+                        spacing: 0px;
+                        alignment: start;
+
+                        for message in root.messages: message-slot := Rectangle {
+                            private property <bool> matches-filter:
+                                root.selected-filter == 0
+                                || (root.selected-filter == 1 && !message.read)
+                                || (root.selected-filter == 2 && message.read);
+                            width: parent.width;
+                            height: self.matches-filter ? root.row-height : 0px;
+                            clip: !self.matches-filter;
+
+                            GitHubMessageListItem {
+                                width: parent.width;
+                                height: parent.height;
+                                item: message;
+                                compact: root.width < 720px;
+                                tip-enabled: message-slot.matches-filter;
+                                activated(id) => {
+                                    if !message.read {
+                                        root.set-read(id, true);
+                                    }
+                                    if message.target != "" {
+                                        root.activate-target(message.target);
+                                    }
+                                }
+                                read-changed(id, read) => { root.set-read(id, read); }
+                                delete-requested(id) => { root.delete-message(id); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+}

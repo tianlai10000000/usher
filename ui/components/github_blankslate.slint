@@ -104,16 +104,24 @@ export component GitHubBlankslate inherits Rectangle {
             wrap: word-wrap;
         }
 
-        if root.description != "": description-text := Text {
-            x: (parent.width - self.width) / 2;
-            width: min(parent.width, 560px);
-            height: self.preferred-height;
-            text: root.description;
-            font-size: GitHubMetrics.text-medium;
-            color: GitHubTheme.fg-muted;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            wrap: word-wrap;
+        // A layout owns its direct child's width. Use a full-width host and
+        // center the bounded Text inside it so long descriptions actually wrap.
+        if root.description != "": Rectangle {
+            width: parent.width;
+            height: description-text.preferred-height;
+            background: transparent;
+
+            description-text := Text {
+                x: (parent.width - self.width) / 2;
+                width: min(parent.width, 560px);
+                height: self.preferred-height;
+                text: root.description;
+                font-size: GitHubMetrics.text-medium;
+                color: GitHubTheme.fg-muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
         }
 
         if root.primary-label != "" || root.secondary-label != "": HorizontalLayout {

@@ -38,6 +38,7 @@ pub(super) fn route_label(route: Route) -> &'static str {
     match route {
         Route::Home => "Home",
         Route::Search => "Search",
+        Route::Messages => "Messages",
         Route::Settings => "Settings",
         Route::Project => "Project",
         Route::Chat => "Chat",

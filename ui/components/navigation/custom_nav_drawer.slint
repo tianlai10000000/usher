@@ -311,7 +311,11 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 tooltip-above: false;
                 tooltip-align-right: true;
                 foreground: GitHubTheme.fg-muted;
-                clicked => { root.interaction-started(); }
+                selected: root.current-route == Route.Messages;
+                clicked => {
+                    root.interaction-started();
+                    root.navigate(Route.Messages);
+                }
             }
         }
 

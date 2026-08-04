@@ -16,8 +16,9 @@ import { GitHubUnderlineNav, GitHubUnderlineNavItem } from "../navigation/github
 import { GitHubActionMenu, GitHubActionListItem } from "../github_action_menu.slint";
 import { GitHubFilterMenuButton, GitHubFilterMenuFrame, GitHubFilterMenuItem } from "../github_filter_menu.slint";
 import { ToastManager, ToastType } from "../toast/toast_manager.slint";
-import { NotificationManager, NotificationType, CustomComponentType } from "../notify/notification.slint";
+import { NotificationManager, NotificationType, NotificationDelivery, CustomComponentType } from "../notify/notification.slint";
 import { DialogManager } from "../dialog/dialog_manager.slint";
+import { GitHubMessageListItem, MessageLevel } from "../messages/github_message_components.slint";
 
 component GitHubShowcaseSection inherits Rectangle {
     in property <string> title;
@@ -195,6 +196,47 @@ export component GitHubUiComponentsGallery inherits Rectangle {
             NotificationManager.remove-all();
         } else {
             NotificationManager.clear();
+        }
+    }
+
+    function send-message-example(action: int) {
+        if action == 0 {
+            NotificationManager.info({
+                title: "General message", message: "A general application message was received.",
+                source: "Usher", category: "general"
+            });
+        } else if action == 1 {
+            NotificationManager.info({
+                title: "Webhook received", message: "A webhook event is ready for review.",
+                source: "Webhook", category: "webhook"
+            });
+        } else if action == 2 {
+            NotificationManager.info({
+                title: "Update available", message: "Usher 1.0.0 is ready to install.",
+                source: "Updater", category: "software_update"
+            });
+        } else if action == 3 {
+            NotificationManager.success({
+                title: "CD workflow completed", message: "The release passed verification and is live.",
+                source: "CD", category: "cd_workflow"
+            });
+        } else if action == 4 {
+            NotificationManager.warn({
+                title: "Action recommended", message: "Review the deployment configuration before continuing.",
+                source: "Usher", category: "general"
+            });
+        } else if action == 5 {
+            NotificationManager.error({
+                title: "Critical failure", message: "This test always requests a native system notification.",
+                source: "Usher", category: "general",
+                native-delivery: NotificationDelivery.Always
+            });
+        } else {
+            NotificationManager.info({
+                title: "In-app only", message: "This message is stored in Inbox without a system notification.",
+                source: "Usher", category: "general",
+                native-delivery: NotificationDelivery.Never
+            });
         }
     }
 
@@ -938,6 +980,51 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         }
 
         GitHubShowcaseSection {
+            title: "Message center";
+            description: "Exercise the real Banner, durable Inbox, unread count, category, and native-delivery pipeline.";
+            content-height: 96px;
+
+            HorizontalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for action in [
+                    { label: "General", id: 0, primary: false },
+                    { label: "Webhook", id: 1, primary: false },
+                    { label: "Software update", id: 2, primary: false },
+                    { label: "CD success", id: 3, primary: true }
+                ]: GitHubButton {
+                    text: action.label;
+                    primary: action.primary;
+                    clicked => { root.send-message-example(action.id); }
+                }
+            }
+
+            HorizontalLayout {
+                x: 0px;
+                y: 56px;
+                width: parent.width;
+                height: 32px;
+                spacing: GitHubMetrics.size-8;
+                alignment: start;
+
+                for action in [
+                    { label: "Warning", id: 4, danger: false },
+                    { label: "Critical + OS", id: 5, danger: true },
+                    { label: "In-app only", id: 6, danger: false }
+                ]: GitHubButton {
+                    text: action.label;
+                    danger: action.danger;
+                    clicked => { root.send-message-example(action.id); }
+                }
+            }
+        }
+
+        GitHubShowcaseSection {
             title: "Dialog";
             description: "Fixed/percentage sizing, modal/non-modal behavior, backdrop, and action combinations.";
             content-height: 40px;
@@ -1047,6 +1134,54 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     narrow: true;
                     loading: root.blankslate-loading;
                     error: !root.blankslate-loading;
+                }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "Notification inbox rows";
+            description: "GitHub Inbox unread hierarchy: canvas-subtle fill, accent unread disc, bold vs muted title.";
+            content-height: 176px;
+
+            GitHubShowcaseSampleSurface {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 168px;
+                clip: true;
+
+                VerticalLayout {
+                    width: parent.width;
+                    spacing: 0px;
+
+                    GitHubMessageListItem {
+                        item: {
+                            id: "gallery-unread",
+                            title: "Pull request checks completed",
+                            body: "All required checks passed for the release branch.",
+                            source: "Pull requests",
+                            category: "cd_workflow",
+                            category-label: "CD workflow",
+                            created-at: "Just now",
+                            level: MessageLevel.Success,
+                            read: false,
+                            target: ""
+                        };
+                    }
+                    GitHubMessageListItem {
+                        item: {
+                            id: "gallery-read",
+                            title: "Network connection restored",
+                            body: "Remote repository operations are available again.",
+                            source: "Network",
+                            category: "general",
+                            category-label: "General",
+                            created-at: "10 minutes ago",
+                            level: MessageLevel.Info,
+                            read: true,
+                            target: ""
+                        };
+                    }
                 }
             }
         }

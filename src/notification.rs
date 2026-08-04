@@ -9,9 +9,10 @@ use std::time::Duration;
 
 // Use types re-exported from crate root
 use crate::{
-    MainWindow, Notification, NotificationIcons, NotificationManager, NotificationOptions,
-    NotificationType, UpdateLogic,
+    MainWindow, Notification, NotificationDelivery, NotificationIcons, NotificationManager,
+    NotificationOptions, NotificationType, UpdateLogic,
 };
+use usher_messages::{MessageCenter, MessageDraft, MessageSeverity, NativeDelivery, categories};
 
 // Global counter for generating unique IDs
 static NOTIFICATION_ID_COUNTER: AtomicI32 = AtomicI32::new(0);
@@ -77,6 +78,21 @@ fn create_notification_with_defaults(
     notification_type: NotificationType,
     options: NotificationOptions,
 ) -> Notification {
+    let source = if options.source.is_empty() {
+        "Usher".into()
+    } else {
+        options.source.clone()
+    };
+    let category = if options.category.is_empty() {
+        match options.tag.as_str() {
+            "auto-update" | "manual-update" | "software-update" => {
+                categories::SOFTWARE_UPDATE.into()
+            }
+            _ => categories::GENERAL.into(),
+        }
+    } else {
+        options.category.clone()
+    };
     let default_duration = match notification_type {
         NotificationType::Info => DEFAULT_DURATION_INFO,
         NotificationType::Success => DEFAULT_DURATION_SUCCESS,
@@ -164,8 +180,11 @@ fn create_notification_with_defaults(
         custom_component: options.component,
         actions: options.actions.clone(), // Copy actions array
         tag: options.tag.clone(),         // Copy tag for callback identification
-        dismissed: false,                 // Initially not dismissed
-        hovered: false,                   // Initially not hovered
+        source,
+        category,
+        native_delivery: options.native_delivery,
+        dismissed: false, // Initially not dismissed
+        hovered: false,   // Initially not hovered
     }
 }
 
@@ -177,6 +196,7 @@ fn push_notification(
     manager: &NotificationManager,
     notification: Notification,
     shared_queue: &Option<Arc<RwLock<SharedQueue>>>,
+    message_center: &MessageCenter,
 ) {
     // First collect all data into a Vec, avoid holding queue_model borrow
     let mut items = Vec::new();
@@ -203,6 +223,42 @@ fn push_notification(
         if let Ok(mut q) = queue.write() {
             q.0.push(notification.clone());
         }
+    }
+
+    record_message(message_center, &notification);
+}
+
+fn record_message(message_center: &MessageCenter, notification: &Notification) {
+    let severity = match notification.r#type {
+        NotificationType::Info => MessageSeverity::Info,
+        NotificationType::Success => MessageSeverity::Success,
+        NotificationType::Warning => MessageSeverity::Warning,
+        NotificationType::Error => MessageSeverity::Error,
+    };
+    let fallback_title = match notification.r#type {
+        NotificationType::Info => "Information",
+        NotificationType::Success => "Completed",
+        NotificationType::Warning => "Attention",
+        NotificationType::Error => "Failed",
+    };
+    let title = if notification.title.is_empty() {
+        fallback_title
+    } else {
+        notification.title.as_str()
+    };
+    let native_delivery = match notification.native_delivery {
+        NotificationDelivery::WhenUnfocused => NativeDelivery::WhenUnfocused,
+        NotificationDelivery::Never => NativeDelivery::Never,
+        NotificationDelivery::Always => NativeDelivery::Always,
+    };
+    if let Err(error) = message_center.publish(
+        MessageDraft::new(title, notification.message.as_str())
+            .source(notification.source.as_str())
+            .category(notification.category.as_str())
+            .severity(severity)
+            .native_delivery(native_delivery),
+    ) {
+        log::error!("[Messages] Failed to record application notification: {error}");
     }
 }
 
@@ -377,6 +433,7 @@ fn start_auto_close_timer(
 pub fn setup_notifications(
     ui: &MainWindow,
     shared_queue: Option<Arc<RwLock<SharedQueue>>>, // Optional: for multi-window sharing
+    message_center: MessageCenter,
 ) {
     let ui_weak = ui.as_weak();
 
@@ -390,9 +447,11 @@ pub fn setup_notifications(
     // Convenience method callbacks
     let ui_weak_info = ui_weak.clone();
     let shared_queue_clone_info = shared_queue.clone();
+    let message_center_info = message_center.clone();
     manager.on_info(move |options: NotificationOptions| {
         let ui_weak = ui_weak_info.clone();
         let shared_queue = shared_queue_clone_info.clone();
+        let message_center = message_center_info.clone();
         // Extract data that can be safely sent
         let message = options.message.to_string();
         let title = options.title.to_string();
@@ -400,6 +459,9 @@ pub fn setup_notifications(
         let icon = options.icon.to_string();
         let component = options.component;
         let tag = options.tag.to_string();
+        let source = options.source.to_string();
+        let category = options.category.to_string();
+        let native_delivery = options.native_delivery;
         // Convert actions ModelRc to Vec<String> for thread safety
         let actions_vec: Vec<String> = (0..options.actions.row_count())
             .filter_map(|i| options.actions.row_data(i).map(|s| s.to_string()))
@@ -427,10 +489,13 @@ pub fn setup_notifications(
                         component,
                         actions,
                         tag: tag.into(),
+                        source: source.into(),
+                        category: category.into(),
+                        native_delivery,
                     },
                 );
                 let notification_id = notif.id;
-                push_notification(&manager, notif.clone(), &shared_queue);
+                push_notification(&manager, notif.clone(), &shared_queue, &message_center);
 
                 // Set auto-close timer (supports hover pause)
                 if notif.duration > 0 {
@@ -448,14 +513,19 @@ pub fn setup_notifications(
 
     let ui_weak_success = ui_weak.clone();
     let shared_queue_clone_success = shared_queue.clone();
+    let message_center_success = message_center.clone();
     manager.on_success(move |options: NotificationOptions| {
         let ui_weak = ui_weak_success.clone();
         let shared_queue = shared_queue_clone_success.clone();
+        let message_center = message_center_success.clone();
         // Extract data that can be safely sent (component cannot be sent across threads, use None)
         let message = options.message.to_string();
         let title = options.title.to_string();
         let duration = options.duration;
         let icon = options.icon.to_string();
+        let source = options.source.to_string();
+        let category = options.category.to_string();
+        let native_delivery = options.native_delivery;
         // Use Timer to delay execution, avoid immediately accessing RefCell in invoke_success callback
         Timer::single_shot(Duration::from_millis(10), move || {
             if let Some(ui) = ui_weak.upgrade() {
@@ -470,10 +540,13 @@ pub fn setup_notifications(
                         component: crate::CustomComponentType::None,
                         actions: Default::default(),
                         tag: Default::default(),
+                        source: source.into(),
+                        category: category.into(),
+                        native_delivery,
                     },
                 );
                 let notification_id = notif.id;
-                push_notification(&manager, notif.clone(), &shared_queue);
+                push_notification(&manager, notif.clone(), &shared_queue, &message_center);
 
                 if notif.duration > 0 {
                     let duration = Duration::from_millis(notif.duration as u64);
@@ -490,12 +563,18 @@ pub fn setup_notifications(
 
     let ui_weak_warning = ui_weak.clone();
     let shared_queue_clone_warning = shared_queue.clone();
+    let message_center_warning = message_center.clone();
     manager.on_warn(move |options: NotificationOptions| {
         if let Some(ui) = ui_weak_warning.upgrade() {
             let manager = NotificationManager::get(&ui);
             let notif = create_notification_with_defaults(NotificationType::Warning, options);
             let notification_id = notif.id;
-            push_notification(&manager, notif.clone(), &shared_queue_clone_warning);
+            push_notification(
+                &manager,
+                notif.clone(),
+                &shared_queue_clone_warning,
+                &message_center_warning,
+            );
 
             if notif.duration > 0 {
                 let duration = Duration::from_millis(notif.duration as u64);
@@ -511,14 +590,19 @@ pub fn setup_notifications(
 
     let ui_weak_error = ui_weak.clone();
     let shared_queue_clone_error = shared_queue.clone();
+    let message_center_error = message_center.clone();
     manager.on_error(move |options: NotificationOptions| {
         let ui_weak = ui_weak_error.clone();
         let shared_queue = shared_queue_clone_error.clone();
+        let message_center = message_center_error.clone();
         // Extract data that can be safely sent (component cannot be sent across threads, use None)
         let message = options.message.to_string();
         let title = options.title.to_string();
         let duration = options.duration;
         let icon = options.icon.to_string();
+        let source = options.source.to_string();
+        let category = options.category.to_string();
+        let native_delivery = options.native_delivery;
         // Use Timer to delay execution, avoid immediately accessing RefCell in invoke_error callback
         Timer::single_shot(Duration::from_millis(10), move || {
             if let Some(ui) = ui_weak.upgrade() {
@@ -533,10 +617,13 @@ pub fn setup_notifications(
                         component: crate::CustomComponentType::None,
                         actions: Default::default(),
                         tag: Default::default(),
+                        source: source.into(),
+                        category: category.into(),
+                        native_delivery,
                     },
                 );
                 let notification_id = notif.id;
-                push_notification(&manager, notif.clone(), &shared_queue);
+                push_notification(&manager, notif.clone(), &shared_queue, &message_center);
 
                 if notif.duration > 0 {
                     let duration = Duration::from_millis(notif.duration as u64);
@@ -553,12 +640,18 @@ pub fn setup_notifications(
 
     let ui_weak_show = ui_weak.clone();
     let shared_queue_clone_show = shared_queue.clone();
+    let message_center_show = message_center.clone();
     manager.on_show(move |type_, options: NotificationOptions| {
         if let Some(ui) = ui_weak_show.upgrade() {
             let manager = NotificationManager::get(&ui);
             let notif = create_notification_with_defaults(type_, options);
             let notification_id = notif.id;
-            push_notification(&manager, notif.clone(), &shared_queue_clone_show);
+            push_notification(
+                &manager,
+                notif.clone(),
+                &shared_queue_clone_show,
+                &message_center_show,
+            );
 
             if notif.duration > 0 {
                 let duration = Duration::from_millis(notif.duration as u64);
@@ -575,6 +668,7 @@ pub fn setup_notifications(
     // push callback: add message + start timer
     let shared_queue_clone = shared_queue.clone();
     let ui_weak_push = ui_weak.clone();
+    let message_center_push = message_center.clone();
     manager.on_push(move |mut notification: Notification| {
         let ui_weak = ui_weak_push.clone();
         let shared_queue = shared_queue_clone.clone();
@@ -612,6 +706,8 @@ pub fn setup_notifications(
                     q.0.push(notification.clone());
                 }
             }
+
+            record_message(&message_center_push, &notification);
 
             // Auto-close timer (supports hover pause)
             if notification.duration > 0 {

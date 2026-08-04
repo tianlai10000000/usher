@@ -1,8 +1,10 @@
-use crate::MainWindow;
 use crate::app_runtime::shared_runtime;
 use crate::workflow::bindings::{show_error, show_success};
 use crate::workflow::state::SharedWorkflowState;
-use slint::ComponentHandle;
+use crate::{
+    CustomComponentType, MainWindow, NotificationDelivery, NotificationManager, NotificationOptions,
+};
+use slint::{ComponentHandle, Global};
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -159,6 +161,21 @@ pub(crate) fn apply_cd_snapshot(ui: &MainWindow, snapshot: &CdSnapshot) {
     ui.set_workflow_cd_verify_detail(snapshot.verify_detail.clone().into());
 }
 
+fn show_completion(ui: &MainWindow, title: &str, message: &str) {
+    NotificationManager::get(ui).invoke_success(NotificationOptions {
+        title: title.into(),
+        message: message.into(),
+        duration: 5000,
+        icon: Default::default(),
+        component: CustomComponentType::None,
+        actions: Default::default(),
+        tag: "cd-workflow".into(),
+        source: "CD".into(),
+        category: "cd_workflow".into(),
+        native_delivery: NotificationDelivery::WhenUnfocused,
+    });
+}
+
 pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
     let runtime = shared_runtime();
 
@@ -214,6 +231,7 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
             for stage in stages {
                 tokio::time::sleep(Duration::from_millis(700)).await;
                 let snapshot = deployment_snapshot(&req, stage);
+                let completed = stage == "done";
                 let _ = slint::invoke_from_event_loop({
                     let ui_weak_task = ui_weak_task.clone();
                     let state_task = state_task.clone();
@@ -229,6 +247,9 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         }
                         if let Some(ui) = ui_weak_task.upgrade() {
                             apply_cd_snapshot(&ui, &snapshot);
+                            if completed {
+                                show_completion(&ui, "CD workflow completed", &snapshot.summary);
+                            }
                         }
                     }
                 });
@@ -284,6 +305,7 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
             for stage in ["verify", "done"] {
                 tokio::time::sleep(Duration::from_millis(700)).await;
                 let snapshot = rollback_snapshot(&commit, stage);
+                let completed = stage == "done";
                 let _ = slint::invoke_from_event_loop({
                     let ui_weak_task = ui_weak_task.clone();
                     let state_task = state_task.clone();
@@ -299,6 +321,9 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         }
                         if let Some(ui) = ui_weak_task.upgrade() {
                             apply_cd_snapshot(&ui, &snapshot);
+                            if completed {
+                                show_completion(&ui, "CD rollback completed", &snapshot.summary);
+                            }
                         }
                     }
                 });

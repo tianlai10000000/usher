@@ -3,9 +3,9 @@ import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { NotificationType } from "notification.slint";
 
-// Floating application notifications reproduce Primer React Banner's compact
-// geometry: 8px outer padding, 1px semantic border, 6px radius, 16px status
-// Octicon, 14px text, and stacked actions below complex content.
+// A floating application notification is an overlay surface, not an inline
+// Primer Banner. Keep its canvas and border neutral so it cannot merge with
+// page content; convey severity with the leading visual and a narrow accent.
 export component GitHubNotificationBanner inherits Rectangle {
     in property <int> notification-id;
     in property <string> title;
@@ -19,16 +19,6 @@ export component GitHubNotificationBanner inherits Rectangle {
 
     private property <color> foreground: GitHubTheme.fg-default;
     private property <color> muted-foreground: GitHubTheme.fg-muted;
-    private property <color> canvas:
-        root.notification-type == NotificationType.Success ? GitHubTheme.success-muted :
-        root.notification-type == NotificationType.Info ? GitHubTheme.accent-subtle :
-        root.notification-type == NotificationType.Warning ? GitHubTheme.attention-muted :
-        GitHubTheme.danger-muted;
-    private property <color> border:
-        root.notification-type == NotificationType.Success ? GitHubTheme.success-fg :
-        root.notification-type == NotificationType.Info ? GitHubTheme.accent-muted :
-        root.notification-type == NotificationType.Warning ? GitHubTheme.attention-fg :
-        GitHubTheme.danger-border-muted;
     private property <color> semantic-foreground:
         root.notification-type == NotificationType.Success ? GitHubTheme.success-fg :
         root.notification-type == NotificationType.Info ? GitHubTheme.accent-fg :
@@ -36,13 +26,22 @@ export component GitHubNotificationBanner inherits Rectangle {
         GitHubTheme.danger-fg;
 
     height: max(48px, banner-content.preferred-height);
-    background: root.canvas;
+    background: GitHubTheme.canvas-overlay;
     border-width: 1px;
-    border-color: root.border;
+    border-color: GitHubTheme.border-default;
     border-radius: 6px;
-    drop-shadow-blur: 8px;
-    drop-shadow-offset-y: 2px;
+    drop-shadow-blur: 12px;
+    drop-shadow-offset-y: 4px;
     drop-shadow-color: GitHubTheme.shadow-floating-medium;
+
+    Rectangle {
+        x: 0px;
+        y: 6px;
+        width: 3px;
+        height: parent.height - 12px;
+        border-radius: 2px;
+        background: root.semantic-foreground;
+    }
 
     banner-content := VerticalLayout {
         width: parent.width;

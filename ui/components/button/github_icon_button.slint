@@ -165,15 +165,19 @@ export component GitHubIconButton inherits FocusScope {
         }
     }
 
-    if root.show-tooltip
-            && (button-touch.has-hover || root.keyboard-focus-visible || root.force-tooltip)
-            && root.tooltip-text != "": GitHubTooltip {
+    // Keep the locator mounted and clear its text when inactive. Conditional
+    // `if hover: GitHubTooltip` destroys the element without a destructor, so
+    // adjacent IconButtons can briefly keep painting a stale tip (wrong label
+    // over the newly hovered control). Empty text publishes hide() instead.
+    if root.show-tooltip && root.tooltip-text != "": GitHubTooltip {
         z: 10001;
         x: root.tooltip-align-right ? root.width - self.width
             : (root.tooltip-align-left ? 0px : (root.width - self.width) / 2);
         y: root.tooltip-above
             ? -self.height - GitHubMetrics.overlay-offset
             : root.height + GitHubMetrics.overlay-offset;
-        text: root.tooltip-text;
+        text: (button-touch.has-hover || root.keyboard-focus-visible || root.force-tooltip)
+            ? root.tooltip-text
+            : "";
     }
 }

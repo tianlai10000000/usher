@@ -1,0 +1,179 @@
+import {
+    MessageMarkToggleAction,
+    MessageDeleteAction
+} from "./github_message_actions.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+export enum MessageLevel {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+export struct MessageListItem {
+    id: string,
+    title: string,
+    body: string,
+    source: string,
+    category: string,
+    category-label: string,
+    created-at: string,
+    level: MessageLevel,
+    read: bool,
+    target: string,
+}
+
+// GitHub Inbox-style notification row.
+// Unread hierarchy matches github.com/notifications:
+// canvas-subtle resting fill, 8px accent unread indicator, bold default title;
+// read rows stay transparent with muted title. Hover uses accent-subtle.
+export component GitHubMessageListItem inherits Rectangle {
+    in property <MessageListItem> item;
+    in property <bool> compact: false;
+    in property <bool> tip-enabled: true;
+    callback activated(string);
+    callback read-changed(string, bool);
+    callback delete-requested(string);
+
+    private property <length> row-height: root.compact ? 76px : 84px;
+    private property <length> action-size: GitHubMetrics.control-medium-size;
+    private property <length> action-gap: GitHubMetrics.size-4;
+    private property <length> action-gutter: GitHubMetrics.size-8;
+    private property <length> actions-width:
+        root.action-size * 2 + root.action-gap + root.action-gutter;
+    private property <length> mark-action-x: root.width - root.actions-width;
+    private property <length> delete-action-x:
+        root.width - root.action-size - root.action-gutter;
+    private property <color> level-color:
+        root.item.level == MessageLevel.Success ? GitHubTheme.success-fg
+        : root.item.level == MessageLevel.Warning ? GitHubTheme.attention-fg
+        : root.item.level == MessageLevel.Error ? GitHubTheme.danger-fg
+        : GitHubTheme.accent-fg;
+    private property <image> level-icon:
+        root.item.level == MessageLevel.Success
+            ? @image-url("../../assets/icons/octicon-check-circle-16.svg")
+        : root.item.level == MessageLevel.Warning
+            ? @image-url("../../assets/icons/octicon-alert-16.svg")
+        : root.item.level == MessageLevel.Error
+            ? @image-url("../../assets/icons/octicon-x-16.svg")
+        : @image-url("../../assets/icons/octicon-info-16.svg");
+    private property <length> title-y: GitHubMetrics.size-8;
+    private property <length> title-height: GitHubMetrics.size-24;
+    private property <length> level-icon-y:
+        root.title-y + (root.title-height - GitHubMetrics.icon-medium) / 2;
+    // GitHub `.notification-list-item-unread-indicator` is an 8px accent disc
+    // aligned with the subject line, ahead of the leading type icon.
+    private property <length> unread-indicator-size: GitHubMetrics.size-8;
+    private property <length> unread-indicator-x: GitHubMetrics.size-12;
+    private property <length> unread-indicator-y:
+        root.title-y + (root.title-height - root.unread-indicator-size) / 2;
+    private property <length> level-icon-x:
+        root.unread-indicator-x + root.unread-indicator-size + GitHubMetrics.size-12;
+    private property <length> content-x:
+        root.level-icon-x + GitHubMetrics.icon-medium + GitHubMetrics.size-12;
+    private property <bool> row-hot:
+        row-touch.has-hover || mark-btn.has-hover || delete-btn.has-hover;
+
+    width: 100%;
+    height: root.row-height;
+    clip: true;
+    background: row-touch.pressed
+        ? GitHubTheme.control-transparent-active
+        : root.row-hot
+            ? GitHubTheme.accent-subtle
+            : (root.item.read ? transparent : GitHubTheme.canvas-subtle);
+    accessible-role: list-item;
+    accessible-label: root.item.title + ". " + root.item.body;
+
+    // Cover the full row so left padding and gaps between action buttons keep
+    // hover. Mark/delete sit above this and own their own clicks.
+    row-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.activated(root.item.id); }
+    }
+
+    // Keep the indicator slot mounted so read/unread never shift the type icon.
+    Rectangle {
+        x: root.unread-indicator-x;
+        y: root.unread-indicator-y;
+        width: root.unread-indicator-size;
+        height: root.unread-indicator-size;
+        border-radius: root.unread-indicator-size / 2;
+        background: root.item.read ? transparent : GitHubTheme.accent-emphasis;
+    }
+
+    Image {
+        x: root.level-icon-x;
+        y: root.level-icon-y;
+        width: GitHubMetrics.icon-medium;
+        height: GitHubMetrics.icon-medium;
+        source: root.level-icon;
+        colorize: root.level-color;
+    }
+
+    Text {
+        x: root.content-x;
+        y: root.title-y;
+        width: parent.width - self.x - root.actions-width - GitHubMetrics.size-16;
+        height: root.title-height;
+        text: root.item.title;
+        font-size: GitHubMetrics.text-medium;
+        font-weight: root.item.read ? 400 : 600;
+        color: root.item.read ? GitHubTheme.fg-muted : GitHubTheme.fg-default;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: root.content-x;
+        y: GitHubMetrics.size-28;
+        width: parent.width - self.x - root.actions-width - GitHubMetrics.size-16;
+        height: GitHubMetrics.size-20;
+        text: root.item.body;
+        font-size: GitHubMetrics.text-small;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: root.content-x;
+        y: root.row-height - GitHubMetrics.size-24;
+        width: parent.width - self.x - root.actions-width - GitHubMetrics.size-16;
+        height: GitHubMetrics.size-20;
+        text: root.item.category-label + " · " + root.item.source + " · " + root.item.created-at;
+        font-size: GitHubMetrics.text-small;
+        color: GitHubTheme.fg-subtle;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    mark-btn := MessageMarkToggleAction {
+        x: root.mark-action-x;
+        y: (parent.height - self.height) / 2;
+        control-size: root.action-size;
+        read: root.item.read;
+        tip-enabled: root.tip-enabled;
+        opacity: root.row-hot || self.has-hover ? 1 : 0.72;
+        clicked => { root.read-changed(root.item.id, !root.item.read); }
+    }
+
+    delete-btn := MessageDeleteAction {
+        x: root.delete-action-x;
+        y: (parent.height - self.height) / 2;
+        control-size: root.action-size;
+        tip-enabled: root.tip-enabled;
+        opacity: root.row-hot || self.has-hover ? 1 : 0.72;
+        clicked => { root.delete-requested(root.item.id); }
+    }
+
+    Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+}

@@ -17,8 +17,8 @@ use serde::de::DeserializeOwned;
 use slint::{ComponentHandle, Global};
 
 use crate::{
-    CustomComponentType, MainWindow, NotificationManager, NotificationOptions, ToastManager,
-    ToastOptions,
+    CustomComponentType, MainWindow, NotificationDelivery, NotificationManager,
+    NotificationOptions, ToastManager, ToastOptions,
 };
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -556,6 +556,9 @@ fn present_error(error: &HttpError, feedback: ErrorFeedback) {
                 component: CustomComponentType::None,
                 actions: Default::default(),
                 tag: "http-error".into(),
+                source: "HTTP".into(),
+                category: "general".into(),
+                native_delivery: NotificationDelivery::WhenUnfocused,
             });
         }
     });

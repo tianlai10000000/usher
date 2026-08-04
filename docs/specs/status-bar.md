@@ -25,7 +25,10 @@ surface.
   the live main-content edge while the docked sidebar moves.
 - `src/shortcuts/` owns shortcut initialization stages, failure/readiness, and
   the binding detail shown by the shortcut popup.
-- `src/notification.rs` and `NotificationManager` own the notification queue.
+- `crates/usher-messages/` owns durable messages and unread count;
+  `src/message_center.rs` projects that count into `ui/main.slint`.
+- `src/notification.rs` and `NotificationManager` own only the transient Banner
+  queue and must not drive the status badge.
 - `src/network.rs` owns the connectivity probe and publishes
   `AppState.network-online`.
 - `AppState.version` is the single displayed application version value.
@@ -41,7 +44,10 @@ surface.
   临时状态区跟随主内容区实时左边缘。
 - `src/shortcuts/` 持有快捷键初始化阶段、失败/就绪状态，以及快捷键浮层显示的
   键位详情。
-- `src/notification.rs` 与 `NotificationManager` 持有通知队列。
+- `crates/usher-messages/` 持有持久消息与未读数，`src/message_center.rs` 把计数
+  投影到 `ui/main.slint`。
+- `src/notification.rs` 与 `NotificationManager` 只持有短时 Banner 队列，不得驱动
+  状态徽标。
 - `src/network.rs` 持有网络探测并发布 `AppState.network-online`。
 - `AppState.version` 是唯一的应用版本展示值。
 - 更新/下载状态仍由 Updater 持有，状态栏只负责展示。
@@ -69,9 +75,11 @@ surface.
    persistent cluster's absolute x positions. Window resize moves the complete
    cluster directly with the window-right edge without changing item widths.
 8. The notification trigger is icon-only. A top-right numeric badge displays
-   unread count from 1 through 99 and caps larger values at `99+`; count 0
-   mounts no badge. Tooltip and popup retain the complete count. A persistent
-   `Notifications N` label is not rendered.
+   durable unread count from 1 through 99 and caps larger values at `99+`; count
+   0 mounts no badge. Unread presence uses accent icon color and the badge only;
+   the selected/pressed chrome is reserved for `Route.Messages` being current.
+   The Tooltip retains the complete count, and activation navigates to
+   `Route.Messages`. A persistent `Notifications N` label is not rendered.
 
 1. 28px 高的透明宿主覆盖窗口底边，始终保持 `x=0` 和窗口宽度，不得使用受侧栏
    影响的内容区宽度。
@@ -86,9 +94,10 @@ surface.
    隐藏版本号。
 7. 侧栏动画及动画中快速反向切换不得改变常驻工具组的绝对 x 坐标。窗口 Resize 时
    整组只直接跟随窗口右边缘移动，条目宽度不得改变。
-8. 通知入口只显示铃铛图标；右上角数字徽标显示 1–99 条未读数量，更大值显示
-   `99+`，数量为 0 时不挂载徽标。Tooltip 与浮层保留完整数量，不显示常驻
-   `Notifications N` 文字。
+8. 通知入口只显示铃铛图标；右上角数字徽标显示持久消息的 1–99 条未读数量，
+   更大值显示 `99+`，数量为 0 时不挂载徽标。未读只用强调色铃铛与数字徽标表达；
+   选中/按下底色仅在当前路由为 `Route.Messages` 时出现。Tooltip 保留完整数量，
+   激活后导航到 `Route.Messages`，不显示常驻 `Notifications N` 文字。
 
 ## Status semantics / 状态语义
 
@@ -98,7 +107,7 @@ the only source of meaning; every icon has a tooltip and popup detail.
 | Item | Normal/idle | Positive | Failure/attention |
 | --- | --- | --- | --- |
 | Shortcut | Initialization uses progress and accent color | Ready keyboard icon is green | Failed keyboard icon is red and remains visible |
-| Notification | Empty bell is muted and has no badge | Not applicable; notifications are not a health signal | Unread queue uses an accent bell and numeric badge, not green |
+| Notification | Empty bell is muted and has no badge; selected chrome only while Messages is open | Not applicable; notifications are not a health signal | Unread queue uses an accent bell and numeric badge, not green or selected chrome |
 | Network | Not applicable | Online broadcast icon is green | Offline alert icon is red |
 | Version | Muted text | Not applicable | Not applicable |
 
@@ -108,7 +117,7 @@ Tooltip 与浮层详情。
 | 条目 | 正常/空闲 | 正向状态 | 失败/注意状态 |
 | --- | --- | --- | --- |
 | 快捷键 | 初始化期间显示进度和强调色 | 就绪后的键盘图标为绿色 | 失败后的键盘图标为红色并保持可见 |
-| 通知 | 空队列铃铛为弱化灰色且无徽标 | 不适用；通知不是健康状态 | 有未读通知时使用强调色铃铛与数字徽标，不使用绿色 |
+| 通知 | 空队列铃铛为弱化灰色且无徽标；选中底色仅在 Messages 路由打开时出现 | 不适用；通知不是健康状态 | 有未读通知时使用强调色铃铛与数字徽标，不使用绿色，也不用选中底色表示未读 |
 | 网络 | 不适用 | 在线广播图标为绿色 | 离线警告图标为红色 |
 | 版本 | 始终使用弱化文字色 | 不适用 | 不适用 |
 
@@ -118,8 +127,9 @@ Tooltip 与浮层详情。
    and expand leftward. They must stay inside the window at the minimum width.
 2. Tooltip text names the function or current state: shortcut readiness,
    notification count/empty state, connectivity, or version.
-3. Clicking an item toggles one shared anchored popup. Only one status popup is
-   active at a time.
+3. Clicking shortcut, network, or version toggles one shared anchored popup.
+   Clicking notification closes any popup and navigates to the message Inbox.
+   Only one status popup is active at a time.
 4. Shortcut detail may use a wider 360 px popup; ordinary utility popups use
    220 px. Shared viewport collision handling constrains either width when the
    window is narrower.
@@ -134,7 +144,8 @@ Tooltip 与浮层详情。
    必须留在窗口内。
 2. Tooltip 文案说明功能或当前状态：快捷键就绪状态、通知数量/空状态、网络连接或
    版本。
-3. 点击条目切换同一个共享锚定浮层；同一时间只能激活一个状态栏浮层。
+3. 点击快捷键、网络或版本条目切换共享锚定浮层；点击通知会关闭已有浮层并导航到
+   消息 Inbox；同一时间只能激活一个状态栏浮层。
 4. 快捷键详情可使用 360px 宽浮层，普通工具浮层使用 220px；窗口更窄时由共享
    viewport 碰撞逻辑约束宽度。
 5. 浮层 viewport 与条目 anchor 只在状态栏父坐标系中换算一次，禁止重复减去
@@ -148,13 +159,13 @@ Tooltip 与浮层详情。
   stage/error detail; the UI must never report ready prematurely.
 - A failed connectivity probe publishes offline/red without blocking the event
   loop or creating duplicate notification feedback.
-- An empty notification queue is a valid idle state, not a success or failure.
+- An empty durable Inbox is a valid idle state, not a success or failure.
 - Missing version data hides only the version item; it must not move other
   items outside the right edge.
 
 - 快捷键初始化失败以红色保持可见，浮层保留阶段/错误详情；不得提前报告就绪。
 - 网络探测失败发布离线/红色状态，不得阻塞 event loop，也不得重复创建通知反馈。
-- 空通知队列是合法空闲状态，不是成功或失败。
+- 空的持久 Inbox 是合法空闲状态，不是成功或失败。
 - 版本数据缺失时只隐藏版本项，不得把其他条目推出右边界。
 
 ## Regression checklist / 回归清单
@@ -168,13 +179,14 @@ Tooltip 与浮层详情。
 - Verify the version remains visible while every status popup is open.
 - Verify notification uses a bell icon with muted empty and accent unread
   states; count 0 has no badge, positive counts have a numeric badge, and no
-  persistent notification text is rendered.
+  persistent notification text is rendered. Unread must not keep the bell in
+  selected chrome; selected chrome appears only on `Route.Messages`.
 - Verify shortcut ready/failed and network online/offline use the semantic
   colors above.
 - Hover every right-side item and verify its tooltip expands leftward without
   clipping.
-- Open each popup and verify anchor position, Escape, outside click, and
-  internal scrolling.
+- Activate the bell and verify `Route.Messages`; open each remaining popup and
+  verify anchor position, Escape, outside click, and internal scrolling.
 - Run the full Slint compile and the repository standard checks.
 
 - 在 800px 与宽窗口下分别检查侧栏展开/收起时的四个常驻条目。
@@ -183,10 +195,11 @@ Tooltip 与浮层详情。
 - 侧栏展开时确认其底部保留侧栏表面，不出现状态栏背景或顶部分隔线。
 - 打开每一种状态栏浮层时确认版本号仍可见。
 - 确认通知只使用铃铛图标：空队列为弱化色且不显示数字徽标，未读为强调色并显示
-  数字徽标，不显示常驻通知文字。
+  数字徽标，不显示常驻通知文字。未读不得让铃铛保持选中底色；选中底色仅在
+  `Route.Messages` 时出现。
 - 确认快捷键就绪/失败、网络在线/离线符合上述语义色。
 - 悬停全部右侧条目，确认 Tooltip 向左展开且不被裁切。
-- 打开每个浮层，检查锚点、Escape、外部点击与内部滚动。
+- 激活铃铛并检查 `Route.Messages`；打开其余浮层，检查锚点、Escape、外部点击与内部滚动。
 - 编译完整 Slint 根并运行仓库标准检查。
 
 ## Design references / 设计参考

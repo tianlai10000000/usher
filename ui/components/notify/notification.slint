@@ -5,6 +5,14 @@ export enum NotificationType {
     Error,
 }
 
+// Native notification delivery is presentation policy, not message identity.
+// Keep WhenUnfocused first so omitted fields use the non-duplicating default.
+export enum NotificationDelivery {
+    WhenUnfocused,
+    Never,
+    Always,
+}
+
 // 自定义组件类型枚举
 export enum CustomComponentType {
     None,           // 不使用自定义组件
@@ -22,6 +30,9 @@ export struct Notification {
     custom-component: CustomComponentType,  // 自定义组件类型
     actions: [string],     // 操作按钮文本数组（用于 ActionsNotify 组件）
     tag: string,           // 标识符，用于在回调中区分不同业务场景
+    source: string,        // 消息来源，例如 Usher、Webhook、Updater、CD
+    category: string,      // 稳定分类标识，例如 general、webhook、software_update
+    native-delivery: NotificationDelivery,
     dismissed: bool,       // 是否已被用户手动关闭
     hovered: bool,         // 鼠标是否悬停（暂停计时器）
 }
@@ -35,6 +46,9 @@ export struct NotificationOptions {
     component: CustomComponentType,  // 自定义组件类型，默认为 None
     actions: [string],     // 操作按钮文本数组（用于 ActionsNotify 组件）
     tag: string,           // 标识符，用于在回调中区分不同业务场景
+    source: string,
+    category: string,
+    native-delivery: NotificationDelivery,
 }
 
 export global NotificationManager {
@@ -85,4 +99,3 @@ export global NotificationManager {
     // action-clicked 回调：当 ActionsNotify 组件的操作按钮被点击时触发
     callback action-clicked(/* notification-id */ int, /* action-index */ int);
 }
-

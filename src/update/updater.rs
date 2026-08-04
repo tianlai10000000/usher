@@ -10,8 +10,8 @@ use tokio::runtime::Runtime;
 
 use crate::http::{self, RequestOptions};
 use crate::{
-    CustomComponentType, MainWindow, NotificationManager, NotificationOptions, UpdateLogic,
-    app_runtime::shared_runtime,
+    CustomComponentType, MainWindow, NotificationDelivery, NotificationManager,
+    NotificationOptions, UpdateLogic, app_runtime::shared_runtime,
 };
 
 #[derive(Default, Clone)]
@@ -738,7 +738,10 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                                         icon: "".into(),
                                         component: CustomComponentType::None,
                                         actions: Default::default(),
-                                        tag: Default::default(),
+                                        tag: "software-update".into(),
+                                        source: "Updater".into(),
+                                        category: "software_update".into(),
+                                        native_delivery: NotificationDelivery::WhenUnfocused,
                                     });
                                 } // manager borrow released here
                             }
@@ -822,6 +825,9 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                                     component: CustomComponentType::ActionsNotify,
                                     actions,
                                     tag: "manual-update".into(),
+                                    source: "Updater".into(),
+                                    category: "software_update".into(),
+                                    native_delivery: NotificationDelivery::WhenUnfocused,
                                 });
                             } else {
                                 log::debug!(" ui_weak_for_notification.upgrade() failed");
@@ -864,7 +870,10 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                                     icon: "".into(),
                                     component: CustomComponentType::None,
                                     actions: Default::default(),
-                                    tag: Default::default(),
+                                    tag: "software-update".into(),
+                                    source: "Updater".into(),
+                                    category: "software_update".into(),
+                                    native_delivery: NotificationDelivery::WhenUnfocused,
                                 });
                             } // manager borrow released here, avoid conflict with borrow in callback
                         }
@@ -989,7 +998,10 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                                         icon: "".into(),
                                         component: CustomComponentType::None,
                                         actions: Default::default(),
-                                        tag: Default::default(),
+                                        tag: "software-update".into(),
+                                        source: "Updater".into(),
+                                        category: "software_update".into(),
+                                        native_delivery: NotificationDelivery::WhenUnfocused,
                                     });
                                 }
                             }
@@ -1033,7 +1045,10 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                     icon: "".into(),
                     component: CustomComponentType::None,
                     actions: Default::default(),
-                    tag: Default::default(),
+                    tag: "software-update".into(),
+                    source: "Updater".into(),
+                    category: "software_update".into(),
+                    native_delivery: NotificationDelivery::WhenUnfocused,
                 });
             }
         });

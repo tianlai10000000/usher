@@ -386,17 +386,38 @@ expanded/collapsed, and success confirmation.
   counter only when count is positive (`99+` cap); zero mounts no counter.
   Green is reserved for ready/online state, unread notification uses accent,
   and version remains muted. Right-edge tooltips align to their host's trailing
-  edge and expand leftward. Shared popups use one status-bar parent coordinate
-  space and must leave the version item visible. The complete behavior contract
+  edge and expand leftward. The bell navigates to `Route.Messages`; remaining
+  shared popups use one status-bar parent coordinate space and must leave the version item visible. The complete behavior contract
   is [status-bar.md](status-bar.md).
+- `GitHubMessageListItem`: GitHub Inbox-style 84 px row (76 px compact) with
+  stable unread dot, semantic 16 px leading visual, title/body/source-time
+  hierarchy, and always-mounted read/unread and delete IconButtons. Unread state
+  uses a neutral subtle background, dot, and title weight; semantic color is
+  confined to the leading state icon and color is never the only signal. Its
+  read/unread property matrix lives under `Notification inbox rows`
+  in UI Components. The separate `Message center` section publishes real test
+  events for each built-in category and for default, always-native, and in-app-only
+  delivery policies; it is not a static component preview.
+- Floating application notifications use a neutral `canvas-overlay` card with
+  neutral border/shadow; severity is limited to the leading icon and a 3 px
+  accent. The overlay is not rendered on the Notifications route because the
+  corresponding Inbox row already supplies durable feedback.
+- `GitHubMessageListItem`：GitHub Inbox 风格 84px 行（紧凑态 76px），包含稳定未读
+  圆点、16px 语义前导视觉、标题/正文/来源时间层级，以及常驻的已读切换和删除
+  IconButton。未读状态使用中性浅底、圆点与标题字重，语义色仅用于前导状态图标，
+  不能只依赖颜色；其属性矩阵
+  登记在 UI Components 的 `Notification inbox rows`。独立的 `Message center` 分类会
+  发布各内置分类以及默认、强制原生、仅应用内投递策略的真实测试事件，并非静态预览。
+- 浮动应用通知使用中性的 `canvas-overlay` 卡片及中性边框/阴影，语义色仅用于前导图标
+  和 3px 强调线；Notifications 路由已有对应 Inbox 行，因此不再渲染该浮层。
 - `GitHubStatusBar`：根 Shell 唯一的 28px 全窗口透明宿主；可见表面从实时主内容
   边缘开始，侧栏展开后其正下方不得出现状态栏表面。常驻键盘、铃铛、网络与版本
   工具组距窗口右边缘 8px、条目间距 4px，位于移动可见表面之外，并禁止参与会重新
   分配宽度的 Layout。铃铛只显示
   图标；未读数大于 0 时叠加 Primer Primary 风格数字 Counter（上限显示 `99+`），
   为 0 时不挂载 Counter。绿色只表示就绪/在线，未读通知使用强调色，版本保持弱化色。
-  右侧 Tooltip 与宿主尾边对齐并向左展开；共享浮层只使用一套状态栏父坐标系，且不得
-  遮挡版本项。完整契约见 [status-bar.md](status-bar.md)。
+  右侧 Tooltip 与宿主尾边对齐并向左展开；铃铛导航到 `Route.Messages`，其余共享浮层
+  只使用一套状态栏父坐标系，且不得遮挡版本项。完整契约见 [status-bar.md](status-bar.md)。
 - `GitHubCopyButton`: 32×32 invisible icon button, centered 16 px Copy
   Octicon, persistent tooltip, and Copy→Check confirmation only after the
   clipboard callback returns success.
@@ -438,12 +459,16 @@ expanded/collapsed, and success confirmation.
   pin shared tab items directly to a container edge.
 - `GitHubSegmentedControl`, `GitHubSegmentedControlItem`, and
   `GitHubSegmentedControlDivider`: the shared compact, mutually exclusive
-  choice group. Items own selected, hover, disabled, Enter/Space, and
-  keyboard-visible focus states; activating the selected item is a no-op.
-  Groups expose an accessible contextual label and contain 2–5 concise
-  non-wrapping labels. Selection may change text weight or color, but it must
-  never change an item's measured width, divider positions, or the group's
-  outer geometry.
+  choice group. The shell width hugs the segment row with no trailing empty
+  chrome. Items own selected, hover, disabled, Enter/Space, and
+  keyboard-visible focus states, and always report `clicked` (callers may
+  ignore a re-selection). Live numeric suffixes use the item's integer `count`
+  input (`label` + `" (N)"` inside the item). Call sites must not concatenate
+  changing numbers into the `label` string — that binding can freeze after the
+  first paint on independently compiled ComponentFactory pages. Groups expose
+  an accessible contextual label and contain 2–5 concise non-wrapping labels.
+  Selection may change text weight or color, but measuring always reserves the
+  selected weight so divider positions stay stable for a given label/count.
 - `GitHubScrollView`: the application-owned mounted viewport and semantic
   scrollbar foundation. It must preserve models while scrolling, support
   track and thumb pointer interaction, and never depend on Material styling.

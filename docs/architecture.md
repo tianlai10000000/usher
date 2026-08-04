@@ -37,6 +37,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/main.rs` | Minimal binary entry point. Delegates to the library entry point. |
 | `src/lib.rs` | Imports and re-exports the generated UI API, creates `MainWindow`, initializes modules, wires cross-cutting callbacks, and manages window lifecycle and shutdown. |
 | `crates/usher-ui/` | Owns the Slint build script and generated Rust API. Compiles the repository-level `ui/main.slint` tree and exports its window, globals, models, structs, and enums. |
+| `crates/usher-messages/` | Independently compiled message-center package: durable domain/storage service, snapshot subscriptions, background persistence/native-delivery worker, `notify-rust` OS adapter, and generated Inbox page API. |
 | `src/app_runtime.rs` | Process-wide multi-thread Tokio runtime. Runtime threads install the tracing dispatch. |
 | `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots, startup checkpoints, bounded Slint-model accounting, UI-size correlation, and the cancellable periodic memory sampler. |
 | `src/platform/` | Cross-platform native integration boundary. `macos.rs` owns AppKit appearance (forced Light/Dark or follow-system for Auto), title-bar accessories, window-interaction notifications, the native-title-bar click bridge for dismissible transient overlays, macOS PR-review font registration, the `NSSound` click, and `AppleInterfaceThemeChangedNotification` for live Auto theme updates; `windows.rs` owns Windows theme detection and `MessageBeep`; `linux.rs` owns XDG Portal theme detection and non-blocking desktop sound playback. `mod.rs` exposes the shared API, Auto theme watch enablement with a 1s poll fallback on all platforms, plus opening a directory in the OS file manager (Finder/Explorer/`xdg-open`). |
@@ -68,6 +69,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/logger/` | Debug logging, tracing, and panic/error support. |
 | `src/toast.rs` | Transient single-toast manager binding. |
 | `src/notification.rs` | Queued notifications, timers, hover pause, actions, and icons. |
+| `src/message_center.rs` | Thin bridge between the root window and `usher-messages`; mirrors theme/viewport state, pushes total/unread/read filter counts, and converts immutable snapshots into isolated-page Slint models. |
 | `src/dialog.rs` | Imperative `DialogManager` binding and action dispatch; it owns no visual variant. |
 
 Repository endpoint definitions and executable behavior are intentionally separated: `src/git/` may reference constants from `src/codereview/api/`, while `src/codereview/api/` must not depend on `src/git/`, `src/http/`, reqwest, or serde.
@@ -104,6 +106,7 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `ui/components/jobs/` | Reusable GitHub Actions-style run, Job, Step, and log presentation. It accepts normalized snapshots and never executes workflow commands. |
 | `ui/components/dialog/github_dialog.slint` | Shared responsive Primer Dialog chrome, backdrop input ownership, initial close-control focus, header/body/footer safe areas, Esc dismiss (unless `modal`), close behavior, narrow full-window layout, and action states for global, project, PR-review, and update dialogs. Its optional external viewport keeps route-owned surfaces centered on the complete application window and paints one continuous backdrop across docked shell chrome. Root state continues that backdrop through the macOS title-bar inset; `src/platform/macos.rs` shields application-owned title-bar accessories while leaving AppKit traffic lights interactive. Native-title-bar clicks mirror ordinary backdrop dismissal without weakening non-dismissible dialogs. Feature body content nests as `@children`. |
 | `ui/components/toast/`, `ui/components/notify/` | Shared compact Primer Banner-style transient and queued feedback; the root renders one queued notification Banner at a time. |
+| `ui/components/messages/` | Reusable GitHub Inbox message rows with read/unread, semantic level, metadata, and mounted row actions; registered in UI Components. |
 | `ui/components/pr_review/` | PR Review public UI structs plus reusable shell, file-tree, and diff controls; cross-region state stays in the workspace view. |
 | `ui/theme/github_theme.slint` | Application-owned `GitHubTheme` semantic color roles and `GitHubMetrics` Primer geometry, control, typography, overlay, and breakpoint tokens. Raw functional UI colors are centralized here. |
 | `material-1.7.1-fixed/` | Vendored Material source aligned with Slint v1.17.1. |
@@ -140,7 +143,8 @@ layout-distributed. The transparent host remains in window coordinates while
 only its painted surface and transient left lane follow the live content edge,
 so opening the sidebar leaves no status surface below it and cannot move or
 compress the shortcut, notification, network, or version items. Notification
-count is rendered as a bell badge only when nonzero; shortcut/network health colors come from their
+count comes from the durable message center and is rendered as a bell badge only
+when nonzero; activating it opens `Route.Messages`. Shortcut/network health colors come from their
 feature state, while notification and version remain non-health indicators.
 Right-edge tooltips expand leftward and status popups share one parent
 coordinate space. Pages must not recreate either shell surface. See
@@ -171,16 +175,20 @@ their geometry; all other review controls and prose inherit the application font
 
 The UI source remains under the repository-level `ui/` directory. The main
 window and ordinary route tree are generated by the `usher-ui` workspace crate;
-the Settings route is generated independently by `usher-ui-settings` and is
-mounted through Slint's experimental `ComponentContainer`/component-factory
-boundary. The application crate re-exports the main public API and owns the
-explicit Settings bridge in `src/settings_page.rs`. A component created by a
+the Settings and Messages routes are generated independently by
+`usher-ui-settings` and `usher-messages`, then mounted through Slint's experimental
+`ComponentContainer`/component-factory boundary. The application crate re-exports
+the main public API and owns explicit bridges in `src/settings_page.rs` and
+`src/message_center.rs`. A component created by a
 cross-crate factory has its own Slint global graph, so the bridge must copy the
 initial `AppState`, forward callbacks to `MainWindow`, and mirror later state
-changes rather than assuming globals are shared. Changing `settings.slint` must
-not regenerate or compile `usher-ui`; changing the main shell still rebuilds the
-main generated crate. When `SLINT_LIVE_PREVIEW` is enabled, the Settings build
-script deliberately keeps the factory product static because Slint 1.17's
+changes rather than assuming globals are shared. Messages inbox rows report
+hover ownership, text, and position to one page-owned `GitHubTooltipSurface`;
+each hover update directly replaces the previous value.
+Changing `settings.slint` or
+`messages.slint` must not regenerate or compile `usher-ui`; changing the main shell
+still rebuilds the main generated crate. When `SLINT_LIVE_PREVIEW` is enabled,
+both isolated build scripts deliberately keep factory products static because Slint 1.17's
 `ComponentFactory` cannot accept the live-preview dynamic handle; the main
 window and UI Components route remain live-reloadable.
 
@@ -230,7 +238,7 @@ The effective startup sequence in `src/lib.rs` is intentionally ordered:
 2. Create `MainWindow` and initialize debug/tracing loggers.
 3. Apply settings and configure updater state.
 4. Bind theme, routing, navigation, application shortcuts, and window callbacks.
-5. Initialize notification and toast managers.
+5. Open the durable message center and install its isolated-page bridge, then initialize notification and toast managers; queued Banners mirror into the center.
 6. Bind the shared HTTP module to UI feedback, then start network monitoring.
 7. Initialize dialog, project, chat, terminal, and workflow modules.
 8. On macOS, install title-bar accessories and Menu vibrancy before `show()` when the native window handle is already available; retry after `show()` if needed. The winit window is created only after the event loop starts, so a first-render hook hides the window and installs native chrome in the same transaction as the first frame. A short poll then keeps retrying installation until the native chrome is confirmed installed, waits a few settle ticks so the effect's first (unblurred) behind-window sample commits and AppKit's post-accessory layout reset is realigned while invisible, re-aligns the traffic lights, then reveals the window; a deadline guarantees the window always appears. The first visible frame is therefore the final shell rather than a staged transition.
@@ -274,6 +282,37 @@ fields, toggles, sections, and detail rows live under
 `ui/components/settings/` and `ui/components/about/` with `GitHub`-prefixed
 symbols. Compact Settings navigation exposes the same section model and
 keyboard interaction as the regular NavList.
+
+### Messages
+
+`usher-messages` stores the newest 1,000 application messages in
+`messages/messages.json` under the platform local-data directory. Publishing
+updates a small in-memory snapshot immediately; one owned worker performs JSON
+persistence and `notify-rust` OS delivery outside the Slint event loop. Native
+delivery failure is non-fatal and leaves the durable application message intact.
+Delivery policy is orthogonal to category and severity: normal events use
+`WhenUnfocused`, explicit in-app events use `Never`, and critical/diagnostic
+events may use `Always`. The shell feeds window activity into the service so a
+focused app does not duplicate its Banner in the OS notification center.
+Read state, individual deletion, and bulk operations publish immutable snapshots;
+the root bridge schedules unread-count and isolated-page model updates on the
+event loop. Transient Banner dismissal never mutates the durable Inbox. See
+[specs/messages.md](specs/messages.md).
+
+The message contract separates ingress `channel` from semantic `category`.
+Built-in keys cover general, Webhook, software-update, and CD-workflow messages,
+but category is an open string vocabulary so a feature can add a category
+without changing the center. Software-update Banners are classified while they
+are mirrored, and completed CD deploy/rollback runs flow through the shared
+Notification manager as categorized messages. UI Components owns a dedicated
+Message center test section that exercises categories and delivery policies.
+
+A future Webhook receiver belongs in a separate ingress adapter that authenticates
+and normalizes provider payloads into `MessageDraft`; it does not change storage,
+subscriptions, native delivery, or the Inbox. Channel-scoped external keys make
+provider retries idempotent, while only bounded non-sensitive metadata crosses
+the adapter boundary. No Webhook HTTP listener or provider schema is part of the
+current implementation.
 
 ### Projects
 

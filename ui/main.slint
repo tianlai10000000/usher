@@ -20,7 +20,7 @@ import { TransientOverlayState } from "./state/transient_overlay_state.slint";
 import { TooltipOverlayState } from "./state/tooltip_overlay_state.slint";
 import { GitHubTooltipOverlayHost } from "./components/github_tooltip_overlay.slint";
 import { GitHubBreadcrumb } from "./components/navigation/github_breadcrumb.slint";
-import { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
+import { NotificationManager, Notification, NotificationType, NotificationDelivery } from "./components/notify/notification.slint";
 import { NotificationIcons } from "./components/notify/icons.slint";
 import { GitHubNotificationItem } from "./components/notify/notification_item.slint";
 import { GitHubToast } from "./components/toast/toast.slint";
@@ -42,7 +42,7 @@ export { AppState } from "./state/app_state.slint";
 export { DebugLogger } from "./state/debug_logger.slint";
 export { TransientOverlayState } from "./state/transient_overlay_state.slint";
 export { TooltipOverlayState } from "./state/tooltip_overlay_state.slint";
-export { NotificationManager, Notification, NotificationType } from "./components/notify/notification.slint";
+export { NotificationManager, Notification, NotificationType, NotificationDelivery } from "./components/notify/notification.slint";
 export { NotificationIcons } from "./components/notify/icons.slint";
 export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
 export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
@@ -74,6 +74,10 @@ export component MainWindow inherits Window {
         : transparent;
     in-out property <bool> window-live-resizing: false;
     in-out property <bool> native-window-active: true;
+    callback message-window-activity-changed(bool);
+    changed native-window-active => {
+        root.message-window-activity-changed(root.native-window-active);
+    }
     in-out property <bool> native-sidebar-vibrancy-ready: false;
     // Display-only labels come from the Rust shortcut registry so tooltips and
     // executable bindings cannot drift apart.
@@ -310,6 +314,23 @@ export component MainWindow inherits Window {
     callback settings-update-checking-changed(bool);
     changed settings-update-checking => {
         root.settings-update-checking-changed(root.settings-update-checking);
+    }
+    in property <component-factory> messages-page-factory;
+    in-out property <int> message-unread-count: 0;
+    out property <length> messages-page-viewport-width: page-stack.width;
+    out property <length> messages-page-viewport-height: page-stack.height + 4px;
+    callback messages-page-viewport-changed(length, length);
+    changed messages-page-viewport-width => {
+        root.messages-page-viewport-changed(
+            root.messages-page-viewport-width,
+            root.messages-page-viewport-height
+        );
+    }
+    changed messages-page-viewport-height => {
+        root.messages-page-viewport-changed(
+            root.messages-page-viewport-width,
+            root.messages-page-viewport-height
+        );
     }
     in property <bool> platform-is-macos: false;
     in property <image> navigation-home-icon: @image-url("./assets/icons/lucide-sidebar-home.svg");
@@ -817,6 +838,7 @@ export component MainWindow inherits Window {
                     page-scroll-view := GitHubScrollView {
                         visible: root.show-page-scroll-view
                             && root.current-route != Route.Settings
+                            && root.current-route != Route.Messages
                             && !(root.shell-drawer-docked-route
                                 && root.shell-drawer-visible
                                 && root.shell-drawer-fullscreen);
@@ -1046,6 +1068,16 @@ export component MainWindow inherits Window {
                         width: root.settings-page-viewport-width;
                         height: root.settings-page-viewport-height;
                         component-factory: root.settings-page-factory;
+                    }
+
+                    // The notification inbox is independently generated and
+                    // owns its viewport, matching the Settings package boundary.
+                    if root.current-route == Route.Messages && root.show-page-scroll-view: ComponentContainer {
+                        x: 0px;
+                        y: 0px;
+                        width: root.messages-page-viewport-width;
+                        height: root.messages-page-viewport-height;
+                        component-factory: root.messages-page-factory;
                     }
 
                     breadcrumb-host := Rectangle {
@@ -1433,6 +1465,9 @@ export component MainWindow inherits Window {
         shortcut-initialization-progress: root.shortcut-initialization-progress;
         shortcut-initialization-status: root.shortcut-initialization-status;
         shortcut-initialization-detail: root.shortcut-initialization-detail;
+        unread-message-count: root.message-unread-count;
+        messages-route-active: root.current-route == Route.Messages;
+        open-messages => { root.navigate(Route.Messages); }
         z: 600;
     }
 
@@ -1933,9 +1968,12 @@ export component MainWindow inherits Window {
         }
     }
     
-    // Primer recommends one Banner at a time. Keep the queue in the manager,
-    // but render only its head; dismissing it reveals the next notification.
-    if NotificationManager.queue.length > 0: Rectangle {
+    // Keep one transient notification overlay visible at a time. The manager
+    // retains the queue; dismissing its head reveals the next notification.
+    // The Inbox row is already the durable presentation when this route is
+    // visible. Suppress the transient overlay there to avoid duplicate visual
+    // feedback for the same event.
+    if NotificationManager.queue.length > 0 && root.current-route != Route.Messages: Rectangle {
         x: root.width - self.width - GitHubMetrics.size-16;
         y: GitHubMetrics.size-16;
         width: min(400px, root.width - GitHubMetrics.size-32);

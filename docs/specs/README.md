@@ -16,6 +16,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 | [Application keyboard shortcuts](shortcuts.md) | Current / 当前 | `src/shortcuts/`, `ui/main.slint`, `src/platform/` |
 | [Application status bar](status-bar.md) | Current / 当前 | `ui/components/status_bar.slint`, `ui/main.slint`, shortcut/notification/network/update state owners |
+| [Application message center](messages.md) | Current / 当前 | `crates/usher-messages/`, `src/message_center.rs`, `src/notification.rs`, message/status UI |
 | [GitHub/Primer UI design](ui-design.md) | Current / 当前 | `ui/theme/github_theme.slint`, `ui/`, `ui/assets/icons/`, all UI contributors |
 
 The UI design specification defines `GitHub*` component naming,

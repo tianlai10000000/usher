@@ -1,9 +1,13 @@
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 
 // Shared compact Primer SegmentedControl shell.
+// Width hugs the segment row. Do not let the outer chrome grow past the items
+// or trailing empty hit-space appears after the last segment.
 export component GitHubSegmentedControl inherits Rectangle {
     in property <string> group-label;
 
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
     width: segments.preferred-width;
     height: GitHubMetrics.control-small-size;
     border-radius: GitHubMetrics.radius-medium;
@@ -11,42 +15,51 @@ export component GitHubSegmentedControl inherits Rectangle {
     border-color: GitHubTheme.border-default;
     background: GitHubTheme.canvas-default;
     clip: true;
-    vertical-stretch: 0;
     accessible-role: list;
     accessible-label: root.group-label;
 
     segments := HorizontalLayout {
+        width: self.preferred-width;
         height: parent.height;
         spacing: 0px;
         alignment: start;
+        horizontal-stretch: 0;
         @children
     }
 }
 
 export component GitHubSegmentedControlItem inherits FocusScope {
+    // Static caption. Prefer `count` for live numeric suffixes — concatenating
+    // the number into `label` at the call site can freeze inside independently
+    // compiled ComponentFactory pages after the first paint.
     in property <string> label;
+    in property <int> count: -1;
     in property <bool> selected: false;
     in property <bool> item-enabled: true;
     callback clicked();
 
+    private property <string> display-label: root.count < 0
+        ? root.label
+        : root.label + " (" + root.count + ")";
     private property <bool> keyboard-focus-visible: false;
     private property <length> segment-width:
         max(GitHubMetrics.size-48 + GitHubMetrics.size-8,
             label-measure.preferred-width + GitHubMetrics.size-24);
 
+    horizontal-stretch: 0;
     width: root.segment-width;
     height: GitHubMetrics.control-small-size;
     vertical-stretch: 0;
     opacity: root.item-enabled ? 1 : 0.55;
     accessible-role: button;
     accessible-enabled: root.item-enabled;
-    accessible-label: root.label;
+    accessible-label: root.display-label;
     accessible-checkable: true;
     accessible-checked: root.selected;
 
     key-pressed(event) => {
         root.keyboard-focus-visible = true;
-        if (root.item-enabled && !root.selected
+        if (root.item-enabled
                 && (event.text == Key.Return || event.text == " ")) {
             root.clicked();
             return accept;
@@ -62,7 +75,7 @@ export component GitHubSegmentedControlItem inherits FocusScope {
 
     label-measure := Text {
         visible: false;
-        text: root.label;
+        text: root.display-label;
         font-size: GitHubMetrics.text-small;
         // Reserve the selected-state weight for every item. Switching the
         // visible label to semibold must never move dividers or resize the
@@ -99,7 +112,7 @@ export component GitHubSegmentedControlItem inherits FocusScope {
     Text {
         width: parent.width;
         height: parent.height;
-        text: root.label;
+        text: root.display-label;
         font-size: GitHubMetrics.text-small;
         font-weight: root.selected ? 600 : 400;
         color: GitHubTheme.fg-default;
@@ -116,14 +129,13 @@ export component GitHubSegmentedControlItem inherits FocusScope {
         clicked => {
             root.keyboard-focus-visible = false;
             root.focus();
-            if !root.selected {
-                root.clicked();
-            }
+            root.clicked();
         }
     }
 }
 
 export component GitHubSegmentedControlDivider inherits Rectangle {
+    horizontal-stretch: 0;
     width: GitHubMetrics.border-thin;
     height: GitHubMetrics.control-small-size;
     background: GitHubTheme.border-default;
