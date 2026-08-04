@@ -21,8 +21,10 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   tips that match `GitHubIconButton`: below the action, trailing-aligned, and
   separated by `overlay-offset`. Rows keep `clip: false` so those tips are not
   cropped onto the button. The Inbox intentionally bypasses the shared tooltip
-  portal. Filter tab badges bind to integer `count` inputs on
-  `GitHubSegmentedControlItem` rather than call-site string concatenation.
+  portal.   Filter tab badges bind to integer `count` inputs on
+  `GitHubSegmentedControlItem` (rendered as separate Text nodes, not one
+  concatenated caption). The page header status sentence is a complete string
+  pushed from Rust on each snapshot for the same ComponentFactory freeze reason.
 - `src/notification.rs` continues to own transient queued Banners and mirrors
   every created application notification into the durable message center.
 - `ui/components/messages/github_message_components.slint` owns reusable Inbox
@@ -37,7 +39,9 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   行动作使用写死 SVG；tip 在按钮上本地绘制，与 `GitHubIconButton` 一致（下方、
   尾对齐、`overlay-offset` 间距）。行保持 `clip: false`，避免 tip 被裁进按钮。
   Inbox 特意绕过共享 tooltip 门户。筛选 Tab 徽标绑定
-  `GitHubSegmentedControlItem` 的整型 `count`，禁止在调用方拼接数量字符串。
+  `GitHubSegmentedControlItem` 的整型 `count`（控件内用独立 Text 节点渲染，
+  禁止拼成单一字符串）。页头状态句由 Rust 在每次快照中下发完整字符串，原因
+  同为 ComponentFactory 页面上动态字符串拼接会在首次绘制后冻结。
 - `src/notification.rs` 继续负责短时排队 Banner，并把每条应用通知镜像到持久消息中心。
 - `ui/components/messages/github_message_components.slint` 负责可复用 Inbox 行视觉，
   并登记到 UI Components 演练场。
@@ -134,7 +138,9 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 - A row activation marks an unread message read before forwarding an optional
   target. Target routing remains feature-owned and absent targets are valid.
 - Read state and deletions persist. Closing a transient Banner does not mark its
-  durable message read or delete it.
+  durable message read or delete it. Deleting or clearing an Inbox message removes
+  any still-queued Banner linked by `message-id`; Clear all therefore clears the
+  mirrored Banner queue as well.
 - The transient top-right notification uses a neutral overlay canvas, neutral
   border, shadow, semantic icon, and narrow semantic accent. It is suppressed on
   `Route.Messages`, where the durable Inbox row is already visible, so one event
@@ -154,6 +160,8 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 - 每行展示分类标签；原始分类键保留在行模型中，未来增加分类筛选无需迁移存储。
 - 激活未读行时先标记已读，再转发可选目标；目标路由仍由 Feature 持有，无目标合法。
 - 已读与删除状态都持久化；关闭短时 Banner 不得把对应持久消息标记已读或删除。
+  删除或清空 Inbox 消息时，按 `message-id` 移除仍排队的对应 Banner；Clear all
+  因此也会清掉已镜像的 Banner 队列。
 - 右上角短时通知使用中性浮层表面、中性边框、阴影、语义图标与窄语义强调线；在
   `Route.Messages` 中不显示该浮层，因为持久 Inbox 行已经可见，避免同一事件同时表现
   为两块竞争注意力的蓝色表面。
@@ -168,6 +176,10 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   permission is granted), durable Inbox row, and unread badge.
 - Restart and verify messages/read state reload newest-first.
 - Exercise All/Unread/Read, individual toggle/delete, Mark all, and two-step Clear all.
+- Clear all, publish again from UI Components, reopen Messages, and verify tab
+  badges plus the header status sentence match the new unread/total counts.
+- From a non-Messages route, publish a permanent Banner, delete or Clear all its
+  Inbox row, leave Messages, and verify the Banner is gone from the queue.
 - Mark several non-adjacent rows read in All and verify their relative order and
   scroll position remain stable; filtered-out rows must leave no layout gaps.
 - Verify 0, 1, 99, and 100 unread badge states at 800 px and wide widths.
@@ -185,6 +197,10 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 - 从非消息页面发布，检查 Banner、系统通知（已授权时）、持久 Inbox 行和未读徽标。
 - 重启后检查消息/已读状态按最新优先恢复。
 - 检查 All/Unread/Read、单条切换/删除、全部已读和两步 Clear all。
+- 清空后从 UI Components 再发布，重新打开 Messages，确认 Tab 徽标与页头状态句
+  与新的未读/总数一致。
+- 在非 Messages 路由发布一条常驻 Banner，删除或 Clear all 对应 Inbox 行后离开
+  Messages，确认 Banner 已从队列消失。
 - 在 All 中把多条不相邻消息标记为已读，确认相对顺序与滚动位置稳定，筛掉的行不留下空白。
 - 在 800px 与宽屏检查未读数 0、1、99、100。
 - 展开停靠侧栏后，确认页头操作换行到筛选器上方，且 Blankslate 文本不超出内容区。

@@ -225,8 +225,34 @@ impl MessageCenter {
             true
         })?;
         if let Some(existing) = duplicate {
+            log::info!(
+                "[Messages] publish deduped id={} channel={} key={:?} title={:?} total={} unread={} read_flags={}",
+                existing.id,
+                existing.channel,
+                existing.deduplication_key,
+                existing.title,
+                snapshot.messages.len(),
+                snapshot.unread_count,
+                snapshot.messages.iter().filter(|item| item.read).count()
+            );
             return Ok(existing);
         }
+        let read_flags = snapshot.messages.iter().filter(|item| item.read).count();
+        log::info!(
+            "[Messages] publish added id={} source={} category={} channel={} severity={:?} native={:?} title={:?} body_chars={} total={} unread={} read_flags={} app_active={}",
+            message.id,
+            message.source,
+            message.category,
+            message.channel,
+            message.severity,
+            native_delivery,
+            message.title,
+            message.body.chars().count(),
+            snapshot.messages.len(),
+            snapshot.unread_count,
+            read_flags,
+            self.application_active()
+        );
         if native_delivery.should_deliver(self.application_active()) {
             self.send_worker(WorkerCommand::Notify(message.clone()))?;
         }

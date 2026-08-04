@@ -29,18 +29,18 @@ export component GitHubSegmentedControl inherits Rectangle {
 }
 
 export component GitHubSegmentedControlItem inherits FocusScope {
-    // Static caption. Prefer `count` for live numeric suffixes — concatenating
-    // the number into `label` at the call site can freeze inside independently
-    // compiled ComponentFactory pages after the first paint.
+    // Static caption. Prefer `count` for live numeric suffixes.
+    // Never concatenate the changing number into a single string property —
+    // that binding freezes after the first paint on independently compiled
+    // ComponentFactory pages. Render label / "(" / count / ")" as separate
+    // Text nodes so the integer can update on its own.
     in property <string> label;
     in property <int> count: -1;
     in property <bool> selected: false;
     in property <bool> item-enabled: true;
     callback clicked();
 
-    private property <string> display-label: root.count < 0
-        ? root.label
-        : root.label + " (" + root.count + ")";
+    private property <bool> show-count: root.count >= 0;
     private property <bool> keyboard-focus-visible: false;
     private property <length> segment-width:
         max(GitHubMetrics.size-48 + GitHubMetrics.size-8,
@@ -53,7 +53,8 @@ export component GitHubSegmentedControlItem inherits FocusScope {
     opacity: root.item-enabled ? 1 : 0.55;
     accessible-role: button;
     accessible-enabled: root.item-enabled;
-    accessible-label: root.display-label;
+    // Keep a11y on the static caption; the visible count updates separately.
+    accessible-label: root.label;
     accessible-checkable: true;
     accessible-checked: root.selected;
 
@@ -73,15 +74,36 @@ export component GitHubSegmentedControlItem inherits FocusScope {
         root.keyboard-focus-visible = false;
     }
 
-    label-measure := Text {
+    // Invisible measure row reserves selected-state weight so divider
+    // positions stay stable when selection toggles font-weight.
+    label-measure := HorizontalLayout {
         visible: false;
-        text: root.display-label;
-        font-size: GitHubMetrics.text-small;
-        // Reserve the selected-state weight for every item. Switching the
-        // visible label to semibold must never move dividers or resize the
-        // control.
-        font-weight: 600;
-        wrap: no-wrap;
+        spacing: 0px;
+        alignment: start;
+        Text {
+            text: root.label;
+            font-size: GitHubMetrics.text-small;
+            font-weight: 600;
+            wrap: no-wrap;
+        }
+        if root.show-count: Text {
+            text: " (";
+            font-size: GitHubMetrics.text-small;
+            font-weight: 600;
+            wrap: no-wrap;
+        }
+        if root.show-count: Text {
+            text: root.count;
+            font-size: GitHubMetrics.text-small;
+            font-weight: 600;
+            wrap: no-wrap;
+        }
+        if root.show-count: Text {
+            text: ")";
+            font-size: GitHubMetrics.text-small;
+            font-weight: 600;
+            wrap: no-wrap;
+        }
     }
 
     Rectangle {
@@ -109,16 +131,45 @@ export component GitHubSegmentedControlItem inherits FocusScope {
         background: transparent;
     }
 
-    Text {
+    HorizontalLayout {
         width: parent.width;
         height: parent.height;
-        text: root.display-label;
-        font-size: GitHubMetrics.text-small;
-        font-weight: root.selected ? 600 : 400;
-        color: GitHubTheme.fg-default;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        overflow: elide;
+        spacing: 0px;
+        alignment: center;
+
+        Text {
+            text: root.label;
+            font-size: GitHubMetrics.text-small;
+            font-weight: root.selected ? 600 : 400;
+            color: GitHubTheme.fg-default;
+            vertical-alignment: center;
+            wrap: no-wrap;
+            overflow: elide;
+        }
+        if root.show-count: Text {
+            text: " (";
+            font-size: GitHubMetrics.text-small;
+            font-weight: root.selected ? 600 : 400;
+            color: GitHubTheme.fg-default;
+            vertical-alignment: center;
+            wrap: no-wrap;
+        }
+        if root.show-count: Text {
+            text: root.count;
+            font-size: GitHubMetrics.text-small;
+            font-weight: root.selected ? 600 : 400;
+            color: GitHubTheme.fg-default;
+            vertical-alignment: center;
+            wrap: no-wrap;
+        }
+        if root.show-count: Text {
+            text: ")";
+            font-size: GitHubMetrics.text-small;
+            font-weight: root.selected ? 600 : 400;
+            color: GitHubTheme.fg-default;
+            vertical-alignment: center;
+            wrap: no-wrap;
+        }
     }
 
     segment-touch := TouchArea {

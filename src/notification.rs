@@ -1,8 +1,8 @@
 use slint::{ComponentHandle, Global, Model, ModelRc, SharedVector, Timer, VecModel, Weak};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{
-    Arc, RwLock,
+    Arc, Mutex, RwLock,
     atomic::{AtomicI32, Ordering},
 };
 use std::time::Duration;
@@ -12,7 +12,14 @@ use crate::{
     MainWindow, Notification, NotificationDelivery, NotificationIcons, NotificationManager,
     NotificationOptions, NotificationType, UpdateLogic,
 };
-use usher_messages::{MessageCenter, MessageDraft, MessageSeverity, NativeDelivery, categories};
+use usher_messages::{
+    MessageCenter, MessageDraft, MessageSeverity, NativeDelivery, Subscription, categories,
+};
+
+lazy_static::lazy_static! {
+    // Keeps the Inbox→Banner reconciliation subscription alive for the process.
+    static ref BANNER_MESSAGE_SYNC: Mutex<Option<Subscription>> = Mutex::new(None);
+}
 
 // Global counter for generating unique IDs
 static NOTIFICATION_ID_COUNTER: AtomicI32 = AtomicI32::new(0);
@@ -172,6 +179,7 @@ fn create_notification_with_defaults(
 
     Notification {
         id: next_notification_id(),
+        message_id: Default::default(),
         title: options.title.clone(), // title directly uses user-provided value, empty string means no title
         message: final_message,
         r#type: notification_type,
@@ -194,10 +202,14 @@ pub struct SharedQueue(pub SharedVector<Notification>);
 // Helper function: add notification to queue
 fn push_notification(
     manager: &NotificationManager,
-    notification: Notification,
+    mut notification: Notification,
     shared_queue: &Option<Arc<RwLock<SharedQueue>>>,
     message_center: &MessageCenter,
 ) {
+    if let Some(message_id) = record_message(message_center, &notification) {
+        notification.message_id = message_id.into();
+    }
+
     // First collect all data into a Vec, avoid holding queue_model borrow
     let mut items = Vec::new();
     {
@@ -224,11 +236,9 @@ fn push_notification(
             q.0.push(notification.clone());
         }
     }
-
-    record_message(message_center, &notification);
 }
 
-fn record_message(message_center: &MessageCenter, notification: &Notification) {
+fn record_message(message_center: &MessageCenter, notification: &Notification) -> Option<String> {
     let severity = match notification.r#type {
         NotificationType::Info => MessageSeverity::Info,
         NotificationType::Success => MessageSeverity::Success,
@@ -251,15 +261,57 @@ fn record_message(message_center: &MessageCenter, notification: &Notification) {
         NotificationDelivery::Never => NativeDelivery::Never,
         NotificationDelivery::Always => NativeDelivery::Always,
     };
-    if let Err(error) = message_center.publish(
+    match message_center.publish(
         MessageDraft::new(title, notification.message.as_str())
             .source(notification.source.as_str())
             .category(notification.category.as_str())
             .severity(severity)
             .native_delivery(native_delivery),
     ) {
-        log::error!("[Messages] Failed to record application notification: {error}");
+        Ok(message) => Some(message.id),
+        Err(error) => {
+            log::error!("[Messages] Failed to record application notification: {error}");
+            None
+        }
     }
+}
+
+/// Drops queued banners whose durable Inbox rows were deleted or cleared.
+/// Must run on the Slint event loop. Only Send data (alive ids) may cross
+/// `invoke_from_event_loop` — the banner queue holds non-Send `Image` handles.
+fn prune_banners_for_alive_messages(manager: &NotificationManager, alive: &HashSet<String>) {
+    let mut kept = Vec::new();
+    let mut removed = 0usize;
+    {
+        let queue_model: ModelRc<Notification> = manager.get_queue();
+        for index in 0..queue_model.row_count() {
+            let Some(item) = queue_model.row_data(index) else {
+                continue;
+            };
+            let message_id = item.message_id.as_str();
+            if !message_id.is_empty() && !alive.contains(message_id) {
+                removed += 1;
+                if let Ok(mut state) = HOVER_STATE.write() {
+                    state.remove(&item.id);
+                }
+                continue;
+            }
+            kept.push(item);
+        }
+    }
+    if removed == 0 {
+        return;
+    }
+
+    log::info!(
+        "[Messages] pruned {removed} banner(s) after Inbox change; remaining={}",
+        kept.len()
+    );
+    let new_vec = VecModel::default();
+    for item in kept {
+        new_vec.push(item);
+    }
+    manager.set_queue(ModelRc::new(new_vec));
 }
 
 // Helper function: remove notification by notification ID (exact match, avoid index misalignment issues)
@@ -681,33 +733,12 @@ pub fn setup_notifications(
 
         if let Some(ui) = ui_weak.upgrade() {
             let manager = NotificationManager::get(&ui);
-            // First collect all data into a Vec, avoid holding queue_model borrow
-            let mut items = Vec::new();
-            {
-                let queue_model: ModelRc<Notification> = manager.get_queue();
-                let row_count = queue_model.row_count();
-                for i in 0..row_count {
-                    if let Some(item) = queue_model.row_data(i) {
-                        items.push(item);
-                    }
-                }
-            } // queue_model is dropped here, releasing all borrows
-            // Create new VecModel, copy existing elements and add new element
-            let new_vec = VecModel::default();
-            for item in items {
-                new_vec.push(item);
-            }
-            new_vec.push(notification.clone());
-            manager.set_queue(ModelRc::new(new_vec));
-
-            // Optional: update shared queue
-            if let Some(queue) = &shared_queue {
-                if let Ok(mut q) = queue.write() {
-                    q.0.push(notification.clone());
-                }
-            }
-
-            record_message(&message_center_push, &notification);
+            push_notification(
+                &manager,
+                notification.clone(),
+                &shared_queue,
+                &message_center_push,
+            );
 
             // Auto-close timer (supports hover pause)
             if notification.duration > 0 {
@@ -981,4 +1012,29 @@ pub fn setup_notifications(
             });
         }
     });
+
+    // Inbox delete/clear is authoritative for mirrored banners. Closing a banner
+    // still never deletes the durable message (handled only in dismiss paths).
+    // Clone before later callbacks move `ui_weak`.
+    let ui_weak_sync = ui.as_weak();
+    let subscription = message_center.subscribe(Arc::new(move |snapshot| {
+        let ui_weak = ui_weak_sync.clone();
+        let alive = snapshot
+            .messages
+            .iter()
+            .map(|message| message.id.clone())
+            .collect::<HashSet<_>>();
+        if let Err(error) = slint::invoke_from_event_loop(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let manager = NotificationManager::get(&ui);
+            prune_banners_for_alive_messages(&manager, &alive);
+        }) {
+            log::debug!("[Messages] Banner sync dropped during shutdown: {error}");
+        }
+    }));
+    if let Ok(mut guard) = BANNER_MESSAGE_SYNC.lock() {
+        *guard = Some(subscription);
+    }
 }

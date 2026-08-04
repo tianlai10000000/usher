@@ -22,6 +22,10 @@ export enum CustomComponentType {
 
 export struct Notification {
     id: int,               // 唯一标识符，用于精确删除
+    // Durable Inbox message id mirrored for this banner. Empty when the banner
+    // was not recorded in the message center. Inbox delete/clear drops matching
+    // queued banners via this link; closing a banner never deletes the message.
+    message-id: string,
     title: string,         // 标题（可选，参考 Vuetify Alert）
     message: string,       // 消息内容
     type: NotificationType,

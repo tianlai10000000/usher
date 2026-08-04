@@ -462,11 +462,12 @@ expanded/collapsed, and success confirmation.
   choice group. The shell width hugs the segment row with no trailing empty
   chrome. Items own selected, hover, disabled, Enter/Space, and
   keyboard-visible focus states, and always report `clicked` (callers may
-  ignore a re-selection). Live numeric suffixes use the item's integer `count`
-  input (`label` + `" (N)"` inside the item). Call sites must not concatenate
-  changing numbers into the `label` string — that binding can freeze after the
-  first paint on independently compiled ComponentFactory pages. Groups expose
-  an accessible contextual label and contain 2–5 concise non-wrapping labels.
+  ignore a re-selection).   Live numeric suffixes use the item's integer `count` input. The item renders
+  `label`, `" ("`, the integer, and `")"` as separate `Text` nodes — never as one
+  concatenated string property. Call sites must not concatenate changing numbers
+  into `label` either; both forms can freeze after the first paint on
+  independently compiled ComponentFactory pages. Groups expose an accessible
+  contextual label and contain 2–5 concise non-wrapping labels.
   Selection may change text weight or color, but measuring always reserves the
   selected weight so divider positions stay stable for a given label/count.
 - `GitHubScrollView`: the application-owned mounted viewport and semantic

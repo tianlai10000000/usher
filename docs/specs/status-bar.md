@@ -28,7 +28,8 @@ surface.
 - `crates/usher-messages/` owns durable messages and unread count;
   `src/message_center.rs` projects that count into `ui/main.slint`.
 - `src/notification.rs` and `NotificationManager` own only the transient Banner
-  queue and must not drive the status badge.
+  queue and must not drive the status badge. Inbox delete/clear may prune
+  mirrored Banners by `message-id` without changing the badge source.
 - `src/network.rs` owns the connectivity probe and publishes
   `AppState.network-online`.
 - `AppState.version` is the single displayed application version value.
@@ -47,7 +48,7 @@ surface.
 - `crates/usher-messages/` 持有持久消息与未读数，`src/message_center.rs` 把计数
   投影到 `ui/main.slint`。
 - `src/notification.rs` 与 `NotificationManager` 只持有短时 Banner 队列，不得驱动
-  状态徽标。
+  状态徽标。Inbox 删除/清空可按 `message-id` 裁剪已镜像 Banner，但不改变徽标数据源。
 - `src/network.rs` 持有网络探测并发布 `AppState.network-online`。
 - `AppState.version` 是唯一的应用版本展示值。
 - 更新/下载状态仍由 Updater 持有，状态栏只负责展示。

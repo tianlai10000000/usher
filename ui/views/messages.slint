@@ -28,6 +28,9 @@ export component GitHubMessagesPage inherits Rectangle {
     in property <int> total-count: 0;
     in property <int> unread-count: 0;
     in property <int> read-count: 0;
+    // Complete status sentence from Rust. Do not build this with unread-count
+    // string concat here — that freezes after first paint on this factory page.
+    in property <string> status-description: "You're all caught up.";
     callback set-read(string, bool);
     callback mark-all-read();
     callback delete-message(string);
@@ -86,9 +89,7 @@ export component GitHubMessagesPage inherits Rectangle {
                 y: GitHubMetrics.size-16;
                 width: parent.width;
                 title: "Notifications";
-                description: root.unread-count == 0
-                    ? "You're all caught up."
-                    : root.unread-count + " unread notification" + (root.unread-count == 1 ? "" : "s");
+                description: root.status-description;
                 leading-icon: @image-url("../assets/icons/octicon-inbox-16.svg");
                 large-title: true;
                 actions-width: root.compact-actions ? 0px : header-actions.width;
