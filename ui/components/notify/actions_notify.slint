@@ -75,6 +75,13 @@ export component GitHubNotificationBanner inherits Rectangle {
     background: transparent;
     clip: false;
 
+    // The root overlay reuses this Banner instance while replacing queue[0].
+    // Menu state belongs to one visible notification, so never carry it into
+    // the next head item when the bound notification id changes.
+    changed notification-id => {
+        root.queue-menu-open = false;
+    }
+
     // Root-mounted Banner ActionMenu follows the readiness contract: Escape,
     // chrome dismiss-revision, and peer exclusive-claim live on ActionMenu.
     // Do not paint a full-window scrim here — at Notify's root z it would sit
@@ -103,6 +110,17 @@ export component GitHubNotificationBanner inherits Rectangle {
             height: parent.height;
             background: root.semantic-foreground;
         }
+    }
+
+    // A click on the Banner surface is an outside click relative to its
+    // ActionMenu. Keep this hit target behind every real Banner control so
+    // Later/Install, close, and the kebab retain their normal behavior.
+    menu-card-dismiss-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.queue-menu-open;
+        mouse-cursor: default;
+        clicked => { root.queue-menu-open = false; }
     }
 
     banner-content := VerticalLayout {
@@ -260,11 +278,14 @@ export component GitHubNotificationBanner inherits Rectangle {
         viewport-y: root.menu-viewport-y;
         viewport-width: root.menu-viewport-width;
         viewport-height: root.menu-viewport-height;
-        // Match the footer kebab; end-align so the menu sits under the trigger.
+        // Match the footer kebab horizontally, but anchor vertically to the
+        // complete card edge. Anchoring to the inset 24px trigger made the
+        // menu overlap the footer instead of sitting cleanly below the Banner.
         anchor-x: root.width - 30px;
-        anchor-y: root.height - root.footer-height + 2px;
+        anchor-y: root.height;
         anchor-width: 24px;
-        anchor-height: 24px;
+        anchor-height: 0px;
+        anchor-gap: 6px;
         menu-width: 224px;
         content-height: 80px;
         align: "end";
@@ -307,6 +328,12 @@ export component GitHubNotificationBanner inherits Rectangle {
         tooltip-align-right: true;
         tooltip-above: false;
         foreground: root.muted-foreground;
-        clicked => { root.close-clicked(); }
+        clicked => {
+            // Dismissal keeps the old queue row mounted for its exit animation.
+            // Close the menu immediately instead of letting it outlive the card
+            // or leak into the next queue head during that delay.
+            root.queue-menu-open = false;
+            root.close-clicked();
+        }
     }
 }

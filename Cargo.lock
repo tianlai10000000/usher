@@ -7415,7 +7415,12 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+ "usher-state-store",
 ]
+
+[[package]]
+name = "usher-state-store"
+version = "0.0.8-alpha.1"
 
 [[package]]
 name = "usher-ui"

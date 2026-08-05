@@ -134,6 +134,10 @@ export component MainWindow inherits Window {
         : 0px;
     private property <bool> page-memory-diag-pending: false;
     private property <bool> page-scroll-reset-pending: false;
+    // Latch after the first Inbox visit. The cross-crate factory shell is
+    // created lazily and never remounted; its potentially large row model is
+    // released separately while the route is hidden.
+    private property <bool> messages-page-ever-opened: false;
     private property <bool> sidebar-preview-visible: false;
     private property <bool> sidebar-preview-dismiss-pending: false;
     // Codex drives the docked sidebar from one interruptible Motion value. Keep
@@ -317,9 +321,15 @@ export component MainWindow inherits Window {
     }
     in property <component-factory> messages-page-factory;
     in-out property <int> message-unread-count: 0;
+    out property <bool> messages-page-active:
+        root.current-route == Route.Messages && root.show-page-scroll-view;
     out property <length> messages-page-viewport-width: page-stack.width;
     out property <length> messages-page-viewport-height: page-stack.height + 4px;
     callback messages-page-viewport-changed(length, length);
+    callback messages-page-active-changed(bool);
+    changed messages-page-active => {
+        root.messages-page-active-changed(root.messages-page-active);
+    }
     changed messages-page-viewport-width => {
         root.messages-page-viewport-changed(
             root.messages-page-viewport-width,
@@ -628,6 +638,9 @@ export component MainWindow inherits Window {
         root.workflow-pr-readiness-popup-open = false;
         if root.current-route == Route.Settings {
             page-scroll-view.viewport_x = 0px;
+        }
+        if root.current-route == Route.Messages {
+            root.messages-page-ever-opened = true;
         }
         page-scroll-view.viewport_y = 0px;
         root.page-scroll-reset-pending = true;
@@ -1070,14 +1083,24 @@ export component MainWindow inherits Window {
                         component-factory: root.settings-page-factory;
                     }
 
-                    // The notification inbox is independently generated and
-                    // owns its viewport, matching the Settings package boundary.
-                    if root.current-route == Route.Messages && root.show-page-scroll-view: ComponentContainer {
+                    // Lazily create one stable cross-crate factory shell. The
+                    // page releases its message model while hidden, so only
+                    // the small static page/factory shell survives;
+                    // reopening rehydrates it from the current Rust snapshot.
+                    if root.messages-page-ever-opened: messages-page-host := Rectangle {
                         x: 0px;
                         y: 0px;
                         width: root.messages-page-viewport-width;
                         height: root.messages-page-viewport-height;
-                        component-factory: root.messages-page-factory;
+                        visible: root.messages-page-active;
+                        background: transparent;
+                        clip: true;
+
+                        ComponentContainer {
+                            width: parent.width;
+                            height: parent.height;
+                            component-factory: root.messages-page-factory;
+                        }
                     }
 
                     breadcrumb-host := Rectangle {

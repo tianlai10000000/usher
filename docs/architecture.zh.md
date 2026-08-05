@@ -38,6 +38,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `src/lib.rs` | 导入并重新导出生成的 UI API，创建 `MainWindow`、初始化模块、绑定跨模块 callback，并管理窗口和关闭流程。 |
 | `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum。 |
 | `crates/usher-messages/` | 独立编译的消息中心包：持久领域/存储服务、快照订阅、后台持久化/原生投递 Worker、`notify-rust` OS 适配器及生成的 Inbox 页面 API。可嵌入 Slint 页面使用 library-module 模式编译，不再依赖已废弃的非 Window 根组件兼容路径。 |
+| `crates/usher-state-store/` | 与框架无关的跨页面 State 接口与内置引擎：强类型 reducer/action、不可变 revision 快照、selector、立即 hydration、自动单调订阅与 RAII 取消。Feature 门面隐藏具体引擎，未来可通过 adapter 替换社区 Store。 |
 | `src/app_runtime.rs` | 进程级多线程 Tokio runtime，并为 runtime 线程安装 tracing dispatch。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观（强制浅色/深色，或 Auto 时跟随系统）、标题栏附件、窗口交互通知、用于关闭可消隐临时弹层的原生标题栏点击桥接、macOS PR Review 字体注册、`NSSound` 点击音，以及用于 Auto 实时跟随的 `AppleInterfaceThemeChangedNotification`；`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
@@ -208,6 +209,21 @@ preview 动态 handle；主窗口与 UI Components 路由仍可正常热更新�
 
 后续独立页复用同一清单，按状态种类选择 snapshot、operation 或两者并用；不得假定
 生成 crate 之间共享 Slint global。
+
+### 跨页面自动 State Store
+
+凡是由多个路由、页面、状态展示或后台发布方消费的 State，都必须放在
+`usher-state-store::StateStore` 接口与稳定 Feature 门面之后。强类型 Action 是唯一
+变更入口；有效 reduction 安装带单调 revision 的不可变快照并自动通知订阅者，新
+订阅者立即从当前快照 hydration。订阅者 revision guard 防止延迟回调覆盖更新的 UI
+状态。Slint bridge 仍只是 event-loop adapter，不能成为 Store 引擎。
+
+需要持久化的 Store owner 把持久化注册为非阻塞 commit subscription：每个有效
+revision 按 commit 顺序排队到 Feature Worker 和 shutdown flush；reducer 与 Slint
+event loop 不执行文件 I/O。包括内置 `LocalStateStore` 在内的具体引擎都隐藏在 trait
+之后。未来社区 Redux/Pinia 类库只能以 adapter 方式接入，并保持 Action、Feature
+门面、Schema、revision/hydration 契约和测试不变。详见
+[specs/state-store.md](specs/state-store.md)。
 
 ## 构建产物策略
 

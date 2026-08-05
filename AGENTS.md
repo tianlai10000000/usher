@@ -80,11 +80,15 @@ Keep Usher a responsive desktop application with explicit module ownership, even
 
 ### State and lifecycle / 状态与生命周期
 
+- All state shared by multiple routes/pages/status surfaces/background publishers must use the local `crates/usher-state-store` abstraction and a feature-owned facade. Mutations dispatch typed Actions; changed commits auto-notify subscribers; UI bridges never depend on a concrete Store engine.
+- Durable shared state must attach automatic commit persistence on a worker. Do not scatter manual save calls across action creators or perform persistence/reducer work on the Slint event loop.
 - Scope workflow state by project; never reuse one project's running/log state for another.
 - Preserve terminal content only when reopening the same project; switching project must reset session presentation and working directory.
 - Long operations need cancellation or duplicate-start protection.
 - Keep shutdown registration and priorities intact when adding persistent threads/processes.
 
+- 所有由多个路由/页面/状态展示/后台发布方共享的状态必须使用本地 `crates/usher-state-store` 抽象与 Feature 自有门面。变更统一 dispatch 强类型 Action；有效 commit 自动通知订阅者；UI bridge 禁止依赖具体 Store 引擎。
+- 需要持久化的共享状态必须通过 Worker 挂接自动 commit 持久化，禁止把手工 save 分散到各 Action creator，也禁止在 Slint event loop 执行持久化或 reducer 工作。
 - Workflow 状态必须按项目隔离。
 - 只有同项目重开才保留 Terminal；切换项目必须重置会话展示和 cwd。
 - 长任务必须支持取消或防止重复启动。

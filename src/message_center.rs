@@ -45,6 +45,7 @@ impl MessagePageBridge {
             page.set_viewport_height(window.get_messages_page_viewport_height());
             bind_page_callbacks(&center, &page);
             apply_page_snapshot(&page, center.snapshot());
+            page.set_active(window.get_messages_page_active());
             *page_slot.lock().expect("message page bridge poisoned") = Some(page.as_weak());
             Some(page)
         }));
@@ -55,6 +56,11 @@ impl MessagePageBridge {
                 page.set_viewport_width(width);
                 page.set_viewport_height(height);
             });
+        });
+
+        let bridge = self.clone();
+        window.on_messages_page_active_changed(move |active| {
+            bridge.set_active(active);
         });
 
         let page_slot = self.page.clone();
@@ -72,7 +78,9 @@ impl MessagePageBridge {
                     .ok()
                     .and_then(|page| page.clone())
                     .and_then(|page| page.upgrade());
-                if let Some(page) = page {
+                if let Some(page) = page
+                    && page.get_active()
+                {
                     apply_page_snapshot(&page, snapshot);
                 }
             }) {
@@ -96,6 +104,24 @@ impl MessagePageBridge {
         });
     }
 
+    fn set_active(&self, active: bool) {
+        if active {
+            let snapshot = self.center.snapshot();
+            self.with_page(|page| {
+                // Rehydrate from the authoritative current snapshot before the
+                // conditional page tree is instantiated. Messages published
+                // while another route was visible are therefore included.
+                apply_page_snapshot(page, snapshot);
+                page.set_active(true);
+            });
+        } else {
+            self.with_page(|page| {
+                page.set_active(false);
+                release_page_rows(page);
+            });
+        }
+    }
+
     fn with_page(&self, update: impl FnOnce(&GitHubMessagesPage)) {
         let page = self
             .page
@@ -106,6 +132,15 @@ impl MessagePageBridge {
         if let Some(page) = page {
             update(&page);
         }
+    }
+}
+
+fn release_page_rows(page: &GitHubMessagesPage) {
+    let current = page.get_messages();
+    if let Some(model) = current.as_any().downcast_ref::<VecModel<MessageListItem>>() {
+        model.set_vec(Vec::new());
+    } else {
+        page.set_messages(ModelRc::new(VecModel::default()));
     }
 }
 
@@ -155,7 +190,8 @@ fn sync_theme(window: &MainWindow, page: &GitHubMessagesPage) {
 fn apply_page_snapshot(page: &GitHubMessagesPage, snapshot: MessageSnapshot) {
     let rows = snapshot
         .messages
-        .into_iter()
+        .iter()
+        .cloned()
         .map(|message| MessageListItem {
             id: message.id.into(),
             title: message.title.into(),

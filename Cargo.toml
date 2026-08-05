@@ -8,7 +8,7 @@ license = "LicenseRef-Proprietary"
 publish = false
 
 [workspace]
-members = [".", "crates/usher-messages", "crates/usher-ui", "crates/usher-ui-settings"]
+members = [".", "crates/usher-messages", "crates/usher-state-store", "crates/usher-ui", "crates/usher-ui-settings"]
 default-members = ["."]
 resolver = "3"
 

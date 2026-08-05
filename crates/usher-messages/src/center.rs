@@ -1,10 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 
 use chrono::Utc;
 use std::collections::BTreeMap;
+use usher_state_store::{
+    LocalStateStore, Reduction, StateStore, Subscription as StoreSubscription,
+};
 
 use crate::desktop::{DesktopNotifier, NotifyRustDesktopNotifier};
 use crate::storage::{self, MAX_STORED_MESSAGES};
@@ -48,7 +51,7 @@ impl From<std::io::Error> for MessageCenterError {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessageSnapshot {
-    pub messages: Vec<Message>,
+    pub messages: Arc<[Message]>,
     pub unread_count: usize,
 }
 
@@ -56,7 +59,7 @@ impl MessageSnapshot {
     fn from_messages(messages: Vec<Message>) -> Self {
         let unread_count = messages.iter().filter(|message| !message.read).count();
         Self {
-            messages,
+            messages: messages.into(),
             unread_count,
         }
     }
@@ -67,10 +70,12 @@ pub struct MessageCenter {
     inner: Arc<Inner>,
 }
 
+type MessageStore = dyn StateStore<MessageSnapshot, MessageAction, MessageActionResult>;
+
 struct Inner {
-    messages: RwLock<Vec<Message>>,
-    listeners: Mutex<Vec<(u64, Listener)>>,
-    next_listener_id: AtomicU64,
+    store: Arc<MessageStore>,
+    // Keeps the automatic persistence observer registered for this center.
+    persistence_subscription: Mutex<Option<StoreSubscription>>,
     application_active: AtomicBool,
     worker: Mutex<Option<Worker>>,
 }
@@ -87,21 +92,25 @@ enum WorkerCommand {
     Shutdown(mpsc::Sender<()>),
 }
 
-/// Removes a snapshot listener when dropped.
-pub struct Subscription {
-    inner: std::sync::Weak<Inner>,
-    id: u64,
+/// Closed set of domain mutations accepted by the message store. Public
+/// methods below are typed action creators; only `dispatch` mutates state.
+enum MessageAction {
+    Publish(Message),
+    SetRead { id: String, read: bool },
+    MarkAllRead,
+    Remove { id: String },
+    Clear,
 }
 
-impl Drop for Subscription {
-    fn drop(&mut self) {
-        let Some(inner) = self.inner.upgrade() else {
-            return;
-        };
-        if let Ok(mut listeners) = inner.listeners.lock() {
-            listeners.retain(|(id, _)| *id != self.id);
-        }
-    }
+enum MessageActionResult {
+    Publish { message: Message, inserted: bool },
+    Changed(bool),
+    Count(usize),
+}
+
+/// Removes a snapshot listener when dropped.
+pub struct Subscription {
+    _store_subscription: StoreSubscription,
 }
 
 impl MessageCenter {
@@ -128,11 +137,23 @@ impl MessageCenter {
         messages.sort_by(|left, right| right.created_at.cmp(&left.created_at));
         messages.truncate(MAX_STORED_MESSAGES);
         let worker = Worker::start(path, notifier)?;
+        let store: Arc<MessageStore> = Arc::new(LocalStateStore::new(
+            MessageSnapshot::from_messages(messages),
+            reduce_state,
+        ));
+        let persistence_sender = worker.sender.clone();
+        let persistence_subscription = store.observe_commits(Arc::new(move |snapshot| {
+            if persistence_sender
+                .send(WorkerCommand::Persist(snapshot.state().messages.to_vec()))
+                .is_err()
+            {
+                log::error!("[Messages] State commit could not reach persistence worker");
+            }
+        }));
         Ok(Self {
             inner: Arc::new(Inner {
-                messages: RwLock::new(messages),
-                listeners: Mutex::new(Vec::new()),
-                next_listener_id: AtomicU64::new(1),
+                store,
+                persistence_subscription: Mutex::new(Some(persistence_subscription)),
                 // Unknown activity is treated as foreground. This conservative
                 // default prevents duplicate native + in-app presentation until
                 // the host supplies its first focus state.
@@ -143,23 +164,14 @@ impl MessageCenter {
     }
 
     pub fn snapshot(&self) -> MessageSnapshot {
-        let messages = self
-            .inner
-            .messages
-            .read()
-            .map(|messages| messages.clone())
-            .unwrap_or_default();
-        MessageSnapshot::from_messages(messages)
+        self.inner.store.snapshot().state().clone()
     }
 
     pub fn subscribe(&self, listener: Listener) -> Subscription {
-        let id = self.inner.next_listener_id.fetch_add(1, Ordering::Relaxed);
-        if let Ok(mut listeners) = self.inner.listeners.lock() {
-            listeners.push((id, listener));
-        }
         Subscription {
-            inner: Arc::downgrade(&self.inner),
-            id,
+            _store_subscription: self.inner.store.subscribe(Arc::new(move |snapshot| {
+                listener(snapshot.state().clone());
+            })),
         }
     }
 
@@ -209,33 +221,24 @@ impl MessageCenter {
             metadata: bounded_metadata(draft.metadata),
         };
 
-        let mut duplicate = None;
-        let snapshot = self.mutate(|messages| {
-            if let Some(key) = message.deduplication_key.as_deref()
-                && let Some(existing) = messages.iter().find(|existing| {
-                    existing.channel == message.channel
-                        && existing.deduplication_key.as_deref() == Some(key)
-                })
-            {
-                duplicate = Some(existing.clone());
-                return false;
-            }
-            messages.insert(0, message.clone());
-            messages.truncate(MAX_STORED_MESSAGES);
-            true
-        })?;
-        if let Some(existing) = duplicate {
+        let dispatch = self.inner.store.dispatch(MessageAction::Publish(message));
+        let snapshot = dispatch.snapshot.state().clone();
+        let result = dispatch.output;
+        let MessageActionResult::Publish { message, inserted } = result else {
+            unreachable!("publish action returned a non-publish result");
+        };
+        if !inserted {
             log::info!(
                 "[Messages] publish deduped id={} channel={} key={:?} title={:?} total={} unread={} read_flags={}",
-                existing.id,
-                existing.channel,
-                existing.deduplication_key,
-                existing.title,
+                message.id,
+                message.channel,
+                message.deduplication_key,
+                message.title,
                 snapshot.messages.len(),
                 snapshot.unread_count,
                 snapshot.messages.iter().filter(|item| item.read).count()
             );
-            return Ok(existing);
+            return Ok(message);
         }
         let read_flags = snapshot.messages.iter().filter(|item| item.read).count();
         log::info!(
@@ -256,65 +259,45 @@ impl MessageCenter {
         if native_delivery.should_deliver(self.application_active()) {
             self.send_worker(WorkerCommand::Notify(message.clone()))?;
         }
-        self.publish_snapshot(snapshot);
         Ok(message)
     }
 
     pub fn set_read(&self, id: &str, read: bool) -> Result<bool, MessageCenterError> {
-        let mut changed = false;
-        let snapshot = self.mutate(|messages| {
-            if let Some(message) = messages.iter_mut().find(|message| message.id == id) {
-                changed = message.read != read;
-                message.read = read;
-            }
-            changed
-        })?;
-        if changed {
-            self.publish_snapshot(snapshot);
+        let dispatch = self.inner.store.dispatch(MessageAction::SetRead {
+            id: id.to_string(),
+            read,
+        });
+        match dispatch.output {
+            MessageActionResult::Changed(changed) => Ok(changed),
+            _ => unreachable!("set-read action returned an incompatible result"),
         }
-        Ok(changed)
     }
 
     pub fn mark_all_read(&self) -> Result<usize, MessageCenterError> {
-        let mut changed = 0;
-        let snapshot = self.mutate(|messages| {
-            for message in messages.iter_mut().filter(|message| !message.read) {
-                message.read = true;
-                changed += 1;
-            }
-            changed > 0
-        })?;
-        if changed > 0 {
-            self.publish_snapshot(snapshot);
+        let dispatch = self.inner.store.dispatch(MessageAction::MarkAllRead);
+        match dispatch.output {
+            MessageActionResult::Count(changed) => Ok(changed),
+            _ => unreachable!("mark-all-read action returned an incompatible result"),
         }
-        Ok(changed)
     }
 
     pub fn remove(&self, id: &str) -> Result<bool, MessageCenterError> {
-        let mut changed = false;
-        let snapshot = self.mutate(|messages| {
-            let before = messages.len();
-            messages.retain(|message| message.id != id);
-            changed = messages.len() != before;
-            changed
-        })?;
-        if changed {
-            self.publish_snapshot(snapshot);
+        let dispatch = self
+            .inner
+            .store
+            .dispatch(MessageAction::Remove { id: id.to_string() });
+        match dispatch.output {
+            MessageActionResult::Changed(changed) => Ok(changed),
+            _ => unreachable!("remove action returned an incompatible result"),
         }
-        Ok(changed)
     }
 
     pub fn clear(&self) -> Result<usize, MessageCenterError> {
-        let mut removed = 0;
-        let snapshot = self.mutate(|messages| {
-            removed = messages.len();
-            messages.clear();
-            removed > 0
-        })?;
-        if removed > 0 {
-            self.publish_snapshot(snapshot);
+        let dispatch = self.inner.store.dispatch(MessageAction::Clear);
+        match dispatch.output {
+            MessageActionResult::Count(removed) => Ok(removed),
+            _ => unreachable!("clear action returned an incompatible result"),
         }
-        Ok(removed)
     }
 
     pub fn flush(&self) -> Result<(), MessageCenterError> {
@@ -326,6 +309,13 @@ impl MessageCenter {
     }
 
     pub fn shutdown(&self) {
+        // Drop automatic observers before stopping the worker they target.
+        let _ = self
+            .inner
+            .persistence_subscription
+            .lock()
+            .ok()
+            .and_then(|mut subscription| subscription.take());
         let worker = self
             .inner
             .worker
@@ -343,25 +333,6 @@ impl MessageCenter {
         }
     }
 
-    fn mutate(
-        &self,
-        mutation: impl FnOnce(&mut Vec<Message>) -> bool,
-    ) -> Result<MessageSnapshot, MessageCenterError> {
-        let (snapshot, changed) = {
-            let mut messages = self
-                .inner
-                .messages
-                .write()
-                .map_err(|_| MessageCenterError::WorkerUnavailable)?;
-            let changed = mutation(&mut messages);
-            (MessageSnapshot::from_messages(messages.clone()), changed)
-        };
-        if changed {
-            self.send_worker(WorkerCommand::Persist(snapshot.messages.clone()))?;
-        }
-        Ok(snapshot)
-    }
-
     fn send_worker(&self, command: WorkerCommand) -> Result<(), MessageCenterError> {
         let sender = self
             .inner
@@ -374,21 +345,81 @@ impl MessageCenter {
             .send(command)
             .map_err(|_| MessageCenterError::WorkerUnavailable)
     }
+}
 
-    fn publish_snapshot(&self, snapshot: MessageSnapshot) {
-        let listeners = self
-            .inner
-            .listeners
-            .lock()
-            .map(|listeners| {
-                listeners
-                    .iter()
-                    .map(|(_, listener)| listener.clone())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        for listener in listeners {
-            listener(snapshot.clone());
+fn reduce_state(
+    current: &MessageSnapshot,
+    action: MessageAction,
+) -> Reduction<MessageSnapshot, MessageActionResult> {
+    let mut messages = current.messages.to_vec();
+    let (result, changed) = reduce_messages(&mut messages, action);
+    let state = MessageSnapshot::from_messages(messages);
+    if changed {
+        Reduction::changed(state, result)
+    } else {
+        Reduction::unchanged(state, result)
+    }
+}
+
+fn reduce_messages(
+    messages: &mut Vec<Message>,
+    action: MessageAction,
+) -> (MessageActionResult, bool) {
+    match action {
+        MessageAction::Publish(message) => {
+            if let Some(key) = message.deduplication_key.as_deref()
+                && let Some(existing) = messages.iter().find(|existing| {
+                    existing.channel == message.channel
+                        && existing.deduplication_key.as_deref() == Some(key)
+                })
+            {
+                return (
+                    MessageActionResult::Publish {
+                        message: existing.clone(),
+                        inserted: false,
+                    },
+                    false,
+                );
+            }
+            messages.insert(0, message.clone());
+            messages.truncate(MAX_STORED_MESSAGES);
+            (
+                MessageActionResult::Publish {
+                    message,
+                    inserted: true,
+                },
+                true,
+            )
+        }
+        MessageAction::SetRead { id, read } => {
+            let changed = messages
+                .iter_mut()
+                .find(|message| message.id == id)
+                .is_some_and(|message| {
+                    let changed = message.read != read;
+                    message.read = read;
+                    changed
+                });
+            (MessageActionResult::Changed(changed), changed)
+        }
+        MessageAction::MarkAllRead => {
+            let mut changed = 0;
+            for message in messages.iter_mut().filter(|message| !message.read) {
+                message.read = true;
+                changed += 1;
+            }
+            (MessageActionResult::Count(changed), changed > 0)
+        }
+        MessageAction::Remove { id } => {
+            let before = messages.len();
+            messages.retain(|message| message.id != id);
+            let changed = messages.len() != before;
+            (MessageActionResult::Changed(changed), changed)
+        }
+        MessageAction::Clear => {
+            let removed = messages.len();
+            messages.clear();
+            (MessageActionResult::Count(removed), removed > 0)
         }
     }
 }
@@ -536,6 +567,55 @@ mod tests {
     }
 
     #[test]
+    fn subscribers_hydrate_immediately_and_follow_off_page_publishes() {
+        let path = temporary_path("automatic-subscription");
+        let center = MessageCenter::open_with(&path, Arc::new(NoopDesktopNotifier)).unwrap();
+        center
+            .publish(MessageDraft::new("Before page", "already in Store").desktop(false))
+            .unwrap();
+
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_for_listener = seen.clone();
+        let _subscription = center.subscribe(Arc::new(move |snapshot| {
+            seen_for_listener
+                .lock()
+                .unwrap()
+                .push((snapshot.messages.len(), snapshot.unread_count));
+        }));
+        assert_eq!(*seen.lock().unwrap(), vec![(1, 1)]);
+
+        center
+            .publish(MessageDraft::new("Another route", "new data").desktop(false))
+            .unwrap();
+        assert_eq!(*seen.lock().unwrap(), vec![(1, 1), (2, 2)]);
+        center.shutdown();
+    }
+
+    #[test]
+    fn every_changed_action_is_automatically_persisted() {
+        let path = temporary_path("persist-actions");
+        let center = MessageCenter::open_with(&path, Arc::new(NoopDesktopNotifier)).unwrap();
+        let first = center
+            .publish(MessageDraft::new("First", "one").desktop(false))
+            .unwrap();
+        let second = center
+            .publish(MessageDraft::new("Second", "two").desktop(false))
+            .unwrap();
+        assert!(center.set_read(&first.id, true).unwrap());
+        assert!(center.remove(&second.id).unwrap());
+        center.flush().unwrap();
+        center.shutdown();
+
+        let reloaded = MessageCenter::open_with(&path, Arc::new(NoopDesktopNotifier)).unwrap();
+        let snapshot = reloaded.snapshot();
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].id, first.id);
+        assert!(snapshot.messages[0].read);
+        assert_eq!(snapshot.unread_count, 0);
+        reloaded.shutdown();
+    }
+
+    #[test]
     fn adapter_retries_are_idempotent_within_the_same_channel() {
         let path = temporary_path("deduplication");
         let center = MessageCenter::open_with(&path, Arc::new(NoopDesktopNotifier)).unwrap();
@@ -576,10 +656,10 @@ mod tests {
         center.shutdown();
 
         let reloaded = MessageCenter::open_with(&path, Arc::new(NoopDesktopNotifier)).unwrap();
-        let webhook_message = reloaded
-            .snapshot()
+        let reloaded_snapshot = reloaded.snapshot();
+        let webhook_message = reloaded_snapshot
             .messages
-            .into_iter()
+            .iter()
             .find(|message| message.channel == "webhook")
             .unwrap();
         assert_eq!(webhook_message.category, crate::categories::WEBHOOK);

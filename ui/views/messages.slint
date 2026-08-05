@@ -21,6 +21,10 @@ export { MessageListItem, MessageLevel } from "../components/messages/github_mes
 export component GitHubMessagesPage inherits Rectangle {
     in-out property <length> viewport-width: 800px;
     in-out property <length> viewport-height: 768px;
+    // The small static page shell survives route changes so ComponentFactory
+    // bindings are never remounted. Rust releases the potentially large row
+    // model while inactive.
+    in property <bool> active: false;
     in property <[MessageListItem]> messages: [];
     // Counts are pushed from Rust on every snapshot. Do not derive tab badges
     // from `messages.length` string concat inside SegmentedControlItem — that
@@ -63,9 +67,15 @@ export component GitHubMessagesPage inherits Rectangle {
     background: GitHubTheme.canvas-default;
     clip: false;
 
+    changed active => {
+        if !root.active {
+            root.clear-confirmation = false;
+        }
+    }
+
     clear-confirmation-reset := Timer {
         interval: 3000ms;
-        running: root.clear-confirmation;
+        running: root.active && root.clear-confirmation;
         triggered => { root.clear-confirmation = false; }
     }
 

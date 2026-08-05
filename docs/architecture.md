@@ -38,6 +38,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/lib.rs` | Imports and re-exports the generated UI API, creates `MainWindow`, initializes modules, wires cross-cutting callbacks, and manages window lifecycle and shutdown. |
 | `crates/usher-ui/` | Owns the Slint build script and generated Rust API. Compiles the repository-level `ui/main.slint` tree and exports its window, globals, models, structs, and enums. |
 | `crates/usher-messages/` | Independently compiled message-center package: durable domain/storage service, snapshot subscriptions, background persistence/native-delivery worker, `notify-rust` OS adapter, and generated Inbox page API. Its embeddable Slint page is compiled in library-module mode rather than through the deprecated non-Window root fallback. |
+| `crates/usher-state-store/` | Framework-neutral cross-page state port and built-in engine: typed reducers/actions, immutable revisioned snapshots, selectors, immediate hydration, automatic monotonic subscriptions, and RAII cancellation. Feature facades hide the engine so a community Store can replace it through an adapter. |
 | `src/app_runtime.rs` | Process-wide multi-thread Tokio runtime. Runtime threads install the tracing dispatch. |
 | `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots, startup checkpoints, bounded Slint-model accounting, UI-size correlation, and the cancellable periodic memory sampler. |
 | `src/platform/` | Cross-platform native integration boundary. `macos.rs` owns AppKit appearance (forced Light/Dark or follow-system for Auto), title-bar accessories, window-interaction notifications, the native-title-bar click bridge for dismissible transient overlays, macOS PR-review font registration, the `NSSound` click, and `AppleInterfaceThemeChangedNotification` for live Auto theme updates; `windows.rs` owns Windows theme detection and `MessageBeep`; `linux.rs` owns XDG Portal theme detection and non-blocking desktop sound playback. `mod.rs` exposes the shared API, Auto theme watch enablement with a 1s poll fallback on all platforms, plus opening a directory in the OS file manager (Finder/Explorer/`xdg-open`). |
@@ -238,6 +239,25 @@ Common rules:
 Future isolated pages reuse the same checklist and pick snapshot mode,
 operation mode, or both per state kind. Do not assume globals are shared across
 generated crates.
+
+### Cross-page automatic state stores
+
+Any State consumed by more than one route, page, status surface, or background
+publisher is owned behind the `usher-state-store::StateStore` port and a stable
+feature facade. Typed Actions are the only mutation path. A changed reduction
+installs an immutable snapshot with a monotonically increasing revision and
+automatically notifies subscribers; a new subscriber immediately hydrates from
+the current snapshot. Subscriber revision guards prevent delayed callbacks from
+overwriting newer UI state. Slint bridges remain event-loop adapters and never
+become Store engines.
+
+Durable Store owners attach persistence as a non-blocking commit subscription.
+Each changed revision is queued in commit order to the feature worker and
+shutdown flush; reducers and the Slint event loop perform no file I/O. Concrete
+engines, including the built-in `LocalStateStore`, stay behind the trait. A
+future community Redux/Pinia-style library is accepted only as an adapter that
+preserves the same Actions, feature facade, schema, revision/hydration contract,
+and tests. See [specs/state-store.md](specs/state-store.md).
 
 ## Build artifact policy
 

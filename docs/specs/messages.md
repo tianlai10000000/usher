@@ -14,6 +14,11 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
 - `crates/usher-messages/` owns the message domain model, bounded JSON storage,
   subscriptions, background persistence worker, `notify-rust` adapter, and the
   independently generated `GitHubMessagesPage` API.
+- `MessageCenter` is the stable feature Store facade. Its private typed Actions
+  reduce through the framework-neutral `usher-state-store::StateStore` port.
+  Subscribers hydrate immediately and follow changed revisions automatically;
+  each changed revision automatically queues the complete bounded State to the
+  JSON persistence worker. Concrete Store-engine types never cross this facade.
 - `src/message_center.rs` is the only root-window bridge. It converts immutable
   snapshots to Slint models, mirrors theme/viewport state, pushes explicit
   total/unread/read filter counts, and forwards page commands to the domain
@@ -25,6 +30,12 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   `GitHubSegmentedControlItem` (rendered as separate Text nodes, not one
   concatenated caption). The page header status sentence is a complete string
   pushed from Rust on each snapshot for the same ComponentFactory freeze reason.
+- `ui/main.slint` lazily creates one stable factory/page shell on the first
+  Inbox visit. Route changes hide rather than remount that shell; while hidden,
+  the bridge releases the potentially large Slint row model and skips page
+  projection work while the Store keeps accepting Actions and updating the
+  global unread selector. Re-entry rehydrates the row model from the latest
+  Store snapshot before making the page active.
 - `src/notification.rs` continues to own transient queued Banners and mirrors
   every created application notification into the durable message center.
 - `ui/components/messages/github_message_components.slint` owns reusable Inbox
@@ -34,6 +45,10 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
 
 - `crates/usher-messages/` 负责消息领域模型、有界 JSON 存储、订阅、后台持久化
   Worker、`notify-rust` 适配器和独立生成的 `GitHubMessagesPage` API。
+- `MessageCenter` 是稳定的 Feature Store 门面；私有强类型 Action 通过与框架无关的
+  `usher-state-store::StateStore` 接口 reduce。订阅者立即 hydration，并自动跟随
+  有效 revision；每个有效 revision 自动把完整有界 State 排队到 JSON 持久化
+  Worker。具体 Store 引擎类型不得越过该门面。
 - `src/message_center.rs` 是唯一主窗口桥接层，负责把不可变快照转换为 Slint model、
   同步主题/视口、下发 All/Unread/Read 整型计数，并把页面命令转给领域服务。Inbox
   行动作使用写死 SVG；tip 在按钮上本地绘制，与 `GitHubIconButton` 一致（下方、
@@ -42,6 +57,10 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   `GitHubSegmentedControlItem` 的整型 `count`（控件内用独立 Text 节点渲染，
   禁止拼成单一字符串）。页头状态句由 Rust 在每次快照中下发完整字符串，原因
   同为 ComponentFactory 页面上动态字符串拼接会在首次绘制后冻结。
+- `ui/main.slint` 在首次进入 Inbox 时才懒创建一个稳定 factory/page shell；路由
+  切换只隐藏、不重新挂载该 shell。隐藏期间 bridge 释放可能很大的 Slint 行 model，
+  并跳过页面投影；Store 仍继续接收 Action、更新全局未读 selector。重新进入时先从
+  最新 Store 快照 hydration 行 model，再激活页面。
 - `src/notification.rs` 继续负责短时排队 Banner，并把每条应用通知镜像到持久消息中心。
 - `ui/components/messages/github_message_components.slint` 负责可复用 Inbox 行视觉，
   并登记到 UI Components 演练场。
@@ -90,8 +109,10 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 1. Publishing updates the in-memory snapshot synchronously and returns the new
    message. It must not perform filesystem or OS-notification work on the Slint
    event loop.
-2. One owned worker serializes JSON persistence and native delivery. JSON lives
-   at `messages/messages.json` under the platform local-data directory.
+2. Every changed Store revision automatically notifies the persistence
+   subscriber. One owned worker serializes JSON persistence and native delivery;
+   individual Actions never call save manually. JSON lives at
+   `messages/messages.json` under the platform local-data directory.
 3. Native delivery uses community crate `notify-rust`; application code must not
    add per-platform notification implementations beside this adapter.
 4. `NativeDelivery` is an orthogonal per-draft policy: `WhenUnfocused` is the
@@ -111,7 +132,8 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 
 1. 发布操作同步更新内存快照并返回新消息；不得在 Slint event loop 执行文件系统或
    OS 通知工作。
-2. 唯一 Worker 串行执行 JSON 持久化和原生投递；JSON 位于平台本地数据目录下的
+2. 每个有效 Store revision 自动通知持久化 subscriber；唯一 Worker 串行执行 JSON
+   持久化和原生投递，各 Action 禁止手工调用 save。JSON 位于平台本地数据目录下的
    `messages/messages.json`。
 3. 原生投递统一使用社区 `notify-rust`，应用代码不得在适配器之外新增各平台实现。
 4. `NativeDelivery` 是独立的逐 Draft 策略：默认 `WhenUnfocused`，`Never` 只进入
@@ -158,10 +180,17 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   on the menu, peer popovers close via `claim-exclusive` on the same click, and
   page blank outside-click is owned under page chrome through
   `TransientOverlayState.dismiss-all`—never a Notify-z full-window scrim that
-  would steal the first click from other popups. Window hosts must pass the
+  would steal the first click from other popups. The overflow-open flag belongs to
+  the currently visible queue head: closing that Banner resets it immediately,
+  and replacing `queue[0]` with another notification always starts with the
+  ActionMenu closed. Clicking the non-interactive Banner surface also closes
+  the menu, while action buttons, close, and the overflow trigger keep their
+  own behavior. Window hosts must pass the
   real window size as `overlay-viewport-*` so collision clamping uses
   window-mapped coordinates; demo hosts that omit those inputs keep Banner-local
-  clamping so the end-aligned menu stays under the overflow trigger. This
+  clamping. The menu is end-aligned with the overflow trigger horizontally and
+  anchored 6 px below the complete Banner card rather than overlapping its
+  footer. This
   prevents a Banner's own action buttons from competing with a second
   text-button toolbar. The semantic rail spans the card's complete left edge
   and is clipped by its outer radius. The footer is shown for a multi-item
@@ -195,9 +224,13 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   Esc / Chrome `dismiss-revision` 由菜单承接，其它弹层靠同一次点击的
   `claim-exclusive` 互斥关闭，页面空白点击由页面 chrome 之下通过
   `TransientOverlayState.dismiss-all` 关闭——禁止在 Notify 根 z 铺全窗口 scrim
-  抢走其它弹层的首次点击。窗口宿主必须把真实窗口尺寸传入 `overlay-viewport-*`，
+  抢走其它弹层的首次点击。overflow 展开状态只属于当前可见队首：关闭当前 Banner
+  时必须立即复位，`queue[0]` 替换为下一条通知时 ActionMenu 也必须默认关闭。
+  点击 Banner 的非交互表面也必须关闭菜单；操作按钮、关闭按钮与三点入口保持各自行为。
+  窗口宿主必须把真实窗口尺寸传入 `overlay-viewport-*`，
   碰撞夹紧才使用窗口坐标；演练场等未传入的宿主则回退到 Banner 本地夹紧，保证
-  尾对齐菜单仍落在三点按钮下方。这样 Notify 自身已有操作按钮时，不会再叠加
+  菜单横向与三点按钮尾对齐，纵向从完整 Banner 卡片底边向下留出 6px，不得覆盖
+  底栏。这样 Notify 自身已有操作按钮时，不会再叠加
   第二条文字按钮工具栏。左侧语义色条贯穿卡片全高，并由外层圆角裁剪。多条 Banner
   排队或存在额外未读消息时显示该底部行。
 - 行遵循 github.com/notifications 的未读层级：未读行静止态使用 `canvas-subtle`、
@@ -213,6 +246,9 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 - Exercise All/Unread/Read, individual toggle/delete, Mark all, and two-step Clear all.
 - Clear all, publish again from UI Components, reopen Messages, and verify tab
   badges plus the header status sentence match the new unread/total counts.
+- While Messages is closed, publish several messages from other routes, then
+  open/reopen Messages and verify automatic Store hydration shows the newest
+  rows and counts on the first visible frame.
 - From a non-Messages route, publish a permanent Banner, delete or Clear all its
   Inbox row, leave Messages, and verify the Banner is gone from the queue.
 - Queue three-plus Banners off Messages, confirm only the head shows with a
@@ -220,6 +256,15 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   click plus Escape, then reopen and verify another page ActionMenu opens on
   the first click (peer exclusive-claim, no double-click), dismiss all, and
   verify Inbox rows remain.
+- With at least two queued Banners, open the first head's overflow menu and
+  close that Banner with its X button. Verify the next head appears with its
+  overflow ActionMenu closed.
+- Open the Banner overflow and verify the menu is end-aligned with the kebab
+  but begins below the complete card with a visible gap; it must not overlap
+  the footer.
+- With the overflow open, click the Banner body or footer count and verify the
+  menu closes; then verify action buttons, X, and the kebab still activate on
+  their first click.
 - Mark several non-adjacent rows read in All and verify their relative order and
   scroll position remain stable; filtered-out rows must leave no layout gaps.
 - Verify 0, 1, 99, and 100 unread badge states at 800 px and wide widths.
@@ -239,11 +284,19 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 - 检查 All/Unread/Read、单条切换/删除、全部已读和两步 Clear all。
 - 清空后从 UI Components 再发布，重新打开 Messages，确认 Tab 徽标与页头状态句
   与新的未读/总数一致。
+- Messages 关闭期间从其他页面发布多条消息，再打开/重新打开 Messages，确认 Store
+  自动 hydration 在首个可见帧展示最新消息行与计数。
 - 在非 Messages 路由发布一条常驻 Banner，删除或 Clear all 对应 Inbox 行后离开
   Messages，确认 Banner 已从队列消失。
 - 在非 Messages 路由连续排队 3 条以上 Banner，确认只显示队首且出现 Dismiss all，
   打开 overflow 菜单后点击页面空白与按 Esc 均可关闭，再打开后点页面其它
   ActionMenu 入口应一次切换（互斥，无需点两次），一键关闭后 Inbox 行仍在。
+- 至少排队两条 Banner，展开第一条队首的 overflow 菜单后直接点击 X 关闭，确认
+  下一条队首出现时其 overflow ActionMenu 默认关闭。
+- 展开 Banner overflow，确认菜单横向与三点按钮尾对齐、纵向在完整卡片底边下方
+  留有可见间距，不能覆盖底栏。
+- overflow 展开时点击 Banner 正文或底栏计数区域，确认菜单关闭；再确认操作按钮、
+  X 与三点入口仍能在第一次点击时正常响应。
 - 在 All 中把多条不相邻消息标记为已读，确认相对顺序与滚动位置稳定，筛掉的行不留下空白。
 - 在 800px 与宽屏检查未读数 0、1、99、100。
 - 展开停靠侧栏后，确认页头操作换行到筛选器上方，且 Blankslate 文本不超出内容区。

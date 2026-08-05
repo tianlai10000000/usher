@@ -674,6 +674,11 @@ Settings 拆出后，默认根生成 Rust 从 39,131,311 字节、420,331 行、
 7. `SLINT_LIVE_PREVIEW` 只能动态生成主窗口。Slint 1.17 的 `ComponentFactory`
    要求静态 `VWeak`，因此独立 factory 产品的 build script 必须屏蔽该环境变量；
    否则 `live-preview,ui-components` 组合会在 Rust 类型检查阶段失败。
+8. Slint 1.17.1 的实验 `ComponentContainer` 不得随路由反复销毁/重建同一个独立
+   页面产品。Messages 已复现二次挂载后的文字、选中态与布局损坏。使用首次访问
+   懒创建的稳定 shell，隐藏时释放大型 Slint model/行投影，返回前从
+   `usher-state-store` 最新 revision 自动 hydration；不得用常驻 1,000 行换稳定性，
+   也不得用手工 property 重写代替 Store 同步。
 三次可还原的 Settings 注释热改样本为 9.26 / 6.94 / 6.50 秒，中位数
 6.94 秒；每次都只出现 `Compiling usher-ui-settings` 和 `Compiling usher`。
 `SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components` 首次暴露了
