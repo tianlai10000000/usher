@@ -4,10 +4,17 @@ import { GitHubNotificationBanner } from "actions_notify.slint";
 export component GitHubNotificationItem inherits Rectangle {
     in property <Notification> notification;
     in property <int> index;
+    // Recent transient queue size and durable unread total for the footer.
+    in property <int> queue-count: 1;
+    in property <int> total-count: root.queue-count;
+    in property <length> overlay-viewport-width: root.width;
+    in property <length> overlay-viewport-height: 600px;
 
     callback dismissed(int);
     callback hovered(int, bool);
     callback action-clicked(/* id */ int, /* action-index */ int);
+    callback view-all();
+    callback dismiss-all();
 
     private property <bool> is-hovered: hover-area.has-hover;
     private property <length> item-spacing: 8px;
@@ -16,7 +23,9 @@ export component GitHubNotificationItem inherits Rectangle {
     height: notification.dismissed ? 0px : banner.height + root.item-spacing;
     opacity: notification.dismissed ? 0 : 1;
     background: transparent;
-    clip: true;
+    // Keep dismissal animation clipped, but allow the anchored queue menu to
+    // extend beyond the normal Banner bounds while the item is active.
+    clip: notification.dismissed;
     animate height { duration: 180ms; easing: ease-out; }
     animate opacity { duration: 120ms; }
 
@@ -34,11 +43,17 @@ export component GitHubNotificationItem inherits Rectangle {
         icon: root.notification.icon;
         actions: root.notification.actions;
         notification-type: root.notification.type;
+        queue-count: root.queue-count;
+        total-count: root.total-count;
+        overlay-viewport-width: root.overlay-viewport-width;
+        overlay-viewport-height: root.overlay-viewport-height;
 
         close-clicked => { root.dismissed(root.notification.id); }
         action-clicked(action-index) => {
             root.action-clicked(root.notification.id, action-index);
         }
+        view-all-clicked => { root.view-all(); }
+        dismiss-all-clicked => { root.dismiss-all(); }
     }
 
     changed is-hovered => {

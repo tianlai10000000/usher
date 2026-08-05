@@ -9,6 +9,7 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 
 use crate::http::{self, RequestOptions};
+use crate::settings_page::{SettingsPageBridge, mirror_update_checking};
 use crate::{
     CustomComponentType, MainWindow, NotificationDelivery, NotificationManager,
     NotificationOptions, UpdateLogic, app_runtime::shared_runtime,
@@ -658,7 +659,10 @@ pub struct UpdaterContext {
 ///
 /// Note: Auto-update initialization and callback should be done in lib.rs
 /// after settings are loaded, using the returned UpdaterContext.
-pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
+pub fn setup_updater(
+    app: &MainWindow,
+    settings_page: &SettingsPageBridge,
+) -> Result<UpdaterContext> {
     let state = Arc::new(Mutex::new(UpdateState::default()));
     let rt = shared_runtime();
     let app_weak = app.as_weak();
@@ -670,11 +674,20 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
     let state_clone_check = state.clone();
     let app_weak_clone_check = app_weak.clone();
     let rt_clone_check = rt.clone();
+    let settings_page_check = settings_page.clone();
     app.on_check_update(move || {
         log::debug!(" check-update callback called");
         let state = state_clone_check.clone();
         let ui_weak = app_weak_clone_check.clone();
         let rt = rt_clone_check.clone();
+        let settings_page = settings_page_check.clone();
+
+        // Operation dual-write: host UpdateLogic + isolated Settings page.
+        // Do not rely on Slint `changed` alone for begin/end.
+        if let Some(ui) = ui_weak.upgrade() {
+            mirror_update_checking(&ui, &settings_page, true);
+        }
+
         rt.spawn(async move {
             log::debug!(" Starting update check...");
             // Reset state
@@ -718,33 +731,34 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
 
                     if is_up_to_date {
                         // Current version is the latest
-                        let ui_weak_for_notification = ui_weak.clone();
+                        let ui_weak_for_completion = ui_weak.clone();
+                        let settings_page_for_completion = settings_page.clone();
                         let ui_weak_for_logic = ui_weak.clone();
-                        let ui_weak_for_reset = ui_weak.clone();
 
-                        // Call notification first
                         slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = ui_weak_for_notification.upgrade() {
-                                {
-                                    let manager = NotificationManager::get(&ui);
-                                    manager.invoke_success(NotificationOptions {
-                                        message: format!(
-                                            "Usher {} is the latest version.",
-                                            cargo_crate_version!()
-                                        )
-                                        .into(),
-                                        title: "You're up to date".into(),
-                                        duration: 4000,
-                                        icon: "".into(),
-                                        component: CustomComponentType::None,
-                                        actions: Default::default(),
-                                        tag: "software-update".into(),
-                                        source: "Updater".into(),
-                                        category: "software_update".into(),
-                                        native_delivery: NotificationDelivery::WhenUnfocused,
-                                    });
-                                } // manager borrow released here
-                            }
+                            let Some(ui) = ui_weak_for_completion.upgrade() else {
+                                settings_page_for_completion.set_update_checking(false);
+                                return;
+                            };
+                            // Clear busy before feedback so the control is
+                            // interactive when Notify appears.
+                            mirror_update_checking(&ui, &settings_page_for_completion, false);
+                            NotificationManager::get(&ui).invoke_success(NotificationOptions {
+                                message: format!(
+                                    "Usher {} is the latest version.",
+                                    cargo_crate_version!()
+                                )
+                                .into(),
+                                title: "You're up to date".into(),
+                                duration: 4000,
+                                icon: "".into(),
+                                component: CustomComponentType::None,
+                                actions: Default::default(),
+                                tag: "software-update".into(),
+                                source: "Updater".into(),
+                                category: "software_update".into(),
+                                native_delivery: NotificationDelivery::WhenUnfocused,
+                            });
                         })
                         .ok();
 
@@ -761,77 +775,53 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                             })
                             .ok();
                         });
-
-                        // Immediately reset button state to ensure user can see button restored
-                        log::debug!(" Preparing to reset button state (already latest version)");
-                        slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = ui_weak_for_reset.upgrade() {
-                                log::debug!(
-                                    "Resetting checking-update state (already latest version)"
-                                );
-                                let logic = ui.global::<UpdateLogic>();
-                                logic.set_checking_update(false);
-                            } else {
-                                log::warn!(
-                                    "ui_weak_for_reset.upgrade() failed (already latest version)"
-                                );
-                            }
-                        })
-                        .ok();
                     } else {
                         log::debug!(" Entering branch with new version available");
                         // New version available
-                        let ui_weak_for_all = ui_weak.clone();
+                        let ui_weak_for_completion = ui_weak.clone();
                         let version_for_all = version.clone();
-
-                        // Set state
-                        let ui_weak_for_state = ui_weak_for_all.clone();
-                        let version_for_state = version_for_all.clone();
-                        slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = ui_weak_for_state.upgrade() {
-                                log::debug!(" Setting state");
-                                let logic = ui.global::<UpdateLogic>();
-                                logic.set_update_available(true);
-                                logic.set_new_version(version_for_state.clone().into());
-                                logic.set_checking_update(false);
-                                log::debug!(
-                                    "Set update-available=true, new-version={}",
-                                    version_for_state
-                                );
-                            }
-                        })
-                        .ok();
+                        let settings_page_for_completion = settings_page.clone();
 
                         // Manual checks report every outcome through the shared
                         // Primer Notify instead of opening a separate modal.
-                        let ui_weak_for_notification = ui_weak_for_all.clone();
                         slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = ui_weak_for_notification.upgrade() {
-                                let current_version = cargo_crate_version!();
-                                let actions: ModelRc<SharedString> =
-                                    ModelRc::new(Rc::new(VecModel::from(vec![
-                                        SharedString::from("Later"),
-                                        SharedString::from("Update now"),
-                                    ])));
-                                NotificationManager::get(&ui).invoke_info(NotificationOptions {
-                                    title: "Update available".into(),
-                                    message: format!(
-                                        "Usher {} is available. You’re currently using {}.",
-                                        version_for_all, current_version
-                                    )
-                                    .into(),
-                                    duration: 0,
-                                    icon: "".into(),
-                                    component: CustomComponentType::ActionsNotify,
-                                    actions,
-                                    tag: "manual-update".into(),
-                                    source: "Updater".into(),
-                                    category: "software_update".into(),
-                                    native_delivery: NotificationDelivery::WhenUnfocused,
-                                });
-                            } else {
-                                log::debug!(" ui_weak_for_notification.upgrade() failed");
-                            }
+                            let Some(ui) = ui_weak_for_completion.upgrade() else {
+                                settings_page_for_completion.set_update_checking(false);
+                                return;
+                            };
+                            log::debug!(" Setting state");
+                            let logic = ui.global::<UpdateLogic>();
+                            logic.set_update_available(true);
+                            logic.set_new_version(version_for_all.clone().into());
+                            drop(logic);
+                            mirror_update_checking(&ui, &settings_page_for_completion, false);
+                            log::debug!(
+                                "Set update-available=true, new-version={}",
+                                version_for_all
+                            );
+
+                            let current_version = cargo_crate_version!();
+                            let actions: ModelRc<SharedString> =
+                                ModelRc::new(Rc::new(VecModel::from(vec![
+                                    SharedString::from("Later"),
+                                    SharedString::from("Update now"),
+                                ])));
+                            NotificationManager::get(&ui).invoke_info(NotificationOptions {
+                                title: "Update available".into(),
+                                message: format!(
+                                    "Usher {} is available. You’re currently using {}.",
+                                    version_for_all, current_version
+                                )
+                                .into(),
+                                duration: 0,
+                                icon: "".into(),
+                                component: CustomComponentType::ActionsNotify,
+                                actions,
+                                tag: "manual-update".into(),
+                                source: "Updater".into(),
+                                category: "software_update".into(),
+                                native_delivery: NotificationDelivery::WhenUnfocused,
+                            });
                         })
                         .ok();
                     }
@@ -854,29 +844,28 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                     } else {
                         "We couldn’t check for updates. Try again in a moment.".to_string()
                     };
-                    let ui_weak_for_error = ui_weak.clone();
+                    let ui_weak_for_completion = ui_weak.clone();
                     let ui_weak_for_logic = ui_weak.clone();
-                    let ui_weak_for_reset = ui_weak.clone();
+                    let settings_page_for_completion = settings_page.clone();
 
-                    // Show error notification
                     slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = ui_weak_for_error.upgrade() {
-                            {
-                                let manager = NotificationManager::get(&ui);
-                                manager.invoke_error(NotificationOptions {
-                                    message: friendly_msg.clone().into(),
-                                    title: "Couldn’t check for updates".into(),
-                                    duration: 8000,
-                                    icon: "".into(),
-                                    component: CustomComponentType::None,
-                                    actions: Default::default(),
-                                    tag: "software-update".into(),
-                                    source: "Updater".into(),
-                                    category: "software_update".into(),
-                                    native_delivery: NotificationDelivery::WhenUnfocused,
-                                });
-                            } // manager borrow released here, avoid conflict with borrow in callback
-                        }
+                        let Some(ui) = ui_weak_for_completion.upgrade() else {
+                            settings_page_for_completion.set_update_checking(false);
+                            return;
+                        };
+                        mirror_update_checking(&ui, &settings_page_for_completion, false);
+                        NotificationManager::get(&ui).invoke_error(NotificationOptions {
+                            message: friendly_msg.into(),
+                            title: "Couldn’t check for updates".into(),
+                            duration: 8000,
+                            icon: "".into(),
+                            component: CustomComponentType::None,
+                            actions: Default::default(),
+                            tag: "software-update".into(),
+                            source: "Updater".into(),
+                            category: "software_update".into(),
+                            native_delivery: NotificationDelivery::WhenUnfocused,
+                        });
                     })
                     .ok();
 
@@ -893,19 +882,6 @@ pub fn setup_updater(app: &MainWindow) -> Result<UpdaterContext> {
                         })
                         .ok();
                     });
-
-                    // Immediately reset button state to ensure user can see button restored
-                    log::debug!(" Preparing to reset button state (check failed)");
-                    slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = ui_weak_for_reset.upgrade() {
-                            log::debug!(" Resetting checking-update state (check failed)");
-                            let logic = ui.global::<UpdateLogic>();
-                            logic.set_checking_update(false);
-                        } else {
-                            log::debug!(" ui_weak_for_reset.upgrade() failed (check failed)");
-                        }
-                    })
-                    .ok();
                 }
             }
         });

@@ -394,7 +394,7 @@ export component GitHubProjectListRow inherits Rectangle {
     }
 
     actions := HorizontalLayout {
-        x: parent.width - 176px;
+        x: Math.floor((parent.width - 176px) / 1px) * 1px;
         y: 12px;
         width: 96px;
         height: 32px;
@@ -636,7 +636,9 @@ export component GitHubProjectGridCard inherits Rectangle {
     }
 
     HorizontalLayout {
-        x: parent.width - 112px;
+        // parent.width is the floored grid card width; keep the trailing
+        // action cluster on the same whole-pixel grid.
+        x: Math.floor((parent.width - 112px) / 1px) * 1px;
         y: 164px;
         width: 96px;
         height: 32px;

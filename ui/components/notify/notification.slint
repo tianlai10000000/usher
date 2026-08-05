@@ -94,10 +94,9 @@ export global NotificationManager {
     // set-hovered 方法：设置通知的 hover 状态（暂停/恢复计时器）
     callback set-hovered(id: int, hovered: bool);
 
-    // remove-all（关闭所有消息：逐个 remove，支持动画等）
+    // remove-all / clear: dismiss the transient Banner queue only.
+    // Durable Inbox rows are not deleted.
     callback remove-all();
-
-    // clear（直接清除队列所有消息）
     callback clear();
 
     // action-clicked 回调：当 ActionsNotify 组件的操作按钮被点击时触发

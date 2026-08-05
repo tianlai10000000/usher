@@ -23,7 +23,13 @@ static mut TITLEBAR_ACCESSORY_ANCHOR: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_CONTROLS_CONTAINER: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_MODAL_SHIELD: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_EVENT_MONITOR: *mut Object = std::ptr::null_mut();
+static mut TRAFFIC_LIGHT_BASE_X: [f64; 3] = [f64::NAN; 3];
 static mut TRAFFIC_LIGHT_BASE_Y: [f64; 3] = [f64::NAN; 3];
+/// Shift the AppKit traffic-light cluster right so the close button shares the
+/// sidebar nav-icon centerline (24px). Default close center is 16px.
+const TRAFFIC_LIGHT_X_OFFSET: f64 = 8.0;
+/// Lower the compact AppKit control band onto the 46pt title-bar midline.
+const TRAFFIC_LIGHT_Y_OFFSET: f64 = 7.0;
 static mut SIDEBAR_VIBRANCY_INSTALLED: bool = false;
 static mut SIDEBAR_VIBRANCY_VIEW: *mut Object = std::ptr::null_mut();
 static mut WINDOW_SURFACE_BACKDROP_VIEW: *mut Object = std::ptr::null_mut();
@@ -147,10 +153,18 @@ fn native_window(window: &MainWindow) -> Option<*mut Object> {
     (!window.is_null()).then_some(window)
 }
 
+/// Point size for sidebar/back/forward SF Symbols inside the 28 pt accessory
+/// buttons. Must stay on a whole point — half sizes like 12.5 rasterize soft.
+const TITLEBAR_SYMBOL_POINT_SIZE: f64 = 14.0;
+/// `NSImageScaleNone`: the symbol is already sized; do not let the bezel
+/// bilinear-scale it again inside the 28 pt control.
+const NS_IMAGE_SCALE_NONE: u64 = 2;
+
 unsafe fn configured_system_symbol(image: *mut Object, point_size: f64) -> *mut Object {
     let Some(configuration_class) = Class::get("NSImageSymbolConfiguration") else {
         return image;
     };
+    // weight 0 = NSFontWeightRegular; scale 2 = NSImageSymbolScaleMedium.
     let configuration: *mut Object = unsafe {
         msg_send![
             configuration_class,
@@ -660,7 +674,7 @@ unsafe fn configure_icon_button(
                 continue;
             }
             let image = if system_symbol {
-                unsafe { configured_system_symbol(image, 12.5) }
+                unsafe { configured_system_symbol(image, TITLEBAR_SYMBOL_POINT_SIZE) }
             } else {
                 image
             };
@@ -670,7 +684,7 @@ unsafe fn configure_icon_button(
                     let _: () = msg_send![button, setTitle: empty];
                 }
                 let _: () = msg_send![button, setImagePosition: 2u64];
-                let _: () = msg_send![button, setImageScaling: 0u64];
+                let _: () = msg_send![button, setImageScaling: NS_IMAGE_SCALE_NONE];
             }
             image_set = true;
             break;
@@ -962,7 +976,8 @@ unsafe fn update_sidebar_window_surface(window: *mut Object, is_focused: bool) {
 /// AppKit keeps the standard traffic lights in its compact default control
 /// band even when the content/title-bar inset is taller. Usher's breadcrumb
 /// and accessory controls use the geometric center of the full 46 pt inset,
-/// so lower the three standard buttons by the same 7 pt delta.
+/// so lower the three standard buttons by the same Y delta. The cluster is
+/// also shifted right so the close button shares the sidebar icon centerline.
 fn titlebar_controls_x(anchor_x: f64, traffic_right: f64) -> f64 {
     anchor_x.max(traffic_right + 8.0)
 }
@@ -973,6 +988,13 @@ fn titlebar_controls_y(traffic_y: f64, traffic_height: f64, fullscreen: bool) ->
     // ordinary accessory host is already centered and must not be adjusted.
     let fullscreen_content_offset = if fullscreen { 7.0 } else { 0.0 };
     traffic_y + (traffic_height - 28.0) / 2.0 + fullscreen_content_offset
+}
+
+fn traffic_light_origin(base_x: f64, base_y: f64) -> NSPoint {
+    NSPoint {
+        x: base_x + TRAFFIC_LIGHT_X_OFFSET,
+        y: base_y - TRAFFIC_LIGHT_Y_OFFSET,
+    }
 }
 
 unsafe fn align_standard_window_buttons(window: *mut Object) {
@@ -987,21 +1009,24 @@ unsafe fn align_standard_window_buttons(window: *mut Object) {
         }
         let frame: NSRect = unsafe { msg_send![button, frame] };
         let index = button_kind as usize;
-        let stored_base = unsafe { TRAFFIC_LIGHT_BASE_Y[index] };
-        let target = stored_base - 7.0;
-        if stored_base.is_finite() && (frame.origin.y - target).abs() < 0.1 {
+        let stored_base_x = unsafe { TRAFFIC_LIGHT_BASE_X[index] };
+        let stored_base_y = unsafe { TRAFFIC_LIGHT_BASE_Y[index] };
+        let target = traffic_light_origin(stored_base_x, stored_base_y);
+        if stored_base_x.is_finite()
+            && stored_base_y.is_finite()
+            && (frame.origin.x - target.x).abs() < 0.1
+            && (frame.origin.y - target.y).abs() < 0.1
+        {
             continue;
         }
         // If AppKit laid the title bar out again, the current position is the
         // new system baseline. Save it and apply the optical delta exactly
         // once instead of accumulating offsets across notifications.
         unsafe {
+            TRAFFIC_LIGHT_BASE_X[index] = frame.origin.x;
             TRAFFIC_LIGHT_BASE_Y[index] = frame.origin.y;
         }
-        let origin = NSPoint {
-            x: frame.origin.x,
-            y: frame.origin.y - 7.0,
-        };
+        let origin = traffic_light_origin(frame.origin.x, frame.origin.y);
         unsafe {
             let _: () = msg_send![button, setFrameOrigin: origin];
         }
@@ -1372,9 +1397,9 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
 #[cfg(test)]
 mod tests {
     use super::{
-        SIDEBAR_DARK_MODE, macos_shortcut_key, sidebar_content_surface_components,
-        sidebar_toggle_image_names, sidebar_toggle_tooltip, titlebar_controls_x,
-        titlebar_controls_y,
+        SIDEBAR_DARK_MODE, TITLEBAR_SYMBOL_POINT_SIZE, macos_shortcut_key,
+        sidebar_content_surface_components, sidebar_toggle_image_names, sidebar_toggle_tooltip,
+        titlebar_controls_x, titlebar_controls_y, traffic_light_origin,
     };
 
     #[test]
@@ -1412,6 +1437,21 @@ mod tests {
     fn titlebar_controls_compensate_for_native_button_image_baseline() {
         assert_eq!(titlebar_controls_y(10.0, 14.0, true), 10.0);
         assert_eq!(titlebar_controls_y(10.0, 14.0, false), 3.0);
+    }
+
+    #[test]
+    fn traffic_lights_shift_right_onto_sidebar_icon_centerline() {
+        // Default AppKit close origin x=9 (center 16). After +8, center is 24,
+        // matching GitHubMetrics.sidebar-nav-icon-center-x.
+        let origin = traffic_light_origin(9.0, 16.0);
+        assert_eq!(origin.x, 17.0);
+        assert_eq!(origin.y, 9.0);
+    }
+
+    #[test]
+    fn titlebar_symbol_point_size_stays_on_whole_points() {
+        assert_eq!(TITLEBAR_SYMBOL_POINT_SIZE, 14.0);
+        assert_eq!(TITLEBAR_SYMBOL_POINT_SIZE.fract(), 0.0);
     }
 
     #[test]

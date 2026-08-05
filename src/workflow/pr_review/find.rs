@@ -178,7 +178,7 @@ mod tests {
     use slint::{Model, ModelRc, VecModel};
 
     use super::{collect_diff_find_matches, estimate_diff_line_offset_y};
-    use crate::{WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrDiffToken};
+    use crate::{WorkflowPrDiffLine, WorkflowPrDiffToken};
 
     fn line(content: &str, left: &str, right: &str) -> WorkflowPrDiffLine {
         let empty_tokens = || ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffToken>::new()));

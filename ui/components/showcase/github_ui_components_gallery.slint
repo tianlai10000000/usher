@@ -17,6 +17,8 @@ import { GitHubActionMenu, GitHubActionListItem } from "../github_action_menu.sl
 import { GitHubFilterMenuButton, GitHubFilterMenuFrame, GitHubFilterMenuItem } from "../github_filter_menu.slint";
 import { ToastManager, ToastType } from "../toast/toast_manager.slint";
 import { NotificationManager, NotificationType, NotificationDelivery, CustomComponentType } from "../notify/notification.slint";
+import { NotificationIcons } from "../notify/icons.slint";
+import { GitHubNotificationBanner } from "../notify/actions_notify.slint";
 import { DialogManager } from "../dialog/dialog_manager.slint";
 import { GitHubMessageListItem, MessageLevel } from "../messages/github_message_components.slint";
 
@@ -194,8 +196,25 @@ export component GitHubUiComponentsGallery inherits Rectangle {
             });
         } else if action == 5 {
             NotificationManager.remove-all();
-        } else {
+        } else if action == 6 {
             NotificationManager.clear();
+        } else {
+            // Permanent stack exercises the in-card Dismiss all footer (queue >= 2).
+            NotificationManager.info({
+                title: "Webhook received",
+                message: "A webhook event is ready for review.",
+                duration: 0
+            });
+            NotificationManager.success({
+                title: "Saved",
+                message: "Configuration was saved.",
+                duration: 0
+            });
+            NotificationManager.warn({
+                title: "Attention",
+                message: "A follow-up action is required.",
+                duration: 0
+            });
         }
     }
 
@@ -935,8 +954,8 @@ export component GitHubUiComponentsGallery inherits Rectangle {
 
         GitHubShowcaseSection {
             title: "Notification";
-            description: "Info, success, warning, error, action Banner, queue removal, and clear behavior.";
-            content-height: 96px;
+            description: "Action Banner plus an honest capped-queue footer whose batch actions stay in an overflow menu.";
+            content-height: 320px;
 
             HorizontalLayout {
                 x: 0px;
@@ -961,7 +980,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
 
             HorizontalLayout {
                 x: 0px;
-                y: 56px;
+                y: 48px;
                 width: parent.width;
                 height: 32px;
                 spacing: GitHubMetrics.size-8;
@@ -969,12 +988,46 @@ export component GitHubUiComponentsGallery inherits Rectangle {
 
                 for action in [
                     { label: "Action Banner", id: 4, danger: false },
+                    { label: "Queue stack + footer", id: 7, danger: false },
                     { label: "Remove all", id: 5, danger: false },
                     { label: "Clear queue", id: 6, danger: true }
                 ]: GitHubButton {
                     text: action.label;
                     danger: action.danger;
                     clicked => { root.show-notification-example(action.id); }
+                }
+            }
+
+            GitHubShowcaseLabel {
+                x: 0px;
+                y: 96px;
+                width: parent.width;
+                height: 20px;
+                label: "Action Banner + overflow footer (3 shown · 9 more)";
+            }
+
+            GitHubShowcaseSampleSurface {
+                x: 0px;
+                y: 124px;
+                width: min(400px, parent.width);
+                height: 196px;
+
+                GitHubNotificationBanner {
+                    x: GitHubMetrics.size-12;
+                    y: GitHubMetrics.size-12;
+                    width: parent.width - GitHubMetrics.size-24;
+                    title: "Attention";
+                    message: "A follow-up action is required.";
+                    icon: NotificationIcons.warning;
+                    notification-type: NotificationType.Warning;
+                    actions: ["Later", "Install"];
+                    queue-count: 3;
+                    total-count: 12;
+                    // Sample surface is not the window; leave overlay viewport at
+                    // the Banner default so the overflow menu clamps locally.
+                    view-all-clicked => { }
+                    dismiss-all-clicked => { }
+                    close-clicked => { }
                 }
             }
         }

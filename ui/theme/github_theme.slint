@@ -297,4 +297,10 @@ export global GitHubMetrics {
     out property <length> application-sidebar-width: 240px;
     out property <length> page-content-max-width: 1120px;
     out property <length> page-wide-content-max-width: 1280px;
+    // Sidebar nav glyphs and the macOS close traffic light share this
+    // centerline. macos.rs shifts AppKit's default cluster (+8pt) to match.
+    // Use 16px (not 15) so x/y land on whole logical pixels; FemtoVG blurs
+    // SVG bitmaps that sit on half-pixel origins.
+    out property <length> sidebar-nav-icon-size: 16px;
+    out property <length> sidebar-nav-icon-center-x: 24px;
 }

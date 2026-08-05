@@ -655,7 +655,11 @@ Settings 拆出后，默认根生成 Rust 从 39,131,311 字节、420,331 行、
 后续页面拆分必须复用以下回归清单：
 
 1. 跨 crate factory 组件的 Slint globals 不共享；必须显式复制初值、转发 callback，
-   并同步主题、异步状态和保存反馈。
+   并同步主题、异步状态和保存反馈。状态桥接遵循两种模式：领域列表/计数用
+   snapshot push（参考 Messages `apply_page_snapshot`）；异步 busy/短时反馈用
+   operation dual-write（宿主 property/global 与 `*PageBridge::set_*` 同时写入）。
+   完成态不得只依赖 Slint `changed`（边沿触发，会漏掉 `false→false`）。独立页
+   点击处理只转发 command，不得自行赋值宿主拥有的 busy 标志。
 2. 独立页面必须作为主壳 `Flickable` 的同级节点，不能嵌套在主滚动器中；同一路由
    只允许一个滚动所有者。
 3. factory 产品必须接收宿主真实 viewport 宽高；固定默认尺寸会破坏响应式布局并

@@ -2,6 +2,7 @@ import { Route } from "../../route/routeMap.slint";
 import { LayoutConstants } from "../../layout_constants.slint";
 import { GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubPageHeader } from "github_page_header.slint";
+import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
 
 export component GitHubPageView {
     callback navigate(Route);
@@ -19,7 +20,21 @@ export component GitHubPageView {
         width: parent.width;
         min-height: page_viewport_height;
 
+        // Under-chrome blank dismiss for root-mounted ActionMenus (notification
+        // overflow, readiness peers, etc.). Must stay under page content so the
+        // first click on page/status controls can open another popup via
+        // exclusive-claim instead of only closing. Same contract as the PR
+        // workspace blank layer — not a Notify-z root scrim above the page.
+        TouchArea {
+            z: 0;
+            width: 100%;
+            height: 100%;
+            mouse-cursor: default;
+            clicked => { TransientOverlayState.dismiss-all(); }
+        }
+
         VerticalLayout {
+            z: 1;
             padding-left: GitHubMetrics.size-16;
             padding-right: GitHubMetrics.size-16;
             padding-bottom: GitHubMetrics.size-16;

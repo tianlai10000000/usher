@@ -43,6 +43,15 @@ pub(crate) async fn send_message_to_server(user_message: &str) -> Result<String,
     )
     .await?;
 
+    // References are not rendered yet, but consume their metadata so the API
+    // contract stays exercised without logging repository paths or identifiers.
+    let reference_count = result
+        .references
+        .iter()
+        .filter(|reference| !reference.reference_id.is_empty() || !reference.file_path.is_empty())
+        .count();
+    log::debug!("[Chat] Received {reference_count} non-empty reference(s)");
+
     Ok(result.response)
 }
 

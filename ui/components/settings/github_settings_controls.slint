@@ -107,13 +107,16 @@ export component GitHubButton inherits Rectangle {
         visible: false;
         text: root.text;
         font-size: root.label-font-size;
-        font-weight: 500;
+        // Match the visible label weight so preferred-width is not underestimated.
+        font-weight: 600;
         wrap: no-wrap;
     }
 
-    // Reserve a leading loading slot from the first frame so busy state never
-    // changes the button's measured width or truncates its visible label.
-    width: max(72px, label-measure.preferred-width + 48px);
+    // 12px side padding + 16px spinner + 4px gap, reserved from the first frame
+    // so busy state never shrinks the label or truncates it.
+    private property <length> pad-x: 12px;
+    private property <length> spinner-slot: GitHubMetrics.icon-medium + 4px;
+    width: max(72px, label-measure.preferred-width + root.pad-x * 2 + root.spinner-slot);
     height: 32px;
     border-radius: 6px;
     border-width: 1px;
@@ -185,8 +188,8 @@ export component GitHubButton inherits Rectangle {
     }
 
     if root.busy: GitHubSpinner {
-        x: 10px;
-        y: 8px;
+        x: root.pad-x;
+        y: (parent.height - self.height) / 2;
         spinner-size: GitHubMetrics.icon-medium;
         foreground: root.primary || (root.danger && button-touch.has-hover)
             ? GitHubTheme.fg-on-emphasis
@@ -196,8 +199,8 @@ export component GitHubButton inherits Rectangle {
     }
 
     Text {
-        x: root.busy ? 32px : 12px;
-        width: parent.width - self.x - 12px;
+        x: root.busy ? root.pad-x + root.spinner-slot : root.pad-x;
+        width: parent.width - self.x - root.pad-x;
         height: parent.height;
         text: root.text;
         font-size: root.label-font-size;

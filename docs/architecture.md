@@ -10,7 +10,7 @@ Usher is a desktop-first Rust application. Slint owns presentation and declarati
 
 Production builds select Winit with FemtoVG/OpenGL at compile time. Skia and FemtoVG/WGPU are opt-in Cargo features used for renderer diagnostics and A/B comparisons, so normal builds cannot silently change renderer because multiple implementations were linked. Slint's in-process live preview and the UI Components playground are explicit `live-preview` and `ui-components` development features; neither is compiled into default or production builds. The WGPU path is not a production default because current macOS tests reduce physical footprint but increase RSS.
 
-On macOS, entering or leaving full screen re-aligns native title-bar controls after AppKit's final layout; application-owned controls are always placed beyond the system traffic lights.
+On macOS, entering or leaving full screen re-aligns native title-bar controls after AppKit's final layout; the traffic-light cluster is shifted 8 pt right onto the sidebar icon centerline, and application-owned controls are always placed beyond those lights.
 
 ## System context
 
@@ -37,7 +37,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/main.rs` | Minimal binary entry point. Delegates to the library entry point. |
 | `src/lib.rs` | Imports and re-exports the generated UI API, creates `MainWindow`, initializes modules, wires cross-cutting callbacks, and manages window lifecycle and shutdown. |
 | `crates/usher-ui/` | Owns the Slint build script and generated Rust API. Compiles the repository-level `ui/main.slint` tree and exports its window, globals, models, structs, and enums. |
-| `crates/usher-messages/` | Independently compiled message-center package: durable domain/storage service, snapshot subscriptions, background persistence/native-delivery worker, `notify-rust` OS adapter, and generated Inbox page API. |
+| `crates/usher-messages/` | Independently compiled message-center package: durable domain/storage service, snapshot subscriptions, background persistence/native-delivery worker, `notify-rust` OS adapter, and generated Inbox page API. Its embeddable Slint page is compiled in library-module mode rather than through the deprecated non-Window root fallback. |
 | `src/app_runtime.rs` | Process-wide multi-thread Tokio runtime. Runtime threads install the tracing dispatch. |
 | `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots, startup checkpoints, bounded Slint-model accounting, UI-size correlation, and the cancellable periodic memory sampler. |
 | `src/platform/` | Cross-platform native integration boundary. `macos.rs` owns AppKit appearance (forced Light/Dark or follow-system for Auto), title-bar accessories, window-interaction notifications, the native-title-bar click bridge for dismissible transient overlays, macOS PR-review font registration, the `NSSound` click, and `AppleInterfaceThemeChangedNotification` for live Auto theme updates; `windows.rs` owns Windows theme detection and `MessageBeep`; `linux.rs` owns XDG Portal theme detection and non-blocking desktop sound playback. `mod.rs` exposes the shared API, Auto theme watch enablement with a 1s poll fallback on all platforms, plus opening a directory in the OS file manager (Finder/Explorer/`xdg-open`). |
@@ -105,7 +105,7 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `ui/components/button/github_copy_button.slint` | Shared GitHub CopyToClipboardButton interaction for every icon-copy action. It owns the transient Copy→Check state and `Copied!` tooltip; feature callbacks return clipboard-write success. |
 | `ui/components/jobs/` | Reusable GitHub Actions-style run, Job, Step, and log presentation. It accepts normalized snapshots and never executes workflow commands. |
 | `ui/components/dialog/github_dialog.slint` | Shared responsive Primer Dialog chrome, backdrop input ownership, initial close-control focus, header/body/footer safe areas, Esc dismiss (unless `modal`), close behavior, narrow full-window layout, and action states for global, project, PR-review, and update dialogs. Its optional external viewport keeps route-owned surfaces centered on the complete application window and paints one continuous backdrop across docked shell chrome. Root state continues that backdrop through the macOS title-bar inset; `src/platform/macos.rs` shields application-owned title-bar accessories while leaving AppKit traffic lights interactive. Native-title-bar clicks mirror ordinary backdrop dismissal without weakening non-dismissible dialogs. Feature body content nests as `@children`. |
-| `ui/components/toast/`, `ui/components/notify/` | Shared compact Primer Banner-style transient and queued feedback; the root renders one queued notification Banner at a time. |
+| `ui/components/toast/`, `ui/components/notify/` | Shared compact Primer Banner-style transient and queued feedback; the root renders one newest-first queued notification Banner at a time, discloses capped-queue overflow against the durable unread total, and keeps batch operations in a compact ActionMenu. |
 | `ui/components/messages/` | Reusable GitHub Inbox message rows with read/unread, semantic level, metadata, and mounted row actions; registered in UI Components. |
 | `ui/components/pr_review/` | PR Review public UI structs plus reusable shell, file-tree, and diff controls; cross-region state stays in the workspace view. |
 | `ui/theme/github_theme.slint` | Application-owned `GitHubTheme` semantic color roles and `GitHubMetrics` Primer geometry, control, typography, overlay, and breakpoint tokens. Raw functional UI colors are centralized here. |
@@ -176,8 +176,10 @@ their geometry; all other review controls and prose inherit the application font
 The UI source remains under the repository-level `ui/` directory. The main
 window and ordinary route tree are generated by the `usher-ui` workspace crate;
 the Settings and Messages routes are generated independently by
-`usher-ui-settings` and `usher-messages`, then mounted through Slint's experimental
-`ComponentContainer`/component-factory boundary. The application crate re-exports
+`usher-ui-settings` and `usher-messages` in library-module mode, then mounted
+through Slint's experimental `ComponentContainer`/component-factory boundary.
+This generates embeddable non-Window components without relying on Slint's
+deprecated application-root fallback. The application crate re-exports
 the main public API and owns explicit bridges in `src/settings_page.rs` and
 `src/message_center.rs`. A component created by a
 cross-crate factory has its own Slint global graph, so the bridge must copy the
@@ -200,6 +202,42 @@ including the ordinary 4 px page-stack bottom spacer, must be removed from the
 isolated route's viewport. These rules prevent nested wheel capture, clipped
 bottom content, apparent horizontal gutters, and transparent pages exposing a
 different shell canvas.
+
+### Isolated page state bridge
+
+Every cross-crate `ComponentFactory` page follows one bridge contract. Host or
+domain code owns truth; the page only displays mirrored state. Bridges push
+explicitly through `page.set_*` or a snapshot apply helper. Slint `changed`
+handlers may act as a secondary host→page mirror, but completion and domain
+updates must not rely on them alone—`changed` is edge-triggered and misses
+already-equal assignments such as `false→false`.
+
+Two sync modes share that contract:
+
+| Sync mode | When to use | Reference |
+| --- | --- | --- |
+| Snapshot push | Durable list/count/domain state | Messages: `MessageCenter` → `apply_page_snapshot` in `src/message_center.rs` |
+| Operation dual-write | Async command busy or short-lived feedback (`checking`, `testing`, saved flash) | Settings: update check / AI Agent test via `SettingsPageBridge` |
+
+Common rules:
+
+1. Durable domain data belongs to the Rust feature or domain crate; the page
+   displays a mirrored snapshot or copied `AppState`.
+2. Async operation busy flags belong to the host feature module on the Slint
+   event loop. Isolated-page click handlers forward command callbacks only and
+   must not assign those busy flags themselves.
+3. Purely local UI (selected section, filter chips, reveal toggles, confirm
+   dialogs) stays page-owned and is not synced.
+4. Operation begin/end dual-writes the host property/global and
+   `*PageBridge::set_*(value)` on the event loop, on every success/error/cancel
+   path, before or with Notify/Toast feedback.
+5. Factory create-time sync restores the current host busy flags and domain
+   snapshot so remount mid-flight does not lose UI state.
+6. All page writes from workers use `slint::invoke_from_event_loop`.
+
+Future isolated pages reuse the same checklist and pick snapshot mode,
+operation mode, or both per state kind. Do not assume globals are shared across
+generated crates.
 
 ## Build artifact policy
 

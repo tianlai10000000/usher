@@ -332,7 +332,7 @@ export component GitHubSettingsPane inherits Rectangle {
 
                     Text {
                         x: 0px;
-                        width: parent.width - 180px;
+                        width: parent.width - 200px;
                         height: parent.height;
                         text: "Current version  v" + AppState.version;
                         font-size: 14px;
@@ -347,7 +347,8 @@ export component GitHubSettingsPane inherits Rectangle {
                         text: root.update-checking ? "Checking…" : "Check for updates";
                         busy: root.update-checking;
                         clicked => {
-                            root.update-checking = true;
+                            // Busy flag is host-owned; Rust dual-writes begin/end
+                            // through SettingsPageBridge (operation mode).
                             root.check-update();
                         }
                     }
@@ -704,8 +705,8 @@ export component GitHubSettingsPane inherits Rectangle {
                         text: root.ai-agent-testing ? "Testing…" : "Test connection";
                         busy: root.ai-agent-testing;
                         clicked => {
+                            // Busy flag is host-owned; Rust dual-writes begin/end.
                             if (!root.ai-agent-testing) {
-                                root.ai-agent-testing = true;
                                 AppState.test-ai-agent-connection(
                                     AppState.ai-agent-base-url,
                                     AppState.ai-agent-api-key,

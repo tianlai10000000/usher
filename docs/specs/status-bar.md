@@ -67,9 +67,11 @@ surface.
    width-distributing layout.
 4. Persistent items appear in this fixed order: shortcut status, notification,
    network, version.
-5. Shortcut, notification, and network use 28 px icon hit targets. Version uses
-   a stable 104 px text target. Adjacent items have a 4 px gap. The complete
-   cluster is 200 px wide.
+5. Shortcut, notification, and network use 28 px icon hit targets with 16 px
+   glyphs on whole logical pixels (the 27 px item host under the top hairline
+   must not vertically center a 14/16 px SVG at a half-pixel origin). Version
+   uses a stable 104 px text target. Adjacent items have a 4 px gap. The
+   complete cluster is 200 px wide.
 6. Opening the 240 px sidebar or resizing down to the 800 px application
    minimum must not clip, overlap, reorder, or hide the version item.
 7. Sidebar motion, including a rapid mid-flight retarget, must not change the
@@ -89,8 +91,9 @@ surface.
 3. 快捷键初始化结束后，常驻工具组以 8px 内缩直接锚定到稳定宿主的窗口右边缘；
    它既不是移动可见表面的子节点，也不得作为会分配宽度的 Layout 子节点。
 4. 常驻条目固定顺序为：快捷键状态、通知、网络、版本。
-5. 快捷键、通知和网络使用 28px 图标命中区；版本使用稳定的 104px 文字命中区；
-   相邻条目间距为 4px，完整工具组宽度为 200px。
+5. 快捷键、通知和网络使用 28px 图标命中区，内部为落在整逻辑像素上的 16px 字形
+   （顶部分隔线下的 27px 条目宿主不得把 14/16px SVG 垂直居中到半像素原点）；
+   版本使用稳定的 104px 文字命中区；相邻条目间距为 4px，完整工具组宽度为 200px。
 6. 打开 240px 侧栏或把窗口缩小到应用 800px 最小宽度时，不得裁切、重叠、重排或
    隐藏版本号。
 7. 侧栏动画及动画中快速反向切换不得改变常驻工具组的绝对 x 坐标。窗口 Resize 时

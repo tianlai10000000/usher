@@ -232,8 +232,10 @@ fn ui() -> Result<MainWindow> {
     });
 
     // ========= Update ========= //
-    // setup_updater must be called AFTER setup_settings so it reads the correct auto_update value
-    let updater_ctx = setup_updater(&app)?;
+    // setup_updater must be called AFTER setup_settings so it reads the correct auto_update value.
+    // The Settings page bridge is installed later; the updater only needs the handle so manual
+    // check completion can clear the isolated page busy flag.
+    let updater_ctx = setup_updater(&app, &settings_page)?;
     memory_diagnostics::log_checkpoint("startup.updater_ready");
 
     // ========= Auto Update ========= //
@@ -385,14 +387,18 @@ fn ui() -> Result<MainWindow> {
         };
         let ui_weak = app_weak_ai_agent_test.clone();
         let settings_page = settings_page_for_ai_test.clone();
+        // Operation dual-write begin: host + isolated Settings page.
+        if let Some(ui) = ui_weak.upgrade() {
+            settings_page::mirror_ai_agent_testing(&ui, &settings_page, true);
+        }
         app_runtime::shared_runtime().spawn(async move {
             let result = ai::agent::test_connection(&settings).await;
             let _ = slint::invoke_from_event_loop(move || {
                 let Some(ui) = ui_weak.upgrade() else {
+                    settings_page.set_ai_agent_testing(false);
                     return;
                 };
-                ui.set_settings_ai_agent_testing(false);
-                settings_page.set_ai_agent_testing(false);
+                settings_page::mirror_ai_agent_testing(&ui, &settings_page, false);
                 match result {
                     Ok(result) => {
                         let message = if result.model_listed {

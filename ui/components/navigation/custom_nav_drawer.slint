@@ -56,8 +56,15 @@ component GitHubNavigationItem {
     private property <color> item-foreground: root.selected
         ? GitHubTheme.fg-default
         : GitHubTheme.sidebar-navigation-fg;
+    // Shared with the macOS traffic-light cluster (shifted +8pt in macos.rs).
+    private property <length> icon-x:
+        GitHubMetrics.sidebar-nav-icon-center-x
+            - GitHubMetrics.sidebar-nav-icon-size / 2
+            - GitHubMetrics.size-8;
 
-    height: 30px;
+    // The complete 32px band remains interactive; the 31px background below
+    // leaves a 1px visual gap before the next row without breaking hover.
+    height: 32px;
     accessible-role: tab;
     accessible-enabled: true;
     accessible-label: root.text;
@@ -86,7 +93,7 @@ component GitHubNavigationItem {
     item-background := Rectangle {
         x: GitHubMetrics.size-8;
         width: parent.width - GitHubMetrics.size-16;
-        height: parent.height;
+        height: 31px;
         border-radius: 10px;
         background: item-touch.pressed
             ? GitHubTheme.sidebar-item-active
@@ -95,14 +102,14 @@ component GitHubNavigationItem {
                 : item-touch.has-hover
                     ? GitHubTheme.sidebar-item-hover
                     : transparent;
-        animate background { duration: 150ms; easing: ease-in-out; }
 
         Image {
-            x: GitHubMetrics.size-8;
+            x: root.icon-x;
             y: (parent.height - self.height) / 2;
-            width: 15px;
-            height: 15px;
+            width: GitHubMetrics.sidebar-nav-icon-size;
+            height: GitHubMetrics.sidebar-nav-icon-size;
             source: root.icon;
+            image-fit: contain;
             colorize: root.item-foreground;
         }
 
@@ -119,22 +126,24 @@ component GitHubNavigationItem {
             overflow: elide;
         }
 
-        item-touch := TouchArea {
-            width: 100%;
-            height: 100%;
-            mouse-cursor: pointer;
-            clicked => {
-                navigation-focus.focus();
-                root.keyboard-focus-visible = false;
-                root.clicked();
-            }
+    }
+
+    item-touch := TouchArea {
+        x: GitHubMetrics.size-8;
+        width: parent.width - GitHubMetrics.size-16;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => {
+            navigation-focus.focus();
+            root.keyboard-focus-visible = false;
+            root.clicked();
         }
     }
 
     if navigation-focus.has-focus && root.keyboard-focus-visible: Rectangle {
         x: GitHubMetrics.size-8;
         width: parent.width - GitHubMetrics.size-16;
-        height: parent.height;
+        height: 31px;
         border-radius: 10px;
         border-width: GitHubMetrics.focus-outline-width;
         border-color: GitHubTheme.focus-outline;
@@ -266,8 +275,10 @@ export component GitHubNavigationSidebar inherits Rectangle {
             height: 52px;
             background: transparent;
 
+            // Codex aligns the product title with the nav icon left edges.
             Text {
-                x: GitHubMetrics.size-16;
+                x: GitHubMetrics.sidebar-nav-icon-center-x
+                    - GitHubMetrics.sidebar-nav-icon-size / 2;
                 width: 58px;
                 height: parent.height;
                 text: "Usher";
@@ -278,7 +289,9 @@ export component GitHubNavigationSidebar inherits Rectangle {
             }
 
             Image {
-                x: 72px;
+                x: GitHubMetrics.sidebar-nav-icon-center-x
+                    - GitHubMetrics.sidebar-nav-icon-size / 2
+                    + 56px;
                 y: (parent.height - self.height) / 2;
                 width: 14px;
                 height: 14px;
@@ -290,7 +303,9 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 x: parent.width - 64px;
                 y: (parent.height - self.height) / 2;
                 control-size: GitHubMetrics.size-24;
-                glyph-size: 15px;
+                // 16px in a 24px control → 4px inset (whole pixels). 15px sat
+                // on 4.5px and FemtoVG bilinear-blurred the SVG bitmap.
+                glyph-size: GitHubMetrics.sidebar-nav-icon-size;
                 icon: root.search-icon;
                 tooltip-text: "Search";
                 tooltip-above: false;
@@ -305,7 +320,7 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 x: parent.width - GitHubMetrics.size-32;
                 y: (parent.height - self.height) / 2;
                 control-size: GitHubMetrics.size-24;
-                glyph-size: 15px;
+                glyph-size: GitHubMetrics.sidebar-nav-icon-size;
                 icon: root.notification-icon;
                 tooltip-text: "Notifications";
                 tooltip-above: false;
@@ -340,14 +355,14 @@ export component GitHubNavigationSidebar inherits Rectangle {
 
             VerticalLayout {
                 width: parent.width;
-                spacing: GitHubMetrics.size-2;
+                spacing: 0px;
                 padding-top: GitHubMetrics.size-2;
                 padding-bottom: GitHubMetrics.size-12;
 
                 for item[index] in root.items: GitHubNavigationItem {
                     width: parent.width;
                     visible: index < root.item-count;
-                    height: self.visible ? 30px : 0px;
+                    height: self.visible ? 32px : 0px;
                     icon: item.icon;
                     text: item.text;
                     selected: index == root.current-index;
@@ -389,7 +404,7 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 x: parent.width - GitHubMetrics.size-32;
                 y: GitHubMetrics.size-12;
                 control-size: GitHubMetrics.size-24;
-                glyph-size: 15px;
+                glyph-size: GitHubMetrics.sidebar-nav-icon-size;
                 icon: root.about-icon;
                 tooltip-text: "About Usher";
                 show-tooltip: false;

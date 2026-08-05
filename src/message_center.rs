@@ -183,10 +183,14 @@ fn apply_page_snapshot(page: &GitHubMessagesPage, snapshot: MessageSnapshot) {
     let unread = snapshot.unread_count.min(total);
     let read = total.saturating_sub(unread);
     // Push filter badges as ints before the model mutates. Tab labels bind to
-    // these counts directly; string-concat labels were freezing on this page.
+    // these counts through separate Text nodes; string-concat captions and
+    // finished "All (N)" strings both freeze after first paint on this page.
     page.set_total_count(saturating_i32(total));
     page.set_unread_count(saturating_i32(unread));
     page.set_read_count(saturating_i32(read));
+    // Header sentence is still a complete Rust string — int concat in Slint
+    // freezes the same way on this ComponentFactory page.
+    page.set_status_description(status_description(unread).into());
     // Keep the VecModel identity across read-state updates. Replacing ModelRc
     // remounts every All-tab row and makes Slint reshuffle scroll/order so a
     // body click looks like a delete or reorder even though storage is stable.
@@ -232,6 +236,14 @@ fn saturating_i32(value: usize) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
+fn status_description(unread: usize) -> String {
+    match unread {
+        0 => "You're all caught up.".to_string(),
+        1 => "1 unread notification".to_string(),
+        n => format!("{n} unread notifications"),
+    }
+}
+
 fn category_label(category: &str) -> String {
     match category {
         usher_messages::categories::GENERAL => "General".to_string(),
@@ -255,13 +267,20 @@ fn category_label(category: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{category_label, message_row_equivalent};
+    use super::{category_label, message_row_equivalent, status_description};
     use usher_messages::{MessageLevel, MessageListItem};
 
     #[test]
     fn category_labels_cover_built_in_and_extension_keys() {
         assert_eq!(category_label("software_update"), "Software update");
         assert_eq!(category_label("security-alert"), "Security Alert");
+    }
+
+    #[test]
+    fn status_description_matches_unread_count() {
+        assert_eq!(status_description(0), "You're all caught up.");
+        assert_eq!(status_description(1), "1 unread notification");
+        assert_eq!(status_description(17), "17 unread notifications");
     }
 
     #[test]

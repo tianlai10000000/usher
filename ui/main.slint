@@ -1968,11 +1968,12 @@ export component MainWindow inherits Window {
         }
     }
     
-    // Keep one transient notification overlay visible at a time. The manager
-    // retains the queue; dismissing its head reveals the next notification.
-    // The Inbox row is already the durable presentation when this route is
-    // visible. Suppress the transient overlay there to avoid duplicate visual
-    // feedback for the same event.
+    // Keep one transient Banner visible at a time. The manager retains a
+    // newest-first capped queue; dismissing the head reveals the next older
+    // item. The footer uses the durable unread count to disclose items beyond
+    // that cap and opens the Inbox through View all. Dismiss all affects only
+    // the Banner stack.
+    // Suppress on Messages to avoid duplicating the durable Inbox row.
     if NotificationManager.queue.length > 0 && root.current-route != Route.Messages: Rectangle {
         x: root.width - self.width - GitHubMetrics.size-16;
         y: GitHubMetrics.size-16;
@@ -1985,6 +1986,10 @@ export component MainWindow inherits Window {
             width: parent.width;
             notification: NotificationManager.queue[0];
             index: 0;
+            queue-count: NotificationManager.queue.length;
+            total-count: max(root.message-unread-count, NotificationManager.queue.length);
+            overlay-viewport-width: root.width;
+            overlay-viewport-height: root.height;
             dismissed(id) => {
                 NotificationManager.dismiss-by-id(id);
             }
@@ -1996,6 +2001,12 @@ export component MainWindow inherits Window {
                     notification-id,
                     action-index
                 );
+            }
+            view-all => {
+                root.navigate(Route.Messages);
+            }
+            dismiss-all => {
+                NotificationManager.remove-all();
             }
         }
     }

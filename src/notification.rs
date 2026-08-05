@@ -41,6 +41,11 @@ const DEFAULT_DURATION_WARNING: i32 = 3000;
 const DEFAULT_DURATION_ERROR: i32 = 5000;
 // const DEFAULT_DURATION_GENERAL: i32 = 3000;
 
+/// Visible Banner queue cap (VS Code-style). Queue order is newest-first:
+/// index 0 is the visible head. Older tails are dropped from the transient
+/// overlay only; durable Inbox rows remain via `record_message`.
+const MAX_BANNER_QUEUE: usize = 3;
+
 // Default message constants
 const DEFAULT_MESSAGE_INFO: &str = "Info";
 const DEFAULT_MESSAGE_SUCCESS: &str = "Success";
@@ -199,6 +204,19 @@ fn create_notification_with_defaults(
 #[derive(Default, Clone)]
 pub struct SharedQueue(pub SharedVector<Notification>);
 
+/// Newest-first enqueue with a hard cap. Returns retained items plus any
+/// oldest tails that fell off the overlay.
+fn prepend_capped<T>(mut items: Vec<T>, item: T, cap: usize) -> (Vec<T>, Vec<T>) {
+    items.insert(0, item);
+    let mut dropped = Vec::new();
+    while items.len() > cap {
+        if let Some(old) = items.pop() {
+            dropped.push(old);
+        }
+    }
+    (items, dropped)
+}
+
 // Helper function: add notification to queue
 fn push_notification(
     manager: &NotificationManager,
@@ -222,18 +240,32 @@ fn push_notification(
         }
     } // queue_model is dropped here, releasing all borrows
 
-    // Create new VecModel, copy existing elements and add new element
-    let new_vec = VecModel::default();
-    for item in items {
-        new_vec.push(item);
+    let (items, dropped) = prepend_capped(items, notification.clone(), MAX_BANNER_QUEUE);
+    for dropped in &dropped {
+        if let Ok(mut state) = HOVER_STATE.write() {
+            state.remove(&dropped.id);
+        }
+        log::info!(
+            "[Notification] banner queue capped at {MAX_BANNER_QUEUE}; dropped id={} message_id={}",
+            dropped.id,
+            dropped.message_id
+        );
     }
-    new_vec.push(notification.clone());
+
+    let new_vec = VecModel::default();
+    for item in &items {
+        new_vec.push(item.clone());
+    }
     manager.set_queue(ModelRc::new(new_vec));
 
-    // Optional: update shared queue
+    // Optional: update shared queue (same cap)
     if let Some(queue) = shared_queue {
         if let Ok(mut q) = queue.write() {
-            q.0.push(notification.clone());
+            let mut next = SharedVector::default();
+            for item in &items {
+                next.push(item.clone());
+            }
+            q.0 = next;
         }
     }
 }
@@ -274,6 +306,22 @@ fn record_message(message_center: &MessageCenter, notification: &Notification) -
             None
         }
     }
+}
+
+fn clear_banner_queue(
+    manager: &NotificationManager,
+    shared_queue: &Option<Arc<RwLock<SharedQueue>>>,
+) {
+    if let Ok(mut state) = HOVER_STATE.write() {
+        state.clear();
+    }
+    manager.set_queue(ModelRc::new(VecModel::default()));
+    if let Some(queue) = shared_queue
+        && let Ok(mut shared) = queue.write()
+    {
+        shared.0.clear();
+    }
+    log::info!("[Notification] dismissed all banners (Inbox unchanged)");
 }
 
 /// Drops queued banners whose durable Inbox rows were deleted or cleared.
@@ -862,38 +910,23 @@ pub fn setup_notifications(
         }
     });
 
-    // remove-all callback
+    // remove-all / clear: dismiss the transient Banner queue only. Durable
+    // Inbox rows are intentionally preserved (opposite of Inbox Clear all).
     let shared_queue_clone = shared_queue.clone();
     let ui_weak_remove_all = ui_weak.clone();
     manager.on_remove_all(move || {
         if let Some(ui) = ui_weak_remove_all.upgrade() {
             let manager = NotificationManager::get(&ui);
-            // Directly clear queue
-            manager.set_queue(ModelRc::new(VecModel::default()));
-
-            // Optional: clear shared queue
-            if let Some(queue) = &shared_queue_clone {
-                if let Ok(mut q) = queue.write() {
-                    q.0.clear();
-                }
-            }
+            clear_banner_queue(&manager, &shared_queue_clone);
         }
     });
 
-    // clear callback
     let shared_queue_clone = shared_queue.clone();
     let ui_weak_clear = ui_weak.clone();
     manager.on_clear(move || {
         if let Some(ui) = ui_weak_clear.upgrade() {
             let manager = NotificationManager::get(&ui);
-            manager.set_queue(ModelRc::new(VecModel::default()));
-
-            // Optional: clear shared queue
-            if let Some(queue) = &shared_queue_clone {
-                if let Ok(mut q) = queue.write() {
-                    q.0.clear();
-                }
-            }
+            clear_banner_queue(&manager, &shared_queue_clone);
         }
     });
 
@@ -1036,5 +1069,25 @@ pub fn setup_notifications(
     }));
     if let Ok(mut guard) = BANNER_MESSAGE_SYNC.lock() {
         *guard = Some(subscription);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_BANNER_QUEUE, prepend_capped};
+
+    #[test]
+    fn banner_queue_keeps_newest_first_within_cap() {
+        let (queue, dropped) = prepend_capped(vec![1, 2], 3, MAX_BANNER_QUEUE);
+        assert_eq!(queue, vec![3, 1, 2]);
+        assert!(dropped.is_empty());
+
+        let (queue, dropped) = prepend_capped(queue, 4, MAX_BANNER_QUEUE);
+        assert_eq!(queue, vec![4, 3, 1]);
+        assert_eq!(dropped, vec![2]);
+
+        let (queue, dropped) = prepend_capped(queue, 5, MAX_BANNER_QUEUE);
+        assert_eq!(queue, vec![5, 4, 3]);
+        assert_eq!(dropped, vec![1]);
     }
 }

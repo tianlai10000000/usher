@@ -1,11 +1,14 @@
-import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
+import { GitHubActionListItem, GitHubActionMenu, GitHubActionMenuTriggerArea } from "../github_action_menu.slint";
 import { NotificationType } from "notification.slint";
 
 // A floating application notification is an overlay surface, not an inline
 // Primer Banner. Keep its canvas and border neutral so it cannot merge with
 // page content; convey severity with the leading visual and a narrow accent.
+// The in-card footer distinguishes the capped transient queue from the durable
+// unread total. Infrequent batch actions stay in one compact overflow menu.
 export component GitHubNotificationBanner inherits Rectangle {
     in property <int> notification-id;
     in property <string> title;
@@ -13,10 +16,48 @@ export component GitHubNotificationBanner inherits Rectangle {
     in property <image> icon;
     in property <[string]> actions: [];
     in property <NotificationType> notification-type: NotificationType.Info;
+    // Number of recent items retained in the capped transient queue.
+    in property <int> queue-count: 1;
+    // Durable unread total. May exceed the capped transient queue.
+    in property <int> total-count: root.queue-count;
+    // Host window geometry lets the overflow ActionMenu avoid viewport edges.
+    in property <length> overlay-viewport-width: root.width;
+    in property <length> overlay-viewport-height: 600px;
 
     callback close-clicked();
     callback action-clicked(/* action-index */ int);
+    callback view-all-clicked();
+    callback dismiss-all-clicked();
 
+    private property <int> hidden-count: max(0, root.total-count - root.queue-count);
+    private property <bool> show-queue-footer: root.queue-count >= 2 || root.hidden-count > 0;
+    private property <bool> queue-menu-open: false;
+    // Window hosts pass a viewport wider than this Banner (see main.slint).
+    // Demo hosts leave the default (Banner width); mixing that with a
+    // window-origin viewport-x clamps the menu to the far left of the window.
+    private property <bool> uses-window-viewport:
+        root.overlay-viewport-width > root.width;
+    private property <length> menu-viewport-x:
+        root.uses-window-viewport ? -root.absolute-position.x : 0px;
+    private property <length> menu-viewport-y:
+        root.uses-window-viewport ? -root.absolute-position.y : 0px;
+    private property <length> menu-viewport-width:
+        root.uses-window-viewport ? root.overlay-viewport-width : root.width;
+    private property <length> menu-viewport-height:
+        root.uses-window-viewport
+            ? root.overlay-viewport-height
+            : max(root.overlay-viewport-height, root.height + 120px);
+    // Footer strip below the Banner body (hairline + status + overflow).
+    // 36px gives the status and 24px menu trigger balanced vertical padding.
+    private property <length> footer-height: 36px;
+    // Slint does not include the conditionally mounted action layout in this
+    // VerticalLayout's preferred height. Reserve it explicitly so the footer
+    // always starts below the 32px buttons and their top padding.
+    private property <length> action-row-reserve: root.actions.length > 0 ? 44px : 0px;
+    // Derive the body from the actual wrapped title/message stack, not from
+    // the outer layout whose assigned height is controlled by this component.
+    private property <length> body-region-height:
+        max(48px, message-copy.preferred-height + 16px);
     private property <color> foreground: GitHubTheme.fg-default;
     private property <color> muted-foreground: GitHubTheme.fg-muted;
     private property <color> semantic-foreground:
@@ -25,26 +66,54 @@ export component GitHubNotificationBanner inherits Rectangle {
         root.notification-type == NotificationType.Warning ? GitHubTheme.attention-fg :
         GitHubTheme.danger-fg;
 
-    height: max(48px, banner-content.preferred-height);
-    background: GitHubTheme.canvas-overlay;
-    border-width: 1px;
-    border-color: GitHubTheme.border-default;
-    border-radius: 6px;
-    drop-shadow-blur: 12px;
-    drop-shadow-offset-y: 4px;
-    drop-shadow-color: GitHubTheme.shadow-floating-medium;
+    height: max(
+        48px,
+        root.body-region-height
+            + root.action-row-reserve
+            + (root.show-queue-footer ? root.footer-height : 0px)
+    );
+    background: transparent;
+    clip: false;
 
-    Rectangle {
-        x: 0px;
-        y: 6px;
-        width: 3px;
-        height: parent.height - 12px;
-        border-radius: 2px;
-        background: root.semantic-foreground;
+    // Root-mounted Banner ActionMenu follows the readiness contract: Escape,
+    // chrome dismiss-revision, and peer exclusive-claim live on ActionMenu.
+    // Do not paint a full-window scrim here — at Notify's root z it would sit
+    // above page/status chrome and force a second click to open another popup.
+    // Page blank outside-click is owned under page chrome via
+    // TransientOverlayState.dismiss-all (see GitHubPageView).
+
+    // Clip the card surface independently so the semantic rail reaches both
+    // rounded edges while the overflow menu can paint outside the Banner.
+    card-surface := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: GitHubTheme.canvas-overlay;
+        border-width: 1px;
+        border-color: GitHubTheme.border-default;
+        border-radius: 6px;
+        drop-shadow-blur: 12px;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: GitHubTheme.shadow-floating-medium;
+        clip: true;
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: 4px;
+            height: parent.height;
+            background: root.semantic-foreground;
+        }
     }
 
     banner-content := VerticalLayout {
+        // Anchor explicitly: Slint centers an element with an explicit size
+        // inside its parent when x/y are omitted, which sank the body into the
+        // action row / footer regions.
+        x: 0px;
+        y: 0px;
         width: parent.width;
+        // Body, actions, and footer own disjoint vertical regions.
+        height: root.body-region-height;
         spacing: 4px;
         padding: 8px;
 
@@ -69,7 +138,7 @@ export component GitHubNotificationBanner inherits Rectangle {
                 }
             }
 
-            VerticalLayout {
+            message-copy := VerticalLayout {
                 horizontal-stretch: 1;
                 spacing: 4px;
                 padding-top: 6px;
@@ -97,21 +166,134 @@ export component GitHubNotificationBanner inherits Rectangle {
             }
         }
 
-        if root.actions.length > 0: HorizontalLayout {
-            height: 36px;
-            spacing: 12px;
-            padding-top: 4px;
-            alignment: end;
+    }
 
-            // Keep the card-level action group pinned to the trailing edge,
-            // secondary first and primary last.
-            Rectangle { horizontal-stretch: 1; }
+    // Do not place actions in banner-content's auto layout: conditional rows
+    // are omitted from its preferred height and can overflow. This fixed region
+    // always ends exactly where the footer begins.
+    if root.actions.length > 0: action-row := HorizontalLayout {
+        x: 8px;
+        y: root.height
+            - root.action-row-reserve
+            - (root.show-queue-footer ? root.footer-height : 0px);
+        width: parent.width - 16px;
+        height: root.action-row-reserve;
+        spacing: 12px;
+        padding-top: 4px;
+        padding-bottom: 8px;
+        alignment: end;
 
-            for action[index] in root.actions: GitHubButton {
-                text: action;
-                primary: root.actions.length > 1
-                    && index == root.actions.length - 1;
-                clicked => { root.action-clicked(index); }
+        Rectangle { horizontal-stretch: 1; }
+
+        for action[index] in root.actions: GitHubButton {
+            text: action;
+            primary: root.actions.length > 1
+                && index == root.actions.length - 1;
+            clicked => { root.action-clicked(index); }
+        }
+    }
+
+    // Hairline + compact footer sit flush to the card bottom. The hairline
+    // starts after the 4px semantic rail so it never cuts the accent.
+    if root.show-queue-footer: Rectangle {
+        x: 4px;
+        y: root.height - root.footer-height;
+        width: root.width - 4px;
+        height: 1px;
+        background: GitHubTheme.border-muted;
+    }
+
+    if root.show-queue-footer: queue-footer := Rectangle {
+        x: 0px;
+        y: root.height - root.footer-height + 1px;
+        width: parent.width;
+        height: root.footer-height - 1px;
+        background: transparent;
+
+        Text {
+            x: 12px;
+            width: parent.width - 54px;
+            height: 100%;
+            text: root.hidden-count > 0
+                ? root.queue-count + " shown · " + root.hidden-count + " more"
+                : root.queue-count + " notifications";
+            font-size: GitHubMetrics.text-small;
+            color: root.muted-foreground;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+            wrap: no-wrap;
+        }
+
+        queue-menu-button := Rectangle {
+            x: parent.width - 30px;
+            y: (parent.height - self.height) / 2;
+            width: 24px;
+            height: 24px;
+            border-radius: GitHubMetrics.radius-medium;
+            background: queue-menu-touch.pressed
+                ? GitHubTheme.control-default-active
+                : (root.queue-menu-open
+                    ? GitHubTheme.control-transparent-selected
+                    : queue-menu-touch.has-hover
+                        ? GitHubTheme.control-default-hover
+                        : transparent);
+            accessible-role: button;
+            accessible-label: "More notification actions";
+
+            Rectangle { x: 10px; y: 5px; width: 3px; height: 3px; border-radius: 1.5px; background: root.muted-foreground; }
+            Rectangle { x: 10px; y: 10.5px; width: 3px; height: 3px; border-radius: 1.5px; background: root.muted-foreground; }
+            Rectangle { x: 10px; y: 16px; width: 3px; height: 3px; border-radius: 1.5px; background: root.muted-foreground; }
+
+            queue-menu-touch := GitHubActionMenuTriggerArea {
+                width: 100%;
+                height: 100%;
+                menu-open: root.queue-menu-open;
+                request-open => { root.queue-menu-open = true; }
+                request-close => { root.queue-menu-open = false; }
+            }
+        }
+    }
+
+    queue-actions-menu := GitHubActionMenu {
+        open: root.queue-menu-open;
+        viewport-x: root.menu-viewport-x;
+        viewport-y: root.menu-viewport-y;
+        viewport-width: root.menu-viewport-width;
+        viewport-height: root.menu-viewport-height;
+        // Match the footer kebab; end-align so the menu sits under the trigger.
+        anchor-x: root.width - 30px;
+        anchor-y: root.height - root.footer-height + 2px;
+        anchor-width: 24px;
+        anchor-height: 24px;
+        menu-width: 224px;
+        content-height: 80px;
+        align: "end";
+        side: "bottom";
+        dismiss-requested => { root.queue-menu-open = false; }
+
+        VerticalLayout {
+            x: 8px;
+            y: 8px;
+            width: parent.width - 16px;
+            spacing: 0px;
+            alignment: start;
+
+            GitHubActionListItem {
+                text: "View all notifications";
+                icon: @image-url("../../assets/icons/octicon-link-external-16.svg");
+                activated => {
+                    root.queue-menu-open = false;
+                    root.view-all-clicked();
+                }
+            }
+
+            GitHubActionListItem {
+                text: "Dismiss all";
+                icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+                activated => {
+                    root.queue-menu-open = false;
+                    root.dismiss-all-clicked();
+                }
             }
         }
     }

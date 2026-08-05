@@ -4,6 +4,10 @@ import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 // also keep a visible loading label or status message; the spinner is never
 // the only loading communication.
 // Reference: https://primer.style/product/components/spinner/
+//
+// Drawn with theme-colored Paths (not an SVG + colorize mask) so the 2px ring
+// stays visible on both light and dark canvases, matching Primer's 25% track
+// + rotating head at every spinner size.
 export component GitHubSpinner inherits Rectangle {
     in property <length> spinner-size: GitHubMetrics.icon-medium;
     in property <color> foreground: GitHubTheme.fg-muted;
@@ -15,16 +19,103 @@ export component GitHubSpinner inherits Rectangle {
     accessible-role: progress-indicator;
     accessible-label: "Loading";
 
-    Image {
+    // Keep the Primer 2px stroke at every display size (SVG used
+    // vector-effect="non-scaling-stroke").
+    private property <float> vb: 100;
+    private property <float> stroke-vb: 2 * root.vb / (root.spinner-size / 1px);
+    private property <float> radius: root.vb / 2 - root.stroke-vb / 2;
+    private property <float> inner-radius: root.radius - root.stroke-vb;
+    private property <float> cx: root.vb / 2;
+    private property <float> cy: root.vb / 2;
+    // One full turn per second; head sweeps a quarter circle.
+    private property <float> turn: root.spinning
+        ? mod(animation-tick(), 1s) / 1s
+        : 0;
+    private property <float> head-span: 0.25;
+
+    // Full track ring at 25% opacity.
+    Path {
         width: parent.width;
         height: parent.height;
-        source: @image-url("../assets/icons/github-spinner-16.svg");
-        image-fit: contain;
-        colorize: root.foreground;
-        transform-rotation: root.spinning
-            ? mod(animation-tick(), 1s) / 1s * 360deg
-            : 0deg;
-        transform-origin: { x: self.width / 2, y: self.height / 2 };
+        viewbox-width: root.vb;
+        viewbox-height: root.vb;
+        fill: root.foreground;
+        opacity: 0.25;
+
+        MoveTo {
+            x: root.cx;
+            y: root.cy - root.radius;
+        }
+        ArcTo {
+            radius-x: root.radius;
+            radius-y: root.radius;
+            x: root.cx;
+            y: root.cy + root.radius;
+            sweep: true;
+            large-arc: true;
+        }
+        ArcTo {
+            radius-x: root.radius;
+            radius-y: root.radius;
+            x: root.cx;
+            y: root.cy - root.radius;
+            sweep: true;
+            large-arc: true;
+        }
+        LineTo {
+            x: root.cx;
+            y: root.cy - root.inner-radius;
+        }
+        ArcTo {
+            radius-x: root.inner-radius;
+            radius-y: root.inner-radius;
+            x: root.cx;
+            y: root.cy + root.inner-radius;
+            sweep: false;
+            large-arc: true;
+        }
+        ArcTo {
+            radius-x: root.inner-radius;
+            radius-y: root.inner-radius;
+            x: root.cx;
+            y: root.cy - root.inner-radius;
+            sweep: false;
+            large-arc: true;
+        }
+    }
+
+    // Rotating head (quarter ring) at full foreground contrast.
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: root.vb;
+        viewbox-height: root.vb;
+        fill: root.foreground;
+
+        MoveTo {
+            x: root.cx - root.radius * sin(-root.turn * 360deg);
+            y: root.cy - root.radius * cos(-root.turn * 360deg);
+        }
+        ArcTo {
+            radius-x: root.radius;
+            radius-y: root.radius;
+            x: root.cx - root.radius * sin(-(root.turn + root.head-span) * 360deg);
+            y: root.cy - root.radius * cos(-(root.turn + root.head-span) * 360deg);
+            sweep: true;
+            large-arc: false;
+        }
+        LineTo {
+            x: root.cx - root.inner-radius * sin(-(root.turn + root.head-span) * 360deg);
+            y: root.cy - root.inner-radius * cos(-(root.turn + root.head-span) * 360deg);
+        }
+        ArcTo {
+            radius-x: root.inner-radius;
+            radius-y: root.inner-radius;
+            x: root.cx - root.inner-radius * sin(-root.turn * 360deg);
+            y: root.cy - root.inner-radius * cos(-root.turn * 360deg);
+            sweep: false;
+            large-arc: false;
+        }
     }
 }
 

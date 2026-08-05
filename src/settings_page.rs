@@ -10,7 +10,21 @@ use std::sync::{Arc, Mutex};
 use slint::{ComponentFactory, ComponentHandle, Global};
 use usher_ui_settings::{AppState as SettingsAppState, GitHubSettingsPage};
 
-use crate::{AppState, MainWindow};
+use crate::{AppState, MainWindow, UpdateLogic};
+
+/// Dual-write a host-owned update-checking busy flag onto the isolated Settings
+/// page. Must run on the Slint event loop. Do not rely on Slint `changed` alone:
+/// already-equal assignments such as `false→false` do not propagate.
+pub(crate) fn mirror_update_checking(ui: &MainWindow, page: &SettingsPageBridge, checking: bool) {
+    ui.global::<UpdateLogic>().set_checking_update(checking);
+    page.set_update_checking(checking);
+}
+
+/// Dual-write the AI Agent connection-test busy flag. Event-loop only.
+pub(crate) fn mirror_ai_agent_testing(ui: &MainWindow, page: &SettingsPageBridge, testing: bool) {
+    ui.set_settings_ai_agent_testing(testing);
+    page.set_ai_agent_testing(testing);
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct SettingsPageBridge {
@@ -66,6 +80,10 @@ impl SettingsPageBridge {
 
     pub(crate) fn set_ai_agent_testing(&self, testing: bool) {
         self.with_page(|page| page.set_ai_agent_testing(testing));
+    }
+
+    pub(crate) fn set_update_checking(&self, checking: bool) {
+        self.with_page(|page| page.set_update_checking(checking));
     }
 
     pub(crate) fn set_ai_agent_provider_index(&self, index: i32) {

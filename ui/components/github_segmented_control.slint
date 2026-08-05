@@ -77,7 +77,10 @@ export component GitHubSegmentedControlItem inherits FocusScope {
     // Invisible measure row reserves selected-state weight so divider
     // positions stay stable when selection toggles font-weight.
     label-measure := HorizontalLayout {
-        visible: false;
+        // `visible: false` removes this row from Slint layout measurement and
+        // made segment-width fall back to its minimum, clipping count suffixes
+        // such as "Read (3)". Keep it mounted but fully transparent.
+        opacity: 0;
         spacing: 0px;
         alignment: start;
         Text {

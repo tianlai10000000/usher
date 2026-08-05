@@ -609,6 +609,7 @@ fn slice_character_range(value: &str, from: u32, to: u32) -> String {
 }
 
 /// Legacy display-column slicer kept for find/wrap helpers and unit coverage.
+#[cfg(test)]
 pub(super) fn slice_display_columns(value: &str, from: u32, to: u32) -> &str {
     if from >= to {
         return "";

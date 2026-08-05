@@ -144,7 +144,28 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 - The transient top-right notification uses a neutral overlay canvas, neutral
   border, shadow, semantic icon, and narrow semantic accent. It is suppressed on
   `Route.Messages`, where the durable Inbox row is already visible, so one event
-  never appears simultaneously as two competing blue surfaces.
+  never appears simultaneously as two competing blue surfaces. The Banner queue
+  retains at most three recent slots in newest-first order (index 0 is the
+  visible head; older tails drop from the overlay only). The head Banner's
+  in-card footer distinguishes the retained queue count from the durable unread
+  total. When unread messages exceed the queue cap it says, for example,
+  **3 shown · 9 more** instead of implying that three is the total.
+  The footer keeps only the count and a vertical overflow trigger, separated
+  from the Banner body by a hairline. Its ActionMenu contains **View all
+  notifications** (opens `Route.Messages`) and **Dismiss all** (clears only the
+  Banner stack without deleting Inbox rows). Dismissal follows the root-mounted
+  ActionMenu contract (same as readiness): Escape and chrome `dismiss-revision`
+  on the menu, peer popovers close via `claim-exclusive` on the same click, and
+  page blank outside-click is owned under page chrome through
+  `TransientOverlayState.dismiss-all`—never a Notify-z full-window scrim that
+  would steal the first click from other popups. Window hosts must pass the
+  real window size as `overlay-viewport-*` so collision clamping uses
+  window-mapped coordinates; demo hosts that omit those inputs keep Banner-local
+  clamping so the end-aligned menu stays under the overflow trigger. This
+  prevents a Banner's own action buttons from competing with a second
+  text-button toolbar. The semantic rail spans the card's complete left edge
+  and is clipped by its outer radius. The footer is shown for a multi-item
+  queue or whenever additional unread messages exist.
 - The row follows github.com/notifications unread hierarchy: unread rows rest on
   `canvas-subtle`, show an 8px accent unread indicator ahead of the leading type
   icon (slot always mounted), and use bold `fg-default` titles; read rows stay
@@ -164,7 +185,21 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   因此也会清掉已镜像的 Banner 队列。
 - 右上角短时通知使用中性浮层表面、中性边框、阴影、语义图标与窄语义强调线；在
   `Route.Messages` 中不显示该浮层，因为持久 Inbox 行已经可见，避免同一事件同时表现
-  为两块竞争注意力的蓝色表面。
+  为两块竞争注意力的蓝色表面。Banner 队列最多保留 3 条，且最新在前（index 0
+  为可见队首；更早的从队尾离开浮层，Inbox 仍保留）。队首 Banner **同一张卡**
+  底部会区分已保留队列数与持久未读总数；
+  超过上限时显示如 **3 shown · 9 more**，不再暗示总共只有 3 条。
+  底部与正文之间有 Hairline，只保留计数与竖向三点入口；ActionMenu 内提供
+  **View all notifications**（进入 `Route.Messages`）与 **Dismiss all**（只清空
+  Banner，不删除 Inbox）。关闭遵循根层 ActionMenu 约定（与 readiness 相同）：
+  Esc / Chrome `dismiss-revision` 由菜单承接，其它弹层靠同一次点击的
+  `claim-exclusive` 互斥关闭，页面空白点击由页面 chrome 之下通过
+  `TransientOverlayState.dismiss-all` 关闭——禁止在 Notify 根 z 铺全窗口 scrim
+  抢走其它弹层的首次点击。窗口宿主必须把真实窗口尺寸传入 `overlay-viewport-*`，
+  碰撞夹紧才使用窗口坐标；演练场等未传入的宿主则回退到 Banner 本地夹紧，保证
+  尾对齐菜单仍落在三点按钮下方。这样 Notify 自身已有操作按钮时，不会再叠加
+  第二条文字按钮工具栏。左侧语义色条贯穿卡片全高，并由外层圆角裁剪。多条 Banner
+  排队或存在额外未读消息时显示该底部行。
 - 行遵循 github.com/notifications 的未读层级：未读行静止态使用 `canvas-subtle`、
   在类型图标前显示 8px 强调色未读圆点（占位常驻），标题为加粗 `fg-default`；已读
   行透明底 + muted 标题。Hover 使用 `accent-subtle`。前导类型图标保留 Primer
@@ -180,6 +215,11 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   badges plus the header status sentence match the new unread/total counts.
 - From a non-Messages route, publish a permanent Banner, delete or Clear all its
   Inbox row, leave Messages, and verify the Banner is gone from the queue.
+- Queue three-plus Banners off Messages, confirm only the head shows with a
+  Dismiss all affordance, open the overflow menu and close it by blank page
+  click plus Escape, then reopen and verify another page ActionMenu opens on
+  the first click (peer exclusive-claim, no double-click), dismiss all, and
+  verify Inbox rows remain.
 - Mark several non-adjacent rows read in All and verify their relative order and
   scroll position remain stable; filtered-out rows must leave no layout gaps.
 - Verify 0, 1, 99, and 100 unread badge states at 800 px and wide widths.
@@ -201,6 +241,9 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   与新的未读/总数一致。
 - 在非 Messages 路由发布一条常驻 Banner，删除或 Clear all 对应 Inbox 行后离开
   Messages，确认 Banner 已从队列消失。
+- 在非 Messages 路由连续排队 3 条以上 Banner，确认只显示队首且出现 Dismiss all，
+  打开 overflow 菜单后点击页面空白与按 Esc 均可关闭，再打开后点页面其它
+  ActionMenu 入口应一次切换（互斥，无需点两次），一键关闭后 Inbox 行仍在。
 - 在 All 中把多条不相邻消息标记为已读，确认相对顺序与滚动位置稳定，筛掉的行不留下空白。
 - 在 800px 与宽屏检查未读数 0、1、99、100。
 - 展开停靠侧栏后，确认页头操作换行到筛选器上方，且 Blankslate 文本不超出内容区。

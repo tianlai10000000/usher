@@ -63,6 +63,10 @@ export component GitHubProjectPage {
     private property <length> available-width: max(320px, root.width - 32px);
     private property <length> content-width:
         min(GitHubMetrics.page-content-max-width, root.available-width);
+    // Keep the content column on whole logical pixels so toolbar IconButtons
+    // are not painted from a half-pixel origin after centering.
+    private property <length> content-x:
+        Math.floor(max(0px, (root.available-width - root.content-width) / 2) / 1px) * 1px;
     // Derive columns from the actual content width. A project card stays
     // readable before another column is introduced.
     private property <length> grid-card-min-width: 280px;
@@ -72,8 +76,14 @@ export component GitHubProjectPage {
         : root.content-width >= root.grid-card-min-width * 2 + 16px ? 2
         : 1;
     private property <int> grid-rows: Math.ceil(root.projects.length / root.grid-columns);
+    // Floor the divided card width. A fractional card width shifts the trailing
+    // terminal/edit/delete cluster onto a half-pixel and FemtoVG blurs the SVGs.
     private property <length> grid-card-width:
-        (root.content-width - ((root.grid-columns - 1) * 16px)) / root.grid-columns;
+        Math.floor(
+            (root.content-width - ((root.grid-columns - 1) * 16px))
+                / root.grid-columns
+                / 1px
+        ) * 1px;
 
     height: page-content.preferred-height;
 
@@ -83,7 +93,7 @@ export component GitHubProjectPage {
         background: transparent;
 
         page-content := VerticalLayout {
-            x: max(0px, (parent.width - root.content-width) / 2);
+            x: root.content-x;
             width: root.content-width;
             spacing: 16px;
             alignment: start;
@@ -138,13 +148,13 @@ export component GitHubProjectPage {
                 }
 
                 GitHubProjectViewSwitcher {
-                    x: parent.width - 120px;
+                    x: Math.floor((parent.width - 120px) / 1px) * 1px;
                     y: 0px;
                     mode <=> root.view-mode;
                 }
 
                 GitHubProjectIconButton {
-                    x: parent.width - 32px;
+                    x: Math.floor((parent.width - 32px) / 1px) * 1px;
                     y: 0px;
                     icon: @image-url("../assets/icons/octicon-sync-16.svg");
                     tooltip: "Reload projects";

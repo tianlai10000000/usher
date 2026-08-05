@@ -10,7 +10,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 
 生产构建在编译期固定选择 Winit + FemtoVG/OpenGL。Skia 和 FemtoVG/WGPU 作为显式启用的 Cargo feature，仅用于渲染器诊断和 A/B 对比，避免常规构建因同时链接多个实现而静默切换渲染器。Slint 应用内实时预览和 UI Components 演练场分别由显式的 `live-preview`、`ui-components` 开发 feature 控制，默认构建和生产构建都不会编译它们。当前 macOS 测试中 WGPU 虽降低 physical footprint，但会增加 RSS，因此不作为生产默认配置。
 
-在 macOS 上，进入或退出全屏后会在 AppKit 最终标题栏布局完成时重新对齐原生控件；应用自有控件始终位于系统红黄绿按钮右侧。
+在 macOS 上，进入或退出全屏后会在 AppKit 最终标题栏布局完成时重新对齐原生控件；交通灯簇整体右移 8pt 以对齐侧栏图标中线，应用自有控件始终位于这些按钮右侧。
 
 ## 系统上下文
 
@@ -37,7 +37,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `src/main.rs` | 最小二进制入口，转发到库入口。 |
 | `src/lib.rs` | 导入并重新导出生成的 UI API，创建 `MainWindow`、初始化模块、绑定跨模块 callback，并管理窗口和关闭流程。 |
 | `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum。 |
-| `crates/usher-messages/` | 独立编译的消息中心包：持久领域/存储服务、快照订阅、后台持久化/原生投递 Worker、`notify-rust` OS 适配器及生成的 Inbox 页面 API。 |
+| `crates/usher-messages/` | 独立编译的消息中心包：持久领域/存储服务、快照订阅、后台持久化/原生投递 Worker、`notify-rust` OS 适配器及生成的 Inbox 页面 API。可嵌入 Slint 页面使用 library-module 模式编译，不再依赖已废弃的非 Window 根组件兼容路径。 |
 | `src/app_runtime.rs` | 进程级多线程 Tokio runtime，并为 runtime 线程安装 tracing dispatch。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观（强制浅色/深色，或 Auto 时跟随系统）、标题栏附件、窗口交互通知、用于关闭可消隐临时弹层的原生标题栏点击桥接、macOS PR Review 字体注册、`NSSound` 点击音，以及用于 Auto 实时跟随的 `AppleInterfaceThemeChangedNotification`；`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
@@ -105,7 +105,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/components/button/github_copy_button.slint` | 所有图标复制操作共用的 GitHub CopyToClipboardButton 交互；组件负责短时 Copy→Check 状态和 `Copied!` Tooltip，feature callback 返回剪贴板写入是否成功。 |
 | `ui/components/jobs/` | 可复用的 GitHub Actions 风格 Run/Job/Step/日志展示；只接收归一化快照，不执行流程命令。 |
 | `ui/components/dialog/github_dialog.slint` | 全局、项目、PR Review 和更新弹窗共用的响应式 Primer Dialog 外壳，统一遮罩输入归属、初始关闭按钮焦点、Header/Body/Footer 安全边距、Esc 关闭（`modal` 时禁用）、窄屏全窗口布局、关闭行为与操作状态；可选的外部视口使路由内弹窗始终按完整应用窗口居中，并跨固定 Shell Chrome 绘制连续遮罩；根状态继续把遮罩延伸到 macOS 标题栏 inset，`src/platform/macos.rs` 在保留 AppKit 交通灯可用的同时屏蔽应用自有标题栏附件；原生标题栏点击复用普通遮罩关闭语义，不会削弱不可关闭 Dialog；功能正文以 `@children` 嵌套。 |
-| `ui/components/toast/`、`ui/components/notify/` | 共用的紧凑 Primer Banner 风格瞬时/排队反馈；根层同一时刻只渲染一条排队通知。 |
+| `ui/components/toast/`、`ui/components/notify/` | 共用的紧凑 Primer Banner 风格瞬时/排队反馈；根层同一时刻只渲染最新的一条排队通知（最新在前、最多 3 条），用持久未读总数明示队列上限之外的通知，并把批量操作收入紧凑 ActionMenu。 |
 | `ui/components/messages/` | 可复用 GitHub Inbox 消息行，统一已读/未读、语义级别、元数据和常驻行操作，并登记到 UI Components。 |
 | `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在工作区视图。 |
 | `ui/theme/github_theme.slint` | 应用自有的 `GitHubTheme` 语义色，以及 `GitHubMetrics` Primer 几何、控件、字体、浮层与断点令牌；功能性 UI 原始颜色统一在此管理。 |
@@ -158,8 +158,9 @@ macOS 使用原生 `.AppleSystemUIFont`，Windows 使用 `Microsoft YaHei UI`，
 
 UI 源码继续保留在仓库根目录的 `ui/` 下。主窗口与普通路由树由
 `usher-ui` workspace crate 生成；Settings 与 Messages 路由分别由
-`usher-ui-settings` 和 `usher-messages` 独立生成，再通过 Slint 实验性的
-`ComponentContainer`/component-factory 边界挂载。应用 crate 继续重新导出主 UI
+`usher-ui-settings` 和 `usher-messages` 以 library-module 模式独立生成，再通过
+Slint 实验性的 `ComponentContainer`/component-factory 边界挂载。这会正式
+生成可嵌入的非 Window 组件，不再依赖 Slint 已废弃的应用根兼容路径。应用 crate 继续重新导出主 UI
 API，并由 `src/settings_page.rs` 与 `src/message_center.rs` 显式桥接。
 跨 crate factory 创建的组件拥有独立 Slint global 图，因此桥接层必须复制初始
 `AppState`、把 callback 转发给 `MainWindow`，并同步后续状态变化，不能假定两边
@@ -177,6 +178,36 @@ preview 动态 handle；主窗口与 UI Components 路由仍可正常热更新�
 也必须从独立路由视口中扣除或补回，包括普通页面统一保留的 4px page-stack 底部
 间隔。该约束用于避免嵌套滚轮抢占、底部内容裁剪、伪横向留白，以及透明页面透出
 不同主壳底色。
+
+### 独立页面状态桥接
+
+所有跨 crate `ComponentFactory` 页面共用同一套桥接契约：宿主或 domain 拥有真相，
+页面只展示镜像状态；桥接通过 `page.set_*` 或快照 apply 显式下推。Slint `changed`
+可以保留为次级 host→page 镜像，但完成态与领域更新不得只依赖它——`changed` 是边沿
+触发，会漏掉 `false→false` 这类“值未变化”的赋值。
+
+两种同步模式共享该契约：
+
+| 同步模式 | 适用场景 | 参考实现 |
+| --- | --- | --- |
+| Snapshot push | 持久列表/计数/领域数据 | Messages：`MessageCenter` → `src/message_center.rs` 的 `apply_page_snapshot` |
+| Operation dual-write | 异步命令 busy 或短时反馈（`checking`、`testing`、保存闪烁） | Settings：更新检查 / AI Agent 测试，经 `SettingsPageBridge` |
+
+通用规则：
+
+1. 持久领域数据归 Rust feature 或 domain crate；页面只展示镜像快照或复制后的
+   `AppState`。
+2. 异步操作 busy 标志归宿主 feature 模块，且只在 Slint event loop 上改写。独立页
+   点击处理只转发 command callback，不得自行赋值这些 busy 标志。
+3. 纯本地 UI（选中分区、筛选 chips、reveal 开关、确认框）归页面所有，不同步。
+4. 操作 begin/end 必须在 event loop 上双写宿主 property/global 与
+   `*PageBridge::set_*(value)`，覆盖成功/失败/取消全部路径，并在 Notify/Toast
+   之前或同一轮回写完成。
+5. factory 创建时同步当前宿主 busy 与领域快照，避免中途 remount 丢失 UI 状态。
+6. Worker 回写页面必须通过 `slint::invoke_from_event_loop`。
+
+后续独立页复用同一清单，按状态种类选择 snapshot、operation 或两者并用；不得假定
+生成 crate 之间共享 Slint global。
 
 ## 构建产物策略
 

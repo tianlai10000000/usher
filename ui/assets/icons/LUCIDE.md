@@ -10,5 +10,6 @@ indicator.
 - Copyright: Lucide Contributors
 
 Slint applies a semantic foreground color and displays the 24 px source
-geometry at 14-15 px. This preserves Lucide's round 2/24 stroke proportions
-while matching the smaller optical size of the Codex desktop shell.
+geometry at 16 px in the application sidebar. The even size keeps Image x/y on
+whole logical pixels so FemtoVG does not bilinear-blur the pre-rasterized SVG;
+Lucide's round 2/24 stroke proportions remain intact at that scale.

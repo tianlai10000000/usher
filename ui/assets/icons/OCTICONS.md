@@ -54,6 +54,8 @@ behind a plain X).
 `octicon-terminal-16.svg`, `octicon-pencil-16.svg`, `octicon-trash-16.svg`,
 `octicon-sync-16.svg`, `octicon-plus-16.svg`, and `octicon-repo-16.svg` are the
 unchanged upstream controls used by the Project list and its actions.
+`octicon-link-external-16.svg` is the unchanged upstream LinkExternal Octicon
+used by the notification Banner overflow “View all notifications” action.
 `octicon-arrow-up-16.svg` is the upstream ArrowUp Octicon used by the page
 Back-to-top IconButton.
 `octicon-home-16.svg`, `octicon-gear-16.svg`, and

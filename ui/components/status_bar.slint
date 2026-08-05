@@ -33,9 +33,11 @@ component GitHubStatusBarItem inherits Rectangle {
     property <color> fg-muted: GitHubTheme.fg-muted;
     property <color> control-hover: GitHubTheme.control-transparent-hover;
     property <color> control-active: GitHubTheme.control-transparent-active;
+    private property <length> status-icon-size: GitHubMetrics.icon-medium;
     private property <length> resolved-width: root.fixed-width > 0px
         ? root.fixed-width
-        : max(28px, 16px + status-label.preferred-width + (root.show-icon ? 18px : 0px));
+        : max(28px, 16px + status-label.preferred-width
+            + (root.show-icon ? root.status-icon-size + GitHubMetrics.size-4 : 0px));
     
     // Output: item's absolute x position and width for popup positioning
     out property <length> item-x: self.absolute-position.x;
@@ -96,15 +98,19 @@ component GitHubStatusBarItem inherits Rectangle {
         alignment: center;
         
         if root.show-icon : Rectangle {
-            width: 14px;
+            width: root.status-icon-size;
             height: 100%;
             background: transparent;
 
+            // Item host is 27px (28px bar minus the top hairline). A centered
+            // 16px glyph would sit at y=5.5 and FemtoVG would blur the SVG
+            // bitmap; prefer the whole-pixel inset just below true center.
             Image {
                 source: root.icon;
-                width: 14px;
-                height: 14px;
-                y: parent.height / 2 - self.height / 2;
+                width: root.status-icon-size;
+                height: root.status-icon-size;
+                y: GitHubMetrics.size-6;
+                image-fit: contain;
                 colorize: root.icon-color;
             }
         }

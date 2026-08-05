@@ -141,8 +141,11 @@ export component GitHubIconButton inherits FocusScope {
         }
 
         if !root.loading: Image {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
+            // Snap glyph origins to whole logical pixels. Odd control/glyph
+            // pairs (and fractional parents) otherwise land on *.5 and FemtoVG
+            // bilinear-blurs the pre-rasterized SVG.
+            x: Math.floor(((parent.width - self.width) / 2) / 1px) * 1px;
+            y: Math.floor(((parent.height - self.height) / 2) / 1px) * 1px;
             width: root.glyph-size;
             height: root.glyph-size;
             source: root.icon;

@@ -212,8 +212,9 @@ expanded/collapsed, and success confirmation.
 
 - `GitHubButton`: Primer default/primary/danger action variants, medium 32 px
   control geometry by default, semibold single-line label, stable loading
-  dimensions, duplicate-start protection, Enter/Space activation, and a
-  visible focus outline.
+  dimensions (width measured with the visible weight-600 label plus a reserved
+  leading spinner slot), duplicate-start protection, Enter/Space activation,
+  and a visible focus outline.
 - `GitHubIconButton`: the shared basis for every icon-only action; centered
   Octicon, default/primary/danger/invisible states, small/medium/large control
   geometry, loading support, Enter/Space activation, focus outline, and an
@@ -241,8 +242,17 @@ expanded/collapsed, and success confirmation.
   consistent final geometry; startup must never run the interactive sidebar
   transition. When no persisted value exists, the default is expanded. Its menu
   rows follow the Codex/macOS SwiftUI sidebar hierarchy:
-  compact 30 px rows, 8 px inline inset, 10 px selection radius, 15 px Lucide
-  icons inside 24 px slots, 13 px native system body typography, a neutral
+  compact 30 px rows, 8 px inline inset, 10 px selection radius, 16 px Lucide
+  icons centered on a 24 px window-edge centerline (16 px keeps the Image on
+  whole logical pixels so FemtoVG does not bilinear-blur the SVG bitmap). On
+  macOS, AppKit's default traffic-light cluster (and the sidebar/back/forward
+  accessories that follow it) is shifted 8 pt right in `src/platform/macos.rs`
+  so the close button shares that same centerline; the product title aligns to
+  the icon left edges. Each 31 px painted row owns a continuous 32 px hit band,
+  so the trailing 1 px remains a visual gap while still retaining that row's
+  pointer, hover, and click behavior during vertical traversal. Row background
+  states switch immediately without a color transition, keeping hover attached
+  to the pointer during rapid traversal. 13 px native system body typography, a neutral
   low-contrast selection surface, and no accent outline. The footer uses a
   sidebar-specific translucent hairline. The right edge is owned by the root
   shell as a content-boundary decoration: a visible 1 px stroke plus
@@ -257,7 +267,7 @@ expanded/collapsed, and success confirmation.
   Native title-bar actions retarget the motion directly on the owning event-loop
   thread, so click bursts cannot queue stale callbacks.
   Settings uses the same regular label weight as navigation rows, with a 1 px
-  optical baseline correction against its 15 px icon.
+  optical baseline correction against its 16 px icon.
   The sidebar body itself must not paint an independent container shadow.
   The docked state uses the root-mounted visible border plus restrained inward
   elevation. The temporary hover state uses an opaque white (`#ffffff` light
@@ -306,10 +316,12 @@ expanded/collapsed, and success confirmation.
   breadcrumb's clipping width; title-bar actions use shared IconButtons and
   must never overlay the route hierarchy or native drag region. One root-owned
   hairline spans the native left region, breadcrumb, and trailing action slot
-  without seams. Compact title-bar actions use 28 px controls, 14 px Lucide
-  glyphs, and the subtle foreground role. Native control frames must remain
-  wholly inside their title-bar accessory container so hover, focus, and
-  pressed chrome cannot be clipped. The initial Slint window title is empty so
+  without seams. Compact title-bar actions use 28 px controls, 14 px glyphs,
+  and the subtle foreground role. On macOS the accessory SF Symbols are
+  configured at a whole 14 pt size with `NSImageScaleNone` so AppKit does not
+  soft-rasterize a half-point symbol inside the bezel. Native control frames
+  must remain wholly inside their title-bar accessory container so hover,
+  focus, and pressed chrome cannot be clipped. The initial Slint window title is empty so
   AppKit cannot flash the standard product label before accessory installation;
   Rust restores the metadata title only after hiding native title presentation.
   macOS must not render substitute Slint title-bar controls while the native
@@ -319,15 +331,20 @@ expanded/collapsed, and success confirmation.
   持久化开关、弹簧进度和路由宽度一次性吸附到同一个最终几何，启动恢复不得播放用户
   交互使用的侧栏动画；没有持久化值时默认展开。取消固定时侧栏不
   占页面布局，窗口左侧 8px Hover 热区在根层以圆角、仅边框浮层打开同一组件，指针离开
-  后短延迟关闭。菜单行高 30px、左右内缩 8px、选中圆角 10px，15px Lucide 线性图标放在
-  24px 槽位中，正文使用 13px 原生系统字体；底部使用侧栏专用半透明 Hairline。右边界
+  后短延迟关闭。菜单行高 30px、左右内缩 8px、选中圆角 10px，16px Lucide 线性图标中心落在距窗口左缘
+  24px 的中线上（用 16px 保证 Image 落在整逻辑像素上，避免 FemtoVG 对 SVG 位图做半像素双线性模糊）。
+  macOS 上由 `src/platform/macos.rs` 把 AppKit 默认交通灯簇（及跟随其后的侧栏/后退/前进附件）
+  整体右移 8pt，使关闭按钮与该中线重合；产品标题与图标左缘对齐。正文使用 13px
+  原生系统字体。每个 31px 绘制行拥有连续的 32px 命中带，因此末尾 1px 仍表现为视觉
+  间距，但垂直穿越时继续保留该行的手型光标、Hover 与点击行为。行背景状态不做颜色
+  过渡而是立即切换，快速移动时 Hover 始终紧随指针。底部使用侧栏专用半透明 Hairline。右边界
   由根 Shell 作为内容边界装饰拥有：可见的 1px 描边加 20px 环境阴影和 8px 近端阴影
   只向侧栏方向投射。
   固定侧栏使用同一个可中断、按显示帧推进的弹簧移动侧栏、内容表面、标题栏分割线和
   状态栏绘制起点；普通路由在运动开始时只采用一次目标宽度，不逐帧重排。状态栏透明
   宿主与右侧常驻工具组保持窗口坐标。原生 Live Resize 会把侧栏运动吸附到目标，冻结
   已挂载路由宽度，并在结束时提交精确最终宽度；PR Review 同时保持稳定内部 Diff 几何。
-  Settings 与普通导航行使用相同的常规字重，并针对 15px 图标做 1px 视觉基线校正。
+  Settings 与普通导航行使用相同的常规字重，并针对 16px 图标做 1px 视觉基线校正。
   侧栏主体自身不得绘制独立的右侧容器阴影；固定态使用根层清晰边框与克制的内向
   Elevation，临时 Hover 态使用不透明白色（浅色模式 `#ffffff`）、只有边框、尾部上下
   10px 圆角且没有右边界阴影的浮层；浅色边框使用 Codex 的中性 `#dfdfe0`。
@@ -356,7 +373,8 @@ expanded/collapsed, and success confirmation.
   Router 历史。Slint 窗口初始标题必须为空，避免原生附件安装前由 AppKit 闪现标准
   产品标题；Rust 只有在隐藏原生标题展示后才恢复系统元数据中的 `Usher`。原生附件
   尚未就绪时，macOS 不得绘制替代的 Slint 标题栏控件；该区域只允许最终 AppKit
-  控件出现。
+  控件出现。macOS 附件 SF Symbols 使用整点号 14pt，并以 `NSImageScaleNone` 禁止
+  Bezel 对半点号符号再次双线性缩放。
 - `GitHubLink`: default, inline, and muted text-link states with visible
   underline and keyboard focus behavior.
 - `GitHubTooltip`: TooltipV2 pattern; tooltip canvas/foreground tokens, 12 px
@@ -462,14 +480,15 @@ expanded/collapsed, and success confirmation.
   choice group. The shell width hugs the segment row with no trailing empty
   chrome. Items own selected, hover, disabled, Enter/Space, and
   keyboard-visible focus states, and always report `clicked` (callers may
-  ignore a re-selection).   Live numeric suffixes use the item's integer `count` input. The item renders
-  `label`, `" ("`, the integer, and `")"` as separate `Text` nodes — never as one
-  concatenated string property. Call sites must not concatenate changing numbers
-  into `label` either; both forms can freeze after the first paint on
-  independently compiled ComponentFactory pages. Groups expose an accessible
-  contextual label and contain 2–5 concise non-wrapping labels.
-  Selection may change text weight or color, but measuring always reserves the
-  selected weight so divider positions stay stable for a given label/count.
+  ignore a re-selection). Live numeric suffixes use the item's integer `count`
+  input. The item renders `label`, `" ("`, the integer, and `")"` as separate
+  `Text` nodes — never as one concatenated string property. Call sites must not
+  concatenate changing numbers into `label` either; a finished `"All (N)"`
+  string property also freezes after the first paint on independently compiled
+  ComponentFactory pages. Groups expose an accessible contextual label and
+  contain 2–5 concise non-wrapping labels. Selection may change text weight or
+  color, but measuring always reserves the selected weight so divider positions
+  stay stable for a given label/count.
 - `GitHubScrollView`: the application-owned mounted viewport and semantic
   scrollbar foundation. It must preserve models while scrolling, support
   track and thumb pointer interaction, and never depend on Material styling.
@@ -477,9 +496,11 @@ expanded/collapsed, and success confirmation.
   track; callers provide the visible operation label and status.
 - `GitHubSpinner`: the only indeterminate spinner implementation; callers
   retain a visible loading label/status and must not shift layout when it
-  appears. `GitHubCenteredLoadingState` is the shared compact spinner+13px
-  muted label panel used by PR list and PR review Conversation/Commits/Files
-  changed loading.
+  appears. It paints a Primer 2px track (25% opacity) plus a rotating head
+  with the caller-supplied theme foreground so the indicator stays visible in
+  both light and dark mode. `GitHubCenteredLoadingState` is the shared compact
+  spinner+13px muted label panel used by PR list and PR review
+  Conversation/Commits/Files changed loading.
 - `GitHubActionsJob`: the shared GitHub Actions-style Job/Step presenter for
   ordered workflow state, semantic lifecycle/conclusion, bounded disclosure
   logs, duration cells, and running animation. It remains presentation-only;
@@ -528,8 +549,19 @@ expanded/collapsed, and success confirmation.
   icon/spinner and dismiss glyph align with its first line; the message block
   must never be centered against its complete multi-line height.
 - `GitHubNotificationBanner`: queued persistent feedback with at most two
-  shared GitHub actions plus a dismiss control. Render only the queue head so
-  one Banner is visible at a time; dismissing it reveals the next item.
+  shared GitHub actions plus a dismiss control. Render only the newest queue
+  head so one Banner is visible at a time; dismissing it reveals the next older
+  item. The transient Banner queue is capped at three (newest-first; older
+  tails drop from the overlay). Its in-card footer distinguishes
+  the retained `queue-count` from the durable unread total: overflow uses copy
+  such as **3 shown · 9 more**, never an ambiguous **3 notifications**.
+  The footer contains only that status plus a vertical overflow trigger; a
+  shared ActionMenu owns **View all notifications** and **Dismiss all**, keeping
+  those batch operations out of the Banner's existing action-button row. A
+  hairline separates the footer, while the semantic rail spans the complete
+  left edge inside the clipped card radius. The footer appears for a multi-item
+  queue or hidden unread messages. UI Components must demo an Action Banner in
+  the overflow state plus the live stack.
 - Toast/notification feedback must not duplicate an existing feature-owned
   error surface and must never be the only way to communicate critical
   information.
