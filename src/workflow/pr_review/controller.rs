@@ -1,9 +1,12 @@
 use std::collections::{HashMap, HashSet};
+use std::fs::{File, OpenOptions};
+use std::io::{BufWriter, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
+use usher_search::{SearchDirection, step_match_index};
 
 use crate::git::{
     PullRequestActionState, PullRequestCommit, PullRequestDiffFile, PullRequestMergeMethod,
@@ -32,7 +35,10 @@ use super::cache::{
 use super::diff_model::{LazyPrDiffLineModel, to_slint_file};
 use super::diff_projection::hunk_scroll_anchor_source_index;
 use super::file_tree::{build_tree_items, extension_counts};
-use super::find::{collect_diff_find_matches, estimate_diff_line_offset_y};
+use super::find::{
+    collect_diff_find_matches, reconcile_measured_diff_find_viewport_y,
+    resolve_diff_find_viewport_y,
+};
 use super::hunk::{
     HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection, expand_all_hunk_context_from_sources,
     expand_hunk_context_from_sources, full_source_file, hunk_is_expandable,
@@ -55,6 +61,79 @@ use super::timeline::{
 
 const LARGE_DIFF_LINE_THRESHOLD: usize = 400;
 const LARGE_DIFF_BYTE_THRESHOLD: usize = 64 * 1024;
+const PR_SCROLL_DIAGNOSTICS_PATH: &str = "/tmp/usher-pr-scroll-diagnostics.log";
+
+struct PrScrollDiagnostics {
+    started_at: Instant,
+    sequence: AtomicU64,
+    writer: Mutex<BufWriter<File>>,
+}
+
+static PR_SCROLL_DIAGNOSTICS: OnceLock<Option<PrScrollDiagnostics>> = OnceLock::new();
+
+fn pr_scroll_diagnostics() -> Option<&'static PrScrollDiagnostics> {
+    PR_SCROLL_DIAGNOSTICS
+        .get_or_init(|| {
+            let enabled = std::env::var("USHER_PR_SCROLL_DIAGNOSTICS")
+                .map(|value| !matches!(value.trim(), "" | "0" | "false" | "off"))
+                .unwrap_or(false);
+            if !enabled {
+                return None;
+            }
+
+            match OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(PR_SCROLL_DIAGNOSTICS_PATH)
+            {
+                Ok(file) => Some(PrScrollDiagnostics {
+                    started_at: Instant::now(),
+                    sequence: AtomicU64::new(0),
+                    writer: Mutex::new(BufWriter::new(file)),
+                }),
+                Err(error) => {
+                    eprintln!(
+                        "[PRScrollDiag] failed to open {PR_SCROLL_DIAGNOSTICS_PATH}: {error}"
+                    );
+                    None
+                }
+            }
+        })
+        .as_ref()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_pr_scroll_diagnostic(
+    kind: &str,
+    viewport_y: f32,
+    requested_y: f32,
+    visible_height: f32,
+    viewport_height: f32,
+    find_open: bool,
+    find_focused: bool,
+    hunk_pending: bool,
+    find_revision: i32,
+    line_revision: i32,
+    hunk_attempts: i32,
+) {
+    let Some(diagnostics) = pr_scroll_diagnostics() else {
+        return;
+    };
+    let sequence = diagnostics.sequence.fetch_add(1, Ordering::Relaxed) + 1;
+    let elapsed_us = diagnostics.started_at.elapsed().as_micros();
+    let maximum = (viewport_height - visible_height).max(0.0);
+    let Ok(mut writer) = diagnostics.writer.lock() else {
+        return;
+    };
+    let _ = writeln!(
+        writer,
+        "seq={sequence} elapsed_us={elapsed_us} kind={kind} viewport_y={viewport_y:.3} requested_y={requested_y:.3} visible_height={visible_height:.3} viewport_height={viewport_height:.3} maximum={maximum:.3} find_open={find_open} find_focused={find_focused} hunk_pending={hunk_pending} find_revision={find_revision} line_revision={line_revision} hunk_attempts={hunk_attempts}"
+    );
+    if sequence % 16 == 0 || kind != "viewport" {
+        let _ = writer.flush();
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReviewRequest {
@@ -93,6 +172,7 @@ pub(crate) struct WorkflowPrReviewController {
     pending_open_commit: Arc<Mutex<Option<String>>>,
     commit_detail_return_tab: Arc<Mutex<Option<i32>>>,
     pr_list_refresh_pending: Arc<AtomicBool>,
+    diff_find_matches: Arc<Mutex<Vec<WorkflowPrDiffFindMatch>>>,
 }
 
 fn session_highlight_resources(
@@ -135,7 +215,44 @@ pub(crate) fn bind_pr_review(
         pending_open_commit: Arc::new(Mutex::new(None)),
         commit_detail_return_tab: Arc::new(Mutex::new(None)),
         pr_list_refresh_pending: Arc::new(AtomicBool::new(false)),
+        diff_find_matches: Arc::new(Mutex::new(Vec::new())),
     };
+
+    let scroll_diagnostics_enabled = pr_scroll_diagnostics().is_some();
+    ui.set_workflow_pr_review_scroll_diagnostics_enabled(scroll_diagnostics_enabled);
+    ui.on_workflow_pr_review_diagnose_diff_scroll(
+        move |kind,
+              viewport_y,
+              requested_y,
+              visible_height,
+              viewport_height,
+              find_open,
+              find_focused,
+              hunk_pending,
+              find_revision,
+              line_revision,
+              hunk_attempts| {
+            if !scroll_diagnostics_enabled {
+                return;
+            }
+            write_pr_scroll_diagnostic(
+                kind.as_str(),
+                viewport_y,
+                requested_y,
+                visible_height,
+                viewport_height,
+                find_open,
+                find_focused,
+                hunk_pending,
+                find_revision,
+                line_revision,
+                hunk_attempts,
+            );
+        },
+    );
+    if scroll_diagnostics_enabled {
+        write_pr_scroll_diagnostic("session", 0.0, 0.0, 0.0, 0.0, false, false, false, 0, 0, 0);
+    }
 
     let open_controller = controller.clone();
     let ui_weak = ui.as_weak();
@@ -563,27 +680,96 @@ pub(crate) fn bind_pr_review(
         )
     });
 
+    let find_matches = controller.diff_find_matches.clone();
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_review_find_diff_matches(move |query, split| {
         let Some(ui) = ui_weak.upgrade() else {
             return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
         };
-        collect_diff_find_matches(&ui.get_workflow_pr_review_lines(), query.as_str(), split)
+        let model =
+            collect_diff_find_matches(&ui.get_workflow_pr_review_lines(), query.as_str(), split);
+        if let Ok(mut stored) = find_matches.lock() {
+            *stored = model.iter().collect();
+        }
+        model
+    });
+
+    let find_matches = controller.diff_find_matches.clone();
+    ui.on_workflow_pr_review_find_diff_row_matches(move |line, side, _query| {
+        let matches = find_matches
+            .lock()
+            .map(|matches| {
+                matches
+                    .iter()
+                    .filter(|hit| hit.line == line && hit.side.as_str() == side.as_str())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        ModelRc::new(VecModel::from(matches))
+    });
+
+    ui.on_workflow_pr_review_step_diff_find_index(move |current, count, backward| {
+        step_match_index(
+            (current >= 0).then_some(current as usize),
+            count.max(0) as usize,
+            if backward {
+                SearchDirection::Backward
+            } else {
+                SearchDirection::Forward
+            },
+        )
+        .map_or(-1, |index| index as i32)
     });
 
     let ui_weak = ui.as_weak();
-    ui.on_workflow_pr_review_estimate_diff_line_y(move |line, code_width, cell_width, side| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return 0.0;
-        };
-        estimate_diff_line_offset_y(
-            &ui.get_workflow_pr_review_lines(),
-            line,
-            code_width,
-            cell_width,
-            side.as_str(),
-        )
-    });
+    ui.on_workflow_pr_review_resolve_diff_find_viewport_y(
+        move |line,
+              start_char,
+              code_width,
+              cell_width,
+              side,
+              current_viewport_y,
+              visible_height,
+              content_height| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return 0.0;
+            };
+            resolve_diff_find_viewport_y(
+                &ui.get_workflow_pr_review_lines(),
+                line,
+                start_char,
+                code_width,
+                cell_width,
+                side.as_str(),
+                current_viewport_y,
+                visible_height,
+                content_height,
+            )
+        },
+    );
+
+    ui.on_workflow_pr_review_reconcile_measured_diff_find_viewport_y(
+        move |match_top,
+              match_height,
+              current_viewport_y,
+              visible_height,
+              content_height,
+              has_last_target,
+              last_target_viewport_y,
+              stable_frames| {
+            reconcile_measured_diff_find_viewport_y(
+                match_top,
+                match_height,
+                current_viewport_y,
+                visible_height,
+                content_height,
+                has_last_target,
+                last_target_viewport_y,
+                stable_frames,
+            )
+        },
+    );
 
     let submit_controller = controller.clone();
     let ui_weak = ui.as_weak();
@@ -856,7 +1042,7 @@ impl WorkflowPrReviewController {
         ui.set_workflow_pr_review_large_diff_loading(false);
         ui.set_workflow_pr_review_files(empty_file_model());
         ui.set_workflow_pr_review_tree_items(empty_tree_model());
-        ui.set_workflow_pr_review_lines(empty_line_model());
+        set_line_model(ui, empty_line_model());
         ui.set_workflow_pr_review_selected_file_index(-1);
         ui.set_workflow_pr_review_selected_file_path("".into());
         ui.set_workflow_pr_review_context_expanded(false);
@@ -1676,7 +1862,7 @@ impl WorkflowPrReviewController {
         apply_file_header(ui, index, &file);
         if is_large_diff(&file) && !large_diff_loaded {
             self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
-            ui.set_workflow_pr_review_lines(empty_line_model());
+            set_line_model(ui, empty_line_model());
             ui.set_workflow_pr_review_max_code_columns(0);
             ui.set_workflow_pr_review_longest_code_line("".into());
             ui.set_workflow_pr_review_code_loading(false);
@@ -2519,7 +2705,7 @@ fn clear_selected_file(ui: &MainWindow) {
     ui.set_workflow_pr_review_selected_file_removed_lines(0);
     ui.set_workflow_pr_review_max_code_columns(0);
     ui.set_workflow_pr_review_longest_code_line("".into());
-    ui.set_workflow_pr_review_lines(empty_line_model());
+    set_line_model(ui, empty_line_model());
     ui.set_workflow_pr_review_code_loading(false);
     ui.set_workflow_pr_review_large_diff_deferred(false);
     ui.set_workflow_pr_review_large_diff_loading(false);
@@ -2566,11 +2752,14 @@ fn apply_highlighted_file(
         .unwrap_or_default();
     ui.set_workflow_pr_review_max_code_columns(max_columns as i32);
     ui.set_workflow_pr_review_longest_code_line(longest_code_line.into());
-    ui.set_workflow_pr_review_lines(ModelRc::new(LazyPrDiffLineModel::new(
-        file.clone(),
-        highlighted,
-        ui.get_workflow_pr_review_diff_view().as_str() == "split",
-    )));
+    set_line_model(
+        ui,
+        ModelRc::new(LazyPrDiffLineModel::new(
+            file.clone(),
+            highlighted,
+            ui.get_workflow_pr_review_diff_view().as_str() == "split",
+        )),
+    );
     ui.set_workflow_pr_review_has_expandable_hunks(
         !ui.get_workflow_pr_review_viewing_file()
             && file
@@ -2592,6 +2781,14 @@ fn apply_highlighted_file(
                 .wrapping_add(1),
         );
     }
+}
+
+fn set_line_model(ui: &MainWindow, lines: ModelRc<WorkflowPrDiffLine>) {
+    ui.set_workflow_pr_review_lines(lines);
+    ui.set_workflow_pr_review_line_content_revision(
+        ui.get_workflow_pr_review_line_content_revision()
+            .wrapping_add(1),
+    );
 }
 
 fn empty_file_model() -> ModelRc<WorkflowPrDiffFile> {
@@ -2743,7 +2940,7 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_only_manifest_files(false);
     ui.set_workflow_pr_review_show_viewed_files(true);
     ui.set_workflow_pr_review_file_filters_active(false);
-    ui.set_workflow_pr_review_lines(empty_line_model());
+    set_line_model(ui, empty_line_model());
     ui.set_workflow_pr_review_selected_file_index(-1);
     ui.set_workflow_pr_review_selected_file_path("".into());
     ui.set_workflow_pr_review_selected_file_added_lines(0);

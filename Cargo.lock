@@ -7397,6 +7397,7 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon",
  "usher-messages",
+ "usher-search",
  "usher-ui",
  "usher-ui-settings",
  "vt100",
@@ -7417,6 +7418,10 @@ dependencies = [
  "slint-build",
  "usher-state-store",
 ]
+
+[[package]]
+name = "usher-search"
+version = "0.1.0"
 
 [[package]]
 name = "usher-state-store"

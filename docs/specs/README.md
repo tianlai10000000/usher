@@ -8,6 +8,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | --- | --- | --- |
 | [HTTP pipeline](http.md) | Current / 当前 | `src/http/mod.rs`, all HTTP callers |
 | [Cross-page state store](state-store.md) | Current / 当前 | `crates/usher-state-store/`, all cross-page state owners and UI bridges |
+| [Shared search navigation](search.md) | Current / 当前 | `crates/usher-search/`, all feature Find adapters |
 | [AI Agent configuration](ai-agent.md) | Current / 当前 | `src/settings.rs`, `src/ai/agent.rs`, `ui/views/settings.slint` |
 | [Chat behavior](chat.md) | Current / 当前 | `src/chat/`, `ui/views/chat.slint`, `ui/components/chat/`, `ui/main.slint` |
 | [Project repository metadata](project-repository.md) | Current / 当前 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |

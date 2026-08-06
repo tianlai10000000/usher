@@ -35,16 +35,17 @@ export component GitHubProjectProviderRibbon inherits Rectangle {
         : root.normalized-type == "gitee"
             ? "Gitee"
             : "GitHub";
-    private property <image> provider-icon: root.normalized-type == "gitlab"
-        ? @image-url("../../assets/icons/provider-gitlab.svg")
+    private property <image> ribbon-image: root.normalized-type == "gitlab"
+        ? (root.compact
+            ? @image-url("../../assets/provider-ribbons/provider-ribbon-gitlab-compact.svg")
+            : @image-url("../../assets/provider-ribbons/provider-ribbon-gitlab-full.svg"))
         : root.normalized-type == "gitee"
-            ? @image-url("../../assets/icons/provider-gitee.svg")
-            : @image-url("../../assets/icons/provider-github.svg");
-    private property <color> provider-color: root.normalized-type == "gitlab"
-        ? GitHubTheme.provider-gitlab-emphasis
-        : root.normalized-type == "gitee"
-            ? GitHubTheme.provider-gitee-emphasis
-            : GitHubTheme.provider-github-emphasis;
+            ? (root.compact
+                ? @image-url("../../assets/provider-ribbons/provider-ribbon-gitee-compact.svg")
+                : @image-url("../../assets/provider-ribbons/provider-ribbon-gitee-full.svg"))
+            : (root.compact
+                ? @image-url("../../assets/provider-ribbons/provider-ribbon-github-compact.svg")
+                : @image-url("../../assets/provider-ribbons/provider-ribbon-github-full.svg"));
     // Keep the corner footprint deliberately small. The long band extends
     // beyond this host and the card clips it into the final corner shape.
     width: root.compact ? 48px : 54px;
@@ -54,54 +55,16 @@ export component GitHubProjectProviderRibbon inherits Rectangle {
     accessible-role: text;
     accessible-label: "Repository provider: " + root.provider-name;
 
+    // FemtoVG renders Text under rotation as anti-aliased glyph outlines
+    // instead of using its hinted glyph atlas. At this size that is visibly
+    // soft on low-DPI displays. The application-owned SVG preserves the same
+    // band, icon, and centered 45deg caption geometry, while this Image stays
+    // axis-aligned so SVG rasterization happens directly at the output scale.
     Image {
-        x: root.compact ? -21px : -23px;
-        y: root.compact ? 6px : 7px;
-        width: root.compact ? 90px : 100px;
-        height: root.compact ? 16px : 18px;
-        transform-origin: { x: self.width / 2, y: self.height / 2 };
-        transform-rotation: 45deg;
-
-        Rectangle {
-            width: parent.width;
-            height: parent.height;
-            background: root.provider-color;
-            clip: true;
-
-            // Place the provider identity in the part of the diagonal band
-            // that remains visible after the card clips it. Centering against
-            // the full off-card rectangle would make the content look shifted.
-            // Keep local x/y unshifted so cross-band centering matches Gitee;
-            // provider-specific optical nudges previously over-corrected.
-            provider-identity := HorizontalLayout {
-                x: root.compact ? 39px : 43px;
-                y: 0;
-                width: root.compact ? 50px : 55px;
-                height: parent.height;
-                spacing: 3px;
-                alignment: center;
-                cross-axis-alignment: center;
-
-                Image {
-                    width: root.compact ? 9px : 10px;
-                    height: self.width;
-                    source: root.provider-icon;
-                    colorize: GitHubTheme.provider-ribbon-foreground;
-                }
-
-                Text {
-                    width: root.compact ? 38px : 42px;
-                    height: parent.height;
-                    text: root.provider-name;
-                    font-size: 7px;
-                    font-weight: 700;
-                    color: GitHubTheme.provider-ribbon-foreground;
-                    vertical-alignment: center;
-                    horizontal-alignment: left;
-                    overflow: elide;
-                }
-            }
-        }
+        width: parent.width;
+        height: parent.height;
+        source: root.ribbon-image;
+        image-fit: contain;
     }
 }
 

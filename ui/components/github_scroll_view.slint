@@ -104,3 +104,117 @@ export component GitHubScrollView inherits Rectangle {
         }
     }
 }
+
+// ListView estimates variable-height content from the currently mounted rows.
+// Freeze that estimate for the duration of a direct thumb drag so delegate
+// recycling cannot change the pointer-to-scroll mapping mid-gesture.
+export component GitHubVirtualListScrollbar inherits Rectangle {
+    in-out property <length> viewport-y;
+    in property <length> visible-height;
+    in property <length> content-height;
+    in property <bool> enabled: true;
+
+    private property <bool> dragging: false;
+    private property <length> drag-content-height: 0px;
+    private property <length> drag-maximum: 0px;
+    private property <length> drag-thumb-height: 0px;
+    private property <length> drag-thumb-y: 0px;
+    private property <length> drag-pointer-offset: 0px;
+    private property <length> live-maximum:
+        max(0px, root.content-height - root.visible-height);
+    private property <length> live-thumb-height:
+        root.live-maximum > 0px
+            ? max(
+                GitHubMetrics.size-32,
+                root.height * root.visible-height
+                    / max(root.visible-height, root.content-height)
+            )
+            : root.height;
+    private property <length> live-thumb-range:
+        max(1px, root.height - root.live-thumb-height - GitHubMetrics.size-4);
+    private property <length> live-thumb-y:
+        GitHubMetrics.size-2
+            + max(0px, -root.viewport-y) / max(1px, root.live-maximum)
+                * root.live-thumb-range;
+    private property <length> displayed-thumb-height:
+        root.dragging ? root.drag-thumb-height : root.live-thumb-height;
+    private property <length> displayed-thumb-y:
+        root.dragging ? root.drag-thumb-y : root.live-thumb-y;
+
+    function apply-drag(pointer-y: length) {
+        let thumb-range = max(
+            1px,
+            root.height - root.drag-thumb-height - GitHubMetrics.size-4
+        );
+        root.drag-thumb-y = max(
+            GitHubMetrics.size-2,
+            min(
+                GitHubMetrics.size-2 + thumb-range,
+                pointer-y - root.drag-pointer-offset
+            )
+        );
+        root.viewport-y = -(
+            (root.drag-thumb-y - GitHubMetrics.size-2) / thumb-range
+                * root.drag-maximum
+        );
+    }
+
+    function begin-drag(pointer-y: length) {
+        root.drag-content-height = max(root.visible-height, root.content-height);
+        root.drag-maximum = max(0px, root.drag-content-height - root.visible-height);
+        root.drag-thumb-height = root.live-thumb-height;
+        let thumb-top = root.live-thumb-y;
+        let pressed-on-thumb = pointer-y >= thumb-top
+            && pointer-y <= thumb-top + root.drag-thumb-height;
+        root.drag-pointer-offset = pressed-on-thumb
+            ? pointer-y - thumb-top
+            : root.drag-thumb-height / 2;
+        root.dragging = true;
+        root.apply-drag(pointer-y);
+    }
+
+    visible: root.enabled && (root.dragging || root.live-maximum > 0px);
+    width: GitHubMetrics.size-8;
+    background: transparent;
+
+    scrollbar-hit := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                root.begin-drag(self.mouse-y);
+            } else if event.kind == PointerEventKind.up
+                || event.kind == PointerEventKind.cancel {
+                root.dragging = false;
+            }
+        }
+        moved => {
+            if self.pressed && root.dragging {
+                root.apply-drag(self.mouse-y);
+            }
+        }
+    }
+
+    Rectangle {
+        x: (parent.width - GitHubMetrics.size-4) / 2;
+        y: GitHubMetrics.size-2;
+        width: GitHubMetrics.size-4;
+        height: parent.height - GitHubMetrics.size-4;
+        border-radius: GitHubMetrics.radius-small;
+        background: GitHubTheme.scrollbar-track;
+        opacity: scrollbar-hit.has-hover || root.dragging ? 1 : 0;
+        animate opacity { duration: 120ms; easing: ease-out; }
+    }
+
+    Rectangle {
+        x: (parent.width - GitHubMetrics.size-4) / 2;
+        y: root.displayed-thumb-y;
+        width: GitHubMetrics.size-4;
+        height: root.displayed-thumb-height;
+        border-radius: GitHubMetrics.radius-small;
+        background: GitHubTheme.scrollbar-thumb;
+        opacity: scrollbar-hit.has-hover || root.dragging ? 1 : 0.55;
+        animate opacity { duration: 120ms; easing: ease-out; }
+    }
+}

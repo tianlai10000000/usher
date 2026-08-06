@@ -6,9 +6,15 @@
 //! current projected line model.
 
 use slint::{Model, ModelRc, SharedString, VecModel};
+use usher_search::{
+    AxisRange, MatchCase, ScrollViewport, center_if_needed, converge_center_if_needed,
+    find_non_overlapping,
+};
 
 use crate::workflow::syntax_highlight::character_columns;
-use crate::{WorkflowPrDiffFindMatch, WorkflowPrDiffLine};
+use crate::{WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrDiffRevealStep};
+
+use super::selection::soft_wrap_visual_line_index;
 
 /// Case-insensitive substring matches over copyable code columns.
 /// Split mode searches both panes and tags each hit with `left` / `right`.
@@ -21,7 +27,6 @@ pub(super) fn collect_diff_find_matches(
     if needle.is_empty() {
         return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
     }
-    let needle_lower = needle.to_lowercase();
     let mut matches = Vec::new();
 
     for index in 0..lines.row_count() {
@@ -36,14 +41,14 @@ pub(super) fn collect_diff_find_matches(
                 &mut matches,
                 index as i32,
                 line.left_content.as_str(),
-                needle_lower.as_str(),
+                needle,
                 "left",
             );
             push_content_matches(
                 &mut matches,
                 index as i32,
                 line.right_content.as_str(),
-                needle_lower.as_str(),
+                needle,
                 "right",
             );
         } else {
@@ -51,7 +56,7 @@ pub(super) fn collect_diff_find_matches(
                 &mut matches,
                 index as i32,
                 line.content.as_str(),
-                needle_lower.as_str(),
+                needle,
                 "",
             );
         }
@@ -108,6 +113,106 @@ pub(super) fn estimate_diff_line_offset_y(
     offset
 }
 
+/// Blink Find-in-page equivalent for the diff scroll axis.
+///
+/// Chromium scrolls the active match rectangle with CenterIfNeeded: preserve
+/// the viewport when the match is fully visible, otherwise center it and clamp
+/// to the scrollable content bounds. Diff code wraps instead of scrolling
+/// horizontally, so only the vertical axis is needed here.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_diff_find_viewport_y(
+    lines: &ModelRc<WorkflowPrDiffLine>,
+    target_line: i32,
+    start_char: i32,
+    code_width: f32,
+    cell_width: f32,
+    side: &str,
+    current_viewport_y: f32,
+    visible_height: f32,
+    content_height: f32,
+) -> f32 {
+    const MATCH_HEIGHT: f32 = 22.0;
+    let match_top =
+        estimate_diff_match_offset_y(lines, target_line, start_char, code_width, cell_width, side);
+    -center_if_needed(
+        AxisRange {
+            start: match_top,
+            extent: MATCH_HEIGHT,
+        },
+        ScrollViewport {
+            offset: -current_viewport_y,
+            extent: visible_height,
+            content_extent: content_height,
+        },
+    )
+}
+
+/// Applies the shared reveal policy to a match rectangle measured by the
+/// mounted Slint delegate. This second pass removes accumulated row-height
+/// estimation error after wrapping or window resizing.
+pub(super) fn reconcile_measured_diff_find_viewport_y(
+    match_top: f32,
+    match_height: f32,
+    current_viewport_y: f32,
+    visible_height: f32,
+    content_height: f32,
+    has_last_target: bool,
+    last_target_viewport_y: f32,
+    stable_frames: i32,
+) -> WorkflowPrDiffRevealStep {
+    let target_end = match_top.max(0.0) + match_height.max(1.0);
+    let convergence = converge_center_if_needed(
+        AxisRange {
+            start: match_top,
+            extent: match_height,
+        },
+        ScrollViewport {
+            offset: -current_viewport_y,
+            extent: visible_height,
+            // Virtual ListView content height can lag its last mounted row.
+            // Never clamp before the measured target rectangle itself.
+            content_extent: content_height.max(target_end),
+        },
+        has_last_target.then_some(-last_target_viewport_y),
+        stable_frames.clamp(0, u8::MAX as i32) as u8,
+    );
+    WorkflowPrDiffRevealStep {
+        viewport_y: -convergence.target_offset,
+        stable_frames: convergence.stable_frames as i32,
+        complete: convergence.complete,
+    }
+}
+
+fn estimate_diff_match_offset_y(
+    lines: &ModelRc<WorkflowPrDiffLine>,
+    target_line: i32,
+    start_char: i32,
+    code_width: f32,
+    cell_width: f32,
+    side: &str,
+) -> f32 {
+    const CODE_LINE_HEIGHT: f32 = 22.0;
+    let line_top = estimate_diff_line_offset_y(lines, target_line, code_width, cell_width, side);
+    if target_line < 0 || target_line as usize >= lines.row_count() {
+        return line_top;
+    }
+    let Some(line) = lines.row_data(target_line as usize) else {
+        return line_top;
+    };
+    let (content, columns) = match side {
+        "left" => (line.left_content.as_str(), line.left_columns),
+        "right" => (line.right_content.as_str(), line.right_columns),
+        _ => (line.content.as_str(), line.left_columns),
+    };
+    let safe_code_width = code_width.max(1.0);
+    let safe_cell_width = cell_width.max(0.1);
+    if columns.max(0) as f32 * safe_cell_width <= safe_code_width + 0.5 {
+        return line_top;
+    }
+    let max_cells = (safe_code_width / safe_cell_width).floor().max(1.0) as i32;
+    line_top + soft_wrap_visual_line_index(content, start_char, max_cells) as f32 * CODE_LINE_HEIGHT
+}
+
 fn is_copyable_diff_line(line: &WorkflowPrDiffLine) -> bool {
     !matches!(line.kind.as_str(), "hunk" | "meta")
 }
@@ -122,39 +227,23 @@ fn push_content_matches(
     if content.is_empty() || needle_lower.is_empty() {
         return;
     }
-    let haystack_lower = content.to_lowercase();
-    let mut search_from = 0_usize;
-    while let Some(rel) = haystack_lower[search_from..].find(needle_lower) {
-        let start_byte = search_from + rel;
-        let end_byte = start_byte + needle_lower.len();
-        // Needle length is measured on the lowercased haystack; for UTF-8 this
-        // matches the original slice length because lowercasing BMP letters
-        // keeps byte length for the scripts we care about in source diffs.
-        if !content.is_char_boundary(start_byte) || !content.is_char_boundary(end_byte) {
-            search_from = start_byte.saturating_add(1);
-            continue;
-        }
+    for hit in find_non_overlapping(content, needle_lower, MatchCase::Insensitive) {
+        let start_byte = hit.start_byte;
+        let end_byte = hit.end_byte;
         let prefix = &content[..start_byte];
         let text = &content[start_byte..end_byte];
         let start_column = display_column_at_byte(content, start_byte);
         let end_column = display_column_at_byte(content, end_byte);
-        let start_char = prefix.chars().count();
-        let end_char = start_char + text.chars().count();
         out.push(WorkflowPrDiffFindMatch {
             line,
             start_column: start_column as i32,
             end_column: end_column as i32,
-            start_char: start_char as i32,
-            end_char: end_char as i32,
+            start_char: hit.start_char as i32,
+            end_char: hit.end_char as i32,
             side: side.into(),
             prefix: SharedString::from(prefix),
             text: SharedString::from(text),
         });
-        search_from = if end_byte > start_byte {
-            end_byte
-        } else {
-            start_byte.saturating_add(1)
-        };
     }
 }
 
@@ -177,7 +266,10 @@ fn display_column_at_byte(value: &str, byte: usize) -> u32 {
 mod tests {
     use slint::{Model, ModelRc, VecModel};
 
-    use super::{collect_diff_find_matches, estimate_diff_line_offset_y};
+    use super::{
+        collect_diff_find_matches, estimate_diff_line_offset_y,
+        reconcile_measured_diff_find_viewport_y, resolve_diff_find_viewport_y,
+    };
     use crate::{WorkflowPrDiffLine, WorkflowPrDiffToken};
 
     fn line(content: &str, left: &str, right: &str) -> WorkflowPrDiffLine {
@@ -272,6 +364,20 @@ mod tests {
     }
 
     #[test]
+    fn same_line_occurrences_are_distinct_non_overlapping_matches() {
+        let lines = ModelRc::new(VecModel::from(vec![line(
+            "find find find",
+            "find find find",
+            "find find find",
+        )]));
+        let matches = collect_diff_find_matches(&lines, "find", false);
+        assert_eq!(matches.row_count(), 3);
+        assert_eq!(matches.row_data(0).map(|hit| hit.start_char), Some(0));
+        assert_eq!(matches.row_data(1).map(|hit| hit.start_char), Some(5));
+        assert_eq!(matches.row_data(2).map(|hit| hit.start_char), Some(10));
+    }
+
+    #[test]
     fn line_offset_accounts_for_wrapped_rows() {
         let wrapped = "01234567890123456789";
         let lines = ModelRc::new(VecModel::from(vec![
@@ -281,5 +387,31 @@ mod tests {
         // 20 cols / 10 px cells in 100 px width => 2 visual rows => 44 px.
         let offset = estimate_diff_line_offset_y(&lines, 1, 100.0, 10.0, "");
         assert_eq!(offset, 44.0);
+    }
+
+    #[test]
+    fn wrapped_matches_use_their_visual_subline() {
+        let content = "alpha beta gamma delta epsilon";
+        let lines = ModelRc::new(VecModel::from(vec![line(content, content, content)]));
+        let viewport_y =
+            resolve_diff_find_viewport_y(&lines, 0, 23, 72.0, 7.2, "", 0.0, 22.0, 88.0);
+        assert!(viewport_y < 0.0);
+    }
+
+    #[test]
+    fn measured_delegate_geometry_corrects_a_stale_visible_estimate() {
+        let step = reconcile_measured_diff_find_viewport_y(
+            340.0, 22.0, -100.0, 240.0, 800.0, false, 0.0, 0,
+        );
+        assert_eq!(step.viewport_y, -231.0);
+        assert!(!step.complete);
+    }
+
+    #[test]
+    fn measured_last_match_extends_a_stale_virtual_content_bound() {
+        let step = reconcile_measured_diff_find_viewport_y(
+            780.0, 22.0, -500.0, 240.0, 760.0, false, 0.0, 0,
+        );
+        assert_eq!(step.viewport_y, -562.0);
     }
 }

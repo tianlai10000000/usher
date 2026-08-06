@@ -59,6 +59,14 @@ export struct WorkflowPrDiffFindMatch {
     text: string,
 }
 
+// One measured virtual-list reveal pass. The generic convergence algorithm
+// lives in `usher-search`; this struct only transports its result to Slint.
+export struct WorkflowPrDiffRevealStep {
+    viewport-y: float,
+    stable-frames: int,
+    complete: bool,
+}
+
 export struct WorkflowPrDiffLine {
     old-line: int,
     new-line: int,

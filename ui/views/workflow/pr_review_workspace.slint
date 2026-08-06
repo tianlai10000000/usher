@@ -3,11 +3,12 @@ import { GitHubTheme } from "../../theme/github_theme.slint";
 import { AppState } from "../../state/app_state.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
 import { GitHubDialog } from "../../components/dialog/github_dialog.slint";
-import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffRevealStep, WorkflowPrDiffLine, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
 import { GitHubTreeIndentGuides, GitHubCommitMessageToggleButton, GitHubFileToolbarButton, GitHubCommitSummaryNavButton, GitHubFileChangeTypeIcon, GitHubSelectableDiffCode, GitHubSplitDiffSide, GitHubDiffViewPreview, GitHubDiffViewChoice, GitHubDiffSettingsPopover, GitHubFileTreeToggleButton, GitHubFileMenuButton, GitHubDiffStatSegment, GitHubDiffStatBar, GitHubFileDiffStat, GitHubCodeRenderingIndicator, GitHubLargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, GitHubDiffFindBar } from "../../components/pr_review/content.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
 import { GitHubCenteredLoadingState } from "../../components/github_spinner.slint";
+import { GitHubVirtualListScrollbar } from "../../components/github_scroll_view.slint";
 export component GitHubPullRequestReviewPage inherits FocusScope {
     // Full application viewport used by route-owned root overlays. The page
     // root stays at x=0; ordinary review content applies shell-leading-inset
@@ -55,7 +56,9 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     in property <[WorkflowPrDiffLine]> lines: [];
     in property <int> max-code-columns: 0;
     in property <string> longest-code-line;
+    in property <int> line-content-revision: 0;
     in property <int> line-model-revision: 0;
+    in property <bool> scroll-diagnostics-enabled: false;
     in property <int> hunk-scroll-anchor-source-index: -1;
     in property <int> hunk-scroll-restore-revision: 0;
     in property <int> selected-file-index: -1;
@@ -160,8 +163,9 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     private property <color> github-accent-muted: GitHubTheme.accent-subtle;
     // Match the filter-input selection brush so diff copy looks Primer-native.
     private property <color> diff-selection-background: GitHubTheme.diff-selection-bg;
-    // CodeMirror/editor-style current find match (attention yellow).
-    private property <color> diff-find-background: GitHubTheme.diff-find-bg;
+    // Chromium/Blink Find-in-page colors used by GitHub code pages.
+    private property <color> diff-find-match-background: GitHubTheme.diff-find-match-bg;
+    private property <color> diff-find-current-background: GitHubTheme.diff-find-current-bg;
     // GitHub-style code selection (code column only; gutters are excluded).
     private property <int> diff-sel-anchor-line: -1;
     private property <int> diff-sel-anchor-col: 0;
@@ -204,7 +208,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
         root.diff-find-has-current ? root.diff-find-matches[root.diff-find-index].prefix : "";
     private property <string> diff-find-cur-text:
         root.diff-find-has-current ? root.diff-find-matches[root.diff-find-index].text : "";
+    // Explicit navigation increments this revision. The diff surface handles
+    // that edge with one synchronous viewport calculation and does no Find
+    // positioning work during later scrolling or layout changes.
     private property <int> diff-find-scroll-revision: 0;
+    private property <bool> diff-find-input-focused: false;
     private property <bool> hunk-scroll-restore-pending: false;
     private property <length> hunk-scroll-anchor-screen-y: 0px;
     private property <length> hunk-scroll-anchor-content-y: 0px;
@@ -326,7 +334,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     pure callback resolve-diff-wrap-line-start(int, string, int, int) -> int;
     callback resolve-diff-click-range(int, int, string, int) -> WorkflowPrDiffSelectionRange;
     callback find-diff-matches(string, bool) -> [WorkflowPrDiffFindMatch];
-    callback estimate-diff-line-y(int, float, float, string) -> float;
+    pure callback find-diff-row-matches(int, string, string) -> [WorkflowPrDiffFindMatch];
+    pure callback step-diff-find-index(int, int, bool) -> int;
+    callback resolve-diff-find-viewport-y(int, int, float, float, string, float, float, float) -> float;
+    pure callback reconcile-measured-diff-find-viewport-y(float, float, float, float, float, bool, float, int) -> WorkflowPrDiffRevealStep;
+    callback diagnose-diff-scroll(string, float, float, float, float, bool, bool, bool, int, int, int);
     callback view-file();
     // Toggle one commit message body; expansions are independent (not exclusive).
     callback toggle-commit-message(string);
@@ -450,7 +462,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
         }
         root.diff-find-open = true;
         root.diff-find-focus-pending = true;
-        root.refresh-diff-find-matches(true);
+        root.refresh-diff-find-matches();
     }
 
     function close-diff-find() {
@@ -459,9 +471,10 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
         root.diff-find-query = "";
         root.diff-find-matches = [];
         root.diff-find-index = -1;
+        root.diff-find-input-focused = false;
     }
 
-    function refresh-diff-find-matches(scroll-to-current: bool) {
+    function refresh-diff-find-matches() {
         if (!root.diff-find-open) {
             return;
         }
@@ -476,31 +489,18 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
         if (root.diff-find-index < 0 || root.diff-find-index >= root.diff-find-matches.length) {
             root.diff-find-index = 0;
         }
-        if (scroll-to-current) {
-            root.scroll-to-diff-find-match();
-        }
     }
 
     function step-diff-find(backward: bool) {
-        if (root.diff-find-matches.length == 0) {
+        if !root.diff-find-input-focused
+            || root.diff-find-matches.length == 0 {
             return;
         }
-        if (backward) {
-            root.diff-find-index = root.diff-find-index <= 0
-                ? root.diff-find-matches.length - 1
-                : root.diff-find-index - 1;
-        } else {
-            root.diff-find-index = root.diff-find-index + 1 >= root.diff-find-matches.length
-                ? 0
-                : root.diff-find-index + 1;
-        }
-        root.scroll-to-diff-find-match();
-    }
-
-    function scroll-to-diff-find-match() {
-        if (!root.diff-find-has-current) {
-            return;
-        }
+        root.diff-find-index = root.step-diff-find-index(
+            root.diff-find-index,
+            root.diff-find-matches.length,
+            backward
+        );
         root.diff-find-scroll-revision += 1;
     }
 
@@ -544,18 +544,18 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     }
     changed diff-view => {
         root.clear-diff-selection();
-        root.refresh-diff-find-matches(true);
+        root.refresh-diff-find-matches();
     }
-    changed line-model-revision => {
+    changed line-content-revision => {
         root.clear-diff-selection();
-        root.refresh-diff-find-matches(true);
+        root.refresh-diff-find-matches();
     }
     changed viewing-file => {
         root.clear-diff-selection();
-        root.refresh-diff-find-matches(true);
+        root.refresh-diff-find-matches();
     }
     changed diff-find-query => {
-        root.refresh-diff-find-matches(true);
+        root.refresh-diff-find-matches();
     }
     changed review-dialog-open => {
         if (root.review-dialog-open) {
@@ -631,6 +631,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
             return accept;
         }
         if (root.diff-find-open
+            && root.diff-find-input-focused
             && event.modifiers.control
             && (event.text == "g" || event.text == "G")) {
             root.step-diff-find(event.modifiers.shift);
@@ -662,7 +663,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 return accept;
             }
             if (event.modifiers.control && (event.text == "g" || event.text == "G")) {
-                if (root.diff-find-open) {
+                if root.diff-find-open && root.diff-find-input-focused {
                     root.step-diff-find(event.modifiers.shift);
                     return accept;
                 }
@@ -2391,6 +2392,10 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                     root.hunk-scroll-restore-revision;
                 private property <int> observed-diff-find-scroll-revision:
                     root.diff-find-scroll-revision;
+                private property <length> diagnostic-viewport-y: diff-scroll.viewport-y;
+                private property <length> diagnostic-viewport-height: diff-scroll.viewport-height;
+                private property <length> diagnostic-visible-height: diff-scroll.visible-height;
+                private property <bool> diagnostic-find-open: root.diff-find-open;
                 // ListView finalizes its virtual row geometry after the model
                 // property changes. Re-apply the same visual anchor over a
                 // bounded number of layout frames so late viewport clamping
@@ -2404,27 +2409,76 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                     root.expand-hunk(line-index, direction);
                 }
 
+                function emit-scroll-diagnostic(kind: string, requested-y: length) {
+                    if root.scroll-diagnostics-enabled {
+                        root.diagnose-diff-scroll(
+                            kind,
+                            diff-scroll.viewport-y / 1px,
+                            requested-y / 1px,
+                            diff-scroll.visible-height / 1px,
+                            diff-scroll.viewport-height / 1px,
+                            root.diff-find-open,
+                            root.diff-find-input-focused,
+                            root.hunk-scroll-restore-pending,
+                            root.diff-find-scroll-revision,
+                            root.line-model-revision,
+                            diff-surface.hunk-scroll-restore-attempts
+                        );
+                    }
+                }
+
+                init => {
+                    diff-surface.emit-scroll-diagnostic("surface-init", diff-scroll.viewport-y);
+                }
+
+                changed diagnostic-viewport-y => {
+                    diff-surface.emit-scroll-diagnostic("viewport", diff-scroll.viewport-y);
+                }
+
+                changed diagnostic-viewport-height => {
+                    diff-surface.emit-scroll-diagnostic("extent", diff-scroll.viewport-y);
+                }
+
+                changed diagnostic-visible-height => {
+                    diff-surface.emit-scroll-diagnostic("visible", diff-scroll.viewport-y);
+                }
+
+                changed diagnostic-find-open => {
+                    diff-surface.emit-scroll-diagnostic(
+                        root.diff-find-open ? "find-open" : "find-close",
+                        diff-scroll.viewport-y
+                    );
+                }
+
                 function apply-diff-find-scroll() {
-                    if (!root.diff-find-has-current) {
+                    if !root.diff-find-has-current
+                        || !root.diff-find-input-focused
+                        || root.live-resizing {
                         return;
                     }
                     let code-width = root.diff-view == "split"
                         ? max(1.0, ((diff-scroll.visible_width / 1px) - 1.0) / 2.0 - 70.0)
                         : max(1.0, (diff-scroll.visible_width / 1px) - 120.0);
-                    let offset = root.estimate-diff-line-y(
+                    let target-y = root.resolve-diff-find-viewport-y(
                         root.diff-find-cur-line,
+                        root.diff-find-cur-start-char,
                         code-width,
                         root.code-character-width / 1px,
-                        root.diff-view == "split" ? root.diff-find-cur-side : ""
+                        root.diff-view == "split" ? root.diff-find-cur-side : "",
+                        diff-scroll.viewport-y / 1px,
+                        diff-scroll.visible-height / 1px,
+                        diff-scroll.viewport-height / 1px
                     );
-                    let minimum-y = min(0px, diff-scroll.visible-height - diff-scroll.viewport-height);
-                    let target-y = -(offset * 1px) + 64px;
-                    diff-scroll.viewport-y = max(minimum-y, min(0px, target-y));
+                    if Math.abs(diff-scroll.viewport-y - target-y * 1px) > 1px {
+                        diff-surface.emit-scroll-diagnostic("find-write", target-y * 1px);
+                        diff-scroll.viewport-y = target-y * 1px;
+                    }
                 }
 
                 changed observed-line-model-revision => {
                     root.hunk-scroll-restore-pending = false;
                     root.hunk-scroll-anchor-resolved = false;
+                    diff-surface.emit-scroll-diagnostic("model-reset-write", 0px);
                     diff-scroll.viewport-x = 0px;
                     diff-scroll.viewport-y = 0px;
                 }
@@ -2436,6 +2490,8 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 }
 
                 changed observed-diff-find-scroll-revision => {
+                    // One command, one calculation, at most one viewport write.
+                    // No timer or observer can re-enter this during scrolling.
                     diff-surface.apply-diff-find-scroll();
                 }
 
@@ -2452,6 +2508,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                             );
                             let target-y = root.hunk-scroll-anchor-screen-y
                                 - root.hunk-scroll-anchor-content-y;
+                            diff-surface.emit-scroll-diagnostic("hunk-write", target-y);
                             diff-scroll.viewport-y = max(minimum-y, min(0px, target-y));
                             if diff-surface.hunk-scroll-restore-attempts <= 1 {
                                 diff-surface.hunk-scroll-restore-attempts = 0;
@@ -2778,10 +2835,23 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                     query <=> root.diff-find-query;
                                     current-index: root.diff-find-index;
                                     match-count: root.diff-find-matches.length;
-                                    previous => { root.step-diff-find(true); }
-                                    next => { root.step-diff-find(false); }
+                                    previous => {
+                                        // GitHubDiffFindBar focuses its input
+                                        // before emitting this explicit command.
+                                        // Mirror that state synchronously so
+                                        // callback ordering cannot drop reveal.
+                                        root.diff-find-input-focused = true;
+                                        root.step-diff-find(true);
+                                    }
+                                    next => {
+                                        root.diff-find-input-focused = true;
+                                        root.step-diff-find(false);
+                                    }
                                     close => { root.close-diff-find(); }
                                     accepted(backward) => { root.step-diff-find(backward); }
+                                    input-focus-changed(focused) => {
+                                        root.diff-find-input-focused = focused;
+                                    }
                                 }
                                 find-focus-timer := Timer {
                                     interval: 16ms;
@@ -2835,9 +2905,14 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                             }
                         }
 
-                        diff-scroll := ListView {
+                        diff-scroll-frame := Rectangle {
                             width: parent.width;
                             vertical-stretch: 1;
+                            background: transparent;
+
+                        diff-scroll := ListView {
+                            width: parent.width;
+                            height: parent.height;
                             visible: !root.large-diff-deferred && !root.large-diff-loading;
                             // A Flickable normally steals vertical drags after
                             // 8px and cancels the code TouchArea. GitHub treats
@@ -2848,8 +2923,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                             // available code column. Never reserve or expose a
                             // horizontal track for content that already wraps.
                             horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
-                            vertical_scrollbar_policy: ScrollBarPolicy.as_needed;
-
+                            vertical_scrollbar_policy: ScrollBarPolicy.always_off;
                             for line[line-index] in root.lines: diff-line-row := Rectangle {
                                 private property <int> observed-hunk-scroll-restore-revision:
                                     root.hunk-scroll-restore-revision;
@@ -2861,7 +2935,9 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                     }
                                 }
                                 init => { self.report-hunk-scroll-anchor(); }
-                                changed y => { self.report-hunk-scroll-anchor(); }
+                                changed y => {
+                                    self.report-hunk-scroll-anchor();
+                                }
                                 // ListView may recycle the delegate at the same
                                 // model index, so neither init nor y necessarily
                                 // changes when a hunk marker becomes line 58.
@@ -3050,7 +3126,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                             font-size: root.code-font-size;
                                             color: root.hunk-foreground;
                                         }
-                                        if line.kind != "hunk" && line.kind != "meta": GitHubSelectableDiffCode {
+                                        if line.kind != "hunk" && line.kind != "meta": unified-code := GitHubSelectableDiffCode {
                                             x: unified-row.gutter-width;
                                             y: 0px;
                                             width: parent.width - unified-row.gutter-width;
@@ -3084,7 +3160,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                             find-end-char: root.diff-find-cur-end-char;
                                             find-prefix: root.diff-find-cur-prefix;
                                             find-text: root.diff-find-cur-text;
-                                            find-background: root.diff-find-background;
+                                            find-matches: root.diff-find-open
+                                                ? root.find-diff-row-matches(line-index, "", root.diff-find-query)
+                                                : [];
+                                            find-match-background: root.diff-find-match-background;
+                                            find-background: root.diff-find-current-background;
                                             multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
                                             multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
                                             multi-sel-end => { root.end-diff-selection(); }
@@ -3144,7 +3224,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                         find-end-char: root.diff-find-cur-end-char;
                                         find-prefix: root.diff-find-cur-prefix;
                                         find-text: root.diff-find-cur-text;
-                                        find-background: root.diff-find-background;
+                                        find-matches: root.diff-find-open
+                                            ? root.find-diff-row-matches(line-index, "left", root.diff-find-query)
+                                            : [];
+                                        find-match-background: root.diff-find-match-background;
+                                        find-background: root.diff-find-current-background;
                                         multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
                                         multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
                                         multi-sel-end => { root.end-diff-selection(); }
@@ -3204,7 +3288,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                         find-end-char: root.diff-find-cur-end-char;
                                         find-prefix: root.diff-find-cur-prefix;
                                         find-text: root.diff-find-cur-text;
-                                        find-background: root.diff-find-background;
+                                        find-matches: root.diff-find-open
+                                            ? root.find-diff-row-matches(line-index, "right", root.diff-find-query)
+                                            : [];
+                                        find-match-background: root.diff-find-match-background;
+                                        find-background: root.diff-find-current-background;
                                         multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
                                         multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
                                         multi-sel-end => { root.end-diff-selection(); }
@@ -3280,7 +3368,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                         find-end-char: root.diff-find-cur-end-char;
                                         find-prefix: root.diff-find-cur-prefix;
                                         find-text: root.diff-find-cur-text;
-                                        find-background: root.diff-find-background;
+                                        find-matches: root.diff-find-open
+                                            ? root.find-diff-row-matches(line-index, "", root.diff-find-query)
+                                            : [];
+                                        find-match-background: root.diff-find-match-background;
+                                        find-background: root.diff-find-current-background;
                                         multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
                                         multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
                                         multi-sel-end => { root.end-diff-selection(); }
@@ -3370,6 +3462,18 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                             }
                         }
 
+                        GitHubVirtualListScrollbar {
+                            x: parent.width - self.width;
+                            y: 0px;
+                            height: parent.height;
+                            z: 40;
+                            viewport-y <=> diff-scroll.viewport-y;
+                            visible-height: diff-scroll.visible-height;
+                            content-height: diff-scroll.viewport-height;
+                            enabled: diff-scroll.visible;
+                        }
+                        }
+
                     }
 
                     if root.large-diff-deferred || root.large-diff-loading: GitHubLargeDiffPlaceholder {
@@ -3434,7 +3538,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                     width: 3px;
                     height: parent.height;
                     z: 101;
-                    background: GitHubTheme.success-emphasis;
+                    background: GitHubTheme.fg-muted;
                     opacity: root.file-list-visible && (root.file-list-resizing || file-list-resize-handle.has-hover) ? 0.8 : 0;
                 }
 

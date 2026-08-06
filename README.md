@@ -158,6 +158,7 @@ src/main.rs
      -> src/terminal/          PTY session and terminal rendering
      -> src/chat/              chat transport, history, Markdown, UI binding
      -> crates/usher-messages/ durable message center, OS delivery, isolated inbox UI
+     -> crates/usher-search/   shared text matching, result navigation, viewport reveal
      -> src/update/            update checks, download, install
      -> src/{toast,notification,message_center,dialog}.rs
 material-1.7.1-fixed/            vendored Slint v1.17.1 Material library

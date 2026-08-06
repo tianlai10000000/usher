@@ -152,6 +152,7 @@ src/main.rs
      -> src/terminal/          PTY 会话和终端渲染
      -> src/chat/              聊天请求、历史、Markdown、UI 绑定
      -> crates/usher-messages/ 持久消息中心、系统投递与独立 Inbox UI
+     -> crates/usher-search/   通用文本匹配、结果导航与视口揭示算法
      -> src/update/            更新检查、下载和安装
      -> src/{toast,notification,message_center,dialog}.rs
 material-1.7.1-fixed/            内置 Slint v1.17.1 Material 库

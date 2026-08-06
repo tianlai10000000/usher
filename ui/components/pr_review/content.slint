@@ -1,6 +1,6 @@
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
-import { WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffTextSlice, WorkflowPrFileExtensionFilter } from "./shell.slint";
+import { WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrFileExtensionFilter } from "./shell.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
@@ -225,6 +225,8 @@ export component GitHubSelectableDiffCode inherits Rectangle {
     in property <int> find-end-char: 0;
     in property <string> find-prefix: "";
     in property <string> find-text: "";
+    in property <[WorkflowPrDiffFindMatch]> find-matches: [];
+    in property <color> find-match-background;
     in property <color> find-background;
     callback multi-sel-begin(int, int, string);
     callback multi-sel-update(int, int, string);
@@ -262,6 +264,8 @@ export component GitHubSelectableDiffCode inherits Rectangle {
             : max(root.highlight-start-col, min(root.multi-sel-hi-col, root.content-chars));
     private property <bool> find-visible:
         root.find-active && (root.find-end-col > root.find-start-col || root.find-text != "");
+    private property <length> find-column-width:
+        max(1, root.find-end-col - root.find-start-col) * root.code-character-width;
     private property <WorkflowPrDiffTextSlice> sel-span:
         root.in-multi-sel && !root.multi-sel-select-all
             ? root.resolve-selection-slice(
@@ -425,19 +429,109 @@ export component GitHubSelectableDiffCode inherits Rectangle {
 
     // Unwrapped rows: preferred-width geometry matches the token/Text layout.
     if root.find-visible && !root.wrap-content: Rectangle {
-        x: find-prefix-measure.preferred-width;
+        x: root.find-prefix == "" ? 0px : find-prefix-measure.preferred-width;
         y: (root.height - root.nominal-row-height) / 2;
-        width: max(root.code-character-width, find-match-measure.preferred-width);
+        width: max(
+            root.find-column-width,
+            max(root.code-character-width, find-match-measure.preferred-width)
+        );
         height: root.nominal-row-height;
         background: root.find-background;
     }
 
     if root.find-visible && root.wrap-content: Rectangle {
-        x: wrap-find-lead-measure.preferred-width;
+        x: root.wrap-find-lead.text == ""
+            ? 0px
+            : wrap-find-lead-measure.preferred-width;
         y: max(0px, wrap-find-pre-measure.preferred-height - root.wrap-line-pitch);
-        width: max(root.code-character-width, find-match-measure.preferred-width);
+        width: max(
+            root.find-column-width,
+            max(root.code-character-width, find-match-measure.preferred-width)
+        );
         height: root.wrap-line-pitch;
         background: root.find-background;
+    }
+
+    for hit in root.find-matches: inactive-find-highlight := Rectangle {
+        private property <bool> is-current:
+            root.find-active
+            && hit.start-char == root.find-start-char
+            && hit.end-char == root.find-end-char;
+        private property <WorkflowPrDiffTextSlice> wrap-pre:
+            root.wrap-content
+                ? root.resolve-selection-slice(root.line-index, root.side, 0, hit.start-char)
+                : { prefix: "", text: "", prefix-bytes: 0, text-bytes: 0 };
+        private property <int> wrap-line-start:
+            root.wrap-content
+                ? root.resolve-wrap-line-start(
+                    root.line-index,
+                    root.side,
+                    hit.start-char,
+                    root.visible-columns
+                )
+                : 0;
+        private property <WorkflowPrDiffTextSlice> wrap-lead:
+            root.wrap-content
+                ? root.resolve-selection-slice(
+                    root.line-index,
+                    root.side,
+                    self.wrap-line-start,
+                    hit.start-char
+                )
+                : { prefix: "", text: "", prefix-bytes: 0, text-bytes: 0 };
+
+        visible: !self.is-current;
+        x: root.wrap-content
+            ? (self.wrap-lead.text == "" ? 0px : inactive-wrap-lead.preferred-width)
+            : (hit.prefix == "" ? 0px : inactive-prefix.preferred-width);
+        y: root.wrap-content
+            ? max(0px, inactive-wrap-pre.preferred-height - root.wrap-line-pitch)
+            : (root.height - root.nominal-row-height) / 2;
+        width: max(
+            max(1, hit.end-column - hit.start-column) * root.code-character-width,
+            max(root.code-character-width, inactive-match.preferred-width)
+        );
+        height: root.wrap-content ? root.wrap-line-pitch : root.nominal-row-height;
+        background: root.find-match-background;
+
+        inactive-prefix := Text {
+            width: 0px;
+            height: 0px;
+            visible: false;
+            text: root.wrap-content ? "" : hit.prefix;
+            font-family: root.code-font-family;
+            font-size: root.code-font-size;
+            wrap: no-wrap;
+        }
+        inactive-match := Text {
+            width: 0px;
+            height: 0px;
+            visible: false;
+            text: hit.text;
+            font-family: root.code-font-family;
+            font-size: root.code-font-size;
+            wrap: no-wrap;
+        }
+        inactive-wrap-pre := Text {
+            width: max(1px, root.width);
+            height: 0px;
+            visible: false;
+            text: root.wrap-content ? inactive-find-highlight.wrap-pre.text : "";
+            font-family: root.code-font-family;
+            font-size: root.code-font-size;
+            overflow: clip;
+            wrap: word-wrap;
+        }
+        inactive-wrap-lead := Text {
+            width: 0px;
+            height: 0px;
+            visible: false;
+            text: root.wrap-content ? inactive-find-highlight.wrap-lead.text : "";
+            font-family: root.code-font-family;
+            font-size: root.code-font-size;
+            overflow: clip;
+            wrap: no-wrap;
+        }
     }
 
     if root.show-tokens: HorizontalLayout {
@@ -591,6 +685,8 @@ export component GitHubSplitDiffSide inherits Rectangle {
     in property <int> find-end-char: 0;
     in property <string> find-prefix: "";
     in property <string> find-text: "";
+    in property <[WorkflowPrDiffFindMatch]> find-matches: [];
+    in property <color> find-match-background;
     in property <color> find-background;
     callback multi-sel-begin(int, int, string);
     callback multi-sel-update(int, int, string);
@@ -687,6 +783,8 @@ export component GitHubSplitDiffSide inherits Rectangle {
         find-end-char: root.find-end-char;
         find-prefix: root.find-prefix;
         find-text: root.find-text;
+        find-matches: root.find-matches;
+        find-match-background: root.find-match-background;
         find-background: root.find-background;
         multi-sel-begin(line, col, side) => { root.multi-sel-begin(line, col, side); }
         multi-sel-update(line, col, side) => { root.multi-sel-update(line, col, side); }
@@ -1380,6 +1478,8 @@ export component GitHubDiffFindBar inherits Rectangle {
     callback next();
     callback close();
     callback accepted(bool);
+    callback input-focus-changed(bool);
+    out property <bool> input-focused: find-input.has-focus;
 
     private property <string> counter-text:
         root.query == ""
@@ -1392,6 +1492,10 @@ export component GitHubDiffFindBar inherits Rectangle {
     width: 320px;
     height: 46px;
     background: transparent;
+
+    changed input-focused => {
+        root.input-focus-changed(root.input-focused);
+    }
 
     bar := Rectangle {
         y: (parent.height - self.height) / 2;
@@ -1489,7 +1593,12 @@ export component GitHubDiffFindBar inherits Rectangle {
             }
             prev-touch := TouchArea {
                 mouse-cursor: root.has-matches ? pointer : default;
-                clicked => { if root.has-matches { root.previous(); } }
+                clicked => {
+                    if root.has-matches {
+                        find-input.focus();
+                        root.previous();
+                    }
+                }
             }
         }
         find-next := Rectangle {
@@ -1513,7 +1622,12 @@ export component GitHubDiffFindBar inherits Rectangle {
             }
             next-touch := TouchArea {
                 mouse-cursor: root.has-matches ? pointer : default;
-                clicked => { if root.has-matches { root.next(); } }
+                clicked => {
+                    if root.has-matches {
+                        find-input.focus();
+                        root.next();
+                    }
+                }
             }
         }
         find-close := Rectangle {

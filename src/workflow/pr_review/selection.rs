@@ -222,6 +222,28 @@ pub(super) fn soft_wrap_line_start(content: &str, caret: i32, max_cells: i32) ->
     soft_wrap_line_range_at_caret(content, caret, max_cells).0
 }
 
+/// Zero-based visual line containing `caret`, using the same word-wrap
+/// boundaries as selection and find-highlight geometry.
+pub(super) fn soft_wrap_visual_line_index(content: &str, caret: i32, max_cells: i32) -> i32 {
+    let chars: Vec<char> = content.chars().collect();
+    if chars.is_empty() {
+        return 0;
+    }
+    let caret = caret.clamp(0, chars.len() as i32) as usize;
+    let max_cells = max_cells.max(1) as u32;
+    let mut line_start = 0usize;
+    let mut visual_line = 0i32;
+    while line_start < chars.len() {
+        let line_end = soft_wrap_next_line_end(&chars, line_start, max_cells);
+        if caret < line_end {
+            return visual_line;
+        }
+        line_start = line_end;
+        visual_line += 1;
+    }
+    visual_line.saturating_sub(1)
+}
+
 /// Inclusive-start / exclusive-end character range of the soft-wrapped visual
 /// line that contains `caret`.
 fn soft_wrap_line_range_at_caret(content: &str, caret: i32, max_cells: i32) -> (i32, i32) {

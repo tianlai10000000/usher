@@ -164,7 +164,12 @@ to be a Primer primitive.
   outer window width. A card keeps at least 280 px of readable width before a
   new column is introduced. Project mounts only the active list or grid visual
   representation; switching modes may replace that visual tree once, but native
-  resize must not keep evaluating both representations.
+  resize must not keep evaluating both representations. Provider corner ribbons
+  keep their band, 10 px identity mark, and caption vertically centered in the
+  45-degree geometry, but ship that fixed identity as an application-owned SVG
+  and display it without a runtime rotation. Small live `Text` must not be placed
+  below a rotated transform with the FemtoVG renderer because rotation switches
+  glyphs from the hinted atlas to low-DPI outline rendering.
 - Chat history pagination is part of the message flow after the virtual top
   spacer. It reserves layout height and must never float over the oldest
   mounted message.
@@ -630,7 +635,10 @@ prefix until their implementation satisfies this specification.
 使用领域命名。尚未迁移的 legacy/demo 路由页面必须明确登记为欠债，在实现满足
 本规范之前不得仅靠加前缀伪装成合规组件。
 
-补充强制约束：通用单选筛选/排序弹层统一归入 ActionMenu，由
+补充强制约束：Project 网格右上角 Provider 斜角标保持 10px 身份图标和文字在
+45 度色带内部垂直居中，但固定身份内容必须预合成为应用自有 SVG，并以无运行时旋转的
+`Image` 显示。FemtoVG 会把旋转变换下的小字号实时 `Text` 从带 hinting 的字形图集切换为
+低 DPI 下偏软的轮廓渲染，因此禁止在该斜角标中恢复旋转 `Text`。通用单选筛选/排序弹层统一归入 ActionMenu，由
 `GitHubFilterMenuButton`、`GitHubFilterMenuFrame` 和
 `GitHubFilterMenuItem` 负责触发器、标题/关闭、选中标记、键盘及无障碍行为；
 业务层只提供中性的 label、value、分组与锚点状态，UI Components 页面必须在

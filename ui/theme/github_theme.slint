@@ -201,7 +201,10 @@ export global GitHubTheme {
     out property <color> diff-hunk-fg: root.dark-mode ? #58a6ff : #0969da;
     out property <color> diff-hunk-bg: root.dark-mode ? #388bfd1a : #ddf4ff;
     out property <color> diff-selection-bg: root.dark-mode ? #388bfd66 : #0969da55;
-    out property <color> diff-find-bg: root.dark-mode ? #bb800966 : #ffe66d99;
+    // GitHub code pages use browser Find-in-page. Blink paints ordinary
+    // matches yellow and the active match orange.
+    out property <color> diff-find-match-bg: #ffff00;
+    out property <color> diff-find-current-bg: #ff9632;
     out property <color> diff-addition-gutter-bg:
         root.dark-mode ? #3fb9504d : #aceebb;
     out property <color> diff-deletion-gutter-bg:

@@ -8,7 +8,7 @@ license = "LicenseRef-Proprietary"
 publish = false
 
 [workspace]
-members = [".", "crates/usher-messages", "crates/usher-state-store", "crates/usher-ui", "crates/usher-ui-settings"]
+members = [".", "crates/usher-messages", "crates/usher-search", "crates/usher-state-store", "crates/usher-ui", "crates/usher-ui-settings"]
 default-members = ["."]
 resolver = "3"
 
@@ -43,6 +43,7 @@ slint = { version = "1.17.1", default-features = false, features = ["std", "comp
 usher-ui = { path = "crates/usher-ui", default-features = false }
 usher-ui-settings = { path = "crates/usher-ui-settings", default-features = false }
 usher-messages = { path = "crates/usher-messages", default-features = false }
+usher-search = { path = "crates/usher-search" }
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
