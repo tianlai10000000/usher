@@ -135,6 +135,39 @@ fn write_pr_scroll_diagnostic(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn write_pr_find_reveal_diagnostic(
+    line: i32,
+    start_char: i32,
+    row_count: usize,
+    code_width: f32,
+    cell_width: f32,
+    side: &str,
+    current_viewport_y: f32,
+    target_viewport_y: f32,
+    visible_height: f32,
+    content_height: f32,
+) {
+    let Some(diagnostics) = pr_scroll_diagnostics() else {
+        return;
+    };
+    let sequence = diagnostics.sequence.fetch_add(1, Ordering::Relaxed) + 1;
+    let elapsed_us = diagnostics.started_at.elapsed().as_micros();
+    let average_item_height = if row_count == 0 {
+        0.0
+    } else {
+        content_height / row_count as f32
+    };
+    let Ok(mut writer) = diagnostics.writer.lock() else {
+        return;
+    };
+    let _ = writeln!(
+        writer,
+        "seq={sequence} elapsed_us={elapsed_us} kind=find-resolve line={line} start_char={start_char} side={side} row_count={row_count} code_width={code_width:.3} cell_width={cell_width:.3} average_item_height={average_item_height:.3} viewport_y={current_viewport_y:.3} target_viewport_y={target_viewport_y:.3} visible_height={visible_height:.3} viewport_height={content_height:.3}"
+    );
+    let _ = writer.flush();
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReviewRequest {
     number: String,
@@ -735,8 +768,9 @@ pub(crate) fn bind_pr_review(
             let Some(ui) = ui_weak.upgrade() else {
                 return 0.0;
             };
-            resolve_diff_find_viewport_y(
-                &ui.get_workflow_pr_review_lines(),
+            let lines = ui.get_workflow_pr_review_lines();
+            let target_viewport_y = resolve_diff_find_viewport_y(
+                &lines,
                 line,
                 start_char,
                 code_width,
@@ -745,7 +779,22 @@ pub(crate) fn bind_pr_review(
                 current_viewport_y,
                 visible_height,
                 content_height,
-            )
+            );
+            if scroll_diagnostics_enabled {
+                write_pr_find_reveal_diagnostic(
+                    line,
+                    start_char,
+                    lines.row_count(),
+                    code_width,
+                    cell_width,
+                    side.as_str(),
+                    current_viewport_y,
+                    target_viewport_y,
+                    visible_height,
+                    content_height,
+                );
+            }
+            target_viewport_y
         },
     );
 
@@ -3863,6 +3912,47 @@ mod tests {
             })
         );
         assert!(!file.lines.iter().any(|line| line.kind == "hunk"));
+    }
+
+    #[test]
+    fn expand_all_includes_source_after_the_final_diff_hunk() {
+        let mut file = file("src/lib.rs");
+        file.lines = vec![
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 0,
+                kind: "hunk".to_string(),
+                content: "@@ -2,1 +2,1 @@".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 2,
+                new_line: 0,
+                kind: "deletion".to_string(),
+                content: "old".to_string(),
+            },
+            PullRequestDiffLine {
+                old_line: 0,
+                new_line: 2,
+                kind: "addition".to_string(),
+                content: "new".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            expand_all_hunk_context_from_sources(
+                &mut file,
+                "one\nold\nafter\nlast",
+                "one\nnew\nafter\nlast",
+            ),
+            2
+        );
+        assert!(!file.lines.iter().any(|line| line.kind == "hunk"));
+        assert_eq!(file.lines.last().map(|line| line.old_line), Some(4));
+        assert_eq!(file.lines.last().map(|line| line.new_line), Some(4));
+        assert_eq!(
+            file.lines.last().map(|line| line.content.as_str()),
+            Some("last")
+        );
     }
 
     #[test]

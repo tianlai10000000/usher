@@ -106,6 +106,40 @@ pub fn center_if_needed(target: AxisRange, viewport: ScrollViewport) -> f32 {
     (target.start + target_extent / 2.0 - viewport_extent / 2.0).clamp(0.0, maximum_offset)
 }
 
+/// Reveals an item in a virtual list whose scroll coordinate is derived from
+/// the virtualizer's current average item size.
+///
+/// This is the index-addressed equivalent of `center_if_needed`, matching the
+/// `scrollToIndex({ align: "auto" })` contract used by mature virtualizers.
+/// Feature adapters may add an offset inside the item (for example, a wrapped
+/// text subline) without scanning or measuring preceding items.
+pub fn center_virtual_item_if_needed(
+    index: usize,
+    item_count: usize,
+    intra_item_start: f32,
+    target_extent: f32,
+    viewport: ScrollViewport,
+) -> f32 {
+    if item_count == 0 {
+        return 0.0;
+    }
+    let index = index.min(item_count - 1);
+    let effective_content_extent = viewport
+        .content_extent
+        .max(target_extent.max(1.0) * item_count as f32);
+    let average_item_extent = effective_content_extent / item_count as f32;
+    center_if_needed(
+        AxisRange {
+            start: index as f32 * average_item_extent + intra_item_start.max(0.0),
+            extent: target_extent,
+        },
+        ScrollViewport {
+            content_extent: effective_content_extent,
+            ..viewport
+        },
+    )
+}
+
 /// Reconciles a measured target rectangle against the current viewport.
 ///
 /// `last_target_offset` and `stable_frames` belong to the active reveal
@@ -297,6 +331,50 @@ mod tests {
                 }
             ),
             600.0
+        );
+    }
+
+    #[test]
+    fn virtual_item_reveal_uses_the_virtualizers_index_coordinate() {
+        let viewport = ScrollViewport {
+            offset: 0.0,
+            extent: 100.0,
+            content_extent: 300.0,
+        };
+        assert_eq!(
+            center_virtual_item_if_needed(6, 10, 20.0, 22.0, viewport),
+            161.0
+        );
+        assert_eq!(
+            center_virtual_item_if_needed(
+                6,
+                10,
+                20.0,
+                22.0,
+                ScrollViewport {
+                    offset: 150.0,
+                    ..viewport
+                }
+            ),
+            150.0
+        );
+    }
+
+    #[test]
+    fn virtual_item_reveal_clamps_the_final_item_to_the_list_end() {
+        assert_eq!(
+            center_virtual_item_if_needed(
+                9,
+                10,
+                20.0,
+                22.0,
+                ScrollViewport {
+                    offset: 0.0,
+                    extent: 100.0,
+                    content_extent: 300.0,
+                }
+            ),
+            200.0
         );
     }
 

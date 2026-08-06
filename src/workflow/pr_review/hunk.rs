@@ -135,6 +135,16 @@ fn bounded_source_range<'a>(
         .collect()
 }
 
+fn trailing_source_range<'a>(source_lines: &'a [&'a str], previous: i32) -> Vec<(i32, &'a str)> {
+    let start = previous.saturating_add(1).max(1) as usize;
+    if start > source_lines.len() {
+        return Vec::new();
+    }
+    (start..=source_lines.len())
+        .map(|number| (number as i32, source_lines[number - 1]))
+        .collect()
+}
+
 fn align_source_ranges(
     old_lines: &[(i32, &str)],
     new_lines: &[(i32, &str)],
@@ -189,6 +199,30 @@ fn align_source_ranges(
         }
     }
     rows
+}
+
+fn align_trailing_source_ranges(
+    old_lines: &[(i32, &str)],
+    new_lines: &[(i32, &str)],
+) -> Vec<PullRequestDiffLine> {
+    if old_lines.len() == new_lines.len()
+        && old_lines
+            .iter()
+            .zip(new_lines)
+            .all(|(old, new)| old.1 == new.1)
+    {
+        return old_lines
+            .iter()
+            .zip(new_lines)
+            .map(|(old, new)| PullRequestDiffLine {
+                old_line: old.0,
+                new_line: new.0,
+                kind: "context".to_string(),
+                content: sanitize_diff_content(old.1),
+            })
+            .collect();
+    }
+    align_source_ranges(old_lines, new_lines)
 }
 
 fn bounded_aligned_rows(
@@ -402,6 +436,7 @@ pub(super) fn expand_all_hunk_context_from_sources(
     head_source: &str,
 ) -> usize {
     let initial_len = file.lines.len();
+    let mut changed = false;
     loop {
         let Some(index) = file
             .lines
@@ -422,11 +457,38 @@ pub(super) fn expand_all_hunk_context_from_sources(
         ) {
             break;
         }
+        changed = true;
         if hunk_hidden_bounds(file, index) == bounds_before {
             break;
         }
     }
-    file.lines.len().saturating_sub(initial_len)
+
+    // Unified diffs have hunk markers before omitted ranges, but no sentinel
+    // after the final hunk. Complete the expanded document explicitly so
+    // "Expand all lines" includes source through EOF.
+    let base_lines = base_source.lines().collect::<Vec<_>>();
+    let head_lines = head_source.lines().collect::<Vec<_>>();
+    let last_old = file
+        .lines
+        .iter()
+        .rev()
+        .find_map(|line| side_line(line, false))
+        .unwrap_or(0);
+    let last_new = file
+        .lines
+        .iter()
+        .rev()
+        .find_map(|line| side_line(line, true))
+        .unwrap_or(0);
+    let trailing_rows = align_trailing_source_ranges(
+        trailing_source_range(base_lines.as_slice(), last_old).as_slice(),
+        trailing_source_range(head_lines.as_slice(), last_new).as_slice(),
+    );
+    changed |= !trailing_rows.is_empty();
+    file.lines.extend(trailing_rows);
+
+    let growth = file.lines.len().saturating_sub(initial_len);
+    if changed { growth.max(1) } else { 0 }
 }
 
 #[cfg(test)]

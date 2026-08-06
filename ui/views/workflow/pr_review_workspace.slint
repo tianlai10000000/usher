@@ -2964,11 +2964,19 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                 private property <int> unified-visual-lines:
                                     max(1, Math.ceil(self.unified-content-width / self.unified-code-width));
                                 width: diff-scroll.visible_width;
-                                height: line.kind == "hunk"
-                                    ? (line.expand-up && line.expand-down ? 52px : root.hunk-line-height)
-                                    : (root.diff-view == "split"
-                                        ? root.code-line-height * self.split-visual-lines
-                                        : root.code-line-height * self.unified-visual-lines);
+                                // Slint ListView addresses random seeks with the
+                                // average height of its mounted delegates. Keep
+                                // that estimate uniform for a direct scrollbar
+                                // gesture so recycling cannot change the scroll
+                                // coordinate underneath the pointer. Actual row
+                                // heights return immediately on pointer release.
+                                height: diff-virtual-scrollbar.direct-dragging
+                                    ? diff-virtual-scrollbar.drag-item-height
+                                    : (line.kind == "hunk"
+                                        ? (line.expand-up && line.expand-down ? 52px : root.hunk-line-height)
+                                        : (root.diff-view == "split"
+                                            ? root.code-line-height * self.split-visual-lines
+                                            : root.code-line-height * self.unified-visual-lines));
                                 background: line.kind == "addition"
                                     ? root.diff-addition-background
                                     : (line.kind == "deletion"
@@ -3462,7 +3470,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                             }
                         }
 
-                        GitHubVirtualListScrollbar {
+                        diff-virtual-scrollbar := GitHubVirtualListScrollbar {
                             x: parent.width - self.width;
                             y: 0px;
                             height: parent.height;
@@ -3470,6 +3478,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                             viewport-y <=> diff-scroll.viewport-y;
                             visible-height: diff-scroll.visible-height;
                             content-height: diff-scroll.viewport-height;
+                            item-count: root.lines.length;
                             enabled: diff-scroll.visible;
                         }
                         }

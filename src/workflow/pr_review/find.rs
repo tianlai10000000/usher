@@ -7,7 +7,7 @@
 
 use slint::{Model, ModelRc, SharedString, VecModel};
 use usher_search::{
-    AxisRange, MatchCase, ScrollViewport, center_if_needed, converge_center_if_needed,
+    AxisRange, MatchCase, ScrollViewport, center_virtual_item_if_needed, converge_center_if_needed,
     find_non_overlapping,
 };
 
@@ -65,54 +65,6 @@ pub(super) fn collect_diff_find_matches(
     ModelRc::new(VecModel::from(matches))
 }
 
-/// Content Y of the top of `target_line`, matching selection hit-test heights.
-pub(super) fn estimate_diff_line_offset_y(
-    lines: &ModelRc<WorkflowPrDiffLine>,
-    target_line: i32,
-    code_width: f32,
-    cell_width: f32,
-    side: &str,
-) -> f32 {
-    const CODE_LINE_HEIGHT: f32 = 22.0;
-    const HUNK_LINE_HEIGHT: f32 = 28.0;
-    const TWO_WAY_HUNK_HEIGHT: f32 = 52.0;
-
-    let row_count = lines.row_count();
-    if row_count == 0 || target_line <= 0 {
-        return 0.0;
-    }
-    let target = (target_line as usize).min(row_count.saturating_sub(1));
-    let safe_code_width = code_width.max(1.0);
-    let safe_cell_width = cell_width.max(0.1);
-
-    let mut offset = 0.0_f32;
-    for index in 0..target {
-        let Some(line) = lines.row_data(index) else {
-            offset += CODE_LINE_HEIGHT;
-            continue;
-        };
-        if line.kind.as_str() == "hunk" {
-            offset += if line.expand_up && line.expand_down {
-                TWO_WAY_HUNK_HEIGHT
-            } else {
-                HUNK_LINE_HEIGHT
-            };
-            continue;
-        }
-        let columns = if side.is_empty() {
-            line.left_columns
-        } else {
-            line.left_columns.max(line.right_columns)
-        }
-        .max(0) as f32;
-        let visual_lines = ((columns * safe_cell_width) / safe_code_width)
-            .ceil()
-            .max(1.0);
-        offset += CODE_LINE_HEIGHT * visual_lines;
-    }
-    offset
-}
-
 /// Blink Find-in-page equivalent for the diff scroll axis.
 ///
 /// Chromium scrolls the active match rectangle with CenterIfNeeded: preserve
@@ -132,13 +84,24 @@ pub(super) fn resolve_diff_find_viewport_y(
     content_height: f32,
 ) -> f32 {
     const MATCH_HEIGHT: f32 = 22.0;
-    let match_top =
-        estimate_diff_match_offset_y(lines, target_line, start_char, code_width, cell_width, side);
-    -center_if_needed(
-        AxisRange {
-            start: match_top,
-            extent: MATCH_HEIGHT,
-        },
+    let row_count = lines.row_count();
+    if row_count == 0 {
+        return 0.0;
+    }
+    let target_index = target_line.clamp(0, row_count.saturating_sub(1) as i32) as usize;
+    let match_intra_row_y = estimate_diff_match_intra_row_y(
+        lines,
+        target_index,
+        start_char,
+        code_width,
+        cell_width,
+        side,
+    );
+    -center_virtual_item_if_needed(
+        target_index,
+        row_count,
+        match_intra_row_y,
+        MATCH_HEIGHT,
         ScrollViewport {
             offset: -current_viewport_y,
             extent: visible_height,
@@ -183,21 +146,20 @@ pub(super) fn reconcile_measured_diff_find_viewport_y(
     }
 }
 
-fn estimate_diff_match_offset_y(
+fn estimate_diff_match_intra_row_y(
     lines: &ModelRc<WorkflowPrDiffLine>,
-    target_line: i32,
+    target_line: usize,
     start_char: i32,
     code_width: f32,
     cell_width: f32,
     side: &str,
 ) -> f32 {
     const CODE_LINE_HEIGHT: f32 = 22.0;
-    let line_top = estimate_diff_line_offset_y(lines, target_line, code_width, cell_width, side);
-    if target_line < 0 || target_line as usize >= lines.row_count() {
-        return line_top;
+    if target_line >= lines.row_count() {
+        return 0.0;
     }
-    let Some(line) = lines.row_data(target_line as usize) else {
-        return line_top;
+    let Some(line) = lines.row_data(target_line) else {
+        return 0.0;
     };
     let (content, columns) = match side {
         "left" => (line.left_content.as_str(), line.left_columns),
@@ -207,10 +169,10 @@ fn estimate_diff_match_offset_y(
     let safe_code_width = code_width.max(1.0);
     let safe_cell_width = cell_width.max(0.1);
     if columns.max(0) as f32 * safe_cell_width <= safe_code_width + 0.5 {
-        return line_top;
+        return 0.0;
     }
     let max_cells = (safe_code_width / safe_cell_width).floor().max(1.0) as i32;
-    line_top + soft_wrap_visual_line_index(content, start_char, max_cells) as f32 * CODE_LINE_HEIGHT
+    soft_wrap_visual_line_index(content, start_char, max_cells) as f32 * CODE_LINE_HEIGHT
 }
 
 fn is_copyable_diff_line(line: &WorkflowPrDiffLine) -> bool {
@@ -267,8 +229,8 @@ mod tests {
     use slint::{Model, ModelRc, VecModel};
 
     use super::{
-        collect_diff_find_matches, estimate_diff_line_offset_y,
-        reconcile_measured_diff_find_viewport_y, resolve_diff_find_viewport_y,
+        collect_diff_find_matches, reconcile_measured_diff_find_viewport_y,
+        resolve_diff_find_viewport_y,
     };
     use crate::{WorkflowPrDiffLine, WorkflowPrDiffToken};
 
@@ -375,18 +337,6 @@ mod tests {
         assert_eq!(matches.row_data(0).map(|hit| hit.start_char), Some(0));
         assert_eq!(matches.row_data(1).map(|hit| hit.start_char), Some(5));
         assert_eq!(matches.row_data(2).map(|hit| hit.start_char), Some(10));
-    }
-
-    #[test]
-    fn line_offset_accounts_for_wrapped_rows() {
-        let wrapped = "01234567890123456789";
-        let lines = ModelRc::new(VecModel::from(vec![
-            line(wrapped, wrapped, wrapped),
-            line("short", "short", "short"),
-        ]));
-        // 20 cols / 10 px cells in 100 px width => 2 visual rows => 44 px.
-        let offset = estimate_diff_line_offset_y(&lines, 1, 100.0, 10.0, "");
-        assert_eq!(offset, 44.0);
     }
 
     #[test]

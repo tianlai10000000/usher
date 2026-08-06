@@ -27,10 +27,13 @@ these primitives.
    visual subline before calling the shared viewport calculation. Moving among
    multiple visible matches on one visual line must not move the viewport.
 6. Virtualized or variably sized features calculate reveal from the geometry
-   available in the explicit navigation command. They must not attach delegate
-   geometry callbacks, viewport observers, or frame timers that continue Find
-   positioning during later scrolling. Approximation error from wrapped virtual
-   rows is tracked separately and must never be fixed by degrading scrolling.
+   available in the explicit navigation command. Index-addressed virtualizers
+   must use their own `scrollToIndex` coordinate (current estimated item extent
+   times model index), then add only the target's intra-item visual offset. They
+   must not mix exact prefix-height sums with an average-index virtualizer, scan
+   preceding rows on every navigation, or attach delegate geometry callbacks,
+   viewport observers, or frame timers that continue Find positioning during
+   later scrolling.
 7. `usher-search` may expose pure measured-convergence primitives for features
    that can complete measurement inside one editor transaction. A UI adapter
    must not turn those primitives into a persistent event-loop reconciliation
@@ -60,9 +63,11 @@ these primitives.
    viewport 完全不动；任一部分不可见时，将该矩形居中并按内容边界夹紧。
 5. 存在软换行时，Feature 必须先把活动命中解析到视觉子行，再调用通用视口计算。
    同一可见视觉行内切换多个命中不得移动 viewport。
-6. 虚拟化或可变行高 Feature 只使用显式导航命令执行时可取得的几何计算揭示；禁止挂接
-   delegate 几何 callback、viewport observer 或跨帧 timer，使 Find 定位在后续滚动中
-   继续执行。软换行虚拟行的近似误差单独记录，绝不能以破坏滚动性能为代价修正。
+6. 虚拟化或可变行高 Feature 只使用显式导航命令执行时可取得的几何计算揭示。按索引
+   寻址的 virtualizer 必须使用自身的 `scrollToIndex` 坐标（当前估算行高乘 model index），
+   再仅叠加目标在本行内的视觉偏移；禁止把真实前缀行高之和传给基于平均行高寻址的
+   virtualizer，禁止每次导航扫描前序行，也禁止挂接 delegate 几何 callback、viewport
+   observer 或跨帧 timer，使 Find 定位在后续滚动中继续执行。
 7. `usher-search` 可以为能在单个编辑器事务内完成测量的 Feature 提供纯测量收敛原语，
    UI adapter 禁止把这些原语变成长驻 event-loop 收敛过程。
 8. 虚拟化 Diff 使用 Blink 黄色 `#ffff00` 绘制非活动命中，使用橙色 `#ff9632`
@@ -88,10 +93,14 @@ continuous scroll observer: CodeMirror adds `scrollToMatch` only to its
 <https://github.com/codemirror/search/blob/main/src/search.ts#L398-L428>
 <https://github.com/microsoft/vscode/blob/main/src/vs/editor/contrib/find/browser/findModel.ts#L236-L246>
 
-The library's optional pure convergence calculation was informed by TanStack
-Virtual and CodeMirror's separated measure/update loop. The PR adapter does not
-run their frame-reconciliation lifecycle because Slint's virtual ListView and
-Material scrollbar do not expose the same cancellable transaction boundary:
+The shared index-addressed reveal primitive follows TanStack Virtual's
+`scrollToIndex({ align: "auto" })` contract. The PR adapter uses Slint's own
+current average-item coordinate and resolves only the wrapped offset inside the
+target row, so navigation is constant-time and addresses the row Slint will
+actually mount. The optional pure convergence calculation remains available
+for adapters with a cancellable measurement transaction; the PR adapter does
+not run that lifecycle because Slint's virtual ListView does not expose the
+same transaction boundary:
 <https://tanstack.com/virtual/latest/docs/api/virtualizer>
 <https://github.com/TanStack/virtual/blob/main/packages/virtual-core/src/index.ts>
 <https://codemirror.net/docs/ref/#view.EditorView.requestMeasure>
@@ -111,8 +120,13 @@ Material scrollbar do not expose the same cancellable transaction boundary:
   and first/middle/final results. Resize alone must never move the viewport.
 - Verify wheel/touch scrolling and direct scrollbar-thumb dragging remain under
   user control after navigating to a match, and a stale virtual content bound
-  cannot hide the final match. Exact reveal placement still has the known
-  deferred limitation recorded as UI-079.
+  cannot hide the final match. Verify navigation addresses the target model
+  index after width-dependent wrapping, especially for the final results. Once
+  a direct-thumb gesture is clamped at either track edge, repeated pointer
+  events at that same mapped position must not restart virtual-list correction.
+  A ListView that derives its coordinate from mounted-row averages must keep one
+  captured item estimate for the complete direct-thumb gesture, then restore
+  actual variable heights on release; it must not rebuild the row model.
 - Move focus directly from the Find input to the scrollbar or code surface,
   then start a wheel/touch or thumb-drag scroll. Verify there is no later Find
   viewport write. The active highlight, count, and active result remain unchanged.
@@ -131,7 +145,10 @@ Material scrollbar do not expose the same cancellable transaction boundary:
 - 覆盖 Find 关闭/打开、固定宽度、Find 前/过程中改变宽度、Find 前/过程中改变高度、
   Unified/Split、换行/不换行、首个/中间/最后命中；仅 resize 不得移动 viewport。
 - 导航到命中后分别验证滚轮/触控滚动和直接拖拽滚动条滑块始终由用户控制，并验证
-  滞后的虚拟内容边界不会隐藏最后一个命中。精确定位仍存在 UI-079 记录的延期限制。
+  滞后的虚拟内容边界不会隐藏最后一个命中；宽度相关换行发生后仍须按目标 model index
+  寻址，尤其覆盖最后几个结果。滑块在轨道任一边缘夹紧后，同一映射位置的重复指针事件
+  不得重新启动虚拟列表校正。若 ListView 的坐标来自已挂载行平均高度，则一次直接拖拽
+  手势必须始终使用按下时捕获的同一估算行高，释放时恢复真实可变行高，且不得重建行 model。
 - 从 Find 输入框直接点击滚动条或代码区，再开始滚轮/触控或滑块拖动；验证后续不存在
   Find viewport 写入，同时保留当前高亮、计数与当前结果。
 - 手动滚动后，验证虚拟列表测量与宽高重排都不会重新启动揭示；只有
