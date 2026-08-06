@@ -40,6 +40,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `crates/usher-messages/` | 独立编译的消息中心包：持久领域/存储服务、快照订阅、后台持久化/原生投递 Worker、`notify-rust` OS 适配器及生成的 Inbox 页面 API。可嵌入 Slint 页面使用 library-module 模式编译，不再依赖已废弃的非 Window 根组件兼容路径。 |
 | `crates/usher-search/` | 与框架无关的通用 Find 引擎：Unicode 安全的非重叠文本命中、首尾循环的相邻结果导航，以及 Chromium/Blink `CenterIfNeeded` 视口策略。Feature 只提供领域/model 与视觉换行适配。 |
 | `crates/usher-state-store/` | 与框架无关的跨页面 State 接口与内置引擎：强类型 reducer/action、不可变 revision 快照、selector、立即 hydration、自动单调订阅与 RAII 取消。Feature 门面隐藏具体引擎，未来可通过 adapter 替换社区 Store。 |
+| `crates/usher-virtual-list/` | 与框架无关的可变行高虚拟列表门面：精确 item extent、offset/index 映射、有界 overscan 窗口与精确 item reveal。私有 adapter 当前使用社区 `virtualizer` 引擎；Feature 与 Slint bridge 只依赖本地接口，底层可替换。 |
 | `src/app_runtime.rs` | 进程级多线程 Tokio runtime，并为 runtime 线程安装 tracing dispatch。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观（强制浅色/深色，或 Auto 时跟随系统）、标题栏附件、窗口交互通知、用于关闭可消隐临时弹层的原生标题栏点击桥接、macOS PR Review 字体注册、`NSSound` 点击音，以及用于 Auto 实时跟随的 `AppleInterfaceThemeChangedNotification`；`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
@@ -120,7 +121,7 @@ Material UI 源码。Material palette、typography 和 style metrics 不定义�
 外观；应用界面统一消费 `GitHubTheme` 与 `GitHubMetrics`。所有视觉适配必须放在
 项目自有代码中，确保依赖升级时可以直接替换 Material UI 目录而无需迁移补丁。
 当前白名单有意保持最小：`ui/main.slint` 的 `MaterialWindowAdapter`，以及 PR
-Review 工作区用于虚拟化的公开 `ListView`/`ScrollView`。
+Review 工作区用于滚动的公开 `ListView`/`ScrollView`。
 `scripts/check-ui-policy.sh` 自动检查该边界及 Octicon 命令图标策略。
 
 所有产品页面和复用视觉组件均遵循
@@ -400,7 +401,7 @@ PR Diff 行 model 每次原子替换都会递增内容 revision，使 Diff 内�
 
 审核页头采用 GitHub 的两步命令模型。标题旁的 GitHub 风格就绪徽标使用 Primer 语义色渲染归一化类型/详情，但合并语义由各 adapter 独立负责：GitHub 映射 REST mergeability，Gitee 企业版映射 v8 `current_state` 条件，Gitee 公有版只映射 v5 字段，GitLab 映射 `detailed_merge_status` 并请求异步重算。共享 enum 只是展示边界，绝不能把一个 Provider 的判定条件套到另一个 Provider。`Review changes` 提交显式的 Provider-neutral Comment、Approve 或 Request changes；不受支持的选项保持可见但禁用。Conversation Tab 底部另有 GitHub 风格纯文本评论框（`Write` + 绿色 `Comment`），提交同一 Comment 动作。Provider 成功后刷新远端状态，绝不自动开始合并。`Merge pull request` 只由最新的归一化 `PullRequestActionState` 启用，并且只展示 adapter 返回的策略。GitHub 支持仓库启用的 merge、squash、rebase；Gitee 企业 v8 映射评审状态，Approve 未填写 summary 时省略可选的 `comment` 字段，并按 `restrict_merge_type` 支持 merge、squash、rebase、fast-forward；Gitee 公有 v5 支持评论和 merge/squash，但没有 approve/request-changes endpoint。GitLab 支持评论、批准，以及携带 SHA 防护的 merge/squash 和显式删除来源分支；项目 `squash_option` 限制可选策略，稳定版 REST API 没有对应写命令，因此 Request changes 保持禁用。
 
-审核文件树使用 GitHub 的平台 UI 字体栈（macOS 使用 SF 系统 UI 字体，Windows 使用 Segoe UI），代码区使用平台等宽字体栈。变更文件树和 Diff 行都使用虚拟化 `ListView` delegate，只实例化当前可见行。分隔线实时调整面板宽度；移动手柄以当前宽度叠加剩余的局部指针位移，使分隔线贴合指针，同时避免重建完整文件树或 Diff。会话宽度限制为 220–520 px 且不超过审核区宽度的 45%，确保 Diff 仍是主要区域。可见性对齐 GitHub Primer `$width-md`（768px）：宽度越过临界值向下时自动折叠、向上时自动展开；工具栏开关在任意宽度下都可用，受限工作区自动收起后仍可手动打开。应用窗口最小宽度为 800px，因此普通桌面 Resize 不再到达该内部断点；响应式规则继续用于受限 Host 和直接工作区测试。
+审核文件树使用 GitHub 的平台 UI 字体栈（macOS 使用 SF 系统 UI 字体，Windows 使用 Segoe UI），代码区使用平台等宽字体栈。文件树保留虚拟化 `ListView`；Diff 行改由 `usher-virtual-list` 精确行高门面计算，并在 `ScrollView` 中挂载稳定、有界的 Slint overscan model。宽度/model revision 只重建轻量行 extent，普通滚动则增量移除和追加可见行。分隔线实时调整面板宽度；移动手柄以当前宽度叠加剩余的局部指针位移，使分隔线贴合指针，同时避免重建完整文件树或 Diff。会话宽度限制为 220–520 px 且不超过审核区宽度的 45%，确保 Diff 仍是主要区域。可见性对齐 GitHub Primer `$width-md`（768px）：宽度越过临界值向下时自动折叠、向上时自动展开；工具栏开关在任意宽度下都可用，受限工作区自动收起后仍可手动打开。应用窗口最小宽度为 800px，因此普通桌面 Resize 不再到达该内部断点；响应式规则继续用于受限 Host 和直接工作区测试。
 
 审核工作区从 macOS 原生标题栏 inset 下方开始并复用 Shell 原生 Back。根渲染树固定在窗口 `x=0`，普通页头、Tab 和 Diff 内容通过内部左内缩跟随 Shell 弹簧，并在运动开始时只采用一次目标宽度。原生 Live Resize 时工作区保持上一次稳定内部几何直到拖拽结束，避免整棵已冻结/虚拟化审核树反复重排，同时 Dialog 使用全窗口坐标。Shell 先把 Back 交给审核控制器，真正离开时再使请求失效并由 Router 返回 Workflow。PR 操作位于标题栏；就绪 ActionMenu 在窗口根层渲染。文件筛选和文件操作菜单仍是互斥工作区 Popover，并支持第一次点击直接切换目标。
 
@@ -408,7 +409,7 @@ Conversation adapter 归一化 GitHub、GitLab、Gitee 公有 v5 与 Gitee 企�
 
 Conversation 提交批次使用 Primer 官方 `repo-push` Octicon；相对时间紧跟 `added N commits`，共享的绝对时间 Tooltip 保留 Provider 的准确时间。GitHub Review 会展开为不可拆分的活动摘要与可选正文卡片；review state 决定话术，相对时间采用 GitHub 自动单位，merged 活动抑制冗余 closed 事件。连接线按事件语义边界分段，但连续 Review 对之间必须从前一张卡片到下一条 summary 标记保持连续轨道。Gitee 企业版普通评论使用 MR `/notes`，并固定发送 `noteable_type: PullRequest`；`/reviews` 只用于 Review 决策。commit 计数探测若没有 total 且响应恰好填满请求页，即使是裸数组也视为不确定，随后统计并丢弃文档约定的完整非分页集合，不挂载懒加载 Commits model。
 
-Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度，从而避免最右侧露出未绘制区域，并保持 Tab/双宽字符对齐。代码栏支持 GitHub 风格的跨 ListView 行拖拽选中（不含行号栏；hunk/meta 行不可选且不进入剪贴板）；双击按相同字符类扩展为单词选区（字母数字/`_`、空白、其余标点各自成组），三击选中整行代码列，连击状态由审核工作区持有以免 ListView 回收打断手势；软换行继续使用 Slint `TextInput.word-wrap` 自动换行，并采用它的原生 UTF-8 选区几何，因此续行双击会高亮完整逻辑单词，不再近似换行偏移。Unified 换行行的行号与 `+`/`-` 使用字体自然首行行盒，未换行行仍使用名义 22px 行槽。仅需 preferred-width 的探测 Text 保持零尺寸。⌘/Ctrl+F 在选中文件工具栏停靠紧凑的编辑器式查找栏（GitHub PR Files changed 无应用内查找；栏体对齐 CodeMirror/GitHub 文件编辑器：查询、序号/总数、上一个/下一个、关闭）。`crates/usher-search` 统一拥有 Unicode 安全匹配、相邻导航与 Blink `CenterIfNeeded`。Find 打开期间继续维护匹配和当前高亮，但定位像 CodeMirror、VS Code 一样是一次性命令：只有 Enter、Shift+Enter 或上一个/下一个控件计算并至多写一次 viewport。PR 适配层不存在 Find 定位 timer、viewport observer、scroll callback、回收行几何上报、行级匹配 model 或命中 repeater；resize、重排、焦点变化、滚轮/触控输入和拖拽滚动条均不重新定位当前命中。只绘制当前命中；非活动命中高亮延期，因为此前的逐行投影会降低虚拟列表滚动性能。review controller 的同步命中测试按投影 model 中每个逻辑行的实际换行高度遍历，因此正向或反向拖入软换行终点时都能精确落到字符。⌘/Ctrl+C 静默写入剪贴板。选中状态只保存两个端点，选区渲染只由已选且可见的 delegate 创建，因此保留有界懒加载 model 与普通 token-only 滚动路径。
+Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度。代码栏支持 GitHub 风格的跨精确虚拟行拖拽选中；软换行继续使用 Slint `TextInput.word-wrap` 原生 UTF-8 选区几何。PR 虚拟列表 adapter 使用轻量显示列指标和最终稳定宽度计算相同换行数，再以精确前缀和统一驱动 content extent、滚动条映射、可见窗口与 Find reveal。⌘/Ctrl+F 定位仍是一次性命令：只有 Enter、Shift+Enter 或上一个/下一个控件计算并至多写一次 viewport。普通滚动只更新有界虚拟渲染窗口，绝不执行 Find 定位；Find 打开时活动与非活动高亮都限制在已挂载行内。review controller 的同步命中测试仍按投影 model 的实际换行高度解析字符，⌘/Ctrl+C 静默复制纯文本。
 
 每次显式 Find 导航命令都会立即完成计算和可选的 viewport 写入，不存在等待后续滚动或布局处理的请求。修改查询、手动滚动、resize 和焦点变化只保留查询、计数、当前结果与当前高亮，不移动 viewport。
 

@@ -10,5 +10,6 @@ mod find;
 mod hunk;
 mod selection;
 mod timeline;
+mod virtual_list;
 
 pub(crate) use controller::{WorkflowPrReviewController, bind_pr_review};

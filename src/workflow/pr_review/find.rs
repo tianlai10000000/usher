@@ -6,13 +6,10 @@
 //! current projected line model.
 
 use slint::{Model, ModelRc, SharedString, VecModel};
-use usher_search::{
-    AxisRange, MatchCase, ScrollViewport, center_virtual_item_if_needed, converge_center_if_needed,
-    find_non_overlapping,
-};
+use usher_search::{MatchCase, find_non_overlapping};
 
 use crate::workflow::syntax_highlight::character_columns;
-use crate::{WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrDiffRevealStep};
+use crate::{WorkflowPrDiffFindMatch, WorkflowPrDiffLine};
 
 use super::selection::soft_wrap_visual_line_index;
 
@@ -65,25 +62,15 @@ pub(super) fn collect_diff_find_matches(
     ModelRc::new(VecModel::from(matches))
 }
 
-/// Blink Find-in-page equivalent for the diff scroll axis.
-///
-/// Chromium scrolls the active match rectangle with CenterIfNeeded: preserve
-/// the viewport when the match is fully visible, otherwise center it and clamp
-/// to the scrollable content bounds. Diff code wraps instead of scrolling
-/// horizontally, so only the vertical axis is needed here.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn resolve_diff_find_viewport_y(
+/// Resolves a match to its visual offset inside one exact-height virtual row.
+pub(super) fn diff_find_intra_item_offset(
     lines: &ModelRc<WorkflowPrDiffLine>,
     target_line: i32,
     start_char: i32,
     code_width: f32,
     cell_width: f32,
     side: &str,
-    current_viewport_y: f32,
-    visible_height: f32,
-    content_height: f32,
 ) -> f32 {
-    const MATCH_HEIGHT: f32 = 22.0;
     let row_count = lines.row_count();
     if row_count == 0 {
         return 0.0;
@@ -97,53 +84,7 @@ pub(super) fn resolve_diff_find_viewport_y(
         cell_width,
         side,
     );
-    -center_virtual_item_if_needed(
-        target_index,
-        row_count,
-        match_intra_row_y,
-        MATCH_HEIGHT,
-        ScrollViewport {
-            offset: -current_viewport_y,
-            extent: visible_height,
-            content_extent: content_height,
-        },
-    )
-}
-
-/// Applies the shared reveal policy to a match rectangle measured by the
-/// mounted Slint delegate. This second pass removes accumulated row-height
-/// estimation error after wrapping or window resizing.
-pub(super) fn reconcile_measured_diff_find_viewport_y(
-    match_top: f32,
-    match_height: f32,
-    current_viewport_y: f32,
-    visible_height: f32,
-    content_height: f32,
-    has_last_target: bool,
-    last_target_viewport_y: f32,
-    stable_frames: i32,
-) -> WorkflowPrDiffRevealStep {
-    let target_end = match_top.max(0.0) + match_height.max(1.0);
-    let convergence = converge_center_if_needed(
-        AxisRange {
-            start: match_top,
-            extent: match_height,
-        },
-        ScrollViewport {
-            offset: -current_viewport_y,
-            extent: visible_height,
-            // Virtual ListView content height can lag its last mounted row.
-            // Never clamp before the measured target rectangle itself.
-            content_extent: content_height.max(target_end),
-        },
-        has_last_target.then_some(-last_target_viewport_y),
-        stable_frames.clamp(0, u8::MAX as i32) as u8,
-    );
-    WorkflowPrDiffRevealStep {
-        viewport_y: -convergence.target_offset,
-        stable_frames: convergence.stable_frames as i32,
-        complete: convergence.complete,
-    }
+    match_intra_row_y
 }
 
 fn estimate_diff_match_intra_row_y(
@@ -228,10 +169,7 @@ fn display_column_at_byte(value: &str, byte: usize) -> u32 {
 mod tests {
     use slint::{Model, ModelRc, VecModel};
 
-    use super::{
-        collect_diff_find_matches, reconcile_measured_diff_find_viewport_y,
-        resolve_diff_find_viewport_y,
-    };
+    use super::{collect_diff_find_matches, diff_find_intra_item_offset};
     use crate::{WorkflowPrDiffLine, WorkflowPrDiffToken};
 
     fn line(content: &str, left: &str, right: &str) -> WorkflowPrDiffLine {
@@ -343,25 +281,7 @@ mod tests {
     fn wrapped_matches_use_their_visual_subline() {
         let content = "alpha beta gamma delta epsilon";
         let lines = ModelRc::new(VecModel::from(vec![line(content, content, content)]));
-        let viewport_y =
-            resolve_diff_find_viewport_y(&lines, 0, 23, 72.0, 7.2, "", 0.0, 22.0, 88.0);
-        assert!(viewport_y < 0.0);
-    }
-
-    #[test]
-    fn measured_delegate_geometry_corrects_a_stale_visible_estimate() {
-        let step = reconcile_measured_diff_find_viewport_y(
-            340.0, 22.0, -100.0, 240.0, 800.0, false, 0.0, 0,
-        );
-        assert_eq!(step.viewport_y, -231.0);
-        assert!(!step.complete);
-    }
-
-    #[test]
-    fn measured_last_match_extends_a_stale_virtual_content_bound() {
-        let step = reconcile_measured_diff_find_viewport_y(
-            780.0, 22.0, -500.0, 240.0, 760.0, false, 0.0, 0,
-        );
-        assert_eq!(step.viewport_y, -562.0);
+        let viewport_y = diff_find_intra_item_offset(&lines, 0, 23, 72.0, 7.2, "");
+        assert!(viewport_y > 0.0);
     }
 }

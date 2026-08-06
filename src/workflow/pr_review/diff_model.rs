@@ -16,7 +16,7 @@ use super::hunk::{
 };
 use crate::git::{PullRequestDiffFile, PullRequestDiffLine};
 use crate::workflow::syntax_highlight::HighlightedLine;
-use crate::{WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken};
+use crate::{WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffToken};
 
 const VISIBLE_LINE_CACHE_CAPACITY: usize = 64;
 
@@ -39,6 +39,48 @@ impl LazyPrDiffLineModel {
             highlighted,
             rows_projection,
             rows: RefCell::new(LazyLineCache::new(VISIBLE_LINE_CACHE_CAPACITY)),
+        }
+    }
+
+    pub(super) fn row_metrics(&self) -> Vec<WorkflowPrDiffRowMetric> {
+        self.rows_projection
+            .iter()
+            .map(|projection| match *projection {
+                DiffRowProjection::Unified(source_index) => {
+                    self.metric_for_sources(source_index, Some(source_index), None)
+                }
+                DiffRowProjection::Split {
+                    left,
+                    right,
+                    source_index,
+                    ..
+                } => self.metric_for_sources(source_index, left, right),
+            })
+            .collect()
+    }
+
+    fn metric_for_sources(
+        &self,
+        source_index: usize,
+        left: Option<usize>,
+        right: Option<usize>,
+    ) -> WorkflowPrDiffRowMetric {
+        let source = self.file.lines.get(source_index);
+        let columns = left
+            .into_iter()
+            .chain(right)
+            .filter_map(|index| self.highlighted.get(index))
+            .map(|line| line.columns)
+            .max()
+            .unwrap_or(0);
+        WorkflowPrDiffRowMetric {
+            kind: source.map_or("meta", |line| line.kind.as_str()).into(),
+            columns: columns.min(i32::MAX as u32) as i32,
+            double_hunk: source.is_some_and(|_| {
+                hunk_is_expandable(&self.file, source_index)
+                    && hunk_can_expand_down(&self.file, source_index)
+                    && !hunk_can_expand_all(&self.file, source_index)
+            }),
         }
     }
 

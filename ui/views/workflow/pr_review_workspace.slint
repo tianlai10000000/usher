@@ -3,7 +3,7 @@ import { GitHubTheme } from "../../theme/github_theme.slint";
 import { AppState } from "../../state/app_state.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
 import { GitHubDialog } from "../../components/dialog/github_dialog.slint";
-import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffRevealStep, WorkflowPrDiffLine, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
 import { GitHubTreeIndentGuides, GitHubCommitMessageToggleButton, GitHubFileToolbarButton, GitHubCommitSummaryNavButton, GitHubFileChangeTypeIcon, GitHubSelectableDiffCode, GitHubSplitDiffSide, GitHubDiffViewPreview, GitHubDiffViewChoice, GitHubDiffSettingsPopover, GitHubFileTreeToggleButton, GitHubFileMenuButton, GitHubDiffStatSegment, GitHubDiffStatBar, GitHubFileDiffStat, GitHubCodeRenderingIndicator, GitHubLargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, GitHubDiffFindBar } from "../../components/pr_review/content.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
@@ -54,6 +54,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     in property <bool> show-viewed-files: true;
     in property <bool> file-filters-active: false;
     in property <[WorkflowPrDiffLine]> lines: [];
+    in property <[WorkflowPrDiffRowMetric]> line-metrics: [];
     in property <int> max-code-columns: 0;
     in property <string> longest-code-line;
     in property <int> line-content-revision: 0;
@@ -337,7 +338,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     pure callback find-diff-row-matches(int, string, string) -> [WorkflowPrDiffFindMatch];
     pure callback step-diff-find-index(int, int, bool) -> int;
     callback resolve-diff-find-viewport-y(int, int, float, float, string, float, float, float) -> float;
-    pure callback reconcile-measured-diff-find-viewport-y(float, float, float, float, float, bool, float, int) -> WorkflowPrDiffRevealStep;
+    callback layout-diff-virtual-window(int, [WorkflowPrDiffRowMetric], float, float, float, float, float, float) -> WorkflowPrDiffVirtualWindow;
     callback diagnose-diff-scroll(string, float, float, float, float, bool, bool, bool, int, int, int);
     callback view-file();
     // Toggle one commit message body; expansions are independent (not exclusive).
@@ -2388,18 +2389,21 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 clip: false;
                 background: transparent;
                 private property <int> observed-line-model-revision: root.line-model-revision;
+                private property <int> observed-line-content-revision: root.line-content-revision;
                 private property <int> observed-hunk-scroll-restore-revision:
                     root.hunk-scroll-restore-revision;
                 private property <int> observed-diff-find-scroll-revision:
                     root.diff-find-scroll-revision;
+                private property <WorkflowPrDiffVirtualWindow> virtual-window;
+                private property <bool> refreshing-virtual-window: false;
                 private property <length> diagnostic-viewport-y: diff-scroll.viewport-y;
                 private property <length> diagnostic-viewport-height: diff-scroll.viewport-height;
                 private property <length> diagnostic-visible-height: diff-scroll.visible-height;
+                private property <length> diagnostic-visible-width: diff-scroll.visible-width;
                 private property <bool> diagnostic-find-open: root.diff-find-open;
-                // ListView finalizes its virtual row geometry after the model
-                // property changes. Re-apply the same visual anchor over a
-                // bounded number of layout frames so late viewport clamping
-                // cannot move the first revealed row away from the pointer.
+                // Hunk replacement updates the exact-height index before the
+                // clicked source anchor is restored. Keep the existing bounded
+                // retries for the asynchronous highlighted-model replacement.
                 private property <int> hunk-scroll-restore-attempts: 0;
 
                 function request-hunk-expansion(line-index: int, direction: string, content-y: length) {
@@ -2427,11 +2431,39 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                     }
                 }
 
+                function refresh-virtual-window() {
+                    if diff-surface.refreshing-virtual-window {
+                        return;
+                    }
+                    diff-surface.refreshing-virtual-window = true;
+                    let code-width = root.diff-view == "split"
+                        ? max(1.0, ((diff-scroll.visible_width / 1px) - 1.0) / 2.0 - 70.0)
+                        : max(1.0, (diff-scroll.visible_width / 1px) - 120.0);
+                    let next = root.layout-diff-virtual-window(
+                        root.line-content-revision,
+                        root.line-metrics,
+                        max(0.0, -diff-scroll.viewport-y / 1px),
+                        max(1.0, diff-scroll.visible-height / 1px),
+                        code-width,
+                        root.code-character-width / 1px,
+                        root.code-line-height / 1px,
+                        root.hunk-line-height / 1px
+                    );
+                    let clamped-y = -next.scroll-offset * 1px;
+                    diff-surface.virtual-window = next;
+                    if Math.abs(diff-scroll.viewport-y - clamped-y) > 0.5px {
+                        diff-scroll.viewport-y = clamped-y;
+                    }
+                    diff-surface.refreshing-virtual-window = false;
+                }
+
                 init => {
+                    diff-surface.refresh-virtual-window();
                     diff-surface.emit-scroll-diagnostic("surface-init", diff-scroll.viewport-y);
                 }
 
                 changed diagnostic-viewport-y => {
+                    diff-surface.refresh-virtual-window();
                     diff-surface.emit-scroll-diagnostic("viewport", diff-scroll.viewport-y);
                 }
 
@@ -2440,7 +2472,12 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 }
 
                 changed diagnostic-visible-height => {
+                    diff-surface.refresh-virtual-window();
                     diff-surface.emit-scroll-diagnostic("visible", diff-scroll.viewport-y);
+                }
+
+                changed diagnostic-visible-width => {
+                    diff-surface.refresh-virtual-window();
                 }
 
                 changed diagnostic-find-open => {
@@ -2481,6 +2518,10 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                     diff-surface.emit-scroll-diagnostic("model-reset-write", 0px);
                     diff-scroll.viewport-x = 0px;
                     diff-scroll.viewport-y = 0px;
+                }
+
+                changed observed-line-content-revision => {
+                    diff-surface.refresh-virtual-window();
                 }
 
                 changed observed-hunk-scroll-restore-revision => {
@@ -2910,21 +2951,28 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                             vertical-stretch: 1;
                             background: transparent;
 
-                        diff-scroll := ListView {
+                        diff-scroll := ScrollView {
                             width: parent.width;
                             height: parent.height;
                             visible: !root.large-diff-deferred && !root.large-diff-loading;
                             // A Flickable normally steals vertical drags after
                             // 8px and cancels the code TouchArea. GitHub treats
                             // dragging code as selection; wheel/touchpad and
-                            // the vertical scrollbar continue to scroll this ListView.
+                            // the vertical scrollbar continue to scroll this view.
                             interactive: false;
                             // Diff rows calculate their wrapped height from the
                             // available code column. Never reserve or expose a
                             // horizontal track for content that already wraps.
                             horizontal_scrollbar_policy: ScrollBarPolicy.always_off;
                             vertical_scrollbar_policy: ScrollBarPolicy.always_off;
-                            for line[line-index] in root.lines: diff-line-row := Rectangle {
+                            viewport_width: self.visible_width;
+                            viewport_height: max(
+                                self.visible_height,
+                                diff-surface.virtual-window.content-height * 1px
+                            );
+                            for virtual-row in diff-surface.virtual-window.rows: diff-line-row := Rectangle {
+                                private property <int> line-index: virtual-row.index;
+                                private property <WorkflowPrDiffLine> line: virtual-row.line;
                                 private property <int> observed-hunk-scroll-restore-revision:
                                     root.hunk-scroll-restore-revision;
                                 function report-hunk-scroll-anchor() {
@@ -2938,12 +2986,10 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                 changed y => {
                                     self.report-hunk-scroll-anchor();
                                 }
-                                // ListView may recycle the delegate at the same
-                                // model index, so neither init nor y necessarily
-                                // changes when a hunk marker becomes line 58.
-                                // The Rust-side revision is emitted after the
-                                // replacement model is installed and provides a
-                                // deterministic post-update anchor report.
+                                // A retained overscan row may keep its component
+                                // instance while the highlighted model changes.
+                                // The Rust-side revision provides a deterministic
+                                // post-update anchor report in that case.
                                 changed observed-hunk-scroll-restore-revision => {
                                     self.report-hunk-scroll-anchor();
                                 }
@@ -2963,20 +3009,10 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                     && self.unified-content-width > self.unified-code-width;
                                 private property <int> unified-visual-lines:
                                     max(1, Math.ceil(self.unified-content-width / self.unified-code-width));
+                                x: 0px;
+                                y: virtual-row.start * 1px;
                                 width: diff-scroll.visible_width;
-                                // Slint ListView addresses random seeks with the
-                                // average height of its mounted delegates. Keep
-                                // that estimate uniform for a direct scrollbar
-                                // gesture so recycling cannot change the scroll
-                                // coordinate underneath the pointer. Actual row
-                                // heights return immediately on pointer release.
-                                height: diff-virtual-scrollbar.direct-dragging
-                                    ? diff-virtual-scrollbar.drag-item-height
-                                    : (line.kind == "hunk"
-                                        ? (line.expand-up && line.expand-down ? 52px : root.hunk-line-height)
-                                        : (root.diff-view == "split"
-                                            ? root.code-line-height * self.split-visual-lines
-                                            : root.code-line-height * self.unified-visual-lines));
+                                height: virtual-row.size * 1px;
                                 background: line.kind == "addition"
                                     ? root.diff-addition-background
                                     : (line.kind == "deletion"
@@ -3478,7 +3514,6 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                             viewport-y <=> diff-scroll.viewport-y;
                             visible-height: diff-scroll.visible-height;
                             content-height: diff-scroll.viewport-height;
-                            item-count: root.lines.length;
                             enabled: diff-scroll.visible;
                         }
                         }

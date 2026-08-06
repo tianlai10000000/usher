@@ -13,7 +13,10 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
 
 - `crates/usher-messages/` owns the message domain model, bounded JSON storage,
   subscriptions, background persistence worker, `notify-rust` adapter, and the
-  independently generated `GitHubMessagesPage` API.
+  independently generated `GitHubMessagesPage` API. Its build script compiles
+  the page in Slint library-module mode: the exported `Rectangle` remains an
+  embeddable `ComponentFactory` product and must not be converted into a second
+  application `Window`.
 - `MessageCenter` is the stable feature Store facade. Its private typed Actions
   reduce through the framework-neutral `usher-state-store::StateStore` port.
   Subscribers hydrate immediately and follow changed revisions automatically;
@@ -44,7 +47,9 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   message service. It never derives durable count from the transient Banner queue.
 
 - `crates/usher-messages/` 负责消息领域模型、有界 JSON 存储、订阅、后台持久化
-  Worker、`notify-rust` 适配器和独立生成的 `GitHubMessagesPage` API。
+  Worker、`notify-rust` 适配器和独立生成的 `GitHubMessagesPage` API。其 build
+  script 使用 Slint library-module 模式编译页面：导出的 `Rectangle` 继续作为
+  `ComponentFactory` 可嵌入产品，禁止为消除警告而改成第二个应用 `Window`。
 - `MessageCenter` 是稳定的 Feature Store 门面；私有强类型 Action 通过与框架无关的
   `usher-state-store::StateStore` 接口 reduce。订阅者立即 hydration，并自动跟随
   有效 revision；每个有效 revision 自动把完整有界 State 排队到 JSON 持久化

@@ -1,0 +1,9 @@
+[package]
+name = "usher-virtual-list"
+version = "0.1.0"
+edition = "2024"
+license = "LicenseRef-Proprietary"
+publish = false
+
+[dependencies]
+virtualizer = { version = "0.4.0", default-features = false, features = ["std"] }

@@ -105,21 +105,17 @@ export component GitHubScrollView inherits Rectangle {
     }
 }
 
-// ListView estimates variable-height content from the currently mounted rows.
-// Freeze that estimate for the duration of a direct thumb drag so delegate
-// recycling cannot change the pointer-to-scroll mapping mid-gesture.
+// Exact-extent scrollbar for application-owned virtual lists. The range and
+// thumb geometry are captured for one direct gesture so resize/model changes
+// cannot move the pointer mapping before release.
 export component GitHubVirtualListScrollbar inherits Rectangle {
     in-out property <length> viewport-y;
     in property <length> visible-height;
     in property <length> content-height;
-    in property <int> item-count;
     in property <bool> enabled: true;
-    out property <bool> direct-dragging: root.dragging;
-    out property <length> drag-item-height: root.drag-estimated-item-height;
 
     private property <bool> dragging: false;
     private property <length> drag-content-height: 0px;
-    private property <length> drag-estimated-item-height: 22px;
     private property <length> drag-maximum: 0px;
     private property <length> drag-thumb-height: 0px;
     private property <length> drag-thumb-y: 0px;
@@ -158,10 +154,8 @@ export component GitHubVirtualListScrollbar inherits Rectangle {
             )
         );
         // macOS can continue delivering mouse-drag events after the pointer has
-        // reached a track edge. Rewriting the same frozen-range offset would
-        // restart ListView's variable-height end correction on every event and
-        // make the document rebound indefinitely. One mapped thumb position
-        // owns at most one viewport write per drag gesture.
+        // reached a track edge. One mapped thumb position owns at most one
+        // viewport write per drag gesture.
         if Math.abs(next-thumb-y - root.drag-thumb-y) <= 0.25px {
             return;
         }
@@ -174,10 +168,6 @@ export component GitHubVirtualListScrollbar inherits Rectangle {
 
     function begin-drag(pointer-y: length) {
         root.drag-content-height = max(root.visible-height, root.content-height);
-        root.drag-estimated-item-height = max(
-            1px,
-            root.drag-content-height / max(1, root.item-count)
-        );
         root.drag-maximum = max(0px, root.drag-content-height - root.visible-height);
         root.drag-thumb-height = root.live-thumb-height;
         let thumb-top = root.live-thumb-y;

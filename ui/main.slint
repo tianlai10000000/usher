@@ -7,7 +7,7 @@ import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.sl
 import { GitHubJobRunPage as JobRunPage } from "./views/job_run.slint";
 import { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 import { GitHubPullRequestReviewPage } from "./views/workflow/pr_review_workspace.slint";
-import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffRevealStep, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit, GitHubHeaderActionStrip } from "./components/pr_review/shell.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit, GitHubHeaderActionStrip } from "./components/pr_review/shell.slint";
 import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 
 import { GitHubProjectPage as ProjectPage, ProjectItem } from "./views/project.slint";
@@ -50,7 +50,7 @@ export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
 export { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 export { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
-export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffRevealStep, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
+export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 
 export component MainWindow inherits Window {
     // Keep the application wide enough for the primary navigation and workspace
@@ -406,6 +406,7 @@ export component MainWindow inherits Window {
     in property <bool> workflow-pr-review-show-viewed-files: true;
     in property <bool> workflow-pr-review-file-filters-active: false;
     in property <[WorkflowPrDiffLine]> workflow-pr-review-lines: [];
+    in property <[WorkflowPrDiffRowMetric]> workflow-pr-review-line-metrics: [];
     in property <int> workflow-pr-review-max-code-columns: 0;
     in property <string> workflow-pr-review-longest-code-line;
     in property <int> workflow-pr-review-line-content-revision: 0;
@@ -533,7 +534,7 @@ export component MainWindow inherits Window {
     pure callback workflow-pr-review-find-diff-row-matches(int, string, string) -> [WorkflowPrDiffFindMatch];
     pure callback workflow-pr-review-step-diff-find-index(int, int, bool) -> int;
     callback workflow-pr-review-resolve-diff-find-viewport-y(int, int, float, float, string, float, float, float) -> float;
-    pure callback workflow-pr-review-reconcile-measured-diff-find-viewport-y(float, float, float, float, float, bool, float, int) -> WorkflowPrDiffRevealStep;
+    callback workflow-pr-review-layout-diff-virtual-window(int, [WorkflowPrDiffRowMetric], float, float, float, float, float, float) -> WorkflowPrDiffVirtualWindow;
     callback workflow-pr-review-diagnose-diff-scroll(string, float, float, float, float, bool, bool, bool, int, int, int);
     callback workflow-pr-review-view-file();
     callback workflow-pr-review-toggle-commit-message(string);
@@ -1639,6 +1640,7 @@ export component MainWindow inherits Window {
         show-viewed-files: root.workflow-pr-review-show-viewed-files;
         file-filters-active: root.workflow-pr-review-file-filters-active;
         lines: root.workflow-pr-review-lines;
+        line-metrics: root.workflow-pr-review-line-metrics;
         max-code-columns: root.workflow-pr-review-max-code-columns;
         longest-code-line: root.workflow-pr-review-longest-code-line;
         line-content-revision: root.workflow-pr-review-line-content-revision;
@@ -1747,16 +1749,16 @@ export component MainWindow inherits Window {
                 content-height
             )
         }
-        reconcile-measured-diff-find-viewport-y(match-top, match-height, current-viewport-y, visible-height, content-height, has-last-target, last-target-viewport-y, stable-frames) => {
-            root.workflow-pr-review-reconcile-measured-diff-find-viewport-y(
-                match-top,
-                match-height,
-                current-viewport-y,
+        layout-diff-virtual-window(revision, metrics, scroll-offset, visible-height, code-width, cell-width, code-line-height, hunk-line-height) => {
+            root.workflow-pr-review-layout-diff-virtual-window(
+                revision,
+                metrics,
+                scroll-offset,
                 visible-height,
-                content-height,
-                has-last-target,
-                last-target-viewport-y,
-                stable-frames
+                code-width,
+                cell-width,
+                code-line-height,
+                hunk-line-height
             )
         }
         diagnose-diff-scroll(kind, viewport-y, requested-y, visible-height, viewport-height, find-open, find-focused, hunk-pending, find-revision, line-revision, hunk-attempts) => {

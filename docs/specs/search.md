@@ -27,13 +27,11 @@ these primitives.
    visual subline before calling the shared viewport calculation. Moving among
    multiple visible matches on one visual line must not move the viewport.
 6. Virtualized or variably sized features calculate reveal from the geometry
-   available in the explicit navigation command. Index-addressed virtualizers
-   must use their own `scrollToIndex` coordinate (current estimated item extent
-   times model index), then add only the target's intra-item visual offset. They
-   must not mix exact prefix-height sums with an average-index virtualizer, scan
-   preceding rows on every navigation, or attach delegate geometry callbacks,
-   viewport observers, or frame timers that continue Find positioning during
-   later scrolling.
+   available in the explicit navigation command. PR Diff uses the exact item
+   start supplied by `usher-virtual-list`, adds only the target's intra-item
+   visual offset, and applies `CenterIfNeeded`. Features must not scan preceding
+   rows on every navigation or attach delegate geometry callbacks, viewport
+   observers, or frame timers that continue Find positioning during scrolling.
 7. `usher-search` may expose pure measured-convergence primitives for features
    that can complete measurement inside one editor transaction. A UI adapter
    must not turn those primitives into a persistent event-loop reconciliation
@@ -48,10 +46,11 @@ these primitives.
    resize, virtual-list measurement, wheel/touch scrolling, and scrollbar-thumb
    dragging never position the viewport. These events do not clear the query,
    result set, active index, or active highlight; closing Find does.
-10. The normal scroll path must contain no Find positioning timer, viewport
-    observer, scroll callback, or recycled-row geometry report. Paint-only match
-    projection must remain bounded to mounted rows and must be absent when Find
-    is closed.
+10. The normal scroll path must contain no Find positioning timer or recycled-row
+    geometry report. A virtual-list adapter may observe offset solely to update
+    its bounded overscan render window; that path must not read query, active
+    result, or match geometry. Paint-only match projection remains bounded to
+    mounted rows and is absent when Find is closed.
 11. Feature code must not copy these algorithms. It may add a thin adapter for
    domain ordering, excluded rows, split panes, or scroll-coordinate signs.
 
@@ -63,11 +62,10 @@ these primitives.
    viewport 完全不动；任一部分不可见时，将该矩形居中并按内容边界夹紧。
 5. 存在软换行时，Feature 必须先把活动命中解析到视觉子行，再调用通用视口计算。
    同一可见视觉行内切换多个命中不得移动 viewport。
-6. 虚拟化或可变行高 Feature 只使用显式导航命令执行时可取得的几何计算揭示。按索引
-   寻址的 virtualizer 必须使用自身的 `scrollToIndex` 坐标（当前估算行高乘 model index），
-   再仅叠加目标在本行内的视觉偏移；禁止把真实前缀行高之和传给基于平均行高寻址的
-   virtualizer，禁止每次导航扫描前序行，也禁止挂接 delegate 几何 callback、viewport
-   observer 或跨帧 timer，使 Find 定位在后续滚动中继续执行。
+6. 虚拟化或可变行高 Feature 只使用显式导航命令执行时可取得的几何计算揭示。PR Diff
+   使用 `usher-virtual-list` 提供的精确 item start，仅叠加目标在本行内的视觉偏移，再
+   应用 `CenterIfNeeded`；禁止每次导航扫描前序行，也禁止挂接 delegate 几何 callback、
+   viewport observer 或跨帧 timer，使 Find 定位在后续滚动中继续执行。
 7. `usher-search` 可以为能在单个编辑器事务内完成测量的 Feature 提供纯测量收敛原语，
    UI adapter 禁止把这些原语变成长驻 event-loop 收敛过程。
 8. 虚拟化 Diff 使用 Blink 黄色 `#ffff00` 绘制非活动命中，使用橙色 `#ff9632`
@@ -77,8 +75,9 @@ these primitives.
    上一个/下一个控件执行一次计算并至多写一次 viewport。修改查询、打开 Find、焦点
    变化、窗口 resize、虚拟列表测量、滚轮/触控滚动和拖拽滚动条滑块均不得定位 viewport。
    这些事件不清除查询、结果集、当前索引或当前高亮；只有关闭 Find 才清空。
-10. 普通滚动路径中禁止存在 Find 定位 timer、viewport observer、scroll callback 或回收
-   行几何上报。仅绘制用途的命中投影必须限制在已挂载行，并在 Find 关闭时完全不存在。
+10. 普通滚动路径中禁止存在 Find 定位 timer 或回收行几何上报。虚拟列表 adapter 可以
+   观察 offset，但只能更新有界 overscan 渲染窗口；该路径不得读取查询、当前结果或
+   命中几何。仅绘制用途的命中投影必须限制在已挂载行，并在 Find 关闭时不存在。
 11. Feature 禁止复制这些算法；只允许为领域顺序、排除行、Split 面板或滚动坐标正负
    增加薄适配层。
 
@@ -93,16 +92,16 @@ continuous scroll observer: CodeMirror adds `scrollToMatch` only to its
 <https://github.com/codemirror/search/blob/main/src/search.ts#L398-L428>
 <https://github.com/microsoft/vscode/blob/main/src/vs/editor/contrib/find/browser/findModel.ts#L236-L246>
 
-The shared index-addressed reveal primitive follows TanStack Virtual's
-`scrollToIndex({ align: "auto" })` contract. The PR adapter uses Slint's own
-current average-item coordinate and resolves only the wrapped offset inside the
-target row, so navigation is constant-time and addresses the row Slint will
-actually mount. The optional pure convergence calculation remains available
-for adapters with a cancellable measurement transaction; the PR adapter does
-not run that lifecycle because Slint's virtual ListView does not expose the
-same transaction boundary:
+The shared reveal policy follows TanStack Virtual's index/offset contract. The
+PR adapter obtains exact prefix-sum geometry from `usher-virtual-list`, whose
+private default adapter uses the community Rust `virtualizer` crate. It resolves
+only the wrapped offset inside the target row, so navigation is logarithmic and
+does not materialize preceding lazy rows. Pure convergence remains available
+for adapters with a cancellable measurement transaction; PR Diff does not need
+that lifecycle because its row extents are deterministic at the stable width:
 <https://tanstack.com/virtual/latest/docs/api/virtualizer>
 <https://github.com/TanStack/virtual/blob/main/packages/virtual-core/src/index.ts>
+<https://docs.rs/virtualizer/0.4.0/virtualizer/>
 <https://codemirror.net/docs/ref/#view.EditorView.requestMeasure>
 
 ## Regression Checklist / 回归清单
@@ -113,8 +112,8 @@ same transaction boundary:
 - Verify partially visible, fully hidden, first, and last matches center or
   clamp correctly.
 - In virtualized/wrapped feature UIs, verify the command-time adapter resolves
-  the active visual subline. Recycled rows must have no per-row match model or
-  match repeater.
+  the active visual subline. Per-row paint models and repeaters may exist only
+  for the bounded mounted window and must not read or write viewport state.
 - Exercise Find closed/open, fixed width, width changed before/during Find,
   height changed before/during Find, Unified/Split, wrapped/unwrapped content,
   and first/middle/final results. Resize alone must never move the viewport.
@@ -124,34 +123,34 @@ same transaction boundary:
   index after width-dependent wrapping, especially for the final results. Once
   a direct-thumb gesture is clamped at either track edge, repeated pointer
   events at that same mapped position must not restart virtual-list correction.
-  A ListView that derives its coordinate from mounted-row averages must keep one
-  captured item estimate for the complete direct-thumb gesture, then restore
-  actual variable heights on release; it must not rebuild the row model.
+  Exact content extent and pointer-to-offset mapping must stay stable for the
+  complete gesture. Dragging and release render the same wrapped rows; scrolling
+  updates only a bounded overscan model, never the complete row model.
 - Move focus directly from the Find input to the scrollbar or code surface,
   then start a wheel/touch or thumb-drag scroll. Verify there is no later Find
   viewport write. The active highlight, count, and active result remain unchanged.
 - After manual scrolling, verify virtual-list measurement and width/height
   reflow do not restart reveal; only Enter/Shift+Enter or the Find navigation
   controls may perform another one-shot viewport calculation.
-- With Find open and closed, profile ordinary code scrolling to confirm there
-  is no Find timer, viewport observer, scroll callback, recycled-row geometry
-  report, row-local match model, or match repeater in the scrolling path.
+- With Find open and closed, confirm ordinary scrolling contains no Find timer
+  or recycled-row geometry report. The virtual-window callback may update only
+  bounded overscan rows and must perform no Find work.
 
 - 覆盖大小写敏感/不敏感、CJK、Unicode 小写展开、同一行重复命中、空结果与首尾循环。
 - 验证完整可见命中不改变滚动 offset。
 - 验证部分可见、完全不可见、首个和末尾命中正确居中或贴边夹紧。
 - 在虚拟化/换行页面验证命令执行时的 adapter 使用活动视觉子行；回收行不得拥有逐行
-  匹配 model 或命中 repeater。
+  匹配定位状态；绘制用 model/repeater 只能存在于有界的已挂载窗口，且不得读写 viewport。
 - 覆盖 Find 关闭/打开、固定宽度、Find 前/过程中改变宽度、Find 前/过程中改变高度、
   Unified/Split、换行/不换行、首个/中间/最后命中；仅 resize 不得移动 viewport。
 - 导航到命中后分别验证滚轮/触控滚动和直接拖拽滚动条滑块始终由用户控制，并验证
   滞后的虚拟内容边界不会隐藏最后一个命中；宽度相关换行发生后仍须按目标 model index
   寻址，尤其覆盖最后几个结果。滑块在轨道任一边缘夹紧后，同一映射位置的重复指针事件
-  不得重新启动虚拟列表校正。若 ListView 的坐标来自已挂载行平均高度，则一次直接拖拽
-  手势必须始终使用按下时捕获的同一估算行高，释放时恢复真实可变行高，且不得重建行 model。
+  不得重新启动虚拟列表校正。一次手势中的精确 content extent 与指针到 offset 映射必须
+  保持稳定；拖拽与释放渲染相同的换行行，滚动只更新有界 overscan model，不重建完整行 model。
 - 从 Find 输入框直接点击滚动条或代码区，再开始滚轮/触控或滑块拖动；验证后续不存在
   Find viewport 写入，同时保留当前高亮、计数与当前结果。
 - 手动滚动后，验证虚拟列表测量与宽高重排都不会重新启动揭示；只有
   Enter/Shift+Enter 或 Find 导航控件可以再次执行一次性 viewport 计算。
-- 在 Find 打开和关闭时检查普通代码滚动，确认滚动路径中不存在 Find timer、viewport
-  observer、scroll callback、回收行几何上报、行级匹配 model 或命中 repeater。
+- 在 Find 打开和关闭时检查普通代码滚动，确认滚动路径中不存在 Find timer 或回收行
+  几何上报；虚拟窗口 callback 只能更新有界 overscan 行，不得执行 Find 工作。

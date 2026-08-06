@@ -1,6 +1,8 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -18,8 +20,9 @@ use crate::git::{
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{
     MainWindow, Route, WorkflowPrDiffFile, WorkflowPrDiffFindMatch, WorkflowPrDiffLine,
-    WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice,
-    WorkflowPrFileExtensionFilter, WorkflowPrTreeItem,
+    WorkflowPrDiffRowMetric, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange,
+    WorkflowPrDiffTextSlice, WorkflowPrDiffVirtualWindow, WorkflowPrFileExtensionFilter,
+    WorkflowPrTreeItem,
 };
 
 use super::super::bindings::{show_error, show_success};
@@ -35,10 +38,7 @@ use super::cache::{
 use super::diff_model::{LazyPrDiffLineModel, to_slint_file};
 use super::diff_projection::hunk_scroll_anchor_source_index;
 use super::file_tree::{build_tree_items, extension_counts};
-use super::find::{
-    collect_diff_find_matches, reconcile_measured_diff_find_viewport_y,
-    resolve_diff_find_viewport_y,
-};
+use super::find::{collect_diff_find_matches, diff_find_intra_item_offset};
 use super::hunk::{
     HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection, expand_all_hunk_context_from_sources,
     expand_hunk_context_from_sources, full_source_file, hunk_is_expandable,
@@ -58,6 +58,7 @@ use super::timeline::{
     empty_commit_model, empty_conversation_model, range_covers_all_commits,
     refresh_commit_group_expand_extras,
 };
+use super::virtual_list::PrDiffVirtualListBridge;
 
 const LARGE_DIFF_LINE_THRESHOLD: usize = 400;
 const LARGE_DIFF_BYTE_THRESHOLD: usize = 64 * 1024;
@@ -250,6 +251,35 @@ pub(crate) fn bind_pr_review(
         pr_list_refresh_pending: Arc::new(AtomicBool::new(false)),
         diff_find_matches: Arc::new(Mutex::new(Vec::new())),
     };
+
+    let diff_virtual_list = Rc::new(RefCell::new(PrDiffVirtualListBridge::default()));
+    let layout_virtual_list = diff_virtual_list.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_layout_diff_virtual_window(
+        move |revision,
+              metrics,
+              scroll_offset,
+              visible_height,
+              code_width,
+              cell_width,
+              code_line_height,
+              hunk_line_height| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return WorkflowPrDiffVirtualWindow::default();
+            };
+            layout_virtual_list.borrow_mut().layout(
+                revision,
+                &metrics,
+                &ui.get_workflow_pr_review_lines(),
+                scroll_offset,
+                visible_height,
+                code_width,
+                cell_width,
+                code_line_height,
+                hunk_line_height,
+            )
+        },
+    );
 
     let scroll_diagnostics_enabled = pr_scroll_diagnostics().is_some();
     ui.set_workflow_pr_review_scroll_diagnostics_enabled(scroll_diagnostics_enabled);
@@ -755,6 +785,7 @@ pub(crate) fn bind_pr_review(
         .map_or(-1, |index| index as i32)
     });
 
+    let reveal_virtual_list = diff_virtual_list.clone();
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_review_resolve_diff_find_viewport_y(
         move |line,
@@ -769,16 +800,20 @@ pub(crate) fn bind_pr_review(
                 return 0.0;
             };
             let lines = ui.get_workflow_pr_review_lines();
-            let target_viewport_y = resolve_diff_find_viewport_y(
+            let intra_item_offset = diff_find_intra_item_offset(
                 &lines,
                 line,
                 start_char,
                 code_width,
                 cell_width,
                 side.as_str(),
-                current_viewport_y,
+            );
+            let target_viewport_y = -reveal_virtual_list.borrow_mut().reveal_center_if_needed(
+                line.max(0) as usize,
+                intra_item_offset,
+                22.0,
+                -current_viewport_y,
                 visible_height,
-                content_height,
             );
             if scroll_diagnostics_enabled {
                 write_pr_find_reveal_diagnostic(
@@ -795,28 +830,6 @@ pub(crate) fn bind_pr_review(
                 );
             }
             target_viewport_y
-        },
-    );
-
-    ui.on_workflow_pr_review_reconcile_measured_diff_find_viewport_y(
-        move |match_top,
-              match_height,
-              current_viewport_y,
-              visible_height,
-              content_height,
-              has_last_target,
-              last_target_viewport_y,
-              stable_frames| {
-            reconcile_measured_diff_find_viewport_y(
-                match_top,
-                match_height,
-                current_viewport_y,
-                visible_height,
-                content_height,
-                has_last_target,
-                last_target_viewport_y,
-                stable_frames,
-            )
         },
     );
 
@@ -1091,7 +1104,7 @@ impl WorkflowPrReviewController {
         ui.set_workflow_pr_review_large_diff_loading(false);
         ui.set_workflow_pr_review_files(empty_file_model());
         ui.set_workflow_pr_review_tree_items(empty_tree_model());
-        set_line_model(ui, empty_line_model());
+        set_empty_line_model(ui);
         ui.set_workflow_pr_review_selected_file_index(-1);
         ui.set_workflow_pr_review_selected_file_path("".into());
         ui.set_workflow_pr_review_context_expanded(false);
@@ -1911,7 +1924,7 @@ impl WorkflowPrReviewController {
         apply_file_header(ui, index, &file);
         if is_large_diff(&file) && !large_diff_loaded {
             self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
-            set_line_model(ui, empty_line_model());
+            set_empty_line_model(ui);
             ui.set_workflow_pr_review_max_code_columns(0);
             ui.set_workflow_pr_review_longest_code_line("".into());
             ui.set_workflow_pr_review_code_loading(false);
@@ -2754,7 +2767,7 @@ fn clear_selected_file(ui: &MainWindow) {
     ui.set_workflow_pr_review_selected_file_removed_lines(0);
     ui.set_workflow_pr_review_max_code_columns(0);
     ui.set_workflow_pr_review_longest_code_line("".into());
-    set_line_model(ui, empty_line_model());
+    set_empty_line_model(ui);
     ui.set_workflow_pr_review_code_loading(false);
     ui.set_workflow_pr_review_large_diff_deferred(false);
     ui.set_workflow_pr_review_large_diff_loading(false);
@@ -2801,14 +2814,13 @@ fn apply_highlighted_file(
         .unwrap_or_default();
     ui.set_workflow_pr_review_max_code_columns(max_columns as i32);
     ui.set_workflow_pr_review_longest_code_line(longest_code_line.into());
-    set_line_model(
-        ui,
-        ModelRc::new(LazyPrDiffLineModel::new(
-            file.clone(),
-            highlighted,
-            ui.get_workflow_pr_review_diff_view().as_str() == "split",
-        )),
-    );
+    let line_model = Rc::new(LazyPrDiffLineModel::new(
+        file.clone(),
+        highlighted,
+        ui.get_workflow_pr_review_diff_view().as_str() == "split",
+    ));
+    let metrics = ModelRc::new(VecModel::from(line_model.row_metrics()));
+    set_line_model(ui, ModelRc::from(line_model), metrics);
     ui.set_workflow_pr_review_has_expandable_hunks(
         !ui.get_workflow_pr_review_viewing_file()
             && file
@@ -2832,12 +2844,21 @@ fn apply_highlighted_file(
     }
 }
 
-fn set_line_model(ui: &MainWindow, lines: ModelRc<WorkflowPrDiffLine>) {
+fn set_line_model(
+    ui: &MainWindow,
+    lines: ModelRc<WorkflowPrDiffLine>,
+    metrics: ModelRc<WorkflowPrDiffRowMetric>,
+) {
     ui.set_workflow_pr_review_lines(lines);
+    ui.set_workflow_pr_review_line_metrics(metrics);
     ui.set_workflow_pr_review_line_content_revision(
         ui.get_workflow_pr_review_line_content_revision()
             .wrapping_add(1),
     );
+}
+
+fn set_empty_line_model(ui: &MainWindow) {
+    set_line_model(ui, empty_line_model(), empty_line_metric_model());
 }
 
 fn empty_file_model() -> ModelRc<WorkflowPrDiffFile> {
@@ -2846,6 +2867,10 @@ fn empty_file_model() -> ModelRc<WorkflowPrDiffFile> {
 
 fn empty_line_model() -> ModelRc<WorkflowPrDiffLine> {
     ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffLine>::new()))
+}
+
+fn empty_line_metric_model() -> ModelRc<WorkflowPrDiffRowMetric> {
+    ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffRowMetric>::new()))
 }
 
 fn empty_tree_model() -> ModelRc<WorkflowPrTreeItem> {
@@ -2989,7 +3014,7 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_only_manifest_files(false);
     ui.set_workflow_pr_review_show_viewed_files(true);
     ui.set_workflow_pr_review_file_filters_active(false);
-    set_line_model(ui, empty_line_model());
+    set_empty_line_model(ui);
     ui.set_workflow_pr_review_selected_file_index(-1);
     ui.set_workflow_pr_review_selected_file_path("".into());
     ui.set_workflow_pr_review_selected_file_added_lines(0);
