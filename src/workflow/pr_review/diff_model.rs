@@ -193,22 +193,28 @@ fn to_slint_line(
     let tokens = highlighted
         .tokens
         .iter()
-        .map(|token| WorkflowPrDiffToken {
-            text: token.text.clone().into(),
-            color: Color::from_argb_u8(
-                token.color[0],
-                token.color[1],
-                token.color[2],
-                token.color[3],
-            ),
-            dark_color: Color::from_argb_u8(
-                token.dark_color[0],
-                token.dark_color[1],
-                token.dark_color[2],
-                token.dark_color[3],
-            ),
-            bold: token.bold,
-            italic: token.italic,
+        .scan(0_i32, |next_char, token| {
+            let start_char = *next_char;
+            *next_char += token.text.chars().count() as i32;
+            Some(WorkflowPrDiffToken {
+                text: token.text.clone().into(),
+                start_char,
+                end_char: *next_char,
+                color: Color::from_argb_u8(
+                    token.color[0],
+                    token.color[1],
+                    token.color[2],
+                    token.color[3],
+                ),
+                dark_color: Color::from_argb_u8(
+                    token.dark_color[0],
+                    token.dark_color[1],
+                    token.dark_color[2],
+                    token.dark_color[3],
+                ),
+                bold: token.bold,
+                italic: token.italic,
+            })
         })
         .collect::<Vec<_>>();
     WorkflowPrDiffLine {
@@ -338,22 +344,28 @@ fn to_slint_tokens(highlighted: &HighlightedLine) -> ModelRc<WorkflowPrDiffToken
     let tokens = highlighted
         .tokens
         .iter()
-        .map(|token| WorkflowPrDiffToken {
-            text: token.text.clone().into(),
-            color: Color::from_argb_u8(
-                token.color[0],
-                token.color[1],
-                token.color[2],
-                token.color[3],
-            ),
-            dark_color: Color::from_argb_u8(
-                token.dark_color[0],
-                token.dark_color[1],
-                token.dark_color[2],
-                token.dark_color[3],
-            ),
-            bold: token.bold,
-            italic: token.italic,
+        .scan(0_i32, |next_char, token| {
+            let start_char = *next_char;
+            *next_char += token.text.chars().count() as i32;
+            Some(WorkflowPrDiffToken {
+                text: token.text.clone().into(),
+                start_char,
+                end_char: *next_char,
+                color: Color::from_argb_u8(
+                    token.color[0],
+                    token.color[1],
+                    token.color[2],
+                    token.color[3],
+                ),
+                dark_color: Color::from_argb_u8(
+                    token.dark_color[0],
+                    token.dark_color[1],
+                    token.dark_color[2],
+                    token.dark_color[3],
+                ),
+                bold: token.bold,
+                italic: token.italic,
+            })
         })
         .collect::<Vec<_>>();
     ModelRc::new(VecModel::from(tokens))
@@ -369,9 +381,45 @@ mod tests {
 
     use slint::Model;
 
-    use super::{LazyPrDiffLineModel, VISIBLE_LINE_CACHE_CAPACITY};
+    use super::{LazyPrDiffLineModel, VISIBLE_LINE_CACHE_CAPACITY, to_slint_tokens};
     use crate::git::{PullRequestDiffFile, PullRequestDiffLine};
     use crate::workflow::syntax_highlight::{HighlightedLine, HighlightedToken};
+
+    #[test]
+    fn preserves_character_offsets_without_splitting_styled_tokens() {
+        let highlighted = HighlightedLine {
+            tokens: vec![
+                HighlightedToken {
+                    text: "## ".to_string(),
+                    color: [0xff, 0x24, 0x29, 0x2f],
+                    dark_color: [0xff, 0xe6, 0xed, 0xf3],
+                    bold: true,
+                    italic: false,
+                },
+                HighlightedToken {
+                    text: "Mission / 目标".to_string(),
+                    color: [0xff, 0x24, 0x29, 0x2f],
+                    dark_color: [0xff, 0xe6, 0xed, 0xf3],
+                    bold: false,
+                    italic: false,
+                },
+            ],
+            columns: 23,
+        };
+
+        let model = to_slint_tokens(&highlighted);
+        let runs = (0..model.row_count())
+            .map(|index| model.row_data(index).expect("layout run"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].text.as_str(), "## ");
+        assert_eq!((runs[0].start_char, runs[0].end_char), (0, 3));
+        assert_eq!(runs[1].text.as_str(), "Mission / 目标");
+        assert_eq!((runs[1].start_char, runs[1].end_char), (3, 15));
+        assert!(runs[0].bold);
+        assert!(!runs[1].bold);
+    }
 
     #[test]
     fn materializes_only_a_bounded_row_window() {

@@ -45,6 +45,7 @@ usher-ui-settings = { path = "crates/usher-ui-settings", default-features = fals
 usher-messages = { path = "crates/usher-messages", default-features = false }
 usher-search = { path = "crates/usher-search" }
 usher-virtual-list = { path = "crates/usher-virtual-list" }
+parley = "0.10"
 lazy_static = "1.4"
 log = "0.4"
 fern = { version = "0.7", features = ["colored"] }

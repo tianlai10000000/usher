@@ -7378,6 +7378,7 @@ dependencies = [
  "libc",
  "log",
  "objc",
+ "parley",
  "portable-pty",
  "pulldown-cmark",
  "rand 0.10.2",

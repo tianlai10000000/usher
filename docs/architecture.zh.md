@@ -367,6 +367,14 @@ GitHub 控件。
 
 Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。所有列表、详情/diff、仓库文件、review state、review submit 和 merge 请求都根据当前项目持久化的 `repo_type` 选择实现，并在执行前校验其与 `remote_repo` 一致。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，并用独立 action 序列防止迟到的 review/merge 响应更新其他项目或 PR。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 在 adapter 边界解码，每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写都使用序列号防止迟到响应污染当前项目或 PR。
 
+PR Review 将逻辑选区与 shaped-text 几何分离：`selection.rs` 负责行/字符范围和剪贴板
+投影；`text_geometry.rs` 是 styled-run 与软换行 caret 命中及范围边界的可替换数值门面，
+默认 adapter 使用有界 Parley 0.10 cursor/selection 几何、Slint 共享字体集合和精确 run
+样式。换行范围会合并同一视觉行内相接的 fallback-font fragment，并使用固定 pitch、互不
+重叠的绘制矩形。Slint 继续
+原生绘制 `syntect` token model，且不导入 Parley 类型。不嵌入 WebView/浏览器编辑器；
+门面缓存有界，滚动或 resize 路径不执行 Find viewport 定位工作。
+
 Tag 工作流采用相同的 façade 模式：`workflow/tag.rs` 暴露绑定和刷新，
 `tag/controller.rs` 负责项目状态、UI 序列、取消和命令执行，`tag/version.rs` 与
 `tag/commands.rs` 保存可直接单测的纯规则。应用级 `src/jobs/` model
@@ -410,6 +418,12 @@ Conversation adapter 归一化 GitHub、GitLab、Gitee 公有 v5 与 Gitee 企�
 Conversation 提交批次使用 Primer 官方 `repo-push` Octicon；相对时间紧跟 `added N commits`，共享的绝对时间 Tooltip 保留 Provider 的准确时间。GitHub Review 会展开为不可拆分的活动摘要与可选正文卡片；review state 决定话术，相对时间采用 GitHub 自动单位，merged 活动抑制冗余 closed 事件。连接线按事件语义边界分段，但连续 Review 对之间必须从前一张卡片到下一条 summary 标记保持连续轨道。Gitee 企业版普通评论使用 MR `/notes`，并固定发送 `noteable_type: PullRequest`；`/reviews` 只用于 Review 决策。commit 计数探测若没有 total 且响应恰好填满请求页，即使是裸数组也视为不确定，随后统计并丢弃文档约定的完整非分页集合，不挂载懒加载 Commits model。
 
 Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度。代码栏支持 GitHub 风格的跨精确虚拟行拖拽选中；软换行继续使用 Slint `TextInput.word-wrap` 原生 UTF-8 选区几何。PR 虚拟列表 adapter 使用轻量显示列指标和最终稳定宽度计算相同换行数，再以精确前缀和统一驱动 content extent、滚动条映射、可见窗口与 Find reveal。⌘/Ctrl+F 定位仍是一次性命令：只有 Enter、Shift+Enter 或上一个/下一个控件计算并至多写一次 viewport。普通滚动只更新有界虚拟渲染窗口，绝不执行 Find 定位；Find 打开时活动与非活动高亮都限制在已挂载行内。review controller 的同步命中测试仍按投影 model 的实际换行高度解析字符，⌘/Ctrl+C 静默复制纯文本。
+
+对不换行代码，token 内、跨 token、跨行拖拽目标的鼠标命中和相交选区/当前 Find 矩形
+使用该门面的 shaped cursor 边界；run 序列命中累加每个独立 Slint token 的 shaped advance。
+这替代了标点、CJK fallback、kerning、粗体和斜体
+run 上的显示列/独立前缀宽度近似，同时把缓存上限固定为 256 个 layout。换行代码继续
+使用 Slint 原生 UTF-8 `TextInput.word-wrap` 几何。
 
 每次显式 Find 导航命令都会立即完成计算和可选的 viewport 写入，不存在等待后续滚动或布局处理的请求。修改查询、手动滚动、resize 和焦点变化只保留查询、计数、当前结果与当前高亮，不移动 viewport。
 

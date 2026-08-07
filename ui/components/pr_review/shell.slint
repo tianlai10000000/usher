@@ -16,6 +16,9 @@ export struct WorkflowPrDiffFile {
 
 export struct WorkflowPrDiffToken {
     text: string,
+    // Unicode character range in the displayed, tab-expanded source line.
+    start-char: int,
+    end-char: int,
     color: color,
     dark-color: color,
     bold: bool,
@@ -37,7 +40,7 @@ export struct WorkflowPrDiffSelectionRange {
     end-column: int,
 }
 
-// Preferred-width selection paint: prefix before the range + selected text.
+// UTF-8 slices retained for wrapped native TextInput selection geometry.
 export struct WorkflowPrDiffTextSlice {
     prefix: string,
     text: string,
@@ -45,9 +48,22 @@ export struct WorkflowPrDiffTextSlice {
     text-bytes: int,
 }
 
+export struct WorkflowPrDiffGlyphRange {
+    // Token-local shaped caret interval in rendered logical pixels.
+    x: float,
+    width: float,
+}
+
+export struct WorkflowPrDiffGlyphRect {
+    // One visual-line rectangle from native shaped selection geometry.
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+}
+
 // One in-diff find hit. `side` is empty for Unified, or `left` / `right` for Split.
-// `prefix` / `text` are the exact slices used for preferred-width highlight
-// geometry so CJK matches the token Text layout (not East-Asian display columns).
+// `prefix` / `text` are retained for wrapped native TextInput highlight geometry.
 export struct WorkflowPrDiffFindMatch {
     line: int,
     start-column: int,
@@ -827,14 +843,13 @@ export component GitHubPullRequestTabButton inherits Rectangle {
     in property <int> count: 0;
     in property <image> icon;
     in property <bool> selected: false;
-    in property <length> tab-width: 160px;
     callback clicked();
     private property <bool> keyboard-focus-visible: false;
 
     // Primer UnderlineNav item inside a 48px row: 32px rounded hover control,
     // coral underline on the shared baseline. Spec: docs/specs/ui-design.md
     // “UnderlineNav tabs”.
-    width: root.tab-width;
+    width: root.content-width;
     height: 48px;
     background: transparent;
     border-width: 0px;
@@ -865,8 +880,19 @@ export component GitHubPullRequestTabButton inherits Rectangle {
     }
 
     private property <length> count-badge-width: max(22px, count-label.preferred-width + 12px);
-    private property <length> content-width: 16px + 10px + tab-label.preferred-width + 10px + root.count-badge-width;
-    private property <length> content-x: max(0px, (root.width - root.content-width) / 2);
+    private property <length> label-width: label-measure.preferred-width;
+    // Primer UnderlineNav item: 8px outer padding and 8px between icon,
+    // label, and counter. Reserve the selected label width in every state so
+    // changing tabs never shifts neighboring items.
+    private property <length> content-width: 8px + 16px + 8px + root.label-width + 8px + root.count-badge-width + 8px;
+
+    label-measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: 14px;
+        font-weight: 600;
+        wrap: no-wrap;
+    }
 
     if tab-touch.has-hover: Rectangle {
         x: 0px;
@@ -878,7 +904,7 @@ export component GitHubPullRequestTabButton inherits Rectangle {
     }
 
     Image {
-        x: root.content-x;
+        x: 8px;
         y: 16px;
         width: 16px;
         height: 16px;
@@ -887,9 +913,9 @@ export component GitHubPullRequestTabButton inherits Rectangle {
         colorize: GitHubTheme.fg-default;
     }
     tab-label := Text {
-        x: root.content-x + 26px;
+        x: 32px;
         y: 8px;
-        width: self.preferred-width;
+        width: root.label-width;
         height: 32px;
         text: root.label;
         font-size: 14px;
@@ -898,7 +924,7 @@ export component GitHubPullRequestTabButton inherits Rectangle {
         vertical-alignment: center;
     }
     Rectangle {
-        x: tab-label.x + tab-label.width + 10px;
+        x: tab-label.x + tab-label.width + 8px;
         y: 14px;
         width: root.count-badge-width;
         height: 20px;

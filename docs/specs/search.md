@@ -39,18 +39,32 @@ these primitives.
 8. Virtualized diff content paints inactive matches with Blink yellow `#ffff00`
    and the active match with orange `#ff9632`. Row-local match models and paint
    repeaters exist only while Find is open, contain only hits for that mounted
-   row/pane, and never participate in viewport positioning.
+   row/pane, and never participate in viewport positioning. A row projection
+   must derive from the query passed to that invocation; it must not read a
+   separately refreshed full-result cache whose update order can lag the input.
 9. Reveal is command-scoped, following CodeMirror and VS Code: only Enter,
    Shift+Enter, or the Find previous/next controls perform one calculation and
-   at most one viewport write. Query changes, opening Find, focus changes,
-   resize, virtual-list measurement, wheel/touch scrolling, and scrollbar-thumb
-   dragging never position the viewport. These events do not clear the query,
-   result set, active index, or active highlight; closing Find does.
+   at most one viewport write. Query changes atomically replace the result set
+   and immediately select/highlight its first result, but never position the
+   viewport. Opening Find, focus changes, resize, virtual-list measurement,
+   wheel/touch scrolling, and scrollbar-thumb dragging likewise never position
+   the viewport. These events preserve the current query/result presentation;
+   closing Find clears it.
 10. The normal scroll path must contain no Find positioning timer or recycled-row
     geometry report. A virtual-list adapter may observe offset solely to update
     its bounded overscan render window; that path must not read query, active
     result, or match geometry. Paint-only match projection remains bounded to
     mounted rows and is absent when Find is closed.
+10.1. Syntax-styled unwrapped content and soft-wrapped content resolve the
+    active match through a
+    feature-owned, replaceable shaped-text geometry facade using the same font
+    collection, family, size, weight, italic state, scale factor, and rendered
+    run width as visible text. The PR adapter uses bounded Parley cursor and
+    selection geometry without WebView/editor embedding. A wrapped range returns
+    one rectangle per intersected visual line, so CJK, punctuation, whitespace,
+    and line breaks cannot be expanded through display-column estimates. Geometry
+    is conditional on the active mounted row or a real run intersection; adapters
+    must not create token-by-match cross-product repeaters or per-character UI models.
 11. Feature code must not copy these algorithms. It may add a thin adapter for
    domain ordering, excluded rows, split panes, or scroll-coordinate signs.
 
@@ -70,14 +84,22 @@ these primitives.
    UI adapter 禁止把这些原语变成长驻 event-loop 收敛过程。
 8. 虚拟化 Diff 使用 Blink 黄色 `#ffff00` 绘制非活动命中，使用橙色 `#ff9632`
    绘制当前命中。行级命中 model 与绘制 repeater 仅在 Find 打开时存在，只包含当前已挂载
-   行/侧的命中，并且绝不参与 viewport 定位。
+   行/侧的命中，并且绝不参与 viewport 定位。行级投影必须直接使用本次调用传入的 query，
+   禁止读取另行刷新的全量结果缓存，以免输入与缓存写入顺序不同步。
 9. 揭示按命令隔离，与 CodeMirror、VS Code 一致：只有 Enter、Shift+Enter 或 Find
-   上一个/下一个控件执行一次计算并至多写一次 viewport。修改查询、打开 Find、焦点
-   变化、窗口 resize、虚拟列表测量、滚轮/触控滚动和拖拽滚动条滑块均不得定位 viewport。
-   这些事件不清除查询、结果集、当前索引或当前高亮；只有关闭 Find 才清空。
+   上一个/下一个控件执行一次计算并至多写一次 viewport。修改查询必须原子替换结果集并
+   立即选中/高亮新结果的第 1 项，但不得定位 viewport。打开 Find、焦点变化、窗口 resize、
+   虚拟列表测量、滚轮/触控滚动和拖拽滚动条滑块同样不得定位 viewport。这些事件保留当前
+   查询/结果展示；只有关闭 Find 才清空。
 10. 普通滚动路径中禁止存在 Find 定位 timer 或回收行几何上报。虚拟列表 adapter 可以
    观察 offset，但只能更新有界 overscan 渲染窗口；该路径不得读取查询、当前结果或
    命中几何。仅绘制用途的命中投影必须限制在已挂载行，并在 Find 关闭时不存在。
+10.1. 对带语法样式且不换行或软换行的内容，当前命中必须通过 Feature 自有、可替换的 shaped-text
+   几何门面计算，并与可见文字共用字体集合、字体族、字号、字重、斜体、scale factor 和
+   实际 run 宽度。PR adapter 使用有界 Parley cursor 与 selection 几何，禁止嵌入 WebView/
+   浏览器编辑器。换行范围按实际相交视觉行返回多个矩形，CJK、标点、空白和换行边界不得
+   回退到显示列估算。只有当前已挂载行或确实相交的 run 才计算几何；禁止 token×match
+   交叉 repeater 和逐字符 UI model。
 11. Feature 禁止复制这些算法；只允许为领域顺序、排除行、Split 面板或滚动坐标正负
    增加薄适配层。
 
@@ -109,6 +131,9 @@ that lifecycle because its row extents are deterministic at the stable width:
 - Cover case-sensitive and insensitive matching, CJK text, Unicode lowercase
   expansion, repeated occurrences on one line, empty results, and wraparound.
 - Verify a fully visible match does not change scroll offset.
+- Edit a non-empty query without pressing Enter and verify the count, active
+  index, and active/inactive highlight bounds switch atomically to the new
+  result set while the viewport remains unchanged.
 - Verify partially visible, fully hidden, first, and last matches center or
   clamp correctly.
 - In virtualized/wrapped feature UIs, verify the command-time adapter resolves
@@ -138,6 +163,8 @@ that lifecycle because its row extents are deterministic at the stable width:
 
 - 覆盖大小写敏感/不敏感、CJK、Unicode 小写展开、同一行重复命中、空结果与首尾循环。
 - 验证完整可见命中不改变滚动 offset。
+- 不按 Enter 直接修改非空查询，验证计数、当前索引及活动/非活动高亮边界原子切换到
+  新结果集，同时 viewport 保持不变。
 - 验证部分可见、完全不可见、首个和末尾命中正确居中或贴边夹紧。
 - 在虚拟化/换行页面验证命令执行时的 adapter 使用活动视觉子行；回收行不得拥有逐行
   匹配定位状态；绘制用 model/repeater 只能存在于有界的已挂载窗口，且不得读写 viewport。

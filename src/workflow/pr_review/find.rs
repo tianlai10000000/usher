@@ -62,6 +62,34 @@ pub(super) fn collect_diff_find_matches(
     ModelRc::new(VecModel::from(matches))
 }
 
+/// Matches for one mounted row and pane, derived solely from this invocation's
+/// query. This keeps paint projection independent from full-result refresh order.
+pub(super) fn collect_diff_find_row_matches(
+    lines: &ModelRc<WorkflowPrDiffLine>,
+    line_index: i32,
+    side: &str,
+    query: &str,
+) -> ModelRc<WorkflowPrDiffFindMatch> {
+    let needle = query.trim();
+    if needle.is_empty() || line_index < 0 {
+        return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
+    }
+    let Some(line) = lines.row_data(line_index as usize) else {
+        return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
+    };
+    if !is_copyable_diff_line(&line) {
+        return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
+    }
+    let content = match side {
+        "left" => line.left_content.as_str(),
+        "right" => line.right_content.as_str(),
+        _ => line.content.as_str(),
+    };
+    let mut matches = Vec::new();
+    push_content_matches(&mut matches, line_index, content, needle, side);
+    ModelRc::new(VecModel::from(matches))
+}
+
 /// Resolves a match to its visual offset inside one exact-height virtual row.
 pub(super) fn diff_find_intra_item_offset(
     lines: &ModelRc<WorkflowPrDiffLine>,
@@ -169,7 +197,9 @@ fn display_column_at_byte(value: &str, byte: usize) -> u32 {
 mod tests {
     use slint::{Model, ModelRc, VecModel};
 
-    use super::{collect_diff_find_matches, diff_find_intra_item_offset};
+    use super::{
+        collect_diff_find_matches, collect_diff_find_row_matches, diff_find_intra_item_offset,
+    };
     use crate::{WorkflowPrDiffLine, WorkflowPrDiffToken};
 
     fn line(content: &str, left: &str, right: &str) -> WorkflowPrDiffLine {
@@ -275,6 +305,26 @@ mod tests {
         assert_eq!(matches.row_data(0).map(|hit| hit.start_char), Some(0));
         assert_eq!(matches.row_data(1).map(|hit| hit.start_char), Some(5));
         assert_eq!(matches.row_data(2).map(|hit| hit.start_char), Some(10));
+    }
+
+    #[test]
+    fn row_paint_matches_follow_each_query_without_shared_refresh_state() {
+        let content = "确保开发者 保持 Usher";
+        let lines = ModelRc::new(VecModel::from(vec![line(content, content, content)]));
+
+        let longer = collect_diff_find_row_matches(&lines, 0, "", "保持");
+        assert_eq!(longer.row_count(), 1);
+        assert_eq!(
+            longer.row_data(0).map(|hit| hit.end_char - hit.start_char),
+            Some(2)
+        );
+
+        let shorter = collect_diff_find_row_matches(&lines, 0, "", "保");
+        assert_eq!(shorter.row_count(), 2);
+        assert!(shorter.iter().all(|hit| hit.end_char - hit.start_char == 1));
+
+        let cleared = collect_diff_find_row_matches(&lines, 0, "", "");
+        assert_eq!(cleared.row_count(), 0);
     }
 
     #[test]

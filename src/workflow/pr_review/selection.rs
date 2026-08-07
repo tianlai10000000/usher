@@ -1,10 +1,9 @@
-//! Diff selection geometry and clipboard projection.
+//! Diff selection semantics, wrapped-row hit routing, and clipboard projection.
 //!
 //! Selection endpoints are Unicode character indices into the displayed
-//! (tab-expanded) line text. Hit-testing maps pointer X through the measured
-//! preferred width so CJK glyphs match token Text layout; East-Asian display
-//! columns alone drift on Menlo fallbacks and used to copy the wrong slice
-//! (e.g. selecting "安全" copied "t-lo").
+//! (tab-expanded) line text. Unwrapped shaped-text hit-testing is injected by
+//! the controller from `text_geometry`; this module owns document-row routing,
+//! soft-wrap behavior, click expansion, and copied text.
 
 use slint::{Model, ModelRc, SharedString};
 
@@ -17,7 +16,7 @@ use crate::{
 /// Resolve a drag position from the grabbed delegate into an exact logical
 /// diff row and character index. Unlike a fixed-height approximation,
 /// this accounts for every crossed row's own wrap count.
-pub(super) fn resolve_diff_selection_hit(
+pub(super) fn resolve_diff_selection_hit<F, G>(
     lines: &ModelRc<WorkflowPrDiffLine>,
     start_line: i32,
     pointer_x: f32,
@@ -25,10 +24,15 @@ pub(super) fn resolve_diff_selection_hit(
     start_height: f32,
     code_width: f32,
     cell_width: f32,
-    content_width: f32,
     line_pitch: f32,
     side: &str,
-) -> WorkflowPrDiffSelectionHit {
+    mut resolve_unwrapped: F,
+    mut resolve_wrapped: G,
+) -> WorkflowPrDiffSelectionHit
+where
+    F: FnMut(&WorkflowPrDiffLine, &str, f32) -> i32,
+    G: FnMut(&WorkflowPrDiffLine, &str, f32, f32, f32, f32) -> i32,
+{
     const CODE_LINE_HEIGHT: f32 = 22.0;
     const HUNK_LINE_HEIGHT: f32 = 28.0;
     const TWO_WAY_HUNK_HEIGHT: f32 = 52.0;
@@ -167,26 +171,13 @@ pub(super) fn resolve_diff_selection_hit(
 
     let content = side_content(&line, side);
     let char_count = content.chars().count() as i32;
-    let visible_chars = (safe_code_width / safe_cell_width).floor().max(1.0) as i32;
-    let wraps =
-        content_width > safe_code_width + 0.5 || (char_count as f32) > visible_chars as f32 + 0.5;
-    let pitch = if wraps { wrap_pitch } else { CODE_LINE_HEIGHT };
+    let content_columns = side_columns(&line, side).max(0) as f32;
+    let wraps = content_columns * safe_cell_width > safe_code_width + 0.5;
     let local_x = pointer_x.max(0.0);
     let column = if wraps {
-        // Match Text.word-wrap breaks — fixed-column indexing selected too far
-        // right on continuation lines.
-        soft_wrap_caret_at(
-            content,
-            visible_chars,
-            local_x,
-            local_y,
-            safe_cell_width,
-            pitch,
-        )
-    } else if content_width > 0.5 {
-        char_index_at_preferred_x(content, local_x, content_width)
+        resolve_wrapped(&line, side, local_x, local_y, safe_code_width, wrap_pitch)
     } else {
-        ((local_x + safe_cell_width * 0.5) / safe_cell_width).floor() as i32
+        resolve_unwrapped(&line, side, local_x)
     };
 
     WorkflowPrDiffSelectionHit {
@@ -203,6 +194,13 @@ fn is_copyable_diff_line(line: &WorkflowPrDiffLine) -> bool {
 
 fn side_char_count(line: &WorkflowPrDiffLine, side: &str) -> i32 {
     side_content(line, side).chars().count() as i32
+}
+
+fn side_columns(line: &WorkflowPrDiffLine, side: &str) -> i32 {
+    match side {
+        "right" => line.right_columns,
+        _ => line.left_columns,
+    }
 }
 
 fn side_content<'a>(line: &'a WorkflowPrDiffLine, side: &str) -> &'a str {
@@ -290,115 +288,6 @@ fn soft_wrap_next_line_end(chars: &[char], line_start: usize, max_cells: u32) ->
     } else {
         index.max(line_start + 1)
     }
-}
-
-/// Start/end character indices for the `visual_line`-th soft-wrapped row
-/// (0-based). Returns `(len, len)` when the visual line is past the end.
-fn soft_wrap_visual_line_range(content: &str, visual_line: i32, max_cells: i32) -> (i32, i32) {
-    let chars: Vec<char> = content.chars().collect();
-    if chars.is_empty() || visual_line < 0 {
-        return (0, 0);
-    }
-    let max_cells = max_cells.max(1) as u32;
-    let mut line_start = 0usize;
-    let mut remaining = visual_line;
-    while line_start < chars.len() {
-        let line_end = soft_wrap_next_line_end(&chars, line_start, max_cells);
-        if remaining == 0 {
-            return (line_start as i32, line_end as i32);
-        }
-        remaining -= 1;
-        line_start = line_end;
-    }
-    let len = chars.len() as i32;
-    (len, len)
-}
-
-/// Map a pointer inside a soft-wrapped code cell to a character index using the
-/// same greedy word/column breaks as selection painting.
-pub(super) fn soft_wrap_caret_at(
-    content: &str,
-    max_cells: i32,
-    pointer_x: f32,
-    pointer_y: f32,
-    cell_width: f32,
-    line_pitch: f32,
-) -> i32 {
-    let char_count = content.chars().count() as i32;
-    if char_count == 0 {
-        return 0;
-    }
-    let pitch = line_pitch.max(1.0);
-    let cell = cell_width.max(0.1);
-    let mut line_count = 0i32;
-    {
-        let mut start = 0i32;
-        while start < char_count {
-            let (_, end) = soft_wrap_visual_line_range(content, line_count, max_cells);
-            if end <= start {
-                break;
-            }
-            line_count += 1;
-            start = end;
-        }
-    }
-    let max_visual = line_count.max(1) - 1;
-    let visual_line = (pointer_y / pitch).floor().max(0.0).min(max_visual as f32) as i32;
-    let (line_start, line_end) = soft_wrap_visual_line_range(content, visual_line, max_cells);
-    if line_start >= line_end {
-        return line_start.clamp(0, char_count);
-    }
-    let target_cells = ((pointer_x.max(0.0) + cell * 0.5) / cell).floor().max(0.0) as i32;
-    let mut cells = 0i32;
-    for (offset, character) in content
-        .chars()
-        .skip(line_start as usize)
-        .take((line_end - line_start) as usize)
-        .enumerate()
-    {
-        let weight = character_columns(character).max(1) as i32;
-        if target_cells < cells + weight {
-            return if target_cells >= cells + (weight + 1) / 2 {
-                (line_start + offset as i32 + 1).clamp(line_start, line_end)
-            } else {
-                (line_start + offset as i32).clamp(line_start, line_end)
-            };
-        }
-        cells += weight;
-    }
-    line_end.clamp(0, char_count)
-}
-
-/// Map pointer X through the measured line preferred-width onto a character
-/// caret, weighting steps by East-Asian display columns as a glyph proxy.
-fn char_index_at_preferred_x(content: &str, pointer_x: f32, content_width: f32) -> i32 {
-    let chars: Vec<char> = content.chars().collect();
-    if chars.is_empty() {
-        return 0;
-    }
-    if content_width <= 0.0 {
-        return 0;
-    }
-    let weights: Vec<f32> = chars
-        .iter()
-        .map(|character| character_columns(*character).max(1) as f32)
-        .collect();
-    let total: f32 = weights.iter().sum::<f32>().max(1.0);
-    let target = ((pointer_x / content_width) * total).clamp(0.0, total);
-    let mut acc = 0.0_f32;
-    for (index, weight) in weights.iter().enumerate() {
-        let next = acc + weight;
-        if target + 0.0001 < next {
-            // Round to the nearest caret boundary inside this glyph.
-            return if target + 0.0001 >= acc + weight * 0.5 {
-                (index as i32) + 1
-            } else {
-                index as i32
-            };
-        }
-        acc = next;
-    }
-    chars.len() as i32
 }
 
 /// Resolve a GitHub-style double-click (word) or triple-click (line) range.
@@ -675,11 +564,10 @@ mod tests {
     use slint::{ModelRc, VecModel};
 
     use super::{
-        char_index_at_preferred_x, diff_selection_text, resolve_diff_click_range,
-        resolve_diff_selection_hit, slice_character_range, slice_display_columns,
-        soft_wrap_caret_at, soft_wrap_line_start, word_range_character_indices,
+        diff_selection_text, resolve_diff_click_range, resolve_diff_selection_hit,
+        slice_character_range, slice_display_columns, soft_wrap_line_start,
+        word_range_character_indices,
     };
-    use crate::workflow::syntax_highlight::character_columns;
     use crate::{WorkflowPrDiffLine, WorkflowPrDiffToken};
 
     fn line(content: &str, left: &str, right: &str) -> WorkflowPrDiffLine {
@@ -706,6 +594,25 @@ mod tests {
             right_content: right.into(),
             right_tokens: empty_tokens(),
         }
+    }
+
+    fn wrapped_test_hit(
+        line: &WorkflowPrDiffLine,
+        side: &str,
+        pointer_x: f32,
+        pointer_y: f32,
+        width: f32,
+        pitch: f32,
+    ) -> i32 {
+        let content = match side {
+            "left" => line.left_content.as_str(),
+            "right" => line.right_content.as_str(),
+            _ => line.content.as_str(),
+        };
+        let columns = (width / 10.0).floor().max(1.0) as i32;
+        let visual_line = (pointer_y / pitch).floor().max(0.0) as i32;
+        let local_column = ((pointer_x + 5.0) / 10.0).floor().max(0.0) as i32;
+        (visual_line * columns + local_column).clamp(0, content.chars().count() as i32)
     }
 
     #[test]
@@ -799,26 +706,6 @@ mod tests {
     }
 
     #[test]
-    fn soft_wrap_caret_uses_line_start_not_fixed_columns() {
-        let text = "Keep Usher a responsive desktop application with explicit module ownership";
-        // 40 cells forces a wrap well before char 40 if counting fixed columns.
-        let second_line_start = soft_wrap_line_start(text, 45, 40);
-        assert!(second_line_start > 0);
-        assert!(second_line_start < 45);
-        // Click near the start of the second visual line (x≈0, y≈pitch).
-        let hit = soft_wrap_caret_at(text, 40, 2.0, 18.0, 7.2, 16.0);
-        assert!(
-            (hit - second_line_start).abs() <= 2,
-            "hit={hit} second_line_start={second_line_start}"
-        );
-        // Fixed-column math would land near 40+0 and be far to the right.
-        assert!(
-            hit < 40,
-            "hit={hit} should not use fixed-column second segment"
-        );
-    }
-
-    #[test]
     fn soft_wrap_breaks_at_whitespace_before_overflow() {
         let text = "This file applies to the entire repository. It is intentionally bilingual";
         // Narrow width forces a wrap around the first sentence.
@@ -830,32 +717,6 @@ mod tests {
     }
 
     #[test]
-    fn preferred_width_hit_maps_into_cjk_run() {
-        let content = "保持 Usher 的桌面响应速度、清晰模块边界、event-loop 安全 UI 更新、项目级状态隔离，以及统一的横切基础设施。";
-        let start = content.find("安全").unwrap();
-        let chars_before = content[..start].chars().count() as i32;
-        // Preferred-width hit testing scales by the same display-column weights
-        // as char_index_at_preferred_x (CJK = 2), not a Menlo 1.5 approximation.
-        let mut width = 0.0_f32;
-        for character in content.chars() {
-            width += character_columns(character).max(1) as f32;
-        }
-        let mut prefix = 0.0_f32;
-        for character in content[..start].chars() {
-            prefix += character_columns(character).max(1) as f32;
-        }
-        let hit = char_index_at_preferred_x(content, prefix + 0.01, width);
-        assert!(
-            (chars_before..chars_before + 2).contains(&hit),
-            "expected caret in 安全, got {hit} (start {chars_before})"
-        );
-        assert_eq!(
-            slice_character_range(content, chars_before as u32, (chars_before + 2) as u32),
-            "安全"
-        );
-    }
-
-    #[test]
     fn hit_tracks_columns_across_wrapped_rows() {
         let wrapped = "01234567890123456789";
         let lines = ModelRc::new(VecModel::from(vec![
@@ -863,17 +724,77 @@ mod tests {
             line(wrapped, wrapped, wrapped),
         ]));
 
-        let forward =
-            resolve_diff_selection_hit(&lines, 0, 40.0, 74.0, 44.0, 100.0, 10.0, 0.0, 22.0, "");
+        let forward = resolve_diff_selection_hit(
+            &lines,
+            0,
+            40.0,
+            74.0,
+            44.0,
+            100.0,
+            10.0,
+            22.0,
+            "",
+            |_, _, _| unreachable!("wrapped rows use soft-wrap geometry"),
+            wrapped_test_hit,
+        );
         assert_eq!((forward.line, forward.column), (1, 14));
 
-        let reverse =
-            resolve_diff_selection_hit(&lines, 1, 40.0, -10.0, 44.0, 100.0, 10.0, 0.0, 22.0, "");
+        let reverse = resolve_diff_selection_hit(
+            &lines,
+            1,
+            40.0,
+            -10.0,
+            44.0,
+            100.0,
+            10.0,
+            22.0,
+            "",
+            |_, _, _| unreachable!("wrapped rows use soft-wrap geometry"),
+            wrapped_test_hit,
+        );
         assert_eq!((reverse.line, reverse.column), (0, 14));
 
-        let rounded =
-            resolve_diff_selection_hit(&lines, 0, 45.0, 10.0, 44.0, 100.0, 10.0, 0.0, 22.0, "");
+        let rounded = resolve_diff_selection_hit(
+            &lines,
+            0,
+            45.0,
+            10.0,
+            44.0,
+            100.0,
+            10.0,
+            22.0,
+            "",
+            |_, _, _| unreachable!("wrapped rows use soft-wrap geometry"),
+            wrapped_test_hit,
+        );
         assert_eq!((rounded.line, rounded.column), (0, 5));
+    }
+
+    #[test]
+    fn unwrapped_cross_row_hit_is_delegated_to_shaped_geometry() {
+        let lines = ModelRc::new(VecModel::from(vec![
+            line("alpha", "alpha", "alpha"),
+            line("标点/event-loop", "标点/event-loop", "标点/event-loop"),
+        ]));
+        let hit = resolve_diff_selection_hit(
+            &lines,
+            0,
+            37.0,
+            30.0,
+            22.0,
+            400.0,
+            10.0,
+            22.0,
+            "",
+            |line, side, pointer_x| {
+                assert_eq!(line.content.as_str(), "标点/event-loop");
+                assert_eq!(side, "");
+                assert!((pointer_x - 37.0).abs() < f32::EPSILON);
+                4
+            },
+            |_, _, _, _, _, _| unreachable!("unwrapped rows use shaped-run geometry"),
+        );
+        assert_eq!((hit.line, hit.column), (1, 4));
     }
 
     #[test]

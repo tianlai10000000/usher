@@ -3,7 +3,7 @@ import { GitHubTheme } from "../../theme/github_theme.slint";
 import { AppState } from "../../state/app_state.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
 import { GitHubDialog } from "../../components/dialog/github_dialog.slint";
-import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
 import { GitHubTreeIndentGuides, GitHubCommitMessageToggleButton, GitHubFileToolbarButton, GitHubCommitSummaryNavButton, GitHubFileChangeTypeIcon, GitHubSelectableDiffCode, GitHubSplitDiffSide, GitHubDiffViewPreview, GitHubDiffViewChoice, GitHubDiffSettingsPopover, GitHubFileTreeToggleButton, GitHubFileMenuButton, GitHubDiffStatSegment, GitHubDiffStatBar, GitHubFileDiffStat, GitHubCodeRenderingIndicator, GitHubLargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, GitHubDiffFindBar } from "../../components/pr_review/content.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
@@ -189,26 +189,30 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     private property <string> diff-find-query: "";
     private property <[WorkflowPrDiffFindMatch]> diff-find-matches: [];
     private property <int> diff-find-index: -1;
+    // Snapshot the selected row instead of binding every field through
+    // model[index]. Replacing a model while retaining index 0 does not reliably
+    // invalidate dynamic item access in Slint.
+    private property <WorkflowPrDiffFindMatch> diff-find-current;
     private property <bool> diff-find-has-current:
         root.diff-find-open
         && root.diff-find-index >= 0
         && root.diff-find-index < root.diff-find-matches.length;
     private property <int> diff-find-cur-line:
-        root.diff-find-has-current ? root.diff-find-matches[root.diff-find-index].line : -1;
+        root.diff-find-has-current ? root.diff-find-current.line : -1;
     private property <int> diff-find-cur-start:
-        root.diff-find-has-current ? root.diff-find-matches[root.diff-find-index].start-column : 0;
+        root.diff-find-has-current ? root.diff-find-current.start-column : 0;
     private property <int> diff-find-cur-end:
-        root.diff-find-has-current ? root.diff-find-matches[root.diff-find-index].end-column : 0;
+        root.diff-find-has-current ? root.diff-find-current.end-column : 0;
     private property <int> diff-find-cur-start-char:
-        root.diff-find-has-current ? root.diff-find-matches[root.diff-find-index].start-char : 0;
+        root.diff-find-has-current ? root.diff-find-current.start-char : 0;
     private property <int> diff-find-cur-end-char:
-        root.diff-find-has-current ? root.diff-find-matches[root.diff-find-index].end-char : 0;
+        root.diff-find-has-current ? root.diff-find-current.end-char : 0;
     private property <string> diff-find-cur-side:
-        root.diff-find-has-current ? root.diff-find-matches[root.diff-find-index].side : "";
+        root.diff-find-has-current ? root.diff-find-current.side : "";
     private property <string> diff-find-cur-prefix:
-        root.diff-find-has-current ? root.diff-find-matches[root.diff-find-index].prefix : "";
+        root.diff-find-has-current ? root.diff-find-current.prefix : "";
     private property <string> diff-find-cur-text:
-        root.diff-find-has-current ? root.diff-find-matches[root.diff-find-index].text : "";
+        root.diff-find-has-current ? root.diff-find-current.text : "";
     // Explicit navigation increments this revision. The diff surface handles
     // that edge with one synchronous viewport calculation and does no Find
     // positioning work during later scrolling or layout changes.
@@ -330,7 +334,10 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     callback copy-source-branch(string) -> bool;
     // Copy the current code-column selection (start/end are document-ordered).
     callback copy-diff-selection(int, int, int, int, string);
-    callback resolve-diff-selection(int, float, float, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
+    callback resolve-diff-selection(int, float, float, float, float, float, float, string, float, string) -> WorkflowPrDiffSelectionHit;
+    pure callback resolve-diff-token-hit(string, float, float, string, float, bool, bool) -> int;
+    pure callback resolve-diff-token-range(string, int, int, float, string, float, bool, bool) -> WorkflowPrDiffGlyphRange;
+    pure callback resolve-diff-wrapped-range(string, int, int, float, float, string, float) -> [WorkflowPrDiffGlyphRect];
     pure callback resolve-diff-selection-slice(int, string, int, int) -> WorkflowPrDiffTextSlice;
     pure callback resolve-diff-wrap-line-start(int, string, int, int) -> int;
     callback resolve-diff-click-range(int, int, string, int) -> WorkflowPrDiffSelectionRange;
@@ -472,7 +479,26 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
         root.diff-find-query = "";
         root.diff-find-matches = [];
         root.diff-find-index = -1;
+        root.sync-diff-find-current();
         root.diff-find-input-focused = false;
+    }
+
+    function sync-diff-find-current() {
+        if root.diff-find-index >= 0
+            && root.diff-find-index < root.diff-find-matches.length {
+            root.diff-find-current = root.diff-find-matches[root.diff-find-index];
+        } else {
+            root.diff-find-current = {
+                line: -1,
+                start-column: 0,
+                end-column: 0,
+                start-char: 0,
+                end-char: 0,
+                side: "",
+                prefix: "",
+                text: ""
+            };
+        }
     }
 
     function refresh-diff-find-matches() {
@@ -485,11 +511,13 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
         );
         if (root.diff-find-matches.length == 0) {
             root.diff-find-index = -1;
+            root.sync-diff-find-current();
             return;
         }
         if (root.diff-find-index < 0 || root.diff-find-index >= root.diff-find-matches.length) {
             root.diff-find-index = 0;
         }
+        root.sync-diff-find-current();
     }
 
     function step-diff-find(backward: bool) {
@@ -502,6 +530,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
             root.diff-find-matches.length,
             backward
         );
+        root.sync-diff-find-current();
         root.diff-find-scroll-revision += 1;
     }
 
@@ -556,6 +585,9 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
         root.refresh-diff-find-matches();
     }
     changed diff-find-query => {
+        // Typing selects the first result from the new result set immediately,
+        // but does not increment the command-only scroll revision.
+        root.diff-find-index = -1;
         root.refresh-diff-find-matches();
     }
     changed review-dialog-open => {
@@ -886,23 +918,16 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
             width: parent.width;
             height: 48px;
             background: root.github-bg-default;
-            private property <bool> compact-tabs: root.content-width < 840px;
-            // GitHub's UnderlineNav starts inside the page gutter on desktop;
-            // compact tabs keep the full-width three-way split instead.
-            private property <length> leading-inset: self.compact-tabs ? 0px : 16px;
+            accessible-role: tab-list;
+            accessible-label: "Pull request sections";
+            private property <bool> show-aggregate-diffstat: root.content-width >= 840px;
             HorizontalLayout {
-                padding-left: 0px;
-                spacing: 0px;
-                // HorizontalLayout padding does not offset fixed-width tab
-                // delegates consistently. A real leading spacer does.
-                if !review-tabs.compact-tabs: Rectangle {
-                    width: review-tabs.leading-inset;
-                    height: parent.height;
-                    background: transparent;
-                }
+                x: 16px;
+                width: parent.width - 32px;
+                spacing: 4px;
+                alignment: start;
                 GitHubPullRequestTabButton {
                     label: "Conversation";
-                    tab-width: review-tabs.compact-tabs ? parent.width / 3 : 200px;
                     // Badge summaries load with the PR detail. Keep them independent
                     // from the lazily mounted Conversation payload.
                     count: root.conversation-count;
@@ -916,7 +941,6 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 }
                 GitHubPullRequestTabButton {
                     label: "Commits";
-                    tab-width: review-tabs.compact-tabs ? parent.width / 3 : 170px;
                     // Loading this tab must not be what makes its badge appear.
                     count: root.commit-count;
                     icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
@@ -929,7 +953,6 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 }
                 GitHubPullRequestTabButton {
                     label: "Files changed";
-                    tab-width: review-tabs.compact-tabs ? parent.width / 3 : 210px;
                     count: root.files.length;
                     icon: @image-url("../../assets/icons/octicon-file-diff-16.svg");
                     selected: root.selected-tab == 2;
@@ -939,14 +962,13 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                         root.select-tab(2);
                     }
                 }
-                if !review-tabs.compact-tabs: Rectangle { horizontal-stretch: 1; }
-                if !review-tabs.compact-tabs: GitHubFileDiffStat {
+                Rectangle { horizontal-stretch: 1; }
+                if review-tabs.show-aggregate-diffstat: GitHubFileDiffStat {
                     height: parent.height;
                     additions: root.added-lines;
                     deletions: root.removed-lines;
                     has-selection: true;
                 }
-                if !review-tabs.compact-tabs: Rectangle { width: 24px; }
             }
         }
 
@@ -3212,8 +3234,17 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                             multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
                                             multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
                                             multi-sel-end => { root.end-diff-selection(); }
-                                            resolve-hit(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side) => {
-                                                root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side)
+                                            resolve-hit(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side) => {
+                                                root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side)
+                                            }
+                                            resolve-token-hit(text, x, width, family, size, bold, italic) => {
+                                                root.resolve-diff-token-hit(text, x, width, family, size, bold, italic)
+                                            }
+                                            resolve-token-range(text, start, end, width, family, size, bold, italic) => {
+                                                root.resolve-diff-token-range(text, start, end, width, family, size, bold, italic)
+                                            }
+                                            resolve-wrapped-range(text, start, end, width, pitch, family, size) => {
+                                                root.resolve-diff-wrapped-range(text, start, end, width, pitch, family, size)
                                             }
                                             resolve-selection-slice(line, side, start-col, end-col) => {
                                                 root.resolve-diff-selection-slice(line, side, start-col, end-col)
@@ -3276,8 +3307,17 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                         multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
                                         multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
                                         multi-sel-end => { root.end-diff-selection(); }
-                                        resolve-hit(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side) => {
-                                            root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side)
+                                        resolve-hit(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side) => {
+                                            root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side)
+                                        }
+                                        resolve-token-hit(text, x, width, family, size, bold, italic) => {
+                                            root.resolve-diff-token-hit(text, x, width, family, size, bold, italic)
+                                        }
+                                        resolve-token-range(text, start, end, width, family, size, bold, italic) => {
+                                            root.resolve-diff-token-range(text, start, end, width, family, size, bold, italic)
+                                        }
+                                        resolve-wrapped-range(text, start, end, width, pitch, family, size) => {
+                                            root.resolve-diff-wrapped-range(text, start, end, width, pitch, family, size)
                                         }
                                         resolve-selection-slice(line, side, start-col, end-col) => {
                                             root.resolve-diff-selection-slice(line, side, start-col, end-col)
@@ -3340,8 +3380,17 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                         multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
                                         multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
                                         multi-sel-end => { root.end-diff-selection(); }
-                                        resolve-hit(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side) => {
-                                            root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side)
+                                        resolve-hit(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side) => {
+                                            root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side)
+                                        }
+                                        resolve-token-hit(text, x, width, family, size, bold, italic) => {
+                                            root.resolve-diff-token-hit(text, x, width, family, size, bold, italic)
+                                        }
+                                        resolve-token-range(text, start, end, width, family, size, bold, italic) => {
+                                            root.resolve-diff-token-range(text, start, end, width, family, size, bold, italic)
+                                        }
+                                        resolve-wrapped-range(text, start, end, width, pitch, family, size) => {
+                                            root.resolve-diff-wrapped-range(text, start, end, width, pitch, family, size)
                                         }
                                         resolve-selection-slice(line, side, start-col, end-col) => {
                                             root.resolve-diff-selection-slice(line, side, start-col, end-col)
@@ -3420,8 +3469,17 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                         multi-sel-begin(line, col, side) => { root.begin-diff-selection(line, col, side); }
                                         multi-sel-update(line, col, side) => { root.update-diff-selection(line, col, side); }
                                         multi-sel-end => { root.end-diff-selection(); }
-                                        resolve-hit(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side) => {
-                                            root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side)
+                                        resolve-hit(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side) => {
+                                            root.resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side)
+                                        }
+                                        resolve-token-hit(text, x, width, family, size, bold, italic) => {
+                                            root.resolve-diff-token-hit(text, x, width, family, size, bold, italic)
+                                        }
+                                        resolve-token-range(text, start, end, width, family, size, bold, italic) => {
+                                            root.resolve-diff-token-range(text, start, end, width, family, size, bold, italic)
+                                        }
+                                        resolve-wrapped-range(text, start, end, width, pitch, family, size) => {
+                                            root.resolve-diff-wrapped-range(text, start, end, width, pitch, family, size)
                                         }
                                         resolve-selection-slice(line, side, start-col, end-col) => {
                                             root.resolve-diff-selection-slice(line, side, start-col, end-col)

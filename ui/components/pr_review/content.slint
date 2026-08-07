@@ -1,6 +1,6 @@
-import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
-import { WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrFileExtensionFilter } from "./shell.slint";
+import { WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrFileExtensionFilter } from "./shell.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
@@ -232,9 +232,12 @@ export component GitHubSelectableDiffCode inherits Rectangle {
     callback multi-sel-update(int, int, string);
     callback multi-sel-end();
     callback multi-sel-edge(int);
-    // pointer x/y, row height, code width, cell width, content preferred width,
-    // wrap/line pitch, side
-    callback resolve-hit(int, float, float, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
+    // pointer x/y, row height, code width, cell width, wrap/line pitch,
+    // font family/size, side
+    callback resolve-hit(int, float, float, float, float, float, float, string, float, string) -> WorkflowPrDiffSelectionHit;
+    pure callback resolve-token-hit(string, float, float, string, float, bool, bool) -> int;
+    pure callback resolve-token-range(string, int, int, float, string, float, bool, bool) -> WorkflowPrDiffGlyphRange;
+    pure callback resolve-wrapped-range(string, int, int, float, float, string, float) -> [WorkflowPrDiffGlyphRect];
     pure callback resolve-selection-slice(int, string, int, int) -> WorkflowPrDiffTextSlice;
     pure callback resolve-wrap-line-start(int, string, int, int) -> int;
 
@@ -264,35 +267,8 @@ export component GitHubSelectableDiffCode inherits Rectangle {
             : max(root.highlight-start-col, min(root.multi-sel-hi-col, root.content-chars));
     private property <bool> find-visible:
         root.find-active && (root.find-end-col > root.find-start-col || root.find-text != "");
-    private property <length> find-column-width:
-        max(1, root.find-end-col - root.find-start-col) * root.code-character-width;
-    private property <WorkflowPrDiffTextSlice> sel-span:
-        root.in-multi-sel && !root.multi-sel-select-all
-            ? root.resolve-selection-slice(
-                root.line-index,
-                root.side,
-                root.highlight-start-col,
-                root.highlight-end-col
-            )
-            : { prefix: "", text: "", prefix-bytes: 0, text-bytes: 0 };
     clip: true;
 
-    // Zero-size probes: preferred-width/height stay measurable, but these must
-    // not inflate GitHubSelectableDiffCode's layout min-width. Unconstrained measure
-    // Text was squeezing the unified gutter/+ columns (stair-step markers) and
-    // breaking soft-wrap in narrow windows.
-    content-measure := Text {
-        x: 0px;
-        y: 0px;
-        width: 0px;
-        height: 0px;
-        visible: false;
-        text: root.content;
-        font-family: root.code-font-family;
-        font-size: root.code-font-size;
-        overflow: clip;
-        wrap: no-wrap;
-    }
     // Single-line font box — wrap selection Y steps by this pitch so it tracks
     // the auto-wrapped Text (Skia word-wrap) instead of a fixed 22px grid.
     wrap-line-probe := Text {
@@ -309,106 +285,6 @@ export component GitHubSelectableDiffCode inherits Rectangle {
     }
     private property <length> wrap-line-pitch:
         max(1px, wrap-line-probe.preferred-height);
-    find-prefix-measure := Text {
-        x: 0px;
-        y: 0px;
-        width: 0px;
-        height: 0px;
-        visible: false;
-        text: root.find-active ? root.find-prefix : "";
-        font-family: root.code-font-family;
-        font-size: root.code-font-size;
-        overflow: clip;
-        wrap: no-wrap;
-    }
-    find-match-measure := Text {
-        x: 0px;
-        y: 0px;
-        width: 0px;
-        height: 0px;
-        visible: false;
-        text: root.find-active ? root.find-text : "";
-        font-family: root.code-font-family;
-        font-size: root.code-font-size;
-        overflow: clip;
-        wrap: no-wrap;
-    }
-    private property <WorkflowPrDiffTextSlice> wrap-find-pre:
-        root.find-visible && root.wrap-content
-            ? root.resolve-selection-slice(
-                root.line-index,
-                root.side,
-                0,
-                root.find-start-char
-            )
-            : { prefix: "", text: "", prefix-bytes: 0, text-bytes: 0 };
-    private property <int> wrap-find-line-start:
-        root.find-visible && root.wrap-content
-            ? root.resolve-wrap-line-start(
-                root.line-index,
-                root.side,
-                root.find-start-char,
-                root.visible-columns
-            )
-            : 0;
-    private property <WorkflowPrDiffTextSlice> wrap-find-lead:
-        root.find-visible && root.wrap-content
-            ? root.resolve-selection-slice(
-                root.line-index,
-                root.side,
-                root.wrap-find-line-start,
-                root.find-start-char
-            )
-            : { prefix: "", text: "", prefix-bytes: 0, text-bytes: 0 };
-    wrap-find-pre-measure := Text {
-        x: 0px;
-        y: 0px;
-        width: max(1px, root.width);
-        height: 0px;
-        visible: false;
-        text: root.find-visible && root.wrap-content ? root.wrap-find-pre.text : "";
-        font-family: root.code-font-family;
-        font-size: root.code-font-size;
-        overflow: clip;
-        wrap: word-wrap;
-    }
-    wrap-find-lead-measure := Text {
-        x: 0px;
-        y: 0px;
-        width: 0px;
-        height: 0px;
-        visible: false;
-        text: root.find-visible && root.wrap-content ? root.wrap-find-lead.text : "";
-        font-family: root.code-font-family;
-        font-size: root.code-font-size;
-        overflow: clip;
-        wrap: no-wrap;
-    }
-    sel-prefix-measure := Text {
-        x: 0px;
-        y: 0px;
-        width: 0px;
-        height: 0px;
-        visible: false;
-        text: root.in-multi-sel && !root.wrap-content ? root.sel-span.prefix : "";
-        font-family: root.code-font-family;
-        font-size: root.code-font-size;
-        overflow: clip;
-        wrap: no-wrap;
-    }
-    sel-text-measure := Text {
-        x: 0px;
-        y: 0px;
-        width: 0px;
-        height: 0px;
-        visible: false;
-        text: root.in-multi-sel && !root.wrap-content ? root.sel-span.text : "";
-        font-family: root.code-font-family;
-        font-size: root.code-font-size;
-        overflow: clip;
-        wrap: no-wrap;
-    }
-
     // Selection rectangles only exist for selected, visible ListView rows.
     // Normal scrolling remains token-only and keeps the lazy model bounded.
     if root.in-multi-sel && root.multi-sel-select-all: Rectangle {
@@ -417,39 +293,51 @@ export component GitHubSelectableDiffCode inherits Rectangle {
         background: root.selection-background;
     }
 
-    // Unwrapped: preferred-width geometry matches token Text (CJK-safe).
-    if root.in-multi-sel && !root.multi-sel-select-all && !root.wrap-content
-        && root.highlight-end-col > root.highlight-start-col: Rectangle {
-        x: sel-prefix-measure.preferred-width;
-        y: (root.height - root.nominal-row-height) / 2;
-        width: max(root.code-character-width, sel-text-measure.preferred-width);
-        height: root.nominal-row-height;
-        background: root.selection-background;
+    if root.wrap-content && root.in-multi-sel && !root.multi-sel-select-all
+        && root.highlight-end-col > root.highlight-start-col: wrapped-selection := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+        private property <[WorkflowPrDiffGlyphRect]> glyph-rects:
+            root.resolve-wrapped-range(
+                root.content,
+                root.highlight-start-col,
+                root.highlight-end-col,
+                root.width / 1px,
+                root.wrap-line-pitch / 1px,
+                root.code-font-family,
+                root.code-font-size / 1px
+            );
+        for glyph in self.glyph-rects: Rectangle {
+            x: glyph.x * 1px;
+            y: glyph.y * 1px;
+            width: glyph.width * 1px;
+            height: glyph.height * 1px;
+            background: root.selection-background;
+        }
     }
 
-    // Unwrapped rows: preferred-width geometry matches the token/Text layout.
-    if root.find-visible && !root.wrap-content: Rectangle {
-        x: root.find-prefix == "" ? 0px : find-prefix-measure.preferred-width;
-        y: (root.height - root.nominal-row-height) / 2;
-        width: max(
-            root.find-column-width,
-            max(root.code-character-width, find-match-measure.preferred-width)
-        );
-        height: root.nominal-row-height;
-        background: root.find-background;
-    }
-
-    if root.find-visible && root.wrap-content: Rectangle {
-        x: root.wrap-find-lead.text == ""
-            ? 0px
-            : wrap-find-lead-measure.preferred-width;
-        y: max(0px, wrap-find-pre-measure.preferred-height - root.wrap-line-pitch);
-        width: max(
-            root.find-column-width,
-            max(root.code-character-width, find-match-measure.preferred-width)
-        );
-        height: root.wrap-line-pitch;
-        background: root.find-background;
+    if root.find-visible && root.wrap-content: active-wrapped-find := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+        private property <[WorkflowPrDiffGlyphRect]> glyph-rects:
+            root.resolve-wrapped-range(
+                root.content,
+                root.find-start-char,
+                root.find-end-char,
+                root.width / 1px,
+                root.wrap-line-pitch / 1px,
+                root.code-font-family,
+                root.code-font-size / 1px
+            );
+        for glyph in self.glyph-rects: Rectangle {
+            x: glyph.x * 1px;
+            y: glyph.y * 1px;
+            width: glyph.width * 1px;
+            height: glyph.height * 1px;
+            background: root.find-background;
+        }
     }
 
     for hit in root.find-matches: inactive-find-highlight := Rectangle {
@@ -457,48 +345,54 @@ export component GitHubSelectableDiffCode inherits Rectangle {
             root.find-active
             && hit.start-char == root.find-start-char
             && hit.end-char == root.find-end-char;
-        private property <WorkflowPrDiffTextSlice> wrap-pre:
+        private property <[WorkflowPrDiffGlyphRect]> wrapped-glyph-rects:
             root.wrap-content
-                ? root.resolve-selection-slice(root.line-index, root.side, 0, hit.start-char)
-                : { prefix: "", text: "", prefix-bytes: 0, text-bytes: 0 };
-        private property <int> wrap-line-start:
-            root.wrap-content
-                ? root.resolve-wrap-line-start(
-                    root.line-index,
-                    root.side,
+                ? root.resolve-wrapped-range(
+                    root.content,
                     hit.start-char,
-                    root.visible-columns
+                    hit.end-char,
+                    root.width / 1px,
+                    root.wrap-line-pitch / 1px,
+                    root.code-font-family,
+                    root.code-font-size / 1px
                 )
-                : 0;
-        private property <WorkflowPrDiffTextSlice> wrap-lead:
-            root.wrap-content
-                ? root.resolve-selection-slice(
-                    root.line-index,
-                    root.side,
-                    self.wrap-line-start,
-                    hit.start-char
-                )
-                : { prefix: "", text: "", prefix-bytes: 0, text-bytes: 0 };
+                : [];
 
-        visible: !self.is-current;
-        x: root.wrap-content
-            ? (self.wrap-lead.text == "" ? 0px : inactive-wrap-lead.preferred-width)
-            : (hit.prefix == "" ? 0px : inactive-prefix.preferred-width);
-        y: root.wrap-content
-            ? max(0px, inactive-wrap-pre.preferred-height - root.wrap-line-pitch)
-            : (root.height - root.nominal-row-height) / 2;
-        width: max(
-            max(1, hit.end-column - hit.start-column) * root.code-character-width,
-            max(root.code-character-width, inactive-match.preferred-width)
-        );
-        height: root.wrap-content ? root.wrap-line-pitch : root.nominal-row-height;
-        background: root.find-match-background;
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        if root.wrap-content: Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: transparent;
+            for glyph in inactive-find-highlight.wrapped-glyph-rects: Rectangle {
+                visible: !inactive-find-highlight.is-current;
+                x: glyph.x * 1px;
+                y: glyph.y * 1px;
+                width: glyph.width * 1px;
+                height: glyph.height * 1px;
+                background: root.find-match-background;
+            }
+        }
+
+        if !root.wrap-content: Rectangle {
+            visible: !inactive-find-highlight.is-current;
+            x: hit.prefix == "" ? 0px : inactive-prefix.preferred-width;
+            y: (parent.height - root.nominal-row-height) / 2;
+            width: max(
+                max(1, hit.end-column - hit.start-column) * root.code-character-width,
+                max(root.code-character-width, inactive-match.preferred-width)
+            );
+            height: root.nominal-row-height;
+            background: root.find-match-background;
+        }
 
         inactive-prefix := Text {
             width: 0px;
             height: 0px;
             visible: false;
-            text: root.wrap-content ? "" : hit.prefix;
+            text: !root.wrap-content ? hit.prefix : "";
             font-family: root.code-font-family;
             font-size: root.code-font-size;
             wrap: no-wrap;
@@ -512,50 +406,175 @@ export component GitHubSelectableDiffCode inherits Rectangle {
             font-size: root.code-font-size;
             wrap: no-wrap;
         }
-        inactive-wrap-pre := Text {
-            width: max(1px, root.width);
-            height: 0px;
-            visible: false;
-            text: root.wrap-content ? inactive-find-highlight.wrap-pre.text : "";
-            font-family: root.code-font-family;
-            font-size: root.code-font-size;
-            overflow: clip;
-            wrap: word-wrap;
-        }
-        inactive-wrap-lead := Text {
-            width: 0px;
-            height: 0px;
-            visible: false;
-            text: root.wrap-content ? inactive-find-highlight.wrap-lead.text : "";
-            font-family: root.code-font-family;
-            font-size: root.code-font-size;
-            overflow: clip;
-            wrap: no-wrap;
-        }
     }
 
-    if root.show-tokens: HorizontalLayout {
+    if root.show-tokens: token-row := HorizontalLayout {
         x: 0px;
         y: 0px;
         width: parent.width;
         height: parent.height;
         spacing: 0px;
-        for token in root.tokens: Text {
-            width: self.preferred-width;
+        for token in root.tokens: token-cell := Rectangle {
+            private property <int> selection-start:
+                max(token.start-char, root.highlight-start-col);
+            private property <int> selection-end:
+                min(token.end-char, root.highlight-end-col);
+            private property <bool> selection-visible:
+                root.in-multi-sel && !root.multi-sel-select-all
+                && self.selection-end > self.selection-start;
+            width: token-text.preferred-width;
             height: parent.height;
-            text: token.text;
-            vertical-alignment: center;
-            overflow: clip;
-            font-family: root.code-font-family;
-            font-size: root.code-font-size;
-            font-weight: token.bold ? 600 : 400;
-            font-italic: token.italic;
-            color: GitHubTheme.dark-mode ? token.dark-color : token.color;
+
+            if token-cell.selection-visible: token-selection := Rectangle {
+                private property <WorkflowPrDiffGlyphRange> glyph-range:
+                    root.resolve-token-range(
+                        token.text,
+                        token-cell.selection-start - token.start-char,
+                        token-cell.selection-end - token.start-char,
+                        token-cell.width / 1px,
+                        root.code-font-family,
+                        root.code-font-size / 1px,
+                        token.bold,
+                        token.italic
+                    );
+                x: self.glyph-range.x * 1px;
+                y: (parent.height - root.nominal-row-height) / 2;
+                width: self.glyph-range.width * 1px;
+                height: root.nominal-row-height;
+                background: root.selection-background;
+            }
+
+            if root.find-visible
+                && root.find-end-char > token.start-char
+                && root.find-start-char < token.end-char: active-find := Rectangle {
+                private property <int> start-char: max(token.start-char, root.find-start-char);
+                private property <int> end-char: min(token.end-char, root.find-end-char);
+                private property <WorkflowPrDiffGlyphRange> glyph-range:
+                    root.resolve-token-range(
+                        token.text,
+                        self.start-char - token.start-char,
+                        self.end-char - token.start-char,
+                        token-cell.width / 1px,
+                        root.code-font-family,
+                        root.code-font-size / 1px,
+                        token.bold,
+                        token.italic
+                    );
+                x: self.glyph-range.x * 1px;
+                y: (parent.height - root.nominal-row-height) / 2;
+                width: self.glyph-range.width * 1px;
+                height: root.nominal-row-height;
+                background: root.find-background;
+            }
+
+            token-text := Text {
+                width: self.preferred-width;
+                height: parent.height;
+                text: token.text;
+                vertical-alignment: center;
+                overflow: clip;
+                font-family: root.code-font-family;
+                font-size: root.code-font-size;
+                font-weight: token.bold ? 600 : 400;
+                font-italic: token.italic;
+                color: GitHubTheme.dark-mode ? token.dark-color : token.color;
+            }
+            token-touch := TouchArea {
+                mouse-cursor: text;
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down {
+                        root.multi-sel-begin(
+                            root.line-index,
+                            token.start-char + root.resolve-token-hit(
+                                token.text,
+                                max(0px, min(self.mouse-x, token-cell.width)) / 1px,
+                                token-cell.width / 1px,
+                                root.code-font-family,
+                                root.code-font-size / 1px,
+                                token.bold,
+                                token.italic
+                            ),
+                            root.side
+                        );
+                    } else if event.kind == PointerEventKind.up
+                        || event.kind == PointerEventKind.cancel {
+                        root.multi-sel-end();
+                    }
+                }
+                moved => {
+                    if !self.pressed { return; }
+                    if self.mouse-y >= 0px && self.mouse-y <= token-cell.height
+                        && self.mouse-x >= 0px && self.mouse-x <= token-cell.width {
+                        root.multi-sel-update(
+                            root.line-index,
+                            token.start-char + root.resolve-token-hit(
+                                token.text,
+                                self.mouse-x / 1px,
+                                token-cell.width / 1px,
+                                root.code-font-family,
+                                root.code-font-size / 1px,
+                                token.bold,
+                                token.italic
+                            ),
+                            root.side
+                        );
+                    } else {
+                        let hit = root.resolve-hit(
+                            root.line-index,
+                            (token-cell.x + self.mouse-x) / 1px,
+                            self.mouse-y / 1px,
+                            root.height / 1px,
+                            root.width / 1px,
+                            root.code-character-width / 1px,
+                            root.nominal-row-height / 1px,
+                            root.code-font-family,
+                            root.code-font-size / 1px,
+                            root.side
+                        );
+                        root.multi-sel-update(hit.line, hit.column, root.side);
+                    }
+                    root.multi-sel-edge(
+                        self.mouse-y < 0px ? -1 : (self.mouse-y > root.height ? 1 : 0)
+                    );
+                }
+            }
+        }
+        trailing-hit := Rectangle {
+            horizontal-stretch: 1;
+            trailing-touch := TouchArea {
+                mouse-cursor: text;
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down {
+                        root.multi-sel-begin(root.line-index, root.content-chars, root.side);
+                    } else if event.kind == PointerEventKind.up
+                        || event.kind == PointerEventKind.cancel {
+                        root.multi-sel-end();
+                    }
+                }
+                moved => {
+                    if !self.pressed { return; }
+                    let hit = root.resolve-hit(
+                        root.line-index,
+                        (trailing-hit.x + self.mouse-x) / 1px,
+                        self.mouse-y / 1px,
+                        root.height / 1px,
+                        root.width / 1px,
+                        root.code-character-width / 1px,
+                        root.nominal-row-height / 1px,
+                        root.code-font-family,
+                        root.code-font-size / 1px,
+                        root.side
+                    );
+                    root.multi-sel-update(hit.line, hit.column, root.side);
+                    root.multi-sel-edge(
+                        self.mouse-y < 0px ? -1 : (self.mouse-y > root.height ? 1 : 0)
+                    );
+                }
+            }
         }
     }
-    // Keep Slint auto-wrap and use TextInput's native selection geometry for
-    // wrapped rows. This guarantees double-click ranges paint every byte of the
-    // word on the same glyph layout, instead of approximating wrap offsets.
+    // Keep Slint auto-wrap for text painting. Selection uses the shared Parley
+    // facade above so adjacent translucent visual-line rectangles never overlap.
     code-input := TextInput {
         visible: !root.show-tokens;
         x: 0px;
@@ -572,31 +591,11 @@ export component GitHubSelectableDiffCode inherits Rectangle {
         font-size: root.code-font-size;
         color: root.fg-default;
         selection-foreground-color: root.fg-default;
-        selection-background-color: root.wrap-content
-            ? root.selection-background
-            : transparent;
-        init => { root.sync-native-selection(); }
-    }
-
-    changed highlight-start-col => { root.sync-native-selection(); }
-    changed highlight-end-col => { root.sync-native-selection(); }
-    changed in-multi-sel => { root.sync-native-selection(); }
-    changed multi-sel-select-all => { root.sync-native-selection(); }
-    changed wrap-content => { root.sync-native-selection(); }
-
-    function sync-native-selection() {
-        if root.wrap-content && root.in-multi-sel && !root.multi-sel-select-all
-            && root.highlight-end-col > root.highlight-start-col {
-            code-input.set-selection-offsets(
-                root.sel-span.prefix-bytes,
-                root.sel-span.prefix-bytes + root.sel-span.text-bytes
-            );
-        } else {
-            code-input.clear-selection();
-        }
+        selection-background-color: transparent;
     }
 
     TouchArea {
+        enabled: !root.show-tokens;
         mouse-cursor: text;
         pointer-event(event) => {
             if (event.kind == PointerEventKind.down) {
@@ -620,8 +619,9 @@ export component GitHubSelectableDiffCode inherits Rectangle {
                 root.height / 1px,
                 root.width / 1px,
                 root.code-character-width / 1px,
-                content-measure.preferred-width / 1px,
                 root.wrap-content ? root.wrap-line-pitch / 1px : root.nominal-row-height / 1px,
+                root.code-font-family,
+                root.code-font-size / 1px,
                 root.side
             );
             root.multi-sel-update(hit.line, hit.column, root.side);
@@ -641,8 +641,9 @@ export component GitHubSelectableDiffCode inherits Rectangle {
             root.height / 1px,
             root.width / 1px,
             root.code-character-width / 1px,
-            content-measure.preferred-width / 1px,
             root.wrap-content ? root.wrap-line-pitch / 1px : root.nominal-row-height / 1px,
+            root.code-font-family,
+            root.code-font-size / 1px,
             root.side
         ).column;
     }
@@ -692,7 +693,10 @@ export component GitHubSplitDiffSide inherits Rectangle {
     callback multi-sel-update(int, int, string);
     callback multi-sel-end();
     callback multi-sel-edge(int);
-    callback resolve-hit(int, float, float, float, float, float, float, float, string) -> WorkflowPrDiffSelectionHit;
+    callback resolve-hit(int, float, float, float, float, float, float, string, float, string) -> WorkflowPrDiffSelectionHit;
+    pure callback resolve-token-hit(string, float, float, string, float, bool, bool) -> int;
+    pure callback resolve-token-range(string, int, int, float, string, float, bool, bool) -> WorkflowPrDiffGlyphRange;
+    pure callback resolve-wrapped-range(string, int, int, float, float, string, float) -> [WorkflowPrDiffGlyphRect];
     pure callback resolve-selection-slice(int, string, int, int) -> WorkflowPrDiffTextSlice;
     pure callback resolve-wrap-line-start(int, string, int, int) -> int;
 
@@ -790,8 +794,17 @@ export component GitHubSplitDiffSide inherits Rectangle {
         multi-sel-update(line, col, side) => { root.multi-sel-update(line, col, side); }
         multi-sel-end => { root.multi-sel-end(); }
         multi-sel-edge(direction) => { root.multi-sel-edge(direction); }
-        resolve-hit(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side) => {
-            root.resolve-hit(line, x, y, row-height, code-width, cell-width, content-width, line-pitch, side)
+        resolve-hit(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side) => {
+            root.resolve-hit(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side)
+        }
+        resolve-token-hit(text, x, width, family, size, bold, italic) => {
+            root.resolve-token-hit(text, x, width, family, size, bold, italic)
+        }
+        resolve-token-range(text, start, end, width, family, size, bold, italic) => {
+            root.resolve-token-range(text, start, end, width, family, size, bold, italic)
+        }
+        resolve-wrapped-range(text, start, end, width, pitch, family, size) => {
+            root.resolve-wrapped-range(text, start, end, width, pitch, family, size)
         }
         resolve-selection-slice(line, side, start-col, end-col) => {
             root.resolve-selection-slice(line, side, start-col, end-col)
@@ -1199,22 +1212,18 @@ export component GitHubFileMenuButton inherits Rectangle {
         anchor-y: 0px;
         anchor-width: root.width;
         anchor-height: root.height;
-        menu-width: 192px;
-        content-height: 44px;
+        menu-width: GitHubMetrics.overlay-width-xsmall;
+        content-height: GitHubMetrics.size-48;
         align: "end";
         dismiss-requested => { root.close-menu(); }
 
-        Rectangle {
-            width: parent.width;
-            height: 44px;
-
-            GitHubActionListItem {
-                y: 4px;
-                width: parent.width;
-                text: root.viewing-file ? "View diff" : "View file";
-                icon: @image-url("../../assets/icons/octicon-eye-16.svg");
-                activated => { root.action(); }
-            }
+        GitHubActionListItem {
+            x: GitHubMetrics.size-8;
+            y: GitHubMetrics.size-8;
+            width: parent.width - GitHubMetrics.size-16;
+            text: root.viewing-file ? "View diff" : "View file";
+            icon: @image-url("../../assets/icons/octicon-eye-16.svg");
+            activated => { root.action(); }
         }
     }
 }

@@ -212,10 +212,29 @@ rebuilt during scrolling.
 12. Syntax highlighting is produced in Rust with `syntect` using the selected file path; Slint receives styled token models and never parses source languages. The Files changed code column supports GitHub-style drag selection (Unified and Split) without a separate selection mode: selection geometry uses the measured monospace cell advance and display columns (including tabs and wide glyphs), wrapped rows keep Slint auto-wrap (`TextInput.word-wrap`) and use its native UTF-8 selection geometry so continuation-line double-click paints the complete logical word, and line-number gutters plus `+`/`-` markers stay outside the selectable region. Wrapped Unified gutter glyphs use the same natural first-line font box as wrapped code; unwrapped rows retain the nominal 22px slot. Double-click expands to the same character-class run (alphanumeric/`_`, whitespace, or other punctuation), and triple-click selects the full code column line; the multi-click streak is owned by the review workspace so virtual-window projection cannot break the gesture. ⌘/Ctrl+F opens a compact editor-style find bar in the selected-file toolbar (GitHub's PR Files changed page has no first-party find chrome and relies on browser find-in-page; Usher mirrors the CodeMirror/GitHub file-editor find panel: query, `current/total` or `No results`, previous/next, and close). Matching is case-insensitive over copyable code columns only and uses `usher-search` for Unicode-safe non-overlapping occurrences. Enter/Shift+Enter navigate each occurrence in source order with wraparound, including multiple matches on one logical line. Viewport reveal follows Blink `CenterIfNeeded`: a fully visible active match does not scroll; a partially or fully hidden match is centered and clamped to content bounds. Wrapped code resolves the occurrence to its visual subline first, so multiple visible matches on one visual line change only highlight/counter. The PR adapter performs one command-time calculation and at most one viewport write; it has no Find positioning timer, viewport observer, recycled-row geometry report, or persistent reveal state. Width/height changes and scrolling never reposition the active match. Mounted overscan rows use bounded paint-only match models: the active match is Blink orange `#ff9632` and other matches are Blink yellow `#ffff00`; these models never read or write viewport state. Escape closes find before clearing a selection. Hunk headers (`@@ … @@`) and meta rows are never selectable and are omitted from ⌘/Ctrl+A ranges and clipboard text, matching GitHub. Cross-row pointer hit testing walks the projected model's actual per-row wrap heights and word-wrap boundaries, so dragging forward or backward into a wrapped endpoint can stop at an exact character instead of treating visual rows as logical diff rows. The diff Flickable must not arbitrate pointer drags: vertical code drags remain selection gestures, while wheel/touchpad and scrollbar scrolling stay enabled. Multi-line ranges copy newline-joined plain text through a silent clipboard write; ⌘/Ctrl+A selects the complete Unified diff or the active Split pane, and Escape clears the active range. Switching file, tab, diff view, or the line-model revision clears selection. Selection must preserve exact virtualization: no whole-file TextInput or duplicate token model may be created; only mounted overscan delegates own lightweight read-only TextInput instances for wrapped selection rendering.
 12.1. Find reveal is an explicit one-shot operation. Only Enter, Shift+Enter,
 or the Find previous/next controls calculate and write a target viewport.
-Typing, focus changes, wheel/touchpad input, direct scrollbar-thumb dragging,
-resize, virtual-list measurement, and layout reflow perform no Find positioning
-work. They preserve the query, count, active result, and active highlight;
-closing Find clears them.
+Typing atomically replaces the result set and immediately selects/highlights its
+first result, without positioning the viewport. Focus changes, wheel/touchpad
+input, direct scrollbar-thumb dragging, resize, virtual-list measurement, and
+layout reflow likewise perform no Find positioning work. Closing Find clears
+the query, results, and active highlight.
+12.2. Source remains native Slint text painted from `syntect` token models; it
+must not embed a WebView or browser editor. Every unwrapped pointer
+endpoint (within a token, across tokens, or on a crossed row), selection painting,
+and the active Find rectangle use the application-owned text
+geometry facade, whose replaceable default adapter uses Parley 0.10 cursor and
+cluster geometry (the shaping generation used by Slint 1.17). The adapter uses
+Slint's shared font collection plus the visible run's family, size, weight,
+italic state, and scale factor, then normalizes shaped coordinates to the actual
+Slint token width. Wrapped pointer endpoints use the same facade with Parley's
+Unicode line breaking; wrapped selection and Find ranges use Parley selection
+geometry. Adjacent fallback-font fragments on the same visual line are merged,
+while genuinely separated bidirectional fragments remain separate; visual-line
+rectangles use a fixed pitch and never overlap. Its LRU-style cache is
+bounded to 256 layouts. Geometry is limited to direct pointer interaction, the
+single active mounted Find row, or runs intersecting the current selection.
+Display columns remain only for virtual row extent/reveal estimates, never caret
+or active-range bounds; per-character UI models and token-by-match cross-product
+repeaters are prohibited in virtualized rows.
 The scroll-offset callback belongs only to exact virtual-window projection: it
 updates bounded overscan rows and never reads query or match geometry.
 PR Diff uses `usher-virtual-list` for exact variable-height virtualization. Its
@@ -227,7 +246,9 @@ Find reveal. Enter adds only the match's wrapped intra-row offset and never
 materializes preceding lazy rows.
 Inactive matches use Blink yellow `#ffff00`, the active match remains orange
 `#ff9632`, and bounded row-local paint models/repeaters exist only for mounted
-rows while Find is open. They never read or write viewport state.
+rows while Find is open. Each row model matches that invocation's query directly,
+never a separately refreshed shared result cache. They never read or write
+viewport state.
 
 13. Tabs expand to four-column stops before highlighting. Visible token and whitespace widths use the selected monospace face's measured advance. The longest expanded line is measured with that same face; this pixel width drives both the horizontal scroll extent and every diff-row background, so scrolling fully right cannot reveal an unpainted strip. Display columns (including double-width CJK characters) remain the fallback while no measured line is available.
 14. PR list, PR detail/diff, and repository-source requests are dispatched by the current project's persisted `repo_type`. The dispatcher also verifies that it matches `remote_repo`; no caller may silently fall back to another provider.
@@ -257,8 +278,10 @@ rows while Find is open. They never read or write viewport state.
     Merged state. The header action strip may use readiness internally to gate
     actions, but it must not render a duplicate readiness/state badge.
 39. Conversation, Commits, and Files changed tabs remain one row at the minimum
-    supported width. Below 840 px they divide the available width equally and
-    the trailing aggregate diffstat is hidden before any tab overflows.
+    supported width. They follow the shared Primer UnderlineNav geometry at
+    every width: content-sized items, left alignment, a 16 px container inset,
+    and 4 px item spacing. They never stretch to divide the row equally. The
+    trailing aggregate diffstat is hidden before the tabs need overflow.
 40. PR list rows, state choices, review choices, header actions, Back, and
     counted tabs expose accessibility labels/state and Enter/Space activation.
     Command and status visuals use registered Octicons rather than Unicode
@@ -297,9 +320,21 @@ overscan model，直接拖拽滑块与释放后渲染完全相同的换行内容
 11. 归一化后的 `viewed` 字段驱动本地 `Viewed files` 筛选；若某 Provider 的同名字段语义不同，adapter 必须将其归一化为 `false`，不得把该 Provider 字段冒充审核进度。
 12. 语法高亮由 Rust 使用 `syntect` 并根据当前文件路径生成；Slint 只接收带样式的 token model，不解析源码语言。Files changed 代码栏支持 GitHub 风格拖拽选中（Unified/Split），无需单独进入选择模式：选区几何使用实测等宽字符步进与显示列（含 Tab 和双宽字符），换行时只绘制实际命中的视觉片段，行号栏与 `+`/`-` 不在可选区域内。双击按相同字符类扩展选中单词（字母数字/`_`、空白、其余标点各自成组），三击选中整行代码列；连击状态保存在审核工作区，避免虚拟窗口投影打断手势。⌘/Ctrl+F 在选中文件工具栏打开紧凑的编辑器式查找栏（GitHub 的 PR Files changed 没有应用内查找，网页依赖浏览器检索；Usher 对齐 CodeMirror/GitHub 文件编辑器查找面板：查询框、`当前/总数` 或 `No results`、上一个/下一个、关闭）。匹配只覆盖可复制代码列，并通过 `usher-search` 生成 Unicode 安全、非重叠的命中；Enter/Shift+Enter 按源码顺序首尾循环，逻辑同一行内的每次出现均为独立结果。视口揭示遵循 Blink `CenterIfNeeded`：活动命中完整可见时不滚动，部分或完全不可见时居中并按内容边界夹紧；软换行代码先解析到命中所在视觉子行，因此同一可见视觉行的多个结果只切高亮与计数。PR adapter 只在命令执行时计算一次并至多写一次 viewport；不存在 Find 定位 timer、viewport observer、回收行几何上报或持久 reveal 状态，宽高变化与滚动均不得重新定位当前命中。已挂载 overscan 行使用有界、仅绘制用途的匹配 model：当前命中使用 Blink 橙色 `#ff9632`，其他命中使用 Blink 黄色 `#ffff00`，这些 model 绝不读写 viewport 状态。Escape 先关闭查找再清除选区。Hunk 头（`@@ … @@`）与 meta 行不可选中，且不会出现在 ⌘/Ctrl+A 选区或剪贴板文本中，行为与 GitHub 一致。Diff Flickable 不得仲裁指针拖动：代码区垂直拖动始终属于选中手势，滚轮/触控板与滚动条仍可滚动。跨行选区以换行拼接纯文本并静默写入剪贴板；⌘/Ctrl+A 选中完整 Unified diff 或当前 Split 侧，Escape 清除选区。切换文件、Tab、Diff view 或 line-model revision 时清除选区。选中必须保留精确虚拟化：不得创建整文件 TextInput 或重复 token model，只有已挂载 overscan delegate 才拥有用于换行选区渲染的轻量只读 TextInput。
 12.1. Find 揭示是显式的一次性操作，只有 Enter、Shift+Enter 或 Find 上一个/下一个
-控件可以计算并写入目标 viewport。输入、焦点变化、滚轮/触控板输入、直接拖拽滚动条
-滑块、resize、虚拟列表测量和布局重排均不执行 Find 定位；这些操作保留查询、计数、
-当前结果与当前高亮，关闭 Find 才清空。
+控件可以计算并写入目标 viewport。输入时原子替换结果集并立即选中/高亮第 1 项，但不
+定位 viewport。焦点变化、滚轮/触控板输入、直接拖拽滚动条滑块、resize、虚拟列表测量
+和布局重排同样不执行 Find 定位。关闭 Find 才清空查询、结果与当前高亮。
+12.2. 源码继续由原生 Slint 根据 `syntect` token model 绘制，禁止嵌入 WebView
+或浏览器编辑器。所有未换行鼠标终点（token 内、跨 token 或跨行拖拽目标）、选区绘制和
+当前 Find 矩形统一使用应用自有、可替换的文字几何门面；默认 adapter 使用 Parley 0.10
+（与 Slint 1.17 相同代际的 shaping 引擎）
+cursor/cluster 几何。Adapter 复用 Slint 字体集合以及可见 run 的字体族、字号、字重、斜体
+和 scale factor，再将 shaped 坐标归一到 Slint 实际 token 宽度。换行鼠标终点使用同一
+门面及 Parley Unicode 断行；换行选区与 Find 范围使用 Parley selection 几何。同一视觉行
+中相邻的 fallback-font fragment 必须合并，真正分离的双向文本 fragment 保持分离；视觉行
+矩形使用固定 pitch 且不得重叠。LRU 风格缓存最多保留 256 个 layout。几何计算仅限直接鼠标
+交互、当前命中所在的单个已挂载行或与当前选区相交的 run。显示列只用于虚拟行 extent/
+reveal 估计，不得用于 caret 或当前范围边界；虚拟化行禁止创建逐字符 UI model 或
+token×match 交叉 repeater。
 滚动 offset callback 只属于精确虚拟窗口投影：它只更新有界 overscan 行，不读取查询或
 命中几何。
 PR Diff 使用 `usher-virtual-list` 完成精确可变行高虚拟化；私有默认 adapter 使用社区
@@ -307,7 +342,8 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
 行 extent，前缀和统一驱动 content height、offset/index 映射、有界 overscan 渲染、
 滑块拖拽与 Find reveal。Enter 只增加命中在本行内的换行偏移，不实例化此前 lazy 行。
 非活动命中使用 Blink 黄色 `#ffff00`，当前命中继续使用橙色 `#ff9632`；仅绘制用途的行级 model/repeater
-只在 Find 打开时为已挂载行创建，并且绝不读取或写入 viewport 状态。
+只在 Find 打开时为已挂载行创建，并直接匹配本次调用的 query，禁止读取另行刷新的共享结果
+缓存；它们绝不读取或写入 viewport 状态。
 
 13. 高亮前将 Tab 按四列制表位展开；可见 token 和空白宽度使用当前等宽字体的实际测量值。最长的已展开代码行使用同一字体测量，该像素宽度同时驱动横向滚动范围和每行 Diff 背景，滚动到最右端不得露出未绘制区域；没有可测量行时才回退到显示列数（包括双宽中日韩字符）。
 14. PR 列表、PR 详情/diff 和仓库源码请求必须按当前项目持久化的 `repo_type` 分发；分发层同时校验其与 `remote_repo` 一致，任何调用方都不得静默回退到其他 Provider。
@@ -335,8 +371,10 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
 37. 返回导航分为两层。从 Conversation 或 Commits 打开 commit 时创建审核页内返回点；Shell Back 必须先恢复准确的来源 Tab，而从 Workflow PR 列表直接进入的审核页则返回 Workflow。Shell 先把 Back 委托给审核控制器，再调用 Router 历史；审核页自身不渲染返回按钮。跨页面导航使用 Router 的 LIFO 历史栈，不再依赖单个 previous-route 槽位。从活动审核页打开设置、关于或其他路由时必须保留审核状态；在该页面执行 Back 后恢复同一个 PR 审核页及其当前下钻状态。
 38. 审核摘要行是 Open、Closed、Merged 的唯一可见状态来源。页头操作条可以在内部
     使用 readiness 控制操作可用性，但不得再绘制重复的 readiness/state 徽标。
-39. Conversation、Commits、Files changed 在最小支持宽度下仍保持同一行；低于
-    840px 时三个 Tab 等分可用宽度，尾部总 diffstat 必须在 Tab 溢出前隐藏。
+39. Conversation、Commits、Files changed 在最小支持宽度下仍保持同一行；
+    所有宽度都遵循共享 Primer UnderlineNav 几何：Tab 按内容定宽、左对齐，容器
+    保留 16px 内边距，Tab 间距为 4px，禁止拉伸后均分整行；尾部总 diffstat 必须
+    在 Tab 需要 overflow 前隐藏。
 40. PR 列表行、状态选项、Review 选项、页头操作、Back 和带计数 Tab 必须暴露
     无障碍 label/state 并支持 Enter/Space；命令与状态视觉统一使用已登记 Octicon，
     禁止用 Unicode 字符代替图标。

@@ -9,6 +9,7 @@ mod file_tree;
 mod find;
 mod hunk;
 mod selection;
+mod text_geometry;
 mod timeline;
 mod virtual_list;
 

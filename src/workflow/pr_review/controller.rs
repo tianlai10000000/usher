@@ -19,10 +19,10 @@ use crate::git::{
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{
-    MainWindow, Route, WorkflowPrDiffFile, WorkflowPrDiffFindMatch, WorkflowPrDiffLine,
-    WorkflowPrDiffRowMetric, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange,
-    WorkflowPrDiffTextSlice, WorkflowPrDiffVirtualWindow, WorkflowPrFileExtensionFilter,
-    WorkflowPrTreeItem,
+    MainWindow, Route, WorkflowPrDiffFile, WorkflowPrDiffFindMatch, WorkflowPrDiffGlyphRange,
+    WorkflowPrDiffGlyphRect, WorkflowPrDiffLine, WorkflowPrDiffRowMetric,
+    WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice,
+    WorkflowPrDiffVirtualWindow, WorkflowPrFileExtensionFilter, WorkflowPrTreeItem,
 };
 
 use super::super::bindings::{show_error, show_success};
@@ -38,7 +38,9 @@ use super::cache::{
 use super::diff_model::{LazyPrDiffLineModel, to_slint_file};
 use super::diff_projection::hunk_scroll_anchor_source_index;
 use super::file_tree::{build_tree_items, extension_counts};
-use super::find::{collect_diff_find_matches, diff_find_intra_item_offset};
+use super::find::{
+    collect_diff_find_matches, collect_diff_find_row_matches, diff_find_intra_item_offset,
+};
 use super::hunk::{
     HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection, expand_all_hunk_context_from_sources,
     expand_hunk_context_from_sources, full_source_file, hunk_is_expandable,
@@ -52,6 +54,7 @@ use super::selection::{
     diff_selection_slice, diff_selection_text, diff_wrap_line_start, resolve_diff_click_range,
     resolve_diff_selection_hit,
 };
+use super::text_geometry;
 use super::timeline::{
     chrono_commit_index_to_display, commit_index_by_sha, commit_model, commit_range_label,
     conversation_content_height, conversation_model, display_commit_range_to_chrono,
@@ -206,7 +209,6 @@ pub(crate) struct WorkflowPrReviewController {
     pending_open_commit: Arc<Mutex<Option<String>>>,
     commit_detail_return_tab: Arc<Mutex<Option<i32>>>,
     pr_list_refresh_pending: Arc<AtomicBool>,
-    diff_find_matches: Arc<Mutex<Vec<WorkflowPrDiffFindMatch>>>,
 }
 
 fn session_highlight_resources(
@@ -249,7 +251,6 @@ pub(crate) fn bind_pr_review(
         pending_open_commit: Arc::new(Mutex::new(None)),
         commit_detail_return_tab: Arc::new(Mutex::new(None)),
         pr_list_refresh_pending: Arc::new(AtomicBool::new(false)),
-        diff_find_matches: Arc::new(Mutex::new(Vec::new())),
     };
 
     let diff_virtual_list = Rc::new(RefCell::new(PrDiffVirtualListBridge::default()));
@@ -680,24 +681,133 @@ pub(crate) fn bind_pr_review(
               start_height,
               code_width,
               cell_width,
-              content_width,
               line_pitch,
+              family,
+              font_size,
               side| {
             let Some(ui) = ui_weak.upgrade() else {
                 return WorkflowPrDiffSelectionHit::default();
             };
+            let lines = ui.get_workflow_pr_review_lines();
+            let scale_factor = ui.window().scale_factor();
             resolve_diff_selection_hit(
-                &ui.get_workflow_pr_review_lines(),
+                &lines,
                 start_line,
                 pointer_x,
                 pointer_y,
                 start_height,
                 code_width,
                 cell_width,
-                content_width,
                 line_pitch,
                 side.as_str(),
+                |line, side, local_x| {
+                    let tokens = match side {
+                        "left" => &line.left_tokens,
+                        "right" => &line.right_tokens,
+                        _ => &line.tokens,
+                    };
+                    text_geometry::hit_test_runs(
+                        (0..tokens.row_count()).filter_map(|index| {
+                            tokens.row_data(index).map(|token| {
+                                (token.text, if token.bold { 600 } else { 400 }, token.italic)
+                            })
+                        }),
+                        local_x,
+                        family.as_str(),
+                        font_size,
+                        scale_factor,
+                    )
+                },
+                |line, side, local_x, local_y, width, line_pitch| {
+                    let content = match side {
+                        "left" => line.left_content.as_str(),
+                        "right" => line.right_content.as_str(),
+                        _ => line.content.as_str(),
+                    };
+                    text_geometry::hit_test_wrapped(
+                        content,
+                        local_x,
+                        local_y,
+                        width,
+                        line_pitch,
+                        family.as_str(),
+                        font_size,
+                        scale_factor,
+                    )
+                },
             )
+        },
+    );
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_resolve_diff_token_hit(
+        move |text, pointer_x, token_width, family, font_size, bold, italic| {
+            let scale_factor = ui_weak
+                .upgrade()
+                .map_or(1.0, |ui| ui.window().scale_factor());
+            text_geometry::hit_test(
+                text.as_str(),
+                pointer_x,
+                token_width,
+                family.as_str(),
+                font_size,
+                if bold { 600 } else { 400 },
+                italic,
+                scale_factor,
+            )
+        },
+    );
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_resolve_diff_token_range(
+        move |text, start, end, token_width, family, font_size, bold, italic| {
+            let scale_factor = ui_weak
+                .upgrade()
+                .map_or(1.0, |ui| ui.window().scale_factor());
+            let geometry = text_geometry::range_geometry(
+                text.as_str(),
+                start,
+                end,
+                token_width,
+                family.as_str(),
+                font_size,
+                if bold { 600 } else { 400 },
+                italic,
+                scale_factor,
+            );
+            WorkflowPrDiffGlyphRange {
+                x: geometry.x,
+                width: geometry.width,
+            }
+        },
+    );
+
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_resolve_diff_wrapped_range(
+        move |text, start, end, width, line_pitch, family, font_size| {
+            let scale_factor = ui_weak
+                .upgrade()
+                .map_or(1.0, |ui| ui.window().scale_factor());
+            ModelRc::new(VecModel::from(
+                text_geometry::wrapped_range_geometry(
+                    text.as_str(),
+                    start,
+                    end,
+                    width,
+                    line_pitch,
+                    family.as_str(),
+                    font_size,
+                    scale_factor,
+                )
+                .into_iter()
+                .map(|geometry| WorkflowPrDiffGlyphRect {
+                    x: geometry.x,
+                    y: geometry.y,
+                    width: geometry.width,
+                    height: geometry.height,
+                })
+                .collect::<Vec<_>>(),
+            ))
         },
     );
 
@@ -743,33 +853,25 @@ pub(crate) fn bind_pr_review(
         )
     });
 
-    let find_matches = controller.diff_find_matches.clone();
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_review_find_diff_matches(move |query, split| {
         let Some(ui) = ui_weak.upgrade() else {
             return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
         };
-        let model =
-            collect_diff_find_matches(&ui.get_workflow_pr_review_lines(), query.as_str(), split);
-        if let Ok(mut stored) = find_matches.lock() {
-            *stored = model.iter().collect();
-        }
-        model
+        collect_diff_find_matches(&ui.get_workflow_pr_review_lines(), query.as_str(), split)
     });
 
-    let find_matches = controller.diff_find_matches.clone();
-    ui.on_workflow_pr_review_find_diff_row_matches(move |line, side, _query| {
-        let matches = find_matches
-            .lock()
-            .map(|matches| {
-                matches
-                    .iter()
-                    .filter(|hit| hit.line == line && hit.side.as_str() == side.as_str())
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        ModelRc::new(VecModel::from(matches))
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_find_diff_row_matches(move |line, side, query| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
+        };
+        collect_diff_find_row_matches(
+            &ui.get_workflow_pr_review_lines(),
+            line,
+            side.as_str(),
+            query.as_str(),
+        )
     });
 
     ui.on_workflow_pr_review_step_diff_find_index(move |current, count, backward| {
