@@ -388,8 +388,10 @@ expanded/collapsed, and success confirmation.
   8 px horizontal padding, 6 px radius, and a 4 px host gap. Call sites keep
   relative host geometry; the painted tip always portals through
   `TooltipOverlayState` to the window-root `GitHubTooltipOverlayHost` so
-  ancestor `clip` (scroll views, cards, menus) cannot truncate it. Local `z`
-  alone is not a valid escape from clip.
+  ancestor `clip` (scroll views, cards, menus) cannot truncate it. The root
+  host clamps the complete surface to an 8 px viewport inset. Local `z` alone
+  is not a valid escape from clip. / Tooltip 表面必须通过窗口根门户绘制，并
+  约束在视口 8px 内边距内，既不能被祖先 clip，也不能越过窗口边界。
 - `GitHubCounterLabel`: the typed Primer CounterLabel counterpart for counts
   adjacent to navigation text or actions. It provides Default, Primary, and
   Secondary schemes, optional upper-limit formatting, a compact overlay mode,
@@ -452,7 +454,8 @@ expanded/collapsed, and success confirmation.
   geometry (6 px block padding around a 20 px label); block descriptions use
   48 px rows with a 16 px secondary line. Single selections use a leading
   Check Octicon; selected state must not be represented by persistent hover
-  fill or heavier label weight.   Outside dismissal is split on purpose: the menu owns Escape and chrome
+  fill or heavier label weight. Row dividers are opt-in and remain disabled for
+  the borderless ActionMenu/ActionList variant. Outside dismissal is split on purpose: the menu owns Escape and chrome
   `dismiss-revision` (native title-bar / docked-shell); opening also
   `claim-exclusive` so peer ActionMenu/Diff-settings popovers close on the same
   click without page-local dismiss wiring. Each host still mounts a sibling
@@ -468,9 +471,16 @@ expanded/collapsed, and success confirmation.
 - `GitHubFilterMenuButton`, `GitHubFilterMenuFrame`, and
   `GitHubFilterMenuItem` are the generic single-select filter/sort ActionMenu
   composition. They own trigger, header/close, checked-row, keyboard, and
-  accessibility behavior. Feature menus provide only labels, values, grouping,
-  and anchored state; the UI Components demonstration uses provider-neutral
-  examples and lives in the ActionMenu section.
+  accessibility behavior. Toolbar triggers use the 14 px body-text token;
+  compact option labels use the 12 px small-text token while retaining the
+  shared 32 px ActionList row geometry. The GitHub PR filter variant matches
+  `.SelectMenu-item`: each row has a muted 1 px bottom divider; the selected
+  label uses weight 500 and the Check plus label use the default foreground,
+  with no persistent selected fill. Feature menus provide only labels, values,
+  grouping, and anchored state; overlays anchor to the measured trigger edge
+  rather than typography-specific offsets. UI Components demonstrates both the
+  bordered SelectMenu and borderless ActionMenu variants with provider-neutral
+  examples.
 - `GitHubPageHeader`: the shared Primer PageHeader foundation for page title,
   description, leading visual, optional divider, and trailing actions.
 - `GitHubUnderlineNavItem`: the shared UnderlineNav/UnderlinePanels tab item
@@ -642,6 +652,12 @@ prefix until their implementation satisfies this specification.
 低 DPI 下偏软的轮廓渲染，因此禁止在该斜角标中恢复旋转 `Text`。通用单选筛选/排序弹层统一归入 ActionMenu，由
 `GitHubFilterMenuButton`、`GitHubFilterMenuFrame` 和
 `GitHubFilterMenuItem` 负责触发器、标题/关闭、选中标记、键盘及无障碍行为；
+工具栏触发器统一使用 14px body-text 令牌；紧凑选项标签统一使用 12px small-text
+令牌，同时保持共享 ActionList 的 32px 行高；弹层按触发器实际边界定位，不得依赖
+特定字号下的固定偏移；PR 筛选变体匹配 GitHub `.SelectMenu-item`：每行底部绘制
+1px muted 分隔线，选中标签使用 500 字重，Check 与标签使用默认前景色且不绘制持续
+选中背景。无逐行边框的 ActionMenu/ActionList 是独立变体，UI Components 必须以
+中性示例同时演示这两种菜单，禁止混用；
 业务层只提供中性的 label、value、分组与锚点状态，UI Components 页面必须在
 ActionMenu 区域使用无 Provider/Workflow/PR 字样的通用数据演示。Project 网格
 必须按受约束内容区计算列数，新增一列前保证每张卡片至少 280px 可读宽度。Chat

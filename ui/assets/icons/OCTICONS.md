@@ -29,6 +29,8 @@ overflow menu.
 `octicon-comment-discussion-16.svg`, `octicon-git-commit-16.svg`, and
 `octicon-file-diff-16.svg` are the upstream 16 px icons used by the PR review
 navigation tabs.
+`octicon-copilot-16.svg` is the unchanged upstream 16 px GitHub Copilot icon
+used by the PR-list AI review action.
 `octicon-git-pull-request-16.svg` is the upstream-style 16 px pull-request
 status icon used by the PR review summary badge.
 `octicon-arrow-left-16.svg` is the unchanged Primer back-navigation icon used

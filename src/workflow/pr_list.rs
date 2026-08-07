@@ -414,6 +414,10 @@ fn to_slint_item(item: &PullRequestItem) -> WorkflowPullRequestItem {
         author: item.author.clone().into(),
         source_branch: item.source_branch.clone().into(),
         target_branch: item.target_branch.clone().into(),
+        conversation_count: item
+            .conversation_count
+            .and_then(|count| i32::try_from(count).ok())
+            .unwrap_or(-1),
         updated_at: format_github_relative_time(item.updated_at.as_str()).into(),
         updated_at_raw: item.updated_at.clone().into(),
         updated_at_tooltip: format_github_absolute_tooltip(item.updated_at.as_str()).into(),

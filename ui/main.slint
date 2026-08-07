@@ -503,7 +503,7 @@ export component MainWindow inherits Window {
     callback workflow-pr-list-sort-filter-change(string);
     callback workflow-copy-remote-repo(string) -> bool;
     callback workflow-open-local-repo(string);
-    callback workflow-pr-review-open(string, string, string, string, string, string);
+    callback workflow-pr-review-open(string, string, string, string, string, string, int);
     callback workflow-pr-review-back();
     callback workflow-pr-review-select-tab(int);
     callback workflow-pr-review-ensure-commits();
@@ -927,6 +927,7 @@ export component MainWindow inherits Window {
                         // the opaque review surface is mounted so hidden delegates do
                         // not participate in live-resize layout and rendering.
                         if root.current-route == Route.Workflow && !root.workflow-pr-review-visible: WorkflowPage {
+                            code-font-family: root.workflow-pr-review-code-font-family;
                             viewport-height: page-scroll-view.visible-height - 2px;
                             selected-flow <=> root.workflow-selected-flow;
                             navigate(route) => {
@@ -1026,8 +1027,8 @@ export component MainWindow inherits Window {
                             open-local-repo(path) => {
                                 root.workflow-open-local-repo(path);
                             }
-                            pr-open-detail(number, title, author, source-branch, target-branch, updated-at) => {
-                                root.workflow-pr-review-open(number, title, author, source-branch, target-branch, updated-at);
+                            pr-open-detail(number, title, author, source-branch, target-branch, updated-at, initial-tab) => {
+                                root.workflow-pr-review-open(number, title, author, source-branch, target-branch, updated-at, initial-tab);
                             }
                             cd-start(environment-name, release-name, commit-hash) => {
                                 root.workflow-cd-start(environment-name, release-name, commit-hash);
@@ -2155,7 +2156,7 @@ export component MainWindow inherits Window {
 
     // Shared tooltip portal: locators inside clipped page/scroll hosts publish
     // here so tips are never truncated by ancestor clip (z alone cannot escape).
-    // Host stays zero-sized; only the tip child paints (no full-window hit target).
+    // The full-window host has no input handler; only its clamped tip child paints.
     GitHubTooltipOverlayHost {
         x: 0px;
         y: 0px;

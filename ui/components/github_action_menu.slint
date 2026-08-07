@@ -208,6 +208,10 @@ export component GitHubActionListItem inherits FocusScope {
     in property <string> text;
     in property <string> description: "";
     in property <string> trailing-text: "";
+    in property <length> label-font-size: GitHubMetrics.text-medium;
+    in property <int> label-font-weight: 400;
+    in property <color> selected-visual-color: GitHubTheme.accent-fg;
+    in property <bool> show-bottom-divider: false;
     in property <image> icon;
     in property <bool> selected: false;
     in property <bool> selectable: false;
@@ -278,7 +282,7 @@ export component GitHubActionListItem inherits FocusScope {
         height: GitHubMetrics.icon-medium;
         source: @image-url("../assets/icons/octicon-check-16.svg");
         colorize: root.item-enabled
-            ? GitHubTheme.accent-fg
+            ? root.selected-visual-color
             : GitHubTheme.control-disabled-fg;
     }
 
@@ -300,8 +304,8 @@ export component GitHubActionListItem inherits FocusScope {
             - (root.trailing-text == "" ? 0px : GitHubMetrics.size-64);
         height: root.description == "" ? parent.height : GitHubMetrics.size-20;
         text: root.text;
-        font-size: GitHubMetrics.text-medium;
-        font-weight: 400;
+        font-size: root.label-font-size;
+        font-weight: root.label-font-weight;
         color: !root.item-enabled
             ? GitHubTheme.control-disabled-fg
             : (root.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-default);
@@ -335,6 +339,13 @@ export component GitHubActionListItem inherits FocusScope {
         horizontal-alignment: right;
         vertical-alignment: center;
         overflow: elide;
+    }
+
+    if root.show-bottom-divider: Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
     }
 
     item-touch := TouchArea {

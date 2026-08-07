@@ -321,7 +321,7 @@ pub(crate) fn bind_pr_review(
     let open_controller = controller.clone();
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_review_open(
-        move |number, title, author, source_branch, target_branch, updated_at| {
+        move |number, title, author, source_branch, target_branch, updated_at, initial_tab| {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
@@ -337,6 +337,9 @@ pub(crate) fn bind_pr_review(
                     ignore_whitespace: false,
                 },
             );
+            if initial_tab != 2 {
+                ui.invoke_workflow_pr_review_select_tab(initial_tab);
+            }
         },
     );
 

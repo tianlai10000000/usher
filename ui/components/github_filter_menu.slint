@@ -49,7 +49,8 @@ export component GitHubFilterMenuButton inherits FocusScope {
     label-measure := Text {
         visible: false;
         text: root.label;
-        font-size: GitHubMetrics.text-small;
+        font-size: GitHubMetrics.text-medium;
+        font-weight: 500;
         wrap: no-wrap;
     }
 
@@ -62,7 +63,7 @@ export component GitHubFilterMenuButton inherits FocusScope {
         Text {
             width: root.label-width;
             text: root.label;
-            font-size: GitHubMetrics.text-small;
+            font-size: GitHubMetrics.text-medium;
             font-weight: 500;
             color: GitHubTheme.fg-muted;
             vertical-alignment: center;
@@ -107,6 +108,10 @@ export component GitHubFilterMenuItem inherits GitHubActionListItem {
     in property <string> selected-value;
     callback chosen(string);
 
+    label-font-size: GitHubMetrics.text-small;
+    label-font-weight: root.selected ? 500 : 400;
+    selected-visual-color: GitHubTheme.fg-default;
+    show-bottom-divider: true;
     selectable: true;
     selected: root.value == root.selected-value;
     activated => { root.chosen(root.value); }

@@ -107,6 +107,7 @@ pub(super) async fn get_pull_requests(
                 .unwrap_or_else(|| "Unknown author".to_string()),
             source_branch: string_field(value, "source_branch").unwrap_or_else(|| "—".to_string()),
             target_branch: string_field(value, "target_branch").unwrap_or_else(|| "—".to_string()),
+            conversation_count: conversation_count_from_detail(value),
             updated_at: string_field(value, "updated_at")
                 .unwrap_or_else(|| "Unknown update time".to_string()),
             web_url: string_field(value, "web_url").unwrap_or_default(),

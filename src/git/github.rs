@@ -128,6 +128,7 @@ pub(super) async fn get_pull_requests(
                 .unwrap_or_else(|| "Unknown author".to_string()),
             source_branch: "—".to_string(),
             target_branch: "—".to_string(),
+            conversation_count: conversation_count_from_detail(value),
             updated_at: string_field(value, "updated_at")
                 .unwrap_or_else(|| "Unknown update time".to_string()),
             web_url: string_field(value, "html_url").unwrap_or_default(),
@@ -193,23 +194,25 @@ async fn hydrate_pull_request_branches(
     mut items: Vec<PullRequestItem>,
 ) -> Vec<PullRequestItem> {
     let requests = items.iter().enumerate().map(|(index, item)| async move {
-        let branches = load_pull_request_branches(locator, item.number.as_str()).await;
-        (index, branches)
+        let summary = load_pull_request_summary(locator, item.number.as_str()).await;
+        (index, summary)
     });
 
-    for (index, branches) in join_all(requests).await {
-        if let Some((source_branch, target_branch)) = branches {
+    for (index, summary) in join_all(requests).await {
+        if let Some((source_branch, target_branch, conversation_count)) = summary {
             items[index].source_branch = source_branch;
             items[index].target_branch = target_branch;
+            items[index].conversation_count =
+                conversation_count.or(items[index].conversation_count);
         }
     }
     items
 }
 
-async fn load_pull_request_branches(
+async fn load_pull_request_summary(
     locator: &RepoLocator,
     pull_request_number: &str,
-) -> Option<(String, String)> {
+) -> Option<(String, String, Option<u32>)> {
     let endpoint = repository_endpoint(
         endpoints::PULL_REQUEST_URL,
         locator,
@@ -222,7 +225,13 @@ async fn load_pull_request_branches(
     )
     .await
     .ok()?;
-    pull_request_branches(&detail)
+    pull_request_branches(&detail).map(|(source_branch, target_branch)| {
+        (
+            source_branch,
+            target_branch,
+            conversation_count_from_detail(&detail),
+        )
+    })
 }
 
 pub(super) async fn get_pull_request_diff(

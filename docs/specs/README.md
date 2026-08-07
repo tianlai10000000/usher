@@ -26,7 +26,8 @@ The UI design specification defines `GitHub*` component naming,
 contracts, shared Button/IconButton/Link/Tooltip/CounterLabel/Copy/Spinner/form-control
 foundations, shared shell/title-bar breadcrumb/PageHeader/ScrollView/Progress foundations,
 UnderlineNav/SegmentedControl/Actions Job foundations,
-Dialog/ActionMenu/Banner overlay contracts, the Material dependency boundary,
+Dialog/borderless ActionMenu/bordered SelectMenu/Banner overlay contracts,
+compact PR-list branch chips, the Material dependency boundary,
 the mandatory UI Components playground/property-matrix contract,
 repository-wide component placement (`ui/components/<feature>/`) and route-view
 composition (`ui/views/`), and the per-batch acceptance gate. The
@@ -35,9 +36,9 @@ implementation sequence and current status live in
 live in [`bug-history.md`](../../bug-history.md). / UI 设计规范定义
 `GitHub*` 组件命名、`GitHubTheme`/`GitHubMetrics` 归属、Primer 布局与交互
 契约、CounterLabel、Shell/标题栏面包屑/PageHeader/ScrollView/Progress、
-UnderlineNav/SegmentedControl/Actions Job 基础、Dialog/ActionMenu/Banner
+UnderlineNav/SegmentedControl/Actions Job 基础、Dialog/无边框 ActionMenu/带边框 SelectMenu/Banner
 浮层契约、通用 Filter ActionMenu、Project 可读卡片宽度、Chat 历史流内操作、
-PR 单一状态/窄屏 Tab 及 diff/文件树字体颜色保护约束、强制 UI Components 演练场/属性矩阵契约、
+PR 单一状态/窄屏 Tab、列表响应式标题/紧凑分支胶囊/行操作及 diff/文件树字体颜色保护约束、强制 UI Components 演练场/属性矩阵契约、
 Material 依赖边界、仓库级组件目录
 （`ui/components/<feature>/`）与路由页面编排（`ui/views/`）边界，以及逐批
 验收门禁；实施顺序和当前状态见

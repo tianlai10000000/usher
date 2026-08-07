@@ -43,6 +43,7 @@ pub(crate) struct PullRequestItem {
     pub(crate) author: String,
     pub(crate) source_branch: String,
     pub(crate) target_branch: String,
+    pub(crate) conversation_count: Option<u32>,
     pub(crate) updated_at: String,
     pub(crate) web_url: String,
 }

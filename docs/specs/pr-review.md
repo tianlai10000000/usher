@@ -255,6 +255,7 @@ viewport state.
 15. A clickable hunk control is shown only when hidden context exists. Each directional click reveals at most 21 primary-side source rows, matching GitHub's signed-in improved `/changes/{commit}` view; the signed-out classic `/commits/{commit}` fallback uses a different 20-row page and must not redefine this workspace's interaction. Edited files lazily fetch both immutable base and head sources and locally align the bounded hidden range, preserving base-only deletions and head-only additions at the reveal boundary; new/deleted files fetch their only applicable side. Source texts are cached for the active review.
 16. Source expansion requests use the same stale-response protection as diff loading. Switching projects, closing the review, or opening another PR prevents a late source response from modifying the visible model.
 17. The PR list has a fixed page size of 10. Changing state resets to page 1; changing page requests only that page, except for GitHub's visible-row branch enrichment.
+    Visible rows keep a trailing multi-action region aligned to the title's first-line visual center: Conversation displays the provider summary count when available and opens tab 0, while the icon-only Copilot action opens the Files changed review workspace. Both actions stay backgroundless and change only their icon/count foreground to the accent color on hover. The active first-line center follows responsive title layout: top-aligned when branches wrap and centered in the 26 px title box on wide rows. The leading state icon has a compact 6 px gap before aligned title/metadata/branch content. Title hover uses glyph-run underlines, including each wrapped line, rather than one full-width rule. At the branch-wrap breakpoint, an over-width title uses a 40 px two-line block and clips only overflow after the visible lines, preserving the title start; a title that still fits one line uses a separately tightened metadata offset. The wide inline-branch layout retains enough title-to-metadata separation to clear the title hover underline. Target/source branch chips use compact 22 px boxes with centered labels; they stay vertically centered on the metadata line after the timestamp on wide rows and move together, without changing that internal alignment, to a continuation row below 760 px. Gitee timestamps apply a 1 px optical baseline correction beside mixed CJK/Latin metadata; GitHub and GitLab retain the unshifted Latin baseline. Only the timestamp text may trigger its absolute-time tooltip. Window-root tooltip painting clamps to the viewport inset so right-edge row actions remain fully readable at narrow widths.
 18. Provider timestamps are converted to UTC+08:00 before presentation when they are valid RFC 3339 values. An unparseable value remains visible verbatim rather than being replaced with a misleading time. On the PR review route, the header summary, Conversation timestamps, and Commits-tab row times follow GitHub Primer `<relative-time>` defaults (`threshold=P30D`, `prefix=on`): within 30 days use relative labels (`3 hours ago`, `yesterday`, `5 days ago`, `last week`); past that threshold use absolute short dates (`on Mar 19`, or `on Mar 19, 2025` when the year differs). Hover tooltips still show the absolute local datetime (`Jul 15, 2026, 1:26 PM GMT+8`). Commits rows render as `{author} committed {label}` so relative stays `committed yesterday` while absolute becomes `committed on Mar 19`. Description/comment card and commit-batch relative times place that tooltip to the right of the label so ListView/card clipping cannot crop it; other Conversation timestamps keep their existing placement. The Workflow PR list continues to show absolute UTC+08:00 values.
 19. The file filter, folder collapse state, tree construction, selected-file navigation, and syntax highlighting are local presentation operations; none may reload a diff.
 21. Tokens, authorization headers, and unbounded provider response bodies are not logged. Background list, diff, branch-enrichment, and source requests use silent feedback; the view owns its inline loading and error state.
@@ -290,7 +291,12 @@ viewport state.
     tree colors and fonts. Those values remain owned by the diff/file-tree
     content contract and require an explicit, separately reviewed change.
 42. Filter/sort popovers compose the generic `GitHubFilterMenu*` ActionMenu
-    controls; PR code provides only feature option values and grouping.
+    controls, including 14 px toolbar triggers, compact 12 px option labels,
+    and overlays anchored to the actual trigger edge. Filter rows use the
+    bordered GitHub SelectMenu variant: a muted 1 px bottom divider, weight-500
+    selected label, and default-foreground Check without persistent selected
+    fill. PR code provides only feature option values and grouping. Each PR
+    row's state icon is vertically centered on the title line.
 43. The root navigation sidebar and its right-edge decoration paint above the
     PR route during native resize and sidebar motion. Review content must not
     cover the sidebar, boundary stroke/shadow, or escaping sidebar Tooltips;
@@ -350,6 +356,7 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
 15. 只有确实存在隐藏上下文时才显示可点击的 hunk 控件。每次方向点击最多展示 21 个主侧源码行，以 GitHub 登录后的新版 `/changes/{commit}` 页面为准；未登录时回退的经典 `/commits/{commit}` 页面采用不同的 20 行分页，不能反过来改变本工作区的交互基准。修改文件按固定 base/head SHA 懒加载两侧源码，并在有界隐藏区内做本地行对齐，展开边界处的 base 独有删除行和 head 独有新增行都不得丢失；新增/删除文件只读取其适用的一侧。源码在当前审核期间缓存。
 16. 源码展开请求复用 diff 加载的旧响应防护；切换项目、关闭审核或打开其他 PR 后，迟到的源码响应不得修改当前 model。
 17. PR 列表固定每页 10 条。切换状态时重置到第 1 页；切换页码时只请求该页，GitHub 为可见行补充分支的详情请求除外。
+    可见行保留与标题首行视觉中心对齐的尾部多操作区：Conversation 在 Provider 提供摘要数量时显示计数并打开 Tab 0；纯 Copilot 图标操作打开 Files changed 审核工作区。两项操作始终无背景，Hover 时只把图标/计数前景切换为强调色。首行中心必须跟随响应式标题布局：分支换行时按顶部标题行对齐，宽布局则按 26px 标题盒居中。前导状态图标与统一对齐的标题/元信息/分支内容之间只保留 6px 紧凑间距。标题 Hover 使用逐字形 run 的下划线，多行时分别绘制，禁止用一条全宽横线。分支换行断点下，超宽标题使用 40px 双行块，只裁剪两条可见行之后的溢出并保留标题开头；标题仍为单行时使用独立收紧的元信息偏移。宽布局的内联分支行必须保留足够的标题间距，不能碰到标题 Hover 下划线。目标/源分支胶囊使用 22px 紧凑高度，文字水平和垂直居中；宽布局下整组在元信息行中心紧跟时间，低于 760px 时保持内部对齐并移到续行。Gitee 时间在中英文混排元信息旁应用 1px 视觉基线补偿；GitHub/GitLab 保持未偏移的拉丁基线。只有时间文字本身可以触发绝对时间 Tooltip；窗口根 Tooltip 必须约束在视口内边距中，确保窄宽下靠右操作的提示完整可见。
 18. Provider 时间戳若为有效 RFC 3339，必须在展示前转换为东八区（UTC+08:00）。无法解析的值应原样展示，不能替换成误导性的时间。PR 审核路由中，页头摘要、Conversation 时间戳与 Commits Tab 行时间遵循 GitHub Primer `<relative-time>` 默认（`threshold=P30D`、`prefix=on`）：30 天内使用相对时间（如 `3 hours ago`、`yesterday`、`5 days ago`、`last week`）；超过阈值后改为绝对短日期（同年 `on Mar 19`，跨年 `on Mar 19, 2025`）。悬停 Tooltip 仍显示绝对本地时间（如 `Jul 15, 2026, 1:26 PM GMT+8`）。Commits 行格式为 `{author} committed {label}`，因此相对时间为 `committed yesterday`，绝对时间为 `committed on Mar 19`。描述/评论卡片与 commits 批次行的相对时间把 Tooltip 放在标签右侧，避免 ListView/卡片裁剪；其他 Conversation 时间戳保持原有位置。Workflow PR 列表仍显示绝对东八区时间。
 19. 文件筛选、目录折叠状态、树构建、选中文件导航和语法高亮均是本地展示操作；它们不得重载 diff。
 21. 不得记录 token、鉴权 header 或无边界的 Provider 响应正文。后台列表、diff、分支补全和源码请求必须静默；视图自身拥有行内 loading 和 error 状态。
@@ -381,7 +388,10 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
 41. 页头、外壳和导航调整不得修改 Files changed 代码区或文件树的字体与颜色；
     这些值由 diff/文件树内容契约独立拥有，只有明确且单独评审的变更才可调整。
 42. 筛选/排序弹层必须组合通用 `GitHubFilterMenu*` ActionMenu 控件；PR 层只提供
-    功能选项值与分组。
+    功能选项值与分组，并统一使用组件自带的 14px 工具栏触发器、12px 紧凑选项
+    标签及按触发器实际边界定位的弹层。筛选行使用带边框的 GitHub SelectMenu 变体：
+    每行底部有 1px muted 分隔线，选中标签为 500 字重，Check 使用默认前景色且没有
+    持续选中背景。每条 PR 的状态图标必须与标题行垂直居中。
 43. 原生 Resize 与侧栏运动期间，根导航侧栏及其右边界装饰必须绘制在 PR 路由之上。
     审核内容不得覆盖侧栏、边界描边/阴影或越界显示的侧栏 Tooltip；PR Modal 遮罩仍
     必须覆盖并屏蔽侧栏。

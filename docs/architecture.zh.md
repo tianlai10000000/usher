@@ -101,7 +101,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/components/github_scroll_view.slint` | 应用自有的常驻纵向视口和语义滚动条基础。 |
 | `ui/components/navigation/github_underline_nav.slint` | Workflow 及其功能子页签共用的、支持键盘的 Primer UnderlineNav/UnderlinePanels 容器与 Item；容器统一管理全宽底线、安全区内边距和页签间距。 |
 | `ui/components/github_segmented_control.slint` | 共用的紧凑 Primer SegmentedControl 外壳、Item、Divider 及焦点/禁用交互。 |
-| `ui/components/github_tooltip.slint` | 共用的 GitHub TooltipV2 契约：调用方挂载透明定位器，由 `ui/state/tooltip_overlay_state.slint` 与根层 `GitHubTooltipOverlayHost` 在窗口根绘制，避免被滚动/裁剪祖先截断。 |
+| `ui/components/github_tooltip.slint` | 共用的 GitHub TooltipV2 契约：调用方挂载透明定位器，由 `ui/state/tooltip_overlay_state.slint` 与根层 `GitHubTooltipOverlayHost` 在窗口根绘制并约束在视口内，避免被滚动/裁剪祖先或窗口边界截断。 |
 | `ui/state/tooltip_overlay_state.slint` | 窗口根 Tooltip 门户状态（文案、窗口坐标、claim token、lease 心跳）。 |
 | `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面，统一焦点归属、Esc 关闭、打开时 peer exclusive-claim、视口碰撞定位、限高纵向滚动、ActionList 行，以及 `GitHubActionMenuTriggerArea` 的 press 态开/关（避免标题栏 Chrome dismiss 与 toggle 同一次点击先关后开）。页面空白点击关闭仍由各宿主在菜单之下自行挂载 TouchArea。`ui/state/transient_overlay_state.slint` 提供 `dismiss-revision` 与 `exclusive-generation`。 |
 | `ui/components/page/github_page_header.slint` | 标题、说明、前导视觉、分隔线和尾部操作共用的 Primer PageHeader 基础。 |
@@ -333,6 +333,8 @@ Webhook HTTP Listener 或任何提供方专属 Schema。
 ### Workflow
 
 Workflow 在所有支持的宽度下统一使用 GitHub 仓库页的 UnderlineNav 交互；低于 720px 时，仓库路径与操作从身份页头移入尾部 kebab 浮层。PR 列表严格复刻 GitHub 响应式筛选工具栏：Open/Closed 与筛选保持同一行；低于 620px 时直接保留 Assignee，把 Reviews 与 Sort 合并进一个分组 kebab ActionMenu。所有菜单互斥，第一次点击即可切换。GitHub 仓库会把这些菜单映射为原生 Search qualifier 和排序参数，并在切换后重置分页重新请求，其他 Provider 会忽略不支持的 GitHub qualifier。项目或筛选条件变化时独立获取 Open 与 Closed 总数，页头不再复用当前选中分页的临时数量。总数仍在加载或计数请求失败时，页头按 Primer 降级体验隐藏数字并保留 Open/Closed 标签，而不是长期停留在加载占位。列表时间使用相对时间，并提供东八区绝对时间 Tooltip。
+
+PR 行把绝对时间 Tooltip 的命中区限制在时间文字本身，并预留响应式尾部操作组。长标题在操作组之前自动换行；目标/源分支对在宽布局同行展示，在窄布局移到续行。Provider 列表/详情字段可提供 Conversation 数量。Conversation 会直接在 Tab 0 打开审核路由；AI Review 打开既有 Files changed 审核工作区。
 
 Workflow 顶层 PR/Tag/Branch/CD 导航和 Tag Add/Remove 导航统一复用
 `GitHubUnderlineNavItem`；Tag Scope 与语义版本选项统一复用

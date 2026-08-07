@@ -1689,6 +1689,7 @@ fn to_pull_request_item(value: &Value) -> PullRequestItem {
         target_branch: string_field(value, "target_branch")
             .or_else(|| nested_string(value, "base", "label"))
             .unwrap_or_else(|| "—".to_string()),
+        conversation_count: conversation_count_from_detail(value),
         updated_at: string_field(value, "updated_at")
             .unwrap_or_else(|| "Unknown update time".to_string()),
         web_url: string_field(value, "web_url")

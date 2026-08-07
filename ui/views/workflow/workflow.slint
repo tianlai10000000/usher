@@ -29,7 +29,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     callback pr-list-review-filter-change(string);
     callback pr-list-assignee-filter-change(string);
     callback pr-list-sort-filter-change(string);
-    callback pr-open-detail(string, string, string, string, string, string);
+    callback pr-open-detail(string, string, string, string, string, string, int);
     callback copy-remote-repo(string) -> bool;
     callback open-local-repo(string);
     callback cd-start(string, string, string);
@@ -55,6 +55,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in property <string> open-local-folder-tooltip: "Show in file manager";
     in property <string> project-logo: "";
     in property <image> project-logo-image: @image-url("../../../logo.png");
+    in property <string> code-font-family: "Menlo";
     in property <string> pr-repo-project-id: "";
     in property <string> pr-repo-type: "";
     in property <[WorkflowPullRequestItem]> pr-list-items: [];
@@ -115,9 +116,10 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     private property <length> pr-flow-width: root.workflow-content-width
         - (root.compact-workflow-layout ? 32px : 48px);
     private property <length> pr-list-header-height: 48px;
+    private property <length> pr-list-row-height: root.pr-flow-width < 760px ? 104px : 72px;
     private property <length> pr-list-content-height: root.pr-list-loading || root.pr-list-error != "" || root.pr-list-items.length == 0
         ? root.pr-list-header-height + 320px
-        : root.pr-list-header-height + root.pr-list-items.length * 72px;
+        : root.pr-list-header-height + root.pr-list-items.length * root.pr-list-row-height;
     private property <length> pr-flow-content-height: root.pr-list-content-height
         + ((!root.pr-list-loading
             && root.pr-list-error == ""
@@ -251,6 +253,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 viewport-global-y: root.absolute-position.y;
                 viewport-width: root.width;
                 viewport-height: root.height;
+                code-font-family: root.code-font-family;
                 repo-project-id: root.pr-repo-project-id;
                 repo-type: root.pr-repo-type;
                 pr-items: root.pr-list-items;
@@ -271,8 +274,8 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 change-review-filter(value) => { root.pr-list-review-filter-change(value); }
                 change-assignee-filter(value) => { root.pr-list-assignee-filter-change(value); }
                 change-sort-filter(value) => { root.pr-list-sort-filter-change(value); }
-                open-detail(number, title, author, source-branch, target-branch, updated-at) => {
-                    root.pr-open-detail(number, title, author, source-branch, target-branch, updated-at);
+                open-detail(number, title, author, source-branch, target-branch, updated-at, initial-tab) => {
+                    root.pr-open-detail(number, title, author, source-branch, target-branch, updated-at, initial-tab);
                 }
             }
 

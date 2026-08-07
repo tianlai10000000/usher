@@ -656,8 +656,8 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         }
 
         GitHubShowcaseSection {
-            title: "ActionMenu";
-            description: "AnchoredOverlay placement, start/end alignment, above/below side selection, ActionList rows, Escape, and caller-owned outside-click dismiss.";
+            title: "ActionMenu - borderless ActionList";
+            description: "Borderless action rows, AnchoredOverlay placement, alignment, side selection, Escape, and caller-owned outside-click dismiss.";
             content-height: root.action-menu-open ? 204px : 48px;
 
             HorizontalLayout {
@@ -752,8 +752,8 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         }
 
         GitHubShowcaseSection {
-            title: "ActionMenu - filter menu";
-            description: "Anchored single-select filter menu with a title, close control, selected options, and dismissal behavior.";
+            title: "SelectMenu - bordered single select";
+            description: "GitHub filter rows with dividers, a default-foreground Check, semibold selection, title, close control, and dismissal behavior.";
             content-height: root.filter-menu == "" ? 48px : 216px;
 
             status-filter-button := GitHubFilterMenuButton {
