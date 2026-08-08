@@ -104,6 +104,34 @@ export component GitHubFloatingOverlayHost inherits Rectangle {
         : root.alignment == GitHubTooltipAlignment.End
             ? root.anchor-bottom - root.floating-height
             : root.anchor-top + (root.anchor-height - root.floating-height) / 2;
+    private property <length> max-surface-x: max(
+        root.boundary-padding,
+        Math.floor(
+            (root.width - root.floating-width - root.boundary-padding) / 1px
+        ) * 1px,
+    );
+    private property <length> max-surface-y: max(
+        root.boundary-padding,
+        Math.floor(
+            (root.height - root.floating-height - root.boundary-padding) / 1px
+        ) * 1px,
+    );
+    private property <length> clamped-x: max(
+        root.boundary-padding,
+        min(root.max-surface-x, root.ideal-x),
+    );
+    private property <length> clamped-y: max(
+        root.boundary-padding,
+        min(root.max-surface-y, root.ideal-y),
+    );
+    // Center alignment commonly produces a half-logical-pixel origin. Retina
+    // masks that at 2x, but on a 1x external display it changes glyph coverage
+    // and makes identical tooltip text look gray. Snap once in this shared
+    // geometry layer so every generic and factory-local portal behaves alike.
+    private property <length> snapped-x:
+        Math.round(root.clamped-x / 1px) * 1px;
+    private property <length> snapped-y:
+        Math.round(root.clamped-y / 1px) * 1px;
 
     width: 100%;
     height: 100%;
@@ -113,17 +141,11 @@ export component GitHubFloatingOverlayHost inherits Rectangle {
     surface-slot := Rectangle {
         x: max(
             root.boundary-padding,
-            min(
-                root.ideal-x,
-                max(root.boundary-padding, root.width - root.floating-width - root.boundary-padding),
-            ),
+            min(root.max-surface-x, root.snapped-x),
         );
         y: max(
             root.boundary-padding,
-            min(
-                root.ideal-y,
-                max(root.boundary-padding, root.height - root.floating-height - root.boundary-padding),
-            ),
+            min(root.max-surface-y, root.snapped-y),
         );
         width: root.floating-width;
         height: root.floating-height;

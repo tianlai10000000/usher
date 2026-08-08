@@ -391,7 +391,9 @@ expanded/collapsed, and success confirmation.
   the Floating UI sequence `offset -> flip(bestFit) -> shift(padding) -> size`:
   keep the preferred side when it fits, try its opposite, otherwise choose the
   least-overflowing side, clamp both axes to an 8 px visible-viewport inset,
-  and wrap long labels to the remaining width. Every Slint global graph owns
+  snap the final surface origin and measured width to whole logical pixels so
+  12 px text retains identical contrast on 1x and Retina displays, and wrap
+  long labels to the remaining width. Every Slint global graph owns
   one root portal, including the independently compiled Settings and Messages
   pages, so scroll/list/card/menu `clip` cannot truncate the surface. A generic
   portal remounts its measurement surface for each new claim token so a
@@ -406,8 +408,10 @@ expanded/collapsed, and success confirmation.
   Tooltip 调用点只发布完整锚点矩形及首选方向/对齐，禁止自行计算浮层 `x`/`y`。
   根层按 `offset -> flip(bestFit) -> shift(padding) -> size` 计算：能容纳时保留
   首选方向，否则尝试反向，再选择溢出最少的一侧；两轴约束在可视视口 8px 内边距
-  内，长文案按剩余宽度换行。每个 Slint global 图各自挂一个根门户，包括独立编译的
-  Settings 与 Messages，因此滚动区、列表、卡片和菜单的 `clip` 不得裁剪 Tooltip。
+  内，并把最终 surface 原点和测量宽度对齐到完整逻辑像素，确保 12px 文本在 1x 与
+  Retina 显示器上保持一致对比度；长文案按剩余宽度换行。每个 Slint global 图各自
+  挂一个根门户，包括独立编译的 Settings 与 Messages，因此滚动区、列表、卡片和
+  菜单的 `clip` 不得裁剪 Tooltip。
   通用 portal 每次收到新的 claim token 都重新创建文本测量 surface，禁止独立 factory
   复用上一条文案的 preferred-width。定位器常驻并用空文案撤销；操作触发业务回调前
   同步关闭当前 claim，token/lease 仅作为模型移除兜底。Messages 行动作使用只传枚举的

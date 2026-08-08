@@ -12,8 +12,13 @@ export component GitHubTooltipSurface inherits Rectangle {
     in property <length> viewport-max-width: 320px;
     in property <length> viewport-max-height: 320px;
 
+    // Keep the painted box and its 8px text inset on the logical-pixel grid.
+    // Fractional preferred widths otherwise make centered tips land at x.5;
+    // FemtoVG visibly softens 12px white glyphs there on 1x displays.
     private property <length> natural-width:
-        tip-measure.preferred-width + GitHubMetrics.size-16;
+        Math.ceil(
+            (tip-measure.preferred-width + GitHubMetrics.size-16) / 1px
+        ) * 1px;
     private property <length> label-height: max(
         tip-label.preferred-height,
         GitHubMetrics.size-16 + GitHubMetrics.size-2

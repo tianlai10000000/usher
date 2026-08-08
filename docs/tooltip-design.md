@@ -143,7 +143,10 @@ Tooltip {
 4. `flip` 能容纳时保留首选侧；否则尝试相反侧；两侧都不完整时，在四侧中选择
    主轴溢出最少的 `bestFit`。
 5. `shift` 最后同时 clamp 两轴，保证完整 surface 不越过可视边界。
-6. 定位器常驻，用空文案撤销 claim。共享 IconButton 点击时先同步 dismiss，再执行
+6. 最终 surface 原点取整到完整逻辑像素，文本测量宽度向上取整。居中对齐不得把
+   12px 文本放在半逻辑像素上，否则 1x 显示器的 FemtoVG 灰度抗锯齿会使同一白色
+   token 看起来比起始/结束对齐的 Tooltip 更灰；Retina 2x 不得掩盖这项回归。
+7. 定位器常驻，用空文案撤销 claim。共享 IconButton 点击时先同步 dismiss，再执行
    可能卸载锚点的业务回调；token 防止旧 locator 清除新 tip，lease 仅兜底模型直接
    删除导致的异常生命周期。
 
@@ -170,6 +173,8 @@ portal，禁止为了“全局统一”跨 factory 读取另一个生成图的 g
 - 点击会卸载锚点的操作必须在业务回调前同步关闭 tip，禁止闪到窗口原点。
 - Messages 反复进入/离开、切换已读状态、删除行时不得串文案或保留旧 tip。
 - 在任意通用 factory 内连续 hover 长短不同的 Tooltip 时，每次都必须重新测量宽度。
+- Center/Start/End 对齐的 Tooltip 在 1x 与 Retina 显示器上必须保持相同文字对比度；
+  共享几何层输出的 surface 原点不得包含半逻辑像素。
 - Settings/Messages 的 Tooltip 不得依赖 `MainWindow` 的 global 实例。
 - 新增独立 factory 时必须同时新增 factory-root portal，并加入此处的独立 factory 清单。
 
