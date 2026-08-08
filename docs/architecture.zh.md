@@ -101,8 +101,8 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/components/github_scroll_view.slint` | 应用自有的常驻纵向视口和语义滚动条基础。 |
 | `ui/components/navigation/github_underline_nav.slint` | Workflow 及其功能子页签共用的、支持键盘的 Primer UnderlineNav/UnderlinePanels 容器与 Item；容器统一管理全宽底线、安全区内边距和页签间距。 |
 | `ui/components/github_segmented_control.slint` | 共用的紧凑 Primer SegmentedControl 外壳、Item、Divider 及焦点/禁用交互。 |
-| `ui/components/github_tooltip.slint` | 共用的 GitHub TooltipV2 契约：调用方挂载透明定位器，由 `ui/state/tooltip_overlay_state.slint` 与根层 `GitHubTooltipOverlayHost` 在窗口根绘制并约束在视口内，避免被滚动/裁剪祖先或窗口边界截断。 |
-| `ui/state/tooltip_overlay_state.slint` | 窗口根 Tooltip 门户状态（文案、窗口坐标、claim token、lease 心跳）。 |
+| `ui/components/github_tooltip.slint` | 共用的 GitHub TooltipV2 契约：调用方挂载透明锚点定位器，由 `ui/state/tooltip_overlay_state.slint` 与根层 `GitHubTooltipOverlayHost` 统一执行 offset/flip/shift/size，在窗口根绘制并避开滚动/裁剪祖先与窗口边界。 |
+| `ui/state/tooltip_overlay_state.slint` | 窗口根 Tooltip 门户状态（文案、锚点矩形、首选方向/对齐、claim token、lease 心跳）。 |
 | `ui/components/github_action_menu.slint` | 点击浮层共用的 Primer ActionMenu/AnchoredOverlay 表面，统一焦点归属、Esc 关闭、打开时 peer exclusive-claim、视口碰撞定位、限高纵向滚动、ActionList 行，以及 `GitHubActionMenuTriggerArea` 的 press 态开/关（避免标题栏 Chrome dismiss 与 toggle 同一次点击先关后开）。页面空白点击关闭仍由各宿主在菜单之下自行挂载 TouchArea。`ui/state/transient_overlay_state.slint` 提供 `dismiss-revision` 与 `exclusive-generation`。 |
 | `ui/components/page/github_page_header.slint` | 标题、说明、前导视觉、分隔线和尾部操作共用的 Primer PageHeader 基础。 |
 | `ui/components/button/github_copy_button.slint` | 所有图标复制操作共用的 GitHub CopyToClipboardButton 交互；组件负责短时 Copy→Check 状态和 `Copied!` Tooltip，feature callback 返回剪贴板写入是否成功。 |
@@ -167,8 +167,13 @@ Slint 实验性的 `ComponentContainer`/component-factory 边界挂载。这会�
 API，并由 `src/settings_page.rs` 与 `src/message_center.rs` 显式桥接。
 跨 crate factory 创建的组件拥有独立 Slint global 图，因此桥接层必须复制初始
 `AppState`、把 callback 转发给 `MainWindow`，并同步后续状态变化，不能假定两边
-global 自动共享。Messages Inbox 的行只上报 hover owner、文案和位置，由页面唯一的
-`GitHubTooltipSurface` 直接用最新值覆盖旧值。修改 `settings.slint` 或
+global 自动共享。Messages Inbox 行只把动作枚举与锚点矩形发布到专用的 factory 本地
+`MessageTooltipOverlayState`，由页面唯一的 `GitHubMessageTooltipOverlayHost` 把枚举
+映射到相互独立的字面量 surface，任何标签字符串都不穿过列表 delegate。Settings 为
+共享控件挂载本地通用 `GitHubTooltipOverlayHost`，并在每个新 claim token 到来时重建
+文本测量 surface。两个 factory
+页面都复用与 `MainWindow` 相同的锚点式 offset/flip/shift/size 实现，但不尝试跨
+factory 边界共享 global 实例。修改 `settings.slint` 或
 `messages.slint` 不得重新生成或编译
 `usher-ui`；修改主壳仍会重编主生成 crate。启用 `SLINT_LIVE_PREVIEW` 时，两套独立
 build script 都会刻意保持 factory 产品为静态生成，因为 Slint 1.17 的

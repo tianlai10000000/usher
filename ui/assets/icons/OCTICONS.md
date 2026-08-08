@@ -58,6 +58,8 @@ behind a plain X).
 unchanged upstream controls used by the Project list and its actions.
 `octicon-link-external-16.svg` is the unchanged upstream LinkExternal Octicon
 used by the notification Banner overflow “View all notifications” action.
+`octicon-read-16.svg` and `octicon-unread-16.svg` are the unchanged upstream
+open/closed envelope icons used by the read and unread Inbox row actions.
 `octicon-arrow-up-16.svg` is the upstream ArrowUp Octicon used by the page
 Back-to-top IconButton.
 `octicon-home-16.svg`, `octicon-gear-16.svg`, and
@@ -89,3 +91,11 @@ spacing. Light and dark files use the corresponding GitHub Primer color tokens.
 - Color-token source: <https://github.com/primer/primitives>
 - License: MIT
 - Copyright: GitHub, Inc.
+
+## GitHub spinner head
+
+`github-spinner-head-16.svg` is application-owned Primer Spinner geometry, not
+an Octicon. It contains only the opaque quarter-ring head; Slint supplies its
+semantic foreground color and rotates the cached image above the static track.
+Keeping animation out of Path coordinates avoids rebuilding vector geometry on
+every frame, including on 60 Hz displays.

@@ -1,5 +1,6 @@
 import {
-    MessageMarkToggleAction,
+    MessageMarkReadAction,
+    MessageMarkUnreadAction,
     MessageDeleteAction
 } from "./github_message_actions.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
@@ -73,7 +74,10 @@ export component GitHubMessageListItem inherits Rectangle {
     private property <length> content-x:
         root.level-icon-x + GitHubMetrics.icon-medium + GitHubMetrics.size-12;
     private property <bool> row-hot:
-        row-touch.has-hover || mark-btn.has-hover || delete-btn.has-hover;
+        row-touch.has-hover
+        || mark-read-btn.has-hover
+        || mark-unread-btn.has-hover
+        || delete-btn.has-hover;
 
     width: 100%;
     height: root.row-height;
@@ -151,14 +155,24 @@ export component GitHubMessageListItem inherits Rectangle {
         overflow: elide;
     }
 
-    mark-btn := MessageMarkToggleAction {
+    mark-read-btn := MessageMarkReadAction {
         x: root.mark-action-x;
         y: (parent.height - self.height) / 2;
+        visible: !root.item.read;
         control-size: root.action-size;
-        read: root.item.read;
         tip-enabled: root.tip-enabled;
         opacity: root.row-hot || self.has-hover ? 1 : 0.72;
-        clicked => { root.read-changed(root.item.id, !root.item.read); }
+        clicked => { root.read-changed(root.item.id, true); }
+    }
+
+    mark-unread-btn := MessageMarkUnreadAction {
+        x: root.mark-action-x;
+        y: (parent.height - self.height) / 2;
+        visible: root.item.read;
+        control-size: root.action-size;
+        tip-enabled: root.tip-enabled;
+        opacity: root.row-hot || self.has-hover ? 1 : 0.72;
+        clicked => { root.read-changed(root.item.id, false); }
     }
 
     delete-btn := MessageDeleteAction {

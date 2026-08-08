@@ -2,6 +2,7 @@ import { UpdateLogic } from "./update/update.slint";
 import { AppState } from "../state/app_state.slint";
 import { LayoutConstants } from "../layout_constants.slint";
 import { GitHubTooltip } from "./github_tooltip.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../state/tooltip_overlay_state.slint";
 import { GitHubActionMenu } from "./github_action_menu.slint";
 import { GitHubProgressBar } from "./github_progress_bar.slint";
 import { GitHubCounterLabel, GitHubCounterScheme } from "./label/github_counter_label.slint";
@@ -145,11 +146,12 @@ component GitHubStatusBarItem inherits Rectangle {
         background: transparent;
     }
     
-    // Tooltip
-    if hover-area.has-hover && tooltip-text != "" : GitHubTooltip {
-        x: root.tooltip-align-end ? parent.width - self.width : 0px;
-        y: -24px;
-        text: root.tooltip-text;
+    if root.tooltip-text != "": GitHubTooltip {
+        preferred-placement: GitHubTooltipPlacement.Top;
+        alignment: root.tooltip-align-end
+            ? GitHubTooltipAlignment.End
+            : GitHubTooltipAlignment.Start;
+        text: hover-area.has-hover ? root.tooltip-text : "";
     }
 }
 
@@ -363,11 +365,13 @@ export component GitHubStatusBar inherits Rectangle {
                         }
                     }
                     
-                    // Tooltip
-                    if hover-area.has-hover : GitHubTooltip {
-                        y: -28px;
-                        text: "Download progress: " + Math.round(UpdateLogic.download-progress * 100) + "%\n" +
-                            UpdateLogic.download-status;
+                    GitHubTooltip {
+                        preferred-placement: GitHubTooltipPlacement.Top;
+                        alignment: GitHubTooltipAlignment.Start;
+                        text: hover-area.has-hover
+                            ? "Download progress: " + Math.round(UpdateLogic.download-progress * 100) + "%\n"
+                                + UpdateLogic.download-status
+                            : "";
                     }
                 }
                 

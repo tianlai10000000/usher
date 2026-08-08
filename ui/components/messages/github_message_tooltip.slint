@@ -1,0 +1,292 @@
+import { GitHubFloatingOverlayHost } from "../github_floating_overlay.slint";
+import { GitHubTooltipSurface } from "../github_tooltip.slint";
+import {
+    GitHubTooltipAlignment,
+    GitHubTooltipPlacement,
+} from "../../state/tooltip_overlay_state.slint";
+import {
+    MessageTooltipKind,
+    MessageTooltipOverlayState,
+} from "../../state/message_tooltip_overlay_state.slint";
+
+// Do not consolidate these anchors behind a `kind` input. The Messages list is
+// an isolated ComponentFactory whose recycled delegates have retained sibling
+// input values. Each leaf publishes its action kind directly so neither a
+// string nor an enum crosses that boundary.
+export component GitHubMarkReadTooltipAnchor inherits Rectangle {
+    in property <bool> active: false;
+
+    private property <bool> has-published-non-origin-position: false;
+    private property <bool> detached:
+        root.has-published-non-origin-position
+        && root.absolute-position.x == 0px
+        && root.absolute-position.y == 0px;
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+
+    init => { root.publish(); }
+    changed active => { root.publish(); }
+    changed absolute-position => { root.publish(); }
+    changed width => { root.publish(); }
+    changed height => { root.publish(); }
+
+    lease-timer := Timer {
+        interval: 32ms;
+        running: root.active;
+        triggered => {
+            if !root.detached && root.width > 0px && root.height > 0px {
+                MessageTooltipOverlayState.renew(
+                    MessageTooltipKind.MarkRead,
+                    root.absolute-position.x,
+                    root.absolute-position.y,
+                    root.width,
+                    root.height,
+                );
+            }
+        }
+    }
+
+    function publish() {
+        if root.active && !root.detached && root.width > 0px && root.height > 0px {
+            debug(
+                "[tooltip.show] scope=messages node=MessageMarkToggleAction.MarkRead text=Mark as read x={} y={} width={} height={}",
+                root.absolute-position.x,
+                root.absolute-position.y,
+                root.width,
+                root.height,
+            );
+            MessageTooltipOverlayState.show(
+                MessageTooltipKind.MarkRead,
+                root.absolute-position.x,
+                root.absolute-position.y,
+                root.width,
+                root.height,
+            );
+            if root.absolute-position.x != 0px || root.absolute-position.y != 0px {
+                root.has-published-non-origin-position = true;
+            }
+        } else {
+            MessageTooltipOverlayState.hide(
+                MessageTooltipKind.MarkRead,
+                root.absolute-position.x,
+                root.absolute-position.y,
+            );
+        }
+    }
+}
+
+export component GitHubMarkUnreadTooltipAnchor inherits Rectangle {
+    in property <bool> active: false;
+
+    private property <bool> has-published-non-origin-position: false;
+    private property <bool> detached:
+        root.has-published-non-origin-position
+        && root.absolute-position.x == 0px
+        && root.absolute-position.y == 0px;
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+
+    init => { root.publish(); }
+    changed active => { root.publish(); }
+    changed absolute-position => { root.publish(); }
+    changed width => { root.publish(); }
+    changed height => { root.publish(); }
+
+    lease-timer := Timer {
+        interval: 32ms;
+        running: root.active;
+        triggered => {
+            if !root.detached && root.width > 0px && root.height > 0px {
+                MessageTooltipOverlayState.renew(
+                    MessageTooltipKind.MarkUnread,
+                    root.absolute-position.x,
+                    root.absolute-position.y,
+                    root.width,
+                    root.height,
+                );
+            }
+        }
+    }
+
+    function publish() {
+        if root.active && !root.detached && root.width > 0px && root.height > 0px {
+            debug(
+                "[tooltip.show] scope=messages node=MessageMarkToggleAction.MarkUnread text=Mark as unread x={} y={} width={} height={}",
+                root.absolute-position.x,
+                root.absolute-position.y,
+                root.width,
+                root.height,
+            );
+            MessageTooltipOverlayState.show(
+                MessageTooltipKind.MarkUnread,
+                root.absolute-position.x,
+                root.absolute-position.y,
+                root.width,
+                root.height,
+            );
+            if root.absolute-position.x != 0px || root.absolute-position.y != 0px {
+                root.has-published-non-origin-position = true;
+            }
+        } else {
+            MessageTooltipOverlayState.hide(
+                MessageTooltipKind.MarkUnread,
+                root.absolute-position.x,
+                root.absolute-position.y,
+            );
+        }
+    }
+}
+
+export component GitHubDeleteTooltipAnchor inherits Rectangle {
+    in property <bool> active: false;
+
+    private property <bool> has-published-non-origin-position: false;
+    private property <bool> detached:
+        root.has-published-non-origin-position
+        && root.absolute-position.x == 0px
+        && root.absolute-position.y == 0px;
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+
+    init => { root.publish(); }
+    changed active => { root.publish(); }
+    changed absolute-position => { root.publish(); }
+    changed width => { root.publish(); }
+    changed height => { root.publish(); }
+
+    lease-timer := Timer {
+        interval: 32ms;
+        running: root.active;
+        triggered => {
+            if !root.detached && root.width > 0px && root.height > 0px {
+                MessageTooltipOverlayState.renew(
+                    MessageTooltipKind.Delete,
+                    root.absolute-position.x,
+                    root.absolute-position.y,
+                    root.width,
+                    root.height,
+                );
+            }
+        }
+    }
+
+    function publish() {
+        if root.active && !root.detached && root.width > 0px && root.height > 0px {
+            debug(
+                "[tooltip.show] scope=messages node=MessageDeleteAction text=Delete x={} y={} width={} height={}",
+                root.absolute-position.x,
+                root.absolute-position.y,
+                root.width,
+                root.height,
+            );
+            MessageTooltipOverlayState.show(
+                MessageTooltipKind.Delete,
+                root.absolute-position.x,
+                root.absolute-position.y,
+                root.width,
+                root.height,
+            );
+            if root.absolute-position.x != 0px || root.absolute-position.y != 0px {
+                root.has-published-non-origin-position = true;
+            }
+        } else {
+            MessageTooltipOverlayState.hide(
+                MessageTooltipKind.Delete,
+                root.absolute-position.x,
+                root.absolute-position.y,
+            );
+        }
+    }
+}
+
+// Factory-root portal. Keep all three literal surfaces mounted for the complete
+// page lifetime. Opacity selects the active one without allowing Slint to reuse
+// a conditional node's previous text or preferred width.
+export component GitHubMessageTooltipOverlayHost inherits Rectangle {
+    in property <length> boundary-padding: 8px;
+    in property <length> anchor-gap: 4px;
+    private property <int> observed-lease: 0;
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    clip: false;
+
+    mark-read-host := GitHubFloatingOverlayHost {
+        opacity: MessageTooltipOverlayState.kind == MessageTooltipKind.MarkRead ? 1 : 0;
+        anchor-x: MessageTooltipOverlayState.anchor-x;
+        anchor-y: MessageTooltipOverlayState.anchor-y;
+        anchor-width: MessageTooltipOverlayState.anchor-width;
+        anchor-height: MessageTooltipOverlayState.anchor-height;
+        floating-width: mark-read-surface.width;
+        floating-height: mark-read-surface.height;
+        preferred-placement: GitHubTooltipPlacement.Bottom;
+        alignment: GitHubTooltipAlignment.End;
+        boundary-padding: root.boundary-padding;
+        anchor-gap: root.anchor-gap;
+
+        mark-read-surface := GitHubTooltipSurface {
+            text: "Mark as read";
+            viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
+            viewport-max-height: max(0px, root.height - root.boundary-padding * 2);
+        }
+    }
+
+    mark-unread-host := GitHubFloatingOverlayHost {
+        opacity: MessageTooltipOverlayState.kind == MessageTooltipKind.MarkUnread ? 1 : 0;
+        anchor-x: MessageTooltipOverlayState.anchor-x;
+        anchor-y: MessageTooltipOverlayState.anchor-y;
+        anchor-width: MessageTooltipOverlayState.anchor-width;
+        anchor-height: MessageTooltipOverlayState.anchor-height;
+        floating-width: mark-unread-surface.width;
+        floating-height: mark-unread-surface.height;
+        preferred-placement: GitHubTooltipPlacement.Bottom;
+        alignment: GitHubTooltipAlignment.End;
+        boundary-padding: root.boundary-padding;
+        anchor-gap: root.anchor-gap;
+
+        mark-unread-surface := GitHubTooltipSurface {
+            text: "Mark as unread";
+            viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
+            viewport-max-height: max(0px, root.height - root.boundary-padding * 2);
+        }
+    }
+
+    delete-host := GitHubFloatingOverlayHost {
+        opacity: MessageTooltipOverlayState.kind == MessageTooltipKind.Delete ? 1 : 0;
+        anchor-x: MessageTooltipOverlayState.anchor-x;
+        anchor-y: MessageTooltipOverlayState.anchor-y;
+        anchor-width: MessageTooltipOverlayState.anchor-width;
+        anchor-height: MessageTooltipOverlayState.anchor-height;
+        floating-width: delete-surface.width;
+        floating-height: delete-surface.height;
+        preferred-placement: GitHubTooltipPlacement.Bottom;
+        alignment: GitHubTooltipAlignment.End;
+        boundary-padding: root.boundary-padding;
+        anchor-gap: root.anchor-gap;
+
+        delete-surface := GitHubTooltipSurface {
+            text: "Delete";
+            viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
+            viewport-max-height: max(0px, root.height - root.boundary-padding * 2);
+        }
+    }
+
+    lease-watch := Timer {
+        interval: 48ms;
+        running: MessageTooltipOverlayState.kind != MessageTooltipKind.None;
+        triggered => {
+            if MessageTooltipOverlayState.lease == root.observed-lease {
+                MessageTooltipOverlayState.dismiss-all();
+            } else {
+                root.observed-lease = MessageTooltipOverlayState.lease;
+            }
+        }
+    }
+}

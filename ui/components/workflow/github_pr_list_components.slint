@@ -1,4 +1,5 @@
 import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubFilterMenuFrame, GitHubFilterMenuItem, GitHubFilterMenuSectionLabel } from "../github_filter_menu.slint";
@@ -115,11 +116,11 @@ export component GitHubPullRequestStateButton inherits Rectangle {
     }
 
     // Explain a missing count on the interactive control (Primer guidance).
-    if root.count < 0 && state-touch.has-hover: GitHubTooltip {
-        x: 8px;
-        y: parent.height - 4px;
+    GitHubTooltip {
         z: 20;
-        text: "Count unavailable";
+        preferred-placement: GitHubTooltipPlacement.Bottom;
+        alignment: GitHubTooltipAlignment.Start;
+        text: root.count < 0 && state-touch.has-hover ? "Count unavailable" : "";
     }
 
     state-touch := TouchArea {

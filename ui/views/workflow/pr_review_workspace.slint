@@ -7,6 +7,7 @@ import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, Wo
 import { GitHubTreeIndentGuides, GitHubCommitMessageToggleButton, GitHubFileToolbarButton, GitHubCommitSummaryNavButton, GitHubFileChangeTypeIcon, GitHubSelectableDiffCode, GitHubSplitDiffSide, GitHubDiffViewPreview, GitHubDiffViewChoice, GitHubDiffSettingsPopover, GitHubFileTreeToggleButton, GitHubFileMenuButton, GitHubDiffStatSegment, GitHubDiffStatBar, GitHubFileDiffStat, GitHubCodeRenderingIndicator, GitHubLargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, GitHubDiffFindBar } from "../../components/pr_review/content.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubCenteredLoadingState } from "../../components/github_spinner.slint";
 import { GitHubVirtualListScrollbar } from "../../components/github_scroll_view.slint";
 export component GitHubPullRequestReviewPage inherits FocusScope {
@@ -2329,10 +2330,10 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                     commit-row.sha-hovered = self.has-hover;
                                 }
                             }
-                            if commit-row.sha-hovered: GitHubTooltip {
-                                x: parent.width - self.width;
-                                y: -self.height - 4px;
-                                text: "View commit details";
+                            GitHubTooltip {
+                                preferred-placement: GitHubTooltipPlacement.Top;
+                                alignment: GitHubTooltipAlignment.End;
+                                text: commit-row.sha-hovered ? "View commit details" : "";
                             }
                         }
                         copy-sha-button := GitHubCopyButton {

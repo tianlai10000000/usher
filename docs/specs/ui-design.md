@@ -385,13 +385,35 @@ expanded/collapsed, and success confirmation.
   underline and keyboard focus behavior.
 - `GitHubTooltip`: TooltipV2 pattern; tooltip canvas/foreground tokens, 12 px
   text in an 18 px line box (so descenders are not clipped), 4 px vertical and
-  8 px horizontal padding, 6 px radius, and a 4 px host gap. Call sites keep
-  relative host geometry; the painted tip always portals through
-  `TooltipOverlayState` to the window-root `GitHubTooltipOverlayHost` so
-  ancestor `clip` (scroll views, cards, menus) cannot truncate it. The root
-  host clamps the complete surface to an 8 px viewport inset. Local `z` alone
-  is not a valid escape from clip. / Tooltip 表面必须通过窗口根门户绘制，并
-  约束在视口 8px 内边距内，既不能被祖先 clip，也不能越过窗口边界。
+  8 px horizontal padding, 6 px radius, and a 4 px host gap. Call sites publish
+  only the complete anchor rectangle plus a preferred side/alignment; they must
+  never calculate floating-surface `x`/`y`. `GitHubTooltipOverlayHost` applies
+  the Floating UI sequence `offset -> flip(bestFit) -> shift(padding) -> size`:
+  keep the preferred side when it fits, try its opposite, otherwise choose the
+  least-overflowing side, clamp both axes to an 8 px visible-viewport inset,
+  and wrap long labels to the remaining width. Every Slint global graph owns
+  one root portal, including the independently compiled Settings and Messages
+  pages, so scroll/list/card/menu `clip` cannot truncate the surface. A generic
+  portal remounts its measurement surface for each new claim token so a
+  ComponentFactory cannot reuse the preceding label's preferred width. Locators
+  stay mounted and clear text while inactive; action activation synchronously
+  dismisses the active claim before callbacks that may unmount the anchor, with
+  token/lease expiry only as a model-removal fallback. Messages row actions use
+  an enum-only factory-local state and separate literal surfaces; no label
+  string or shared dynamic tip-label property may cross a list delegate. Local
+  Tooltip rectangles, pointer-relative built-in
+  `Tooltip`, and local `z` escalation are not valid alternatives. /
+  Tooltip 调用点只发布完整锚点矩形及首选方向/对齐，禁止自行计算浮层 `x`/`y`。
+  根层按 `offset -> flip(bestFit) -> shift(padding) -> size` 计算：能容纳时保留
+  首选方向，否则尝试反向，再选择溢出最少的一侧；两轴约束在可视视口 8px 内边距
+  内，长文案按剩余宽度换行。每个 Slint global 图各自挂一个根门户，包括独立编译的
+  Settings 与 Messages，因此滚动区、列表、卡片和菜单的 `clip` 不得裁剪 Tooltip。
+  通用 portal 每次收到新的 claim token 都重新创建文本测量 surface，禁止独立 factory
+  复用上一条文案的 preferred-width。定位器常驻并用空文案撤销；操作触发业务回调前
+  同步关闭当前 claim，token/lease 仅作为模型移除兜底。Messages 行动作使用只传枚举的
+  factory-local state 和相互独立的字面量 surface，任何标签字符串或共享动态 tip-label
+  属性都不得穿过列表 delegate。局部 Tooltip Rectangle、指针相对的内置 `Tooltip` 和提高局部
+  `z` 均不是允许的替代方案。
 - `GitHubCounterLabel`: the typed Primer CounterLabel counterpart for counts
   adjacent to navigation text or actions. It provides Default, Primary, and
   Secondary schemes, optional upper-limit formatting, a compact overlay mode,
@@ -494,7 +516,9 @@ expanded/collapsed, and success confirmation.
 - `GitHubSegmentedControl`, `GitHubSegmentedControlItem`, and
   `GitHubSegmentedControlDivider`: the shared compact, mutually exclusive
   choice group. The shell width hugs the segment row with no trailing empty
-  chrome. Items own selected, hover, disabled, Enter/Space, and
+  chrome. Item labels fill the complete control height, remain vertically
+  centered, and apply the shared 1 px optical correction for compact text.
+  Items own selected, hover, disabled, Enter/Space, and
   keyboard-visible focus states, and always report `clicked` (callers may
   ignore a re-selection). Live numeric suffixes use the item's integer `count`
   input. The item renders `label`, `" ("`, the integer, and `")"` as separate
@@ -514,7 +538,10 @@ expanded/collapsed, and success confirmation.
   retain a visible loading label/status and must not shift layout when it
   appears. It paints a Primer 2px track (25% opacity) plus a rotating head
   with the caller-supplied theme foreground so the indicator stays visible in
-  both light and dark mode. `GitHubCenteredLoadingState` is the shared compact
+  both light and dark mode. The track geometry remains static and animation
+  updates only the cached head image's rotation transform; it must not rebuild
+  Path coordinates per frame and must remain evenly paced at 60 Hz.
+  `GitHubCenteredLoadingState` is the shared compact
   spinner+13px muted label panel used by PR list and PR review
   Conversation/Commits/Files changed loading.
 - `GitHubActionsJob`: the shared GitHub Actions-style Job/Step presenter for
@@ -535,7 +562,10 @@ expanded/collapsed, and success confirmation.
 - `GitHubTextField` and `GitHubCompactTextField`: visible label when used as a
   form control, 32 px medium input, focus outline, disabled/loading handling,
   caption, and descriptive validation message. Error color alone is
-  insufficient.
+  insufficient. A transformed loading visual must be mounted above the field as
+  a sibling of the clipped TextInput surface, not inside its clip subtree, so
+  continuous animation cannot destabilize text antialiasing on non-Retina
+  60 Hz displays.
 - `GitHubToggle`: immediate-save boolean setting only; permanently visible
   external label/caption supplied by its owner, 24 px minimum target, loading
   and disabled protection, Enter/Space activation, and keyboard-visible focus.

@@ -1,7 +1,14 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import {
+    GitHubDeleteTooltipAnchor,
+    GitHubMarkReadTooltipAnchor,
+    GitHubMarkUnreadTooltipAnchor,
+} from "./github_message_tooltip.slint";
+import { MessageTooltipOverlayState } from "../../state/message_tooltip_overlay_state.slint";
 
 // Inbox row actions must NOT share `in property <image>` or tip-label strings.
-// Slint list rows alias those bindings. Tips paint locally with literal labels.
+// Slint list rows alias those bindings. Each action publishes a literal label
+// to the Messages factory's page-owned tooltip portal.
 
 component MessageActionChrome inherits FocusScope {
     in property <bool> tip-enabled: true;
@@ -28,6 +35,8 @@ component MessageActionChrome inherits FocusScope {
     key-pressed(event) => {
         root.keyboard-focus-visible = true;
         if event.text == Key.Return || event.text == " " {
+            // Read/delete callbacks can immediately replace this list delegate.
+            MessageTooltipOverlayState.dismiss-all();
             root.clicked();
             return accept;
         }
@@ -63,148 +72,47 @@ component MessageActionChrome inherits FocusScope {
         clicked => {
             root.keyboard-focus-visible = false;
             root.focus();
+            MessageTooltipOverlayState.dismiss-all();
             root.clicked();
         }
     }
 }
 
-component MessageMarkReadTip inherits Rectangle {
-    in property <bool> open: false;
-    private property <length> label-height: max(
-        tip-measure.preferred-height,
-        GitHubMetrics.size-16 + GitHubMetrics.size-2
-    );
-
-    width: tip-measure.preferred-width + GitHubMetrics.size-16;
-    height: root.label-height + GitHubMetrics.size-8;
-    visible: root.open;
-    border-radius: GitHubMetrics.radius-medium;
-    background: GitHubTheme.tooltip-bg;
-
-    tip-measure := Text {
-        visible: false;
-        text: "Mark as read";
-        font-size: GitHubMetrics.text-small;
-        wrap: no-wrap;
-    }
-
-    Text {
-        x: GitHubMetrics.size-8;
-        y: GitHubMetrics.size-4;
-        width: self.preferred-width;
-        height: root.label-height;
-        text: "Mark as read";
-        color: GitHubTheme.tooltip-fg;
-        font-size: GitHubMetrics.text-small;
-        vertical-alignment: center;
-        wrap: no-wrap;
-    }
-}
-
-component MessageMarkUnreadTip inherits Rectangle {
-    in property <bool> open: false;
-    private property <length> label-height: max(
-        tip-measure.preferred-height,
-        GitHubMetrics.size-16 + GitHubMetrics.size-2
-    );
-
-    width: tip-measure.preferred-width + GitHubMetrics.size-16;
-    height: root.label-height + GitHubMetrics.size-8;
-    visible: root.open;
-    border-radius: GitHubMetrics.radius-medium;
-    background: GitHubTheme.tooltip-bg;
-
-    tip-measure := Text {
-        visible: false;
-        text: "Mark as unread";
-        font-size: GitHubMetrics.text-small;
-        wrap: no-wrap;
-    }
-
-    Text {
-        x: GitHubMetrics.size-8;
-        y: GitHubMetrics.size-4;
-        width: self.preferred-width;
-        height: root.label-height;
-        text: "Mark as unread";
-        color: GitHubTheme.tooltip-fg;
-        font-size: GitHubMetrics.text-small;
-        vertical-alignment: center;
-        wrap: no-wrap;
-    }
-}
-
-component MessageDeleteTip inherits Rectangle {
-    in property <bool> open: false;
-    private property <length> label-height: max(
-        tip-measure.preferred-height,
-        GitHubMetrics.size-16 + GitHubMetrics.size-2
-    );
-
-    width: tip-measure.preferred-width + GitHubMetrics.size-16;
-    height: root.label-height + GitHubMetrics.size-8;
-    visible: root.open;
-    border-radius: GitHubMetrics.radius-medium;
-    background: GitHubTheme.tooltip-bg;
-
-    tip-measure := Text {
-        visible: false;
-        text: "Delete";
-        font-size: GitHubMetrics.text-small;
-        wrap: no-wrap;
-    }
-
-    Text {
-        x: GitHubMetrics.size-8;
-        y: GitHubMetrics.size-4;
-        width: self.preferred-width;
-        height: root.label-height;
-        text: "Delete";
-        color: GitHubTheme.tooltip-fg;
-        font-size: GitHubMetrics.text-small;
-        vertical-alignment: center;
-        wrap: no-wrap;
-    }
-}
-
-export component MessageMarkToggleAction inherits MessageActionChrome {
-    in property <bool> read: false;
-    accessible-label: root.read ? "Mark as unread" : "Mark as read";
+// Keep read and unread as separate fixed leaves. ComponentFactory list rows
+// must never switch an Image source or stack state images behind opacity.
+export component MessageMarkReadAction inherits MessageActionChrome {
+    accessible-label: "Mark as read";
 
     Image {
         x: (parent.width - root.glyph-size) / 2;
         y: (parent.height - root.glyph-size) / 2;
         width: root.glyph-size;
         height: root.glyph-size;
-        opacity: root.read ? 0 : 1;
-        source: @image-url("../../assets/icons/octicon-check-16.svg");
-        image-fit: contain;
-        colorize: root.glyph-color;
-    }
-
-    Image {
-        x: (parent.width - root.glyph-size) / 2;
-        y: (parent.height - root.glyph-size) / 2;
-        width: root.glyph-size;
-        height: root.glyph-size;
-        opacity: root.read ? 1 : 0;
         source: @image-url("../../assets/icons/octicon-unread-16.svg");
         image-fit: contain;
         colorize: root.glyph-color;
     }
 
-    MessageMarkReadTip {
-        z: 100;
-        x: parent.width - self.width;
-        y: parent.height - 6px;
-        open: root.tip-active && !root.read;
+    GitHubMarkReadTooltipAnchor {
+        active: root.tip-active;
+    }
+}
+
+export component MessageMarkUnreadAction inherits MessageActionChrome {
+    accessible-label: "Mark as unread";
+
+    Image {
+        x: (parent.width - root.glyph-size) / 2;
+        y: (parent.height - root.glyph-size) / 2;
+        width: root.glyph-size;
+        height: root.glyph-size;
+        source: @image-url("../../assets/icons/octicon-read-16.svg");
+        image-fit: contain;
+        colorize: root.glyph-color;
     }
 
-    MessageMarkUnreadTip {
-        z: 100;
-        x: parent.width - self.width;
-        y: parent.height  - 6px; 
-        open: root.tip-active && root.read;
+    GitHubMarkUnreadTooltipAnchor {
+        active: root.tip-active;
     }
 }
 
@@ -223,10 +131,7 @@ export component MessageDeleteAction inherits MessageActionChrome {
         colorize: root.glyph-color;
     }
 
-    MessageDeleteTip {
-        z: 100;
-        x: parent.width - self.width;
-        y: parent.height - 6px;
-        open: root.tip-active;
+    GitHubDeleteTooltipAnchor {
+        active: root.tip-active;
     }
 }

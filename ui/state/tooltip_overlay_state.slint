@@ -1,35 +1,92 @@
-// Window-root bridge for GitHubTooltip. Locators inside clipped scroll/page
-// hosts publish geometry here; MainWindow paints one tip above every clip
-// ancestor. Raising local z cannot escape clip — this portal is the shared fix.
+// Logical placement requested by a tooltip anchor. The root host may flip to a
+// better side when the preferred side would overflow the visible viewport.
+export enum GitHubTooltipPlacement {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+export enum GitHubTooltipAlignment {
+    Start,
+    Center,
+    End,
+}
+
+// Window-root bridge for GitHubTooltip. Locators publish reference geometry;
+// the root host owns every floating-surface positioning decision.
 export global TooltipOverlayState {
     in-out property <bool> open: false;
     in-out property <string> text: "";
-    in-out property <length> x: 0px;
-    in-out property <length> y: 0px;
+    in-out property <length> anchor-x: 0px;
+    in-out property <length> anchor-y: 0px;
+    in-out property <length> anchor-width: 0px;
+    in-out property <length> anchor-height: 0px;
+    in-out property <GitHubTooltipPlacement> preferred-placement:
+        GitHubTooltipPlacement.Top;
+    in-out property <GitHubTooltipAlignment> alignment:
+        GitHubTooltipAlignment.Center;
     // Monotonic claim id so a stale hide/renew cannot clear a newer tip.
     in-out property <int> token: 0;
-    // Heartbeat from the active locator; the root host clears when it stalls
-    // after a conditional `if hover:` element is destroyed without a destructor.
+    // Heartbeat from the active locator. This is a lifecycle fallback for a
+    // reference destroyed by a list/model update before it can publish hide.
     in-out property <int> lease: 0;
 
-    callback show(string, length, length);
-    callback renew(int, string, length, length);
+    callback show(
+        string,
+        string,
+        length,
+        length,
+        length,
+        length,
+        GitHubTooltipPlacement,
+        GitHubTooltipAlignment,
+    );
+    callback renew(
+        int,
+        string,
+        length,
+        length,
+        length,
+        length,
+        GitHubTooltipPlacement,
+        GitHubTooltipAlignment,
+    );
     callback hide(int);
+    callback dismiss-all();
 
-    show(text, x, y) => {
+    show(node, text, anchor-x, anchor-y, anchor-width, anchor-height, placement, alignment) => {
         root.token += 1;
+        debug(
+            "[tooltip.show] token={} scope=generic node={} text={} x={} y={} width={} height={}",
+            root.token,
+            node,
+            text,
+            anchor-x,
+            anchor-y,
+            anchor-width,
+            anchor-height,
+        );
         root.text = text;
-        root.x = x;
-        root.y = y;
+        root.anchor-x = anchor-x;
+        root.anchor-y = anchor-y;
+        root.anchor-width = anchor-width;
+        root.anchor-height = anchor-height;
+        root.preferred-placement = placement;
+        root.alignment = alignment;
         root.open = true;
         root.lease += 1;
     }
 
-    renew(token, text, x, y) => {
+    renew(token, text, anchor-x, anchor-y, anchor-width, anchor-height, placement, alignment) => {
         if token == root.token {
             root.text = text;
-            root.x = x;
-            root.y = y;
+            root.anchor-x = anchor-x;
+            root.anchor-y = anchor-y;
+            root.anchor-width = anchor-width;
+            root.anchor-height = anchor-height;
+            root.preferred-placement = placement;
+            root.alignment = alignment;
             root.open = true;
             root.lease += 1;
         }
@@ -39,5 +96,11 @@ export global TooltipOverlayState {
         if token == root.token {
             root.open = false;
         }
+    }
+
+    dismiss-all() => {
+        root.token += 1;
+        root.open = false;
+        root.text = "";
     }
 }

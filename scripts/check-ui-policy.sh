@@ -37,6 +37,26 @@ if [ -n "$unexpected_icons" ]; then
     failed=1
 fi
 
+# Slint globals do not cross ComponentFactory/library-module boundaries. Every
+# independently generated route must therefore mount a factory-local tooltip
+# portal at its root, even when its current controls happen not to show tips.
+factory_build_scripts=$(rg -l '\.as_library\(' crates --glob 'build.rs' || true)
+for factory_build_script in $factory_build_scripts; do
+    factory_views=$(rg -o 'ui/views/[^" ]+\.slint' "$factory_build_script" || true)
+    if [ -z "$factory_views" ]; then
+        echo "UI policy: cannot locate the factory root view in $factory_build_script" >&2
+        failed=1
+        continue
+    fi
+
+    for factory_view in $factory_views; do
+        if ! rg -q 'GitHub(Message)?TooltipOverlayHost' "$factory_view"; then
+            echo "UI policy: independent factory root lacks a tooltip portal: $factory_view" >&2
+            failed=1
+        fi
+    done
+done
+
 if [ "$failed" -ne 0 ]; then
     exit 1
 fi

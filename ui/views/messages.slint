@@ -15,6 +15,8 @@ import {
     MessageLevel
 } from "../components/messages/github_message_components.slint";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+import { GitHubMessageTooltipOverlayHost } from "../components/messages/github_message_tooltip.slint";
+import { MessageTooltipOverlayState } from "../state/message_tooltip_overlay_state.slint";
 
 export { MessageListItem, MessageLevel } from "../components/messages/github_message_components.slint";
 
@@ -70,6 +72,7 @@ export component GitHubMessagesPage inherits Rectangle {
     changed active => {
         if !root.active {
             root.clear-confirmation = false;
+            MessageTooltipOverlayState.dismiss-all();
         }
     }
 
@@ -229,6 +232,14 @@ export component GitHubMessagesPage inherits Rectangle {
                 }
             }
         }
+    }
+
+    // ComponentFactory pages own an independent global graph. Keep the shared
+    // positioning algorithm, but mount its portal inside this page's viewport.
+    GitHubMessageTooltipOverlayHost {
+        width: parent.width;
+        height: parent.height;
+        z: 10000;
     }
 
 }

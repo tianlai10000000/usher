@@ -135,10 +135,12 @@ export component GitHubSegmentedControlItem inherits FocusScope {
     }
 
     HorizontalLayout {
+        y: GitHubMetrics.border-thin;
         width: parent.width;
         height: parent.height;
         spacing: 0px;
         alignment: center;
+        cross-axis-alignment: stretch;
 
         Text {
             text: root.label;

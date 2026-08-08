@@ -1,4 +1,5 @@
 import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubActionMenu } from "../github_action_menu.slint";
 import { GitHubCenteredLoadingState } from "../github_spinner.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
@@ -55,6 +56,8 @@ export component GitHubPullRequestFlow {
     private property <string> hovered-inline-tooltip: "";
     private property <length> hovered-inline-tooltip-x: 42px;
     private property <length> hovered-inline-tooltip-y: 0px;
+    private property <length> hovered-inline-tooltip-width: 1px;
+    private property <length> hovered-inline-tooltip-height: 1px;
     private property <bool> compact-filters: root.width < 620px;
     private property <bool> wrap-row-branches: root.width < 760px;
     private property <length> row-height: root.wrap-row-branches ? 98px : 64px;
@@ -511,7 +514,9 @@ export component GitHubPullRequestFlow {
                             root.hovered-inline-tooltip-x = self.absolute-position.x
                                 - root.absolute-position.x;
                             root.hovered-inline-tooltip-y = self.absolute-position.y
-                                - root.absolute-position.y + self.height + 4px;
+                                - root.absolute-position.y;
+                            root.hovered-inline-tooltip-width = self.width;
+                            root.hovered-inline-tooltip-height = self.height;
                         } else if root.hovered-inline-tooltip == item.updated-at-tooltip {
                             root.hovered-inline-tooltip = "";
                         }
@@ -561,7 +566,9 @@ export component GitHubPullRequestFlow {
                                 root.hovered-inline-tooltip-x = self.absolute-position.x
                                     - root.absolute-position.x;
                                 root.hovered-inline-tooltip-y = self.absolute-position.y
-                                    - root.absolute-position.y + self.height + 4px;
+                                    - root.absolute-position.y;
+                                root.hovered-inline-tooltip-width = self.width;
+                                root.hovered-inline-tooltip-height = self.height;
                             } else if root.hovered-inline-tooltip == item.target-branch {
                                 root.hovered-inline-tooltip = "";
                             }
@@ -624,7 +631,9 @@ export component GitHubPullRequestFlow {
                                 root.hovered-inline-tooltip-x = self.absolute-position.x
                                     - root.absolute-position.x;
                                 root.hovered-inline-tooltip-y = self.absolute-position.y
-                                    - root.absolute-position.y + self.height + 4px;
+                                    - root.absolute-position.y;
+                                root.hovered-inline-tooltip-width = self.width;
+                                root.hovered-inline-tooltip-height = self.height;
                             } else if root.hovered-inline-tooltip == item.source-branch {
                                 root.hovered-inline-tooltip = "";
                             }
@@ -683,7 +692,9 @@ export component GitHubPullRequestFlow {
                                 root.hovered-inline-tooltip-x = self.absolute-position.x
                                     - root.absolute-position.x;
                                 root.hovered-inline-tooltip-y = self.absolute-position.y
-                                    - root.absolute-position.y + self.height + 4px;
+                                    - root.absolute-position.y;
+                                root.hovered-inline-tooltip-width = self.width;
+                                root.hovered-inline-tooltip-height = self.height;
                             } else if root.hovered-inline-tooltip == "Open Conversation" {
                                 root.hovered-inline-tooltip = "";
                             }
@@ -730,7 +741,9 @@ export component GitHubPullRequestFlow {
                                 root.hovered-inline-tooltip-x = self.absolute-position.x
                                     - root.absolute-position.x;
                                 root.hovered-inline-tooltip-y = self.absolute-position.y
-                                    - root.absolute-position.y + self.height + 4px;
+                                    - root.absolute-position.y;
+                                root.hovered-inline-tooltip-width = self.width;
+                                root.hovered-inline-tooltip-height = self.height;
                             } else if root.hovered-inline-tooltip == "Review pull request with AI" {
                                 root.hovered-inline-tooltip = "";
                             }
@@ -824,12 +837,14 @@ export component GitHubPullRequestFlow {
         }
     }
 
-    // Paint outside pr-list so the clipped, rounded list border cannot cut off
-    // timestamp or branch-name tooltips.
-    if root.hovered-inline-tooltip != "": GitHubTooltip {
+    GitHubTooltip {
         x: root.hovered-inline-tooltip-x;
         y: root.hovered-inline-tooltip-y;
+        width: root.hovered-inline-tooltip-width;
+        height: root.hovered-inline-tooltip-height;
         z: 200;
+        preferred-placement: GitHubTooltipPlacement.Bottom;
+        alignment: GitHubTooltipAlignment.Center;
         text: root.hovered-inline-tooltip;
     }
 

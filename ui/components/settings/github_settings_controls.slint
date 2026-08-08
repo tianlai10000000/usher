@@ -418,11 +418,15 @@ export component GitHubTextField inherits Rectangle {
             overflow: elide;
         }
 
-        if root.loading: GitHubSpinner {
-            x: parent.width - 24px;
-            y: 8px;
-            spinner-size: GitHubMetrics.icon-medium;
-        }
+    }
+
+    // Keep the transformed spinner outside the clipped TextInput subtree.
+    // FemtoVG otherwise redraws the clipped text with subtly changing grayscale
+    // antialiasing on non-Retina 60 Hz displays as the sibling image rotates.
+    if root.loading: GitHubSpinner {
+        x: field.x + field.width - 24px;
+        y: field.y + 8px;
+        spinner-size: GitHubMetrics.icon-medium;
     }
 
     if root.supporting-text != "": Text {

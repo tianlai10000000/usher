@@ -2,6 +2,7 @@ import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
 import { WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrFileExtensionFilter } from "./shell.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
@@ -64,9 +65,11 @@ export component GitHubCommitMessageToggleButton inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
-    if toggle-touch.has-hover: GitHubTooltip {
-        y: -self.height - 4px;
-        text: root.expanded ? "Hide commit description" : "Show commit description";
+    GitHubTooltip {
+        preferred-placement: GitHubTooltipPlacement.Top;
+        text: toggle-touch.has-hover
+            ? (root.expanded ? "Hide commit description" : "Show commit description")
+            : "";
     }
 }
 

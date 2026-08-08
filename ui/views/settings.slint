@@ -2,6 +2,7 @@ import { AppState } from "../state/app_state.slint";
 export { AppState } from "../state/app_state.slint";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
 import { GitHubTheme } from "../theme/github_theme.slint";
+import { GitHubTooltipOverlayHost } from "../components/github_tooltip_overlay.slint";
 import { GitHubSettingsNavItem } from "../components/settings/github_settings_controls.slint";
 import {
     GitHubSettingsPane,
@@ -194,5 +195,14 @@ export component GitHubSettingsPage inherits Rectangle {
                         }
                     }
         }
+    }
+
+    // Settings is also an independent ComponentFactory/global graph. Mount a
+    // local root portal so present and future shared controls keep full Tooltip
+    // behavior without reaching into MainWindow globals.
+    GitHubTooltipOverlayHost {
+        width: parent.width;
+        height: parent.height;
+        z: 10000;
     }
 }

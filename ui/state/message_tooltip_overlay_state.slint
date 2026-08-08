@@ -1,0 +1,54 @@
+export enum MessageTooltipKind {
+    None,
+    MarkRead,
+    MarkUnread,
+    Delete,
+}
+
+// Messages is an independently compiled ComponentFactory whose list delegates
+// have historically aliased dynamic strings. This state intentionally carries
+// only a literal kind and geometry; no Tooltip label crosses a delegate.
+export global MessageTooltipOverlayState {
+    in-out property <MessageTooltipKind> kind: MessageTooltipKind.None;
+    in-out property <length> anchor-x: 0px;
+    in-out property <length> anchor-y: 0px;
+    in-out property <length> anchor-width: 0px;
+    in-out property <length> anchor-height: 0px;
+    in-out property <int> lease: 0;
+
+    callback show(MessageTooltipKind, length, length, length, length);
+    callback renew(MessageTooltipKind, length, length, length, length);
+    callback hide(MessageTooltipKind, length, length);
+    callback dismiss-all();
+
+    show(kind, anchor-x, anchor-y, anchor-width, anchor-height) => {
+        root.kind = kind;
+        root.anchor-x = anchor-x;
+        root.anchor-y = anchor-y;
+        root.anchor-width = anchor-width;
+        root.anchor-height = anchor-height;
+        root.lease += 1;
+    }
+
+    renew(kind, anchor-x, anchor-y, anchor-width, anchor-height) => {
+        if root.kind == kind
+                && root.anchor-x == anchor-x
+                && root.anchor-y == anchor-y {
+            root.anchor-width = anchor-width;
+            root.anchor-height = anchor-height;
+            root.lease += 1;
+        }
+    }
+
+    hide(kind, anchor-x, anchor-y) => {
+        if root.kind == kind
+                && root.anchor-x == anchor-x
+                && root.anchor-y == anchor-y {
+            root.kind = MessageTooltipKind.None;
+        }
+    }
+
+    dismiss-all() => {
+        root.kind = MessageTooltipKind.None;
+    }
+}

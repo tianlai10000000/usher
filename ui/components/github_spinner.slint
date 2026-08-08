@@ -5,9 +5,9 @@ import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 // the only loading communication.
 // Reference: https://primer.style/product/components/spinner/
 //
-// Drawn with theme-colored Paths (not an SVG + colorize mask) so the 2px ring
-// stays visible on both light and dark canvases, matching Primer's 25% track
-// + rotating head at every spinner size.
+// The theme-colored track is a static Path. The head is a static SVG whose
+// transform rotates, avoiding per-frame Path reconstruction while preserving
+// Primer's 2px track + quarter-ring head at every spinner size.
 export component GitHubSpinner inherits Rectangle {
     in property <length> spinner-size: GitHubMetrics.icon-medium;
     in property <color> foreground: GitHubTheme.fg-muted;
@@ -27,12 +27,6 @@ export component GitHubSpinner inherits Rectangle {
     private property <float> inner-radius: root.radius - root.stroke-vb;
     private property <float> cx: root.vb / 2;
     private property <float> cy: root.vb / 2;
-    // One full turn per second; head sweeps a quarter circle.
-    private property <float> turn: root.spinning
-        ? mod(animation-tick(), 1s) / 1s
-        : 0;
-    private property <float> head-span: 0.25;
-
     // Full track ring at 25% opacity.
     Path {
         width: parent.width;
@@ -84,38 +78,17 @@ export component GitHubSpinner inherits Rectangle {
         }
     }
 
-    // Rotating head (quarter ring) at full foreground contrast.
-    Path {
+    // Rotate one cached visual instead of rebuilding arc geometry each frame.
+    Image {
         width: parent.width;
         height: parent.height;
-        viewbox-width: root.vb;
-        viewbox-height: root.vb;
-        fill: root.foreground;
-
-        MoveTo {
-            x: root.cx - root.radius * sin(-root.turn * 360deg);
-            y: root.cy - root.radius * cos(-root.turn * 360deg);
-        }
-        ArcTo {
-            radius-x: root.radius;
-            radius-y: root.radius;
-            x: root.cx - root.radius * sin(-(root.turn + root.head-span) * 360deg);
-            y: root.cy - root.radius * cos(-(root.turn + root.head-span) * 360deg);
-            sweep: true;
-            large-arc: false;
-        }
-        LineTo {
-            x: root.cx - root.inner-radius * sin(-(root.turn + root.head-span) * 360deg);
-            y: root.cy - root.inner-radius * cos(-(root.turn + root.head-span) * 360deg);
-        }
-        ArcTo {
-            radius-x: root.inner-radius;
-            radius-y: root.inner-radius;
-            x: root.cx - root.inner-radius * sin(-root.turn * 360deg);
-            y: root.cy - root.inner-radius * cos(-root.turn * 360deg);
-            sweep: false;
-            large-arc: false;
-        }
+        source: @image-url("../assets/icons/github-spinner-head-16.svg");
+        image-fit: contain;
+        colorize: root.foreground;
+        transform-rotation: root.spinning
+            ? mod(animation-tick(), 1s) / 1s * 360deg
+            : 0deg;
+        transform-origin: { x: self.width / 2, y: self.height / 2 };
     }
 }
 

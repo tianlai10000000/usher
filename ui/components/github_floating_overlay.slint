@@ -1,0 +1,135 @@
+import {
+    GitHubTooltipAlignment,
+    GitHubTooltipPlacement,
+} from "../state/tooltip_overlay_state.slint";
+
+// Shared deterministic Floating UI geometry. Feature-specific portals provide
+// their own surface content while this component owns offset/flip/shift/size.
+export component GitHubFloatingOverlayHost inherits Rectangle {
+    in property <length> anchor-x;
+    in property <length> anchor-y;
+    in property <length> anchor-width;
+    in property <length> anchor-height;
+    in property <length> floating-width;
+    in property <length> floating-height;
+    in property <GitHubTooltipPlacement> preferred-placement:
+        GitHubTooltipPlacement.Top;
+    in property <GitHubTooltipAlignment> alignment:
+        GitHubTooltipAlignment.Center;
+    in property <length> boundary-padding: 8px;
+    in property <length> anchor-gap: 4px;
+
+    private property <length> anchor-left:
+        root.anchor-x - root.absolute-position.x;
+    private property <length> anchor-top:
+        root.anchor-y - root.absolute-position.y;
+    private property <length> anchor-right:
+        root.anchor-left + root.anchor-width;
+    private property <length> anchor-bottom:
+        root.anchor-top + root.anchor-height;
+    private property <length> available-top:
+        root.anchor-top - root.boundary-padding - root.anchor-gap;
+    private property <length> available-bottom:
+        root.height - root.boundary-padding - root.anchor-bottom - root.anchor-gap;
+    private property <length> available-left:
+        root.anchor-left - root.boundary-padding - root.anchor-gap;
+    private property <length> available-right:
+        root.width - root.boundary-padding - root.anchor-right - root.anchor-gap;
+    private property <length> top-overflow:
+        max(0px, root.floating-height - root.available-top);
+    private property <length> bottom-overflow:
+        max(0px, root.floating-height - root.available-bottom);
+    private property <length> left-overflow:
+        max(0px, root.floating-width - root.available-left);
+    private property <length> right-overflow:
+        max(0px, root.floating-width - root.available-right);
+    private property <GitHubTooltipPlacement> opposite-placement:
+        root.preferred-placement == GitHubTooltipPlacement.Top
+            ? GitHubTooltipPlacement.Bottom
+        : root.preferred-placement == GitHubTooltipPlacement.Bottom
+            ? GitHubTooltipPlacement.Top
+        : root.preferred-placement == GitHubTooltipPlacement.Left
+            ? GitHubTooltipPlacement.Right
+            : GitHubTooltipPlacement.Left;
+    private property <length> preferred-overflow:
+        root.preferred-placement == GitHubTooltipPlacement.Top
+            ? root.top-overflow
+        : root.preferred-placement == GitHubTooltipPlacement.Bottom
+            ? root.bottom-overflow
+        : root.preferred-placement == GitHubTooltipPlacement.Left
+            ? root.left-overflow
+            : root.right-overflow;
+    private property <length> opposite-overflow:
+        root.opposite-placement == GitHubTooltipPlacement.Top
+            ? root.top-overflow
+        : root.opposite-placement == GitHubTooltipPlacement.Bottom
+            ? root.bottom-overflow
+        : root.opposite-placement == GitHubTooltipPlacement.Left
+            ? root.left-overflow
+            : root.right-overflow;
+    private property <GitHubTooltipPlacement> best-fit-placement:
+        root.top-overflow <= root.bottom-overflow
+            && root.top-overflow <= root.left-overflow
+            && root.top-overflow <= root.right-overflow
+            ? GitHubTooltipPlacement.Top
+        : root.bottom-overflow <= root.left-overflow
+            && root.bottom-overflow <= root.right-overflow
+            ? GitHubTooltipPlacement.Bottom
+        : root.left-overflow <= root.right-overflow
+            ? GitHubTooltipPlacement.Left
+            : GitHubTooltipPlacement.Right;
+    private property <GitHubTooltipPlacement> resolved-placement:
+        root.preferred-overflow <= 0px
+            ? root.preferred-placement
+        : root.opposite-overflow <= 0px
+            ? root.opposite-placement
+            : root.best-fit-placement;
+    private property <length> ideal-x:
+        root.resolved-placement == GitHubTooltipPlacement.Left
+            ? root.anchor-left - root.floating-width - root.anchor-gap
+        : root.resolved-placement == GitHubTooltipPlacement.Right
+            ? root.anchor-right + root.anchor-gap
+        : root.alignment == GitHubTooltipAlignment.Start
+            ? root.anchor-left
+        : root.alignment == GitHubTooltipAlignment.End
+            ? root.anchor-right - root.floating-width
+            : root.anchor-left + (root.anchor-width - root.floating-width) / 2;
+    private property <length> ideal-y:
+        root.resolved-placement == GitHubTooltipPlacement.Top
+            ? root.anchor-top - root.floating-height - root.anchor-gap
+        : root.resolved-placement == GitHubTooltipPlacement.Bottom
+            ? root.anchor-bottom + root.anchor-gap
+        : root.alignment == GitHubTooltipAlignment.Start
+            ? root.anchor-top
+        : root.alignment == GitHubTooltipAlignment.End
+            ? root.anchor-bottom - root.floating-height
+            : root.anchor-top + (root.anchor-height - root.floating-height) / 2;
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    clip: false;
+
+    surface-slot := Rectangle {
+        x: max(
+            root.boundary-padding,
+            min(
+                root.ideal-x,
+                max(root.boundary-padding, root.width - root.floating-width - root.boundary-padding),
+            ),
+        );
+        y: max(
+            root.boundary-padding,
+            min(
+                root.ideal-y,
+                max(root.boundary-padding, root.height - root.floating-height - root.boundary-padding),
+            ),
+        );
+        width: root.floating-width;
+        height: root.floating-height;
+        background: transparent;
+        clip: false;
+
+        @children
+    }
+}

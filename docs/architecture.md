@@ -101,8 +101,8 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `ui/components/github_scroll_view.slint` | Application-owned mounted vertical viewport and semantic scrollbar foundation. |
 | `ui/components/navigation/github_underline_nav.slint` | Shared keyboard-accessible Primer UnderlineNav/UnderlinePanels shell and item used by Workflow and nested feature tabs; the shell owns the full-width baseline, safe-area inset, and item spacing. |
 | `ui/components/github_segmented_control.slint` | Shared compact Primer SegmentedControl shell, items, dividers, and focus/disabled interaction. |
-| `ui/components/github_tooltip.slint` | Shared GitHub TooltipV2 contract: call sites mount a transparent locator; `ui/state/tooltip_overlay_state.slint` plus the root `GitHubTooltipOverlayHost` paint one viewport-clamped tip above clipped scroll/page hosts. |
-| `ui/state/tooltip_overlay_state.slint` | Window-root tooltip portal state (text, window coordinates, claim token, lease heartbeat). |
+| `ui/components/github_tooltip.slint` | Shared GitHub TooltipV2 contract: call sites mount a transparent anchor locator; `ui/state/tooltip_overlay_state.slint` plus the root `GitHubTooltipOverlayHost` apply shared offset/flip/shift/size placement above clipped scroll/page hosts. |
+| `ui/state/tooltip_overlay_state.slint` | Window-root tooltip portal state (text, anchor rectangle, preferred placement/alignment, claim token, lease heartbeat). |
 | `ui/components/github_action_menu.slint` | Shared Primer ActionMenu/AnchoredOverlay surface with focus ownership, Escape dismissal, peer exclusive-claim on open, viewport collision placement, bounded vertical scrolling, reusable ActionList rows, and `GitHubActionMenuTriggerArea` press-state open/close so title-bar chrome dismiss cannot dismiss-then-reopen on the same click. Page blank outside-click stays on each host's sibling TouchArea. `ui/state/transient_overlay_state.slint` owns chrome `dismiss-revision` and popover `exclusive-generation`. |
 | `ui/components/page/github_page_header.slint` | Shared Primer PageHeader foundation for title, description, leading visual, divider, and trailing actions. |
 | `ui/components/button/github_copy_button.slint` | Shared GitHub CopyToClipboardButton interaction for every icon-copy action. It owns the transient Copy→Check state and `Copied!` tooltip; feature callbacks return clipboard-write success. |
@@ -187,9 +187,15 @@ the main public API and owns explicit bridges in `src/settings_page.rs` and
 `src/message_center.rs`. A component created by a
 cross-crate factory has its own Slint global graph, so the bridge must copy the
 initial `AppState`, forward callbacks to `MainWindow`, and mirror later state
-changes rather than assuming globals are shared. Messages inbox rows report
-hover ownership, text, and position to one page-owned `GitHubTooltipSurface`;
-each hover update directly replaces the previous value.
+changes rather than assuming globals are shared. Messages inbox rows report an
+action enum and anchor rectangle through the dedicated factory-local
+`MessageTooltipOverlayState`; one page-owned `GitHubMessageTooltipOverlayHost`
+maps those enum values to separate literal surfaces. No label string crosses a
+list delegate. Settings mounts a local generic `GitHubTooltipOverlayHost` for
+shared controls; that host remounts its text-measurement surface for each claim
+token. Both factory pages reuse the
+same anchor-based offset/flip/shift/size implementation as `MainWindow` without
+attempting to share a global instance across the factory boundary.
 Changing `settings.slint` or
 `messages.slint` must not regenerate or compile `usher-ui`; changing the main shell
 still rebuilds the main generated crate. When `SLINT_LIVE_PREVIEW` is enabled,

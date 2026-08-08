@@ -1,56 +1,32 @@
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
-import { TooltipOverlayState } from "../state/tooltip_overlay_state.slint";
+import {
+    GitHubTooltipAlignment,
+    GitHubTooltipPlacement,
+    TooltipOverlayState,
+} from "../state/tooltip_overlay_state.slint";
 
-// Painted tip surface. Only the window-root overlay host mounts this; call
-// sites use GitHubTooltip, which is a locator that portals here.
+// Primer tooltip surface. Root-layer hosts provide the available viewport size
+// so long labels wrap instead of overflowing a narrow desktop window.
 export component GitHubTooltipSurface inherits Rectangle {
     in property <string> text;
+    in property <length> viewport-max-width: 320px;
+    in property <length> viewport-max-height: 320px;
 
-    // Primer body-small uses an 18px line box for 12px type. Slint Text has no
-    // line-height, and preferred-height alone can clip descenders (g/y/p).
+    private property <length> natural-width:
+        tip-measure.preferred-width + GitHubMetrics.size-16;
     private property <length> label-height: max(
         tip-label.preferred-height,
         GitHubMetrics.size-16 + GitHubMetrics.size-2
     );
+    private property <length> natural-height:
+        root.label-height + GitHubMetrics.size-8;
 
-    width: tip-label.preferred-width + GitHubMetrics.size-16;
-    height: root.label-height + GitHubMetrics.size-8;
+    width: min(root.natural-width, max(0px, root.viewport-max-width));
+    height: min(root.natural-height, max(0px, root.viewport-max-height));
     border-radius: GitHubMetrics.radius-medium;
     border-width: 0px;
     background: GitHubTheme.tooltip-bg;
-    clip: false;
-
-    tip-label := Text {
-        x: GitHubMetrics.size-8;
-        y: GitHubMetrics.size-4;
-        width: self.preferred-width;
-        height: root.label-height;
-        text: root.text;
-        color: GitHubTheme.tooltip-fg;
-        font-size: GitHubMetrics.text-small;
-        vertical-alignment: center;
-        wrap: no-wrap;
-    }
-}
-
-// Application-owned counterpart to GitHub's TooltipV2. Call sites keep their
-// relative x/y formulas (using self.width / self.height); this locator stays
-// transparent and publishes window coordinates so scroll/clip ancestors cannot
-// truncate the painted tip.
-export component GitHubTooltip inherits Rectangle {
-    in property <string> text;
-
-    private property <length> label-height: max(
-        tip-measure.preferred-height,
-        GitHubMetrics.size-16 + GitHubMetrics.size-2
-    );
-    private property <int> tip-token: 0;
-
-    width: tip-measure.preferred-width + GitHubMetrics.size-16;
-    height: root.label-height + GitHubMetrics.size-8;
-    border-width: 0px;
-    background: transparent;
-    clip: false;
+    clip: true;
 
     tip-measure := Text {
         visible: false;
@@ -59,44 +35,89 @@ export component GitHubTooltip inherits Rectangle {
         wrap: no-wrap;
     }
 
-    init => {
-        root.publish-tip();
+    tip-label := Text {
+        x: GitHubMetrics.size-8;
+        y: GitHubMetrics.size-4;
+        width: max(0px, parent.width - GitHubMetrics.size-16);
+        height: max(0px, parent.height - GitHubMetrics.size-8);
+        text: root.text;
+        color: GitHubTheme.tooltip-fg;
+        font-size: GitHubMetrics.text-small;
+        vertical-alignment: center;
+        wrap: word-wrap;
     }
+}
 
-    changed text => {
-        root.publish-tip();
-    }
+// A transparent reference locator. It always covers its host and publishes the
+// host rectangle, never a precomputed tooltip coordinate. Placement belongs to
+// the root overlay host so every call site shares the same collision handling.
+export component GitHubTooltip inherits Rectangle {
+    in property <string> text;
+    in property <string> debug-node: "GitHubTooltip";
+    in property <GitHubTooltipPlacement> preferred-placement:
+        GitHubTooltipPlacement.Top;
+    in property <GitHubTooltipAlignment> alignment:
+        GitHubTooltipAlignment.Center;
 
-    changed absolute-position => {
-        root.publish-tip();
-    }
+    private property <int> tip-token: 0;
+    private property <bool> has-published-non-origin-position: false;
+    private property <bool> detached:
+        root.has-published-non-origin-position
+        && root.absolute-position.x == 0px
+        && root.absolute-position.y == 0px;
 
-    // Conditional `if hover: GitHubTooltip` hosts drop this element without a
-    // destructor. Renew the lease while mounted so the root host can clear a
-    // stale tip shortly after unmount.
+    width: 100%;
+    height: 100%;
+    border-width: 0px;
+    background: transparent;
+
+    init => { root.publish-tip(); }
+    changed text => { root.publish-tip(); }
+    changed absolute-position => { root.publish-tip(); }
+    changed width => { root.publish-tip(); }
+    changed height => { root.publish-tip(); }
+    changed preferred-placement => { root.publish-tip(); }
+    changed alignment => { root.publish-tip(); }
+
     lease-timer := Timer {
         interval: 32ms;
         running: root.text != "";
         triggered => {
-            TooltipOverlayState.renew(
-                root.tip-token,
-                root.text,
-                root.absolute-position.x,
-                root.absolute-position.y,
-            );
+            if root.detached || root.width <= 0px || root.height <= 0px {
+                TooltipOverlayState.hide(root.tip-token);
+            } else {
+                TooltipOverlayState.renew(
+                    root.tip-token,
+                    root.text,
+                    root.absolute-position.x,
+                    root.absolute-position.y,
+                    root.width,
+                    root.height,
+                    root.preferred-placement,
+                    root.alignment,
+                );
+            }
         }
     }
 
     function publish-tip() {
-        if root.text == "" {
+        if root.text == "" || root.detached || root.width <= 0px || root.height <= 0px {
             TooltipOverlayState.hide(root.tip-token);
         } else {
             TooltipOverlayState.show(
+                root.debug-node,
                 root.text,
                 root.absolute-position.x,
                 root.absolute-position.y,
+                root.width,
+                root.height,
+                root.preferred-placement,
+                root.alignment,
             );
             root.tip-token = TooltipOverlayState.token;
+            if root.absolute-position.x != 0px || root.absolute-position.y != 0px {
+                root.has-published-non-origin-position = true;
+            }
         }
     }
 }

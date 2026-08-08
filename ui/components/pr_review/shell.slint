@@ -1,5 +1,6 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubActionMenu, GitHubActionMenuTriggerArea } from "../github_action_menu.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
@@ -338,13 +339,13 @@ export component GitHubReviewActionButton inherits Rectangle {
         border-color: GitHubTheme.focus-outline;
         background: transparent;
     }
-    if root.embed-tooltip && action-touch.has-hover && root.tooltip-text != "": GitHubTooltip {
+    if root.embed-tooltip && root.tooltip-text != "": GitHubTooltip {
         z: 10001;
-        x: root.tooltip-align-start ? 0px : root.width - self.width;
-        // Title-bar tips must clear the native/content divider before they
-        // begin; otherwise the divider crosses the tooltip's first line.
-        y: root.height + (root.titlebar-mode ? 10px : 4px);
-        text: root.tooltip-text;
+        preferred-placement: GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-start
+            ? GitHubTooltipAlignment.Start
+            : GitHubTooltipAlignment.End;
+        text: action-touch.has-hover ? root.tooltip-text : "";
     }
 }
 
@@ -419,11 +420,10 @@ export component GitHubCommentButton inherits Rectangle {
         border-color: GitHubTheme.focus-outline;
         background: transparent;
     }
-    if action-touch.has-hover && root.tooltip-text != "": GitHubTooltip {
-        // Composer card clips descendants; keep the tip above the footer button.
-        x: root.width - self.width;
-        y: -self.height - 4px;
-        text: root.tooltip-text;
+    if root.tooltip-text != "": GitHubTooltip {
+        preferred-placement: GitHubTooltipPlacement.Top;
+        alignment: GitHubTooltipAlignment.End;
+        text: action-touch.has-hover ? root.tooltip-text : "";
     }
 }
 
@@ -487,9 +487,7 @@ export component GitHubBranchLabel inherits Rectangle {
     }
 }
 
-// GitHub-style relative timestamp: muted label with an absolute datetime
-// GitHubTooltip. Avoid PopupWindow on hover — it steals input and flickers as
-// has-hover toggles.
+// GitHub-style relative timestamp with an absolute datetime Tooltip.
 export component GitHubRelativeTimestamp inherits Rectangle {
     in property <string> text;
     in property <string> tooltip-text;
@@ -499,7 +497,7 @@ export component GitHubRelativeTimestamp inherits Rectangle {
     in property <length> label-height: 26px;
     in property <bool> tooltip-align-right: false;
     in property <bool> tooltip-above: false;
-    // Place the tip to the left of the label (stays inside clipped headers).
+    // Semantic preferences only; the root host may flip at viewport edges.
     in property <bool> tooltip-beside: false;
     // Place the tip to the right of the label (into trailing free space).
     in property <bool> tooltip-after: false;
@@ -524,34 +522,18 @@ export component GitHubRelativeTimestamp inherits Rectangle {
         height: parent.height;
         mouse-cursor: default;
     }
-    if time-touch.has-hover && root.tooltip-text != "" && (root.tooltip-after || root.tooltip-beside): Rectangle {
-        // Keep the inline tip on the same 18px line box as GitHubTooltip so
-        // descenders are not clipped when this path cannot mount the shared tip.
-        z: 10000;
-        x: root.tooltip-after ? root.width + 4px : -self.width - 4px;
-        y: (root.height - self.height) / 2;
-        width: tip-label.preferred-width + 16px;
-        height: max(tip-label.preferred-height, GitHubMetrics.size-16 + GitHubMetrics.size-2) + GitHubMetrics.size-8;
-        border-radius: 4px;
-        background: GitHubTheme.tooltip-bg;
-        clip: false;
-        tip-label := Text {
-            x: GitHubMetrics.size-8;
-            y: GitHubMetrics.size-4;
-            width: self.preferred-width;
-            height: max(self.preferred-height, GitHubMetrics.size-16 + GitHubMetrics.size-2);
-            text: root.tooltip-text;
-            font-size: 12px;
-            color: GitHubTheme.tooltip-fg;
-            vertical-alignment: center;
-            wrap: no-wrap;
-        }
-    }
-    if time-touch.has-hover && root.tooltip-text != "" && !root.tooltip-after && !root.tooltip-beside: GitHubTooltip {
-        // above/below: pin trailing edge when tooltip-align-right.
-        x: root.tooltip-align-right ? root.width - self.width : 0px;
-        y: root.tooltip-above ? -self.height - 4px : root.height + 4px;
-        text: root.tooltip-text;
+    if root.tooltip-text != "": GitHubTooltip {
+        preferred-placement: root.tooltip-after
+            ? GitHubTooltipPlacement.Right
+            : (root.tooltip-beside
+                ? GitHubTooltipPlacement.Left
+                : (root.tooltip-above
+                    ? GitHubTooltipPlacement.Top
+                    : GitHubTooltipPlacement.Bottom));
+        alignment: root.tooltip-align-right
+            ? GitHubTooltipAlignment.End
+            : GitHubTooltipAlignment.Center;
+        text: time-touch.has-hover ? root.tooltip-text : "";
     }
 }
 

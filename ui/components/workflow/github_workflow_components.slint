@@ -1,4 +1,5 @@
 import { GitHubTooltip } from "../github_tooltip.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
 import { GitHubMetadataLabel } from "../github_metadata_label.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
@@ -308,11 +309,11 @@ export component GitHubWorkflowProjectDetails inherits Rectangle {
                 }
             }
 
-            if open-touch.has-hover: GitHubTooltip {
-                x: parent.width - self.width;
-                y: -self.height - 4px;
+            GitHubTooltip {
                 z: 10000;
-                text: root.open-local-folder-tooltip;
+                preferred-placement: GitHubTooltipPlacement.Top;
+                alignment: GitHubTooltipAlignment.End;
+                text: open-touch.has-hover ? root.open-local-folder-tooltip : "";
             }
         }
     }
@@ -351,11 +352,13 @@ export component GitHubWorkflowProjectDetails inherits Rectangle {
             }
         }
 
-        if compact-details-touch.has-hover && !root.repository-details-open: GitHubTooltip {
-            x: parent.width - self.width;
-            y: -self.height - 4px;
+        GitHubTooltip {
             z: 10000;
-            text: "Repository details";
+            preferred-placement: GitHubTooltipPlacement.Top;
+            alignment: GitHubTooltipAlignment.End;
+            text: compact-details-touch.has-hover && !root.repository-details-open
+                ? "Repository details"
+                : "";
         }
     }
 

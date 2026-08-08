@@ -1,32 +1,63 @@
-import { TooltipOverlayState } from "../state/tooltip_overlay_state.slint";
+import {
+    TooltipOverlayState,
+} from "../state/tooltip_overlay_state.slint";
+import { GitHubFloatingOverlayHost } from "./github_floating_overlay.slint";
 import { GitHubTooltipSurface } from "./github_tooltip.slint";
 
-// Window-root host for the shared tooltip portal. It has no input handler, so
-// its full-window geometry can clamp painted tips without stealing hits.
+// Floating UI-style viewport positioning for the shared Tooltip portal:
+// offset -> flip(bestFit) -> shift(boundary padding) -> size.
 export component GitHubTooltipOverlayHost inherits Rectangle {
-    private property <int> observed-lease: 0;
+    in property <length> boundary-padding: 8px;
+    in property <length> anchor-gap: 4px;
 
+    private property <int> observed-lease: 0;
+    private property <bool> even-claim: mod(TooltipOverlayState.token, 2) == 0;
     width: 100%;
     height: 100%;
     background: transparent;
     clip: false;
 
-    if TooltipOverlayState.open && TooltipOverlayState.text != "": GitHubTooltipSurface {
-        x: max(
-            8px,
-            min(
-                TooltipOverlayState.x - root.absolute-position.x,
-                root.width - self.width - 8px,
-            ),
-        );
-        y: max(
-            8px,
-            min(
-                TooltipOverlayState.y - root.absolute-position.y,
-                root.height - self.height - 8px,
-            ),
-        );
-        text: TooltipOverlayState.text;
+    // Recreate the measured Text node for every new claim. ComponentFactory
+    // graphs can retain the previous preferred-width when only a string binding
+    // changes; alternating slots makes the current label the initial value.
+    if TooltipOverlayState.open && TooltipOverlayState.text != ""
+            && root.even-claim: even-floating-host := GitHubFloatingOverlayHost {
+        anchor-x: TooltipOverlayState.anchor-x;
+        anchor-y: TooltipOverlayState.anchor-y;
+        anchor-width: TooltipOverlayState.anchor-width;
+        anchor-height: TooltipOverlayState.anchor-height;
+        floating-width: tip-surface.width;
+        floating-height: tip-surface.height;
+        preferred-placement: TooltipOverlayState.preferred-placement;
+        alignment: TooltipOverlayState.alignment;
+        boundary-padding: root.boundary-padding;
+        anchor-gap: root.anchor-gap;
+
+        tip-surface := GitHubTooltipSurface {
+            viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
+            viewport-max-height: max(0px, root.height - root.boundary-padding * 2);
+            text: TooltipOverlayState.text;
+        }
+    }
+
+    if TooltipOverlayState.open && TooltipOverlayState.text != ""
+            && !root.even-claim: odd-floating-host := GitHubFloatingOverlayHost {
+        anchor-x: TooltipOverlayState.anchor-x;
+        anchor-y: TooltipOverlayState.anchor-y;
+        anchor-width: TooltipOverlayState.anchor-width;
+        anchor-height: TooltipOverlayState.anchor-height;
+        floating-width: odd-tip-surface.width;
+        floating-height: odd-tip-surface.height;
+        preferred-placement: TooltipOverlayState.preferred-placement;
+        alignment: TooltipOverlayState.alignment;
+        boundary-padding: root.boundary-padding;
+        anchor-gap: root.anchor-gap;
+
+        odd-tip-surface := GitHubTooltipSurface {
+            viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
+            viewport-max-height: max(0px, root.height - root.boundary-padding * 2);
+            text: TooltipOverlayState.text;
+        }
     }
 
     lease-watch := Timer {

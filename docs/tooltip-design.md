@@ -5,24 +5,25 @@
 > [`architecture.md`](architecture.md) / [`architecture.zh.md`](architecture.zh.md)。
 > 下文保留各方案的取舍与实测结论，便于后续回退或再评估。
 >
-> **产品决定（2026-08-04）：暂时不采用本纪要中的「Slint 1.17 内置 `Tooltip` +
-> `GitHubTooltipContent`」方案。** 原因是延迟约 500ms 不可调，且指针相对定位
-> 会挡住宿主按钮。该方案的代码/文档迁移可保留作参考，但产品交互在另行恢复
-> 可控 tip 之前不应继续以此为最终交付目标。
+> **产品决定（2026-08-07）：采用方案 E「锚点式自适应 portal」。** Slint 1.17
+> 内置 `Tooltip` 继续不采用；旧 portal 与 Inbox 局部 Rectangle 仅作为失败历史。
+> 当前实现复用 Floating UI 的 offset/flip(bestFit)/shift/size 思路，但保留
+> Slint ComponentFactory 的独立 global 边界。
 
-日期：2026-08-04 · Slint 1.17.1
+日期：2026-08-04，更新于 2026-08-07 · Slint 1.17.1
 
 ## 0. 采用状态 / Adoption status
 
 | 方案 | 状态 |
 | --- | --- |
+| E. 锚点式自适应 portal | **当前采用**；每个 Slint global 图一个根层 host |
 | D. Slint 1.17 内置 `Tooltip` + `GitHubTooltipContent` | **暂不采用**（延迟与挡按钮不可接受） |
-| B. 应用自研全局 portal | 已废弃；曾解决 clip，但有串文案/坐标回归 |
+| B. 旧版坐标式全局 portal | 已被 E 取代；曾解决 clip，但有串文案/坐标回归 |
 | A. 局部 Rectangle tip | 仅作历史对照；易被 clip / 叠层截断 |
 | C. Material `ToolTip` | 未采用 |
 
-后续若恢复可控体验，优先重新评估「统一视觉 + 宿主相对定位/可调延迟」路径，
-而不是继续打磨内置 `Tooltip` 的公开缺口。
+当前方案统一视觉、宿主锚点、自动碰撞处理和可控生命周期；调用点不再计算
+Tooltip 表面坐标，也不通过提高局部 `z` 或关闭父级 clip 解决浮层问题。
 
 ## 1. 目标 / Goals
 
@@ -50,7 +51,7 @@ Usher 需要统一的 GitHub/Primer 风格 Tooltip，覆盖：
 
 **结论：** 适合快速原型，不适合作为全仓共享契约。Inbox 本地 tip 的裁切与边框回归，是该路径的典型失败模式。
 
-### B. 应用自研全局 portal（已废弃）
+### B. 旧版坐标式全局 portal（已被 E 取代）
 
 **做法（迁移前）：**
 
@@ -72,7 +73,7 @@ Usher 需要统一的 GitHub/Primer 风格 Tooltip，覆盖：
 
 Vendored `material-1.7.1-fixed` 的 `ToolTip` 是普通局部组件：hover 即显、本地 `tooltip_offset`、无 popup 降级、受祖先 `clip` 限制、Material 色板。仓库策略禁止产品 UI 依赖 Material 私有实现；视觉也不符合 Primer。
 
-### D. Slint 1.17 内置 `Tooltip` + `GitHubTooltipContent`（当前）
+### D. Slint 1.17 内置 `Tooltip` + `GitHubTooltipContent`（历史尝试）
 
 **做法：**
 
@@ -102,17 +103,19 @@ Tooltip {
 
 ## 3. 当前代码归属 / Current ownership
 
-> 下列路径描述的是「内置 Tooltip 迁移后」的代码快照，便于回退对照。因产品暂不采用该方案，实际交付应以恢复后的可控 tip 实现为准，勿把本节当作长期契约。
-
 | 路径 | 职责 |
 | --- | --- |
-| `ui/components/github_tooltip.slint` | 仅 `GitHubTooltipContent` 样式表面 |
-| `ui/components/button/github_icon_button.slint` | 共享 IconButton：有文案且 `show-tooltip` 时挂内置 `Tooltip` |
-| `ui/components/button/github_copy_button.slint` | Copy→Check；“Copied!” 仅在仍悬停时由 tip 文案体现 |
-| `ui/components/messages/github_message_actions.slint` | Inbox 动作：每动作一个内置 `Tooltip` + 字面量文案 |
-| `ui/components/showcase/github_ui_components_gallery.slint` | UI Components 中的 Tooltip 示例（动态文案、裁切宿主） |
-| ~~`ui/state/tooltip_overlay_state.slint`~~ | 已删除 |
-| ~~`ui/components/github_tooltip_overlay.slint`~~ | 已删除 |
+| `ui/components/github_tooltip.slint` | 透明锚点定位器与统一 Primer surface；长文案按视口宽度换行 |
+| `ui/state/tooltip_overlay_state.slint` | 锚点矩形、首选方向/对齐、token/lease 和同步 dismiss claim |
+| `ui/components/github_floating_overlay.slint` | 与 surface 内容无关的 offset/flip(bestFit)/shift/size 几何算法 |
+| `ui/components/github_tooltip_overlay.slint` | 通用 portal；每个新 claim token 重建文本测量 surface |
+| `ui/components/button/github_icon_button.slint` | hover/focus/force-open；点击业务回调前同步 dismiss |
+| `ui/main.slint` | 主窗口 global 图的唯一根层 host |
+| `ui/state/message_tooltip_overlay_state.slint` | Messages 专用的枚举动作类型、锚点矩形与 lease；禁止承载字符串 |
+| `ui/views/messages.slint` | Messages factory-local 专用根层 host |
+| `ui/components/messages/github_message_tooltip.slint` | 枚举锚点及三个独立字面量 surface |
+| `ui/components/messages/github_message_actions.slint` | 只发布枚举的行动作，禁止动态 delegate label 别名 |
+| `ui/views/settings.slint` | Settings factory-local global 图的唯一根层 host |
 
 ## 4. 实测问题（迁移后）/ Observed issues after migration
 
@@ -124,22 +127,55 @@ Tooltip {
 
 二者均属 Slint 1.17.1 内置行为，**不是应用样式组件能修的**。
 
-## 5. 若需恢复可控体验 / If product needs controllable tips again
+## 5. 方案 E：锚点式自适应 portal / Adaptive anchor portal
 
-产品已暂不采用内置方案。可选路径：
+实现参考 [Floating UI Tutorial](https://floating-ui.com/docs/tutorial)、
+[`flip`](https://floating-ui.com/docs/flip)、
+[`shift`](https://floating-ui.com/docs/shift)、
+[`detectOverflow`](https://floating-ui.com/docs/detectoverflow) 与
+[`size`](https://floating-ui.com/docs/size)。仓库不引入 Web/JS 运行时依赖，只移植
+适用于 Slint 矩形布局的确定性子集：
 
-1. **恢复应用自研 tip（当前倾向）**  
-   保留统一的 `GitHubTooltipContent` 视觉；行为改回宿主相对定位 + 可选短延迟。裁切仍需 portal 或抬高 hover 行 z，并严格避免列表属性串台。
+1. 定位器发布触发元素的绝对矩形，以及首选 `Top/Bottom/Left/Right` 与
+   `Start/Center/End`，禁止发布调用方算好的 Tooltip 左上角。
+2. `size` 先把 surface 限制在可视视口 8px 内边距内；长文本按剩余宽度换行。
+3. `offset` 在锚点与 surface 之间保留 4px。
+4. `flip` 能容纳时保留首选侧；否则尝试相反侧；两侧都不完整时，在四侧中选择
+   主轴溢出最少的 `bestFit`。
+5. `shift` 最后同时 clamp 两轴，保证完整 surface 不越过可视边界。
+6. 定位器常驻，用空文案撤销 claim。共享 IconButton 点击时先同步 dismiss，再执行
+   可能卸载锚点的业务回调；token 防止旧 locator 清除新 tip，lease 仅兜底模型直接
+   删除导致的异常生命周期。
 
-2. **维护 Slint runtime / fork**  
-   给内置 `Tooltip` 暴露 delay、placement、offset 等 API；升级成本高。
+### ComponentFactory 边界
 
-3. **长期再评估内置 `Tooltip`**  
-   仅当上游提供可调延迟与宿主相对定位后，再考虑重新采用。
+跨 crate factory 的 global 不共享，因此“全局统一”指同一实现与契约，而不是同一个
+global 实例。`MainWindow` 与 Settings factory 各挂一个通用根层
+`GitHubTooltipOverlayHost`；通用 host 按 claim token 在两套条件 surface 之间切换，使
+上一套先卸载、下一套以当前文案重新测量，不能沿用上一条 preferred-width。Messages
+继续遵守此前实测约束：动作图标写死在叶子组件，行内锚点只发布
+`MessageTooltipKind` 和矩形，不把任何字符串属性穿过列表 delegate；页面根部唯一的
+`GitHubMessageTooltipOverlayHost` 为三个动作分别挂载独立的字面量 surface。所有 host
+复用同一个 `GitHubFloatingOverlayHost` 几何算法。这样不会重现属性串台，也不会被行
+`clip` 或下一行背景遮挡。
 
-## 6. 相关文档 / Related docs
+当前独立 factory 清单只有 Settings 与 Messages。以后新增独立生成 crate/page 时，
+必须在该 factory 的根组件挂载自己的 portal；普通功能分包继续使用 `MainWindow` 的
+portal，禁止为了“全局统一”跨 factory 读取另一个生成图的 global。
 
-- 稳定契约：[`docs/specs/ui-design.md`](specs/ui-design.md)（`GitHubTooltipContent`）
+## 6. 回归边界 / Regression boundaries
+
+- 窗口四角、四边与窄宽度下，surface 必须自动 flip/shift，完整保留在 8px 边界内。
+- ScrollView、列表、卡片和菜单关闭按钮不得通过放开 clip 或局部提高 `z` 绘制 tip。
+- 点击会卸载锚点的操作必须在业务回调前同步关闭 tip，禁止闪到窗口原点。
+- Messages 反复进入/离开、切换已读状态、删除行时不得串文案或保留旧 tip。
+- 在任意通用 factory 内连续 hover 长短不同的 Tooltip 时，每次都必须重新测量宽度。
+- Settings/Messages 的 Tooltip 不得依赖 `MainWindow` 的 global 实例。
+- 新增独立 factory 时必须同时新增 factory-root portal，并加入此处的独立 factory 清单。
+
+## 7. 相关文档 / Related docs
+
+- 稳定契约：[`docs/specs/ui-design.md`](specs/ui-design.md)（`GitHubTooltip`）
 - Messages：[`docs/specs/messages.md`](specs/messages.md)
 - Status bar：[`docs/specs/status-bar.md`](specs/status-bar.md)
 - 架构：[`docs/architecture.md`](architecture.md)、[`docs/architecture.zh.md`](architecture.zh.md)

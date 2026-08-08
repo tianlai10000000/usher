@@ -9,6 +9,7 @@ import { GitHubBranchFlow } from "../../components/workflow/github_branch_flow.s
 import { GitHubCdFlow } from "../../components/workflow/github_cd_flow.slint";
 import { GitHubTagFlow } from "../../components/workflow/github_tag_flow.slint";
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
+import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import { GitHubWorkflowProjectDetails } from "../../components/workflow/github_workflow_components.slint";
 
@@ -435,14 +436,13 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                     mouse-cursor: pointer;
                     clicked => { root.open-local-repo(root.project-local-repo); }
                 }
-                // Match the expanded header's Show in Finder/Explorer tooltip.
-                // Keep it inside the ActionMenu surface so clip:true does not
-                // hide an above-tooltip that would otherwise escape the panel.
-                if shell-open-touch.has-hover && root.has-local: GitHubTooltip {
-                    x: parent.width - self.width;
-                    y: -self.height - 4px;
+                GitHubTooltip {
                     z: 10001;
-                    text: root.open-local-folder-tooltip;
+                    preferred-placement: GitHubTooltipPlacement.Top;
+                    alignment: GitHubTooltipAlignment.End;
+                    text: shell-open-touch.has-hover && root.has-local
+                        ? root.open-local-folder-tooltip
+                        : "";
                 }
                 }
             }

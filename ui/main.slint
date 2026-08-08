@@ -2160,6 +2160,9 @@ export component MainWindow inherits Window {
     GitHubTooltipOverlayHost {
         x: 0px;
         y: 0px;
-        z: 1500;
+        // Tooltip surfaces are input-transparent and must remain visually
+        // above nested ActionMenu z-layers so their fixed token color is not
+        // composited through menu/scrim chrome.
+        z: 100000;
     }
 }

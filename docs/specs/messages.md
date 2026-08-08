@@ -25,11 +25,18 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
 - `src/message_center.rs` is the only root-window bridge. It converts immutable
   snapshots to Slint models, mirrors theme/viewport state, pushes explicit
   total/unread/read filter counts, and forwards page commands to the domain
-  service. Inbox row actions use dedicated hardcoded-glyph controls with local
-  tips that match `GitHubIconButton`: below the action, trailing-aligned, and
-  separated by `overlay-offset`. Rows keep `clip: false` so those tips are not
-  cropped onto the button. The Inbox intentionally bypasses the shared tooltip
-  portal.   Filter tab badges bind to integer `count` inputs on
+  service. Inbox row actions use dedicated hardcoded-glyph controls and literal
+  Tooltip labels so dynamic list delegates cannot alias icon or label bindings.
+  The independently compiled page owns a dedicated enum-only
+  `MessageTooltipOverlayState` and root-layer
+  `GitHubMessageTooltipOverlayHost`. Delegates publish only an action kind and
+  anchor rectangle; three separate factory-root surfaces own the literal
+  **Mark as read**, **Mark as unread**, and **Delete** labels. This prevents
+  both delegate string aliasing and stale preferred-width reuse while retaining
+  the shared anchor-based flip/shift/size geometry without reaching into
+  `MainWindow` globals. Rows remain clipped list content while only the
+  page-owned surface escapes that clip. Filter tab badges bind to integer
+  `count` inputs on
   `GitHubSegmentedControlItem` (rendered as separate Text nodes, not one
   concatenated caption). The page header status sentence is a complete string
   pushed from Rust on each snapshot for the same ComponentFactory freeze reason.
@@ -56,9 +63,14 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   Worker。具体 Store 引擎类型不得越过该门面。
 - `src/message_center.rs` 是唯一主窗口桥接层，负责把不可变快照转换为 Slint model、
   同步主题/视口、下发 All/Unread/Read 整型计数，并把页面命令转给领域服务。Inbox
-  行动作使用写死 SVG；tip 在按钮上本地绘制，与 `GitHubIconButton` 一致（下方、
-  尾对齐、`overlay-offset` 间距）。行保持 `clip: false`，避免 tip 被裁进按钮。
-  Inbox 特意绕过共享 tooltip 门户。筛选 Tab 徽标绑定
+  行动作使用写死 SVG 和 Tooltip 字面量文案，避免动态列表 delegate 串用图标或文案
+  binding。独立编译页面拥有专用、只传枚举的
+  `MessageTooltipOverlayState` 与根层 `GitHubMessageTooltipOverlayHost`。Delegate
+  只发布动作类型和锚点矩形；页面根部用三个独立 surface 分别持有 **Mark as read**、
+  **Mark as unread** 和 **Delete** 字面量，既避免 delegate 字符串串用，也避免复用旧的
+  preferred-width。定位仍复用共享的锚点式 flip/shift/size 算法，但不读取
+  `MainWindow` global。列表行继续裁剪内容，只有页面根层 surface 逃逸该裁剪。筛选
+  Tab 徽标绑定
   `GitHubSegmentedControlItem` 的整型 `count`（控件内用独立 Text 节点渲染，
   禁止拼成单一字符串）。页头状态句由 Rust 在每次快照中下发完整字符串，原因
   同为 ComponentFactory 页面上动态字符串拼接会在首次绘制后冻结。

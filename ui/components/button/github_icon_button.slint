@@ -1,5 +1,10 @@
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubTooltip } from "../github_tooltip.slint";
+import {
+    GitHubTooltipAlignment,
+    GitHubTooltipPlacement,
+    TooltipOverlayState,
+} from "../../state/tooltip_overlay_state.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 
 // Primer IconButton foundation for application-owned icon-only actions.
@@ -46,6 +51,7 @@ export component GitHubIconButton inherits FocusScope {
     in property <color> selected-hover-background: root.selected-background;
     out property <bool> has-hover: button-touch.has-hover;
     private property <bool> keyboard-focus-visible: false;
+    private property <bool> tooltip-dismissed: false;
     private property <color> resolved-foreground: root.selected
         ? (button-touch.has-hover
             ? root.selected-hover-foreground
@@ -69,16 +75,31 @@ export component GitHubIconButton inherits FocusScope {
         root.keyboard-focus-visible = true;
         if (root.activation-enabled
                 && (event.text == Key.Return || event.text == " ")) {
-            root.clicked();
+            root.activate();
             return accept;
         }
         return reject;
     }
     focus-gained(reason) => {
+        // A fresh Tab visit may show the tip again. Mouse focus is acquired by
+        // activate() after dismissal and must not immediately republish it.
+        if reason == FocusReason.tab-navigation {
+            root.tooltip-dismissed = false;
+        }
         root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
     }
     focus-lost => {
         root.keyboard-focus-visible = false;
+    }
+
+    function activate() {
+        root.keyboard-focus-visible = false;
+        root.tooltip-dismissed = true;
+        TooltipOverlayState.dismiss-all();
+        // Manual focus replaces focus-on-click so the same press both focuses
+        // (for Enter/Space) and activates.
+        root.focus();
+        root.clicked();
     }
 
     if root.has-focus && root.keyboard-focus-visible: focus-ring := Rectangle {
@@ -159,27 +180,33 @@ export component GitHubIconButton inherits FocusScope {
         height: 100%;
         enabled: root.activation-enabled;
         mouse-cursor: self.enabled ? pointer : default;
+        changed has-hover => {
+            if !self.has-hover {
+                root.tooltip-dismissed = false;
+            }
+        }
         clicked => {
-            root.keyboard-focus-visible = false;
-            // Manual focus replaces focus-on-click so the same press both
-            // focuses (for Enter/Space) and activates.
-            root.focus();
-            root.clicked();
+            // Dismiss before invoking a callback that may unmount this anchor.
+            root.activate();
         }
     }
 
-    // Keep the locator mounted and clear its text when inactive. Conditional
-    // `if hover: GitHubTooltip` destroys the element without a destructor, so
-    // adjacent IconButtons can briefly keep painting a stale tip (wrong label
-    // over the newly hovered control). Empty text publishes hide() instead.
+    // Keep the locator mounted and publish the complete button rectangle. The
+    // root host owns flip/shift/size and therefore needs no edge-specific x/y.
     if root.show-tooltip && root.tooltip-text != "": GitHubTooltip {
         z: 10001;
-        x: root.tooltip-align-right ? root.width - self.width
-            : (root.tooltip-align-left ? 0px : (root.width - self.width) / 2);
-        y: root.tooltip-above
-            ? -self.height - GitHubMetrics.overlay-offset
-            : root.height + GitHubMetrics.overlay-offset;
-        text: (button-touch.has-hover || root.keyboard-focus-visible || root.force-tooltip)
+        debug-node: "GitHubIconButton";
+        preferred-placement: root.tooltip-above
+            ? GitHubTooltipPlacement.Top
+            : GitHubTooltipPlacement.Bottom;
+        alignment: root.tooltip-align-right
+            ? GitHubTooltipAlignment.End
+            : (root.tooltip-align-left
+                ? GitHubTooltipAlignment.Start
+                : GitHubTooltipAlignment.Center);
+        text: (root.force-tooltip
+                || ((button-touch.has-hover || root.keyboard-focus-visible)
+                    && !root.tooltip-dismissed))
             ? root.tooltip-text
             : "";
     }
