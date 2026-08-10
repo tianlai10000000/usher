@@ -459,10 +459,10 @@ fn validated_repository_context(
 mod tests {
     use super::{
         PullRequestCommit, PullRequestState, RepoType, commit_count_from_detail,
-        conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
-        finalize_conversation_timeline, is_redundant_commit_system_note,
-        is_redundant_merge_system_note, parse_repo_locator, parse_unified_diff,
-        percent_encode_path, split_commit_message, supports_ignore_whitespace,
+        conversation_body_to_plain_text, conversation_commit_batch_items,
+        conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
+        is_redundant_commit_system_note, is_redundant_merge_system_note, parse_repo_locator,
+        parse_unified_diff, percent_encode_path, split_commit_message, supports_ignore_whitespace,
     };
 
     #[test]
@@ -516,6 +516,46 @@ mod tests {
             conversation_count_from_detail(&serde_json::json!({ "comments": 0 })),
             Some(0)
         );
+    }
+
+    #[test]
+    fn normalizes_provider_markup_for_the_shared_conversation_cards() {
+        assert_eq!(
+            conversation_body_to_plain_text(
+                r#"<p>feat: customer page (<a target="_blank" href="https://example.test/p11">p11_202604100012</a>)</p>"#,
+            ),
+            "feat: customer page (p11_202604100012)"
+        );
+        assert_eq!(
+            conversation_body_to_plain_text("**Ready**\n\n- first\n- second &amp; final"),
+            "Ready\n• first\n• second & final"
+        );
+
+        let timeline = finalize_conversation_timeline(
+            super::PullRequestConversationItem {
+                id: "description-1".into(),
+                kind: "provider-description".into(),
+                author: "alice".into(),
+                avatar_url: String::new(),
+                author_association: String::new(),
+                body: "<p>Shared <strong>description</strong></p>".into(),
+                created_at: "2026-08-10T00:00:00Z".into(),
+                state: "open".into(),
+            },
+            vec![super::PullRequestConversationItem {
+                id: "comment-1".into(),
+                kind: "comment".into(),
+                author: "bob".into(),
+                avatar_url: String::new(),
+                author_association: String::new(),
+                body: "<p>Shared <em>comment</em></p>".into(),
+                created_at: "2026-08-10T00:01:00Z".into(),
+                state: String::new(),
+            }],
+        );
+        assert_eq!(timeline[0].kind, "description");
+        assert_eq!(timeline[0].body, "Shared description");
+        assert_eq!(timeline[1].body, "Shared comment");
     }
 
     #[test]

@@ -1,5 +1,7 @@
 use std::fmt;
 
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RepoType {
     Gitee,
@@ -315,13 +317,20 @@ pub(crate) fn finalize_conversation_timeline(
     activity: Vec<PullRequestConversationItem>,
 ) -> Vec<PullRequestConversationItem> {
     description.kind = "description".to_string();
+    normalize_conversation_body(&mut description);
 
     // Treat a GitHub-style `commits` header and its following `commit` rows as
     // one atomic timeline block. Sorting every row independently separates the
     // "added N commits" record from commits whose authored dates differ. This
     // block normalization is shared by GitHub, GitLab, and both Gitee profiles.
     let mut blocks = Vec::<(String, Vec<PullRequestConversationItem>)>::new();
-    let mut activity = activity.into_iter().peekable();
+    let mut activity = activity
+        .into_iter()
+        .map(|mut item| {
+            normalize_conversation_body(&mut item);
+            item
+        })
+        .peekable();
     while let Some(item) = activity.next() {
         let sort_at = item.created_at.clone();
         let mut block = vec![item];
@@ -346,6 +355,137 @@ pub(crate) fn finalize_conversation_timeline(
     items.push(description);
     items.extend(blocks.into_iter().flat_map(|(_, block)| block.into_iter()));
     items
+}
+
+/// Convert provider-specific Markdown/HTML bodies into the one plain-text
+/// Conversation presentation shared by GitHub, GitLab, and Gitee.
+///
+/// The Slint timeline deliberately owns one GitHub-style card implementation
+/// and does not execute provider-supplied markup. Parsing at this boundary
+/// keeps visible text and paragraph/list breaks while dropping raw tags.
+fn normalize_conversation_body(item: &mut PullRequestConversationItem) {
+    if !matches!(item.kind.as_str(), "description" | "comment" | "review") {
+        return;
+    }
+    item.body = conversation_body_to_plain_text(item.body.as_str());
+}
+
+pub(crate) fn conversation_body_to_plain_text(body: &str) -> String {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_TASKLISTS);
+
+    let mut output = String::with_capacity(body.len());
+    for event in Parser::new_ext(body, options) {
+        match event {
+            Event::Text(text) | Event::Code(text) => output.push_str(text.as_ref()),
+            Event::SoftBreak | Event::HardBreak => push_conversation_line_break(&mut output),
+            Event::Start(Tag::Item) => {
+                push_conversation_line_break(&mut output);
+                output.push_str("• ");
+            }
+            Event::End(
+                TagEnd::Paragraph
+                | TagEnd::Heading(_)
+                | TagEnd::CodeBlock
+                | TagEnd::Item
+                | TagEnd::TableRow,
+            )
+            | Event::Rule => push_conversation_line_break(&mut output),
+            Event::TaskListMarker(checked) => {
+                output.push_str(if checked { "[x] " } else { "[ ] " });
+            }
+            Event::Html(html) | Event::InlineHtml(html) => {
+                append_html_fragment_text(&mut output, html.as_ref());
+            }
+            _ => {}
+        }
+    }
+
+    decode_html_entities(output.trim())
+}
+
+fn push_conversation_line_break(output: &mut String) {
+    if !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
+    }
+}
+
+fn append_html_fragment_text(output: &mut String, html: &str) {
+    let mut tag = String::new();
+    let mut inside_tag = false;
+    for character in html.chars() {
+        match character {
+            '<' if !inside_tag => {
+                inside_tag = true;
+                tag.clear();
+            }
+            '>' if inside_tag => {
+                inside_tag = false;
+                let tag_name = tag
+                    .trim()
+                    .trim_start_matches('/')
+                    .split_ascii_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .trim_end_matches('/')
+                    .to_ascii_lowercase();
+                match tag_name.as_str() {
+                    "li" if !tag.trim_start().starts_with('/') => {
+                        push_conversation_line_break(output);
+                        output.push_str("• ");
+                    }
+                    "br" | "p" | "div" | "li" | "tr" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
+                        push_conversation_line_break(output)
+                    }
+                    _ => {}
+                }
+            }
+            _ if inside_tag => tag.push(character),
+            _ => output.push(character),
+        }
+    }
+}
+
+pub(crate) fn decode_html_entities(value: &str) -> String {
+    let mut decoded = String::with_capacity(value.len());
+    let mut remaining = value;
+    while let Some(entity_start) = remaining.find('&') {
+        decoded.push_str(&remaining[..entity_start]);
+        remaining = &remaining[entity_start..];
+        let Some(entity_end) = remaining.find(';').filter(|end| *end <= 12) else {
+            decoded.push('&');
+            remaining = &remaining[1..];
+            continue;
+        };
+        let entity = &remaining[1..entity_end];
+        let replacement = match entity {
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            "nbsp" => Some(' '),
+            "amp" => Some('&'),
+            numeric if numeric.starts_with("#x") || numeric.starts_with("#X") => {
+                u32::from_str_radix(&numeric[2..], 16)
+                    .ok()
+                    .and_then(char::from_u32)
+            }
+            numeric if numeric.starts_with('#') => {
+                numeric[1..].parse::<u32>().ok().and_then(char::from_u32)
+            }
+            _ => None,
+        };
+        if let Some(replacement) = replacement {
+            decoded.push(replacement);
+        } else {
+            decoded.push_str(&remaining[..=entity_end]);
+        }
+        remaining = &remaining[entity_end + 1..];
+    }
+    decoded.push_str(remaining);
+    decoded
 }
 
 /// True when a provider system note is already covered by structured commit rows.

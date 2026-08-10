@@ -3,6 +3,7 @@ use serde_json::Value;
 
 use super::super::{
     PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine, commit_count_from_detail,
+    decode_html_entities,
 };
 use super::{string_field, value_u32};
 
@@ -191,44 +192,4 @@ pub(super) fn html_diff_line_to_text(value: &str) -> String {
         .chars()
         .filter(|character| !matches!(character, '\r' | '\n'))
         .collect()
-}
-
-pub(super) fn decode_html_entities(value: &str) -> String {
-    let mut decoded = String::with_capacity(value.len());
-    let mut remaining = value;
-    while let Some(entity_start) = remaining.find('&') {
-        decoded.push_str(&remaining[..entity_start]);
-        remaining = &remaining[entity_start..];
-        let Some(entity_end) = remaining.find(';').filter(|end| *end <= 12) else {
-            decoded.push('&');
-            remaining = &remaining[1..];
-            continue;
-        };
-        let entity = &remaining[1..entity_end];
-        let replacement = match entity {
-            "lt" => Some('<'),
-            "gt" => Some('>'),
-            "quot" => Some('"'),
-            "apos" => Some('\''),
-            "nbsp" => Some(' '),
-            "amp" => Some('&'),
-            numeric if numeric.starts_with("#x") || numeric.starts_with("#X") => {
-                u32::from_str_radix(&numeric[2..], 16)
-                    .ok()
-                    .and_then(char::from_u32)
-            }
-            numeric if numeric.starts_with('#') => {
-                numeric[1..].parse::<u32>().ok().and_then(char::from_u32)
-            }
-            _ => None,
-        };
-        if let Some(replacement) = replacement {
-            decoded.push(replacement);
-        } else {
-            decoded.push_str(&remaining[..=entity_end]);
-        }
-        remaining = &remaining[entity_end + 1..];
-    }
-    decoded.push_str(remaining);
-    decoded
 }
