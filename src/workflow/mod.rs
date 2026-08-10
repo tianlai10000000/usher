@@ -2,6 +2,8 @@ mod bindings;
 pub mod branch;
 pub mod cd;
 mod pr_list;
+#[cfg(feature = "test-fixtures")]
+mod pr_list_fixture;
 mod pr_review;
 pub mod state;
 mod syntax_highlight;

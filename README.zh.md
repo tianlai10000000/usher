@@ -97,6 +97,14 @@ UI Components 演练场同样只用于开发。普通 `cargo run` 和现有 Rele
 SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components
 ```
 
+如需在不依赖 Provider 响应的情况下检查 GitHub 风格 PR 列表评审状态，可使用下面
+的显式固定 fixture 启动应用，再打开任意已配置项目。它覆盖已批准、需要评审、
+请求修改、无状态、长标题和长分支；普通启动绝不会加载这些记录。
+
+```sh
+./tests/run-pr-list-review-status-fixture.sh
+```
+
 完整的 `cargo test --locked` 当前会暴露 `src/logger/debug_logger.rs` 中已有的 doctest 问题；库单元测试本身可以通过。
 
 验证可选的 Skia 渲染路径：

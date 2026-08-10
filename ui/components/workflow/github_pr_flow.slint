@@ -60,7 +60,6 @@ export component GitHubPullRequestFlow {
     private property <length> hovered-inline-tooltip-height: 1px;
     private property <bool> compact-filters: root.width < 620px;
     private property <bool> wrap-row-branches: root.width < 760px;
-    private property <length> row-height: root.wrap-row-branches ? 98px : 72px;
     private property <bool> supports-review-filter: root.repo-type == "github";
     private property <bool> supports-assignee-filter: root.repo-type == "github"
         || root.repo-type == "gitlab";
@@ -76,7 +75,7 @@ export component GitHubPullRequestFlow {
     private property <color> fg-muted: GitHubTheme.fg-muted;
     private property <length> list-height: root.pr-loading || root.pr-error != "" || root.pr-items.length == 0
         ? root.header-height + 320px
-        : root.header-height + root.pr-items.length * root.row-height;
+        : root.header-height + visible-rows.preferred-height;
     private property <bool> show-pagination: !root.pr-loading
         && root.pr-error == ""
         && root.pr-items.length > 0
@@ -261,16 +260,16 @@ export component GitHubPullRequestFlow {
             description: "Try another status filter.";
         }
 
-        if !root.pr-loading && root.pr-error == "" && root.pr-items.length > 0: Rectangle {
+        visible-rows := VerticalLayout {
             y: root.header-height;
             width: parent.width;
-            height: root.pr-items.length * root.row-height;
-            background: transparent;
+            height: self.preferred-height;
+            visible: !root.pr-loading && root.pr-error == "" && root.pr-items.length > 0;
+            spacing: 0px;
+            alignment: start;
 
             for item[index] in root.pr-items: pr-row := Rectangle {
-                y: index * root.row-height;
                 width: parent.width;
-                height: root.row-height;
                 // GitHub PR list rows stay on the default canvas. The title is an
                 // accent link; hover underlines the title instead of painting
                 // Box-row--hover-gray across the row.
@@ -281,18 +280,34 @@ export component GitHubPullRequestFlow {
                 private property <length> content-x: 38px;
                 // StyledText provides stable paragraph line spacing for mixed
                 // CJK/Latin titles where Text's glyph rows otherwise crowd.
-                private property <length> first-line-center-y: root.wrap-row-branches ? 17px : 21px;
                 private property <length> title-max-width: max(
                     80px,
                     parent.width - self.content-x - self.action-width - 32px,
                 );
                 private property <bool> title-wraps: title-measure.preferred-width > self.title-max-width;
-                private property <bool> title-uses-two-lines: root.wrap-row-branches && self.title-wraps;
-                private property <length> title-block-height: self.title-uses-two-lines ? 36px : 26px;
+                private property <length> title-block-height: max(
+                    root.wrap-row-branches ? 18px : 26px,
+                    title-wrapped-measure.preferred-height,
+                );
+                private property <length> first-line-center-y:
+                    self.title-wraps || root.wrap-row-branches ? 17px : 21px;
                 private property <length> title-draw-width: self.title-wraps
                     ? self.title-max-width
                     : min(title-measure.preferred-width, self.title-max-width);
                 private property <bool> keyboard-focus-visible: false;
+                private property <length> metadata-y: 8px + self.title-block-height
+                    + (self.title-wraps ? 4px : (root.wrap-row-branches ? 2px : 0px));
+                private property <length> branch-chip-height: 22px;
+                private property <length> branch-chip-y: root.wrap-row-branches
+                    ? self.metadata-y + 26px
+                    : self.metadata-y;
+                private property <length> natural-row-height: root.wrap-row-branches && self.has-branches
+                    ? self.branch-chip-y + self.branch-chip-height + 6px
+                    : max(
+                        root.wrap-row-branches ? 64px : 72px,
+                        self.metadata-y + 22px + 8px,
+                    );
+                height: self.natural-row-height;
 
                 row-focus := FocusScope {
                     width: 100%;
@@ -352,31 +367,45 @@ export component GitHubPullRequestFlow {
                     wrap: no-wrap;
                 }
 
-                if !title-touch.has-hover: StyledText {
-                    x: parent.content-x;
-                    y: 8px;
+                title-wrapped-measure := StyledText {
+                    visible: false;
                     width: parent.title-max-width;
-                    height: parent.title-block-height;
                     text: @markdown("**\{item.title}**");
                     default-font-size: 14px;
-                    default-color: root.fg-default;
-                    horizontal-alignment: left;
-                    vertical-alignment: root.wrap-row-branches ? top : center;
                 }
 
-                // StyledText underlines each glyph run and each wrapped line.
-                // A separate Rectangle creates one unrelated rule that can
-                // collide with metadata below the title.
-                if title-touch.has-hover: StyledText {
+                title-clip := Rectangle {
                     x: parent.content-x;
                     y: 8px;
                     width: parent.title-max-width;
                     height: parent.title-block-height;
-                    text: @markdown("<u>**\{item.title}**</u>");
-                    default-font-size: 14px;
-                    default-color: GitHubTheme.accent-fg;
-                    horizontal-alignment: left;
-                    vertical-alignment: root.wrap-row-branches ? top : center;
+                    background: transparent;
+
+                    if !title-touch.has-hover: StyledText {
+                        width: parent.width;
+                        height: parent.height;
+                        text: @markdown("**\{item.title}**");
+                        default-font-size: 14px;
+                        default-color: root.fg-default;
+                        horizontal-alignment: left;
+                        vertical-alignment: pr-row.title-wraps || root.wrap-row-branches
+                            ? top
+                            : center;
+                    }
+
+                    // StyledText underlines each glyph run and each wrapped line.
+                    // The measured host grows for every wrapped line.
+                    if title-touch.has-hover: StyledText {
+                        width: parent.width;
+                        height: parent.height;
+                        text: @markdown("<u>**\{item.title}**</u>");
+                        default-font-size: 14px;
+                        default-color: GitHubTheme.accent-fg;
+                        horizontal-alignment: left;
+                        vertical-alignment: pr-row.title-wraps || root.wrap-row-branches
+                            ? top
+                            : center;
+                    }
                 }
 
                 title-touch := TouchArea {
@@ -405,27 +434,57 @@ export component GitHubPullRequestFlow {
                         : (item.state == "closed" ? " was closed " : " was opened "));
                 private property <bool> has-branches: item.target-branch != ""
                     && item.source-branch != "";
-                private property <length> metadata-y: root.wrap-row-branches
-                    ? (self.title-uses-two-lines ? 38px : 24px)
-                    : 34px;
                 // Gitee's mixed CJK/Latin metadata needs a small optical
                 // correction; Latin-only GitHub/GitLab metadata does not.
                 private property <length> time-visual-offset-y: root.repo-type == "gitee" ? 1px : 0px;
-                private property <length> meta-max-width: parent.width - self.content-x - 16px;
+                private property <string> review-status-label: item.review-status == "approved"
+                    ? "Approved"
+                    : (item.review-status == "review_required"
+                        ? "Review required"
+                        : (item.review-status == "changes_requested" ? "Changes requested" : ""));
+                private property <string> review-status-tooltip: item.review-status == "approved"
+                    ? "This pull request has an approving review"
+                    : (item.review-status == "review_required"
+                        ? "This pull request is awaiting a required review"
+                        : (item.review-status == "changes_requested"
+                            ? "A reviewer requested changes"
+                            : ""));
+                private property <length> meta-max-width: max(
+                    0px,
+                    parent.width - self.content-x - 16px
+                        - (root.wrap-row-branches ? self.action-width + 8px : 0px),
+                );
                 private property <length> inline-meta-budget: root.wrap-row-branches || !self.has-branches
                     ? self.meta-max-width
                     : max(0px, self.meta-max-width * 0.58);
+                private property <length> review-status-width: self.review-status-label == ""
+                    ? 0px
+                    : min(review-status-measure.preferred-width + 14px, self.inline-meta-budget);
                 private property <length> meta-prefix-width: min(
                     meta-prefix-measure.preferred-width,
-                    max(0px, self.inline-meta-budget - time-measure.preferred-width),
+                    max(
+                        0px,
+                        self.inline-meta-budget
+                            - self.review-status-width
+                            - time-measure.preferred-width,
+                    ),
                 );
                 private property <length> time-width: min(
                     time-measure.preferred-width,
-                    max(0px, self.inline-meta-budget - self.meta-prefix-width),
+                    max(
+                        0px,
+                        self.inline-meta-budget
+                            - self.meta-prefix-width
+                            - self.review-status-width,
+                    ),
                 );
                 private property <length> branch-pair-x: root.wrap-row-branches
                     ? self.content-x
-                    : self.content-x + self.meta-prefix-width + self.time-width + 12px;
+                    : self.content-x
+                        + self.meta-prefix-width
+                        + self.time-width
+                        + self.review-status-width
+                        + 12px;
                 private property <length> branch-pair-width: max(
                     0px,
                     self.meta-max-width - (self.branch-pair-x - self.content-x),
@@ -439,11 +498,6 @@ export component GitHubPullRequestFlow {
                     source-branch-measure.preferred-width + 16px,
                     max(0px, self.branch-label-space - self.target-branch-width),
                 );
-                private property <length> branch-chip-height: 22px;
-                private property <length> branch-row-center-y: self.metadata-y
-                    + (root.wrap-row-branches ? 35px : 11px);
-                private property <length> branch-chip-y:
-                    self.branch-row-center-y - self.branch-chip-height / 2;
 
                 meta-prefix-measure := Text {
                     visible: false;
@@ -455,6 +509,13 @@ export component GitHubPullRequestFlow {
                 time-measure := Text {
                     visible: false;
                     text: item.updated-at;
+                    font-size: 12px;
+                    wrap: no-wrap;
+                }
+
+                review-status-measure := Text {
+                    visible: false;
+                    text: parent.review-status-label;
                     font-size: 12px;
                     wrap: no-wrap;
                 }
@@ -529,6 +590,102 @@ export component GitHubPullRequestFlow {
                             item.updated-at-raw,
                             2,
                         );
+                    }
+                }
+
+                if pr-row.review-status-label != "": review-status := FocusScope {
+                    x: parent.content-x + parent.meta-prefix-width + parent.time-width;
+                    y: parent.metadata-y;
+                    width: parent.review-status-width;
+                    height: 22px;
+                    accessible-role: button;
+                    accessible-enabled: true;
+                    accessible-label: parent.review-status-label + ". Open pull request conversation";
+                    private property <bool> keyboard-focus-visible: false;
+
+                    key-pressed(event) => {
+                        self.keyboard-focus-visible = true;
+                        if event.text == Key.Return || event.text == " " {
+                            root.open-detail(
+                                item.number,
+                                item.title,
+                                item.author,
+                                item.source-branch,
+                                item.target-branch,
+                                item.updated-at-raw,
+                                0,
+                            );
+                            return accept;
+                        }
+                        return reject;
+                    }
+                    focus-gained(reason) => {
+                        self.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+                    }
+                    focus-lost => { self.keyboard-focus-visible = false; }
+
+                    Text {
+                        x: 2px;
+                        width: 10px;
+                        height: parent.height;
+                        text: "•";
+                        font-size: 12px;
+                        color: root.fg-muted;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        x: 14px;
+                        width: max(0px, parent.width - 14px);
+                        height: parent.height;
+                        text: pr-row.review-status-label;
+                        font-size: 12px;
+                        color: review-status-touch.has-hover || review-status.has-focus
+                            ? GitHubTheme.accent-fg
+                            : root.fg-muted;
+                        vertical-alignment: center;
+                        overflow: clip;
+                    }
+                    if review-status.has-focus && review-status.keyboard-focus-visible: Rectangle {
+                        x: 11px;
+                        y: 1px;
+                        width: max(0px, parent.width - 9px);
+                        height: parent.height - 2px;
+                        border-radius: 4px;
+                        border-width: 2px;
+                        border-color: GitHubTheme.focus-outline;
+                        background: transparent;
+                    }
+                    review-status-touch := TouchArea {
+                        x: 12px;
+                        width: max(0px, parent.width - 12px);
+                        height: parent.height;
+                        mouse-cursor: pointer;
+                        changed has-hover => {
+                            if self.has-hover {
+                                root.hovered-inline-tooltip = pr-row.review-status-tooltip;
+                                root.hovered-inline-tooltip-x = self.absolute-position.x
+                                    - root.absolute-position.x;
+                                root.hovered-inline-tooltip-y = self.absolute-position.y
+                                    - root.absolute-position.y;
+                                root.hovered-inline-tooltip-width = self.width;
+                                root.hovered-inline-tooltip-height = self.height;
+                            } else if root.hovered-inline-tooltip == pr-row.review-status-tooltip {
+                                root.hovered-inline-tooltip = "";
+                            }
+                        }
+                        clicked => {
+                            parent.keyboard-focus-visible = false;
+                            parent.focus();
+                            root.open-detail(
+                                item.number,
+                                item.title,
+                                item.author,
+                                item.source-branch,
+                                item.target-branch,
+                                item.updated-at-raw,
+                                0,
+                            );
+                        }
                     }
                 }
 

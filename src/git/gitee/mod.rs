@@ -13,11 +13,12 @@ use super::{
     GiteeApiProfile, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
     PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters, PullRequestItem,
     PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
-    PullRequestRevertResult, PullRequestReviewAction, PullRequestState, RepoLocator, RepoType,
-    commit_count_from_detail, configured_api_base_url, configured_enterprise,
-    configured_gitee_token, conversation_commit_batch_items, conversation_count_from_detail,
-    conversation_merged_item, finalize_conversation_timeline, gitee_api_profile,
-    is_redundant_commit_system_note, is_redundant_merge_system_note, percent_encode_path,
+    PullRequestRevertResult, PullRequestReviewAction, PullRequestReviewStatus, PullRequestState,
+    RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url,
+    configured_enterprise, configured_gitee_token, conversation_commit_batch_items,
+    conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
+    gitee_api_profile, is_redundant_commit_system_note, is_redundant_merge_system_note,
+    percent_encode_path,
 };
 
 mod conversation;
@@ -1830,12 +1831,27 @@ fn to_pull_request_item(value: &Value) -> PullRequestItem {
         target_branch: string_field(value, "target_branch")
             .or_else(|| nested_string(value, "base", "label"))
             .unwrap_or_else(|| "—".to_string()),
+        review_status: gitee_list_review_status(value),
         conversation_count: conversation_count_from_detail(value),
         updated_at: string_field(value, "updated_at")
             .unwrap_or_else(|| "Unknown update time".to_string()),
         web_url: string_field(value, "web_url")
             .or_else(|| string_field(value, "html_url"))
             .unwrap_or_default(),
+    }
+}
+
+fn gitee_list_review_status(value: &Value) -> PullRequestReviewStatus {
+    match string_field(value, "review_state")
+        .or_else(|| string_field(value, "reviewState"))
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "review_approved" | "approved" => PullRequestReviewStatus::Approved,
+        "review_rejected" | "rejected" => PullRequestReviewStatus::ChangesRequested,
+        "review_pending" | "pending" => PullRequestReviewStatus::ReviewRequired,
+        _ => PullRequestReviewStatus::None,
     }
 }
 
@@ -1900,13 +1916,29 @@ mod tests {
         enterprise_review_belongs_to_current_user, enterprise_review_dismissal_payload,
         enterprise_review_payload, enterprise_review_summaries,
         enterprise_web_pull_request_review_endpoint, expand_enterprise_conversation_notes,
-        gitee_enterprise_list_sort, gitee_enterprise_merge_readiness, gitee_public_list_sort,
-        gitee_public_merge_readiness, normalize_enterprise_commit_order, pull_request_values,
-        select_enterprise_project_id, trusted_enterprise_commit_count,
+        gitee_enterprise_list_sort, gitee_enterprise_merge_readiness, gitee_list_review_status,
+        gitee_public_list_sort, gitee_public_merge_readiness, normalize_enterprise_commit_order,
+        pull_request_values, select_enterprise_project_id, trusted_enterprise_commit_count,
     };
     use crate::codereview::api::gitee as endpoints;
-    use crate::git::{PullRequestReadinessKind, parse_repo_locator};
+    use crate::git::{PullRequestReadinessKind, PullRequestReviewStatus, parse_repo_locator};
     use reqwest::header::HeaderMap;
+
+    #[test]
+    fn maps_gitee_list_review_states_to_github_statuses() {
+        assert_eq!(
+            gitee_list_review_status(&json!({ "review_state": "review_pending" })),
+            PullRequestReviewStatus::ReviewRequired
+        );
+        assert_eq!(
+            gitee_list_review_status(&json!({ "review_state": "review_approved" })),
+            PullRequestReviewStatus::Approved
+        );
+        assert_eq!(
+            gitee_list_review_status(&json!({ "review_state": "review_rejected" })),
+            PullRequestReviewStatus::ChangesRequested
+        );
+    }
 
     #[test]
     fn chooses_the_exact_remote_match_from_a_search_result() {

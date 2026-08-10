@@ -103,6 +103,16 @@ preview script enables it automatically; the equivalent direct command is:
 SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components
 ```
 
+To inspect the GitHub-style PR-list review statuses without depending on a
+provider response, start the app with the opt-in fixed fixture below and open
+any configured project. It includes approved, review-required,
+changes-requested, absent-status, long-title, and long-branch rows; normal runs
+never load these records.
+
+```sh
+./tests/run-pr-list-review-status-fixture.sh
+```
+
 The full `cargo test --locked` command currently exposes a pre-existing failing doctest in `src/logger/debug_logger.rs`; the library unit tests pass.
 
 To inspect the optional Skia path:

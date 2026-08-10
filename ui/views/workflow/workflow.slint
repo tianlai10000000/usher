@@ -114,27 +114,13 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     // Compact mode moves paths into the overflow menu.
     private property <length> project-header-height: project-details.height;
     private property <length> workflow-nav-height: 48px;
-    private property <length> pr-flow-width: root.workflow-content-width
-        - (root.compact-workflow-layout ? 32px : 48px);
-    private property <length> pr-list-header-height: 48px;
-    private property <length> pr-list-row-height: root.pr-flow-width < 760px ? 98px : 72px;
-    private property <length> pr-list-content-height: root.pr-list-loading || root.pr-list-error != "" || root.pr-list-items.length == 0
-        ? root.pr-list-header-height + 320px
-        : root.pr-list-header-height + root.pr-list-items.length * root.pr-list-row-height;
-    private property <length> pr-flow-content-height: root.pr-list-content-height
-        + ((!root.pr-list-loading
-            && root.pr-list-error == ""
-            && root.pr-list-items.length > 0
-            && root.pr-list-page-count > 1)
-            ? 56px
-            : 0px);
     private property <length> selected-panel-height:
         root.selected-flow == 0
             ? max(620px, 16px + branch-flow.height + 24px)
         : root.selected-flow == 1
             ? max(620px, 16px + cd-flow.height + 24px)
         : root.selected-flow == 2
-            ? max(620px, 16px + root.pr-flow-content-height)
+            ? max(620px, 16px + pr-flow.height)
         : max(620px, 16px + tag-flow.height + 24px);
     private property <length> body-top: root.project-header-height + root.workflow-nav-height;
 
@@ -242,13 +228,11 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 }
             }
 
-            if root.selected-flow == 2: GitHubPullRequestFlow {
+            pr-flow := GitHubPullRequestFlow {
+                visible: root.selected-flow == 2;
                 x: root.compact-workflow-layout ? 16px : 24px;
                 y: 16px;
                 width: parent.width - (root.compact-workflow-layout ? 32px : 48px);
-                // Pin to content height so max(620px, …) panel spare space cannot
-                // stretch the list card over the pagination footer.
-                height: root.pr-flow-content-height;
                 vertical-stretch: 0;
                 viewport-global-x: root.absolute-position.x;
                 viewport-global-y: root.absolute-position.y;

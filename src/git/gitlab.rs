@@ -1,5 +1,6 @@
 //! GitLab repository operations.
 
+use futures_util::future::join_all;
 use reqwest::header::{ACCEPT, HeaderMap};
 use serde::Deserialize;
 use serde_json::Value;
@@ -11,11 +12,11 @@ use super::{
     PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
     PullRequestDiffFile, PullRequestFilters, PullRequestItem, PullRequestMergeMethod,
     PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestReviewAction,
-    PullRequestState, RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url,
-    configured_token, conversation_commit_batch_items, conversation_count_from_detail,
-    conversation_merged_item, finalize_conversation_timeline, is_configured_enterprise_host,
-    is_redundant_commit_system_note, is_redundant_merge_system_note, parse_unified_diff,
-    percent_encode_path, unavailable_diff_file,
+    PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
+    configured_api_base_url, configured_token, conversation_commit_batch_items,
+    conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
+    is_configured_enterprise_host, is_redundant_commit_system_note, is_redundant_merge_system_note,
+    parse_unified_diff, percent_encode_path, unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -72,6 +73,7 @@ pub(super) async fn get_pull_requests(
             ("page", page_query.as_str()),
             ("order_by", order_by),
             ("sort", sort),
+            ("with_merge_status_recheck", "true"),
         ]);
     if let Some(state) = state {
         request = request.query(&[("state", state.gitlab_query())]);
@@ -107,12 +109,18 @@ pub(super) async fn get_pull_requests(
                 .unwrap_or_else(|| "Unknown author".to_string()),
             source_branch: string_field(value, "source_branch").unwrap_or_else(|| "—".to_string()),
             target_branch: string_field(value, "target_branch").unwrap_or_else(|| "—".to_string()),
+            review_status: gitlab_list_review_status(value),
             conversation_count: conversation_count_from_detail(value),
             updated_at: string_field(value, "updated_at")
                 .unwrap_or_else(|| "Unknown update time".to_string()),
             web_url: string_field(value, "web_url").unwrap_or_default(),
         })
         .collect::<Vec<_>>();
+    let items = if per_page == 1 {
+        items
+    } else {
+        hydrate_gitlab_review_statuses(locator, repo_project_id, items).await
+    };
     let total = pagination_total(&headers);
     Ok(PullRequestPage {
         total: total.unwrap_or_else(|| fallback_total(page, per_page, items.len())),
@@ -120,6 +128,68 @@ pub(super) async fn get_pull_requests(
         page_count: header_u32(&headers, "x-total-pages"),
         items,
     })
+}
+
+async fn hydrate_gitlab_review_statuses(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    mut items: Vec<PullRequestItem>,
+) -> Vec<PullRequestItem> {
+    let requests = items.iter().enumerate().map(|(index, item)| async move {
+        let endpoint = merge_request_endpoint(
+            endpoints::MERGE_REQUEST_APPROVALS_URL,
+            locator,
+            repo_project_id,
+            item.number.as_str(),
+        );
+        let approvals = http::send_json::<Value>(
+            gitlab_request(endpoint),
+            RequestOptions::new("Load GitLab merge request list approvals"),
+        )
+        .await
+        .ok();
+        (index, approvals)
+    });
+    for (index, approvals) in join_all(requests).await {
+        if let Some(approvals) = approvals {
+            items[index].review_status =
+                gitlab_approval_review_status(&approvals, items[index].review_status);
+        }
+    }
+    items
+}
+
+fn gitlab_list_review_status(value: &Value) -> PullRequestReviewStatus {
+    match string_field(value, "detailed_merge_status")
+        .or_else(|| string_field(value, "merge_status"))
+        .unwrap_or_default()
+        .as_str()
+    {
+        "not_approved" | "approvals_syncing" => PullRequestReviewStatus::ReviewRequired,
+        _ => PullRequestReviewStatus::None,
+    }
+}
+
+fn gitlab_approval_review_status(
+    approvals: &Value,
+    fallback: PullRequestReviewStatus,
+) -> PullRequestReviewStatus {
+    let approvals_left = value_u32(approvals, "approvals_left");
+    let approvals_required = value_u32(approvals, "approvals_required");
+    let approval_count = approvals
+        .get("approved_by")
+        .and_then(Value::as_array)
+        .map(|approved_by| approved_by.len())
+        .unwrap_or(0);
+    if approvals_left.is_some_and(|left| left > 0)
+        || (approvals_required.is_some_and(|required| required > 0) && approval_count == 0)
+    {
+        PullRequestReviewStatus::ReviewRequired
+    } else if approval_count > 0 {
+        PullRequestReviewStatus::Approved
+    } else {
+        fallback
+    }
 }
 
 fn gitlab_list_sort(value: &str) -> (&'static str, &'static str) {
@@ -1203,6 +1273,19 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
         })
 }
 
+fn value_u32(value: &Value, key: &str) -> Option<u32> {
+    value
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .or_else(|| {
+            value
+                .get(key)
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<u32>().ok())
+        })
+}
+
 fn nested_string(value: &Value, parent: &str, key: &str) -> Option<String> {
     value.get(parent)?.get(key)?.as_str().map(str::to_string)
 }
@@ -1218,10 +1301,41 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        gitlab_action_state, gitlab_approval_summaries, gitlab_list_sort, gitlab_merge_methods,
-        gitlab_merge_payload, gitlab_merge_readiness, is_gitlab_review_system_note,
+        gitlab_action_state, gitlab_approval_review_status, gitlab_approval_summaries,
+        gitlab_list_review_status, gitlab_list_sort, gitlab_merge_methods, gitlab_merge_payload,
+        gitlab_merge_readiness, is_gitlab_review_system_note,
     };
-    use crate::git::{PullRequestMergeMethod, PullRequestReadinessKind};
+    use crate::git::{PullRequestMergeMethod, PullRequestReadinessKind, PullRequestReviewStatus};
+
+    #[test]
+    fn maps_gitlab_list_approval_states_to_github_statuses() {
+        assert_eq!(
+            gitlab_list_review_status(&json!({ "detailed_merge_status": "not_approved" })),
+            PullRequestReviewStatus::ReviewRequired
+        );
+        assert_eq!(
+            gitlab_approval_review_status(
+                &json!({
+                    "approvals_required": 2,
+                    "approvals_left": 1,
+                    "approved_by": [{ "user": { "id": 1 } }]
+                }),
+                PullRequestReviewStatus::None,
+            ),
+            PullRequestReviewStatus::ReviewRequired
+        );
+        assert_eq!(
+            gitlab_approval_review_status(
+                &json!({
+                    "approvals_required": 1,
+                    "approvals_left": 0,
+                    "approved_by": [{ "user": { "id": 1 } }]
+                }),
+                PullRequestReviewStatus::None,
+            ),
+            PullRequestReviewStatus::Approved
+        );
+    }
 
     #[test]
     fn maps_gitlab_mergeable_status_to_ready() {

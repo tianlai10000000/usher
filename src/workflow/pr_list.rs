@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, FixedOffset, Timelike};
+use chrono::{DateTime, Datelike, FixedOffset, Timelike, Utc};
 
 use crate::git::{PullRequestFilters, PullRequestItem, PullRequestState, get_pull_requests};
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 const PAGE_SIZE: u32 = 10;
+const REVIEW_STATUS_FIXTURE: &str = "review-status-v1";
 
 #[derive(Clone)]
 pub(crate) struct WorkflowPrListController {
@@ -17,6 +18,7 @@ pub(crate) struct WorkflowPrListController {
     filters: Arc<Mutex<PullRequestFilters>>,
     request_sequence: Arc<AtomicU64>,
     count_sequence: Arc<AtomicU64>,
+    fixture_enabled: bool,
 }
 
 pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
@@ -30,6 +32,7 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
         })),
         request_sequence: Arc::new(AtomicU64::new(0)),
         count_sequence: Arc::new(AtomicU64::new(0)),
+        fixture_enabled: review_status_fixture_enabled(),
     };
 
     let state_controller = controller.clone();
@@ -142,6 +145,14 @@ impl WorkflowPrListController {
         reset_ui(ui);
         ui.set_workflow_pr_list_loading(true);
 
+        if self.fixture_enabled {
+            ui.set_workflow_pr_repo_project_id(REVIEW_STATUS_FIXTURE.into());
+            ui.set_workflow_pr_repo_type("github".into());
+            self.clear_and_load_page(ui, PullRequestState::Open, 1);
+            self.refresh_state_totals(ui);
+            return;
+        }
+
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
@@ -201,6 +212,10 @@ impl WorkflowPrListController {
     }
 
     fn refresh_state_totals(&self, ui: &MainWindow) {
+        if self.fixture_enabled {
+            self.refresh_fixture_state_totals(ui);
+            return;
+        }
         let context = self.context.lock().ok().and_then(|guard| guard.clone());
         let Some(context) = context else {
             return;
@@ -266,6 +281,10 @@ impl WorkflowPrListController {
     /// Fetch exactly the page chosen by the user. The internal endpoint has no
     /// total-count contract, so a full page means "there may be a next page".
     fn load_page(&self, ui: &MainWindow, state: PullRequestState, page: u32) {
+        if self.fixture_enabled {
+            self.load_fixture_page(ui, state, page);
+            return;
+        }
         let context = self.context.lock().ok().and_then(|guard| guard.clone());
         let Some(context) = context else {
             ui.set_workflow_pr_list_loading(false);
@@ -330,6 +349,71 @@ impl WorkflowPrListController {
                 }
             });
         });
+    }
+
+    fn load_fixture_page(&self, ui: &MainWindow, state: PullRequestState, page: u32) {
+        let filters = self
+            .filters
+            .lock()
+            .map(|filters| filters.clone())
+            .unwrap_or_default();
+        let items = match filtered_review_status_fixture(state, &filters, Utc::now()) {
+            Ok(items) => items,
+            Err(error) => {
+                ui.set_workflow_pr_list_loading(false);
+                ui.set_workflow_pr_list_items(ModelRc::new(VecModel::from(Vec::<
+                    WorkflowPullRequestItem,
+                >::new(
+                ))));
+                ui.set_workflow_pr_list_error(error.into());
+                return;
+            }
+        };
+        let total = items.len() as u32;
+        ui.set_workflow_pr_list_loading(false);
+        ui.set_workflow_pr_list_error("".into());
+        ui.set_workflow_pr_list_state(state.as_str().into());
+        apply_page_to_ui(ui, page.min(1), items, 1, true);
+        ui.set_workflow_pr_list_total(total as i32);
+        set_state_total(ui, state, total);
+    }
+
+    fn refresh_fixture_state_totals(&self, ui: &MainWindow) {
+        let filters = self
+            .filters
+            .lock()
+            .map(|filters| filters.clone())
+            .unwrap_or_default();
+        let now = Utc::now();
+        let open_total = filtered_review_status_fixture(PullRequestState::Open, &filters, now)
+            .map(|items| items.len() as i32)
+            .unwrap_or(-1);
+        let closed_total = filtered_review_status_fixture(PullRequestState::Closed, &filters, now)
+            .map(|items| items.len() as i32)
+            .unwrap_or(-1);
+        ui.set_workflow_pr_list_open_total(open_total);
+        ui.set_workflow_pr_list_closed_total(closed_total);
+    }
+}
+
+fn review_status_fixture_enabled() -> bool {
+    cfg!(feature = "test-fixtures")
+        && std::env::var("USHER_PR_LIST_FIXTURE").as_deref() == Ok(REVIEW_STATUS_FIXTURE)
+}
+
+fn filtered_review_status_fixture(
+    state: PullRequestState,
+    filters: &PullRequestFilters,
+    now: DateTime<Utc>,
+) -> Result<Vec<PullRequestItem>, String> {
+    #[cfg(feature = "test-fixtures")]
+    {
+        return super::pr_list_fixture::filtered_review_status_fixture(state, filters, now);
+    }
+    #[cfg(not(feature = "test-fixtures"))]
+    {
+        let _ = (state, filters, now);
+        Err("PR list fixtures are not compiled into this build.".to_string())
     }
 }
 
@@ -424,6 +508,7 @@ fn to_slint_item(item: &PullRequestItem) -> WorkflowPullRequestItem {
         author: item.author.clone().into(),
         source_branch: item.source_branch.clone().into(),
         target_branch: item.target_branch.clone().into(),
+        review_status: item.review_status.as_str().into(),
         conversation_count: item
             .conversation_count
             .and_then(|count| i32::try_from(count).ok())

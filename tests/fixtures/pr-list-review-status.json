@@ -1,0 +1,70 @@
+{
+  "items": [
+    {
+      "number": "99001",
+      "title": "Keep the approved review status aligned with compact metadata",
+      "state": "open",
+      "author": "octocat",
+      "source_branch": "feature/review-status",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 3,
+      "updated_hours_ago": 1
+    },
+    {
+      "number": "99002",
+      "title": "Exercise a very long pull request title that wraps across at least three compact lines without clipping the final line, colliding with metadata, branches, or the trailing Conversation and Copilot actions during responsive window resizing",
+      "state": "open",
+      "author": "frontend-platform-maintainer",
+      "source_branch": "feature/responsive-review-status-with-an-extra-long-source-branch",
+      "target_branch": "release/2026.08-enterprise-candidate",
+      "review_status": "review_required",
+      "conversation_count": 18,
+      "updated_hours_ago": 7
+    },
+    {
+      "number": "99003",
+      "title": "Prevent requested changes from being clipped on narrow windows",
+      "state": "open",
+      "author": "reviewer",
+      "source_branch": "fix/narrow-layout",
+      "target_branch": "main",
+      "review_status": "changes_requested",
+      "conversation_count": 1,
+      "updated_hours_ago": 26
+    },
+    {
+      "number": "99004",
+      "title": "Keep rows without a review decision visually unchanged",
+      "state": "open",
+      "author": "automation",
+      "source_branch": "chore/no-review-state",
+      "target_branch": "develop",
+      "review_status": "none",
+      "conversation_count": null,
+      "updated_hours_ago": 72
+    },
+    {
+      "number": "99005",
+      "title": "Show an approved decision on a closed pull request",
+      "state": "closed",
+      "author": "release-manager",
+      "source_branch": "release/closed-candidate",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 9,
+      "updated_hours_ago": 240
+    },
+    {
+      "number": "99006",
+      "title": "Retain the review decision when the pull request is merged",
+      "state": "merged",
+      "author": "merge-bot",
+      "source_branch": "feature/merged-review-status",
+      "target_branch": "main",
+      "review_status": "changes_requested",
+      "conversation_count": 5,
+      "updated_hours_ago": 960
+    }
+  ]
+}

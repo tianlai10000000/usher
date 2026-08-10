@@ -29,6 +29,9 @@ live-preview = ["slint/live-preview", "usher-ui/live-preview"]
 # Development-only component playground. Keep this out of the default feature
 # set so normal and production builds do not compile the large showcase page.
 ui-components = ["usher-ui/ui-components"]
+# Opt-in local fixtures used for manual UI acceptance. Normal and production
+# builds do not compile the fixture bridge or embed its data.
+test-fixtures = []
 
 [[bin]]
 path = "src/main.rs"

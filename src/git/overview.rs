@@ -79,6 +79,7 @@ mod tests {
             author: String::new(),
             source_branch: String::new(),
             target_branch: target_branch.to_string(),
+            review_status: Default::default(),
             conversation_count: None,
             updated_at: String::new(),
             web_url: String::new(),

@@ -13,11 +13,11 @@ use super::{
     PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
     PullRequestDiffFile, PullRequestFilters, PullRequestItem, PullRequestMergeMethod,
     PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestRevertResult,
-    PullRequestReviewAction, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
-    configured_api_base_url, configured_token, conversation_commit_batch_items,
-    conversation_count_from_detail, conversation_merged_item, conversation_system_event_item,
-    finalize_conversation_timeline, is_configured_enterprise_host, parse_unified_diff,
-    percent_encode_path, unavailable_diff_file,
+    PullRequestReviewAction, PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType,
+    commit_count_from_detail, configured_api_base_url, configured_token,
+    conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
+    conversation_system_event_item, finalize_conversation_timeline, is_configured_enterprise_host,
+    parse_unified_diff, percent_encode_path, unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -128,6 +128,7 @@ pub(super) async fn get_pull_requests(
                 .unwrap_or_else(|| "Unknown author".to_string()),
             source_branch: "—".to_string(),
             target_branch: "—".to_string(),
+            review_status: PullRequestReviewStatus::None,
             conversation_count: conversation_count_from_detail(value),
             updated_at: string_field(value, "updated_at")
                 .unwrap_or_else(|| "Unknown update time".to_string()),
@@ -199,9 +200,10 @@ async fn hydrate_pull_request_branches(
     });
 
     for (index, summary) in join_all(requests).await {
-        if let Some((source_branch, target_branch, conversation_count)) = summary {
+        if let Some((source_branch, target_branch, review_status, conversation_count)) = summary {
             items[index].source_branch = source_branch;
             items[index].target_branch = target_branch;
+            items[index].review_status = review_status;
             items[index].conversation_count =
                 conversation_count.or(items[index].conversation_count);
         }
@@ -212,23 +214,35 @@ async fn hydrate_pull_request_branches(
 async fn load_pull_request_summary(
     locator: &RepoLocator,
     pull_request_number: &str,
-) -> Option<(String, String, Option<u32>)> {
-    let endpoint = repository_endpoint(
+) -> Option<(String, String, PullRequestReviewStatus, Option<u32>)> {
+    let detail_endpoint = repository_endpoint(
         endpoints::PULL_REQUEST_URL,
         locator,
         Some(pull_request_number),
         None,
     );
-    let detail: Value = http::send_json(
-        authenticated_request(locator, endpoint),
-        RequestOptions::new("Load GitHub pull request branches"),
-    )
-    .await
-    .ok()?;
+    let reviews_endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_REVIEWS_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    );
+    let detail_future = http::send_json(
+        authenticated_request(locator, detail_endpoint),
+        RequestOptions::new("Load GitHub pull request list summary"),
+    );
+    let reviews_future = http::send_json::<Vec<Value>>(
+        authenticated_request(locator, reviews_endpoint).query(&[("per_page", "100")]),
+        RequestOptions::new("Load GitHub pull request list reviews"),
+    );
+    let (detail, reviews) = tokio::join!(detail_future, reviews_future);
+    let detail: Value = detail.ok()?;
+    let reviews = reviews.unwrap_or_default();
     pull_request_branches(&detail).map(|(source_branch, target_branch)| {
         (
             source_branch,
             target_branch,
+            github_list_review_status(&detail, reviews.as_slice()),
             conversation_count_from_detail(&detail),
         )
     })
@@ -1313,6 +1327,25 @@ fn aggregate_review_state(reviews: &[Value]) -> String {
     }
 }
 
+fn github_list_review_status(detail: &Value, reviews: &[Value]) -> PullRequestReviewStatus {
+    match aggregate_review_state(reviews).as_str() {
+        "approved" => PullRequestReviewStatus::Approved,
+        "rejected" => PullRequestReviewStatus::ChangesRequested,
+        _ if detail
+            .get("requested_reviewers")
+            .and_then(Value::as_array)
+            .is_some_and(|reviewers| !reviewers.is_empty())
+            || detail
+                .get("requested_teams")
+                .and_then(Value::as_array)
+                .is_some_and(|teams| !teams.is_empty()) =>
+        {
+            PullRequestReviewStatus::ReviewRequired
+        }
+        _ => PullRequestReviewStatus::None,
+    }
+}
+
 /// GitHub owns this mapping. Do not reuse it for Gitee or GitLab: GitHub's
 /// `mergeable` and `mergeable_state` are provider-specific and `null` means
 /// that GitHub is still computing a synthetic test merge.
@@ -1418,12 +1451,12 @@ mod tests {
 
     use super::{
         aggregate_review_state, decode_commit, decode_github_timeline_activity,
-        decode_revert_pull_request_result, github_can_dismiss_reviews, github_merge_readiness,
-        github_review_action, graphql_url_from_rest_base, link_rel_last_page,
-        open_pull_request_count_query, pull_request_branches, revert_pull_request_payload,
-        single_item_page_total,
+        decode_revert_pull_request_result, github_can_dismiss_reviews, github_list_review_status,
+        github_merge_readiness, github_review_action, graphql_url_from_rest_base,
+        link_rel_last_page, open_pull_request_count_query, pull_request_branches,
+        revert_pull_request_payload, single_item_page_total,
     };
-    use crate::git::{PullRequestReadinessKind, parse_repo_locator};
+    use crate::git::{PullRequestReadinessKind, PullRequestReviewStatus, parse_repo_locator};
 
     #[test]
     fn scopes_overview_count_to_repository_state_and_target_branch() {
@@ -1558,6 +1591,31 @@ mod tests {
             json!({ "user": { "login": "bob" }, "state": "DISMISSED" }),
         ];
         assert_eq!(aggregate_review_state(&reviews), "approved");
+    }
+
+    #[test]
+    fn maps_github_list_review_status_with_github_precedence() {
+        assert_eq!(
+            github_list_review_status(
+                &json!({ "requested_reviewers": [{ "login": "alice" }] }),
+                &[]
+            ),
+            PullRequestReviewStatus::ReviewRequired
+        );
+        assert_eq!(
+            github_list_review_status(
+                &json!({ "requested_reviewers": [{ "login": "alice" }] }),
+                &[json!({ "user": { "login": "alice" }, "state": "APPROVED" })]
+            ),
+            PullRequestReviewStatus::Approved
+        );
+        assert_eq!(
+            github_list_review_status(
+                &json!({}),
+                &[json!({ "user": { "login": "alice" }, "state": "CHANGES_REQUESTED" })]
+            ),
+            PullRequestReviewStatus::ChangesRequested
+        );
     }
 
     #[test]

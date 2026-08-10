@@ -45,9 +45,31 @@ pub(crate) struct PullRequestItem {
     pub(crate) author: String,
     pub(crate) source_branch: String,
     pub(crate) target_branch: String,
+    /// Provider-neutral review decision shown on the pull-request list.
+    pub(crate) review_status: PullRequestReviewStatus,
     pub(crate) conversation_count: Option<u32>,
     pub(crate) updated_at: String,
     pub(crate) web_url: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum PullRequestReviewStatus {
+    #[default]
+    None,
+    ReviewRequired,
+    Approved,
+    ChangesRequested,
+}
+
+impl PullRequestReviewStatus {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::ReviewRequired => "review_required",
+            Self::Approved => "approved",
+            Self::ChangesRequested => "changes_requested",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
