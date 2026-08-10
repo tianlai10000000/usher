@@ -58,6 +58,7 @@ mod app_runtime;
 mod memory_diagnostics;
 mod platform;
 mod shortcuts;
+mod sidebar_motion;
 use platform::{
     THEME_MODE_AUTO, apply_native_appearance_for_mode, apply_native_chrome_for_mode,
     effective_dark_mode as get_effective_dark_mode, install_memory_benchmark_window_control,
@@ -173,7 +174,7 @@ fn save_settings_with_feedback<F>(
     });
 }
 
-fn ui() -> Result<MainWindow> {
+fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWindow> {
     memory_diagnostics::initialize_baseline();
     log::info!("Usher v{} starting...", env!("CARGO_PKG_VERSION"));
 
@@ -189,6 +190,8 @@ fn ui() -> Result<MainWindow> {
     // Now create the MainWindow (will inherit app appearance)
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
+    app.set_sidebar_motion_display_linked(sidebar_motion_mode.is_display_linked());
+    app.on_advance_sidebar_motion(sidebar_motion::advance);
     let settings_page = SettingsPageBridge::default();
     let message_center = MessageCenter::open_default().context("Failed to open message center")?;
     let message_page = MessagePageBridge::new(message_center.clone());
@@ -209,6 +212,7 @@ fn ui() -> Result<MainWindow> {
 
     // Initialize debug logger after window is created (needs app for callbacks)
     setup_debug_logger(&app, true).unwrap_or_else(|e| eprintln!("Debug Logger init failed: {}", e)); // eprintln here since logger not yet initialized
+    log::info!("[SidebarMotion] mode={}", sidebar_motion_mode.label());
     memory_diagnostics::log_checkpoint("startup.debug_logger_ready");
 
     // ========= Trace Logger Initialization ========= //
@@ -824,19 +828,42 @@ pub fn main() {
         }
     }
 
-    let ui: MainWindow = ui().unwrap();
+    let sidebar_motion_mode = sidebar_motion::SidebarMotionMode::from_environment();
+    let ui: MainWindow = ui(sidebar_motion_mode).unwrap();
+    let sidebar_motion_trace_path =
+        std::env::var_os("USHER_SIDEBAR_MOTION_TRACE").map(std::path::PathBuf::from);
+    let sidebar_motion_trace_started = std::time::Instant::now();
+    let sidebar_motion_trace_samples = std::rc::Rc::new(std::cell::RefCell::new(Vec::<
+        sidebar_motion::TraceSample,
+    >::new()));
     // The winit window is created only once the event loop runs, so hiding
     // after show() is too late for the very first frame. Arm a one-shot hook
     // on the first render pass: at that point the native window exists and the
     // alpha change commits in the same transaction as the first frame.
     let ui_weak_first_frame = ui.as_weak();
     let first_frame_gate = std::cell::Cell::new(false);
+    let sidebar_motion_trace_enabled = sidebar_motion_trace_path.is_some();
+    let sidebar_motion_trace_samples_for_render = sidebar_motion_trace_samples.clone();
     if let Err(error) = ui.window().set_rendering_notifier(move |state, _| {
-        if matches!(state, slint::RenderingState::BeforeRendering) && !first_frame_gate.get() {
-            first_frame_gate.set(true);
+        if matches!(state, slint::RenderingState::BeforeRendering) {
             if let Some(win) = ui_weak_first_frame.upgrade() {
-                set_startup_presentation_hidden(&win, true);
-                install_titlebar_settings_button(&win);
+                if !first_frame_gate.get() {
+                    first_frame_gate.set(true);
+                    set_startup_presentation_hidden(&win, true);
+                    install_titlebar_settings_button(&win);
+                }
+                if sidebar_motion_trace_enabled {
+                    sidebar_motion_trace_samples_for_render.borrow_mut().push(
+                        sidebar_motion::TraceSample {
+                            elapsed_microseconds: sidebar_motion_trace_started
+                                .elapsed()
+                                .as_micros(),
+                            progress: win.get_sidebar_motion_observed_progress(),
+                            target_expanded: win.get_sidebar_motion_target_expanded(),
+                            active: win.get_sidebar_motion_active(),
+                        },
+                    );
+                }
             }
         }
     }) {
@@ -901,6 +928,21 @@ pub fn main() {
         },
     );
     slint::run_event_loop_until_quit().unwrap();
+    if let Some(path) = sidebar_motion_trace_path {
+        if let Err(error) = sidebar_motion::write_trace(
+            &path,
+            sidebar_motion_mode,
+            &sidebar_motion_trace_samples.borrow(),
+        ) {
+            log::error!("[SidebarMotion] {error:#}");
+        } else {
+            log::info!(
+                "[SidebarMotion] wrote {} render samples to {}",
+                sidebar_motion_trace_samples.borrow().len(),
+                path.display()
+            );
+        }
+    }
     shutdown::run_cleanup_once("event-loop-exit");
     drop(ui);
     log::info!("[Shutdown] MainWindow dropped, native resources released");

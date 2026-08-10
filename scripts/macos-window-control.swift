@@ -11,7 +11,7 @@ enum WindowControlError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .usage:
-            return "usage: macos-window-control count PID | window-size PID | wait-size PID WIDTH HEIGHT TIMEOUT_MS | fullscreen-state PID | wait-fullscreen PID true|false TIMEOUT_MS"
+            return "usage: macos-window-control count PID | window-size PID | wait-size PID WIDTH HEIGHT TIMEOUT_MS | fullscreen-state PID | wait-fullscreen PID true|false TIMEOUT_MS | click-burst PID OFFSET_X OFFSET_Y COUNT INTERVAL_MS"
         case let .invalidPID(value):
             return "invalid PID: \(value)"
         case let .noWindow(pid):
@@ -91,6 +91,38 @@ func waitForSize(
     throw WindowControlError.timeout("size=\(Int(width))x\(Int(height))")
 }
 
+func clickBurst(
+    pid: pid_t,
+    offsetX: Double,
+    offsetY: Double,
+    count: Int,
+    intervalMilliseconds: Int
+) throws {
+    guard let bounds = nativeWindowBounds(pid: pid) else {
+        throw WindowControlError.noWindow(pid)
+    }
+    NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
+    Thread.sleep(forTimeInterval: 0.2)
+    let point = CGPoint(x: bounds.minX + offsetX, y: bounds.minY + offsetY)
+    for index in 0 ..< count {
+        CGEvent(
+            mouseEventSource: nil,
+            mouseType: .leftMouseDown,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        )?.post(tap: .cghidEventTap)
+        CGEvent(
+            mouseEventSource: nil,
+            mouseType: .leftMouseUp,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        )?.post(tap: .cghidEventTap)
+        if index + 1 < count {
+            Thread.sleep(forTimeInterval: Double(intervalMilliseconds) / 1_000.0)
+        }
+    }
+}
+
 func run() throws {
     let arguments = CommandLine.arguments
     guard arguments.count >= 3 else {
@@ -146,6 +178,22 @@ func run() throws {
             pid: pid,
             enabled: arguments[3] == "true",
             timeoutMilliseconds: timeoutMilliseconds
+        )
+    case "click-burst":
+        guard arguments.count == 7,
+              let offsetX = Double(arguments[3]),
+              let offsetY = Double(arguments[4]),
+              let count = Int(arguments[5]), count > 0,
+              let intervalMilliseconds = Int(arguments[6]), intervalMilliseconds > 0
+        else {
+            throw WindowControlError.usage
+        }
+        try clickBurst(
+            pid: pid,
+            offsetX: offsetX,
+            offsetY: offsetY,
+            count: count,
+            intervalMilliseconds: intervalMilliseconds
         )
     default:
         throw WindowControlError.usage

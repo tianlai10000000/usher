@@ -27,4 +27,5 @@ Thumbs.db
 dist/
 workflow-dist/
 memory-benchmark-results/
+sidebar-motion-benchmark-results/
 __pycache__/

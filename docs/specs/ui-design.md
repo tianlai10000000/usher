@@ -271,7 +271,12 @@ expanded/collapsed, and success confirmation.
   motion to its target, freezes mounted route width, and commits the exact final
   width at drag end. PR Review also preserves its stable internal diff geometry.
   Native title-bar actions retarget the motion directly on the owning event-loop
-  thread, so click bursts cannot queue stale callbacks.
+  thread, so click bursts cannot queue stale callbacks. The spring must use
+  Slint's display animation clock and the actual elapsed frame delta with a
+  closed-form damped-oscillator step; a fixed timer/fixed Euler step is only an
+  explicit A/B baseline. Retargeting preserves current position and velocity.
+  The accepted measurements and reproduction command are recorded in
+  `docs/sidebar_motion_ab.md`.
   Settings uses the same regular label weight as navigation rows, with a 1 px
   optical baseline correction against its 16 px icon.
   The sidebar body itself must not paint an independent container shadow.
@@ -353,6 +358,10 @@ expanded/collapsed, and success confirmation.
   状态栏绘制起点；普通路由在运动开始时只采用一次目标宽度，不逐帧重排。状态栏透明
   宿主与右侧常驻工具组保持窗口坐标。原生 Live Resize 会把侧栏运动吸附到目标，冻结
   已挂载路由宽度，并在结束时提交精确最终宽度；PR Review 同时保持稳定内部 Diff 几何。
+  原生标题栏操作必须在所属 Event Loop 线程直接重定向运动，快速点击不得排队旧回调。
+  弹簧必须使用 Slint 显示动画时钟、真实帧间隔和闭式阻尼振子步进；固定 Timer/固定
+  欧拉步长只能作为显式 A/B 基线。重定向时保留当前进度和速度。采用数据与复现命令见
+  `docs/sidebar_motion_ab.md`。
   Settings 与普通导航行使用相同的常规字重，并针对 16px 图标做 1px 视觉基线校正。
   侧栏主体自身不得绘制独立的右侧容器阴影；固定态使用根层清晰边框与克制的内向
   Elevation，临时 Hover 态使用不透明白色（浅色模式 `#ffffff`）、只有边框、尾部上下

@@ -52,6 +52,11 @@ export { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 export { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 
+export struct SidebarMotionStep {
+    progress: float,
+    velocity: float,
+}
+
 export component MainWindow inherits Window {
     // Keep the application wide enough for the primary navigation and workspace
     // while preserving the shared application-level layout constraint.
@@ -149,6 +154,19 @@ export component MainWindow inherits Window {
     private property <float> sidebar-motion-progress: 0.0;
     private property <float> sidebar-motion-velocity: 0.0;
     private property <bool> sidebar-motion-running: false;
+    // Production follows the display's animation clock. The legacy fixed timer
+    // remains selectable only so the same release binary can run a controlled
+    // A/B comparison.
+    in property <bool> sidebar-motion-display-linked: true;
+    out property <bool> sidebar-motion-active: root.sidebar-motion-running;
+    out property <float> sidebar-motion-observed-progress: root.sidebar-motion-progress;
+    out property <bool> sidebar-motion-target-expanded:
+        root.show-navigation-drawer && root.navigation-drawer-expanded;
+    private property <duration> sidebar-motion-frame-clock:
+        root.sidebar-motion-running && root.sidebar-motion-display-linked
+            ? animation-tick()
+            : 0ms;
+    private property <duration> sidebar-motion-last-frame-clock: 0ms;
     // AppKit can deliver several width commits inside one native live-resize
     // frame. Do not let independently evaluated x/width bindings observe an
     // in-flight sidebar position in that window: snap all shell geometry to
@@ -198,6 +216,7 @@ export component MainWindow inherits Window {
     callback restore-navigation-drawer-state(bool);
     callback toggle-navigation-drawer();
     callback navigation-drawer-motion-settled(bool);
+    pure callback advance-sidebar-motion(float, float, float, float) -> SidebarMotionStep;
     callback modal-overlay-visibility-changed(bool);
     callback dismiss-transient-overlays();
     // One root-window key boundary. Rust owns normalization, scope, conflict
@@ -604,10 +623,10 @@ export component MainWindow inherits Window {
     }
 
     sidebar-motion-timer := Timer {
-        // Drive one layout update per display frame. An 8 ms timer can queue a
-        // second full-tree layout before FemtoVG presents the first frame.
+        // Legacy A/B baseline. Its fixed cadence and fixed Euler step are not
+        // used in production after the display-linked candidate is accepted.
         interval: 16ms;
-        running: root.sidebar-motion-running;
+        running: root.sidebar-motion-running && !root.sidebar-motion-display-linked;
         triggered => {
             let target = root.show-navigation-drawer && root.navigation-drawer-expanded ? 1.0 : 0.0;
             let displacement = target - root.sidebar-motion-progress;
@@ -620,8 +639,40 @@ export component MainWindow inherits Window {
                 root.sidebar-motion-progress = target;
                 root.sidebar-motion-velocity = 0.0;
                 root.sidebar-motion-running = false;
+                root.sidebar-motion-last-frame-clock = 0ms;
                 root.sidebar-content-wide = target < 0.5;
                 root.navigation-drawer-motion-settled(target >= 0.5);
+            }
+        }
+    }
+
+    changed sidebar-motion-frame-clock => {
+        if root.sidebar-motion-running && root.sidebar-motion-display-linked {
+            if root.sidebar-motion-last-frame-clock <= 0ms {
+                root.sidebar-motion-last-frame-clock = root.sidebar-motion-frame-clock;
+            } else {
+                let delta-seconds = (root.sidebar-motion-frame-clock
+                    - root.sidebar-motion-last-frame-clock) / 1s;
+                root.sidebar-motion-last-frame-clock = root.sidebar-motion-frame-clock;
+                let target = root.show-navigation-drawer && root.navigation-drawer-expanded ? 1.0 : 0.0;
+                let step = root.advance-sidebar-motion(
+                    root.sidebar-motion-progress,
+                    root.sidebar-motion-velocity,
+                    target,
+                    delta-seconds,
+                );
+                root.sidebar-motion-progress = step.progress;
+                root.sidebar-motion-velocity = step.velocity;
+
+                if Math.abs(target - root.sidebar-motion-progress) < 0.0005
+                        && Math.abs(root.sidebar-motion-velocity) < 0.001 {
+                    root.sidebar-motion-progress = target;
+                    root.sidebar-motion-velocity = 0.0;
+                    root.sidebar-motion-running = false;
+                    root.sidebar-motion-last-frame-clock = 0ms;
+                    root.sidebar-content-wide = target < 0.5;
+                    root.navigation-drawer-motion-settled(target >= 0.5);
+                }
             }
         }
     }
@@ -640,6 +691,7 @@ export component MainWindow inherits Window {
             root.sidebar-motion-progress = target;
             root.sidebar-motion-velocity = 0.0;
             root.sidebar-motion-running = false;
+            root.sidebar-motion-last-frame-clock = 0ms;
             root.sidebar-content-wide = target < 0.5;
         }
     }
@@ -700,6 +752,7 @@ export component MainWindow inherits Window {
         root.sidebar-motion-progress = expanded ? 1.0 : 0.0;
         root.sidebar-motion-velocity = 0.0;
         root.sidebar-motion-running = false;
+        root.sidebar-motion-last-frame-clock = 0ms;
         root.sidebar-content-wide = !expanded;
     }
     
