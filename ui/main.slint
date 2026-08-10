@@ -453,6 +453,7 @@ export component MainWindow inherits Window {
     in-out property <string> workflow-pr-review-diff-view: "unified";
     in-out property <string> workflow-pr-review-file-filter: "";
     in-out property <bool> workflow-pr-review-dialog-open: false;
+    in-out property <bool> workflow-pr-dismiss-review-dialog-open: false;
     in-out property <bool> workflow-pr-merge-dialog-open: false;
     in-out property <bool> workflow-pr-revert-dialog-open: false;
     in-out property <bool> workflow-pr-readiness-popup-open: false;
@@ -565,6 +566,7 @@ export component MainWindow inherits Window {
     callback workflow-pr-review-view-file();
     callback workflow-pr-review-toggle-commit-message(string);
     callback workflow-pr-submit-review(string, string);
+    callback workflow-pr-dismiss-review(string, string);
     callback workflow-pr-merge(string, bool);
     callback workflow-pr-revert();
     callback workflow-cd-start(string, string, string);
@@ -1734,6 +1736,7 @@ export component MainWindow inherits Window {
         diff-view <=> root.workflow-pr-review-diff-view;
         file-filter <=> root.workflow-pr-review-file-filter;
         review-dialog-open <=> root.workflow-pr-review-dialog-open;
+        dismiss-review-dialog-open <=> root.workflow-pr-dismiss-review-dialog-open;
         merge-dialog-open <=> root.workflow-pr-merge-dialog-open;
         revert-dialog-open <=> root.workflow-pr-revert-dialog-open;
         commit-range-dialog-open <=> root.workflow-pr-commit-range-dialog-open;
@@ -1858,6 +1861,7 @@ export component MainWindow inherits Window {
         view-file => { root.workflow-pr-review-view-file(); }
         toggle-commit-message(sha) => { root.workflow-pr-review-toggle-commit-message(sha); }
         submit-review(action, body) => { root.workflow-pr-submit-review(action, body); }
+        dismiss-review(review-id, reason) => { root.workflow-pr-dismiss-review(review-id, reason); }
         merge(method, remove-source-branch) => { root.workflow-pr-merge(method, remove-source-branch); }
         revert => { root.workflow-pr-revert(); }
     }
@@ -1888,6 +1892,7 @@ export component MainWindow inherits Window {
             remote-review-state: root.workflow-pr-remote-review-state;
             action-loading: root.workflow-pr-action-loading;
             actions-enabled: !root.workflow-pr-review-dialog-open
+                && !root.workflow-pr-dismiss-review-dialog-open
                 && !root.workflow-pr-merge-dialog-open
                 && !root.workflow-pr-revert-dialog-open;
             readiness-popup-open: root.workflow-pr-readiness-popup-open;
@@ -2085,6 +2090,7 @@ export component MainWindow inherits Window {
     if root.platform-is-macos
             && root.current-route == Route.PrReview
             && (root.workflow-pr-review-dialog-open
+                || root.workflow-pr-dismiss-review-dialog-open
                 || root.workflow-pr-merge-dialog-open
                 || root.workflow-pr-revert-dialog-open
                 || root.workflow-pr-commit-range-dialog-open): Rectangle {
@@ -2107,6 +2113,7 @@ export component MainWindow inherits Window {
     // testing outside a route component's own bounds is not guaranteed.
     if root.current-route == Route.PrReview
             && (root.workflow-pr-review-dialog-open
+                || root.workflow-pr-dismiss-review-dialog-open
                 || root.workflow-pr-merge-dialog-open
                 || root.workflow-pr-revert-dialog-open
                 || root.workflow-pr-commit-range-dialog-open): Rectangle {

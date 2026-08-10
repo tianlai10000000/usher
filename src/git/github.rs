@@ -538,6 +538,7 @@ pub(super) async fn get_pull_request_conversation(
         Some(pull_request_number),
         None,
     );
+    let repository_endpoint = repository_endpoint(endpoints::REPOSITORY_URL, locator, None, None);
 
     let detail_future = async {
         http::send_json(
@@ -562,12 +563,24 @@ pub(super) async fn get_pull_request_conversation(
         timeline_endpoint,
         "Load GitHub pull request timeline",
     );
-    let (detail, comments, reviews, timeline) = tokio::try_join!(
+    let repository_future = async {
+        Ok::<Option<Value>, String>(
+            http::send_json(
+                authenticated_request(locator, repository_endpoint),
+                RequestOptions::new("Load GitHub repository review permissions"),
+            )
+            .await
+            .ok(),
+        )
+    };
+    let (detail, comments, reviews, timeline, repository) = tokio::try_join!(
         detail_future,
         comments_future,
         reviews_future,
-        timeline_future
+        timeline_future,
+        repository_future
     )?;
+    let can_dismiss_reviews = repository.as_ref().is_some_and(github_can_dismiss_reviews);
 
     let description = PullRequestConversationItem {
         id: format!("description-{pull_request_number}"),
@@ -579,6 +592,8 @@ pub(super) async fn get_pull_request_conversation(
         body: string_field(&detail, "body").unwrap_or_default(),
         created_at: string_field(&detail, "created_at").unwrap_or_default(),
         state: string_field(&detail, "state").unwrap_or_default(),
+        review_id: String::new(),
+        can_dismiss: false,
     };
     let target_branch = nested_string(&detail, "base", "ref").unwrap_or_default();
 
@@ -596,6 +611,8 @@ pub(super) async fn get_pull_request_conversation(
                 body: string_field(&value, "body").unwrap_or_default(),
                 created_at: string_field(&value, "created_at").unwrap_or_default(),
                 state: String::new(),
+                review_id: String::new(),
+                can_dismiss: false,
             }),
     );
     activity.extend(reviews.into_iter().flat_map(|value| {
@@ -621,10 +638,13 @@ pub(super) async fn get_pull_request_conversation(
             body: github_review_action(state.as_str()).to_string(),
             created_at: created_at.clone(),
             state: state.clone(),
+            review_id: id.clone(),
+            can_dismiss: can_dismiss_reviews
+                && matches!(state.as_str(), "approved" | "changes_requested"),
         }];
         if !body.trim().is_empty() {
             items.push(PullRequestConversationItem {
-                id,
+                id: id.clone(),
                 kind: "review".to_string(),
                 author,
                 avatar_url,
@@ -632,6 +652,8 @@ pub(super) async fn get_pull_request_conversation(
                 body,
                 created_at,
                 state,
+                review_id: id,
+                can_dismiss: false,
             });
         }
         items
@@ -641,6 +663,16 @@ pub(super) async fn get_pull_request_conversation(
         target_branch.as_str(),
     ));
     Ok(finalize_conversation_timeline(description, activity))
+}
+
+fn github_can_dismiss_reviews(repository: &Value) -> bool {
+    let permissions = repository.get("permissions").unwrap_or(&Value::Null);
+    ["admin", "maintain", "push"].into_iter().any(|permission| {
+        permissions
+            .get(permission)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    })
 }
 
 fn decode_github_timeline_activity(
@@ -955,6 +987,46 @@ pub(super) async fn submit_pull_request_review(
     let _: Value = http::send_json(
         request,
         RequestOptions::new("Submit GitHub pull request review"),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(super) async fn dismiss_pull_request_review(
+    locator: &RepoLocator,
+    pull_request_number: &str,
+    review_id: &str,
+    reason: &str,
+) -> Result<(), String> {
+    if configured_token(RepoType::GitHub).is_none() {
+        return Err("Configure a GitHub Token in Settings before dismissing a review.".into());
+    }
+    if review_id.trim().is_empty() {
+        return Err("The GitHub review identifier is unavailable.".into());
+    }
+    if reason.trim().is_empty() {
+        return Err("Enter a reason before dismissing the review.".into());
+    }
+
+    let endpoint = repository_endpoint(
+        endpoints::PULL_REQUEST_REVIEW_DISMISSAL_URL,
+        locator,
+        Some(pull_request_number),
+        None,
+    )
+    .replace(
+        "{review_id}",
+        percent_encode_path(review_id.trim()).as_str(),
+    );
+    let request = authenticated_builder(
+        http::put(endpoint),
+        configured_token(RepoType::GitHub).as_deref(),
+    )
+    .json(&serde_json::json!({ "message": reason.trim() }));
+    let _: Value = http::send_json(
+        request,
+        RequestOptions::new("Dismiss GitHub pull request review"),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -1346,9 +1418,10 @@ mod tests {
 
     use super::{
         aggregate_review_state, decode_commit, decode_github_timeline_activity,
-        decode_revert_pull_request_result, github_merge_readiness, github_review_action,
-        graphql_url_from_rest_base, link_rel_last_page, open_pull_request_count_query,
-        pull_request_branches, revert_pull_request_payload, single_item_page_total,
+        decode_revert_pull_request_result, github_can_dismiss_reviews, github_merge_readiness,
+        github_review_action, graphql_url_from_rest_base, link_rel_last_page,
+        open_pull_request_count_query, pull_request_branches, revert_pull_request_payload,
+        single_item_page_total,
     };
     use crate::git::{PullRequestReadinessKind, parse_repo_locator};
 
@@ -1495,6 +1568,19 @@ mod tests {
             github_review_action("changes_requested"),
             "requested changes"
         );
+    }
+
+    #[test]
+    fn github_review_dismissal_requires_repository_write_permission() {
+        assert!(github_can_dismiss_reviews(&json!({
+            "permissions": { "push": true, "pull": true }
+        })));
+        assert!(github_can_dismiss_reviews(&json!({
+            "permissions": { "maintain": true }
+        })));
+        assert!(!github_can_dismiss_reviews(&json!({
+            "permissions": { "pull": true, "triage": true }
+        })));
     }
 
     #[test]

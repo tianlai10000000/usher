@@ -365,6 +365,36 @@ pub(crate) async fn submit_pull_request_review(
     }
 }
 
+/// Dismiss one visible review through the configured provider's native
+/// operation. GitHub dismisses the selected review id; GitLab and Gitee
+/// Enterprise withdraw the authenticated user's review state.
+pub(crate) async fn dismiss_pull_request_review(
+    repo_type: &str,
+    repo_project_id: &str,
+    remote_repo: &str,
+    pull_request_iid: &str,
+    review_id: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    if pull_request_iid.trim().is_empty() {
+        return Err("Pull request number is empty.".to_string());
+    }
+    match locator.repo_type {
+        RepoType::Gitee => {
+            gitee::dismiss_pull_request_review(&locator, repo_project_id, pull_request_iid, reason)
+                .await
+        }
+        RepoType::GitHub => {
+            github::dismiss_pull_request_review(&locator, pull_request_iid, review_id, reason).await
+        }
+        RepoType::GitLab => {
+            gitlab::dismiss_pull_request_review(&locator, repo_project_id, pull_request_iid, reason)
+                .await
+        }
+    }
+}
+
 pub(crate) async fn merge_pull_request(
     repo_type: &str,
     repo_project_id: &str,
@@ -541,6 +571,8 @@ mod tests {
                 body: "<p>Shared <strong>description</strong></p>".into(),
                 created_at: "2026-08-10T00:00:00Z".into(),
                 state: "open".into(),
+                review_id: String::new(),
+                can_dismiss: false,
             },
             vec![super::PullRequestConversationItem {
                 id: "comment-1".into(),
@@ -551,6 +583,8 @@ mod tests {
                 body: "<p>Shared <em>comment</em></p>".into(),
                 created_at: "2026-08-10T00:01:00Z".into(),
                 state: String::new(),
+                review_id: String::new(),
+                can_dismiss: false,
             }],
         );
         assert_eq!(timeline[0].kind, "description");
@@ -680,6 +714,8 @@ mod tests {
                 body: "hello".into(),
                 created_at: "2025-12-31T00:00:00Z".into(),
                 state: "open".into(),
+                review_id: String::new(),
+                can_dismiss: false,
             },
             {
                 let mut activity = batch;

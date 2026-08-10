@@ -11,6 +11,7 @@ pub(crate) const PULL_REQUEST_FILES_URL: &str =
     "{api_base_url}/repos/{namespace}/{repository}/pulls/{pull_request_number}/files";
 pub(crate) const PULL_REQUEST_REVIEWS_URL: &str =
     "{api_base_url}/repos/{namespace}/{repository}/pulls/{pull_request_number}/reviews";
+pub(crate) const PULL_REQUEST_REVIEW_DISMISSAL_URL: &str = "{api_base_url}/repos/{namespace}/{repository}/pulls/{pull_request_number}/reviews/{review_id}/dismissals";
 pub(crate) const PULL_REQUEST_COMMITS_URL: &str =
     "{api_base_url}/repos/{namespace}/{repository}/pulls/{pull_request_number}/commits";
 pub(crate) const REPOSITORY_COMPARE_URL: &str =

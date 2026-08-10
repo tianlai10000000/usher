@@ -117,7 +117,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     private property <length> pr-flow-width: root.workflow-content-width
         - (root.compact-workflow-layout ? 32px : 48px);
     private property <length> pr-list-header-height: 48px;
-    private property <length> pr-list-row-height: root.pr-flow-width < 760px ? 104px : 72px;
+    private property <length> pr-list-row-height: root.pr-flow-width < 760px ? 98px : 72px;
     private property <length> pr-list-content-height: root.pr-list-loading || root.pr-list-error != "" || root.pr-list-items.length == 0
         ? root.pr-list-header-height + 320px
         : root.pr-list-header-height + root.pr-list-items.length * root.pr-list-row-height;

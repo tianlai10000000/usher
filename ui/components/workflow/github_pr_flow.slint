@@ -60,7 +60,7 @@ export component GitHubPullRequestFlow {
     private property <length> hovered-inline-tooltip-height: 1px;
     private property <bool> compact-filters: root.width < 620px;
     private property <bool> wrap-row-branches: root.width < 760px;
-    private property <length> row-height: root.wrap-row-branches ? 98px : 64px;
+    private property <length> row-height: root.wrap-row-branches ? 98px : 72px;
     private property <bool> supports-review-filter: root.repo-type == "github";
     private property <bool> supports-assignee-filter: root.repo-type == "github"
         || root.repo-type == "gitlab";
@@ -279,16 +279,16 @@ export component GitHubPullRequestFlow {
                 private property <length> ai-action-width: 32px;
                 private property <length> action-width: self.conversation-action-width + self.ai-action-width + 4px;
                 private property <length> content-x: 38px;
-                // Wrapped titles are top-aligned; wide single-line titles are
-                // centered in their 26px box. Actions follow the active line box.
-                private property <length> first-line-center-y: root.wrap-row-branches ? 15px : 21px;
+                // StyledText provides stable paragraph line spacing for mixed
+                // CJK/Latin titles where Text's glyph rows otherwise crowd.
+                private property <length> first-line-center-y: root.wrap-row-branches ? 17px : 21px;
                 private property <length> title-max-width: max(
                     80px,
                     parent.width - self.content-x - self.action-width - 32px,
                 );
                 private property <bool> title-wraps: title-measure.preferred-width > self.title-max-width;
                 private property <bool> title-uses-two-lines: root.wrap-row-branches && self.title-wraps;
-                private property <length> title-block-height: self.title-uses-two-lines ? 40px : 26px;
+                private property <length> title-block-height: self.title-uses-two-lines ? 36px : 26px;
                 private property <length> title-draw-width: self.title-wraps
                     ? self.title-max-width
                     : min(title-measure.preferred-width, self.title-max-width);
@@ -352,18 +352,16 @@ export component GitHubPullRequestFlow {
                     wrap: no-wrap;
                 }
 
-                if !title-touch.has-hover: Text {
+                if !title-touch.has-hover: StyledText {
                     x: parent.content-x;
                     y: 8px;
                     width: parent.title-max-width;
                     height: parent.title-block-height;
-                    text: item.title;
-                    font-size: 14px;
-                    font-weight: 600;
-                    color: root.fg-default;
+                    text: @markdown("**\{item.title}**");
+                    default-font-size: 14px;
+                    default-color: root.fg-default;
+                    horizontal-alignment: left;
                     vertical-alignment: root.wrap-row-branches ? top : center;
-                    wrap: root.wrap-row-branches ? word-wrap : no-wrap;
-                    overflow: root.wrap-row-branches ? clip : elide;
                 }
 
                 // StyledText underlines each glyph run and each wrapped line.
@@ -408,7 +406,7 @@ export component GitHubPullRequestFlow {
                 private property <bool> has-branches: item.target-branch != ""
                     && item.source-branch != "";
                 private property <length> metadata-y: root.wrap-row-branches
-                    ? (self.title-uses-two-lines ? 48px : 24px)
+                    ? (self.title-uses-two-lines ? 38px : 24px)
                     : 34px;
                 // Gitee's mixed CJK/Latin metadata needs a small optical
                 // correction; Latin-only GitHub/GitLab metadata does not.

@@ -67,12 +67,16 @@ pub(super) fn decode_conversation_comment(value: &Value) -> PullRequestConversat
             .or_else(|| string_field(value, "createdAt"))
             .unwrap_or_default(),
         state: string_field(value, "state").unwrap_or_default(),
+        review_id: String::new(),
+        can_dismiss: false,
     }
 }
 
 pub(super) fn decode_conversation_review(value: &Value) -> Option<PullRequestConversationItem> {
     let state = string_field(value, "state")
         .or_else(|| string_field(value, "result"))
+        .or_else(|| string_field(value, "approve_status"))
+        .map(|state| normalize_enterprise_review_state(state.as_str()))
         .unwrap_or_default();
     let body = conversation_note_body(value);
     if body.trim().is_empty() && state.trim().is_empty() {
@@ -83,14 +87,20 @@ pub(super) fn decode_conversation_review(value: &Value) -> Option<PullRequestCon
             .map(|id| format!("review-{id}"))
             .unwrap_or_else(|| format!("review-{}", body.len())),
         kind: "review".to_string(),
-        author: nested_string(value, "author", "name")
+        author: string_field(value, "name")
+            .or_else(|| string_field(value, "username"))
+            .or_else(|| string_field(value, "user_name"))
+            .or_else(|| string_field(value, "login"))
+            .or_else(|| nested_string(value, "author", "name"))
             .or_else(|| nested_string(value, "author", "username"))
             .or_else(|| nested_string(value, "user", "name"))
             .or_else(|| nested_string(value, "user", "login"))
             .or_else(|| nested_string(value, "reviewer", "name"))
             .or_else(|| nested_string(value, "reviewer", "username"))
             .unwrap_or_else(|| "Unknown reviewer".to_string()),
-        avatar_url: nested_string(value, "author", "avatar_url")
+        avatar_url: string_field(value, "avatar_url")
+            .or_else(|| string_field(value, "avatar"))
+            .or_else(|| nested_string(value, "author", "avatar_url"))
             .or_else(|| nested_string(value, "author", "avatar"))
             .or_else(|| nested_string(value, "user", "avatar_url"))
             .or_else(|| nested_string(value, "user", "avatar"))
@@ -105,7 +115,20 @@ pub(super) fn decode_conversation_review(value: &Value) -> Option<PullRequestCon
             .or_else(|| string_field(value, "updatedAt"))
             .unwrap_or_default(),
         state,
+        review_id: string_field(value, "id").unwrap_or_default(),
+        can_dismiss: false,
     })
+}
+
+pub(super) fn normalize_enterprise_review_state(state: &str) -> String {
+    match state.trim().to_ascii_lowercase().as_str() {
+        "approved" | "approvedandcommented" => "approved",
+        "rejected" | "rejectedandcommented" => "rejected",
+        "commented" => "commented",
+        "initialized" => "initialized",
+        other => other,
+    }
+    .to_string()
 }
 
 pub(super) fn conversation_note_body(value: &Value) -> String {

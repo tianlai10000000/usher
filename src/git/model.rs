@@ -185,6 +185,10 @@ pub(crate) struct PullRequestConversationItem {
     pub(crate) created_at: String,
     /// Extra display payload: review state, short SHA, target branch, or commit count.
     pub(crate) state: String,
+    /// Provider review identifier used by GitHub-style per-review actions.
+    pub(crate) review_id: String,
+    /// Whether the configured provider identity may dismiss this exact review.
+    pub(crate) can_dismiss: bool,
 }
 
 pub(crate) fn short_sha(sha: &str) -> String {
@@ -246,6 +250,8 @@ pub(crate) fn conversation_commit_batch_items(
         },
         created_at,
         state: count.to_string(),
+        review_id: String::new(),
+        can_dismiss: false,
     });
     for commit in commits.iter().rev() {
         items.push(PullRequestConversationItem {
@@ -262,6 +268,8 @@ pub(crate) fn conversation_commit_batch_items(
             },
             created_at: commit.authored_at.clone(),
             state: short_sha(commit.sha.as_str()),
+            review_id: String::new(),
+            can_dismiss: false,
         });
     }
     items
@@ -286,6 +294,8 @@ pub(crate) fn conversation_merged_item(
         body: short_sha(merge_sha),
         created_at: created_at.to_string(),
         state: target_branch.to_string(),
+        review_id: String::new(),
+        can_dismiss: false,
     }
 }
 
@@ -308,6 +318,8 @@ pub(crate) fn conversation_system_event_item(
         body: body.into(),
         created_at: created_at.to_string(),
         state: String::new(),
+        review_id: String::new(),
+        can_dismiss: false,
     }
 }
 

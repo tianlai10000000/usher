@@ -28,6 +28,30 @@ pub(super) fn enterprise_pull_request_endpoint(
         ))
 }
 
+pub(super) fn enterprise_web_pull_request_review_endpoint(
+    locator: &RepoLocator,
+    pull_request_iid: &str,
+) -> Result<String, String> {
+    if pull_request_iid.trim().is_empty() {
+        return Err("Gitee pull request number is empty.".to_string());
+    }
+    let full_path = locator
+        .namespace
+        .split('/')
+        .chain(std::iter::once(locator.repo.as_str()))
+        .map(percent_encode_path)
+        .collect::<Vec<_>>()
+        .join("/");
+    Ok(super::endpoints::ENTERPRISE_WEB_PULL_REQUEST_REVIEWS_URL
+        .replace("{scheme}", locator.scheme.as_str())
+        .replace("{authority}", locator.authority.as_str())
+        .replace("{full_path}", full_path.as_str())
+        .replace(
+            "{pull_request_iid}",
+            percent_encode_path(pull_request_iid.trim()).as_str(),
+        ))
+}
+
 pub(super) fn enterprise_authenticated_builder(
     request: reqwest::RequestBuilder,
 ) -> reqwest::RequestBuilder {

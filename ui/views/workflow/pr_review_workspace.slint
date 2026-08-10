@@ -10,6 +10,7 @@ import { GitHubTooltip } from "../../components/github_tooltip.slint";
 import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubCenteredLoadingState } from "../../components/github_spinner.slint";
 import { GitHubVirtualListScrollbar } from "../../components/github_scroll_view.slint";
+import { GitHubActionListItem, GitHubActionMenu, GitHubActionMenuTriggerArea } from "../../components/github_action_menu.slint";
 export component GitHubPullRequestReviewPage inherits FocusScope {
     // Full application viewport used by route-owned root overlays. The page
     // root stays at x=0; ordinary review content applies shell-leading-inset
@@ -84,6 +85,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     in-out property <string> diff-view: "unified";
     in-out property <string> file-filter: "";
     in-out property <bool> review-dialog-open: false;
+    in-out property <bool> dismiss-review-dialog-open: false;
     in-out property <bool> merge-dialog-open: false;
     in-out property <bool> revert-dialog-open: false;
     in-out property <bool> commit-range-dialog-open: false;
@@ -245,6 +247,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     private property <color> hunk-foreground: root.github-fg-muted;
     private property <string> selected-review-action: "comment";
     private property <string> review-body: "";
+    private property <string> dismiss-review-id: "";
+    private property <string> dismiss-review-author: "";
+    private property <string> dismiss-review-reason: "";
+    private property <length> review-menu-anchor-x: 0px;
+    private property <length> review-menu-anchor-y: 0px;
     private property <string> conversation-comment-body: "";
     private property <string> pending-conversation-comment: "";
     private property <string> selected-merge-method: "merge";
@@ -253,6 +260,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     private property <int> draft-range-end: -1;
     private property <bool> modal-open:
         root.review-dialog-open
+            || root.dismiss-review-dialog-open
             || root.merge-dialog-open
             || root.revert-dialog-open
             || root.commit-range-dialog-open;
@@ -320,6 +328,7 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
     callback apply-diff-settings(string, bool);
     callback load-large-diff();
     callback submit-review(string, string);
+    callback dismiss-review(string, string);
     callback merge(string, bool);
     callback revert();
     callback filter-files(string);
@@ -597,6 +606,11 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
             root.selected-review-action = root.can-comment ? "comment" : (root.can-approve ? "approve" : "request_changes");
         }
     }
+    changed dismiss-review-dialog-open => {
+        if root.dismiss-review-dialog-open {
+            root.active-popover = "";
+        }
+    }
     changed remote-review-state => {
         // Clear the Conversation composer after a successful Comment submit.
         if root.remote-review-state == "commented" && root.pending-conversation-comment != "" {
@@ -716,6 +730,10 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 // while it or its nested fields are focused).
                 if (root.review-dialog-open && !root.action-loading) {
                     root.review-dialog-open = false;
+                    return accept;
+                }
+                if (root.dismiss-review-dialog-open && !root.action-loading) {
+                    root.dismiss-review-dialog-open = false;
                     return accept;
                 }
                 if (root.merge-dialog-open && !root.action-loading) {
@@ -1279,6 +1297,18 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                         height: item.row-height * 1px + self.commit-body-extra;
                         background: transparent;
 
+                        // The Material ListView owns pointer input inside its
+                        // viewport, so the workspace-level blank dismiss layer
+                        // cannot see clicks between timeline controls. Keep a
+                        // row-sized target below the real controls so ordinary
+                        // Conversation clicks close an open ActionMenu.
+                        TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            mouse-cursor: default;
+                            clicked => { root.active-popover = ""; }
+                        }
+
                         // Same wrap metrics as the visible expanded body.
                         conv-commit-body-measure := Text {
                             visible: false;
@@ -1584,6 +1614,57 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                                 label-font-size: 12px;
                             }
                             Rectangle { horizontal-stretch: 1; }
+                            review-actions-button := Rectangle {
+                                private property <bool> menu-open:
+                                    root.active-popover == "review-actions"
+                                    && root.dismiss-review-id == item.review-id;
+                                visible: item.can-dismiss;
+                                width: item.can-dismiss ? 32px : 0px;
+                                height: 32px;
+                                border-radius: 6px;
+                                background: self.menu-open
+                                    ? GitHubTheme.control-transparent-selected
+                                    : (review-actions-touch.pressed
+                                    ? GitHubTheme.control-transparent-active
+                                    : (review-actions-touch.has-hover
+                                        ? GitHubTheme.control-transparent-hover
+                                        : transparent));
+                                Image {
+                                    x: 8px;
+                                    y: 8px;
+                                    width: 16px;
+                                    height: 16px;
+                                    source: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
+                                    colorize: review-actions-button.menu-open
+                                        ? root.github-accent-fg
+                                        : root.github-fg-muted;
+                                }
+                                review-actions-touch := GitHubActionMenuTriggerArea {
+                                    menu-open: review-actions-button.menu-open;
+                                    trigger-enabled: item.can-dismiss && !root.action-loading;
+                                    accessible-role: button;
+                                    accessible-label: "Review actions";
+                                    request-open => {
+                                        root.dismiss-review-id = item.review-id;
+                                        root.dismiss-review-author = item.author;
+                                        root.review-menu-anchor-x = review-actions-button.absolute-position.x
+                                            - root.absolute-position.x;
+                                        root.review-menu-anchor-y = review-actions-button.absolute-position.y
+                                            - root.absolute-position.y;
+                                        root.active-popover = "review-actions";
+                                    }
+                                    request-close => { root.active-popover = ""; }
+                                }
+                                changed absolute-position => {
+                                    if root.active-popover == "review-actions"
+                                            && root.dismiss-review-id == item.review-id {
+                                        root.review-menu-anchor-x = self.absolute-position.x
+                                            - root.absolute-position.x;
+                                        root.review-menu-anchor-y = self.absolute-position.y
+                                            - root.absolute-position.y;
+                                    }
+                                }
+                            }
                         }
 
                         if item.kind == "event": Rectangle {
@@ -3667,6 +3748,36 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
         }
     }
 
+    review-actions-menu := GitHubActionMenu {
+        open: root.selected-tab == 0 && root.active-popover == "review-actions";
+        viewport-x: root.shell-leading-inset;
+        viewport-y: 0px;
+        viewport-width: root.content-width;
+        viewport-height: root.height;
+        anchor-x: root.review-menu-anchor-x;
+        anchor-y: root.review-menu-anchor-y;
+        anchor-width: 32px;
+        anchor-height: 32px;
+        menu-width: 184px;
+        content-height: 40px;
+        align: "end";
+        dismiss-requested => { root.active-popover = ""; }
+
+        GitHubActionListItem {
+            x: 4px;
+            y: 4px;
+            width: parent.width - 8px;
+            text: "Dismiss review";
+            danger: true;
+            item-enabled: !root.action-loading;
+            activated => {
+                root.active-popover = "";
+                root.dismiss-review-reason = "";
+                root.dismiss-review-dialog-open = true;
+            }
+        }
+    }
+
     // Host File extensions above VerticalLayout siblings (toolbar z:80, tabs)
     // so auto-flip on short/narrow windows is not covered. Anchor coords are
     // synced from filter-menu-anchor inside the files pane.
@@ -3917,6 +4028,80 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                     }
                 }
             }
+    }
+
+    dismiss-review-dialog-frame := GitHubDialog {
+        viewport-x: -root.absolute-position.x;
+        viewport-y: -root.absolute-position.y;
+        viewport-width: root.application-width;
+        viewport-height: root.application-height;
+        backdrop-y: 0px;
+        backdrop-height: root.height;
+        dialog-visible: root.dismiss-review-dialog-open;
+        modal: false;
+        title: "Dismiss review";
+        dialog-width: 480px;
+        dialog-height: 324px;
+        body-padding: 0px;
+        close-enabled: !root.action-loading;
+        primary-label: root.action-loading ? "Dismissing…" : "Dismiss review";
+        primary-danger: true;
+        primary-enabled: !root.action-loading && root.dismiss-review-reason != "";
+        primary-busy: root.action-loading;
+        close-requested => { root.dismiss-review-dialog-open = false; }
+        cancel-clicked => { root.dismiss-review-dialog-open = false; }
+        primary-clicked => {
+            root.dismiss-review(root.dismiss-review-id, root.dismiss-review-reason);
+        }
+
+        if root.dismiss-review-dialog-open: Text {
+            x: dismiss-review-dialog-frame.content-x + 16px;
+            y: dismiss-review-dialog-frame.content-y + 14px;
+            width: dismiss-review-dialog-frame.content-width - 32px;
+            height: 42px;
+            z: 3100;
+            text: "Dismiss " + root.dismiss-review-author + "'s review and explain why. The reason will be added to the conversation.";
+            font-size: 12px;
+            color: root.github-fg-muted;
+            wrap: word-wrap;
+            vertical-alignment: top;
+        }
+        if root.dismiss-review-dialog-open: Text {
+            x: dismiss-review-dialog-frame.content-x + 16px;
+            y: dismiss-review-dialog-frame.content-y + 66px;
+            width: dismiss-review-dialog-frame.content-width - 32px;
+            height: 20px;
+            z: 3100;
+            text: "Reason for dismissing";
+            font-size: 12px;
+            font-weight: 600;
+            color: root.github-fg-default;
+        }
+        if root.dismiss-review-dialog-open: Rectangle {
+            x: dismiss-review-dialog-frame.content-x + 16px;
+            y: dismiss-review-dialog-frame.content-y + 92px;
+            width: dismiss-review-dialog-frame.content-width - 32px;
+            height: 92px;
+            z: 3100;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: dismiss-reason-editor.has-focus
+                ? GitHubTheme.accent-emphasis
+                : root.github-border-default;
+            background: root.github-bg-default;
+            dismiss-reason-editor := TextInput {
+                x: 10px;
+                y: 8px;
+                width: parent.width - 20px;
+                height: parent.height - 16px;
+                text <=> root.dismiss-review-reason;
+                single-line: false;
+                wrap: word-wrap;
+                color: root.github-fg-default;
+                font-size: 12px;
+                enabled: !root.action-loading;
+            }
+        }
     }
 
     review-dialog-frame := GitHubDialog {

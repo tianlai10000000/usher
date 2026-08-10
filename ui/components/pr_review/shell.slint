@@ -153,6 +153,8 @@ export struct WorkflowPrConversationItem {
     created-at: string,
     created-at-tooltip: string,
     state: string,
+    review-id: string,
+    can-dismiss: bool,
     connect-before: bool,
     connect-after: bool,
     // Precomputed ListView row height from Rust so cards can hug short bodies

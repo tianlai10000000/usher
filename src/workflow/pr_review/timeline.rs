@@ -162,6 +162,8 @@ pub(super) fn conversation_model(
                     )
                     .into(),
                     state: item.state.clone().into(),
+                    review_id: item.review_id.clone().into(),
+                    can_dismiss: item.can_dismiss,
                     connect_before: conversation_items_connect(
                         index
                             .checked_sub(1)
@@ -360,6 +362,8 @@ mod tests {
             body: body.to_string(),
             created_at: String::new(),
             state: String::new(),
+            review_id: String::new(),
+            can_dismiss: false,
         }
     }
 

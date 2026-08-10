@@ -1,6 +1,7 @@
 //! GitLab API URL templates.
 
 pub(crate) const API_VERSION_PATH: &str = "/api/v4";
+pub(crate) const CURRENT_USER_URL: &str = "{api_base_url}/user";
 pub(crate) const PROJECT_URL: &str = "{api_base_url}/projects/{project_id_or_path}";
 pub(crate) const MERGE_REQUESTS_URL: &str = "{api_base_url}/projects/{project_id}/merge_requests";
 pub(crate) const MERGE_REQUEST_URL: &str =
@@ -13,6 +14,10 @@ pub(crate) const MERGE_REQUEST_COMMITS_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/commits";
 pub(crate) const MERGE_REQUEST_APPROVE_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/approve";
+pub(crate) const MERGE_REQUEST_UNAPPROVE_URL: &str =
+    "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/unapprove";
+pub(crate) const MERGE_REQUEST_APPROVALS_URL: &str =
+    "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/approvals";
 pub(crate) const MERGE_REQUEST_MERGE_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/merge";
 pub(crate) const REPOSITORY_FILE_RAW_URL: &str =

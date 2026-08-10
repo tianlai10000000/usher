@@ -32,8 +32,9 @@ use readiness::{gitee_enterprise_merge_readiness, gitee_public_merge_readiness};
 use revert::{enterprise_commit_refs_can_revert, enterprise_data_object};
 use transport::{
     enterprise_authenticated_builder, enterprise_pull_request_endpoint,
-    enterprise_repository_commit_endpoint, parse_gitee_merge_method, public_authenticated_builder,
-    public_authenticated_request, public_repo_endpoint,
+    enterprise_repository_commit_endpoint, enterprise_web_pull_request_review_endpoint,
+    parse_gitee_merge_method, public_authenticated_builder, public_authenticated_request,
+    public_repo_endpoint,
 };
 
 /// Fetch the stable provider project id for a remote repository.
@@ -284,16 +285,22 @@ pub(super) async fn get_pull_request_diff(
         );
     }
     let mut decoded = decode_pull_request_diff(&payload)?;
-    // Enterprise Conversation badge: MR detail `user_notes_count` / `notes_count`.
-    // Fallback is a bounded notes page probe, not the full Conversation timeline.
-    decoded.conversation_count = Some(
-        detail
-            .as_ref()
-            .ok()
-            .and_then(conversation_count_from_detail)
-            .or(count_pull_request_comments(locator, pull_request_iid, Some(repo_project_id)).await)
-            .unwrap_or(0),
-    );
+    // Enterprise Conversation includes ordinary notes plus one current-state
+    // summary for every active approved/rejected reviewer in MR detail.
+    let active_review_count = detail
+        .as_ref()
+        .ok()
+        .map(|detail| {
+            enterprise_review_summaries(enterprise_data_object(detail), None).len() as u32
+        })
+        .unwrap_or(0);
+    let note_count = detail
+        .as_ref()
+        .ok()
+        .and_then(conversation_count_from_detail)
+        .or(count_pull_request_comments(locator, pull_request_iid, Some(repo_project_id)).await)
+        .unwrap_or(0);
+    decoded.conversation_count = Some(note_count.saturating_add(active_review_count));
     // Some Enterprise deployments advertise zero in MR detail/diffs until the
     // commits collection is requested. Only a positive summary is authoritative;
     // zero or a missing field needs the lightweight commits probe.
@@ -796,7 +803,8 @@ pub(super) async fn get_pull_request_conversation(
     repo_project_id: &str,
     pull_request_iid: &str,
 ) -> Result<Vec<PullRequestConversationItem>, String> {
-    let (detail, notes, reviews) = match gitee_api_profile(locator) {
+    let profile = gitee_api_profile(locator);
+    let (detail_payload, notes, current_user) = match profile {
         GiteeApiProfile::EnterpriseV8 => {
             let detail_endpoint = enterprise_pull_request_endpoint(
                 endpoints::ENTERPRISE_MERGE_REQUEST_URL,
@@ -808,11 +816,9 @@ pub(super) async fn get_pull_request_conversation(
                 repo_project_id,
                 pull_request_iid,
             )?;
-            let reviews_endpoint = enterprise_pull_request_endpoint(
-                endpoints::ENTERPRISE_MERGE_REQUEST_REVIEWS_URL,
-                repo_project_id,
-                pull_request_iid,
-            )?;
+            let api_base_url = enterprise_api_base_url()?;
+            let current_user_endpoint = endpoints::ENTERPRISE_CURRENT_USER_URL
+                .replace("{api_base_url}", api_base_url.as_str());
             let detail_future = async {
                 http::send_json(
                     enterprise_authenticated_builder(http::get(detail_endpoint)),
@@ -830,20 +836,17 @@ pub(super) async fn get_pull_request_conversation(
                 .await
                 .map_err(|error| error.to_string())
             };
-            // Reviews are best-effort: notes still render if this endpoint is
-            // unavailable or returns an unexpected wrapper.
-            let reviews_future = async {
+            let current_user_future = async {
                 http::send_json(
-                    enterprise_authenticated_builder(http::get(reviews_endpoint))
-                        .query(&[("per_page", "100")]),
-                    RequestOptions::new("Load Gitee enterprise merge request reviews"),
+                    enterprise_authenticated_builder(http::get(current_user_endpoint)),
+                    RequestOptions::new("Load Gitee enterprise current review user"),
                 )
                 .await
                 .ok()
             };
-            let (detail, notes, reviews) =
-                tokio::join!(detail_future, notes_future, reviews_future);
-            (detail?, notes?, reviews)
+            let (detail, notes, current_user) =
+                tokio::join!(detail_future, notes_future, current_user_future);
+            (detail?, notes?, current_user)
         }
         GiteeApiProfile::PublicV5 => {
             let detail_endpoint = public_repo_endpoint(
@@ -874,29 +877,36 @@ pub(super) async fn get_pull_request_conversation(
             (detail, notes, None)
         }
     };
+    let detail = if profile == GiteeApiProfile::EnterpriseV8 {
+        enterprise_data_object(&detail_payload)
+    } else {
+        &detail_payload
+    };
 
     let mut items = vec![PullRequestConversationItem {
         id: format!("description-{pull_request_iid}"),
         kind: "description".to_string(),
-        author: nested_string(&detail, "author", "name")
-            .or_else(|| nested_string(&detail, "author", "username"))
-            .or_else(|| nested_string(&detail, "user", "login"))
-            .or_else(|| nested_string(&detail, "user", "name"))
+        author: nested_string(detail, "author", "name")
+            .or_else(|| nested_string(detail, "author", "username"))
+            .or_else(|| nested_string(detail, "user", "login"))
+            .or_else(|| nested_string(detail, "user", "name"))
             .unwrap_or_else(|| "Unknown author".to_string()),
-        avatar_url: nested_string(&detail, "author", "avatar_url")
-            .or_else(|| nested_string(&detail, "author", "avatar"))
-            .or_else(|| nested_string(&detail, "user", "avatar_url"))
-            .or_else(|| nested_string(&detail, "user", "avatar"))
+        avatar_url: nested_string(detail, "author", "avatar_url")
+            .or_else(|| nested_string(detail, "author", "avatar"))
+            .or_else(|| nested_string(detail, "user", "avatar_url"))
+            .or_else(|| nested_string(detail, "user", "avatar"))
             .unwrap_or_default(),
         author_association: String::new(),
-        body: string_field(&detail, "description")
-            .or_else(|| string_field(&detail, "body"))
+        body: string_field(detail, "description")
+            .or_else(|| string_field(detail, "body"))
             .unwrap_or_default(),
-        created_at: string_field(&detail, "created_at").unwrap_or_default(),
-        state: string_field(&detail, "state").unwrap_or_default(),
+        created_at: string_field(detail, "created_at").unwrap_or_default(),
+        state: string_field(detail, "state").unwrap_or_default(),
+        review_id: String::new(),
+        can_dismiss: false,
     }];
     if let Some(values) = pull_request_values(&notes) {
-        match gitee_api_profile(locator) {
+        match profile {
             // Enterprise GET /notes returns discussion threads in `data`, with
             // comment text nested at `notes[].note` (+ optional `children`).
             // Top-level `content` is diff context and must not be treated as body.
@@ -927,26 +937,8 @@ pub(super) async fn get_pull_request_conversation(
         }
     }
 
-    if let Some(reviews_payload) = reviews.as_ref() {
-        if let Some(values) = pull_request_values(reviews_payload) {
-            let note_bodies = items
-                .iter()
-                .filter(|item| item.kind == "comment" || item.kind == "review")
-                .map(|item| (item.author.clone(), item.body.trim().to_string()))
-                .filter(|(_, body)| !body.is_empty())
-                .collect::<std::collections::HashSet<_>>();
-            items.extend(values.iter().filter_map(|value| {
-                let review = decode_conversation_review(value)?;
-                // Prefer the richer note card when the same text already exists.
-                if !review.body.trim().is_empty()
-                    && note_bodies
-                        .contains(&(review.author.clone(), review.body.trim().to_string()))
-                {
-                    return None;
-                }
-                Some(review)
-            }));
-        }
+    if profile == GiteeApiProfile::EnterpriseV8 {
+        items.extend(enterprise_review_summaries(detail, current_user.as_ref()));
     }
 
     // Structured commit/merge rows mirror GitHub Conversation activity for both
@@ -956,19 +948,19 @@ pub(super) async fn get_pull_request_conversation(
         items.extend(conversation_commit_batch_items(&commits));
     }
     if let Some(merged_at) =
-        string_field(&detail, "merged_at").filter(|value| !value.trim().is_empty())
+        string_field(detail, "merged_at").filter(|value| !value.trim().is_empty())
     {
-        let merge_sha = string_field(&detail, "merge_commit_sha")
-            .or_else(|| nested_string(&detail, "merge_commit", "sha"))
+        let merge_sha = string_field(detail, "merge_commit_sha")
+            .or_else(|| nested_string(detail, "merge_commit", "sha"))
             .unwrap_or_default();
-        let target_branch = string_field(&detail, "target_branch")
-            .or_else(|| nested_string(&detail, "base", "ref"))
+        let target_branch = string_field(detail, "target_branch")
+            .or_else(|| nested_string(detail, "base", "ref"))
             .unwrap_or_default();
-        let author = nested_string(&detail, "merged_by", "name")
-            .or_else(|| nested_string(&detail, "merged_by", "username"))
-            .or_else(|| nested_string(&detail, "merged_by", "login"))
-            .or_else(|| nested_string(&detail, "user", "login"))
-            .or_else(|| nested_string(&detail, "author", "name"))
+        let author = nested_string(detail, "merged_by", "name")
+            .or_else(|| nested_string(detail, "merged_by", "username"))
+            .or_else(|| nested_string(detail, "merged_by", "login"))
+            .or_else(|| nested_string(detail, "user", "login"))
+            .or_else(|| nested_string(detail, "author", "name"))
             .unwrap_or_else(|| "Unknown author".to_string());
         if !merge_sha.trim().is_empty() {
             items.push(conversation_merged_item(
@@ -987,6 +979,88 @@ pub(super) async fn get_pull_request_conversation(
     let description = items.remove(0);
     let activity = items;
     Ok(finalize_conversation_timeline(description, activity))
+}
+
+fn enterprise_review_summaries(
+    detail: &Value,
+    current_user: Option<&Value>,
+) -> Vec<PullRequestConversationItem> {
+    let current_user = current_user.map(enterprise_data_object);
+    let mut seen = std::collections::HashSet::new();
+    ["general_reviewers", "primary_reviewers"]
+        .into_iter()
+        .filter_map(|key| detail.get(key).and_then(Value::as_array))
+        .flatten()
+        .filter_map(|reviewer| {
+            let mut review = decode_conversation_review(reviewer)?;
+            if !matches!(review.state.as_str(), "approved" | "rejected") {
+                return None;
+            }
+            let identity = enterprise_user_identity(reviewer);
+            if !seen.insert(identity.clone()) {
+                return None;
+            }
+            review.review_id = identity.clone();
+            let can_dismiss = current_user.is_some_and(|current_user| {
+                enterprise_review_belongs_to_current_user(reviewer, current_user)
+            });
+            Some(PullRequestConversationItem {
+                id: format!("review-summary-{identity}"),
+                kind: "review_summary".to_string(),
+                author: review.author,
+                avatar_url: review.avatar_url,
+                author_association: review.author_association,
+                body: gitee_review_action(review.state.as_str()).to_string(),
+                // The MR detail exposes reviewer state but no review timestamp.
+                created_at: String::new(),
+                state: review.state,
+                review_id: review.review_id,
+                can_dismiss,
+            })
+        })
+        .collect()
+}
+
+fn enterprise_review_belongs_to_current_user(review: &Value, current_user: &Value) -> bool {
+    let current_user = enterprise_data_object(current_user);
+    ["author", "user", "reviewer"]
+        .into_iter()
+        .filter_map(|key| review.get(key))
+        .chain(std::iter::once(review))
+        .any(|candidate| enterprise_users_match(candidate, current_user))
+}
+
+fn enterprise_users_match(candidate: &Value, current_user: &Value) -> bool {
+    ["id", "uuid"].into_iter().any(|field| {
+        string_field(candidate, field)
+            .zip(string_field(current_user, field))
+            .is_some_and(|(candidate, current)| candidate == current)
+    }) || enterprise_user_login(candidate)
+        .zip(enterprise_user_login(current_user))
+        .is_some_and(|(candidate, current)| candidate == current)
+}
+
+fn enterprise_user_login(user: &Value) -> Option<String> {
+    ["username", "user_name", "login"]
+        .into_iter()
+        .find_map(|field| string_field(user, field))
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn enterprise_user_identity(user: &Value) -> String {
+    string_field(user, "id")
+        .or_else(|| string_field(user, "uuid"))
+        .or_else(|| enterprise_user_login(user))
+        .unwrap_or_else(|| "unknown-reviewer".to_string())
+}
+
+fn gitee_review_action(state: &str) -> &'static str {
+    match state {
+        "approved" => "approved these changes",
+        "rejected" => "requested changes",
+        "initialized" => "withdrew a review",
+        _ => "reviewed these changes",
+    }
 }
 
 pub(super) async fn get_pull_request_commits(
@@ -1233,6 +1307,73 @@ pub(super) async fn submit_pull_request_review(
             Ok(())
         }
     }
+}
+
+pub(super) async fn dismiss_pull_request_review(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+    reason: &str,
+) -> Result<(), String> {
+    if gitee_api_profile(locator) != GiteeApiProfile::EnterpriseV8 {
+        return Err("Gitee public v5 does not support dismissing pull request reviews.".into());
+    }
+    if configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_none() {
+        return Err(
+            "Configure a Gitee Enterprise Token in Settings before dismissing a review.".into(),
+        );
+    }
+    if reason.trim().is_empty() {
+        return Err("Enter a reason before dismissing the review.".into());
+    }
+    let payload = enterprise_review_dismissal_payload();
+    let web_endpoint = enterprise_web_pull_request_review_endpoint(locator, pull_request_iid)?;
+    let web_result = http::send(
+        enterprise_authenticated_builder(http::post(web_endpoint)).json(&payload),
+        RequestOptions::new("Dismiss Gitee enterprise pull request review"),
+    )
+    .await;
+
+    if let Err(web_error) = web_result {
+        log::warn!(
+            "[CodeReview][Gitee] Web review dismissal failed; trying documented v8 endpoint: {web_error}"
+        );
+        let api_endpoint = enterprise_pull_request_endpoint(
+            endpoints::ENTERPRISE_MERGE_REQUEST_REVIEWS_URL,
+            repo_project_id,
+            pull_request_iid,
+        )?;
+        http::send(
+            enterprise_authenticated_builder(http::post(api_endpoint)).json(&payload),
+            RequestOptions::new("Dismiss Gitee enterprise pull request review through v8"),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
+    // The working withdrawal request has no reason field. Preserve GitHub's
+    // required reason as a normal Conversation note after the state change,
+    // without making a successful withdrawal appear retryable if this
+    // secondary write fails.
+    let note_endpoint = enterprise_pull_request_endpoint(
+        endpoints::ENTERPRISE_MERGE_REQUEST_NOTES_URL,
+        repo_project_id,
+        pull_request_iid,
+    )?;
+    if let Err(error) = http::send(
+        enterprise_authenticated_builder(http::post(note_endpoint))
+            .json(&enterprise_note_payload(reason)),
+        RequestOptions::new("Add Gitee enterprise review dismissal reason"),
+    )
+    .await
+    {
+        log::warn!("[CodeReview][Gitee] Review dismissed but reason note failed: {error}");
+    }
+    Ok(())
+}
+
+fn enterprise_review_dismissal_payload() -> Value {
+    serde_json::json!({ "state": "initialized" })
 }
 
 fn enterprise_review_payload(state: &str, body: &str) -> Value {
@@ -1756,7 +1897,9 @@ mod tests {
         decode_commit, decode_conversation_comment, decode_conversation_review,
         decode_pull_request_diff, enterprise_commit_probe_total, enterprise_commit_refs_can_revert,
         enterprise_compare_diff_payload, enterprise_data_object, enterprise_note_payload,
-        enterprise_review_payload, expand_enterprise_conversation_notes,
+        enterprise_review_belongs_to_current_user, enterprise_review_dismissal_payload,
+        enterprise_review_payload, enterprise_review_summaries,
+        enterprise_web_pull_request_review_endpoint, expand_enterprise_conversation_notes,
         gitee_enterprise_list_sort, gitee_enterprise_merge_readiness, gitee_public_list_sort,
         gitee_public_merge_readiness, normalize_enterprise_commit_order, pull_request_values,
         select_enterprise_project_id, trusted_enterprise_commit_count,
@@ -1899,7 +2042,7 @@ mod tests {
     }
 
     #[test]
-    fn enterprise_approve_omits_an_empty_comment() {
+    fn enterprise_review_payloads_match_the_documented_contract() {
         assert_eq!(
             enterprise_review_payload("approved", "  "),
             json!({ "state": "approved" })
@@ -1907,6 +2050,57 @@ mod tests {
         assert_eq!(
             enterprise_review_payload("approved", " Looks good. "),
             json!({ "state": "approved", "comment": "Looks good." })
+        );
+        assert_eq!(
+            enterprise_review_dismissal_payload(),
+            json!({ "state": "initialized" })
+        );
+    }
+
+    #[test]
+    fn enterprise_review_dismissal_is_scoped_to_the_token_user() {
+        let detail = json!({
+            "general_reviewers": [
+                { "id": 15, "username": "alice", "name": "Alice", "approve_status": "approvedAndCommented" },
+                { "id": 16, "username": "bob", "name": "Bob", "approve_status": "initialized" }
+            ],
+            "primary_reviewers": [
+                { "id": 15, "username": "alice", "name": "Alice", "approve_status": "approved" },
+                { "id": 17, "user_name": "carol", "name": "Carol", "approve_status": "rejected" }
+            ]
+        });
+        let current_user = json!({
+            "data": { "id": 15, "username": "alice" }
+        });
+        let summaries = enterprise_review_summaries(&detail, Some(&current_user));
+
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].author, "Alice");
+        assert_eq!(summaries[0].state, "approved");
+        assert_eq!(summaries[0].review_id, "15");
+        assert!(summaries[0].can_dismiss);
+        assert_eq!(summaries[1].author, "Carol");
+        assert_eq!(summaries[1].state, "rejected");
+        assert!(!summaries[1].can_dismiss);
+        assert!(enterprise_review_belongs_to_current_user(
+            &detail["general_reviewers"][0],
+            &current_user
+        ));
+        assert!(!enterprise_review_belongs_to_current_user(
+            &detail["general_reviewers"][0],
+            &json!({ "id": 16, "username": "bob" })
+        ));
+    }
+
+    #[test]
+    fn enterprise_web_review_endpoint_preserves_nested_repository_path() {
+        let locator = parse_repo_locator(
+            "git@gitee.example.com:picc/picc__wechat/enterprise-insurance-management.git",
+        )
+        .unwrap();
+        assert_eq!(
+            enterprise_web_pull_request_review_endpoint(&locator, "1746").unwrap(),
+            "https://gitee.example.com/api/code/api/picc/picc__wechat/enterprise-insurance-management/-/pull_requests/1746/reviews"
         );
     }
 

@@ -13,9 +13,9 @@ use usher_search::{SearchDirection, step_match_index};
 use crate::git::{
     PullRequestActionState, PullRequestCommit, PullRequestDiffDetail, PullRequestDiffFile,
     PullRequestDiffLine, PullRequestMergeMethod, PullRequestReviewAction,
-    get_pull_request_action_state, get_pull_request_commit_range_diff, get_pull_request_commits,
-    get_pull_request_conversation, get_pull_request_diff, get_repository_file_text,
-    merge_pull_request, revert_pull_request, submit_pull_request_review,
+    dismiss_pull_request_review, get_pull_request_action_state, get_pull_request_commit_range_diff,
+    get_pull_request_commits, get_pull_request_conversation, get_pull_request_diff,
+    get_repository_file_text, merge_pull_request, revert_pull_request, submit_pull_request_review,
     supports_ignore_whitespace,
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
@@ -946,6 +946,15 @@ pub(crate) fn bind_pr_review(
             return;
         };
         submit_controller.submit_review(&ui, action.as_str(), body.as_str());
+    });
+
+    let dismiss_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_dismiss_review(move |review_id, reason| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        dismiss_controller.dismiss_review(&ui, review_id.as_str(), reason.as_str());
     });
 
     let merge_controller = controller.clone();
@@ -1887,6 +1896,57 @@ impl WorkflowPrReviewController {
                     }
                     Err(error) => {
                         log::warn!("[Workflow][PR Review] Failed to submit review: {error}");
+                        show_error(&ui, error.as_str());
+                    }
+                }
+            });
+        });
+    }
+
+    fn dismiss_review(&self, ui: &MainWindow, review_id: &str, reason: &str) {
+        if reason.trim().is_empty() {
+            show_error(ui, "Enter a reason before dismissing the review.");
+            return;
+        }
+        let Some((metadata, pull_request_iid)) = self.action_context() else {
+            show_error(ui, "The pull request repository context is unavailable.");
+            return;
+        };
+        let review_id = review_id.to_string();
+        let reason = reason.to_string();
+        let sequence = self.action_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        ui.set_workflow_pr_action_loading(true);
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let result = dismiss_pull_request_review(
+                metadata.repo_type.as_str(),
+                metadata.repo_project_id.as_str(),
+                metadata.remote_repo.as_str(),
+                pull_request_iid.as_str(),
+                review_id.as_str(),
+                reason.as_str(),
+            )
+            .await;
+            let _ = slint::invoke_from_event_loop(move || {
+                if controller.action_sequence.load(Ordering::SeqCst) != sequence {
+                    return;
+                }
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_action_loading(false);
+                match result {
+                    Ok(()) => {
+                        ui.set_workflow_pr_dismiss_review_dialog_open(false);
+                        let count = ui.get_workflow_pr_review_conversation_count();
+                        ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
+                        show_success(&ui, "Review dismissed on the remote repository.");
+                        controller.refresh_action_state(&ui);
+                        controller.refresh_conversation_after_remote_action(&ui);
+                    }
+                    Err(error) => {
+                        log::warn!("[Workflow][PR Review] Failed to dismiss review: {error}");
                         show_error(&ui, error.as_str());
                     }
                 }
@@ -3181,6 +3241,7 @@ fn reset_action_capabilities(ui: &MainWindow) {
 
 fn reset_action_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_dialog_open(false);
+    ui.set_workflow_pr_dismiss_review_dialog_open(false);
     ui.set_workflow_pr_merge_dialog_open(false);
     ui.set_workflow_pr_revert_dialog_open(false);
     ui.set_workflow_pr_action_loading(false);

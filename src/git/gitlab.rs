@@ -362,6 +362,39 @@ pub(super) async fn submit_pull_request_review(
     })
 }
 
+pub(super) async fn dismiss_pull_request_review(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+    reason: &str,
+) -> Result<(), String> {
+    if configured_token(RepoType::GitLab).is_none() {
+        return Err("Configure a GitLab Token in Settings before dismissing a review.".into());
+    }
+    if reason.trim().is_empty() {
+        return Err("Enter a reason before dismissing the review.".into());
+    }
+
+    // GitLab unapproves only the authenticated user. Preserve GitHub's visible
+    // dismissal reason as a normal merge-request note before changing state.
+    post_merge_request_note(locator, repo_project_id, pull_request_iid, reason).await?;
+    let endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_UNAPPROVE_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    let result: Result<Value, String> = http::send_json(
+        gitlab_authenticated(http::post(endpoint)),
+        RequestOptions::new("Unapprove GitLab merge request"),
+    )
+    .await
+    .map_err(|error| error.to_string());
+    result.map(|_| ()).map_err(|error| {
+        format!("GitLab posted the dismissal reason, but unapprove failed: {error}")
+    })
+}
+
 pub(super) async fn merge_pull_request(
     locator: &RepoLocator,
     repo_project_id: &str,
@@ -442,6 +475,14 @@ pub(super) async fn get_pull_request_conversation(
         repo_project_id,
         pull_request_iid,
     );
+    let approvals_endpoint = merge_request_endpoint(
+        endpoints::MERGE_REQUEST_APPROVALS_URL,
+        locator,
+        repo_project_id,
+        pull_request_iid,
+    );
+    let current_user_endpoint =
+        endpoints::CURRENT_USER_URL.replace("{api_base_url}", api_base_url(locator).as_str());
     let detail_future = async {
         http::send_json(
             gitlab_request(detail_endpoint),
@@ -466,8 +507,39 @@ pub(super) async fn get_pull_request_conversation(
         .await
         .map_err(|error| error.to_string())
     };
-    let (detail, notes, commit_values): (Value, Vec<Value>, Vec<Value>) =
-        tokio::try_join!(detail_future, notes_future, commits_future)?;
+    let approvals_future = async {
+        Ok::<Option<Value>, String>(
+            http::send_json(
+                gitlab_request(approvals_endpoint),
+                RequestOptions::new("Load GitLab merge request approvals"),
+            )
+            .await
+            .ok(),
+        )
+    };
+    let current_user_future = async {
+        Ok::<Option<Value>, String>(
+            http::send_json(
+                gitlab_request(current_user_endpoint),
+                RequestOptions::new("Load GitLab current review user"),
+            )
+            .await
+            .ok(),
+        )
+    };
+    let (detail, notes, commit_values, approvals, current_user): (
+        Value,
+        Vec<Value>,
+        Vec<Value>,
+        Option<Value>,
+        Option<Value>,
+    ) = tokio::try_join!(
+        detail_future,
+        notes_future,
+        commits_future,
+        approvals_future,
+        current_user_future
+    )?;
 
     let description = PullRequestConversationItem {
         id: format!("description-{pull_request_iid}"),
@@ -480,8 +552,15 @@ pub(super) async fn get_pull_request_conversation(
         body: string_field(&detail, "description").unwrap_or_default(),
         created_at: string_field(&detail, "created_at").unwrap_or_default(),
         state: string_field(&detail, "state").unwrap_or_default(),
+        review_id: String::new(),
+        can_dismiss: false,
     };
 
+    let approval_summaries = approvals
+        .as_ref()
+        .map(|approvals| gitlab_approval_summaries(approvals, current_user.as_ref(), &notes))
+        .unwrap_or_default();
+    let has_approval_snapshot = approvals.is_some();
     let mut activity = notes
         .into_iter()
         .filter_map(|value| {
@@ -491,7 +570,8 @@ pub(super) async fn get_pull_request_conversation(
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             if is_system
-                && (is_redundant_commit_system_note(body.as_str())
+                && ((has_approval_snapshot && is_gitlab_review_system_note(body.as_str()))
+                    || is_redundant_commit_system_note(body.as_str())
                     || is_redundant_merge_system_note(body.as_str()))
             {
                 return None;
@@ -511,9 +591,12 @@ pub(super) async fn get_pull_request_conversation(
                 body,
                 created_at: string_field(&value, "created_at").unwrap_or_default(),
                 state: String::new(),
+                review_id: String::new(),
+                can_dismiss: false,
             })
         })
         .collect::<Vec<_>>();
+    activity.extend(approval_summaries);
 
     let commits = commit_values
         .into_iter()
@@ -571,6 +654,77 @@ pub(super) async fn get_pull_request_conversation(
     }
 
     Ok(finalize_conversation_timeline(description, activity))
+}
+
+fn gitlab_approval_summaries(
+    approvals: &Value,
+    current_user: Option<&Value>,
+    notes: &[Value],
+) -> Vec<PullRequestConversationItem> {
+    let current_id = current_user.and_then(|user| string_field(user, "id"));
+    let current_username = current_user.and_then(|user| string_field(user, "username"));
+    approvals
+        .get("approved_by")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|entry| entry.get("user").unwrap_or(entry))
+        .map(|user| {
+            let id = string_field(user, "id").unwrap_or_default();
+            let username = string_field(user, "username").unwrap_or_default();
+            let author = string_field(user, "name")
+                .or_else(|| string_field(user, "username"))
+                .unwrap_or_else(|| "Unknown reviewer".to_string());
+            let created_at = notes
+                .iter()
+                .filter(|note| {
+                    note.get("system").and_then(Value::as_bool) == Some(true)
+                        && string_field(note, "body")
+                            .is_some_and(|body| is_gitlab_approval_note(body.as_str()))
+                        && note.get("author").is_some_and(|note_author| {
+                            (!id.is_empty()
+                                && string_field(note_author, "id").as_deref() == Some(id.as_str()))
+                                || (!username.is_empty()
+                                    && string_field(note_author, "username").as_deref()
+                                        == Some(username.as_str()))
+                        })
+                })
+                .filter_map(|note| string_field(note, "created_at"))
+                .max()
+                .unwrap_or_default();
+            let can_dismiss = current_id
+                .as_ref()
+                .zip((!id.is_empty()).then_some(&id))
+                .is_some_and(|(current, reviewer)| current == reviewer)
+                || current_username
+                    .as_ref()
+                    .zip((!username.is_empty()).then_some(&username))
+                    .is_some_and(|(current, reviewer)| current == reviewer);
+            PullRequestConversationItem {
+                id: format!("review-summary-{id}"),
+                kind: "review_summary".to_string(),
+                author,
+                avatar_url: string_field(user, "avatar_url").unwrap_or_default(),
+                author_association: String::new(),
+                body: "approved these changes".to_string(),
+                created_at,
+                state: "approved".to_string(),
+                review_id: id,
+                can_dismiss,
+            }
+        })
+        .collect()
+}
+
+fn is_gitlab_approval_note(body: &str) -> bool {
+    body.trim()
+        .to_ascii_lowercase()
+        .contains("approved this merge request")
+}
+
+fn is_gitlab_review_system_note(body: &str) -> bool {
+    let body = body.trim().to_ascii_lowercase();
+    body.contains("approved this merge request") || body.contains("unapproved this merge request")
 }
 
 pub(super) async fn get_pull_request_commits(
@@ -1064,8 +1218,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        gitlab_action_state, gitlab_list_sort, gitlab_merge_methods, gitlab_merge_payload,
-        gitlab_merge_readiness,
+        gitlab_action_state, gitlab_approval_summaries, gitlab_list_sort, gitlab_merge_methods,
+        gitlab_merge_payload, gitlab_merge_readiness, is_gitlab_review_system_note,
     };
     use crate::git::{PullRequestMergeMethod, PullRequestReadinessKind};
 
@@ -1109,6 +1263,34 @@ mod tests {
         }));
 
         assert_eq!(readiness.kind, PullRequestReadinessKind::ReviewRequired);
+    }
+
+    #[test]
+    fn maps_only_the_current_users_gitlab_approval_to_a_dismissible_review() {
+        let notes = vec![json!({
+            "system": true,
+            "body": "approved this merge request",
+            "created_at": "2026-08-10T08:00:00Z",
+            "author": { "id": 7, "username": "alice" }
+        })];
+        let summaries = gitlab_approval_summaries(
+            &json!({
+                "approved_by": [
+                    { "user": { "id": 7, "username": "alice", "name": "Alice" } },
+                    { "user": { "id": 8, "username": "bob", "name": "Bob" } }
+                ]
+            }),
+            Some(&json!({ "id": 7, "username": "alice" })),
+            &notes,
+        );
+
+        assert_eq!(summaries.len(), 2);
+        assert!(summaries[0].can_dismiss);
+        assert!(!summaries[1].can_dismiss);
+        assert_eq!(summaries[0].created_at, "2026-08-10T08:00:00Z");
+        assert!(is_gitlab_review_system_note(
+            "unapproved this merge request"
+        ));
     }
 
     #[test]
