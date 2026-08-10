@@ -8,6 +8,17 @@ mod syntax_highlight;
 pub mod tag;
 
 use crate::MainWindow;
+use std::cell::RefCell;
+
+#[derive(Clone)]
+struct WorkflowLifecycleController {
+    pr_list: pr_list::WorkflowPrListController,
+    pr_review: pr_review::WorkflowPrReviewController,
+}
+
+thread_local! {
+    static LIFECYCLE_CONTROLLER: RefCell<Option<WorkflowLifecycleController>> = const { RefCell::new(None) };
+}
 
 pub fn setup_workflow(ui: &MainWindow) {
     log::info!("[Workflow] Initializing workflow module");
@@ -16,6 +27,13 @@ pub fn setup_workflow(ui: &MainWindow) {
     state::initialize_current_ui(ui, &shared_state);
     let pr_list_controller = pr_list::bind_pr_list(ui);
     let pr_review_controller = pr_review::bind_pr_review(ui, pr_list_controller.clone());
+    LIFECYCLE_CONTROLLER.with(|registered| {
+        *registered.borrow_mut() = Some(WorkflowLifecycleController {
+            pr_list: pr_list_controller.clone(),
+            pr_review: pr_review_controller.clone(),
+        });
+    });
+    pr_review_controller.install_memory_benchmark_fixture(ui);
     bindings::bind_project_context(
         ui,
         shared_state.clone(),
@@ -27,4 +45,23 @@ pub fn setup_workflow(ui: &MainWindow) {
     tag::refresh_tag_context(ui, &shared_state, false);
     cd::bind_cd(ui, shared_state);
     log::info!("[Workflow] Workflow module initialized successfully");
+}
+
+pub(crate) fn release_unreachable_state(ui: &MainWindow) {
+    let mode = std::env::var("USHER_MEMORY_WORKFLOW_LIFECYCLE").unwrap_or_default();
+    if mode != "clear" {
+        if mode == "retain" {
+            log::info!("[Workflow][PR Review][Memory] reason=workflow_unreachable.retained_for_ab");
+            crate::memory_diagnostics::log_checkpoint("workflow_unreachable.retained_for_ab");
+        }
+        return;
+    }
+
+    LIFECYCLE_CONTROLLER.with(|registered| {
+        let Some(controller) = registered.borrow().as_ref().cloned() else {
+            return;
+        };
+        controller.pr_review.release_unreachable(ui);
+        controller.pr_list.release_unreachable(ui);
+    });
 }

@@ -74,6 +74,9 @@ export component MainWindow inherits Window {
         : transparent;
     in-out property <bool> window-live-resizing: false;
     in-out property <bool> native-window-active: true;
+    // AppKit owns system full-screen transitions. Platform notifications keep
+    // this presentation-only state current on the Slint event loop.
+    in-out property <bool> native-window-fullscreen: false;
     callback message-window-activity-changed(bool);
     changed native-window-active => {
         root.message-window-activity-changed(root.native-window-active);
@@ -817,7 +820,12 @@ export component MainWindow inherits Window {
             // native sidebar/history accessory before starting the breadcrumb.
             if root.platform-is-macos
                     && (root.show-breadcrumb || root.current-route == Route.PrReview): Rectangle {
-                x: max(0px, 184px - main-content-host.x);
+                // A normal undocked window leaves room for traffic lights and
+                // native history controls. AppKit removes that leading chrome
+                // in system full screen, so align the crumb with page content.
+                x: root.native-window-fullscreen
+                    ? 0px
+                    : max(0px, 184px - main-content-host.x);
                 y: 0px;
                 width: max(0px, parent.width - self.x);
                 height: root.native-titlebar-inset;

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{MainWindow, Route};
 use slint::Model;
@@ -29,9 +29,113 @@ struct DiagnosticState {
     started_at: Instant,
     baseline: ProcessMemorySnapshot,
     previous: ProcessMemorySnapshot,
+    rss_lifetime_peak_bytes: u64,
+    phys_footprint_lifetime_peak_bytes: u64,
+    ui_context: UiMemoryContext,
+}
+
+impl DiagnosticState {
+    fn new(snapshot: ProcessMemorySnapshot) -> Self {
+        Self {
+            started_at: Instant::now(),
+            baseline: snapshot,
+            previous: snapshot,
+            rss_lifetime_peak_bytes: snapshot.rss_peak_bytes.max(snapshot.rss_current_bytes),
+            phys_footprint_lifetime_peak_bytes: snapshot.phys_footprint_bytes,
+            ui_context: UiMemoryContext::default(),
+        }
+    }
+
+    fn observe(&mut self, snapshot: ProcessMemorySnapshot) -> SnapshotObservation {
+        let rss_new_highwater = snapshot.rss_current_bytes > self.rss_lifetime_peak_bytes;
+        let phys_footprint_new_highwater =
+            snapshot.phys_footprint_bytes > self.phys_footprint_lifetime_peak_bytes;
+        self.rss_lifetime_peak_bytes = self
+            .rss_lifetime_peak_bytes
+            .max(snapshot.rss_peak_bytes)
+            .max(snapshot.rss_current_bytes);
+        self.phys_footprint_lifetime_peak_bytes = self
+            .phys_footprint_lifetime_peak_bytes
+            .max(snapshot.phys_footprint_bytes);
+
+        let observation = SnapshotObservation {
+            elapsed_ms: self.started_at.elapsed().as_millis(),
+            rss_delta_previous: signed_delta(
+                snapshot.rss_current_bytes,
+                self.previous.rss_current_bytes,
+            ),
+            rss_delta_baseline: signed_delta(
+                snapshot.rss_current_bytes,
+                self.baseline.rss_current_bytes,
+            ),
+            phys_footprint_delta_previous: signed_delta(
+                snapshot.phys_footprint_bytes,
+                self.previous.phys_footprint_bytes,
+            ),
+            phys_footprint_delta_baseline: signed_delta(
+                snapshot.phys_footprint_bytes,
+                self.baseline.phys_footprint_bytes,
+            ),
+            rss_lifetime_peak_bytes: self.rss_lifetime_peak_bytes,
+            phys_footprint_lifetime_peak_bytes: self.phys_footprint_lifetime_peak_bytes,
+            rss_new_highwater,
+            phys_footprint_new_highwater,
+        };
+        self.previous = snapshot;
+        observation
+    }
+}
+
+#[derive(Debug, Clone)]
+struct UiMemoryContext {
+    route: String,
+    logical_width: i32,
+    logical_height: i32,
+    scale_factor: f32,
+    physical_width: f32,
+    physical_height: f32,
+    terminal_visible: bool,
+}
+
+impl Default for UiMemoryContext {
+    fn default() -> Self {
+        Self {
+            route: "unknown".to_string(),
+            logical_width: 0,
+            logical_height: 0,
+            scale_factor: 1.0,
+            physical_width: 0.0,
+            physical_height: 0.0,
+            terminal_visible: false,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct SnapshotObservation {
+    elapsed_ms: u128,
+    rss_delta_previous: i128,
+    rss_delta_baseline: i128,
+    phys_footprint_delta_previous: i128,
+    phys_footprint_delta_baseline: i128,
+    rss_lifetime_peak_bytes: u64,
+    phys_footprint_lifetime_peak_bytes: u64,
+    rss_new_highwater: bool,
+    phys_footprint_new_highwater: bool,
+}
+
+struct RunMetadata {
+    pid: u32,
+    run_id: String,
+    scenario: String,
+    benchmark_run: String,
+    build_profile: String,
+    compiled_renderer: &'static str,
+    requested_backend: String,
 }
 
 static DIAGNOSTIC_STATE: OnceLock<Mutex<DiagnosticState>> = OnceLock::new();
+static RUN_METADATA: OnceLock<RunMetadata> = OnceLock::new();
 static SAMPLER_STARTED: AtomicBool = AtomicBool::new(false);
 static SAMPLER_STOP: AtomicBool = AtomicBool::new(false);
 static SAMPLE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -50,11 +154,8 @@ pub(crate) fn initialize_baseline() {
         return;
     }
     let snapshot = process_memory_snapshot();
-    let _ = DIAGNOSTIC_STATE.set(Mutex::new(DiagnosticState {
-        started_at: Instant::now(),
-        baseline: snapshot,
-        previous: snapshot,
-    }));
+    let _ = run_metadata();
+    let _ = DIAGNOSTIC_STATE.set(Mutex::new(DiagnosticState::new(snapshot)));
 }
 
 pub(crate) fn process_memory_snapshot() -> ProcessMemorySnapshot {
@@ -79,16 +180,49 @@ pub(crate) fn log_checkpoint(reason: &str) {
     log_snapshot(reason, process_memory_snapshot());
 }
 
+pub(crate) fn record_ui_context(
+    route: Route,
+    logical_width: i32,
+    logical_height: i32,
+    scale_factor: f32,
+    terminal_visible: bool,
+) {
+    if !diagnostics_enabled() {
+        return;
+    }
+    let Some(state) = DIAGNOSTIC_STATE.get() else {
+        return;
+    };
+    if let Ok(mut state) = state.lock() {
+        state.ui_context = UiMemoryContext {
+            route: format!("{route:?}"),
+            logical_width,
+            logical_height,
+            scale_factor,
+            physical_width: logical_width as f32 * scale_factor,
+            physical_height: logical_height as f32 * scale_factor,
+            terminal_visible,
+        };
+    }
+}
+
 pub(crate) fn start_periodic_logging() {
     if !diagnostics_enabled() || SAMPLER_STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
     SAMPLER_STOP.store(false, Ordering::SeqCst);
+    let metadata = run_metadata();
     log::info!(
-        "[Memory][Diag] periodic sampler started: interval_ms={} debug_build={} slint_backend_env={}",
+        "[Memory][Diag] periodic sampler started: pid={} run_id={} scenario={} benchmark_run={} interval_ms={} debug_build={} build_profile={} compiled_renderer={} slint_backend_env={}",
+        metadata.pid,
+        metadata.run_id,
+        metadata.scenario,
+        metadata.benchmark_run,
         SAMPLE_INTERVAL.as_millis(),
         cfg!(debug_assertions),
-        std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "auto".to_string()),
+        metadata.build_profile,
+        metadata.compiled_renderer,
+        metadata.requested_backend,
     );
     crate::app_runtime::shared_runtime().spawn(async {
         let mut interval = tokio::time::interval(SAMPLE_INTERVAL);
@@ -101,7 +235,12 @@ pub(crate) fn start_periodic_logging() {
             }
             log_checkpoint("periodic");
         }
-        log::info!("[Memory][Diag] periodic sampler stopped");
+        let metadata = run_metadata();
+        log::info!(
+            "[Memory][Diag] periodic sampler stopped: pid={} run_id={}",
+            metadata.pid,
+            metadata.run_id,
+        );
     });
 }
 
@@ -249,36 +388,43 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
 }
 
 fn log_snapshot(reason: &str, snapshot: ProcessMemorySnapshot) {
-    let state = DIAGNOSTIC_STATE.get_or_init(|| {
-        Mutex::new(DiagnosticState {
-            started_at: Instant::now(),
-            baseline: snapshot,
-            previous: snapshot,
-        })
-    });
-    let (elapsed_ms, delta_previous, delta_baseline) = match state.lock() {
+    let state = DIAGNOSTIC_STATE.get_or_init(|| Mutex::new(DiagnosticState::new(snapshot)));
+    let (observation, ui_context) = match state.lock() {
         Ok(mut state) => {
-            let values = (
-                state.started_at.elapsed().as_millis(),
-                signed_delta(snapshot.rss_current_bytes, state.previous.rss_current_bytes),
-                signed_delta(snapshot.rss_current_bytes, state.baseline.rss_current_bytes),
-            );
-            state.previous = snapshot;
-            values
+            let observation = state.observe(snapshot);
+            (observation, state.ui_context.clone())
         }
-        Err(_) => (0, 0, 0),
+        Err(_) => (SnapshotObservation::default(), UiMemoryContext::default()),
     };
     let sequence = SAMPLE_SEQUENCE.fetch_add(1, Ordering::Relaxed) + 1;
+    let metadata = run_metadata();
     log::info!(
-        "[Memory][Diag] seq={} reason={} elapsed_ms={} rss_mib={:.2} rss_delta_last_mib={:+.2} rss_delta_baseline_mib={:+.2} rss_peak_mib={:.2} phys_footprint_mib={:.2} virtual_mib={:.2} internal_mib={:.2} external_mib={:.2} reusable_mib={:.2} compressed_mib={:.2} regions={} mach_ports={} threads={} running_threads={} faults={} pageins={}",
+        "[Memory][Diag] pid={} run_id={} scenario={} benchmark_run={} seq={} reason={} elapsed_ms={} route={} logical_width={} logical_height={} scale_factor={:.2} physical_width={:.0} physical_height={:.0} terminal_visible={} rss_mib={:.2} rss_delta_last_mib={:+.2} rss_delta_baseline_mib={:+.2} rss_peak_mib={:.2} rss_lifetime_peak_mib={:.2} rss_new_highwater={} phys_footprint_mib={:.2} phys_footprint_delta_last_mib={:+.2} phys_footprint_delta_baseline_mib={:+.2} phys_footprint_peak_mib={:.2} phys_footprint_new_highwater={} virtual_mib={:.2} internal_mib={:.2} external_mib={:.2} reusable_mib={:.2} compressed_mib={:.2} regions={} mach_ports={} threads={} running_threads={} faults={} pageins={}",
+        metadata.pid,
+        metadata.run_id,
+        metadata.scenario,
+        metadata.benchmark_run,
         sequence,
         reason,
-        elapsed_ms,
+        observation.elapsed_ms,
+        ui_context.route,
+        ui_context.logical_width,
+        ui_context.logical_height,
+        ui_context.scale_factor,
+        ui_context.physical_width,
+        ui_context.physical_height,
+        ui_context.terminal_visible,
         mib(snapshot.rss_current_bytes),
-        mib_signed(delta_previous),
-        mib_signed(delta_baseline),
+        mib_signed(observation.rss_delta_previous),
+        mib_signed(observation.rss_delta_baseline),
         mib(snapshot.rss_peak_bytes),
+        mib(observation.rss_lifetime_peak_bytes),
+        observation.rss_new_highwater,
         mib(snapshot.phys_footprint_bytes),
+        mib_signed(observation.phys_footprint_delta_previous),
+        mib_signed(observation.phys_footprint_delta_baseline),
+        mib(observation.phys_footprint_lifetime_peak_bytes),
+        observation.phys_footprint_new_highwater,
         mib(snapshot.virtual_size_bytes),
         mib(snapshot.internal_bytes),
         mib(snapshot.external_bytes),
@@ -291,6 +437,69 @@ fn log_snapshot(reason: &str, snapshot: ProcessMemorySnapshot) {
         snapshot.page_fault_count,
         snapshot.page_in_count,
     );
+}
+
+fn run_metadata() -> &'static RunMetadata {
+    RUN_METADATA.get_or_init(|| {
+        let pid = std::process::id();
+        let started_unix_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        RunMetadata {
+            pid,
+            run_id: format!("{pid}-{started_unix_ms}"),
+            scenario: environment_log_token("USHER_MEMORY_SCENARIO", "interactive"),
+            benchmark_run: environment_log_token("USHER_MEMORY_BENCHMARK_RUN", "none"),
+            build_profile: environment_log_token(
+                "USHER_MEMORY_BUILD_PROFILE",
+                if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "release"
+                },
+            ),
+            compiled_renderer: compiled_renderer(),
+            requested_backend: environment_log_token("SLINT_BACKEND", "auto"),
+        }
+    })
+}
+
+fn environment_log_token(name: &str, default: &str) -> String {
+    let value = std::env::var(name).unwrap_or_else(|_| default.to_string());
+    sanitize_log_token(&value, default)
+}
+
+fn sanitize_log_token(value: &str, default: &str) -> String {
+    let token = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if token.is_empty() {
+        default.to_string()
+    } else {
+        token
+    }
+}
+
+fn compiled_renderer() -> &'static str {
+    match (
+        cfg!(feature = "renderer-femtovg"),
+        cfg!(feature = "renderer-femtovg-wgpu"),
+        cfg!(feature = "renderer-skia"),
+    ) {
+        (true, false, false) => "femtovg-opengl",
+        (false, true, false) => "femtovg-wgpu",
+        (false, false, true) => "skia",
+        (false, false, false) => "none",
+        _ => "multiple",
+    }
 }
 
 fn signed_delta(current: u64, previous: u64) -> i128 {
@@ -472,7 +681,9 @@ fn macos_process_memory_snapshot() -> ProcessMemorySnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::{mib, mib_signed, signed_delta};
+    use super::{
+        DiagnosticState, ProcessMemorySnapshot, mib, mib_signed, sanitize_log_token, signed_delta,
+    };
 
     #[test]
     fn reports_signed_memory_deltas_in_both_directions() {
@@ -484,6 +695,50 @@ mod tests {
     fn converts_bytes_to_mebibytes() {
         assert_eq!(mib(1_048_576), 1.0);
         assert_eq!(mib_signed(-1_048_576), -1.0);
+    }
+
+    #[test]
+    fn observes_rss_and_footprint_deltas_and_lifetime_peaks() {
+        let baseline = ProcessMemorySnapshot {
+            rss_current_bytes: 10,
+            rss_peak_bytes: 12,
+            phys_footprint_bytes: 5,
+            ..ProcessMemorySnapshot::default()
+        };
+        let mut state = DiagnosticState::new(baseline);
+        let observation = state.observe(ProcessMemorySnapshot {
+            rss_current_bytes: 20,
+            rss_peak_bytes: 22,
+            phys_footprint_bytes: 14,
+            ..ProcessMemorySnapshot::default()
+        });
+        assert_eq!(observation.rss_delta_previous, 10);
+        assert_eq!(observation.rss_delta_baseline, 10);
+        assert_eq!(observation.phys_footprint_delta_previous, 9);
+        assert_eq!(observation.phys_footprint_delta_baseline, 9);
+        assert_eq!(observation.rss_lifetime_peak_bytes, 22);
+        assert_eq!(observation.phys_footprint_lifetime_peak_bytes, 14);
+        assert!(observation.rss_new_highwater);
+        assert!(observation.phys_footprint_new_highwater);
+
+        let settled = state.observe(ProcessMemorySnapshot {
+            rss_current_bytes: 18,
+            rss_peak_bytes: 22,
+            phys_footprint_bytes: 12,
+            ..ProcessMemorySnapshot::default()
+        });
+        assert_eq!(settled.rss_delta_previous, -2);
+        assert_eq!(settled.phys_footprint_delta_previous, -2);
+        assert_eq!(settled.rss_lifetime_peak_bytes, 22);
+        assert_eq!(settled.phys_footprint_lifetime_peak_bytes, 14);
+        assert!(!settled.rss_new_highwater);
+        assert!(!settled.phys_footprint_new_highwater);
+    }
+
+    #[test]
+    fn metadata_values_are_safe_single_log_tokens() {
+        assert_eq!(sanitize_log_token("large PR=1", "fallback"), "large_PR_1");
+        assert_eq!(sanitize_log_token("", "fallback"), "fallback");
     }
 }
 

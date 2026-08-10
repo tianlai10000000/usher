@@ -318,7 +318,10 @@ expanded/collapsed, and success confirmation.
   inset instead of creating a second row above page content. Its blank area
   must remain free of hit targets for native window dragging, and its leading
   edge must stay clear of traffic lights and native accessories throughout the
-  sidebar transition. A stable trailing action slot is excluded from the
+  sidebar transition. In a normal undocked window that safe area includes the
+  traffic lights and native history controls; in macOS system full screen,
+  where AppKit removes that leading chrome, the breadcrumb aligns with the
+  page content's left edge. A stable trailing action slot is excluded from the
   breadcrumb's clipping width; title-bar actions use shared IconButtons and
   must never overlay the route hierarchy or native drag region. One root-owned
   hairline spans the native left region, breadcrumb, and trailing action slot
@@ -380,7 +383,9 @@ expanded/collapsed, and success confirmation.
   产品标题；Rust 只有在隐藏原生标题展示后才恢复系统元数据中的 `Usher`。原生附件
   尚未就绪时，macOS 不得绘制替代的 Slint 标题栏控件；该区域只允许最终 AppKit
   控件出现。macOS 附件 SF Symbols 使用整点号 14pt，并以 `NSImageScaleNone` 禁止
-  Bezel 对半点号符号再次双线性缩放。
+  Bezel 对半点号符号再次双线性缩放。普通非固定侧栏窗口中的面包屑必须避开交通灯及
+  原生历史控件；进入 macOS 系统全屏、AppKit 移除这些左侧 Chrome 后，面包屑必须与
+  页面内容左缘对齐。
 - `GitHubLink`: default, inline, and muted text-link states with visible
   underline and keyboard focus behavior.
 - `GitHubTooltip`: TooltipV2 pattern; tooltip canvas/foreground tokens, 12 px

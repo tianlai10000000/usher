@@ -6,11 +6,11 @@
 
 ## 状态
 
-- 最近测量：2026-08-02
+- 最近测量：2026-08-09
 - 平台：macOS，Retina scale factor 2.0
-- 构建：debug，默认 FemtoVG/OpenGL 渲染器
-- 页面：Home 渲染器基线；Projects 交互对照
-- 当前结论：优先做渲染器与原生窗口 A/B 测量；不要依据空闲样本去优化小体量业务模型
+- 构建：2026-08-09 静态渲染器 A/B 使用 Release；更早的窗口循环与 Projects 交互证据使用 Debug
+- 页面：Home 静态渲染器 A/B；更早的 Home 窗口循环与 Projects 交互对照
+- 当前结论：WGPU 明显降低静态 Home footprint，并小幅降低 RSS；完整窗口循环、视觉和响应性门槛通过前，不改变生产渲染器
 
 以下数字只描述本次受控运行。Release 构建、其他显示缩放、其他页面以及大型 PR Review 会话必须另行测量。
 
@@ -92,9 +92,9 @@
 
 ### MEM-01 — 补齐 physical-footprint 增量
 
-状态：Backlog
+状态：已于 2026-08-08 实现
 
-`src/memory_diagnostics.rs` 当前会记录 physical footprint 绝对值，但相对上次和启动基线的增量只针对 RSS。
+`src/memory_diagnostics.rs` 现在会在同一样本中记录 RSS 与 physical footprint 相对上次/基线的增量、进程生命周期峰值、显式高水位事件、运行元数据，以及最近页面/窗口上下文。Release 诊断仍需显式开启，采样器仍可取消并复用共享 Runtime。
 
 工作：
 
@@ -111,7 +111,9 @@
 
 ### MEM-02 — 建立可重复的 Release 基准
 
-状态：Backlog
+状态：基准框架已于 2026-08-08 实现；代表性 fixture 实跑待完成
+
+`scripts/benchmark-memory.sh` 现在会构建指定 Release 渲染器，默认运行至少三个独立进程，执行固定双循环窗口/全屏协议，并保留原始 TSV、单轮/跨轮汇总、环境元数据与未经改写的应用 stdout 日志。准备 hook 会收到 `PID RUN SCENARIO`，从而无需把自动化逻辑放进应用代码，也能安装固定功能 fixture。
 
 工作：
 
@@ -128,7 +130,36 @@
 
 ### MEM-03 — 渲染器 A/B 对比
 
-状态：Backlog
+状态：已完成完整 Home 窗口循环 A/B；WGPU 候选已拒绝（2026-08-09）
+
+受控 Release A/B 使用相同 Home fixture、800×600 逻辑像素、2.0 scale factor、每阶段 5 个样本，以及每个渲染器 3 个独立进程。候选为 FemtoVG/WGPU，并包含其必需的 WGPU/Naga 第三方 Debug 日志过滤；默认 FemtoVG/OpenGL 不会加载这些 target。下表均为 `candidate - baseline`，负值表示候选减少占用。
+
+| 静态 Home 指标 | FemtoVG/OpenGL 基线 | FemtoVG/WGPU 候选 | Candidate − baseline |
+| --- | ---: | ---: | ---: |
+| 第一稳定段 RSS 中位数 | 104.88 MiB | 100.98 MiB | **−3.89 MiB（−3.7%）** |
+| 第一稳定段 footprint 中位数 | 76.91 MiB | 27.06 MiB | **−49.84 MiB（−64.8%）** |
+| 第一稳定段 RSS 实测最大峰值 | 105.36 MiB | 101.58 MiB | **−3.78 MiB（−3.6%）** |
+| 第一稳定段 footprint 实测最大峰值 | 77.41 MiB | 27.64 MiB | **−49.77 MiB（−64.3%）** |
+| 窗口刚显示时 footprint 峰值 | 90.05 MiB | 27.69 MiB | **−62.36 MiB（−69.3%）** |
+
+第二稳定段相对第一段，OpenGL 的 RSS/footprint 分别变化 −0.34/−0.34 MiB，WGPU 分别变化 −0.02/−0.02 MiB；两个静态方案均未出现正向累积。三轮 WGPU 的稳定 RSS 与 footprint 都低于三轮 OpenGL。
+
+上面的静态结果作为历史证据保留，但最终决策以下面的完整窗口循环为准。应用自有的 signal-file 基准控制已经消除了此前的辅助功能权限阻塞。
+
+最终结论：**拒绝 WGPU，生产继续使用 FemtoVG/OpenGL**。已验证的 Home `window-cycle` 使用相同源码指纹与 fixture、2.00 scale factor、`800x600` / `1000x700` / `1280x860` 尺寸、经确认的 `1800x1130` 全屏尺寸、每阶段 5 个样本，以及每个渲染器 3 个隔离 Release 进程（各 180 个原始样本）。
+
+| 代表性窗口循环指标 | FemtoVG/OpenGL | FemtoVG/WGPU | WGPU - OpenGL |
+| --- | ---: | ---: | ---: |
+| 启动稳定 RSS | 110.97 MiB | 131.39 MiB | **+20.42 MiB（+18.4%）** |
+| 启动 RSS 最大峰值 | 111.31 MiB | 132.41 MiB | **+21.09 MiB（+19.0%）** |
+| 启动 footprint 最大峰值 | 96.52 MiB | 193.67 MiB | **+97.16 MiB（+100.7%）** |
+| 最终 800x600 稳定 RSS | 113.03 MiB | 133.83 MiB | **+20.80 MiB（+18.4%）** |
+| 最终 800x600 稳定 footprint | 120.13 MiB | 79.34 MiB | -40.78 MiB（-33.9%） |
+| 第 2 轮全屏稳定 RSS | 113.05 MiB | 133.86 MiB | **+20.81 MiB（+18.4%）** |
+| 第 2 轮全屏稳定 footprint | 247.36 MiB | 168.80 MiB | -78.56 MiB（-31.8%） |
+| 全屏第 2 轮减第 1 轮 footprint 斜率 | +0.53 MiB | +15.02 MiB | **+14.49 MiB** |
+
+WGPU 在大多数缩放/全屏阶段降低了稳定 physical footprint，但所有稳定 RSS 阶段都回退约 20--21 MiB，启动 footprint 峰值翻倍，重复全屏后的 footprint 保留也更差。三个 WGPU 进程均完成协议；其中一次进入全屏时 AppKit 首次请求超时，依靠基准驱动的有限重试才完成。由于结果明显互有得失，并且未通过 RSS、启动峰值与重复全屏门禁，本轮没有修改默认渲染器或任何生产行为。量化结论已经拒绝候选，因此未继续执行视觉、深色主题与打包门禁。原始数据及完整 `candidate - baseline` 表位于 `memory-benchmark-results/batch1-renderer-window-cycle-20260809/opengl-vs-wgpu/`（Git 忽略）。
 
 对比现有编译期渲染器变体：
 
@@ -152,7 +183,7 @@
 
 ### MEM-04 — 原生 macOS 窗口合成 A/B
 
-状态：Backlog
+状态：A/B 已完成；opaque 候选已拒绝（2026-08-09）
 
 当前 macOS 窗口在 `src/platform/macos.rs` 中启用了透明标题栏，并将原生窗口设为 non-opaque。
 
@@ -167,9 +198,24 @@
 - 仅当 opaque 配置带来可重复的显著节省，且没有不可接受的视觉回归时，才采用。
 - 所有适配留在应用自有代码中；禁止修改 vendored Material 源码。
 
+结果（2026-08-09）：**拒绝 opaque，生产默认继续使用 transparent/non-opaque**。
+
+已验证的 Home `window-cycle` A/B 使用同一个 FemtoVG/OpenGL Release 二进制、相同 fixture、2.00 scale factor、`800x600` / `1000x700` / `1280x860` 尺寸，以及经确认的 `1800x1130` 原生全屏尺寸。每个对比单元包含 3 个隔离进程和 180 个 RSS/footprint 原始样本。opaque 单元从两次参数完全相同的调用中合并了 3 个完整隔离 run，来源 run ID 保留在候选元数据中。另有 2 个 opaque 进程因为 AppKit 忽略第二次进入全屏而作为失败证据保留，但未进入内存聚合。transparent 完成 3/3 个进程；opaque 完成 4/6，在该压力协议下进程失败率为 33.3%。
+
+| 代表性指标 | Transparent | Opaque | Opaque - transparent |
+| --- | ---: | ---: | ---: |
+| 启动稳定 RSS | 110.73 MiB | 110.41 MiB | -0.33 MiB (-0.3%) |
+| 最终 800x600 稳定 RSS | 112.58 MiB | 112.58 MiB | +0.00 MiB (+0.0%) |
+| 最终 800x600 稳定 footprint | 120.19 MiB | 119.25 MiB | -0.94 MiB (-0.8%) |
+| 第 1 轮 large 稳定 footprint | 132.50 MiB | 143.13 MiB | +10.62 MiB (+8.0%) |
+| 第 2 轮 fullscreen 稳定 footprint | 248.02 MiB | 246.45 MiB | -1.56 MiB (-0.6%) |
+| 第 2 轮 fullscreen RSS 最大峰值 | 112.70 MiB | 112.59 MiB | -0.11 MiB (-0.1%) |
+
+候选的稳定 RSS 节省在最终小窗口完全消失，physical footprint 指标互有得失，重复全屏行为还发生回退。第 2 轮减第 1 轮的 RSS 斜率也基本不变（退出全屏后 `+0.20` 对 `+0.19` MiB；全屏内 `+0.36` 对 `+0.41` MiB）。浅色全屏视觉检查未发现明显标题栏或内容损坏，但在内存与功能结论已拒绝后，没有继续执行深色主题与打包门禁。原始数据及完整的 `candidate - baseline` 表位于 `memory-benchmark-results/ab-window-compositing-window-cycle-20260809-validated/transparent-vs-opaque-final/`（Git 忽略）。
+
 ### MEM-05 — 隔离渲染 surface 保留
 
-状态：Backlog
+状态：证据不足；仅用于基准的复现器已撤回（2026-08-09）
 
 工作：
 
@@ -184,9 +230,13 @@
 - 能将保留内存归因到应用窗口配置、Slint/后端行为，或其更小的可复现交互。
 - 任何 workaround 都必须有明确回归测试与基准结果。
 
+结果（2026-08-09）：**证据不足，未采用任何生产优化**。一个仅用于基准的最小 Slint/FemtoVG surface 在不包含 Project model、Router、Tray 集成和 Feature controller 的情况下复现了相同的两轮尺寸/全屏协议。其最终有效单元完成 3/3 个隔离 Release 进程并保留 180 个原始样本。最小进程的全屏循环 RSS 基本持平（`+0.03 MiB`），但稳定全屏 physical-footprint 斜率为 `+18.06 MiB`，说明更小的纯 surface 交互也可能保留图形 footprint。
+
+但是，相同最终源码指纹和协议下的完整 Usher 单元未达到强制三进程门槛。4 个尝试进程中只有 1 个完整完成；一个失败于重复进入全屏，两个失败于外部 `800x600` 尺寸确认，尝试进程失败率为 75%。由于不存在有效的三进程基线，不得把最小复现器数字描述成 `candidate - baseline` 节省或最终归属结论。按照回退原则，已删除仅用于基准的复现器，本轮没有留下 GL context、renderer surface、窗口或其他生产行为改动。通用的 CoreGraphics 全屏尺寸证据和应用变体单变量校验保留在基准基础设施中。成功与失败的原始证据位于 `memory-benchmark-results/mem05-surface-ownership-20260809/`（Git 忽略）。
+
 ### MEM-06 — 调整 Tokio worker 数量
 
-状态：Backlog，较低优先级
+状态：Release A/B 后已采用生产默认 2 个 worker（2026-08-10）
 
 共享 Tokio runtime 当前使用默认多线程 worker 数。启动测量中，依赖 runtime 的服务初始化后，线程数从约 5 个增加至约 15 个。
 
@@ -199,6 +249,19 @@
 
 - 仅在并发操作与 UI 响应性不回退时减少 worker。
 - 内存节省视为次要收益；基线中线程栈驻留低于 1 MiB。
+
+结果（2026-08-10）：**采用 2 个 Tokio worker 作为生产默认，等待用户对代表性并发操作的验收**。受控静态 Home A/B 使用同一个 FemtoVG/OpenGL Release 二进制，并保持源码指纹、fixture、页面、采样参数和启动服务完全一致。每个单元完成 3 个隔离进程，每阶段 5 个样本。基线通过显式 `default` 恢复 Tokio 自动 worker 选择，候选唯一变化为 `2`。
+
+| 静态 Home 指标 | Tokio default | 2 workers | 2 - default |
+| --- | ---: | ---: | ---: |
+| 第 1 稳定段 RSS | 111.23 MiB | 104.64 MiB | **-6.59 MiB（-5.9%）** |
+| 第 2 稳定段 RSS | 110.98 MiB | 104.48 MiB | **-6.50 MiB（-5.9%）** |
+| 第 1 稳定段 footprint | 79.80 MiB | 76.91 MiB | -2.89 MiB（-3.6%） |
+| 稳定段 RSS 最大峰值 | 111.33 MiB | 105.59 MiB | **-5.73 MiB（-5.2%）** |
+| 窗口刚显示时 footprint 峰值 | 97.49 MiB | 90.52 MiB | -6.97 MiB（-7.1%） |
+| 第 2 段减第 1 段 RSS 斜率 | -0.02 MiB | -0.02 MiB | +0.00 MiB |
+
+RSS 在每个稳定阶段都超过默认 5% 采用门槛，候选没有出现静态启动、关闭或循环斜率回退。生产环境在未设置 `USHER_TOKIO_WORKER_THREADS` 时现在选择 2 个 worker；`default` 仅作为显式基准复现开关。静态 fixture 覆盖启动 Project 加载、Chat bootstrap、更新/runtime 服务和有序关闭，但不能替代用户对并发 HTTP、Git、Workflow、Terminal、更新和关闭流程的验收；这些路径一旦出现可重复的延迟或正确性回退，就必须撤回。原始数据及完整表位于 `memory-benchmark-results/mem06-tokio-workers-20260810/default-vs-two/`（Git 忽略）。
 
 ### MEM-07 — 评估 malloc 碎片
 
@@ -345,9 +408,23 @@ Terminal Scrollback 已有上限，但一个可见帧可能同时存在于 `vt10
 
 每次只执行一个批次。进入下一批前，当前批次必须记录明确的**采用**、**拒绝**或**证据不足**结论；禁止在同一个 A/B 进程中混入多个推测性改动。
 
+### 强制 A/B 证据门槛
+
+后续每个批次都必须在 fixture 与协议不变的前提下，用当前生产基线对比且只对比一个候选改动。每个单元至少运行三个独立 Release 进程；保留原始采样，并同时报告稳定态中位数、实测最大峰值、physical footprint、RSS 与循环间斜率，所有指标都要给出 `candidate - baseline` 的绝对差值和百分比。统一使用 `scripts/compare-memory-benchmarks.py` 拒绝机器、fixture、commit、页面或采样参数不一致的数据，并生成公共对比表。
+
+只有目标指标可重复改善，且响应性、正确性、视觉行为、打包和关闭流程均不回退时才采用。中性、噪声较大、指标互有得失或明确回退的结果必须记录为**拒绝**或**证据不足**，不得描述为优化。仅诊断类改动若准备在 Release 默认启用，也必须先做开关前后的 overhead A/B。
+
+此门槛同时是后续每个批次的回退与交付契约：
+
+- 如果候选没有带来实质性提升，或者任一量化指标、功能结果变差，必须撤回该批次的全部候选行为；只保留通用测量基础设施、原始证据与明确的拒绝记录。
+- 被拒绝的候选不得带入下一批基线，也不得与后续候选叠加，以掩盖中性或负向结果。
+- 每批完成测量、决策、必要回退和验证后，必须停下来交给用户实际试用；只有用户确认当前效果正常并明确要求继续时，才能开始下一批。
+
 ### Batch 0 — 测量契约
 
 条目：MEM-01、MEM-02
+
+结论（2026-08-08）：**证据不足，暂不关闭本批次**。采用诊断与基准框架；Home 协议已经可执行，但仍需补齐固定 Projects、PR 列表、大型 PR、Chat 历史与 Terminal 输出的准备 hook，并产出各三轮 Release 结果，才能满足退出门槛。
 
 - 扩展诊断，补齐 footprint 相对上次/基线增量与进程生命周期峰值。
 - 让 Release 基准输出机器可读原始采样与摘要。
@@ -376,6 +453,14 @@ Terminal Scrollback 已有上限，但一个可见帧可能同时存在于 `vt10
 - 若条目数有界缓存仍保留显著大项，在保留现有条目上限的前提下增加字节预算，或跳过超预算项缓存。
 
 退出门槛：固定大型 fixture 有可解释的 owned-byte 总量、反复导航平台期、历史仍可达时的恢复验证，以及真正不可达后的释放验证。没有这些证据前，不允许改缓存策略或生命周期。
+
+2026-08-10 生命周期 A/B 结论：**拒绝，生产行为已回滚**。
+
+- Fixture `pr-review-large-ranges-v1` 使用生产 Review 缓存类型，包含 1 份完整 Diff 和 4 份已访问范围 Diff；每份有 206 个文件、27,369 行、每行 112 个内容字节。诊断在清理前归因到 5 份唯一 Detail、136,845 行和 24,052,165 个估算堆字节，清理后均为 0。
+- A/B 唯一变量为 `workflow_lifecycle=retain|clear`；两组使用同一个 FemtoVG/OpenGL Release 二进制，各 3 个隔离进程、180 条原始样本，并执行完整的双循环 resize/fullscreen 协议。历史保留和 64 条淘汰均经过真实 Router 与 controller 生命周期路径。
+- 最终 800×600 稳定 RSS 变化为 -0.70 MiB（-0.5%），稳定 physical footprint 为 -23.80 MiB（-20.8%）。淘汰后的各相位中，稳定 footprint 改善 23.58–33.77 MiB，而稳定 RSS 只改善 0.16–0.72 MiB。
+- 但候选在淘汰后的所有相位都使最大 RSS 峰值增加 0.41–0.64 MiB（+0.3% 到 +0.4%），部分 RSS 循环斜率也略差。按强制无回退原则，即使 footprint 明显下降也不能采用。
+- 真正可达性清理只保留在显式内存基准模式中，以便复现实验证据；正常生产路由保持本批前的可达性/保留行为。原始证据与生成表位于 Git 忽略的 `memory-benchmark-results/mem08-lifecycle-20260810/retain-vs-clear/`。
 
 ### Batch 3 — 用户加载型状态
 

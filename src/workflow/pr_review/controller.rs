@@ -11,10 +11,11 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use usher_search::{SearchDirection, step_match_index};
 
 use crate::git::{
-    PullRequestActionState, PullRequestCommit, PullRequestDiffFile, PullRequestMergeMethod,
-    PullRequestReviewAction, get_pull_request_action_state, get_pull_request_commit_range_diff,
-    get_pull_request_commits, get_pull_request_conversation, get_pull_request_diff,
-    get_repository_file_text, merge_pull_request, revert_pull_request, submit_pull_request_review,
+    PullRequestActionState, PullRequestCommit, PullRequestDiffDetail, PullRequestDiffFile,
+    PullRequestDiffLine, PullRequestMergeMethod, PullRequestReviewAction,
+    get_pull_request_action_state, get_pull_request_commit_range_diff, get_pull_request_commits,
+    get_pull_request_conversation, get_pull_request_diff, get_repository_file_text,
+    merge_pull_request, revert_pull_request, submit_pull_request_review,
     supports_ignore_whitespace,
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
@@ -969,6 +970,139 @@ pub(crate) fn bind_pr_review(
 }
 
 impl WorkflowPrReviewController {
+    pub(crate) fn install_memory_benchmark_fixture(&self, ui: &MainWindow) {
+        if std::env::var("USHER_MEMORY_PR_REVIEW_FIXTURE").as_deref() != Ok("large-ranges-v1") {
+            return;
+        }
+
+        let request = ReviewRequest {
+            number: "memory-fixture-1".to_string(),
+            title: "Deterministic large PR memory fixture".to_string(),
+            author: "memory-benchmark".to_string(),
+            source_branch: "fixture/head".to_string(),
+            target_branch: "fixture/base".to_string(),
+            updated_at: "2026-08-10T00:00:00Z".to_string(),
+            ignore_whitespace: false,
+        };
+        let base_detail = Arc::new(SharedDiffDetail::from(memory_benchmark_diff_detail(0)));
+        let mut range_diffs = BoundedCache::new(RANGE_DIFF_CACHE_CAPACITY);
+        for range in 1..=RANGE_DIFF_CACHE_CAPACITY {
+            range_diffs.insert(
+                format!("fixture-range-{range}"),
+                Arc::new(SharedDiffDetail::from(memory_benchmark_diff_detail(range))),
+            );
+        }
+        if let Ok(mut alias) = self.project_alias.lock() {
+            *alias = "memory-fixture".to_string();
+        }
+        if let Ok(mut active_request) = self.active_request.lock() {
+            *active_request = Some(request.clone());
+        }
+        if let Ok(mut cache) = self.cache.lock() {
+            *cache = Some(ReviewCache {
+                project_alias: "memory-fixture".to_string(),
+                request: request.clone(),
+                metadata: ProjectRepositoryMetadata {
+                    repo_project_id: "memory-fixture".to_string(),
+                    repo_type: "github".to_string(),
+                    remote_repo: "https://example.invalid/memory/fixture".to_string(),
+                },
+                all_detail: base_detail.clone(),
+                base_detail: base_detail.clone(),
+                range_diffs,
+                expanded_files: HashMap::new(),
+                loaded_large_diffs: HashSet::new(),
+            });
+        }
+
+        apply_review_header(ui, &request);
+        ui.set_workflow_pr_review_visible(true);
+        ui.set_workflow_pr_review_loading(false);
+        self.apply_detail(ui, &base_detail);
+        ui.invoke_navigate(Route::PrReview);
+        self.log_memory_diagnostics("memory_fixture.loaded");
+
+        let ui_weak = ui.as_weak();
+        slint::Timer::single_shot(Duration::from_millis(1_500), move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            for index in 0..=crate::router::MAX_ROUTE_HISTORY {
+                ui.invoke_navigate(if index % 2 == 0 {
+                    Route::About
+                } else {
+                    Route::Home
+                });
+            }
+            crate::memory_diagnostics::log_checkpoint("memory_fixture.workflow_evicted");
+        });
+    }
+
+    fn clear_owned_state(&self, ui: &MainWindow) {
+        self.request_sequence.fetch_add(1, Ordering::SeqCst);
+        self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
+        self.expand_sequence.fetch_add(1, Ordering::SeqCst);
+        self.action_sequence.fetch_add(1, Ordering::SeqCst);
+        self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
+        self.commits_sequence.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut request) = self.active_request.lock() {
+            *request = None;
+        }
+        if let Ok(mut cache) = self.cache.lock() {
+            *cache = None;
+        }
+        if let Ok(mut filter) = self.file_filter.lock() {
+            filter.clear();
+        }
+        if let Ok(mut extensions) = self.selected_extensions.lock() {
+            extensions.clear();
+        }
+        if let Ok(mut enabled) = self.only_manifest_files.lock() {
+            *enabled = false;
+        }
+        if let Ok(mut enabled) = self.show_viewed_files.lock() {
+            *enabled = true;
+        }
+        if let Ok(mut folders) = self.collapsed_folders.lock() {
+            folders.clear();
+        }
+        if let Ok(mut resources) = self.highlight_resources.lock() {
+            *resources = None;
+        }
+        if let Ok(mut highlighted) = self.highlighted_files.lock() {
+            highlighted.clear();
+        }
+        if let Ok(mut sources) = self.source_files.lock() {
+            sources.clear();
+        }
+        if let Ok(mut loaded) = self.conversation_loaded.lock() {
+            *loaded = false;
+        }
+        if let Ok(mut loaded) = self.commits_loaded.lock() {
+            *loaded = false;
+        }
+        if let Ok(mut commits) = self.commits.lock() {
+            commits.clear();
+        }
+        if let Ok(mut pending) = self.pending_open_commit.lock() {
+            *pending = None;
+        }
+        if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
+            *return_tab = None;
+        }
+        reset_review_ui(ui);
+    }
+
+    pub(crate) fn release_unreachable(&self, ui: &MainWindow) {
+        self.log_memory_diagnostics("workflow_unreachable.before_clear");
+        self.pr_list_refresh_pending.store(false, Ordering::SeqCst);
+        if let Ok(mut alias) = self.project_alias.lock() {
+            alias.clear();
+        }
+        self.clear_owned_state(ui);
+        self.log_memory_diagnostics("workflow_unreachable.after_clear");
+    }
+
     fn navigate_back(&self, ui: &MainWindow) {
         let return_tab = self
             .commit_detail_return_tab
@@ -982,58 +1116,7 @@ impl WorkflowPrReviewController {
         }
 
         self.log_memory_diagnostics("review_close.before_clear");
-        self.request_sequence.fetch_add(1, Ordering::SeqCst);
-        self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
-        self.expand_sequence.fetch_add(1, Ordering::SeqCst);
-        self.action_sequence.fetch_add(1, Ordering::SeqCst);
-        self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
-        self.commits_sequence.fetch_add(1, Ordering::SeqCst);
-        if let Ok(mut request) = self.active_request.lock() {
-            *request = None;
-        }
-        if let Ok(mut cache) = self.cache.lock() {
-            *cache = None;
-        }
-        if let Ok(mut filter) = self.file_filter.lock() {
-            filter.clear();
-        }
-        if let Ok(mut extensions) = self.selected_extensions.lock() {
-            extensions.clear();
-        }
-        if let Ok(mut enabled) = self.only_manifest_files.lock() {
-            *enabled = false;
-        }
-        if let Ok(mut enabled) = self.show_viewed_files.lock() {
-            *enabled = true;
-        }
-        if let Ok(mut folders) = self.collapsed_folders.lock() {
-            folders.clear();
-        }
-        if let Ok(mut resources) = self.highlight_resources.lock() {
-            *resources = None;
-        }
-        if let Ok(mut highlighted) = self.highlighted_files.lock() {
-            highlighted.clear();
-        }
-        if let Ok(mut sources) = self.source_files.lock() {
-            sources.clear();
-        }
-        if let Ok(mut loaded) = self.conversation_loaded.lock() {
-            *loaded = false;
-        }
-        if let Ok(mut loaded) = self.commits_loaded.lock() {
-            *loaded = false;
-        }
-        if let Ok(mut commits) = self.commits.lock() {
-            commits.clear();
-        }
-        if let Ok(mut pending) = self.pending_open_commit.lock() {
-            *pending = None;
-        }
-        if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
-            *return_tab = None;
-        }
-        reset_review_ui(ui);
+        self.clear_owned_state(ui);
         ui.invoke_router_back();
         if self.pr_list_refresh_pending.swap(false, Ordering::SeqCst) {
             self.pr_list_controller.refresh_after_remote_mutation(ui);
@@ -1044,61 +1127,10 @@ impl WorkflowPrReviewController {
     pub(crate) fn select_project(&self, ui: &MainWindow, project_alias: String) {
         self.log_memory_diagnostics("project_switch.before_clear");
         self.pr_list_refresh_pending.store(false, Ordering::SeqCst);
-        self.request_sequence.fetch_add(1, Ordering::SeqCst);
-        self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
-        self.expand_sequence.fetch_add(1, Ordering::SeqCst);
-        self.action_sequence.fetch_add(1, Ordering::SeqCst);
-        self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
-        self.commits_sequence.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut alias) = self.project_alias.lock() {
             *alias = project_alias;
         }
-        if let Ok(mut request) = self.active_request.lock() {
-            *request = None;
-        }
-        if let Ok(mut cache) = self.cache.lock() {
-            *cache = None;
-        }
-        if let Ok(mut filter) = self.file_filter.lock() {
-            filter.clear();
-        }
-        if let Ok(mut extensions) = self.selected_extensions.lock() {
-            extensions.clear();
-        }
-        if let Ok(mut enabled) = self.only_manifest_files.lock() {
-            *enabled = false;
-        }
-        if let Ok(mut enabled) = self.show_viewed_files.lock() {
-            *enabled = true;
-        }
-        if let Ok(mut folders) = self.collapsed_folders.lock() {
-            folders.clear();
-        }
-        if let Ok(mut resources) = self.highlight_resources.lock() {
-            *resources = None;
-        }
-        if let Ok(mut highlighted) = self.highlighted_files.lock() {
-            highlighted.clear();
-        }
-        if let Ok(mut sources) = self.source_files.lock() {
-            sources.clear();
-        }
-        if let Ok(mut loaded) = self.conversation_loaded.lock() {
-            *loaded = false;
-        }
-        if let Ok(mut loaded) = self.commits_loaded.lock() {
-            *loaded = false;
-        }
-        if let Ok(mut commits) = self.commits.lock() {
-            commits.clear();
-        }
-        if let Ok(mut pending) = self.pending_open_commit.lock() {
-            *pending = None;
-        }
-        if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
-            *return_tab = None;
-        }
-        reset_review_ui(ui);
+        self.clear_owned_state(ui);
         self.log_memory_diagnostics("project_switch.after_clear");
     }
 
@@ -2825,6 +2857,63 @@ impl WorkflowPrReviewController {
 
 fn commit_detail_source_tab(tab: i32) -> Option<i32> {
     matches!(tab, 0 | 1).then_some(tab)
+}
+
+fn memory_benchmark_diff_detail(seed: usize) -> PullRequestDiffDetail {
+    const TOTAL_FILES: usize = 206;
+    const TOTAL_LINES: usize = 27_369;
+    const SELECTED_LINES: usize = 2_932;
+    const CONTENT_BYTES: usize = 112;
+
+    let remaining_lines = TOTAL_LINES - SELECTED_LINES;
+    let remaining_files = TOTAL_FILES - 1;
+    let lines_per_file = remaining_lines / remaining_files;
+    let extra_lines = remaining_lines % remaining_files;
+    let files = (0..TOTAL_FILES)
+        .map(|file_index| {
+            let line_count = if file_index == 0 {
+                SELECTED_LINES
+            } else {
+                lines_per_file + usize::from(file_index <= extra_lines)
+            };
+            PullRequestDiffFile {
+                path: format!("src/fixture-{seed}/file-{file_index:03}.rs"),
+                old_path: format!("src/fixture-{seed}/file-{file_index:03}.rs"),
+                change_type: "edit_file".to_string(),
+                added_lines: line_count as u32,
+                removed_lines: 0,
+                viewed: false,
+                lines: (0..line_count)
+                    .map(|line_index| {
+                        let prefix = format!("{seed:02}:{file_index:03}:{line_index:05}:");
+                        let mut content = String::with_capacity(CONTENT_BYTES);
+                        content.push_str(prefix.as_str());
+                        content.extend(std::iter::repeat_n(
+                            'x',
+                            CONTENT_BYTES.saturating_sub(prefix.len()),
+                        ));
+                        PullRequestDiffLine {
+                            old_line: line_index as i32 + 1,
+                            new_line: line_index as i32 + 1,
+                            kind: "context".to_string(),
+                            content,
+                        }
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+    PullRequestDiffDetail {
+        files,
+        added_lines: TOTAL_LINES as u32,
+        removed_lines: 0,
+        commit_count: 12,
+        conversation_count: Some(8),
+        base_sha: format!("base-fixture-{seed}"),
+        head_sha: format!("head-fixture-{seed}"),
+        start_sha: format!("start-fixture-{seed}"),
+        too_many_commits: false,
+    }
 }
 
 fn apply_review_header(ui: &MainWindow, request: &ReviewRequest) {

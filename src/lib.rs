@@ -60,10 +60,11 @@ mod platform;
 mod shortcuts;
 use platform::{
     THEME_MODE_AUTO, apply_native_appearance_for_mode, apply_native_chrome_for_mode,
-    effective_dark_mode as get_effective_dark_mode, install_system_theme_watch,
-    install_titlebar_settings_button, play_ui_click, prepare_startup_reveal,
-    set_auto_theme_watch_enabled, set_startup_presentation_hidden, set_title_bar_color,
-    setup_application_font, setup_pr_review_fonts, startup_native_chrome_ready,
+    effective_dark_mode as get_effective_dark_mode, install_memory_benchmark_window_control,
+    install_system_theme_watch, install_titlebar_settings_button, play_ui_click,
+    prepare_startup_reveal, set_auto_theme_watch_enabled, set_startup_presentation_hidden,
+    set_title_bar_color, setup_application_font, setup_pr_review_fonts,
+    startup_native_chrome_ready,
 };
 mod terminal;
 
@@ -697,6 +698,13 @@ fn ui() -> Result<MainWindow> {
             .unwrap_or(1.0);
         terminal::log_page_memory_diag(route, width_px, height_px, terminal_visible, scale_factor);
         if memory_diagnostics::diagnostics_enabled() {
+            memory_diagnostics::record_ui_context(
+                route,
+                width_px,
+                height_px,
+                scale_factor,
+                terminal_visible,
+            );
             let now = std::time::Instant::now();
             let should_log = last_page_memory_diag_for_callback
                 .lock()
@@ -838,6 +846,7 @@ pub fn main() {
     // translucent macOS sidebar never reveals desktop content at startup.
     install_titlebar_settings_button(&ui);
     ui.show().unwrap();
+    install_memory_benchmark_window_control(&ui);
     // Keep the window invisible while native chrome is attached so the first
     // visible frame is the final shell rather than a staged transition.
     set_startup_presentation_hidden(&ui, true);

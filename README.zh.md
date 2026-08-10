@@ -119,6 +119,14 @@ USHER_MEMORY_DIAGNOSTICS=1 ./usher
 
 筛选 `[Memory][Diag]`、`[Memory][UI]` 和 `[Workflow][PR Review][Memory]`，可以把 RSS/物理 footprint 变化与窗口尺寸、PR model/cache 归属对应起来。
 
+在 macOS 上，可运行以下可重复的双循环 Release 基准：
+
+```sh
+scripts/benchmark-memory.sh --runs 3 --scenarios home --fixture home-v1
+```
+
+该命令会构建选定的 Release 渲染器，每轮启动全新进程，执行固定窗口尺寸/全屏阶段，并把原始 TSV、汇总与应用日志写入已忽略的 `memory-benchmark-results/`。窗口自动化需要辅助功能权限。固定 Workflow、PR Review、Chat 或 Terminal fixture 时使用 `--prepare-hook`；可执行 hook 会收到 `PID RUN SCENARIO`。渲染器与采样选项见 `--help`。
+
 ## 配置和本地数据
 
 Usher 使用 `directories::ProjectDirs::from("com", "usher", "app")` 选择各平台的原生目录。

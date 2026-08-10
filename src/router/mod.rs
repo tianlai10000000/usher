@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 const BREADCRUMB_HIDDEN_ROUTES: &[Route] = &[Route::Chat, Route::PrReview];
-const MAX_ROUTE_HISTORY: usize = 64;
+pub(crate) const MAX_ROUTE_HISTORY: usize = 64;
 // Order must match `GitHubNavigationRail` items in `ui/main.slint`.
 const NAVIGATION_ROUTES: &[Route] = &[
     Route::Home,
@@ -63,6 +63,7 @@ pub fn route_for_navigation_index(index: i32) -> Option<Route> {
 pub struct Router {
     window: Weak<MainWindow>,
     history: Arc<Mutex<NavigationHistory>>,
+    workflow_reachable_ab: Option<Arc<Mutex<bool>>>,
     lifecycle_hook: Rc<dyn Fn(&MainWindow, RouteLifecycleEvent)>,
 }
 
@@ -136,6 +137,10 @@ impl NavigationHistory {
             .copied()
             .any(is_workflow_route)
     }
+
+    fn workflow_reachable_from(&self, current: Route) -> bool {
+        is_workflow_route(current) || self.contains_workflow_route()
+    }
 }
 
 impl Router {
@@ -146,6 +151,10 @@ impl Router {
         Self {
             window,
             history: Arc::new(Mutex::new(NavigationHistory::default())),
+            workflow_reachable_ab: std::env::var("USHER_MEMORY_WORKFLOW_LIFECYCLE")
+                .ok()
+                .filter(|value| matches!(value.as_str(), "retain" | "clear"))
+                .map(|_| Arc::new(Mutex::new(false))),
             lifecycle_hook,
         }
     }
@@ -219,18 +228,30 @@ impl Router {
         // Keep Workflow/PR state while a route remains reachable through Back.
         // Once navigation leaves the workflow domain with no workflow entry in
         // history, its large logs and models can be released.
-        let workflow_reachable = is_workflow_route(route)
-            || self
-                .history
-                .lock()
-                .map(|history| history.contains_workflow_route())
-                .unwrap_or(false);
+        let workflow_reachable = self
+            .history
+            .lock()
+            .map(|history| history.workflow_reachable_from(route))
+            .unwrap_or_else(|_| is_workflow_route(route));
+        let workflow_became_unreachable = self.workflow_reachable_ab.as_ref().map_or_else(
+            || is_workflow_route(previous) && !workflow_reachable,
+            |reachable| {
+                reachable
+                    .lock()
+                    .map(|mut previous_reachable| {
+                        let became_unreachable = *previous_reachable && !workflow_reachable;
+                        *previous_reachable = workflow_reachable;
+                        became_unreachable
+                    })
+                    .unwrap_or(false)
+            },
+        );
         (self.lifecycle_hook)(
             win,
             RouteLifecycleEvent {
                 previous,
                 current: route,
-                workflow_became_unreachable: is_workflow_route(previous) && !workflow_reachable,
+                workflow_became_unreachable,
             },
         );
         crate::platform::update_titlebar_navigation_controls(win);
@@ -358,5 +379,61 @@ mod tests {
             history.record_navigation(current, target);
         }
         assert_eq!(history.back_entries.len(), MAX_ROUTE_HISTORY);
+    }
+
+    #[test]
+    fn workflow_remains_reachable_while_back_or_forward_can_restore_it() {
+        let mut history = NavigationHistory::default();
+        history.record_navigation(Route::Home, Route::Workflow);
+        history.record_navigation(Route::Workflow, Route::Settings);
+        assert!(history.workflow_reachable_from(Route::Settings));
+
+        assert_eq!(
+            history.take_back_target(Route::Settings),
+            Some(Route::Workflow)
+        );
+        assert!(history.workflow_reachable_from(Route::Workflow));
+        assert_eq!(
+            history.take_forward_target(Route::Workflow),
+            Some(Route::Settings)
+        );
+        assert!(history.workflow_reachable_from(Route::Settings));
+    }
+
+    #[test]
+    fn direct_navigation_after_back_can_make_workflow_unreachable() {
+        let mut history = NavigationHistory::default();
+        history.record_navigation(Route::Home, Route::Workflow);
+        history.record_navigation(Route::Workflow, Route::Settings);
+        assert_eq!(
+            history.take_back_target(Route::Settings),
+            Some(Route::Workflow)
+        );
+        assert_eq!(history.take_back_target(Route::Workflow), Some(Route::Home));
+        assert!(history.workflow_reachable_from(Route::Home));
+
+        history.record_navigation(Route::Home, Route::About);
+        assert!(!history.workflow_reachable_from(Route::About));
+    }
+
+    #[test]
+    fn bounded_history_eviction_can_make_workflow_unreachable() {
+        let mut history = NavigationHistory::default();
+        history.record_navigation(Route::Home, Route::PrReview);
+        history.record_navigation(Route::PrReview, Route::About);
+        assert!(history.workflow_reachable_from(Route::About));
+
+        let mut current = Route::About;
+        for index in 0..MAX_ROUTE_HISTORY {
+            let target = if index % 2 == 0 {
+                Route::Home
+            } else {
+                Route::About
+            };
+            history.record_navigation(current, target);
+            current = target;
+        }
+
+        assert!(!history.workflow_reachable_from(current));
     }
 }

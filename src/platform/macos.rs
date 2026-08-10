@@ -13,6 +13,7 @@ use crate::{MainWindow, Route};
 static TITLEBAR_UI: std::sync::OnceLock<slint::Weak<MainWindow>> = std::sync::OnceLock::new();
 static WINDOW_MOVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static WINDOW_INTERACTING: AtomicBool = AtomicBool::new(false);
+static MEMORY_WINDOW_CONTROL_INSTALLED: AtomicBool = AtomicBool::new(false);
 
 static mut TITLEBAR_DELEGATE: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_INSTALLED: bool = false;
@@ -30,10 +31,124 @@ static mut TRAFFIC_LIGHT_BASE_Y: [f64; 3] = [f64::NAN; 3];
 const TRAFFIC_LIGHT_X_OFFSET: f64 = 8.0;
 /// Lower the compact AppKit control band onto the 46pt title-bar midline.
 const TRAFFIC_LIGHT_Y_OFFSET: f64 = 7.0;
+const NS_WINDOW_STYLE_MASK_FULLSCREEN: u64 = 1u64 << 14;
 static mut SIDEBAR_VIBRANCY_INSTALLED: bool = false;
 static mut SIDEBAR_VIBRANCY_VIEW: *mut Object = std::ptr::null_mut();
 static mut WINDOW_SURFACE_BACKDROP_VIEW: *mut Object = std::ptr::null_mut();
 static mut SIDEBAR_DARK_MODE: bool = false;
+
+pub(crate) fn install_memory_benchmark_window_control(window: &MainWindow) {
+    if std::env::var("USHER_MEMORY_WINDOW_CONTROL").as_deref() != Ok("signal-file-v1")
+        || MEMORY_WINDOW_CONTROL_INSTALLED.swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
+    let Ok(command_file) = std::env::var("USHER_MEMORY_WINDOW_CONTROL_FILE") else {
+        log::error!("[Memory][WindowControl] Command file path is missing");
+        return;
+    };
+
+    use signal_hook::consts::signal::SIGUSR1;
+    use signal_hook::iterator::Signals;
+
+    let mut signals = match Signals::new([SIGUSR1]) {
+        Ok(signals) => signals,
+        Err(error) => {
+            log::error!("[Memory][WindowControl] Failed to register SIGUSR1: {error}");
+            return;
+        }
+    };
+    let handle = signals.handle();
+    crate::shutdown::register_pre_shutdown_task("stop_memory_window_control", move || {
+        handle.close();
+    });
+
+    let weak_window = window.as_weak();
+    if let Err(error) = std::thread::Builder::new()
+        .name("memory-window-control".to_string())
+        .spawn(move || {
+            for _ in signals.forever() {
+                let command = match std::fs::read_to_string(&command_file) {
+                    Ok(command) => command,
+                    Err(error) => {
+                        log::error!("[Memory][WindowControl] Failed to read command: {error}");
+                        continue;
+                    }
+                };
+                let fields = command.split_whitespace().collect::<Vec<_>>();
+                let resize = match fields.as_slice() {
+                    ["resize", width, height] => {
+                        match (width.parse::<f64>(), height.parse::<f64>()) {
+                            (Ok(width), Ok(height)) if width > 0.0 && height > 0.0 => {
+                                Some((width, height))
+                            }
+                            _ => {
+                                log::error!(
+                                    "[Memory][WindowControl] Invalid resize command: {command:?}"
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    ["toggle-fullscreen"] => None,
+                    _ => {
+                        log::error!(
+                            "[Memory][WindowControl] Unsupported command: {command:?}"
+                        );
+                        continue;
+                    }
+                };
+                let weak_window = weak_window.clone();
+                if let Err(error) = slint::invoke_from_event_loop(move || {
+                    let Some(window) = weak_window.upgrade() else {
+                        return;
+                    };
+                    let Some(native_window) = native_window(&window) else {
+                        log::error!("[Memory][WindowControl] Native window is unavailable");
+                        return;
+                    };
+                    unsafe {
+                        let sender: *mut Object = std::ptr::null_mut();
+                        if let Some(app_class) = Class::get("NSApplication") {
+                            let app: *mut Object = msg_send![app_class, sharedApplication];
+                            if !app.is_null() {
+                                let _: () = msg_send![app, activateIgnoringOtherApps: true];
+                            }
+                        }
+                        let _: () = msg_send![native_window, makeKeyAndOrderFront: sender];
+                        if let Some((width, height)) = resize {
+                            let mut frame: NSRect = msg_send![native_window, frame];
+                            frame.origin.y += frame.size.height - height;
+                            frame.size = NSSize { width, height };
+                            let _: () = msg_send![
+                                native_window,
+                                setFrame: frame
+                                display: true
+                                animate: false
+                            ];
+                            log::info!(
+                                "[Memory][WindowControl] Resized native window to {width:.0}x{height:.0}"
+                            );
+                        } else {
+                            let _: () = msg_send![native_window, toggleFullScreen: sender];
+                            log::info!(
+                                "[Memory][WindowControl] Requested native fullscreen toggle"
+                            );
+                        }
+                    }
+                }) {
+                    log::error!(
+                        "[Memory][WindowControl] Failed to schedule fullscreen toggle: {error}"
+                    );
+                }
+            }
+        })
+    {
+        log::error!("[Memory][WindowControl] Failed to start signal worker: {error}");
+        return;
+    }
+    log::info!("[Memory][WindowControl] SIGUSR1 command-file control is active");
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -247,6 +362,25 @@ fn set_native_window_active(active: bool) {
     }
 }
 
+fn style_mask_is_fullscreen(style_mask: u64) -> bool {
+    style_mask & NS_WINDOW_STYLE_MASK_FULLSCREEN != 0
+}
+
+fn set_native_window_fullscreen(fullscreen: bool) {
+    if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
+        // AppKit window notifications run on Slint's owning event loop.
+        ui.set_native_window_fullscreen(fullscreen);
+    }
+}
+
+unsafe fn sync_native_window_fullscreen(window: *mut Object) {
+    if window.is_null() {
+        return;
+    }
+    let style_mask: u64 = unsafe { msg_send![window, styleMask] };
+    set_native_window_fullscreen(style_mask_is_fullscreen(style_mask));
+}
+
 fn register_titlebar_delegate_class() -> &'static Class {
     static mut DELEGATE_CLASS: *const Class = std::ptr::null();
     static REGISTER: Once = Once::new();
@@ -321,6 +455,7 @@ fn register_titlebar_delegate_class() -> &'static Class {
             }
             let window: *mut Object = unsafe { msg_send![notification, object] };
             unsafe {
+                sync_native_window_fullscreen(window);
                 align_standard_window_buttons(window);
                 layout_sidebar_vibrancy_views();
             }
@@ -339,6 +474,7 @@ fn register_titlebar_delegate_class() -> &'static Class {
                 return;
             }
             unsafe {
+                sync_native_window_fullscreen(window);
                 align_standard_window_buttons(window);
                 // Full-screen transitions can perform one more private title-bar
                 // layout after the did-enter/did-exit notification. Recheck on
@@ -1066,7 +1202,7 @@ unsafe fn align_standard_window_buttons(window: *mut Object) {
         traffic_right = traffic_right.max(frame.origin.x + frame.size.width);
     }
     let style_mask: u64 = unsafe { msg_send![window, styleMask] };
-    let fullscreen = style_mask & (1u64 << 14) != 0;
+    let fullscreen = style_mask_is_fullscreen(style_mask);
     let titlebar_origin = NSPoint {
         x: titlebar_controls_x(anchor_origin.x, traffic_right),
         y: titlebar_controls_y(
@@ -1151,6 +1287,7 @@ pub(crate) fn install_titlebar_settings_button(window: &MainWindow) {
         log::warn!("[TitleBar] native window is unavailable, skip install this round");
         return;
     };
+    unsafe { sync_native_window_fullscreen(window) };
 
     let delegate = unsafe {
         if TITLEBAR_DELEGATE.is_null() {
@@ -1397,9 +1534,10 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
 #[cfg(test)]
 mod tests {
     use super::{
-        SIDEBAR_DARK_MODE, TITLEBAR_SYMBOL_POINT_SIZE, macos_shortcut_key,
-        sidebar_content_surface_components, sidebar_toggle_image_names, sidebar_toggle_tooltip,
-        titlebar_controls_x, titlebar_controls_y, traffic_light_origin,
+        NS_WINDOW_STYLE_MASK_FULLSCREEN, SIDEBAR_DARK_MODE, TITLEBAR_SYMBOL_POINT_SIZE,
+        macos_shortcut_key, sidebar_content_surface_components, sidebar_toggle_image_names,
+        sidebar_toggle_tooltip, style_mask_is_fullscreen, titlebar_controls_x, titlebar_controls_y,
+        traffic_light_origin,
     };
 
     #[test]
@@ -1431,6 +1569,15 @@ mod tests {
     fn titlebar_controls_stay_beyond_traffic_lights_when_fullscreen_resets_anchor() {
         assert_eq!(titlebar_controls_x(7.0, 69.0), 77.0);
         assert_eq!(titlebar_controls_x(82.0, 69.0), 82.0);
+    }
+
+    #[test]
+    fn native_fullscreen_style_mask_is_classified_without_other_bits() {
+        assert!(!style_mask_is_fullscreen(0));
+        assert!(style_mask_is_fullscreen(NS_WINDOW_STYLE_MASK_FULLSCREEN));
+        assert!(style_mask_is_fullscreen(
+            NS_WINDOW_STYLE_MASK_FULLSCREEN | 1u64
+        ));
     }
 
     #[test]

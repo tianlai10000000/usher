@@ -108,6 +108,16 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
 }
 
 impl WorkflowPrListController {
+    pub(crate) fn release_unreachable(&self, ui: &MainWindow) {
+        self.request_sequence.fetch_add(1, Ordering::SeqCst);
+        self.count_sequence.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut context) = self.context.lock() {
+            *context = None;
+        }
+        clear_pages(&self.visited_pages);
+        reset_ui(ui);
+    }
+
     pub(crate) fn refresh_after_remote_mutation(&self, ui: &MainWindow) {
         let state = PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
             .unwrap_or(PullRequestState::Open);

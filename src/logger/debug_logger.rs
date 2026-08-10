@@ -134,6 +134,11 @@ pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
         .level_for("tokio_util", LevelFilter::Warn)
         .level_for("tungstenite", LevelFilter::Warn)
         .level_for("tracing", LevelFilter::Warn)
+        .level_for("wgpu", LevelFilter::Warn)
+        .level_for("wgpu_core", LevelFilter::Warn)
+        .level_for("wgpu_hal", LevelFilter::Warn)
+        .level_for("wgpu_types", LevelFilter::Warn)
+        .level_for("naga", LevelFilter::Warn)
         .chain(std::io::stdout());
 
     // Create main dispatch
@@ -186,6 +191,11 @@ pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
             .level_for("tokio_util", LevelFilter::Warn)
             .level_for("tungstenite", LevelFilter::Warn)
             .level_for("tracing", LevelFilter::Warn)
+            .level_for("wgpu", LevelFilter::Warn)
+            .level_for("wgpu_core", LevelFilter::Warn)
+            .level_for("wgpu_hal", LevelFilter::Warn)
+            .level_for("wgpu_types", LevelFilter::Warn)
+            .level_for("naga", LevelFilter::Warn)
             .chain(log_file);
 
         main_dispatch = main_dispatch.chain(file_dispatch);

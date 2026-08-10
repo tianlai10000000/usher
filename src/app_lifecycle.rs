@@ -13,6 +13,7 @@ pub(crate) fn handle_route_transition(window: &MainWindow, event: RouteLifecycle
         event.previous,
         event.current
     );
+    crate::workflow::release_unreachable_state(window);
     crate::workflow::state::clear_current_project_heavy_state();
     window.set_workflow_project_logo("".into());
     window.set_workflow_project_logo_image(crate::project::resolve_project_logo_image(""));

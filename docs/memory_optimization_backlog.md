@@ -6,11 +6,11 @@ This document records measured memory behavior and follow-up optimization work. 
 
 ## Status
 
-- Last measurement: 2026-08-02
+- Last measurement: 2026-08-09
 - Platform: macOS, Retina scale factor 2.0
-- Build: debug, default FemtoVG/OpenGL renderer
-- Route: Home renderer baseline; Projects interaction A/B
-- Current decision: prioritize renderer and native-window A/B measurements; do not optimize small business models based on the idle sample
+- Build: release for the 2026-08-09 static renderer A/B; earlier window-cycle and Projects interaction evidence used debug builds
+- Route: Home static renderer A/B; earlier Home window-cycle and Projects interaction comparisons
+- Current decision: WGPU materially reduces static Home footprint and modestly reduces RSS, but the production renderer remains unchanged until the full window-cycle and visual/responsiveness gates pass
 
 All numbers below describe this single controlled run. Release builds, other display scales, other routes, and large PR review sessions require separate measurements.
 
@@ -92,9 +92,9 @@ The 16 ms path reduced sampled mean CPU by 11.9%, peak RSS growth by 14.5%, and 
 
 ### MEM-01 — Extend physical-footprint deltas
 
-Status: Backlog
+Status: Implemented on 2026-08-08
 
-`src/memory_diagnostics.rs` currently logs absolute physical footprint but calculates previous/baseline deltas only for RSS.
+`src/memory_diagnostics.rs` now logs RSS and physical-footprint previous/baseline deltas, process-lifetime peaks, explicit high-water events, run metadata, and the latest route/window context in the same sample. Release diagnostics remain opt-in and the sampler remains cancellable on the shared runtime.
 
 Work:
 
@@ -111,7 +111,9 @@ Acceptance:
 
 ### MEM-02 — Establish a repeatable release benchmark
 
-Status: Backlog
+Status: Harness implemented on 2026-08-08; representative fixture runs pending
+
+`scripts/benchmark-memory.sh` now builds a selected release renderer, runs at least three isolated processes by default, executes the fixed two-cycle window/fullscreen protocol, and retains raw TSV, per-run/cross-run summaries, environment metadata, and exact application stdout logs. A preparation hook receives `PID RUN SCENARIO` so fixed feature fixtures can be installed without putting automation into application code.
 
 Work:
 
@@ -128,7 +130,36 @@ Acceptance:
 
 ### MEM-03 — Renderer A/B comparison
 
-Status: Backlog
+Status: Full Home window-cycle A/B completed; WGPU candidate rejected (2026-08-09)
+
+The controlled release A/B used the same Home fixture at 800×600 logical pixels, scale factor 2.0, five samples per phase, and three isolated processes per renderer. The candidate is FemtoVG/WGPU with required third-party WGPU/Naga debug-log filtering; the default FemtoVG/OpenGL binary does not load those targets. Values below are candidate minus baseline, so negative values are reductions.
+
+| Static Home metric | FemtoVG/OpenGL baseline | FemtoVG/WGPU candidate | Candidate − baseline |
+| --- | ---: | ---: | ---: |
+| Settled RSS median, period 1 | 104.88 MiB | 100.98 MiB | **−3.89 MiB (−3.7%)** |
+| Settled footprint median, period 1 | 76.91 MiB | 27.06 MiB | **−49.84 MiB (−64.8%)** |
+| Maximum RSS peak, period 1 | 105.36 MiB | 101.58 MiB | **−3.78 MiB (−3.6%)** |
+| Maximum footprint peak, period 1 | 77.41 MiB | 27.64 MiB | **−49.77 MiB (−64.3%)** |
+| Startup-visible footprint peak | 90.05 MiB | 27.69 MiB | **−62.36 MiB (−69.3%)** |
+
+The second settled period changed RSS/footprint by −0.34/−0.34 MiB for OpenGL and −0.02/−0.02 MiB for WGPU; neither static case showed positive accumulation. All three WGPU runs were below all three OpenGL runs for both settled RSS and footprint.
+
+The static result above is retained as historical evidence but is superseded by the complete window-cycle result below. The earlier Accessibility blocker was removed by the application-owned signal-file benchmark control.
+
+Final decision: **reject WGPU and keep production FemtoVG/OpenGL**. The validated Home `window-cycle` comparison used the same source fingerprint and fixture, 2.00 scale factor, `800x600` / `1000x700` / `1280x860` sizes, verified `1800x1130` fullscreen size, five samples per phase, and three isolated release processes (180 raw samples) per renderer.
+
+| Representative window-cycle metric | FemtoVG/OpenGL | FemtoVG/WGPU | WGPU - OpenGL |
+| --- | ---: | ---: | ---: |
+| Startup settled RSS | 110.97 MiB | 131.39 MiB | **+20.42 MiB (+18.4%)** |
+| Startup maximum RSS peak | 111.31 MiB | 132.41 MiB | **+21.09 MiB (+19.0%)** |
+| Startup maximum footprint peak | 96.52 MiB | 193.67 MiB | **+97.16 MiB (+100.7%)** |
+| Final 800x600 settled RSS | 113.03 MiB | 133.83 MiB | **+20.80 MiB (+18.4%)** |
+| Final 800x600 settled footprint | 120.13 MiB | 79.34 MiB | -40.78 MiB (-33.9%) |
+| Cycle 2 fullscreen settled RSS | 113.05 MiB | 133.86 MiB | **+20.81 MiB (+18.4%)** |
+| Cycle 2 fullscreen settled footprint | 247.36 MiB | 168.80 MiB | -78.56 MiB (-31.8%) |
+| Fullscreen cycle-2-minus-cycle-1 footprint slope | +0.53 MiB | +15.02 MiB | **+14.49 MiB** |
+
+WGPU reduces settled physical footprint in most resized/fullscreen phases, but every settled RSS phase regresses by about 20--21 MiB, its startup footprint peak doubles, and repeated-fullscreen footprint retention is worse. All three WGPU processes completed; one fullscreen entry needed the benchmark driver's bounded retry after the first AppKit request timed out. Because the result is materially mixed and fails the RSS/startup/repeated-fullscreen gates, no renderer-default or production behavior change was made. Visual, dark-theme, and packaging gates were not pursued after this quantitative rejection. Raw data and the complete candidate-minus-baseline table are in `memory-benchmark-results/batch1-renderer-window-cycle-20260809/opengl-vs-wgpu/` (ignored by Git).
 
 Compare the existing compile-time renderer variants:
 
@@ -152,7 +183,7 @@ Existing architecture notes say the WGPU path reduced physical footprint but inc
 
 ### MEM-04 — Native macOS window compositing A/B
 
-Status: Backlog
+Status: Completed A/B; opaque candidate rejected (2026-08-09)
 
 The current macOS window enables a transparent titlebar and sets the native window to non-opaque in `src/platform/macos.rs`.
 
@@ -167,9 +198,24 @@ Acceptance:
 - Adopt an opaque configuration only when it produces a meaningful repeatable saving without unacceptable visual regressions.
 - Keep all adaptation in application-owned code; do not modify vendored Material sources.
 
+Result (2026-08-09): **reject opaque; keep the production default transparent/non-opaque**.
+
+The validated Home `window-cycle` A/B used the same FemtoVG/OpenGL release binary, fixture, 2.00 scale factor, `800x600` / `1000x700` / `1280x860` sizes, and verified `1800x1130` native fullscreen size. Each comparison cell contains three isolated processes and 180 raw RSS/footprint samples. The opaque cell combines three complete isolated runs from two identical invocations; their source run IDs remain in candidate metadata. Two other opaque processes were retained as failure evidence but excluded from memory aggregation because AppKit ignored their second fullscreen entry. Transparent completed 3/3 processes; opaque completed 4/6, a 33.3% process failure rate under this stress protocol.
+
+| Representative metric | Transparent | Opaque | Opaque - transparent |
+| --- | ---: | ---: | ---: |
+| Startup settled RSS | 110.73 MiB | 110.41 MiB | -0.33 MiB (-0.3%) |
+| Final 800x600 settled RSS | 112.58 MiB | 112.58 MiB | +0.00 MiB (+0.0%) |
+| Final 800x600 settled footprint | 120.19 MiB | 119.25 MiB | -0.94 MiB (-0.8%) |
+| Cycle 1 large settled footprint | 132.50 MiB | 143.13 MiB | +10.62 MiB (+8.0%) |
+| Cycle 2 fullscreen settled footprint | 248.02 MiB | 246.45 MiB | -1.56 MiB (-0.6%) |
+| Cycle 2 fullscreen maximum RSS peak | 112.70 MiB | 112.59 MiB | -0.11 MiB (-0.1%) |
+
+The candidate's settled RSS saving disappears at the final small window, physical-footprint results are mixed, and the repeated-fullscreen behavior regresses. Cycle-two-minus-cycle-one RSS slopes are also effectively unchanged (`+0.20` vs `+0.19` MiB after fullscreen exit; `+0.36` vs `+0.41` MiB in fullscreen). The light-theme fullscreen visual check showed no obvious titlebar or content corruption, but dark-theme and packaging gates were not pursued after the memory and functional rejection. Raw data and the complete candidate-minus-baseline table are in `memory-benchmark-results/ab-window-compositing-window-cycle-20260809-validated/transparent-vs-opaque-final/` (ignored by Git).
+
 ### MEM-05 — Isolate renderer surface retention
 
-Status: Backlog
+Status: Evidence insufficient; benchmark-only reproducer rolled back (2026-08-09)
 
 Work:
 
@@ -184,9 +230,13 @@ Acceptance:
 - The retained memory is attributed to either application-owned window configuration, Slint/backend behavior, or a smaller reproducible interaction between them.
 - Any workaround has an explicit regression test and benchmark result.
 
+Result (2026-08-09): **insufficient evidence; no production optimization adopted**. A benchmark-only minimal Slint/FemtoVG surface reproduced the same two-cycle size/fullscreen protocol without project models, routing, tray integration, or feature controllers. Its final valid cell completed 3/3 isolated release processes and retained 180 raw samples. The minimal process had nearly flat RSS across fullscreen cycles (`+0.03 MiB`) but its settled fullscreen physical-footprint slope was `+18.06 MiB`, so a smaller surface-only interaction can retain graphics footprint.
+
+However, the matching full-Usher cell could not meet the mandatory three-process gate under the identical final source fingerprint and protocol. Only 1 of 4 attempted processes completed; one failed repeated fullscreen entry and two failed external `800x600` size confirmation, for a 75% attempted-process failure rate. Because no valid three-process baseline exists, the minimal numbers must not be presented as candidate-minus-baseline savings or as final ownership attribution. The benchmark-only reproducer was removed under the rollback policy, and no GL-context, renderer-surface, window, or production behavior change remains. Generic CoreGraphics fullscreen-size evidence and application-variant comparison validation remain in the benchmark infrastructure. Raw successful and failed evidence is retained under `memory-benchmark-results/mem05-surface-ownership-20260809/` (ignored by Git).
+
 ### MEM-06 — Tune Tokio worker count
 
-Status: Backlog, lower priority
+Status: Adopted two-worker production default after release A/B (2026-08-10)
 
 The shared Tokio runtime currently uses the default multi-thread worker count. Startup measurements showed the process growing from about 5 to about 15 threads when the runtime-backed services initialized.
 
@@ -199,6 +249,19 @@ Acceptance:
 
 - Reduce workers only when concurrent operations and UI responsiveness do not regress.
 - Treat any memory saving as secondary; resident thread stacks were below 1 MiB in the baseline.
+
+Result (2026-08-10): **adopt two Tokio worker threads as the production default, pending user acceptance of representative concurrent operations**. The controlled static Home A/B used one FemtoVG/OpenGL release binary and identical source fingerprint, fixture, route, sampling, and startup services. Each cell completed three isolated processes with five samples per phase. `default` explicitly restored Tokio's automatic worker selection for the baseline; candidate `2` was the only changed dimension.
+
+| Static Home metric | Tokio default | 2 workers | 2 - default |
+| --- | ---: | ---: | ---: |
+| Settled RSS, period 1 | 111.23 MiB | 104.64 MiB | **-6.59 MiB (-5.9%)** |
+| Settled RSS, period 2 | 110.98 MiB | 104.48 MiB | **-6.50 MiB (-5.9%)** |
+| Settled footprint, period 1 | 79.80 MiB | 76.91 MiB | -2.89 MiB (-3.6%) |
+| Maximum settled RSS peak | 111.33 MiB | 105.59 MiB | **-5.73 MiB (-5.2%)** |
+| Startup-visible footprint peak | 97.49 MiB | 90.52 MiB | -6.97 MiB (-7.1%) |
+| Period-2-minus-period-1 RSS slope | -0.02 MiB | -0.02 MiB | +0.00 MiB |
+
+The RSS result clears the default 5% adoption threshold in every settled phase and the candidate showed no static startup, shutdown, or cycle-slope regression. Production now selects two workers when `USHER_TOKIO_WORKER_THREADS` is absent; `default` remains an explicit benchmark escape hatch. The static fixture exercises startup project loading, chat bootstrap, update/runtime services, and orderly shutdown, but it does not replace user acceptance of simultaneous HTTP, Git, Workflow, Terminal, update, and shutdown work. Any reproducible latency or correctness regression in those paths requires rollback. Raw data and the complete table are in `memory-benchmark-results/mem06-tokio-workers-20260810/default-vs-two/` (ignored by Git).
 
 ### MEM-07 — Evaluate malloc fragmentation
 
@@ -345,9 +408,23 @@ These items should be reconsidered only when a representative scenario attribute
 
 Execute one batch at a time. A batch ends with a documented **adopt**, **reject**, or **insufficient evidence** decision before the next batch starts. Do not merge several speculative changes into one A/B process.
 
+### Mandatory A/B evidence gate
+
+Every remaining batch must use an unchanged fixture and protocol to compare the current production baseline with exactly one candidate change. Each cell requires at least three isolated release processes. Keep raw samples and report settled median, maximum observed peak, physical footprint, RSS, and cycle-to-cycle slope as both an absolute candidate-minus-baseline delta and a percentage. Use `scripts/compare-memory-benchmarks.py` to reject mismatched machines, fixtures, commits, routes, or sampling parameters and generate the common comparison table.
+
+A change is adopted only when the measured target improves repeatably and responsiveness, correctness, visual behavior, packaging, and shutdown do not regress. A neutral, noisy, mixed, or regressing result is recorded as **reject** or **insufficient evidence**; it must not be described as an optimization. Diagnostic-only changes still need overhead-on/off A/B before being enabled by default in release builds.
+
+This gate is also a rollback and handoff contract for every future batch:
+
+- If the candidate does not deliver a material improvement, or any measured/functional result is worse, revert all candidate behavior from that batch. Keep only generally useful measurement infrastructure, raw evidence, and the documented rejection.
+- Do not carry a rejected candidate into the next baseline, and do not combine it with a later candidate in an attempt to hide a neutral or negative result.
+- After a batch is measured, decided, rolled back when required, and validated, stop and hand it to the user for an actual trial. Start the next batch only after the user confirms that the current result is acceptable and explicitly asks to continue.
+
 ### Batch 0 — Measurement contract
 
 Items: MEM-01, MEM-02
+
+Decision (2026-08-08): **insufficient evidence to close the batch**. Adopt the diagnostics and benchmark harness. The Home protocol is executable, but fixed Projects, PR-list, large-PR, Chat-history, and Terminal-output preparation hooks plus three-run release results are still required before the exit gate is met.
 
 - Extend diagnostics with footprint previous/baseline deltas and process-lifetime peaks.
 - Make the release benchmark emit machine-readable raw samples and a summary.
@@ -376,6 +453,14 @@ Items: MEM-08, MEM-13
 - If count-bounded caches retain material large entries, add byte budgets or skip caching over-budget entries while preserving the existing count limits.
 
 Exit gate: the fixed large fixture has an explained owned-byte total, bounded repeated-navigation plateau, verified restoration while history remains reachable, and verified release after true unreachability. No cache policy or lifecycle change is allowed without this evidence.
+
+2026-08-10 lifecycle A/B decision: **rejected; production behavior rolled back**.
+
+- Fixture `pr-review-large-ranges-v1` used the production Review cache types with one full diff plus four visited range diffs. Each diff contained 206 files, 27,369 lines, and 112 content bytes per line. Diagnostics attributed 136,845 owned lines and 24,052,165 estimated heap bytes across five unique details before cleanup, and zero after cleanup.
+- The only A/B variable was `workflow_lifecycle=retain|clear`; both cells used the same FemtoVG/OpenGL Release binary, three isolated processes, 180 raw samples, and the complete two-cycle resize/fullscreen protocol. History retention and 64-entry eviction used the real Router and controller lifecycle path.
+- At final 800x600, cleanup changed settled RSS by -0.70 MiB (-0.5%) and settled physical footprint by -23.80 MiB (-20.8%). Across post-eviction phases, settled footprint improved by 23.58–33.77 MiB, while settled RSS improved by only 0.16–0.72 MiB.
+- The candidate nevertheless increased every post-eviction maximum RSS peak by 0.41–0.64 MiB (+0.3% to +0.4%), and several RSS cycle slopes were slightly worse. Under the mandatory no-regression rule, the footprint win does not qualify for adoption.
+- The true-reachability cleanup remains available only through the explicit memory-benchmark mode so the evidence can be reproduced. Normal production routing keeps the pre-batch reachability/retention behavior. Raw evidence and the generated table live under `memory-benchmark-results/mem08-lifecycle-20260810/retain-vs-clear/` (ignored by Git).
 
 ### Batch 3 — User-loaded feature state
 

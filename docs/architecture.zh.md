@@ -10,7 +10,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 
 生产构建在编译期固定选择 Winit + FemtoVG/OpenGL。Skia 和 FemtoVG/WGPU 作为显式启用的 Cargo feature，仅用于渲染器诊断和 A/B 对比，避免常规构建因同时链接多个实现而静默切换渲染器。Slint 应用内实时预览和 UI Components 演练场分别由显式的 `live-preview`、`ui-components` 开发 feature 控制，默认构建和生产构建都不会编译它们。当前 macOS 测试中 WGPU 虽降低 physical footprint，但会增加 RSS，因此不作为生产默认配置。
 
-在 macOS 上，进入或退出全屏后会在 AppKit 最终标题栏布局完成时重新对齐原生控件；交通灯簇整体右移 8pt 以对齐侧栏图标中线，应用自有控件始终位于这些按钮右侧。
+在 macOS 上，进入或退出全屏后会在 AppKit 最终标题栏布局完成时重新对齐原生控件，并把原生全屏状态发布给 Slint，使面包屑释放已经移除的左侧 Chrome 占位；交通灯簇整体右移 8pt 以对齐侧栏图标中线，存在这些按钮时应用自有控件始终位于其右侧。
 
 ## 系统上下文
 
@@ -41,8 +41,8 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `crates/usher-search/` | 与框架无关的通用 Find 引擎：Unicode 安全的非重叠文本命中、首尾循环的相邻结果导航，以及 Chromium/Blink `CenterIfNeeded` 视口策略。Feature 只提供领域/model 与视觉换行适配。 |
 | `crates/usher-state-store/` | 与框架无关的跨页面 State 接口与内置引擎：强类型 reducer/action、不可变 revision 快照、selector、立即 hydration、自动单调订阅与 RAII 取消。Feature 门面隐藏具体引擎，未来可通过 adapter 替换社区 Store。 |
 | `crates/usher-virtual-list/` | 与框架无关的可变行高虚拟列表门面：精确 item extent、offset/index 映射、有界 overscan 窗口与精确 item reveal。私有 adapter 当前使用社区 `virtualizer` 引擎；Feature 与 Slint bridge 只依赖本地接口，底层可替换。 |
-| `src/app_runtime.rs` | 进程级多线程 Tokio runtime，并为 runtime 线程安装 tracing dispatch。 |
-| `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint、启动检查点、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
+| `src/app_runtime.rs` | 进程级 Tokio runtime，生产默认使用 2 个 worker；runtime 线程安装 tracing dispatch，并保留显式环境覆盖用于受控基准。 |
+| `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint 与生命周期高水位、启动/运行元数据、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观（强制浅色/深色，或 Auto 时跟随系统）、标题栏附件、窗口交互通知、用于关闭可消隐临时弹层的原生标题栏点击桥接、macOS PR Review 字体注册、`NSSound` 点击音，以及用于 Auto 实时跟随的 `AppleInterfaceThemeChangedNotification`；`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
 | `src/shutdown.rs` | 按优先级协调关闭。 |
 | `src/single_instance.rs` | 单实例进程行为。 |
@@ -278,7 +278,7 @@ unpacked 策略升级后，开发者应执行一次完整 `cargo clean`；后续
 Slint 窗口启动时不显示标准标题。macOS 等待原生标题栏附件时不挂载替代的 Slint
 控件；该区域只显示最终 AppKit 侧栏与历史控件。
 
-Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_DIAGNOSTICS=1` 启用。`[Memory][Diag]` 记录当前/峰值 RSS、物理 footprint、VM 分类、region、Mach port、线程、fault、page-in，以及相对上次和启动基线的增量；`[Memory][UI]` 将稳定后的路由/窗口变化与逻辑、物理尺寸关联。`[Workflow][PR Review][Memory]` 等功能归属日志只记录有界 model/cache 的数量和容量，不得输出源码内容或凭据。采样任务复用共享 runtime，并由正常的 pre-shutdown 流程停止。
+Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_DIAGNOSTICS=1` 启用。`[Memory][Diag]` 记录当前/峰值 RSS 与物理 footprint、相对上次/启动基线的增量、进程生命周期高水位、运行/场景标识，以及最近页面、逻辑/物理窗口尺寸、缩放和 Terminal 可见性；同时保留 VM 分类、region、Mach port、线程、fault 与 page-in。`[Memory][UI]` 关联稳定后的页面/窗口变化，`[Workflow][PR Review][Memory]` 等功能归属日志只记录有界 model/cache 的数量和容量，不得输出源码内容或凭据。采样任务复用共享 runtime，并由正常的 pre-shutdown 流程停止。`scripts/benchmark-memory.sh` 负责 macOS Release 测量协议并汇总外部 RSS/footprint 采样。仅在显式设置 `USHER_MEMORY_WINDOW_CONTROL=signal-file-v1` 时，基准专用信号 Worker 才读取每个 run 独立的命令文件，并把 AppKit resize/fullscreen 请求投递到 Slint event loop；pre-shutdown 会关闭其信号 handle。外部 Swift helper 只读取 CoreGraphics 窗口状态，用于确认每次切换并独立记录实际全屏尺寸。基准元数据记录应用变体与二进制哈希；比较器只允许渲染器、应用所有权或 Tokio worker 中的一个维度变化，其他 fixture/协议不匹配一律拒绝。
 
 ## 并发模型
 

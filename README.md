@@ -125,6 +125,14 @@ USHER_MEMORY_DIAGNOSTICS=1 ./usher
 
 Filter for `[Memory][Diag]`, `[Memory][UI]`, and `[Workflow][PR Review][Memory]` to correlate RSS/physical-footprint changes with window size and PR model/cache ownership.
 
+On macOS, run the repeatable two-cycle release benchmark with:
+
+```sh
+scripts/benchmark-memory.sh --runs 3 --scenarios home --fixture home-v1
+```
+
+The command builds the selected release renderer, starts a fresh process per run, exercises fixed window/fullscreen phases, and writes raw TSV samples, summaries, and application logs under the ignored `memory-benchmark-results/` directory. Window automation requires Accessibility permission. Use `--prepare-hook` for fixed Workflow, PR Review, Chat, or Terminal fixtures; the executable receives `PID RUN SCENARIO`. See `--help` for renderer and sampling options.
+
 ## Configuration and local data
 
 Usher uses `directories::ProjectDirs::from("com", "usher", "app")` to select platform-native locations.
