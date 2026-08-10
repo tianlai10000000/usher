@@ -279,8 +279,14 @@ export component GitHubReviewActionButton inherits Rectangle {
         label-text := Text {
             // Keep an unconstrained preferred-width when hugging so the root
             // width binding cannot circularly clamp the measured label.
-            x: root.hug-content ? (parent.width - self.preferred-width) / 2 : 0px;
-            width: root.hug-content ? self.preferred-width : parent.width;
+            // Chevron buttons reserve a real trailing lane instead of centering
+            // the label beneath the icon.
+            x: root.show-chevron
+                ? 12px
+                : (root.hug-content ? (parent.width - self.preferred-width) / 2 : 0px);
+            width: root.show-chevron
+                ? (root.hug-content ? self.preferred-width : parent.width - 40px)
+                : (root.hug-content ? self.preferred-width : parent.width);
             height: parent.height;
             text: root.text;
             horizontal-alignment: center;
@@ -292,7 +298,9 @@ export component GitHubReviewActionButton inherits Rectangle {
 
         if root.show-chevron: Image {
             x: parent.width - 25px;
-            y: (parent.height - self.height) / 2;
+            // The Octicon path's visual center sits below its 16px viewBox
+            // center, so lift the glyph one logical pixel to align with text.
+            y: (parent.height - self.height) / 2 - 1px;
             width: 14px;
             height: 14px;
             source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
@@ -1395,19 +1403,23 @@ export component GitHubHeaderActionStrip inherits Rectangle {
             }
         }
         if !root.terminal-state && (root.remote-review-state == "review_approved" || root.remote-review-state == "approved"): Rectangle {
-            width: root.titlebar-mode ? 72px : 88px;
+            // Hug the complete status text. The previous compact fixed width
+            // clipped "Approved" and forced the icon below its text baseline.
+            width: approved-label.preferred-width + 38px;
             height: parent.height;
             Image {
                 x: 8px;
-                y: 10px;
+                // Match the label's optical center; this check path is weighted
+                // slightly below the center of its 16px viewBox.
+                y: (parent.height - self.height) / 2 - 1px;
                 width: 16px;
                 height: 16px;
                 source: @image-url("../../assets/icons/octicon-check-16.svg");
                 colorize: root.success-color;
             }
-            Text {
-                x: 28px;
-                width: parent.width - 28px;
+            approved-label := Text {
+                x: 30px;
+                width: self.preferred-width;
                 height: parent.height;
                 text: "Approved";
                 horizontal-alignment: left;

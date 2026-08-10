@@ -66,6 +66,7 @@ export component MainWindow inherits Window {
     // Use one shared surface color for the native title bar and the main content area.
     private property <color> window-surface-color: GitHubTheme.canvas-default;
     private property <length> native-titlebar-inset: root.platform-is-macos ? 46px : 0px;
+    private property <length> pr-titlebar-action-width: 544px;
     private property <length> page-breadcrumb-height:
         root.show-breadcrumb && !root.platform-is-macos ? 40px : 0px;
     private property <length> page-content-top-padding:
@@ -891,7 +892,7 @@ export component MainWindow inherits Window {
                     height: parent.height;
                     titlebar-mode: true;
                     trailing-reserved-width: root.current-route == Route.PrReview
-                        ? 520px
+                        ? root.pr-titlebar-action-width
                         : GitHubMetrics.size-48;
                     show-bottom-divider: false;
                     current-route: root.current-route;
@@ -1864,9 +1865,11 @@ export component MainWindow inherits Window {
     // PR actions live above the PR surface so the readiness ActionMenu can
     // expand below the title bar without being covered by the page layer.
     if root.platform-is-macos && root.current-route == Route.PrReview: Rectangle {
-        x: max(0px, root.width - 520px);
+        // Keep enough intrinsic width for the complete Approved label and the
+        // merge button's dedicated chevron lane.
+        x: max(0px, root.width - root.pr-titlebar-action-width);
         y: 0px;
-        width: min(520px, root.width);
+        width: min(root.pr-titlebar-action-width, root.width);
         height: root.native-titlebar-inset;
         background: transparent;
         clip: false;
