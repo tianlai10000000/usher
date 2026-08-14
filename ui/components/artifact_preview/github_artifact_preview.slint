@@ -1,0 +1,678 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { GitHubCopyButton } from "../button/github_copy_button.slint";
+import { GitHubScrollView, GitHubVirtualListScrollbar } from "../github_scroll_view.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
+
+export enum ArtifactPreviewKind {
+    None,
+    Markdown,
+    Image,
+    PlainText,
+    Error,
+}
+
+export enum ArtifactPreviewBlockKind {
+    Heading1,
+    Heading2,
+    Heading3,
+    Paragraph,
+    ListItem,
+    Quote,
+    CodeBlock,
+    Rule,
+    TableRow,
+}
+
+export enum ArtifactPreviewInlineKind {
+    Text,
+    Strong,
+    Emphasis,
+    Code,
+    Link,
+}
+
+export struct ArtifactPreviewInlineSpan {
+    kind: ArtifactPreviewInlineKind,
+    start: int,
+    end: int,
+}
+
+export struct ArtifactPreviewBlock {
+    kind: ArtifactPreviewBlockKind,
+    styled: styled-text,
+    plain-text: string,
+    layout-spans: [ArtifactPreviewInlineSpan],
+}
+
+export struct ArtifactPreviewVirtualRow {
+    start: float,
+    size: float,
+    block: ArtifactPreviewBlock,
+}
+
+export struct ArtifactPreviewVirtualWindow {
+    rows: [ArtifactPreviewVirtualRow],
+    scroll-offset: float,
+    content-height: float,
+    projection-revision: int,
+}
+
+component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
+    in property <ArtifactPreviewBlock> block;
+    in property <length> forced-height: 0px;
+    callback open-link(string);
+
+    private property <bool> is-code:
+        root.block.kind == ArtifactPreviewBlockKind.CodeBlock;
+    private property <bool> is-quote:
+        root.block.kind == ArtifactPreviewBlockKind.Quote;
+    private property <bool> is-table:
+        root.block.kind == ArtifactPreviewBlockKind.TableRow;
+    private property <length> content-inset:
+        root.is-code ? GitHubMetrics.size-12
+            : root.is-quote ? GitHubMetrics.size-16
+            : root.is-table ? GitHubMetrics.size-8
+            : 0px;
+    private property <length> block-padding-top:
+        root.block.kind == ArtifactPreviewBlockKind.Heading1 ? GitHubMetrics.size-16
+            : root.block.kind == ArtifactPreviewBlockKind.Heading2 ? GitHubMetrics.size-20
+            : root.block.kind == ArtifactPreviewBlockKind.Heading3 ? GitHubMetrics.size-16
+            : root.is-code ? GitHubMetrics.size-12
+            : root.is-quote || root.is-table ? GitHubMetrics.size-8
+            : root.block.kind == ArtifactPreviewBlockKind.ListItem ? GitHubMetrics.size-2
+            : GitHubMetrics.size-4;
+    private property <length> block-padding-bottom:
+        root.block.kind == ArtifactPreviewBlockKind.Heading1
+                || root.block.kind == ArtifactPreviewBlockKind.Heading2
+            ? GitHubMetrics.size-12
+            : root.block.kind == ArtifactPreviewBlockKind.Heading3
+                ? GitHubMetrics.size-6
+            : root.is-code ? GitHubMetrics.size-12
+            : root.is-quote || root.is-table ? GitHubMetrics.size-8
+            : root.block.kind == ArtifactPreviewBlockKind.ListItem ? GitHubMetrics.size-2
+            : GitHubMetrics.size-8;
+
+    private property <length> intrinsic-height: root.block.kind == ArtifactPreviewBlockKind.Rule
+        ? GitHubMetrics.size-16
+        : (root.is-code ? code-text.preferred-height : block-text.preferred-height)
+            + root.block-padding-top + root.block-padding-bottom;
+    height: root.forced-height > 0px ? root.forced-height : root.intrinsic-height;
+    background: root.is-code ? GitHubTheme.code-canvas
+        : root.is-quote ? GitHubTheme.canvas-subtle
+        : transparent;
+    border-width: root.is-code ? GitHubMetrics.border-thin : 0px;
+    border-color: root.is-code ? GitHubTheme.border-muted : transparent;
+    border-radius: root.is-code || root.is-quote
+        ? GitHubMetrics.radius-medium
+        : 0px;
+
+    if root.block.kind == ArtifactPreviewBlockKind.Heading1
+            || root.block.kind == ArtifactPreviewBlockKind.Heading2: Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+
+    if root.block.kind == ArtifactPreviewBlockKind.TableRow: Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+
+    if root.block.kind == ArtifactPreviewBlockKind.Rule: Rectangle {
+        y: (parent.height - 1px) / 2;
+        width: parent.width;
+        height: 1px;
+        background: GitHubTheme.border-default;
+    }
+
+    block-text := StyledText {
+        visible: root.block.kind != ArtifactPreviewBlockKind.Rule
+            && root.block.kind != ArtifactPreviewBlockKind.CodeBlock;
+        x: root.content-inset;
+        y: root.block-padding-top;
+        width: parent.width - self.x * 2;
+        text: root.block.styled;
+        default-color: root.is-quote ? GitHubTheme.fg-muted : GitHubTheme.fg-default;
+        default-font-size: root.block.kind == ArtifactPreviewBlockKind.Heading1 ? 26px
+            : root.block.kind == ArtifactPreviewBlockKind.Heading2 ? 22px
+            : root.block.kind == ArtifactPreviewBlockKind.Heading3 ? 18px
+            : root.block.kind == ArtifactPreviewBlockKind.TableRow ? 13px
+            : 15px;
+        link-color: GitHubTheme.accent-fg;
+        link-clicked(url) => { root.open-link(url); }
+    }
+
+    code-text := Text {
+        visible: root.block.kind == ArtifactPreviewBlockKind.CodeBlock;
+        x: root.content-inset;
+        y: root.block-padding-top;
+        width: parent.width - self.x * 2;
+        text: root.block.plain-text;
+        color: GitHubTheme.fg-default;
+        font-family: "monospace";
+        font-size: 12px;
+        wrap: word-wrap;
+    }
+}
+
+// Docked-host interaction only: the visible divider stays one logical pixel,
+// while this wider stable hit target owns hover, pointer capture, and cancel.
+export component GitHubArtifactPreviewResizeHandle inherits Rectangle {
+    in property <bool> resize-enabled: true;
+    out property <bool> dragging: false;
+    callback drag-started();
+    callback drag-delta(length);
+    callback drag-finished(bool);
+
+    width: 9px;
+    background: transparent;
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: 0px;
+        width: 3px;
+        height: parent.height;
+        background: GitHubTheme.fg-muted;
+        opacity: root.resize-enabled && (root.dragging || resize-touch.has-hover)
+            ? 0.8
+            : 0;
+        animate opacity { duration: 100ms; easing: ease-out; }
+    }
+
+    resize-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.resize-enabled;
+        mouse-cursor: col-resize;
+        moved => {
+            if root.dragging {
+                root.drag-delta(self.mouse-x - self.pressed-x);
+            }
+        }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                root.dragging = true;
+                root.drag-started();
+            } else if event.kind == PointerEventKind.up {
+                root.dragging = false;
+                root.drag-finished(false);
+            } else if event.kind == PointerEventKind.cancel {
+                root.dragging = false;
+                root.drag-finished(true);
+            }
+        }
+    }
+}
+
+export component GitHubArtifactPreviewSurface inherits Rectangle {
+    in property <ArtifactPreviewKind> preview-kind: ArtifactPreviewKind.None;
+    in property <[ArtifactPreviewBlock]> markdown-blocks: [];
+    in property <string> plain-text: "";
+    in property <image> preview-image;
+    in property <string> error-text: "";
+    in property <bool> loading: false;
+    in property <bool> layout-resizing: false;
+    in property <bool> virtualized-markdown: true;
+    in property <int> markdown-layout-revision: 0;
+    in property <string> application-font-family: ".AppleSystemUIFont";
+    callback layout-markdown-window(
+        int,
+        [ArtifactPreviewBlock],
+        float,
+        float,
+        float,
+        string
+    ) -> ArtifactPreviewVirtualWindow;
+    callback open-link(string);
+
+    background: GitHubTheme.canvas-default;
+
+    if root.loading: Rectangle {
+        background: GitHubTheme.canvas-default;
+
+        VerticalLayout {
+            width: min(parent.width, 280px);
+            x: (parent.width - self.width) / 2;
+            y: max(GitHubMetrics.size-32, (parent.height - self.preferred-height) / 2);
+            alignment: center;
+            spacing: GitHubMetrics.size-12;
+
+            GitHubSpinner { width: GitHubMetrics.size-24; height: GitHubMetrics.size-24; }
+            Text {
+                text: "Preparing preview";
+                color: GitHubTheme.fg-muted;
+                font-size: GitHubMetrics.text-medium;
+                horizontal-alignment: center;
+            }
+        }
+    }
+
+    if !root.loading && root.preview-kind == ArtifactPreviewKind.Markdown
+            && !root.virtualized-markdown: GitHubScrollView {
+        width: parent.width;
+        height: parent.height;
+        show-scrollbar: !root.layout-resizing;
+
+        markdown-column := VerticalLayout {
+            width: min(parent.width, 880px);
+            x: (parent.width - self.width) / 2;
+            spacing: 0px;
+            padding-left: root.width < 560px ? GitHubMetrics.size-16 : GitHubMetrics.size-32;
+            padding-right: root.width < 560px ? GitHubMetrics.size-16 : GitHubMetrics.size-32;
+            padding-top: GitHubMetrics.size-20;
+            padding-bottom: GitHubMetrics.size-48;
+            alignment: start;
+
+            for block in root.markdown-blocks: GitHubArtifactPreviewMarkdownBlock {
+                width: parent.width;
+                block: block;
+                open-link(url) => { root.open-link(url); }
+            }
+        }
+    }
+
+    if !root.loading && root.preview-kind == ArtifactPreviewKind.Markdown
+            && root.virtualized-markdown: markdown-virtual-host := Rectangle {
+        background: GitHubTheme.canvas-default;
+
+        private property <ArtifactPreviewVirtualWindow> virtual-window;
+        private property <bool> refreshing-window: false;
+        private property <length> observed-viewport-y: markdown-scroll.viewport-y;
+        private property <length> observed-visible-height: markdown-scroll.height;
+        private property <length> observed-content-width: root.width;
+        private property <int> observed-layout-revision: root.markdown-layout-revision;
+
+        function refresh-window() {
+            if self.refreshing-window {
+                return;
+            }
+            self.refreshing-window = true;
+            let next = root.layout-markdown-window(
+                root.markdown-layout-revision,
+                root.markdown-blocks,
+                max(0.0, -markdown-scroll.viewport-y / 1px),
+                max(1.0, markdown-scroll.height / 1px),
+                max(1.0, root.width / 1px),
+                root.application-font-family
+            );
+            let clamped-y = -next.scroll-offset * 1px;
+            if next.projection-revision != self.virtual-window.projection-revision
+                    || Math.abs(next.content-height - self.virtual-window.content-height) > 0.5 {
+                self.virtual-window = next;
+            }
+            if Math.abs(markdown-scroll.viewport-y - clamped-y) > 0.5px {
+                markdown-scroll.viewport-y = clamped-y;
+            }
+            self.refreshing-window = false;
+        }
+
+        init => { self.refresh-window(); }
+        changed observed-viewport-y => { self.refresh-window(); }
+        changed observed-visible-height => { self.refresh-window(); }
+        changed observed-content-width => { self.refresh-window(); }
+        changed observed-layout-revision => {
+            markdown-scroll.viewport-y = 0px;
+            self.refresh-window();
+        }
+
+        markdown-scroll := Flickable {
+            width: parent.width;
+            height: parent.height;
+            viewport-width: self.width;
+            viewport-height: max(
+                self.height,
+                parent.virtual-window.content-height * 1px
+            );
+
+            for row in markdown-virtual-host.virtual-window.rows: Rectangle {
+                y: row.start * 1px;
+                width: markdown-scroll.width;
+                height: row.size * 1px;
+
+                markdown-list-block := GitHubArtifactPreviewMarkdownBlock {
+                    x: (parent.width - self.width) / 2;
+                    y: row.start <= 0.5 ? GitHubMetrics.size-20 : 0px;
+                    width: min(parent.width, 880px)
+                        - (root.width < 560px
+                            ? GitHubMetrics.size-32
+                            : GitHubMetrics.size-64);
+                    forced-height: max(
+                        1px,
+                        parent.height - self.y
+                            - (row.start + row.size
+                                    >= markdown-scroll.viewport-height / 1px - 0.5
+                                ? GitHubMetrics.size-48
+                                : 0px)
+                    );
+                    block: row.block;
+                    open-link(url) => { root.open-link(url); }
+                }
+            }
+        }
+
+        GitHubVirtualListScrollbar {
+            x: parent.width - self.width;
+            y: 0px;
+            height: parent.height;
+            viewport-y <=> markdown-scroll.viewport-y;
+            visible-height: markdown-scroll.height;
+            content-height: parent.virtual-window.content-height * 1px;
+            enabled: !root.layout-resizing;
+            z: 20;
+        }
+    }
+
+    if !root.loading && root.preview-kind == ArtifactPreviewKind.PlainText: GitHubScrollView {
+        width: parent.width;
+        height: parent.height;
+        show-scrollbar: !root.layout-resizing;
+
+        Text {
+            width: parent.width;
+            text: root.plain-text;
+            wrap: word-wrap;
+            color: GitHubTheme.fg-default;
+            font-size: GitHubMetrics.text-medium;
+            font-family: "monospace";
+        }
+    }
+
+    if !root.loading && root.preview-kind == ArtifactPreviewKind.Image: Rectangle {
+        background: GitHubTheme.canvas-subtle;
+
+        Image {
+            x: GitHubMetrics.size-16;
+            y: GitHubMetrics.size-16;
+            width: parent.width - GitHubMetrics.size-32;
+            height: parent.height - GitHubMetrics.size-32;
+            source: root.preview-image;
+            image-fit: contain;
+        }
+    }
+
+    if !root.loading && root.preview-kind == ArtifactPreviewKind.Error: Rectangle {
+        background: GitHubTheme.canvas-default;
+
+        VerticalLayout {
+            width: min(parent.width - GitHubMetrics.size-32, 520px);
+            x: (parent.width - self.width) / 2;
+            y: GitHubMetrics.size-48;
+            spacing: GitHubMetrics.size-8;
+
+            Text {
+                text: "Preview unavailable";
+                color: GitHubTheme.fg-default;
+                font-size: GitHubMetrics.heading-small;
+                font-weight: 600;
+            }
+            Text {
+                width: parent.width;
+                text: root.error-text;
+                color: GitHubTheme.fg-muted;
+                font-size: GitHubMetrics.text-medium;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+export component GitHubArtifactPreviewPanel inherits Rectangle {
+    in property <string> title: "Preview";
+    in property <ArtifactPreviewKind> preview-kind: ArtifactPreviewKind.None;
+    in property <[ArtifactPreviewBlock]> markdown-blocks: [];
+    in property <string> plain-text: "";
+    in property <image> preview-image;
+    in property <string> error-text: "";
+    in property <bool> loading: false;
+    in property <bool> can-copy: false;
+    in property <bool> can-open-external: false;
+    in property <string> copy-content: "";
+    in property <bool> detached: false;
+    // Hosts report an active divider/native-window resize. The inexpensive
+    // shell follows the live bounds, while the prepared document tree keeps
+    // its last settled layout width and is clipped by preview-content-host.
+    in property <bool> layout-resizing: false;
+    // Docked open/close animations suspend painting of the prepared document.
+    // The tree and its ModelRc stay mounted, so this is a presentation policy
+    // rather than provider/session lifecycle state.
+    in property <bool> content-suspended: false;
+    in property <bool> performance-optimized: true;
+    in property <int> markdown-layout-revision: 0;
+    in property <string> application-font-family: ".AppleSystemUIFont";
+    callback layout-markdown-window(
+        int,
+        [ArtifactPreviewBlock],
+        float,
+        float,
+        float,
+        string
+    ) -> ArtifactPreviewVirtualWindow;
+    callback close-requested();
+    callback copy-requested(string) -> bool;
+    callback open-external-requested();
+    callback open-link(string);
+
+    private property <length> stable-content-width: self.width;
+    private property <length> content-layout-width:
+        root.performance-optimized && root.layout-resizing
+            ? root.stable-content-width
+            : root.width;
+
+    background: GitHubTheme.canvas-default;
+    changed width => {
+        if !root.layout-resizing {
+            root.stable-content-width = root.width;
+        }
+    }
+    changed layout-resizing => {
+        // Capture before live geometry starts and commit the final width once
+        // after it ends. This prevents every Markdown block from rewrapping on
+        // every pointer event while preserving exact settled layout.
+        root.stable-content-width = root.width;
+    }
+
+    header := Rectangle {
+        y: 0px;
+        width: parent.width;
+        height: GitHubMetrics.size-48;
+        background: GitHubTheme.canvas-default;
+        z: 100;
+
+        Text {
+            x: GitHubMetrics.size-16;
+            width: max(0px, right-actions.x - self.x - GitHubMetrics.size-8);
+            height: parent.height;
+            text: root.title;
+            color: GitHubTheme.fg-default;
+            font-size: GitHubMetrics.text-medium;
+            font-weight: 600;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        right-actions := HorizontalLayout {
+            x: parent.width - self.width - GitHubMetrics.size-8;
+            y: (parent.height - self.height) / 2;
+            width: GitHubMetrics.control-medium-size
+                + (root.can-copy
+                    ? GitHubMetrics.control-medium-size + GitHubMetrics.size-4
+                    : 0px)
+                + (root.can-open-external
+                    ? GitHubMetrics.control-medium-size + GitHubMetrics.size-4
+                    : 0px);
+            height: GitHubMetrics.control-medium-size;
+            spacing: GitHubMetrics.size-4;
+
+            if root.can-copy: GitHubCopyButton {
+                tooltip-text: "Copy preview";
+                copy-requested => { root.copy-requested(root.copy-content) }
+            }
+            if root.can-open-external: GitHubIconButton {
+                icon: @image-url("../../assets/icons/octicon-link-external-16.svg");
+                tooltip-text: "Open with system application";
+                clicked => { root.open-external-requested(); }
+            }
+            GitHubIconButton {
+                icon: @image-url("../../assets/icons/octicon-x-16.svg");
+                tooltip-text: "Close preview";
+                clicked => { root.close-requested(); }
+            }
+        }
+
+        Rectangle {
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: GitHubTheme.border-default;
+        }
+    }
+
+    preview-content-host := Rectangle {
+        x: 0px;
+        y: header.height;
+        width: parent.width;
+        height: parent.height - header.height;
+        background: GitHubTheme.canvas-default;
+        clip: true;
+        z: 0;
+
+        GitHubArtifactPreviewSurface {
+            width: root.content-layout-width;
+            height: parent.height;
+            visible: !root.content-suspended;
+            preview-kind: root.preview-kind;
+            markdown-blocks: root.markdown-blocks;
+            plain-text: root.plain-text;
+            preview-image: root.preview-image;
+            error-text: root.error-text;
+            loading: root.loading;
+            layout-resizing: root.layout-resizing;
+            virtualized-markdown: root.performance-optimized;
+            markdown-layout-revision: root.markdown-layout-revision;
+            application-font-family: root.application-font-family;
+            layout-markdown-window(
+                revision,
+                blocks,
+                scroll-offset,
+                visible-height,
+                content-width,
+                font-family
+            ) => {
+                root.layout-markdown-window(
+                    revision,
+                    blocks,
+                    scroll-offset,
+                    visible-height,
+                    content-width,
+                    font-family
+                )
+            }
+            open-link(url) => { root.open-link(url); }
+        }
+    }
+}
+
+export component ArtifactPreviewWindow inherits Window {
+    in property <string> document-title: "Preview";
+    in property <ArtifactPreviewKind> preview-kind: ArtifactPreviewKind.None;
+    in property <[ArtifactPreviewBlock]> markdown-blocks: [];
+    in property <string> plain-text: "";
+    in property <image> preview-image;
+    in property <string> error-text: "";
+    in property <bool> loading: false;
+    in property <bool> can-copy: false;
+    in property <bool> can-open-external: false;
+    in property <string> copy-content: "";
+    in property <string> application-font-family: ".AppleSystemUIFont";
+    in property <bool> performance-optimized: true;
+    in property <int> markdown-layout-revision: 0;
+    in-out property <bool> native-live-resizing: false;
+    out property <bool> layout-resizing:
+        root.native-live-resizing || root.fallback-live-resizing;
+    callback dismiss-requested();
+    callback copy-requested(string) -> bool;
+    callback open-external-requested();
+    callback open-link(string);
+    callback layout-markdown-window(
+        int,
+        [ArtifactPreviewBlock],
+        float,
+        float,
+        float,
+        string
+    ) -> ArtifactPreviewVirtualWindow;
+
+    // AppKit begin/end notifications are the precise path. This window-local
+    // settle detector covers backends or synthetic native drags that only
+    // publish width changes. It never shares state with MainWindow.
+    private property <bool> fallback-live-resizing: false;
+
+    title: root.document-title;
+    preferred-width: 920px;
+    preferred-height: 720px;
+    min-width: 480px;
+    min-height: 360px;
+    background: GitHubTheme.canvas-default;
+    default-font-family: root.application-font-family;
+
+    changed width => {
+        if !root.native-live-resizing {
+            root.fallback-live-resizing = true;
+            resize-settle-timer.restart();
+        }
+    }
+
+    resize-settle-timer := Timer {
+        interval: 500ms;
+        running: root.fallback-live-resizing;
+        triggered => {
+            root.fallback-live-resizing = false;
+        }
+    }
+
+    GitHubArtifactPreviewPanel {
+        width: parent.width;
+        height: parent.height;
+        title: root.document-title;
+        preview-kind: root.preview-kind;
+        markdown-blocks: root.markdown-blocks;
+        plain-text: root.plain-text;
+        preview-image: root.preview-image;
+        error-text: root.error-text;
+        loading: root.loading;
+        can-copy: root.can-copy;
+        can-open-external: root.can-open-external;
+        copy-content: root.copy-content;
+        detached: true;
+        layout-resizing: root.layout-resizing;
+        content-suspended: false;
+        performance-optimized: root.performance-optimized;
+        markdown-layout-revision: root.markdown-layout-revision;
+        application-font-family: root.application-font-family;
+        layout-markdown-window(
+            revision,
+            blocks,
+            scroll-offset,
+            visible-height,
+            content-width,
+            font-family
+        ) => {
+            root.layout-markdown-window(
+                revision,
+                blocks,
+                scroll-offset,
+                visible-height,
+                content-width,
+                font-family
+            )
+        }
+        close-requested => { root.dismiss-requested(); }
+        copy-requested(text) => { root.copy-requested(text) }
+        open-external-requested => { root.open-external-requested(); }
+        open-link(url) => { root.open-link(url); }
+    }
+}

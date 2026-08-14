@@ -286,6 +286,84 @@ export component GitHubSettingsPane inherits Rectangle {
 
             VerticalLayout {
                 width: parent.width;
+                spacing: 12px;
+                alignment: start;
+
+                Text {
+                    text: "File preview";
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: GitHubTheme.fg-default;
+                }
+                Text {
+                    width: parent.width;
+                    text: "Choose where artifacts open and which file providers may parse content.";
+                    font-size: 14px;
+                    color: GitHubTheme.fg-muted;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: 32px;
+                    spacing: 8px;
+                    alignment: start;
+
+                    GitHubSegment {
+                        text: "Right panel";
+                        selected: AppState.artifact-preview-presentation-mode == 0;
+                        clicked => {
+                            AppState.artifact-preview-presentation-mode = 0;
+                            AppState.set-artifact-preview-presentation-mode(0);
+                        }
+                    }
+                    GitHubSegment {
+                        text: "Separate window";
+                        selected: AppState.artifact-preview-presentation-mode == 1;
+                        clicked => {
+                            AppState.artifact-preview-presentation-mode = 1;
+                            AppState.set-artifact-preview-presentation-mode(1);
+                        }
+                    }
+                }
+
+                GitHubSettingToggleRow {
+                    title: "Markdown";
+                    description: "Render Markdown documents in the shared preview surface.";
+                    checked: AppState.artifact-preview-markdown-enabled;
+                    toggled(value) => {
+                        AppState.artifact-preview-markdown-enabled = value;
+                        AppState.set-artifact-preview-provider-enabled("markdown", value);
+                    }
+                }
+                GitHubSettingToggleRow {
+                    title: "Images";
+                    description: "Decode supported local image files on demand.";
+                    checked: AppState.artifact-preview-image-enabled;
+                    toggled(value) => {
+                        AppState.artifact-preview-image-enabled = value;
+                        AppState.set-artifact-preview-provider-enabled("image", value);
+                    }
+                }
+                GitHubSettingToggleRow {
+                    title: "Plain text";
+                    description: "Preview UTF-8 text and source files.";
+                    checked: AppState.artifact-preview-plain-text-enabled;
+                    toggled(value) => {
+                        AppState.artifact-preview-plain-text-enabled = value;
+                        AppState.set-artifact-preview-provider-enabled("plain-text", value);
+                    }
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: GitHubTheme.border-default;
+            }
+
+            VerticalLayout {
+                width: parent.width;
                 spacing: 8px;
                 alignment: start;
 

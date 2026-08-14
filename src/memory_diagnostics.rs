@@ -263,9 +263,9 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
 
     let chat = ui.get_chat_messages();
     let mut chat_text_bytes = 0usize;
-    let mut chat_blocks = 0usize;
-    let mut chat_inline_lines = 0usize;
-    let mut chat_spans = 0usize;
+    let chat_blocks = 0usize;
+    let chat_inline_lines = 0usize;
+    let chat_spans = 0usize;
     for index in 0..chat.row_count() {
         let Some(message) = chat.row_data(index) else {
             continue;
@@ -273,28 +273,8 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
         chat_text_bytes = chat_text_bytes
             .saturating_add(message.content.len())
             .saturating_add(message.rendered_content.len())
+            .saturating_add(message.preview_title.len())
             .saturating_add(message.timestamp.len());
-        chat_blocks = chat_blocks.saturating_add(message.markdown_blocks.row_count());
-        for block_index in 0..message.markdown_blocks.row_count() {
-            let Some(block) = message.markdown_blocks.row_data(block_index) else {
-                continue;
-            };
-            chat_text_bytes = chat_text_bytes.saturating_add(block.text.len());
-            chat_inline_lines = chat_inline_lines.saturating_add(block.inline_lines.row_count());
-            for line_index in 0..block.inline_lines.row_count() {
-                let Some(line) = block.inline_lines.row_data(line_index) else {
-                    continue;
-                };
-                chat_spans = chat_spans.saturating_add(line.spans.row_count());
-                for span_index in 0..line.spans.row_count() {
-                    if let Some(span) = line.spans.row_data(span_index) {
-                        chat_text_bytes = chat_text_bytes
-                            .saturating_add(span.text.len())
-                            .saturating_add(span.href.len());
-                    }
-                }
-            }
-        }
     }
 
     let projects = ui.get_project_items();
@@ -361,14 +341,24 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
         }
     }
 
+    let (chat_model_commits, chat_markdown_projections) =
+        crate::chat::renderer::diagnostic_counts();
+    let preview = crate::artifact_preview::diagnostic_state(ui);
     log::info!(
-        "[Memory][UI Models] route={:?} chat_rows={} chat_blocks={} chat_inline_lines={} chat_spans={} chat_text_bytes={} project_rows={} project_tags={} project_text_bytes={} pr_list_rows={} pr_list_text_bytes={} pr_review_files={} pr_review_tree_items={} pr_review_extension_filters={} pr_review_lines={} job_steps={} job_step_text_bytes={} terminal_lines={} terminal_spans={} terminal_text_bytes={} terminal_output_bytes={}",
+        "[Memory][UI Models] route={:?} chat_rows={} chat_blocks={} chat_inline_lines={} chat_spans={} chat_text_bytes={} chat_model_commits={} chat_markdown_projections={} preview_host={} preview_kind={} preview_host_count={} preview_blocks={} preview_payload_bytes={} project_rows={} project_tags={} project_text_bytes={} pr_list_rows={} pr_list_text_bytes={} pr_review_files={} pr_review_tree_items={} pr_review_extension_filters={} pr_review_lines={} job_steps={} job_step_text_bytes={} terminal_lines={} terminal_spans={} terminal_text_bytes={} terminal_output_bytes={}",
         route,
         chat.row_count(),
         chat_blocks,
         chat_inline_lines,
         chat_spans,
         chat_text_bytes,
+        chat_model_commits,
+        chat_markdown_projections,
+        preview.host,
+        preview.kind,
+        preview.host_count,
+        preview.block_count,
+        preview.approximate_bytes,
         projects.row_count(),
         project_tags,
         project_text_bytes,

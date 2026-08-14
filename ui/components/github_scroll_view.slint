@@ -10,24 +10,131 @@ export component GitHubScrollView inherits Rectangle {
     out property <length> content_height: content-column.preferred-height;
     in property <bool> interactive: true;
     in property <bool> show-scrollbar: true;
+    // Benchmark-only legacy mode keeps the previous live-geometry mapping.
+    // Production freezes the mapping for the complete direct drag gesture.
+    in property <bool> stable-scrollbar-drag: true;
+    // Full-size macOS content can extend beneath the native title bar. Keep
+    // the document itself edge-to-edge while moving the draggable thumb out
+    // of AppKit's window-drag region.
+    in property <length> scrollbar-top-inset: 0px;
+    in property <length> scrollbar-bottom-inset: 0px;
+    callback user-scroll-started();
+    callback user-wheel-direction(length);
+    callback scrollbar-dragging-changed(bool);
+
+    out property <bool> scrollbar-dragging: root.dragging;
+    out property <length> scrollbar-drag-pointer-y: root.drag-pointer-y;
+    out property <length> scrollbar-drag-thumb-y: root.displayed-thumb-y;
+    out property <int> scrollbar-drag-release-revision: root.drag-release-revision;
+    out property <length> scrollbar-drag-release-position: root.drag-release-position;
 
     private property <bool> needs-scroll:
         root.content_height > root.visible_height;
     private property <length> scrollbar-width: GitHubMetrics.size-8;
+    private property <length> scrollbar-track-height: max(
+        0px,
+        root.height - root.scrollbar-top-inset - root.scrollbar-bottom-inset
+    );
     private property <length> thumb-height:
         root.needs-scroll
             ? max(
                 GitHubMetrics.size-32,
-                root.height * root.height / max(root.height, root.content_height)
+                root.scrollbar-track-height * root.visible_height
+                    / max(root.visible_height, root.content_height)
             )
-            : root.height;
+            : root.scrollbar-track-height;
     private property <length> scroll-range:
         max(1px, root.content_height - root.visible_height);
     private property <length> thumb-range:
-        max(1px, root.height - root.thumb-height - GitHubMetrics.size-4);
+        max(1px, root.scrollbar-track-height - root.thumb-height - GitHubMetrics.size-4);
+    private property <bool> dragging: false;
+    private property <length> drag-maximum: 0px;
+    private property <length> drag-thumb-height: 0px;
+    private property <length> drag-thumb-range: 0px;
+    private property <length> drag-thumb-y: 0px;
+    private property <length> drag-pointer-y: 0px;
+    private property <length> drag-pointer-offset: 0px;
+    private property <int> drag-release-revision: 0;
+    private property <length> drag-release-position: 0px;
+    private property <bool> pending-wheel-direction: false;
+    private property <length> wheel-position-before-animation: 0px;
+    private property <length> displayed-thumb-height:
+        root.dragging && root.stable-scrollbar-drag
+            ? root.drag-thumb-height
+            : root.thumb-height;
+    private property <length> displayed-thumb-y:
+        root.dragging && root.stable-scrollbar-drag
+            ? root.drag-thumb-y
+            : GitHubMetrics.size-2
+                + max(0px, -root.viewport_y) / root.scroll-range
+                    * root.thumb-range;
+
+    function apply-stable-drag(pointer-y: length) {
+        root.drag-pointer-y = pointer-y;
+        let next-thumb-y = max(
+            GitHubMetrics.size-2,
+            min(
+                GitHubMetrics.size-2 + root.drag-thumb-range,
+                pointer-y - root.drag-pointer-offset
+            )
+        );
+        if Math.abs(next-thumb-y - root.drag-thumb-y) <= 0.25px {
+            return;
+        }
+        root.drag-thumb-y = next-thumb-y;
+        root.viewport_y = -(
+            (next-thumb-y - GitHubMetrics.size-2)
+                / max(1px, root.drag-thumb-range) * root.drag-maximum
+        );
+    }
+
+    function begin-stable-drag(pointer-y: length) {
+        root.drag-maximum = max(0px, root.content_height - root.visible_height);
+        root.drag-thumb-height = root.thumb-height;
+        root.drag-thumb-range = max(
+            1px,
+            root.scrollbar-track-height - root.drag-thumb-height - GitHubMetrics.size-4
+        );
+        root.drag-thumb-y = GitHubMetrics.size-2
+            + max(0px, -root.viewport_y) / max(1px, root.drag-maximum)
+                * root.drag-thumb-range;
+        let pressed-on-thumb = pointer-y >= root.drag-thumb-y
+            && pointer-y <= root.drag-thumb-y + root.drag-thumb-height;
+        root.drag-pointer-offset = pressed-on-thumb
+            ? pointer-y - root.drag-thumb-y
+            : root.drag-thumb-height / 2;
+        root.drag-pointer-y = pointer-y;
+        root.dragging = true;
+        root.scrollbar-dragging-changed(true);
+        root.apply-stable-drag(pointer-y);
+    }
+
+    function apply-legacy-drag(pointer-y: length) {
+        root.drag-pointer-y = pointer-y;
+        root.viewport_y = -max(
+            0px,
+            min(
+                root.scroll-range,
+                (pointer-y - root.thumb-height / 2)
+                    / root.thumb-range * root.scroll-range
+            )
+        );
+        root.drag-thumb-y = GitHubMetrics.size-2
+            + max(0px, -root.viewport_y) / root.scroll-range * root.thumb-range;
+    }
 
     background: transparent;
     clip: true;
+
+    changed viewport_y => {
+        let movement = root.viewport_y - root.wheel-position-before-animation;
+        if root.pending-wheel-direction
+            && !root.dragging
+            && Math.abs(movement) > 0.25px {
+            root.pending-wheel-direction = false;
+            root.user-wheel-direction(movement);
+        }
+    }
 
     scroll-area := Flickable {
         width: parent.width;
@@ -35,6 +142,11 @@ export component GitHubScrollView inherits Rectangle {
         viewport-width: self.width;
         viewport-height: max(self.height, content-column.preferred-height);
         interactive: root.interactive;
+        flicked => {
+            root.user-scroll-started();
+            root.wheel-position-before-animation = root.viewport_y;
+            root.pending-wheel-direction = true;
+        }
 
         content-column := VerticalLayout {
             width: scroll-area.width;
@@ -43,11 +155,11 @@ export component GitHubScrollView inherits Rectangle {
         }
     }
 
-    if root.show-scrollbar && root.needs-scroll: Rectangle {
+    if root.show-scrollbar && root.needs-scroll && root.scrollbar-track-height > 0px: Rectangle {
         x: parent.width - root.scrollbar-width;
-        y: 0px;
+        y: root.scrollbar-top-inset;
         width: root.scrollbar-width;
-        height: parent.height;
+        height: root.scrollbar-track-height;
         background: transparent;
         z: 20;
 
@@ -55,26 +167,39 @@ export component GitHubScrollView inherits Rectangle {
             width: 100%;
             height: 100%;
             mouse-cursor: pointer;
-            clicked => {
-                root.viewport_y = -max(
-                    0px,
-                    min(
-                        root.scroll-range,
-                        (self.mouse-y - root.thumb-height / 2)
-                            / root.thumb-range * root.scroll-range
-                    )
-                );
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down {
+                    root.user-scroll-started();
+                    root.pending-wheel-direction = false;
+                    if root.stable-scrollbar-drag {
+                        root.begin-stable-drag(self.mouse-y);
+                    } else {
+                        root.dragging = true;
+                        root.scrollbar-dragging-changed(true);
+                        root.apply-legacy-drag(self.mouse-y);
+                    }
+                } else if event.kind == PointerEventKind.up
+                    || event.kind == PointerEventKind.cancel {
+                    if root.dragging {
+                        if root.stable-scrollbar-drag {
+                            root.apply-stable-drag(self.mouse-y);
+                        } else {
+                            root.apply-legacy-drag(self.mouse-y);
+                        }
+                        root.drag-release-position = root.viewport_y;
+                        root.drag-release-revision += 1;
+                        root.dragging = false;
+                        root.scrollbar-dragging-changed(false);
+                    }
+                }
             }
             moved => {
                 if self.pressed {
-                    root.viewport_y = -max(
-                        0px,
-                        min(
-                            root.scroll-range,
-                            (self.mouse-y - root.thumb-height / 2)
-                                / root.thumb-range * root.scroll-range
-                        )
-                    );
+                    if root.stable-scrollbar-drag {
+                        root.apply-stable-drag(self.mouse-y);
+                    } else {
+                        root.apply-legacy-drag(self.mouse-y);
+                    }
                 }
             }
         }
@@ -92,14 +217,12 @@ export component GitHubScrollView inherits Rectangle {
 
         Rectangle {
             x: (parent.width - GitHubMetrics.size-4) / 2;
-            y: GitHubMetrics.size-2
-                + max(0px, -root.viewport_y) / root.scroll-range
-                    * root.thumb-range;
+            y: root.displayed-thumb-y;
             width: GitHubMetrics.size-4;
-            height: root.thumb-height;
+            height: root.displayed-thumb-height;
             border-radius: GitHubMetrics.radius-small;
             background: GitHubTheme.scrollbar-thumb;
-            opacity: scrollbar-hit.has-hover ? 1 : 0.55;
+            opacity: scrollbar-hit.has-hover || root.dragging ? 1 : 0.55;
             animate opacity { duration: 120ms; easing: ease-out; }
         }
     }

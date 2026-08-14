@@ -37,6 +37,10 @@ pub struct AppSettings {
     #[serde(default = "default_navigation_drawer_expanded")]
     pub navigation_drawer_expanded: bool,
 
+    /// Application-level artifact preview placement and provider policy.
+    #[serde(default)]
+    pub preview: PreviewSettings,
+
     /// Git platform credentials
     #[serde(default)]
     pub git: GitSettings,
@@ -44,6 +48,44 @@ pub struct AppSettings {
     /// OpenAI-compatible AI Agent settings, serialized as `[ai.agent]`.
     #[serde(default)]
     pub ai: AiSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviewSettings {
+    /// `docked` (default) or `detached`.
+    #[serde(default = "default_preview_presentation_mode")]
+    pub presentation_mode: String,
+    #[serde(default)]
+    pub providers: PreviewProviderSettings,
+}
+
+impl Default for PreviewSettings {
+    fn default() -> Self {
+        Self {
+            presentation_mode: default_preview_presentation_mode(),
+            providers: PreviewProviderSettings::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviewProviderSettings {
+    #[serde(default = "default_preview_provider_enabled")]
+    pub markdown: bool,
+    #[serde(default = "default_preview_provider_enabled")]
+    pub image: bool,
+    #[serde(default = "default_preview_provider_enabled")]
+    pub plain_text: bool,
+}
+
+impl Default for PreviewProviderSettings {
+    fn default() -> Self {
+        Self {
+            markdown: true,
+            image: true,
+            plain_text: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -143,6 +185,14 @@ fn default_navigation_drawer_expanded() -> bool {
     true // Start with the primary navigation visible on first launch
 }
 
+fn default_preview_presentation_mode() -> String {
+    "docked".to_string()
+}
+
+fn default_preview_provider_enabled() -> bool {
+    true
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -152,6 +202,7 @@ impl Default for AppSettings {
             terminal_verbose_logging: default_terminal_verbose_logging(),
             ui_sound_effects: default_ui_sound_effects(),
             navigation_drawer_expanded: default_navigation_drawer_expanded(),
+            preview: PreviewSettings::default(),
             git: GitSettings::default(),
             ai: AiSettings::default(),
         }
@@ -306,6 +357,31 @@ impl SettingsManager {
         }
     }
 
+    pub fn set_preview_presentation_mode(&self, mode: &str) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.preview.presentation_mode = if mode == "detached" {
+                "detached".to_string()
+            } else {
+                "docked".to_string()
+            };
+        }
+    }
+
+    pub fn set_preview_provider_enabled(&self, provider_id: &str, enabled: bool) {
+        if let Ok(mut settings) = self.settings.write() {
+            match provider_id {
+                usher_preview::MARKDOWN_PROVIDER_ID => {
+                    settings.preview.providers.markdown = enabled
+                }
+                usher_preview::IMAGE_PROVIDER_ID => settings.preview.providers.image = enabled,
+                usher_preview::PLAIN_TEXT_PROVIDER_ID => {
+                    settings.preview.providers.plain_text = enabled
+                }
+                _ => return,
+            }
+        }
+    }
+
     /// Update git platform tokens
     pub fn set_git_platform_tokens(
         &self,
@@ -437,6 +513,16 @@ pub fn save_navigation_drawer_expanded(expanded: bool) {
     });
 }
 
+pub fn save_preview_presentation_mode(mode: &str) -> Result<(), String> {
+    get_settings_manager().set_preview_presentation_mode(mode);
+    get_settings_manager().save()
+}
+
+pub fn save_preview_provider_enabled(provider_id: &str, enabled: bool) -> Result<(), String> {
+    get_settings_manager().set_preview_provider_enabled(provider_id, enabled);
+    get_settings_manager().save()
+}
+
 /// Update and persist Git platform tokens.
 pub fn save_git_platform_tokens(
     github: &str,
@@ -526,6 +612,16 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app_state.set_tracing_logger_active(settings.tracing_logger_active);
     app_state.set_terminal_verbose_logging(settings.terminal_verbose_logging);
     app_state.set_ui_sound_effects(settings.ui_sound_effects);
+    app_state.set_artifact_preview_presentation_mode(
+        if settings.preview.presentation_mode == "detached" {
+            1
+        } else {
+            0
+        },
+    );
+    app_state.set_artifact_preview_markdown_enabled(settings.preview.providers.markdown);
+    app_state.set_artifact_preview_image_enabled(settings.preview.providers.image);
+    app_state.set_artifact_preview_plain_text_enabled(settings.preview.providers.plain_text);
     app_state.set_git_github_token(settings.git.platform.github.token.clone().into());
     app_state.set_git_gitlab_token(settings.git.platform.gitlab.token.clone().into());
     app_state.set_git_gitee_token(settings.git.platform.gitee.token.clone().into());
@@ -622,6 +718,43 @@ mod tests {
     #[test]
     fn navigation_drawer_is_expanded_by_default() {
         assert!(AppSettings::default().navigation_drawer_expanded);
+    }
+
+    #[test]
+    fn preview_defaults_to_docked_with_all_builtin_providers_enabled() {
+        let preview = AppSettings::default().preview;
+        assert_eq!(preview.presentation_mode, "docked");
+        assert!(preview.providers.markdown);
+        assert!(preview.providers.image);
+        assert!(preview.providers.plain_text);
+    }
+
+    #[test]
+    fn legacy_settings_without_preview_section_receive_preview_defaults() {
+        let settings: AppSettings = toml::from_str(
+            r#"
+theme_mode = 1
+auto_update = false
+"#,
+        )
+        .unwrap();
+        assert_eq!(settings.preview.presentation_mode, "docked");
+        assert!(settings.preview.providers.markdown);
+        assert!(settings.preview.providers.image);
+        assert!(settings.preview.providers.plain_text);
+    }
+
+    #[test]
+    fn writes_preview_as_nested_toml_tables() {
+        let mut settings = AppSettings::default();
+        settings.preview.presentation_mode = "detached".into();
+        settings.preview.providers.image = false;
+
+        let serialized = toml::to_string(&settings).unwrap();
+        assert!(serialized.contains("[preview]"));
+        assert!(serialized.contains("presentation_mode = \"detached\""));
+        assert!(serialized.contains("[preview.providers]"));
+        assert!(serialized.contains("image = false"));
     }
 
     #[test]

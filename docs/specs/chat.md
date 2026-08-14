@@ -9,7 +9,8 @@ This is the stable contract for persisted Chat history, message presentation, vi
 ## Ownership / 所有权
 
 - Persistence and session state: `src/chat/persistence.rs`, `src/chat/session.rs`.
-- UI payload rendering and bounded markdown cache: `src/chat/renderer.rs`.
+- Width-independent UI-row projection and bounded projection cache:
+  `src/chat/renderer.rs`, `src/chat/markdown.rs`.
 - Async request and route interaction: `src/chat/interactive.rs`.
 - Bounded height estimation, prefix cache, and virtual-window selection:
   `src/chat/virtual_layout.rs`.
@@ -25,13 +26,18 @@ This is the stable contract for persisted Chat history, message presentation, vi
 3. Legacy assistant entries beginning with `❌` or `✅` are recognized at render time and shown without the prefix; the history file is not destructively rewritten.
 4. Request failures remain inline assistant messages and do not duplicate centralized HTTP feedback.
 5. Only a bounded virtual window is converted into Slint message rows; scrolling and resize must not rebuild the complete history model.
-6. Markdown render caching remains bounded by both entry count and approximate bytes and is cleared when leaving Chat.
+6. Chat's width-independent projection cache remains bounded by both entry count
+   and approximate bytes and is cleared when leaving Chat. Full Markdown block
+   parsing and formatted presentation belong to the artifact-preview framework.
 7. History I/O and HTTP requests never block the Slint event loop; UI updates are scheduled back onto that loop.
 8. The Chat component and its Slint message model are route-scoped. Leaving Chat destroys the component and clears its UI model/cache; the Rust session remains the source of truth and reconstructs the bounded model on re-entry.
+   When that session contains history, re-entry shows a centered history-loading
+   state until the bounded model is committed. The welcome view is visible only
+   after restoration completes and the session is confirmed empty.
 9. A history-page or assistant response that completes after leaving Chat updates the Rust session/persistence only and must not remount or repopulate the hidden Chat UI.
 10. Chat presentation is application-owned: native layouts plus
-    `GitHubScrollView`, `GitHubSpinner`, `GitHubCopyButton`, and
-    `GitHubIconButton`; Material visuals are not part of the product contract.
+    `GitHubScrollView`, `GitHubSpinner`, and `GitHubIconButton`; Material
+    visuals are not part of the product contract.
 11. Message surfaces use compact semantic borders and six-pixel corners.
     Suggestions and send/load actions support keyboard activation and
     keyboard-visible focus.
@@ -44,19 +50,92 @@ This is the stable contract for persisted Chat history, message presentation, vi
 14. New user-facing request errors use concise English recovery text. Provider,
     HTTP status, and decode details remain in logs and are not exposed verbatim
     in message bubbles.
+15. An assistant row retains a readable width-independent plain-text projection.
+    To bound Slint text layout, a long inline projection is capped at 1,200
+    Unicode scalar values and exposes an action that opens the complete response
+    in the shared artifact preview. Width-only resize must not replace
+    `chat-messages` or rerun the projection.
+16. The production virtual-window policy mounts at most 32 single-role message rows. Its
+    scroll threshold must move the bounded window before the viewport crosses
+    the configured overscan; a resize must never commit a replacement model.
+17. A message delegate instantiates only its active User or Assistant subtree.
+    Hidden role trees must not remain mounted in the optimized product path.
+18. During macOS native live resize, Chat keeps the complete message ScrollView
+    at its last stable width and clips it through the current route host. The
+    route surface and composer continue following the window, and releasing the
+    edge applies one final message layout at the new width.
+19. `USHER_CHAT_PERF_VARIANT=baseline|optimized` is a benchmark-only A/B seam.
+    Baseline preserves the previous 56-row, dual-role-tree, continuously reflowing
+    presentation; normal launches always select optimized behavior.
+20. Virtual-window replacement may occur only when an actual viewport-position
+    change crosses the safe overscan threshold. No delayed idle task may replace
+    the message model or reposition the viewport after scrolling stops. Normal
+    optimized shifts never write an anchor correction to the viewport; Flickable
+    remains the sole wheel/touchpad position owner. Same-event-loop requests are
+    coalesced and commit from the latest viewport position, with at most two newly
+    inserted rows per overlapping shift. Exact stable-ID correction is reserved
+    for history prepend and settled resize.
+21. A plain wrapped `Text` is the sole layout and paint owner for each message
+    body. Selection uses a Chat-owned pointer and shaped-geometry overlay that
+    never replaces that `Text`, participates in preferred size, or mounts a
+    `TextInput`. Only the active message produces coalesced visual-line
+    rectangles, and the platform copy shortcut copies its Unicode-safe range.
+    Chat does not mount a per-message copy action.
+22. Pointer drags inside the message viewport belong to text selection, not
+    Flickable drag-scrolling. Wheel/touchpad scrolling and the explicit
+    scrollbar remain available.
+23. Reaching the top automatically starts one deduplicated history-page load.
+    Before prepended rows are committed, Chat captures the first fully visible
+    message's stable ID and actual content position; after layout, it applies
+    the exact position delta so that message stays at the same viewport pixel.
+    The explicit in-flow pagination action remains as a retry/accessibility path.
+24. New persisted messages store a complete RFC 3339 instant with the local
+    offset. Message rows derive a compact local-time label from calendar dates:
+    `HH:mm` today, `昨天 HH:mm` yesterday, `前天 HH:mm` two calendar days ago,
+    `星期X HH:mm` for three through six days ago, `M月D日 HH:mm` earlier in the current year, and
+    `YYYY年M月D日 HH:mm` across years. Legacy `HH:mm` values remain unchanged
+    because their original date cannot be recovered.
+25. Optimized virtual extents are computed before scrolling from the same bounded
+    1,200-character projection and Parley shaping model used by message text,
+    including bubble padding, preview/status/timestamp rows, role minimums,
+    spacing, and Slint line-box rounding. The resulting width-keyed prefix and
+    document extent remain stable for that layout width. A settled width change
+    rebuilds the prefix once; a height-only change updates viewport coverage.
+    The mounted-content edge guard replaces the window before the viewport can
+    enter a spacer.
+26. The optimized Chat route owns one stable `VecModel` for its lifetime.
+    Virtual-window shifts preserve overlapping stable message IDs and mutate only
+    non-overlapping prefix/suffix rows; replacing the complete `ModelRc` is limited
+    to the benchmark baseline. The interaction A/B fails when any optimized run
+    exceeds a 50 ms commit-adjacent frame gap, exposes more than 1 px of stable
+    virtual blank, commits within 800 ms after motion stops, mounts over 32 rows,
+    or records more than 1 px of wheel/scrollbar reverse movement.
+27. Programmatic bottom navigation pins the exact Flickable bottom for at most
+    800 ms while initial message measurements settle. Wheel/touchpad or scrollbar
+    input cancels the pin immediately. A resize that begins at the bottom remains
+    at the bottom; a resize elsewhere preserves its visible stable-ID anchor. The
+    interaction A/B fails if startup size settlement exposes more than 1 px of
+    bottom distance after the initial bottom positioning.
+28. A direct scrollbar drag freezes the scroll maximum, thumb height/range, and
+    pointer grab offset at pointer-down. The frozen thumb owns its display
+    position until pointer-up, and ordinary anchor writes are forbidden during
+    the drag. Flickable's `flicked()` callback observes wheel/touchpad direction
+    across the complete viewport without adding a second position-writing chain.
 
 1. Chat 历史继续使用 JSONL；缺少 `status` 字段的旧记录按普通消息兼容读取。
 2. 应用生成的错误/成功状态与正文分开保存，并使用矢量图标展示；禁止重新加入会触发彩色字体回退的固定 Emoji 前缀。
 3. 以 `❌` 或 `✅` 开头的旧 assistant 记录在渲染时识别并去除前缀，不破坏性改写历史文件。
 4. 请求失败继续使用内联 assistant 消息，不与统一 HTTP 反馈重复。
 5. 只有有界虚拟窗口转换为 Slint 消息行；滚动和 resize 不得重建完整历史模型。
-6. Markdown 渲染缓存同时受条目数和估算字节数限制，离开 Chat 时清理。
+6. Chat 的宽度无关文本投影缓存同时受条目数和估算字节数限制，离开 Chat 时清理；
+   完整 Markdown block 解析和格式化展示归文件预览框架所有。
 7. 历史 I/O 和 HTTP 请求不得阻塞 Slint event loop；UI 更新必须调度回该线程。
 8. Chat 组件及其 Slint 消息 model 按路由管理；离开 Chat 时销毁组件并清空 UI model/cache，Rust session 继续作为事实来源，重新进入时重建有界 model。
+   会话中存在历史时，重新进入必须显示居中的历史加载状态，直到有界 model 提交完成；
+   只有恢复完成且确认会话为空后才能显示欢迎引导。
 9. 离开 Chat 后才完成的历史分页或 assistant 响应只更新 Rust session/持久化，不得重新挂载或填充隐藏的 Chat UI。
 10. Chat 展示层由应用自有 native layout、`GitHubScrollView`、
-    `GitHubSpinner`、`GitHubCopyButton` 和 `GitHubIconButton` 组成，
-    Material 视觉不属于产品契约。
+    `GitHubSpinner` 和 `GitHubIconButton` 组成，Material 视觉不属于产品契约。
 11. 消息表面使用紧凑语义边框和 6px 圆角；建议、发送和历史加载操作必须支持
     键盘激活与仅键盘可见的焦点状态。
 12. 编辑器必须随可用宽度自适应，保留拖拽调高能力，发送期间保持 model 常驻；
@@ -65,16 +144,100 @@ This is the stable contract for persisted Chat history, message presentation, vi
     不得覆盖最早一条已挂载消息。
 14. 新产生的用户可见请求错误统一使用简洁英文恢复文案；Provider、HTTP 状态和
     解码技术详情只写日志，不得原样暴露在消息气泡中。
+15. Assistant 行保留宽度无关的可读纯文本投影。为限制 Slint 文本布局开销，长内联投影
+    最多保留 1,200 个 Unicode scalar value，并提供在通用文件预览中打开完整回复的入口；
+    仅宽度变化不得替换 `chat-messages` 或重新执行投影。
+16. 生产虚拟窗口最多挂载 32 条单角色消息；滚动阈值必须在 viewport 越过既定 overscan
+    前移动有界窗口，resize 期间禁止提交替换 model。
+17. 消息 delegate 只实例化当前 User 或 Assistant 角色子树；optimized 产品路径不得
+    保留隐藏的另一套角色树。
+18. macOS 原生 live resize 期间，Chat 将完整消息 ScrollView 保持在上一个稳定宽度，
+    并由当前路由 host 裁剪；路由底面与编辑器继续跟随窗口，松开边缘后只按最终宽度
+    执行一次消息布局。
+19. `USHER_CHAT_PERF_VARIANT=baseline|optimized` 仅作为性能基准 A/B 接缝；baseline
+    保留此前 56 行、双角色子树和持续重排展示，普通启动始终选择 optimized。
+20. 只有实际 viewport 位置变化越过安全 overscan 阈值时才能替换虚拟窗口；滚动停止后
+    不得有延迟任务替换消息 model 或重新定位 viewport。普通 optimized 窗口移动禁止向
+    viewport 写入锚点补偿，Flickable 是滚轮/触控板位置的唯一 owner。同一 event-loop
+    周期内的请求必须合并并按最新 viewport 位置提交，存在重叠的移动每次最多新增两行。
+    只有历史 prepend 与稳定 resize 保留按稳定 ID 的精确补偿。
+21. 每条消息正文只由常驻的自动换行普通 `Text` 负责布局和绘制。文本选择使用 Chat
+    自有指针处理与字形几何覆盖层，不替换该 `Text`、不参与 preferred size，也不挂载
+    `TextInput`。只有当前选择的消息生成按视觉行合并后的选区矩形，平台复制快捷键按
+    Unicode 安全范围复制。Chat 不挂载逐消息复制按钮。
+22. 消息 viewport 内的鼠标拖拽归文本选择所有，不得被 Flickable 接管为拖拽滚动；
+    滚轮、触控板和显式滚动条继续可用。
+23. 滚动到顶部会自动启动一次去重的历史分页加载。提交 prepend 行之前，Chat 记录首个
+    完整可见消息的稳定 ID 与真实内容坐标；布局后只补偿该消息的精确坐标差，使它保持
+    在同一 viewport 像素。消息流内的显式分页操作继续作为重试和无障碍入口。
+24. 新持久化消息使用带本地时区偏移的完整 RFC 3339 时间。消息行按本地自然日生成紧凑
+    标签：今天为 `HH:mm`，昨天为“昨天 `HH:mm`”，前天为“前天 `HH:mm`”，前 3 至 6
+    个自然日为“星期X `HH:mm`”，同年更早为“`M月D日 HH:mm`”，跨年为
+    “`YYYY年M月D日 HH:mm`”。旧版
+    `HH:mm` 记录因无法恢复原始日期，继续原样显示。
+25. optimized 虚拟 extent 在滚动前按同一份有界 1,200 字符投影和消息文本使用的 Parley
+    shaping 计算，并计入气泡 padding、预览/状态/时间行、角色最小高度、消息间距与 Slint
+    line-box rounding。得到的 width-keyed prefix 与 document extent 在该稳定宽度内不得变化。
+    稳定宽度变化只重建一次 prefix；仅高度变化只更新 viewport 覆盖。mounted 内容边缘保护
+    必须在 viewport 进入 spacer 前替换窗口。
+26. optimized Chat 路由在其生命周期内只拥有一个稳定 `VecModel`。虚拟窗口移动时保留
+    稳定消息 ID 重叠区，只增删不重叠的头尾行；整批替换 `ModelRc` 仅保留给 benchmark
+    baseline。任一 optimized A/B 轮次出现提交相邻帧超过 50 ms、稳定虚拟空白超过 1 px、
+    停止移动后 800 ms 内仍提交、挂载超过 32 行，或滚轮/滚动条逆向移动超过 1 px 时，
+    基准必须失败。
+27. 程序主动滚到底部后最多固定 Flickable 精确底部 800 ms，等待初始消息测量稳定；滚轮、
+    触控板或滚动条输入必须立即取消固定。resize 从底部开始时必须继续贴底，其他位置则保持
+    可见稳定 ID 锚点。首次自动贴底后，启动尺寸稳定期间离底距离超过 1 px 时交互 A/B 必须失败。
+28. 直接拖拽滚动条时，pointer-down 必须冻结 scroll maximum、thumb 高度/范围及指针抓取
+    偏移；冻结的 thumb 在 pointer-up 前独占显示位置，拖拽期间禁止普通锚点写入。完整 viewport
+    的滚轮/触控板方向由 Flickable `flicked()` 观测，不得增加第二条位置写入链。
 
 ## Regression checklist / 回归检查
 
 - Load a pre-status JSONL history and verify it remains visible.
-- Verify a legacy `❌ message` renders as an error icon plus `message`, and copying returns text without the Emoji prefix.
+- Verify a legacy `❌ message` renders as an error icon plus selectable `message`
+  text without the Emoji prefix.
 - Trigger a new request error, restart, and verify its status and plain text persist.
 - Open enough history to exceed the virtual window and verify scrolling loads the expected rows without linear UI-model growth.
 - Verify the history action occupies a row above the oldest message at minimum
   width and while loading; it must not overlap message content.
 - Navigate Chat -> Home -> Chat and verify the previous scroll state and messages remain correct.
+- With persisted history, navigate Chat -> Home -> Chat and verify the centered
+  loading state replaces the welcome view until messages appear. With an empty
+  history, verify the welcome view appears without a restoration loading state.
 - While a request or history page is loading, leave Chat and verify the response persists without recreating the Chat component/model; re-enter and verify the completed content appears.
 - Resize the window on a non-Chat route with existing Chat history and verify Chat delegates/text layout do not appear in the resize profile.
+- Resize repeatedly on Chat and verify the model-commit and Markdown-projection
+  counters remain unchanged throughout width-only interaction.
+- Open a Markdown title and verify the formatted document uses the globally
+  selected Docked/Detached host while the readable inline projection remains.
+- Scroll through consecutive responses longer than 1,200 characters and verify
+  the inline projection remains bounded, the complete response opens from its
+  title action, and crossing each row does not pad the window to its 32-row cap.
+- Stop wheel, touchpad, and scrollbar-thumb scrolling between messages and verify
+  the viewport does not perform a delayed model replacement or position jump.
+- Scroll through consecutive large responses at minimum, intermediate, and wide
+  window sizes. Resize both width and height between passes and verify the
+  viewport never exposes a blank virtual spacer before the real history end.
+- At the minimum supported width, drag-select user and assistant message text,
+  copy it with the platform shortcut, and verify no row action is clipped or
+  covered because no per-message action is mounted.
+- Drag vertically across multiple wrapped lines in one long message and verify
+  the selection continues without moving the page; then verify wheel/touchpad
+  scrolling and scrollbar dragging still move the message viewport.
+- Capture message and viewport geometry before pointer-down, during selection,
+  and after pointer-up. The same plain `Text` must remain mounted and neither
+  the bubble height nor scroll position may change because selection started.
+- Scroll to the top and stop. Verify exactly one history page loads automatically
+  and the first visible message remains on the same viewport pixel when the load
+  completes. Scroll away and back to verify the next page can load without a
+  duplicate-request loop; verify the explicit pagination action still works.
+- Verify timestamps at today/yesterday/six-day/seven-day/year boundaries, and
+  verify a legacy time-only history row remains visible unchanged.
+- Run `scripts/benchmark-chat-interaction.sh --runs 3` against one release binary;
+  verify both phases exist in every trace, optimized mounted rows never exceed
+  32, every commit-adjacent maximum is at most 50 ms, startup bottom distance
+  remains at most 1 px, wheel direction has at least ten samples, drag/wheel
+  reverse movement remains at most 1 px, and compare p50/p95/max rather than
+  relying on an average.
 - Run `cargo test --lib --locked` and compile the root Slint UI.

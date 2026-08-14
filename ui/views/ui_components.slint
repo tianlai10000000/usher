@@ -3,11 +3,14 @@ import { GitHubUiComponentsGallery } from "../components/showcase/github_ui_comp
 import { GitHubMetrics } from "../theme/github_theme.slint";
 
 export component GitHubUiComponentsPage inherits GitHubPageView {
+    callback open-artifact-preview-fixture(string);
+
     private property <length> available-width:
         max(0px, root.width - GitHubMetrics.size-32);
 
     GitHubUiComponentsGallery {
         width: root.available-width;
         navigate(route) => { root.navigate(route); }
+        open-artifact-preview-fixture(id) => { root.open-artifact-preview-fixture(id); }
     }
 }

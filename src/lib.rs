@@ -50,6 +50,7 @@ use constants::shutdown_priority::PRIORITY_HIGH;
 
 mod chat;
 use chat::setup_chat;
+pub mod artifact_preview;
 
 mod ai;
 
@@ -223,6 +224,9 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     // ========= Settings ========= //
     // Apply loaded settings to AppState
     setup_settings(&app, &loaded_settings);
+    let _artifact_preview = artifact_preview::setup(&app, &loaded_settings.preview);
+    #[cfg(feature = "test-fixtures")]
+    artifact_preview::setup_fixtures(&app, _artifact_preview.clone());
     set_terminal_dark_mode(&app, is_dark);
     // Seed native chrome / sidebar material colors before the first ordered frame.
     set_title_bar_color(&app, is_dark);
@@ -702,6 +706,9 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
             .unwrap_or(1.0);
         terminal::log_page_memory_diag(route, width_px, height_px, terminal_visible, scale_factor);
         if memory_diagnostics::diagnostics_enabled() {
+            if let Some(ui) = ui.as_ref() {
+                artifact_preview::maybe_mount_memory_benchmark_fixture(ui, route);
+            }
             memory_diagnostics::record_ui_context(
                 route,
                 width_px,
@@ -844,6 +851,9 @@ pub fn main() {
     let first_frame_gate = std::cell::Cell::new(false);
     let sidebar_motion_trace_enabled = sidebar_motion_trace_path.is_some();
     let sidebar_motion_trace_samples_for_render = sidebar_motion_trace_samples.clone();
+    let chat_frame_trace = chat::performance::FrameTrace::from_environment();
+    artifact_preview::performance::initialize();
+    let chat_frame_trace_for_render = chat_frame_trace.clone();
     if let Err(error) = ui.window().set_rendering_notifier(move |state, _| {
         if matches!(state, slint::RenderingState::BeforeRendering) {
             if let Some(win) = ui_weak_first_frame.upgrade() {
@@ -864,7 +874,14 @@ pub fn main() {
                         },
                     );
                 }
+                chat_frame_trace_for_render
+                    .borrow_mut()
+                    .before_rendering(&win);
+                artifact_preview::performance::before_main_rendering(&win);
             }
+        } else if matches!(state, slint::RenderingState::AfterRendering) {
+            chat_frame_trace_for_render.borrow_mut().after_rendering();
+            artifact_preview::performance::after_main_rendering();
         }
     }) {
         log::warn!("[Startup] Rendering notifier unavailable: {error:?}");
@@ -941,6 +958,28 @@ pub fn main() {
                 sidebar_motion_trace_samples.borrow().len(),
                 path.display()
             );
+        }
+    }
+    match chat_frame_trace.borrow().write() {
+        Ok(Some((sample_count, path))) => {
+            log::info!(
+                "[Chat::Performance] wrote {sample_count} render samples to {}",
+                path.display()
+            );
+        }
+        Ok(None) => {}
+        Err(error) => log::error!("[Chat::Performance] failed to write trace: {error}"),
+    }
+    match artifact_preview::performance::write() {
+        Ok(Some((sample_count, path))) => {
+            log::info!(
+                "[ArtifactPreview::Performance] wrote {sample_count} render samples to {}",
+                path.display()
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            log::error!("[ArtifactPreview::Performance] failed to write trace: {error}")
         }
     }
     shutdown::run_cleanup_once("event-loop-exit");

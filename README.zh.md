@@ -97,6 +97,11 @@ UI Components 演练场同样只用于开发。普通 `cargo run` 和现有 Rele
 SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components
 ```
 
+演练场中的 **Artifact preview fixtures** 区域可通过真实生产 Preview Registry 与
+Host 打开 Markdown、PNG、纯文本、JSON 和不支持二进制样例。`ui-components` 会
+自动启用 fixture bridge；普通构建和 Release 构建不会编译这些样例，也不会显示
+相应入口。
+
 如需在不依赖 Provider 响应的情况下检查 GitHub 风格 PR 列表评审状态，可使用下面
 的显式固定 fixture 启动应用，再打开任意已配置项目。它覆盖已批准、需要评审、
 请求修改、无状态、长标题和长分支；普通启动绝不会加载这些记录。
@@ -166,7 +171,9 @@ src/main.rs
      -> src/jobs/              可复用 Job model 与应用级运行页投影
      -> src/workflow/          Branch / Tag / PR / CD 状态与执行
      -> src/terminal/          PTY 会话和终端渲染
-     -> src/chat/              聊天请求、历史、Markdown、UI 绑定
+     -> src/chat/              聊天请求、历史、文本投影、UI 绑定
+     -> crates/usher-preview/ Provider 注册及 Markdown/图片/文本准备
+     -> src/artifact_preview/ 通用右侧面板/独立窗口预览 Host
      -> crates/usher-messages/ 持久消息中心、系统投递与独立 Inbox UI
      -> crates/usher-search/   通用文本匹配、结果导航与视口揭示算法
      -> src/update/            更新检查、下载和安装

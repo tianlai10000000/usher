@@ -8,7 +8,7 @@ license = "LicenseRef-Proprietary"
 publish = false
 
 [workspace]
-members = [".", "crates/usher-messages", "crates/usher-search", "crates/usher-state-store", "crates/usher-ui", "crates/usher-ui-settings", "crates/usher-virtual-list"]
+members = [".", "crates/usher-messages", "crates/usher-preview", "crates/usher-search", "crates/usher-state-store", "crates/usher-ui", "crates/usher-ui-settings", "crates/usher-virtual-list"]
 default-members = ["."]
 resolver = "3"
 
@@ -28,7 +28,7 @@ renderer-skia = ["slint/renderer-skia", "usher-messages/renderer-skia", "usher-u
 live-preview = ["slint/live-preview", "usher-ui/live-preview"]
 # Development-only component playground. Keep this out of the default feature
 # set so normal and production builds do not compile the large showcase page.
-ui-components = ["usher-ui/ui-components"]
+ui-components = ["usher-ui/ui-components", "test-fixtures"]
 # Opt-in local fixtures used for manual UI acceptance. Normal and production
 # builds do not compile the fixture bridge or embed its data.
 test-fixtures = []
@@ -46,6 +46,7 @@ slint = { version = "1.17.1", default-features = false, features = ["std", "comp
 usher-ui = { path = "crates/usher-ui", default-features = false }
 usher-ui-settings = { path = "crates/usher-ui-settings", default-features = false }
 usher-messages = { path = "crates/usher-messages", default-features = false }
+usher-preview = { path = "crates/usher-preview" }
 usher-search = { path = "crates/usher-search" }
 usher-virtual-list = { path = "crates/usher-virtual-list" }
 parley = "0.10"
@@ -63,11 +64,11 @@ tar = "0.4"
 flate2 = "1.0"
 tray-icon = "0.24"
 image = "0.25"
+pulldown-cmark = "0.13"
 config = { version = "0.15", default-features = false, features = ["toml"] }
 directories = "6.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-pulldown-cmark = "0.13"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 webbrowser = "1.0"
 toml = "1.1"  # 用于 TOML 序列化

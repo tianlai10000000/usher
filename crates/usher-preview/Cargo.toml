@@ -1,0 +1,16 @@
+[package]
+name = "usher-preview"
+version = "0.0.8-alpha.1"
+edition = "2024"
+license = "LicenseRef-Proprietary"
+publish = false
+
+[features]
+default = ["markdown", "image", "plain-text"]
+markdown = ["dep:pulldown-cmark"]
+image = ["dep:image"]
+plain-text = []
+
+[dependencies]
+image = { version = "0.25", optional = true, default-features = true }
+pulldown-cmark = { version = "0.13", optional = true }

@@ -41,6 +41,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `crates/usher-search/` | Framework-neutral shared Find engine: Unicode-safe non-overlapping text matches, wrapped adjacent-result navigation, and Chromium/Blink `CenterIfNeeded` viewport policy. Features supply only domain/model and visual-wrap adapters. |
 | `crates/usher-state-store/` | Framework-neutral cross-page state port and built-in engine: typed reducers/actions, immutable revisioned snapshots, selectors, immediate hydration, automatic monotonic subscriptions, and RAII cancellation. Feature facades hide the engine so a community Store can replace it through an adapter. |
 | `crates/usher-virtual-list/` | Framework-neutral variable-height virtualization facade: exact item extents, offset/index mapping, bounded overscan windows, and exact item reveal. Its private adapter currently uses the community `virtualizer` engine; features and Slint bridges depend only on the local port so the engine remains replaceable. |
+| `crates/usher-preview/` | Framework-neutral artifact descriptors, provider/registry contracts, runtime policy, prepared payloads, and build-time detachable Markdown/image/plain-text providers. It has no Chat, MainWindow, or Slint dependency. |
 | `src/app_runtime.rs` | Process-wide Tokio runtime with two production worker threads. Runtime threads install the tracing dispatch; an explicit environment override exists for controlled benchmarks. |
 | `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots and lifetime high-water marks, startup/run metadata, bounded Slint-model accounting, UI-size correlation, and the cancellable periodic memory sampler. |
 | `src/platform/` | Cross-platform native integration boundary. `macos.rs` owns AppKit appearance (forced Light/Dark or follow-system for Auto), title-bar accessories, window-interaction notifications, the native-title-bar click bridge for dismissible transient overlays, macOS PR-review font registration, the `NSSound` click, and `AppleInterfaceThemeChangedNotification` for live Auto theme updates; `windows.rs` owns Windows theme detection and `MessageBeep`; `linux.rs` owns XDG Portal theme detection and non-blocking desktop sound playback. `mod.rs` exposes the shared API, Auto theme watch enablement with a 1s poll fallback on all platforms, plus opening a directory in the OS file manager (Finder/Explorer/`xdg-open`). |
@@ -60,7 +61,8 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/jobs/` | Application-wide Job lifecycle model, source-independent run descriptor/UI projection, and source-keyed action dispatch. It owns no feature process. |
 | `src/workflow/` | Per-project Branch, Tag, PR, and CD state and command execution. Tag and PR Review expose stable file façades with internal controller and pure-logic modules. |
 | `src/terminal/` | PTY lifecycle, viewport synchronization, rendering, selection, and project switching; pure input mapping, diagnostics, and refresh throttling use dedicated modules. |
-| `src/chat/` | Chat transport, sessions, JSONL persistence, Markdown conversion, rendering cache, pagination, interaction binding, and pure bounded virtual layout. |
+| `src/chat/` | Chat transport, sessions, JSONL persistence, width-independent plain-text/artifact projection, bounded rendering cache, pagination, interaction binding, and pure bounded virtual layout. Full artifact rendering belongs to the shared preview feature. |
+| `src/artifact_preview/` | Application preview facade: provider policy, background preparation, stale-result cancellation, Slint model adaptation, one active session, and immediate migration between docked and detached hosts. Its `test-fixtures` adapter is development-only and submits playground samples through this same facade. |
 | `src/update/` | Release checks, streamed downloads, progress, cancellation, installation, and restart. |
 | `src/router/` | Route mapping, history, visibility, and reachability transitions; it does not perform feature cleanup. |
 | `src/shortcuts/` | Application command IDs, declarative key bindings, platform-normalized matching, route scopes, conflict validation, dispatch, and display labels. |
@@ -91,8 +93,9 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `ui/views/ui_components.slint` | Route-only composition for the interactive UI Components playground. |
 | `ui/views/workflow/` | Workflow route composition and the full-window PR review page. Flow, tab, filter, field, and panel components live under `ui/components/workflow/`. |
 | `ui/components/` | Central ownership for every application visual component: controls, rows, cards, menus, tabs, panels, dialogs, fields, feedback, and feature-specific building blocks. GitHub/Primer implementations use `GitHub*` symbols. |
+| `ui/components/artifact_preview/` | Shared application-level preview shell, width-independent Markdown/text/image surfaces, docked panel, and detached native window. It owns no parsing or I/O. |
 | `ui/components/about/`, `chat/`, `project/`, `workflow/` | Feature-owned GitHub/Primer visual building blocks extracted from route views; they own no I/O or route transitions. |
-| `ui/components/showcase/` | Interactive GitHub/Primer property matrices and the registry linking model-dependent feature composites to their live routes. New or materially changed visual components must be registered here. |
+| `ui/components/showcase/` | Interactive GitHub/Primer property matrices and the registry linking model-dependent feature composites to their live routes. Its opt-in Preview fixtures emit fixture ids rather than bypassing providers or hosts. New or materially changed visual components must be registered here. |
 | `ui/components/button/github_icon_button.slint` | Shared `GitHubIconButton` foundation for icon-only, floating, terminal, project-card, and copy actions, including keyboard focus, Tooltip, loading, and semantic variants. |
 | `ui/components/label/github_counter_label.slint` | Shared typed Primer CounterLabel with default/primary/secondary schemes, optional upper limit, compact overlay geometry, and zero-count hiding; status notification badges and future navigation/action counts reuse it. |
 | `ui/components/github_link.slint` | Shared Primer text-link states and keyboard interaction. |
@@ -124,9 +127,10 @@ metrics do not define the product UI. Application surfaces consume
 application-owned code so a dependency upgrade can replace the Material tree
 without carrying patches.
 The current allowlist is intentionally narrow: `MaterialWindowAdapter` in
-`ui/main.slint`, plus public `ListView`/`ScrollView` scrolling in the PR
-Review workspace. `scripts/check-ui-policy.sh` enforces this boundary and the
-Octicon command-icon policy.
+`ui/main.slint` and public `ListView`/`ScrollView` scrolling in the PR Review
+workspace. Artifact Preview uses an application-owned `Flickable` plus the
+shared exact-extent virtualization facade. `scripts/check-ui-policy.sh` enforces
+this boundary and the Octicon command-icon policy.
 
 All product pages and reusable visual components follow the
 [GitHub/Primer UI design specification](specs/ui-design.md). Every
@@ -166,6 +170,48 @@ During native live resize, the mounted route width remains frozen and the exact
 final width is applied when dragging ends; the root and opaque native underlays
 continue following the window. PR Review also preserves its stable internal
 virtualized diff geometry during that interaction.
+
+The application-level docked artifact preview is a root-shell pane aligned to
+the window's top edge and separated from route content by one continuous 1 px
+hairline. One 260ms animated progress value controls both its right-edge clipped
+width and the route's reclaimed width. The complete pane stays right-anchored,
+and Preview/Chat document layout remains stable while the clip moves, so opening
+and closing do not reflow either heavy tree per frame. The feature facade drops
+its prepared session immediately; the read-only Slint projection survives for a
+bounded 280ms exit and is then cleared. FemtoVG replays descendants when an
+ancestor clip moves, so the docked host suspends only document painting during
+the 260ms shell transition while retaining the prepared model. At rest the
+Markdown surface uses the exact-extent `usher-virtual-list` facade; only the
+bounded visible/overscan block window is instantiated, which bounds the one-time
+reveal cost without changing provider or session ownership. A preview-owned resize-handle component owns
+the stable hit target, cursor, hover feedback, and pointer-cancel lifecycle; the
+root shell owns the bounded session width and applies it symmetrically to the
+preview and route panes.
+
+Preview resize has a separate geometry contract from provider rendering. During
+a docked-divider drag, the root shell updates the visible pane boundary and
+clips the Preview surface, while the shared Preview panel keeps its prepared
+document tree at the drag-start layout width. During detached macOS live resize,
+an object-filtered AppKit observer supplies the same host-local state; a bounded
+window-local debounce covers backends that publish width changes without
+native begin/end notifications. Neither path reuses the main-window resize flag.
+Releasing either gesture commits the exact final content width once. Markdown,
+image, and text providers remain unaware of host shape and resize lifecycle.
+The native Markdown surface combines `pulldown-cmark`, Slint `StyledText`, and
+official Primer visual tokens; no WebView/browser runtime is part of the host.
+The feature-owned Parley layout bridge measures every block at a settled content
+width and supplies one exact extent model to `usher-virtual-list`, the Preview
+`Flickable`, and the application-owned Primer scrollbar. Ordinary scrolling
+reuses one stable `VecModel` while the viewport remains inside the exact
+three-block overscan guard. Crossing that guard incrementally removes and appends
+only boundary rows; it never replaces the model or increases the bounded mounted
+row peak. Slint replaces the projected-window value only when its revision
+changes. Thumb height therefore stays constant, normalized thumb travel maps to
+the same normalized document offset through the entire document, and paragraph
+boundaries do not cause per-wheel-event delegate reconstruction.
+Frozen Preview content hides its scrollbar until the settled trailing edge.
+Root scrollbars beneath macOS full-size content keep their draggable tracks below
+the native title-bar inset so AppKit cannot steal thumb drags for window movement.
 
 `src/platform/` selects one clear CJK-capable application font at startup:
 the native `.AppleSystemUIFont` on macOS, `Microsoft YaHei UI` on Windows, and `Noto Sans`
@@ -548,13 +594,60 @@ Presentation does not receive provider JSON or credentials. Provider adapters do
 
 ### Chat
 
-Chat history is append-only JSONL at `im/chat_history.jsonl`. Startup loads a recent tail into the Rust session, but the Chat component and bounded Slint message model are mounted only on the Chat route. Leaving Chat destroys its UI tree and clears the Slint model/Markdown cache; re-entry reconstructs the visible window from the session. Late history or assistant responses continue updating persistence/session without repopulating a hidden UI. Rendering and scroll-anchor calculations are deliberately separated to limit work during scrolling/resizing.
+Chat history is append-only JSONL at `im/chat_history.jsonl`. New records persist a complete RFC 3339 instant with the local offset; the Rust presentation projection converts it into calendar-aware local labels (time today, yesterday, the day before yesterday, weekday within six days, month/day within the year, and full date across years), while legacy time-only values remain readable unchanged. Startup loads a recent tail into the Rust session, but the Chat component and bounded Slint message model are mounted only on the Chat route. Leaving Chat destroys its UI tree and clears the Slint model/projection cache; re-entry reconstructs the visible window from the session. Assistant messages retain a width-independent readable text projection; projections longer than 1,200 Unicode scalar values are bounded inline and expose the complete response through the existing title action. Formatted blocks are prepared by `usher-preview` and shown by the application-level preview host. Late history or assistant responses continue updating persistence/session without repopulating a hidden UI.
+
+The production virtual-window policy mounts no more than 32 single-role rows, and each row
+instantiates only its active role subtree. Actual viewport-position changes commit a new bounded
+window before the viewport consumes the configured pixel overscan and does not
+pad a window of large rows merely to reach the row cap; it never rebuilds
+the complete history, and no delayed idle work mutates the model after scrolling
+stops. One route-owned `VecModel` keeps its identity while shifts remove and insert
+only the non-overlapping prefix/suffix rows, preserving delegates for overlapping
+stable message IDs. Same-event-loop window requests are coalesced and commit from the
+latest viewport position; an overlapping shift introduces at most two new rows. Each
+optimized mutation leaves viewport position ownership with Flickable and performs no
+ordinary anchor write. Exact stable-ID correction is reserved for history prepend and
+settled resize. Spacer and document extents come from a width-keyed prefix computed
+before scrolling with the same bounded projection and Parley shaping model as the
+message rows, including bubble sections, role minimums, spacing, and Slint line-box
+rounding. The 2,400 px mounted-content edge guard replaces a window before the viewport
+can enter a spacer. A stable width change rebuilds that prefix once; height changes
+update viewport coverage independently. During macOS live resize, the message column retains its
+last stable width while the viewport and composer continue following the native
+window. The complete message ScrollView retains that stable width and is clipped
+by the current route host, preventing viewport-width invalidation from entering
+the message tree. Releasing the edge applies one final layout and width-only
+resize never replaces the Chat message model. A same-binary baseline path exists only
+for the reproducible interaction benchmark and is selected by environment, not
+by user-facing application state. Programmatic bottom navigation pins the exact Flickable
+bottom for at most 800 ms while initial measurements settle; wheel or scrollbar input
+cancels it immediately. A resize beginning at the bottom retains that intent, while a
+resize elsewhere retains its visible stable-ID anchor. The benchmark records mutation cost, mutation-to-first-render
+latency, changed row counts, and commit-adjacent frame gaps; every optimized run
+must remain at or below 50 ms for the last metric while retaining zero stable blank
+exposure, zero post-stop commits, no more than 32 mounted rows, and at most one pixel
+of bottom distance during startup size settlement. Direct scrollbar gestures freeze
+their scroll maximum, thumb geometry, and pointer grab offset until release. Flickable
+observes wheel/touchpad direction across the complete viewport; the benchmark also
+requires at least ten such samples and no more than one pixel of drag or wheel reverse
+movement.
 
 Chat presentation is split between route composition in `ui/views/chat.slint`
 and reusable message/welcome components in `ui/components/chat/`. It uses the
-application-owned GitHub ScrollView, Spinner, Button/IconButton, Copy, tokens,
-and focus contracts. This presentation boundary must not expand the bounded
-Rust message window or move persistence/HTTP work onto the event loop.
+application-owned GitHub ScrollView, Spinner, Button/IconButton, tokens, and
+focus contracts. Each message body has one permanent wrapped plain-text layout.
+A Chat-owned Parley cache, pointer surface, and coalesced visual-line overlay
+provide selection without mounting `TextInput`, changing preferred height, or
+replacing the message model. Clipboard work occurs only for the active
+Unicode-safe range when the platform copy shortcut is pressed; there is no
+per-message copy control. The Chat viewport gives pointer drags to text
+selection while retaining wheel/touchpad and explicit scrollbar navigation.
+Reaching the top starts one deduplicated history-page
+load. Prepend commits preserve the first fully visible message by stable ID and
+its actual pre/post-layout position, applying only the exact delta before the
+next frame; the in-flow pagination action remains available. This presentation
+boundary must not expand the bounded Rust message window or move
+persistence/HTTP work onto the event loop.
 
 ### Terminal
 

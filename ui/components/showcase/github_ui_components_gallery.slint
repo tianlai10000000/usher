@@ -133,6 +133,7 @@ component GitHubShowcaseStateBadge inherits Rectangle {
 
 export component GitHubUiComponentsGallery inherits Rectangle {
     callback navigate(Route);
+    callback open-artifact-preview-fixture(string);
 
     private property <bool> toggle-checked: true;
     private property <int> selected-segment: 0;
@@ -506,13 +507,13 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         GitHubShowcaseSection {
             title: "Form controls";
             description: "Text input, compact input, secret/loading/error states, and Toggle interaction.";
-            content-height: 216px;
+            content-height: 268px;
 
             GitHubShowcaseSampleSurface {
                 x: 0px;
                 y: 0px;
                 width: parent.width;
-                height: 208px;
+                height: 260px;
 
                 GitHubTextField {
                     x: GitHubMetrics.size-16;
@@ -1309,15 +1310,52 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         }
 
         GitHubShowcaseSection {
-            title: "Feature component registry";
-            description: "Complex components use real project state on their owning routes; use these links to exercise them without duplicating business logic.";
-            content-height: 416px;
+            title: "Artifact preview fixtures";
+            description: "Open real Preview providers and failure handling through the application-level host.";
+            content-height: 268px;
 
             GitHubShowcaseSampleSurface {
                 x: 0px;
                 y: 0px;
                 width: parent.width;
-                height: 416px;
+                height: 260px;
+                clip: true;
+
+                VerticalLayout {
+                    width: parent.width;
+                    spacing: 0px;
+
+                    for fixture in [
+                        { id: "markdown", label: "Markdown", description: "Headings, inline styles, links, lists, quotes, tables, and code", icon: @image-url("../../assets/icons/octicon-read-16.svg") },
+                        { id: "image-png", label: "PNG image", description: "Decoded RGBA image with contain sizing", icon: @image-url("../../assets/icons/octicon-file-added-16.svg") },
+                        { id: "plain-text", label: "Plain text", description: "Scrollable monospaced log with copy support", icon: @image-url("../../assets/icons/octicon-file-diff-16.svg") },
+                        { id: "json-text", label: "JSON text", description: "UTF-8 application/json through the plain-text provider", icon: @image-url("../../assets/icons/octicon-table-16.svg") },
+                        { id: "unsupported-binary", label: "Unsupported binary", description: "Safe unsupported-provider error state", icon: @image-url("../../assets/icons/octicon-alert-16.svg") }
+                    ]: GitHubActionListItem {
+                        text: fixture.label;
+                        description: fixture.description;
+                        trailing-text: "Open";
+                        icon: fixture.icon;
+                        activated => { root.open-artifact-preview-fixture(fixture.id); }
+                    }
+                }
+            }
+        }
+
+        registry-section := GitHubShowcaseSection {
+            title: "Feature component registry";
+            description: "Complex components use real project state on their owning routes; use these links to exercise them without duplicating business logic.";
+            // Seven row gaps separate the eight descriptive ActionList rows;
+            // the final row ends before the surface's bottom inset.
+            content-height: 7 * (GitHubMetrics.size-48 + GitHubMetrics.size-8)
+                + GitHubMetrics.size-48
+                + GitHubMetrics.size-24;
+
+            GitHubShowcaseSampleSurface {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: registry-section.content-height;
 
                 VerticalLayout {
                     x: GitHubMetrics.size-16;
@@ -1327,16 +1365,17 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     spacing: 0px;
                     alignment: start;
 
-                    for feature in [
+                    for feature[index] in [
                         { label: "Project components", description: "Grid/List cards, search, view switcher, card actions, and project dialog variants", trailing: "Open", icon: @image-url("../../assets/icons/octicon-repo-16.svg"), route: Route.Project, selected: false },
                         { label: "Workflow components", description: "Branch, tag, pull request, deployment, filters, and pagination states", trailing: "Open", icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg"), route: Route.Workflow, selected: false },
                         { label: "Pull request filter menu", description: "Reviews, Assignee, and Sort popovers with selected options and dismissal", trailing: "Open", icon: @image-url("../../assets/icons/octicon-filter-16.svg"), route: Route.Workflow, selected: false },
                         { label: "Job Run components", description: "Application-level run header, Jobs navigation, status, steps, logs, and Stop action", trailing: "Open", icon: @image-url("../../assets/icons/octicon-terminal-16.svg"), route: Route.JobRun, selected: false },
-                        { label: "Chat components", description: "Welcome suggestions, message roles/status, Markdown blocks, composer, and history loading", trailing: "Open", icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg"), route: Route.Chat, selected: false },
+                        { label: "Chat components", description: "Welcome suggestions, message roles/status, artifact title actions, composer, and history loading", trailing: "Open", icon: @image-url("../../assets/icons/octicon-comment-discussion-16.svg"), route: Route.Chat, selected: false },
+                        { label: "Artifact preview", description: "Shared Markdown, image, and plain-text surface with docked or detached hosts", trailing: "Shared", icon: @image-url("../../assets/icons/octicon-file-diff-16.svg"), route: Route.UiComponents, selected: false },
                         { label: "Settings components", description: "Responsive section navigation, provider navigation, fields, toggles, panes, and update actions", trailing: "Open", icon: @image-url("../../assets/icons/octicon-gear-16.svg"), route: Route.Settings, selected: false },
                         { label: "Shell and review components", description: "Navigation rail, breadcrumb, status bar, terminal drawer, pull-request review and diff controls", trailing: "Live", icon: @image-url("../../assets/icons/octicon-stack-16.svg"), route: Route.UiComponents, selected: true }
                     ]: GitHubActionListItem {
-                        bottom-padding: GitHubMetrics.size-8;
+                        bottom-padding: index < 7 ? GitHubMetrics.size-8 : 0px;
                         text: feature.label;
                         description: feature.description;
                         trailing-text: feature.trailing;

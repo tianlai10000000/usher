@@ -41,6 +41,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `crates/usher-search/` | 与框架无关的通用 Find 引擎：Unicode 安全的非重叠文本命中、首尾循环的相邻结果导航，以及 Chromium/Blink `CenterIfNeeded` 视口策略。Feature 只提供领域/model 与视觉换行适配。 |
 | `crates/usher-state-store/` | 与框架无关的跨页面 State 接口与内置引擎：强类型 reducer/action、不可变 revision 快照、selector、立即 hydration、自动单调订阅与 RAII 取消。Feature 门面隐藏具体引擎，未来可通过 adapter 替换社区 Store。 |
 | `crates/usher-virtual-list/` | 与框架无关的可变行高虚拟列表门面：精确 item extent、offset/index 映射、有界 overscan 窗口与精确 item reveal。私有 adapter 当前使用社区 `virtualizer` 引擎；Feature 与 Slint bridge 只依赖本地接口，底层可替换。 |
+| `crates/usher-preview/` | 与框架无关的 Artifact 描述、Provider/Registry 契约、运行时策略、准备后 payload，以及构建期可拆卸的 Markdown/图片/纯文本 Provider；不依赖 Chat、MainWindow 或 Slint。 |
 | `src/app_runtime.rs` | 进程级 Tokio runtime，生产默认使用 2 个 worker；runtime 线程安装 tracing dispatch，并保留显式环境覆盖用于受控基准。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint 与生命周期高水位、启动/运行元数据、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观（强制浅色/深色，或 Auto 时跟随系统）、标题栏附件、窗口交互通知、用于关闭可消隐临时弹层的原生标题栏点击桥接、macOS PR Review 字体注册、`NSSound` 点击音，以及用于 Auto 实时跟随的 `AppleInterfaceThemeChangedNotification`；`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
@@ -60,7 +61,8 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `src/jobs/` | 应用级 Job 生命周期 model、来源无关运行描述符/UI 投影，以及按 source key 的动作分发；不拥有任何 Feature 进程。 |
 | `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行；Tag 与 PR Review 通过稳定文件 façade 暴露内部 controller 和纯逻辑模块。 |
 | `src/terminal/` | PTY 生命周期、viewport 同步、渲染、选择和项目切换；纯输入映射、诊断与刷新节流使用独立模块。 |
-| `src/chat/` | 聊天请求、会话、JSONL 持久化、Markdown、渲染缓存、分页、UI 绑定和纯有界虚拟布局。 |
+| `src/chat/` | 聊天请求、会话、JSONL 持久化、宽度无关的纯文本/Artifact 投影、有界渲染缓存、分页、UI 绑定和纯有界虚拟布局；完整 Artifact 渲染归通用预览 Feature。 |
+| `src/artifact_preview/` | 应用预览门面：Provider 策略、后台准备、过期结果取消、Slint model 适配、单活动 Session，以及固定面板与独立窗口之间的即时迁移。其 `test-fixtures` 适配器仅在开发构建存在，并让演练样例通过同一门面提交。 |
 | `src/update/` | Release 检查、流式下载、进度、取消、安装和重启。 |
 | `src/router/` | 路由映射、历史、可见性和可达性 transition；不执行 feature 清理。 |
 | `src/shortcuts/` | 应用命令 ID、声明式键位、平台归一化匹配、路由作用域、冲突校验、分发与展示标签。 |
@@ -91,8 +93,9 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/views/ui_components.slint` | 交互式 UI Components 演练场的纯路由编排。 |
 | `ui/views/workflow/` | Workflow 路由编排和全窗口 PR Review 页面；Flow、Tab、Filter、Field、Panel 组件归 `ui/components/workflow/`。 |
 | `ui/components/` | 所有应用视觉组件的统一归属目录，包括 Control、Row、Card、Menu、Tab、Panel、Dialog、Field、Feedback 和功能专用视觉积木；GitHub/Primer 实现统一使用 `GitHub*` 符号。 |
+| `ui/components/artifact_preview/` | 应用级通用预览外壳、基于 Primer token 的原生 Markdown/文本/图片 Surface、右侧固定面板与独立原生窗口；不承担解析或 I/O，也不引入 WebView。 |
 | `ui/components/about/`、`chat/`、`project/`、`workflow/` | 从路由页面抽出的功能级 GitHub/Primer 视觉积木，不负责 I/O 或路由跳转。 |
-| `ui/components/showcase/` | GitHub/Primer 属性对比矩阵，以及把依赖业务 model 的组合组件链接到真实路由的登记表；新增或实质变更的视觉组件必须同步登记。 |
+| `ui/components/showcase/` | GitHub/Primer 属性对比矩阵，以及把依赖业务 model 的组合组件链接到真实路由的登记表；可选 Preview 样例只发出 fixture id，不得绕过 Provider 或 Host；新增或实质变更的视觉组件必须同步登记。 |
 | `ui/components/button/github_icon_button.slint` | 图标按钮、浮动按钮、Terminal、项目卡片和复制操作共用的 `GitHubIconButton` 基础，统一键盘焦点、Tooltip、加载态和语义变体。 |
 | `ui/components/label/github_counter_label.slint` | 共用的强类型 Primer CounterLabel，提供 Default/Primary/Secondary Scheme、可选上限、紧凑叠加几何与零值隐藏；状态栏通知徽标及后续导航/操作计数统一复用。 |
 | `ui/components/github_link.slint` | 共用的 Primer 文本链接状态和键盘交互。 |
@@ -121,7 +124,8 @@ Material UI 源码。Material palette、typography 和 style metrics 不定义�
 外观；应用界面统一消费 `GitHubTheme` 与 `GitHubMetrics`。所有视觉适配必须放在
 项目自有代码中，确保依赖升级时可以直接替换 Material UI 目录而无需迁移补丁。
 当前白名单有意保持最小：`ui/main.slint` 的 `MaterialWindowAdapter`，以及 PR
-Review 工作区用于滚动的公开 `ListView`/`ScrollView`。
+Review 工作区用于滚动的公开 `ListView`/`ScrollView`。Artifact Preview 使用应用
+自有 `Flickable` 和共享精确 extent 虚拟化门面。
 `scripts/check-ui-policy.sh` 自动检查该边界及 Octicon 命令图标策略。
 
 所有产品页面和复用视觉组件均遵循
@@ -151,6 +155,36 @@ Surface。详见 [specs/status-bar.md](specs/status-bar.md)。
 宽度，动画不会逐帧重排页面树。原生 Live Resize 时冻结已挂载路由宽度，拖拽结束一次
 应用精确最终宽度；根底面和原生不透明底面仍跟随窗口。PR Review 同时保持稳定的内部
 虚拟化 Diff 几何。
+
+应用级右侧 Artifact 预览是根 Shell 面板，从窗口顶边开始，并通过连续 1px 分隔线与
+路由内容分开。开启和关闭使用同一个 260ms progress 同时控制面板裁剪宽度和路由预留
+宽度；完整面板始终靠右，Preview 与 Chat 文档布局在边界移动期间保持稳定，不逐帧重排。
+Feature 门面立即释放 prepared session，只读 Slint 视觉投影最多保留 280ms 绘制退出
+动画，随后清空。FemtoVG 会在祖先 clip 移动时重放后代绘制，因此固定 Host 在 260ms
+Shell 过渡期间只暂停文档绘制，同时保留准备后的 model；稳定后 Markdown Surface 使用
+`usher-virtual-list` 精确 extent 门面，只实例化有界的可见/overscan block，在不改变
+Provider/Session 所有权的前提下限制正文恢复的一次性成本。预览模块自有的 resize-handle 组件负责稳定命中区、光标、
+hover 反馈和 pointer cancel 生命周期；根 Shell 持有有界的会话宽度，并对预览与路由面板
+对称应用。
+
+Preview resize 的几何契约与 Provider 渲染分离。拖动固定面板分割线时，根 Shell
+只更新可见面板边界并裁剪 Preview Surface，共享 Preview Panel 则把准备后的文档树
+保持在拖动开始时的布局宽度。macOS 独立窗口 Live Resize 由按窗口对象过滤的 AppKit
+observer 提供同样的 Host 局部状态；有界的窗口局部 debounce 覆盖只发布宽度
+变化而不发布原生 begin/end 通知的 backend。两条路径都绝不复用主窗口 resize 标志。
+两种手势松开后均只提交一次精确最终内容宽度；Markdown、图片和文本 Provider 不感知
+Host 形态与 resize 生命周期。
+原生 Markdown Surface 组合 `pulldown-cmark`、Slint `StyledText` 与官方 Primer
+视觉 token，不引入 WebView 或浏览器 runtime。Feature 自有 Parley 布局桥在稳定内容
+宽度下测量全部 block，并把同一份精确 extent model 提供给 `usher-virtual-list`、Preview
+`Flickable` 与应用自有 Primer scrollbar；普通滚动只更新有界的可见 block 投影。因此
+viewport 位于精确的 3-block overscan 安全区内时复用同一个稳定 `VecModel`；跨出安全区
+只增量删除/追加边界行，不替换 model，也不提高有界挂载行峰值。Slint 仅在投影 revision
+变化时替换虚拟窗口值。因此滑块高度全程不变，滑块归一化行程与文档归一化 offset
+始终一致，段落边界也不会触发每个滚轮事件的 delegate 重建。
+Preview 内容宽度冻结期间隐藏滚动条，
+稳定后在最终右边缘恢复；延伸到 macOS 全尺寸标题栏下方的根滚动区把可拖动 scrollbar
+track 放在原生标题栏 inset 下方，避免 AppKit 抢占拖动并移动窗口。
 
 `src/platform/` 在启动时按平台选择一套清晰且支持中日韩文字的应用字体：
 macOS 使用原生 `.AppleSystemUIFont`，Windows 使用 `Microsoft YaHei UI`，其他
@@ -474,12 +508,41 @@ Provider adapters
 
 ### Chat
 
-聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。启动时最近一段只加载到 Rust session；Chat 组件及有界 Slint 消息 model 仅在 Chat 路由挂载。离开 Chat 会销毁 UI 树并清空 Slint model/Markdown 缓存，重新进入时从 session 重建可见窗口。迟到的历史分页或 assistant 响应继续更新持久化/session，但不得填充隐藏 UI。渲染和滚动锚点计算分离，以减少滚动/缩放期间的工作量。
+聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。新记录持久化带本地时区偏移的完整 RFC 3339 时间；Rust 展示投影按本地自然日转换为分层标签（今天显示时分、昨天、前天、六天内显示星期、同年显示月日、跨年显示完整日期），旧版仅时分记录继续兼容原样显示。启动时最近一段只加载到 Rust session；Chat 组件及有界 Slint 消息 model 仅在 Chat 路由挂载。离开 Chat 会销毁 UI 树并清空 Slint model/投影缓存，重新进入时从 session 重建可见窗口。Assistant 消息保留宽度无关的可读文本投影；超过 1,200 个 Unicode scalar value 的投影在 Chat 内有界展示，并通过现有标题入口打开完整回复。格式化 block 由 `usher-preview` 后台准备并交给应用级预览 Host 展示。迟到的历史分页或 assistant 响应继续更新持久化/session，但不得填充隐藏 UI。
+
+生产虚拟窗口最多挂载 32 条单角色行，每行只实例化当前角色对应的子树。实际 viewport 位置变化必须在
+viewport 消耗既定像素 overscan 前提交新的有界窗口；连续大行不得仅为凑满行数上限而
+扩大挂载窗口，且不得重建完整历史。滚动停止后不得有延迟任务修改 model；路由自有的
+`VecModel` 在整个挂载期保持同一身份，窗口移动只增删非重叠的头尾行，稳定消息 ID 重叠区的
+delegate 保持不变。同一 event-loop 周期内的窗口请求会合并，并按最新 viewport 位置提交；
+存在重叠的窗口移动每次最多引入两行。optimized 普通窗口变更不写 viewport 锚点，位置始终
+由 Flickable 独占；只有历史 prepend 与稳定 resize 使用按稳定消息 ID 的精确补偿。Spacer 与
+document extent 在滚动前由 width-keyed prefix 给出，该 prefix 使用与消息行相同的有界投影和
+Parley shaping，并计入气泡区段、角色最小高度、间距及 Slint line-box rounding。mounted 内容
+边缘保护必须在 viewport 进入 spacer 前替换窗口，保护距离为 2,400 px。稳定宽度变化只重建
+一次 prefix，高度变化则独立更新 viewport 覆盖
+范围。macOS live resize 期间完整消息 ScrollView 保持上一个稳定宽度，并由当前路由 host 裁剪，避免
+viewport 宽度失效继续进入消息树；路由底面与编辑器继续跟随原生窗口。松开边缘后只
+执行一次最终布局，仅宽度变化始终不替换 Chat 消息 model。同一二进制中的
+baseline 路径仅供可复现交互基准通过环境变量选择，不进入用户设置或产品状态。程序主动滚到
+底部后会把 Flickable 精确底部最多固定 800 ms，等待初始测量稳定；滚轮或滚动条输入会立即
+取消固定。resize 从底部开始时保留贴底意图，其他位置继续保留可见稳定 ID 锚点。
+基准分别记录模型变更耗时、变更到首个完成渲染的延迟、增删行数和提交相邻帧间隔；每个
+optimized 轮次的最后一项都必须不超过 50 ms，并保持稳定空白为零、停止滚动后提交为零、
+挂载行数不超过 32，且启动尺寸稳定期间的离底距离不超过 1 px。直接滚动条手势会冻结 scroll
+maximum、thumb 几何和指针抓取偏移直到 release；完整 viewport 的滚轮/触控板方向由 Flickable
+观测，基准还要求至少十个方向样本，且拖拽或滚轮逆向移动不得超过 1 px。
 
 Chat 展示层拆分为 `ui/views/chat.slint` 的路由组合与
 `ui/components/chat/` 的消息/欢迎组件，并统一使用应用自有 GitHub
-ScrollView、Spinner、Button/IconButton、Copy、token 与焦点契约。该展示边界
-不得扩大 Rust 的有界消息窗口，也不得把持久化或 HTTP 工作移入 event loop。
+ScrollView、Spinner、Button/IconButton、token 与焦点契约。每条消息正文只保留一个
+常驻的自动换行普通文本布局；Chat 自有 Parley 缓存、指针层和按视觉行合并的覆盖层提供
+选择能力，不挂载 `TextInput`、不改变 preferred height，也不替换消息 model。只有按下
+平台复制快捷键时才复制当前 Unicode 安全范围，不提供逐消息复制控件。Chat viewport
+把鼠标拖拽交给文本选择，同时保留滚轮、触控板和显式滚动条导航。滚动到顶部会启动
+一次去重的历史分页；prepend 提交按稳定消息 ID 与布局前后的真实坐标保持首个完整
+可见消息，只在下一帧前补偿精确差值，消息流内的分页操作仍然保留。该展示边界不得
+扩大 Rust 的有界消息窗口，也不得把持久化或 HTTP 工作移入 event loop。
 
 ### Terminal
 

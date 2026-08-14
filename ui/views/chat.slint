@@ -2,10 +2,11 @@ import { Route } from "../route/routeMap.slint";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 import { GitHubIconButton } from "../components/button/github_icon_button.slint";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
+import { GitHubCenteredLoadingState } from "../components/github_spinner.slint";
 import { GitHubButton } from "../components/settings/github_settings_controls.slint";
-import { GitHubMessageBubble, GitHubChatWelcomeView, MessageRole, MessageStatus, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineLine, MarkdownBlock, ChatMessage } from "../components/chat/github_chat_components.slint";
+import { GitHubMessageBubble, GitHubChatWelcomeView, MessageRole, MessageStatus, ChatMessage, ChatSelectionRect } from "../components/chat/github_chat_components.slint";
 
-export { MessageRole, MessageStatus, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineLine, MarkdownBlock, ChatMessage } from "../components/chat/github_chat_components.slint";
+export { MessageRole, MessageStatus, ChatMessage, ChatSelectionRect } from "../components/chat/github_chat_components.slint";
 
 // Route-scoped chat composition. Rust owns persistence and the bounded virtual
 // history window; this component owns only presentation and interaction.
@@ -13,35 +14,173 @@ export component GitHubChatPage inherits Rectangle {
     in property <[ChatMessage]> messages: [];
     in-out property <string> input-text: "";
     in property <bool> is-sending: false;
+    in property <bool> performance-optimized: true;
+    in property <bool> live-resizing: false;
     in property <bool> can-load-more-history: false;
     in property <bool> loading-history: false;
+    in property <bool> history-restoring: false;
     in property <length> virtual-top-spacer: 0px;
     in property <length> virtual-bottom-spacer: 0px;
+    in property <length> virtual-document-height: 0px;
     in-out property <int> loading-phase: 0;
     in property <length> viewport-height;
+    in property <length> scrollbar-top-inset: 0px;
+    in property <string> application-font-family;
     in-out property <length> scroll-position: 0px;
+    in property <int> scroll-to-bottom-revision: 0;
+    out property <length> bottom-distance: message-scroll-view.visible
+        ? max(
+            0px,
+            message-scroll-view.content_height
+                - message-scroll-view.visible_height
+                + root.scroll-position
+        )
+        : 0px;
+    out property <bool> scrollbar-dragging: message-scroll-view.scrollbar-dragging;
+    out property <length> scrollbar-drag-pointer-y:
+        message-scroll-view.scrollbar-drag-pointer-y;
+    out property <length> scrollbar-drag-thumb-y:
+        message-scroll-view.scrollbar-drag-thumb-y;
+    out property <int> scrollbar-drag-release-revision:
+        message-scroll-view.scrollbar-drag-release-revision;
+    out property <length> scrollbar-drag-release-position:
+        message-scroll-view.scrollbar-drag-release-position;
+    out property <int> wheel-input-revision: root.latest-wheel-input-revision;
+    out property <length> wheel-input-delta: root.latest-wheel-input-delta;
+    private property <int> bottom-distance-zone:
+        root.bottom-distance <= 1px ? 0 : root.bottom-distance <= 96px ? 1 : 2;
 
     callback navigate(Route);
     callback send-message(string);
     callback load-more-history();
-    callback copy-to-clipboard(int, string) -> bool;
-    callback open-link(string);
+    callback open-artifact(string, string, string);
+    callback scroll-position-changed(length);
+    callback scrollbar-dragging-changed(bool);
+    callback bottom-distance-changed(length);
+    callback message-geometry(int, length, length, bool);
+    callback layout-metrics-changed(length, length);
+    pure callback resolve-text-hit(string, float, float, float, float, string, float) -> int;
+    pure callback resolve-selection-rects(string, int, int, float, float, string, float) -> [ChatSelectionRect];
+    callback copy-selection(string, int, int) -> bool;
 
     private property <length> input-area-height: 96px;
+    private property <int> selection-message-id: -1;
+    private property <string> selection-text: "";
+    private property <int> selection-anchor: 0;
+    private property <int> selection-focus: 0;
+    private property <bool> selecting: false;
+    private property <int> bottom-scroll-pin-ticks: 0;
+    private property <int> latest-wheel-input-revision: 0;
+    private property <length> latest-wheel-input-delta: 0px;
+    // Keep the complete message viewport at the last stable width during native
+    // live resize. The host clips it while the route surface and composer follow
+    // the window; releasing the edge commits one final layout at the new width.
+    private property <length> stable-message-layout-width: self.width;
+    private property <length> message-layout-width:
+        root.live-resizing ? root.stable-message-layout-width : root.width;
     private property <length> message-bubble-max-width: max(
         280px,
         min(
             960px,
-            chat-content.width
-                * (chat-content.width < 720px
+            root.message-layout-width
+                * (root.message-layout-width < 720px
                     ? 0.78
-                    : chat-content.width < 1200px
+                    : root.message-layout-width < 1200px
                         ? 0.68
                         : 0.62)
         )
     );
 
     background: GitHubTheme.canvas-default;
+
+    init => {
+        root.layout-metrics-changed(root.message-layout-width, root.height);
+    }
+
+    changed width => {
+        if !root.live-resizing {
+            root.stable-message-layout-width = root.width;
+            root.layout-metrics-changed(root.message-layout-width, root.height);
+        }
+    }
+    changed live-resizing => {
+        root.stable-message-layout-width = root.width;
+        if !root.live-resizing {
+            root.layout-metrics-changed(root.message-layout-width, root.height);
+        }
+    }
+    changed height => {
+        root.layout-metrics-changed(root.message-layout-width, root.height);
+    }
+    changed scroll-position => {
+        root.scroll-position-changed(root.scroll-position);
+    }
+    changed bottom-distance => {
+        if root.bottom-scroll-pin-ticks > 0 && root.bottom-distance > 1px {
+            root.apply-bottom-scroll();
+        }
+    }
+    changed bottom-distance-zone => {
+        root.bottom-distance-changed(root.bottom-distance);
+    }
+    changed scroll-to-bottom-revision => {
+        root.bottom-scroll-pin-ticks = 50;
+        root.apply-bottom-scroll();
+    }
+
+    function begin-selection(message-id: int, text: string, position: int) {
+        root.selection-message-id = message-id;
+        root.selection-text = text;
+        root.selection-anchor = position;
+        root.selection-focus = position;
+        root.selecting = true;
+        selection-focus.focus();
+    }
+
+    function update-selection(message-id: int, position: int) {
+        if root.selecting && root.selection-message-id == message-id {
+            root.selection-focus = position;
+        }
+    }
+
+    function end-selection() {
+        root.selecting = false;
+        if root.selection-anchor == root.selection-focus {
+            root.selection-message-id = -1;
+            root.selection-text = "";
+        } else {
+            selection-focus.focus();
+        }
+    }
+
+    function observe-wheel(delta: length) {
+        root.bottom-scroll-pin-ticks = 0;
+        root.latest-wheel-input-delta = delta;
+        root.latest-wheel-input-revision += 1;
+    }
+
+    function apply-bottom-scroll() {
+        root.scroll-position = -max(
+            0px,
+            message-scroll-view.content_height
+                - message-scroll-view.visible_height
+        );
+    }
+
+    selection-focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if (event.modifiers.control || event.modifiers.meta)
+                && (event.text == "c" || event.text == "C") {
+                root.copy-selection(root.selection-text, root.selection-anchor, root.selection-focus);
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     chat-content := VerticalLayout {
         width: parent.width;
@@ -54,7 +193,9 @@ export component GitHubChatPage inherits Rectangle {
             clip: true;
 
             GitHubChatWelcomeView {
-                visible: root.messages.length == 0 && !root.is-sending;
+                visible: !root.history-restoring
+                    && root.messages.length == 0
+                    && !root.is-sending;
                 width: 100%;
                 height: 100%;
                 suggestion-clicked(text) => {
@@ -63,20 +204,42 @@ export component GitHubChatPage inherits Rectangle {
                 }
             }
 
-            message-scroll-view := GitHubScrollView {
-                visible: root.messages.length > 0 || root.is-sending;
+            if root.history-restoring: GitHubCenteredLoadingState {
                 width: 100%;
                 height: 100%;
+                label: "Loading chat history";
+            }
+
+            message-scroll-view := GitHubScrollView {
+                visible: !root.history-restoring
+                    && (root.messages.length > 0 || root.is-sending);
+                width: root.message-layout-width;
+                height: 100%;
+                // The Chat selection overlay owns pointer drags so a long
+                // selection is not cancelled by Flickable drag-scrolling.
+                // Wheel/touchpad input and the explicit scrollbar still scroll.
+                interactive: false;
                 viewport_y <=> root.scroll-position;
-                show-scrollbar: true;
+                show-scrollbar: !root.live-resizing;
+                stable-scrollbar-drag: root.performance-optimized;
+                scrollbar-top-inset: root.scrollbar-top-inset;
+                user-scroll-started => {
+                    root.bottom-scroll-pin-ticks = 0;
+                }
+                user-wheel-direction(delta) => {
+                    root.observe-wheel(delta);
+                }
+                scrollbar-dragging-changed(dragging) => {
+                    root.scrollbar-dragging-changed(dragging);
+                }
 
                 message-list-layout := VerticalLayout {
-                    width: parent.width;
-                    spacing: GitHubMetrics.size-8;
-                    padding-left: root.width < 720px
+                    width: root.message-layout-width;
+                    spacing: 0px;
+                    padding-left: root.message-layout-width < 720px
                         ? GitHubMetrics.size-12
                         : GitHubMetrics.size-24;
-                    padding-right: root.width < 720px
+                    padding-right: root.message-layout-width < 720px
                         ? GitHubMetrics.size-12
                         : GitHubMetrics.size-24;
                     padding-top: GitHubMetrics.size-24;
@@ -106,24 +269,57 @@ export component GitHubChatPage inherits Rectangle {
                         }
                     }
 
-                    for message[index] in root.messages: GitHubMessageBubble {
-                        role: message.role;
-                        status: message.status;
-                        max-bubble-width: root.message-bubble-max-width;
-                        loading-phase: root.loading-phase;
-                        content: message.content;
-                        rendered-content: message.rendered_content;
-                        is-markdown: message.is_markdown;
-                        markdown-blocks: message.markdown_blocks;
-                        timestamp: message.timestamp;
-                        is-loading: message.content == ""
-                            && root.is-sending
-                            && index == root.messages.length - 1;
-                        copy-message(text) => {
-                            root.copy-to-clipboard(index, text)
-                        }
-                        open-link(url) => {
-                            root.open-link(url);
+                    mounted-message-list := VerticalLayout {
+                        spacing: GitHubMetrics.size-8;
+                        for message[index] in root.messages: GitHubMessageBubble {
+                            message-id: message.id;
+                            role: message.role;
+                            status: message.status;
+                            performance-optimized: root.performance-optimized;
+                            application-font-family: root.application-font-family;
+                            selection-active: message.id == root.selection-message-id;
+                            selection-start: root.selection-anchor;
+                            selection-end: root.selection-focus;
+                            max-bubble-width: root.message-bubble-max-width;
+                            loading-phase: root.loading-phase;
+                            content: message.content;
+                            rendered-content: message.rendered_content;
+                            preview-available: message.preview_available;
+                            preview-title: message.preview_title;
+                            timestamp: message.timestamp;
+                            is-loading: message.content == ""
+                                && root.is-sending
+                                && index == root.messages.length - 1;
+                            open-artifact(message-id, title, markdown) => {
+                                root.open-artifact("chat:" + message-id, title, markdown);
+                            }
+                            selection-begin(message-id, position) => {
+                                root.begin-selection(message-id, message.role == MessageRole.User ? message.content : message.rendered_content, position);
+                            }
+                            selection-update(message-id, position) => { root.update-selection(message-id, position); }
+                            selection-finished => { root.end-selection(); }
+                            resolve-text-hit(text, x, y, width, pitch, family, size) => {
+                                root.resolve-text-hit(text, x, y, width, pitch, family, size)
+                            }
+                            resolve-selection-rects(text, start, end, width, pitch, family, size) => {
+                                root.resolve-selection-rects(text, start, end, width, pitch, family, size)
+                            }
+                            changed y => {
+                                root.message-geometry(
+                                    message.id,
+                                    mounted-message-list.y + self.y,
+                                    self.height,
+                                    true
+                                );
+                            }
+                            changed height => {
+                                root.message-geometry(
+                                    message.id,
+                                    mounted-message-list.y + self.y,
+                                    self.height,
+                                    false
+                                );
+                            }
                         }
                     }
 
@@ -132,19 +328,29 @@ export component GitHubChatPage inherits Rectangle {
                         height: self.visible ? self.preferred-height : 0px;
                         role: MessageRole.Assistant;
                         status: MessageStatus.Normal;
+                        performance-optimized: root.performance-optimized;
+                        application-font-family: root.application-font-family;
                         max-bubble-width: root.message-bubble-max-width;
                         loading-phase: root.loading-phase;
                         content: "";
                         rendered-content: "";
-                        is-markdown: false;
-                        markdown-blocks: [];
+                        preview-available: false;
+                        preview-title: "";
                         timestamp: "";
                         is-loading: true;
                     }
 
                     Rectangle {
                         width: 1px;
-                        height: root.virtual-bottom-spacer;
+                        height: root.performance-optimized
+                            && root.virtual-document-height > 0px
+                            ? max(
+                                0px,
+                                root.virtual-document-height
+                                    - root.virtual-top-spacer
+                                    - mounted-message-list.preferred-height
+                            )
+                            : root.virtual-bottom-spacer;
                         background: transparent;
                     }
                 }
@@ -152,13 +358,10 @@ export component GitHubChatPage inherits Rectangle {
 
             bottom-scroll-timer := Timer {
                 interval: 16ms;
-                running: root.scroll-position < -90000px;
+                running: root.bottom-scroll-pin-ticks > 0;
                 triggered => {
-                    root.scroll-position = -max(
-                        0px,
-                        message-scroll-view.content_height
-                            - message-scroll-view.visible_height
-                    );
+                    root.apply-bottom-scroll();
+                    root.bottom-scroll-pin-ticks -= 1;
                 }
             }
 

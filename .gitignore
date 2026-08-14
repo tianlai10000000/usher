@@ -28,4 +28,8 @@ dist/
 workflow-dist/
 memory-benchmark-results/
 sidebar-motion-benchmark-results/
+chat-interaction-benchmark-results/
+artifact-preview-interaction-benchmark-results/
+artifact-preview-transition-benchmark-results/
+artifact-preview-scroll-benchmark-results/
 __pycache__/

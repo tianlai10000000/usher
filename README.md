@@ -103,6 +103,11 @@ preview script enables it automatically; the equivalent direct command is:
 SLINT_LIVE_PREVIEW=1 cargo run --features live-preview,ui-components
 ```
 
+The playground's **Artifact preview fixtures** section opens Markdown, PNG,
+plain-text, JSON, and unsupported-binary samples through the production Preview
+registry and host. `ui-components` enables the fixture bridge automatically;
+normal and release builds do not compile the samples or expose their controls.
+
 To inspect the GitHub-style PR-list review statuses without depending on a
 provider response, start the app with the opt-in fixed fixture below and open
 any configured project. It includes approved, review-required,
@@ -174,7 +179,9 @@ src/main.rs
      -> src/jobs/              reusable Job model and application run route projection
      -> src/workflow/          Branch / Tag / PR / CD state and execution
      -> src/terminal/          PTY session and terminal rendering
-     -> src/chat/              chat transport, history, Markdown, UI binding
+     -> src/chat/              chat transport, history, text projection, UI binding
+     -> crates/usher-preview/ provider registry and Markdown/image/text preparation
+     -> src/artifact_preview/ shared docked/detached preview hosts
      -> crates/usher-messages/ durable message center, OS delivery, isolated inbox UI
      -> crates/usher-search/   shared text matching, result navigation, viewport reveal
      -> src/update/            update checks, download, install

@@ -11,6 +11,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Shared search navigation](search.md) | Current / 当前 | `crates/usher-search/`, all feature Find adapters |
 | [AI Agent configuration](ai-agent.md) | Current / 当前 | `src/settings.rs`, `src/ai/agent.rs`, `ui/views/settings.slint` |
 | [Chat behavior](chat.md) | Current / 当前 | `src/chat/`, `ui/views/chat.slint`, `ui/components/chat/`, `ui/main.slint` |
+| [Artifact preview framework](artifact-preview.md) | Current / 当前 | `crates/usher-preview/`, `src/artifact_preview/`, `ui/components/artifact_preview/`, Settings and all preview callers |
 | [Project repository metadata](project-repository.md) | Current / 当前 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/views/workflow/` |
 | [Reusable job runs](jobs.md) | Current / 当前 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
@@ -51,6 +52,7 @@ Documents that are not specs:
 - `docs/architecture-structure-audit.md`: dated structure audit and refactoring roadmap.
 - `docs/ARCHITECTURE_FOR_AI.md`: compatibility entry point for older agent prompts.
 - `docs/memory_optimization_backlog.md`, `docs/memory_optimization_backlog.zh.md`: measured memory baseline and phased optimization backlog.
+- `docs/artifact-preview-performance.md`: dated Release measurements for Chat resize and artifact-preview hosts.
 - `docs/ui-github-migration-plan.md`: staged UI implementation checklist and
   user-acceptance gate.
 - `bug-history.md`: append-only migration defect ledger.

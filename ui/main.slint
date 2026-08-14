@@ -12,7 +12,7 @@ import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 
 import { GitHubProjectPage as ProjectPage, ProjectItem } from "./views/project.slint";
 import { GitHubProjectDialog } from "./components/project/github_project_dialog.slint";
-import { GitHubChatPage as ChatPage, ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
+import { GitHubChatPage as ChatPage, ChatMessage, ChatSelectionRect, MessageRole, MessageStatus } from "./views/chat.slint";
 import { Route } from "./route/routeMap.slint";
 import { AppState } from "./state/app_state.slint";
 import { DebugLogger } from "./state/debug_logger.slint";
@@ -36,6 +36,7 @@ import { GitHubScrollView } from "./components/github_scroll_view.slint";
 import { GitHubActionMenu } from "./components/github_action_menu.slint";
 import { GitHubIconButton } from "./components/button/github_icon_button.slint";
 import { GitHubTheme, GitHubMetrics } from "./theme/github_theme.slint";
+import { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, GitHubArtifactPreviewPanel, GitHubArtifactPreviewResizeHandle, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
 
 export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
@@ -47,10 +48,11 @@ export { NotificationIcons } from "./components/notify/icons.slint";
 export { ToastManager, ToastType, ToastOptions } from "./components/toast/toast_manager.slint";
 export { DialogManager, DialogOptions } from "./components/dialog/dialog_manager.slint";
 export { UpdateLogic } from "./components/update/update.slint";
-export { ChatMessage, MessageRole, MessageStatus } from "./views/chat.slint";
+export { ChatMessage, ChatSelectionRect, MessageRole, MessageStatus } from "./views/chat.slint";
 export { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 export { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
+export { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
 
 export struct SidebarMotionStep {
     progress: float,
@@ -181,6 +183,76 @@ export component MainWindow inherits Window {
     private property <bool> sidebar-content-wide: true;
     private property <length> sidebar-content-width: root.width
         - (root.sidebar-content-wide ? 0px : GitHubMetrics.application-sidebar-width);
+    private property <bool> artifact-preview-docked-visible:
+        root.artifact-preview-visible
+            && AppState.artifact-preview-presentation-mode == 0;
+    private property <length> artifact-preview-available-width:
+        max(0px, root.width - GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress);
+    private property <bool> artifact-preview-panel-overlays:
+        root.artifact-preview-available-width < 900px;
+    private property <length> artifact-preview-panel-min-width: 320px;
+    private property <length> artifact-preview-main-min-width: 520px;
+    private property <length> artifact-preview-panel-max-width: max(
+        root.artifact-preview-panel-min-width,
+        min(
+            760px,
+            root.artifact-preview-available-width
+                - (root.artifact-preview-panel-overlays
+                    ? 96px
+                    : root.artifact-preview-main-min-width)
+        )
+    );
+    // Zero selects the responsive default. Once dragged, preserve the session
+    // preference and clamp only the rendered width as the window changes.
+    private property <length> artifact-preview-panel-preferred-width: 0px;
+    private property <bool> artifact-preview-panel-resizing: false;
+    out property <bool> artifact-preview-panel-transitioning: false;
+    out property <bool> artifact-preview-divider-resizing:
+        root.artifact-preview-panel-resizing;
+    out property <length> artifact-preview-divider-x:
+        root.width - root.artifact-preview-visible-width;
+    private property <length> artifact-preview-panel-drag-start-width: 0px;
+    private property <length> artifact-preview-panel-auto-width: min(
+        root.artifact-preview-panel-max-width,
+        max(360px, root.artifact-preview-available-width * 0.46)
+    );
+    private property <length> artifact-preview-panel-width:
+        root.artifact-preview-panel-preferred-width > 0px
+            ? max(
+                root.artifact-preview-panel-min-width,
+                min(
+                    root.artifact-preview-panel-max-width,
+                    root.artifact-preview-panel-preferred-width
+                )
+            )
+            : root.artifact-preview-panel-auto-width;
+    // Keep one scalar as the source of truth for both panes. The preview clips
+    // toward the right edge while the route reclaims exactly the same width.
+    private property <float> artifact-preview-panel-progress:
+        root.artifact-preview-docked-visible ? 1.0 : 0.0;
+    animate artifact-preview-panel-progress {
+        duration: 260ms;
+        easing: cubic-bezier(0.2, 0, 0, 1);
+    }
+    private property <length> artifact-preview-visible-width:
+        root.artifact-preview-panel-width * root.artifact-preview-panel-progress;
+    private property <length> artifact-preview-reserved-width:
+        !root.artifact-preview-panel-overlays
+            ? root.artifact-preview-visible-width
+            : 0px;
+
+    changed artifact-preview-docked-visible => {
+        root.artifact-preview-panel-transitioning = true;
+        artifact-preview-transition-timer.restart();
+    }
+
+    artifact-preview-transition-timer := Timer {
+        interval: 280ms;
+        running: root.artifact-preview-panel-transitioning;
+        triggered => {
+            root.artifact-preview-panel-transitioning = false;
+        }
+    }
     // Keep the large PR Review tree mounted at the window origin, but translate
     // its ordinary content with the same shell motion as the sidebar and title
     // bar. Its layout width follows the shell's one-shot width policy so the
@@ -244,17 +316,72 @@ export component MainWindow inherits Window {
     in property <[ChatMessage]> chat-messages: [];
     in-out property <string> chat-input-text: "";
     in property <bool> chat-is-sending: false;
+    // Same-binary A/B switch. Production defaults to the optimized path; Rust
+    // selects the legacy baseline only for controlled performance runs.
+    in property <bool> chat-performance-optimized: true;
+    // Production keeps prepared Preview content at one layout width during a
+    // divider/native resize. The legacy path is benchmark-only.
+    in property <bool> artifact-preview-performance-optimized: true;
     in property <bool> chat-can-load-more-history: false;
     in property <bool> chat-loading-history: false;
+    // Route-scoped message delegates are rebuilt after Chat becomes visible.
+    // Keep this distinct from loading an older pagination page.
+    in property <bool> chat-history-restoring: false;
+    in-out property <length> chat-bottom-distance: 0px;
     in property <length> chat-virtual-top-spacer: 0px;
     in property <length> chat-virtual-bottom-spacer: 0px;
+    in property <length> chat-virtual-document-height: 0px;
     in-out property <length> chat-scroll-position: 0px;
+    in-out property <bool> chat-scrollbar-dragging: false;
+    in-out property <length> chat-scrollbar-drag-pointer-y: 0px;
+    in-out property <length> chat-scrollbar-drag-thumb-y: 0px;
+    in-out property <int> chat-scrollbar-drag-release-revision: 0;
+    in-out property <length> chat-scrollbar-drag-release-position: 0px;
+    in-out property <int> chat-wheel-input-revision: 0;
+    in-out property <length> chat-wheel-input-delta: 0px;
+    in-out property <int> chat-scroll-to-bottom-revision: 0;
     in-out property <int> chat-loading-phase: 0;
     callback chat-send-message(string);
     callback chat-load-more-history();
-    callback chat-copy-to-clipboard(int, string) -> bool;
-    callback chat-open-link(string);
+    callback chat-open-artifact(string, string, string);
+    callback chat-scroll-position-changed(length);
+    callback chat-scrollbar-dragging-changed(bool);
+    // Development playground fixtures use the same application Preview facade
+    // as production callers; default builds mount no trigger for this callback.
+    callback open-artifact-preview-fixture(string);
+    callback chat-message-geometry(int, length, length, bool);
+    callback chat-layout-metrics-changed(length, length);
+    pure callback chat-resolve-text-hit(string, float, float, float, float, string, float) -> int;
+    pure callback chat-resolve-selection-rects(string, int, int, float, float, string, float) -> [ChatSelectionRect];
+    callback chat-copy-selection(string, int, int) -> bool;
     callback chat-route-visible-changed(bool);
+
+    // Application-level artifact preview. Providers prepare these values on a
+    // worker; the root owns only one docked presentation host.
+    in-out property <bool> artifact-preview-visible: false;
+    in-out property <bool> artifact-preview-loading: false;
+    in-out property <string> artifact-preview-title: "Preview";
+    in-out property <ArtifactPreviewKind> artifact-preview-kind: ArtifactPreviewKind.None;
+    in property <[ArtifactPreviewBlock]> artifact-preview-blocks: [];
+    in-out property <int> artifact-preview-markdown-layout-revision: 0;
+    in-out property <string> artifact-preview-plain-text: "";
+    in-out property <image> artifact-preview-image;
+    in-out property <string> artifact-preview-error: "";
+    in-out property <bool> artifact-preview-can-copy: false;
+    in-out property <bool> artifact-preview-can-open-external: false;
+    in-out property <string> artifact-preview-copy-content: "";
+    callback artifact-preview-dismiss();
+    callback artifact-preview-copy(string) -> bool;
+    callback artifact-preview-open-external();
+    callback artifact-preview-open-link(string);
+    callback artifact-preview-layout-markdown-window(
+        int,
+        [ArtifactPreviewBlock],
+        float,
+        float,
+        float,
+        string
+    ) -> ArtifactPreviewVirtualWindow;
 
     // Workflow state and callbacks
     in property <string> workflow-branch-result: "Ready to recreate branches.";
@@ -820,7 +947,7 @@ export component MainWindow inherits Window {
         main-content-host := Rectangle  {
             x: GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress;
             y: 0px;
-            width: root.sidebar-content-width;
+            width: max(0px, root.sidebar-content-width - root.artifact-preview-reserved-width);
             height: parent.height - LayoutConstants.status-bar-height;
             background: root.window-surface-color;
             z: 1;
@@ -959,6 +1086,9 @@ export component MainWindow inherits Window {
                             viewport-height: page-scroll-view.visible-height
                                 - root.page-content-height-offset;
                             navigate(route) => { root.navigate(route); }
+                            open-artifact-preview-fixture(id) => {
+                                root.open-artifact-preview-fixture(id);
+                            }
                         }
                         if root.current-route == Route.About: AboutPage {
                             viewport-height: page-scroll-view.visible-height - 2px;
@@ -1275,11 +1405,22 @@ export component MainWindow inherits Window {
                 messages: root.chat-messages;
                 input-text <=> root.chat-input-text;
                 is-sending: root.chat-is-sending;
+                performance-optimized: root.chat-performance-optimized;
+                live-resizing: root.chat-performance-optimized
+                    && (root.window-live-resizing
+                        || (root.artifact-preview-performance-optimized
+                            && (root.artifact-preview-panel-resizing
+                                || root.artifact-preview-panel-transitioning)));
+                scrollbar-top-inset: root.native-titlebar-inset;
+                application-font-family: root.application-font-family;
                 can-load-more-history: root.chat-can-load-more-history;
                 loading-history: root.chat-loading-history;
+                history-restoring: root.chat-history-restoring;
                 virtual-top-spacer: root.chat-virtual-top-spacer;
                 virtual-bottom-spacer: root.chat-virtual-bottom-spacer;
+                virtual-document-height: root.chat-virtual-document-height;
                 scroll-position <=> root.chat-scroll-position;
+                scroll-to-bottom-revision: root.chat-scroll-to-bottom-revision;
                 loading-phase <=> root.chat-loading-phase;
                 navigate(route) => {
                     root.navigate(route);
@@ -1290,14 +1431,169 @@ export component MainWindow inherits Window {
                 load-more-history() => {
                     root.chat-load-more-history();
                 }
-                copy-to-clipboard(index, text) => {
-                    root.chat-copy-to-clipboard(index, text)
+                open-artifact(id, title, markdown) => {
+                    root.chat-open-artifact(id, title, markdown);
                 }
-                open-link(url) => {
-                    root.chat-open-link(url);
+                scroll-position-changed(position) => {
+                    root.chat-scroll-position-changed(position);
+                }
+                scrollbar-dragging-changed(dragging) => {
+                    root.chat-scrollbar-dragging = dragging;
+                    root.chat-scrollbar-dragging-changed(dragging);
+                }
+                changed scrollbar-drag-pointer-y => {
+                    root.chat-scrollbar-drag-pointer-y = self.scrollbar-drag-pointer-y;
+                }
+                changed scrollbar-drag-thumb-y => {
+                    root.chat-scrollbar-drag-thumb-y = self.scrollbar-drag-thumb-y;
+                }
+                changed scrollbar-drag-release-revision => {
+                    root.chat-scrollbar-drag-release-revision = self.scrollbar-drag-release-revision;
+                    root.chat-scrollbar-drag-release-position = self.scrollbar-drag-release-position;
+                }
+                changed wheel-input-revision => {
+                    root.chat-wheel-input-revision = self.wheel-input-revision;
+                    root.chat-wheel-input-delta = self.wheel-input-delta;
+                }
+                bottom-distance-changed(distance) => {
+                    root.chat-bottom-distance = distance;
+                }
+                message-geometry(id, y, height, position-changed) => {
+                    root.chat-message-geometry(id, y, height, position-changed);
+                }
+                layout-metrics-changed(width, height) => {
+                    root.chat-layout-metrics-changed(width, height);
+                }
+                resolve-text-hit(text, x, y, width, pitch, family, size) => {
+                    root.chat-resolve-text-hit(text, x, y, width, pitch, family, size)
+                }
+                resolve-selection-rects(text, start, end, width, pitch, family, size) => {
+                    root.chat-resolve-selection-rects(text, start, end, width, pitch, family, size)
+                }
+                copy-selection(text, start, end) => {
+                    root.chat-copy-selection(text, start, end)
                 }
             }
 
+        }
+    }
+
+    // The light host and its visual ModelRc stay mounted for the bounded exit
+    // transition after the feature-owned prepared session is released. Its
+    // full-height hairline and top-aligned surface match the Codex document pane.
+    artifact-preview-panel-host := Rectangle {
+        x: root.width - root.artifact-preview-visible-width;
+        y: 0px;
+        width: root.artifact-preview-visible-width;
+        height: root.height - LayoutConstants.status-bar-height;
+        background: GitHubTheme.canvas-default;
+        clip: true;
+        visible: root.artifact-preview-panel-progress > 0.001;
+        // The docked document pane owns the trailing title-bar region while it
+        // is open, so it must paint above the shell's ordinary settings action
+        // (z:70). Root overlays and dialogs remain substantially higher.
+        z: 80;
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: GitHubMetrics.border-thin;
+            height: parent.height;
+            background: GitHubTheme.border-default;
+            z: 1;
+        }
+
+        GitHubArtifactPreviewPanel {
+            // Keep the complete pane right-anchored and reveal it through the
+            // host clip. Header controls and Markdown layout no longer shrink
+            // on every animation frame.
+            x: root.artifact-preview-performance-optimized
+                ? parent.width - root.artifact-preview-panel-width
+                    + GitHubMetrics.border-thin
+                : GitHubMetrics.border-thin;
+            width: root.artifact-preview-performance-optimized
+                ? max(
+                    0px,
+                    root.artifact-preview-panel-width - GitHubMetrics.border-thin
+                )
+                : max(0px, parent.width - GitHubMetrics.border-thin);
+            height: parent.height;
+            title: root.artifact-preview-title;
+            preview-kind: root.artifact-preview-kind;
+            markdown-blocks: root.artifact-preview-blocks;
+            plain-text: root.artifact-preview-plain-text;
+            preview-image: root.artifact-preview-image;
+            error-text: root.artifact-preview-error;
+            loading: root.artifact-preview-loading;
+            can-copy: root.artifact-preview-can-copy;
+            can-open-external: root.artifact-preview-can-open-external;
+            copy-content: root.artifact-preview-copy-content;
+            layout-resizing: root.artifact-preview-panel-resizing
+                || root.artifact-preview-panel-transitioning;
+            // FemtoVG replays the complete Markdown draw tree when an ancestor
+            // clip moves. Keep the mounted model out of that render path while
+            // the docked shell animates, then reveal it once at rest.
+            content-suspended: root.artifact-preview-performance-optimized
+                && root.artifact-preview-panel-transitioning;
+            performance-optimized: root.artifact-preview-performance-optimized;
+            markdown-layout-revision: root.artifact-preview-markdown-layout-revision;
+            application-font-family: root.application-font-family;
+            layout-markdown-window(
+                revision,
+                blocks,
+                scroll-offset,
+                visible-height,
+                content-width,
+                font-family
+            ) => {
+                root.artifact-preview-layout-markdown-window(
+                    revision,
+                    blocks,
+                    scroll-offset,
+                    visible-height,
+                    content-width,
+                    font-family
+                )
+            }
+            close-requested => { root.artifact-preview-dismiss(); }
+            copy-requested(text) => { root.artifact-preview-copy(text) }
+            open-external-requested => { root.artifact-preview-open-external(); }
+            open-link(url) => { root.artifact-preview-open-link(url); }
+        }
+    }
+
+    GitHubArtifactPreviewResizeHandle {
+        x: root.width - root.artifact-preview-visible-width - 4px;
+        y: 0px;
+        height: root.height - LayoutConstants.status-bar-height;
+        visible: root.artifact-preview-docked-visible
+            && root.artifact-preview-panel-progress > 0.999;
+        resize-enabled: self.visible;
+        z: 81;
+        drag-started => {
+            root.artifact-preview-panel-resizing = true;
+            root.artifact-preview-panel-drag-start-width = root.artifact-preview-panel-width;
+            root.artifact-preview-panel-preferred-width = root.artifact-preview-panel-width;
+        }
+        drag-delta(delta) => {
+            if root.artifact-preview-panel-resizing {
+                // The handle follows the divider, so apply its remaining local
+                // delta to the current width to keep the edge under the pointer.
+                root.artifact-preview-panel-preferred-width = max(
+                    root.artifact-preview-panel-min-width,
+                    min(
+                        root.artifact-preview-panel-max-width,
+                        root.artifact-preview-panel-width - delta
+                    )
+                );
+            }
+        }
+        drag-finished(cancelled) => {
+            if cancelled {
+                root.artifact-preview-panel-preferred-width =
+                    root.artifact-preview-panel-drag-start-width;
+            }
+            root.artifact-preview-panel-resizing = false;
         }
     }
 

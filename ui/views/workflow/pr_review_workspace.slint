@@ -1249,7 +1249,8 @@ export component GitHubPullRequestReviewPage inherits FocusScope {
                 viewport-height: conversation-flow.preferred-height;
 
                 conversation-flow := VerticalLayout {
-                    width: conversation-scroll.visible-width;
+                    x: 16px;
+                    width: max(0px, conversation-scroll.visible-width - 32px);
                     spacing: 16px;
                     alignment: start;
                     padding-bottom: 24px;

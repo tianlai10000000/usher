@@ -39,11 +39,11 @@ pub use macos::is_window_interacting;
 
 #[cfg(target_os = "macos")]
 pub(crate) use macos::{
-    detect_system_dark_mode, follow_system_appearance, install_memory_benchmark_window_control,
-    install_shortcut_input_bridge, install_titlebar_settings_button, play_ui_click,
-    prepare_startup_reveal, set_app_appearance, set_startup_presentation_hidden,
-    set_title_bar_color, setup_pr_review_fonts, startup_native_chrome_ready,
-    update_titlebar_navigation_controls,
+    detect_system_dark_mode, follow_system_appearance, install_artifact_preview_live_resize,
+    install_memory_benchmark_window_control, install_shortcut_input_bridge,
+    install_titlebar_settings_button, play_ui_click, prepare_startup_reveal, set_app_appearance,
+    set_startup_presentation_hidden, set_title_bar_color, setup_pr_review_fonts,
+    startup_native_chrome_ready, update_titlebar_navigation_controls,
 };
 
 #[cfg(target_os = "windows")]
@@ -76,6 +76,9 @@ pub(crate) fn install_titlebar_settings_button(_window: &MainWindow) {}
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn install_memory_benchmark_window_control(_window: &MainWindow) {}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn install_artifact_preview_live_resize(_window: &crate::ArtifactPreviewWindow) {}
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn set_startup_presentation_hidden(_window: &MainWindow, _hidden: bool) {}
@@ -266,6 +269,38 @@ pub(crate) fn open_directory_in_file_manager(path: &Path) -> Result<(), String> 
             .map(|_| ())
             .map_err(|error| format!("Failed to open file manager: {error}"))
     }
+}
+
+/// Open a file with the operating system's associated application.
+///
+/// This is only called from an explicit user action. The child is spawned and
+/// not waited on, so the Slint event loop is never blocked.
+pub(crate) fn open_file_with_system_application(path: &Path) -> Result<(), String> {
+    if !path.is_file() {
+        return Err(format!("File does not exist: {}", path.display()));
+    }
+
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(path).spawn();
+
+    #[cfg(target_os = "windows")]
+    let result = Command::new("cmd")
+        .args(["/C", "start", ""])
+        .arg(path)
+        .spawn();
+
+    #[cfg(target_os = "linux")]
+    let result = Command::new("xdg-open").arg(path).spawn();
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    let result: std::io::Result<std::process::Child> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "opening files is unsupported on this platform",
+    ));
+
+    result
+        .map(|_| ())
+        .map_err(|error| format!("Failed to open file: {error}"))
 }
 
 #[cfg(test)]

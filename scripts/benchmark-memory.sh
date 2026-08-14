@@ -341,7 +341,8 @@ for scenario in "${scenario_items[@]}"; do
     sample_phase "$active_pid" "$scenario" "$run" startup_visible 0
 
     if [[ -n "$prepare_hook" ]]; then
-      "$prepare_hook" "$active_pid" "$run" "$scenario"
+      USHER_MEMORY_WINDOW_CONTROL_BINARY="$window_control" \
+        "$prepare_hook" "$active_pid" "$run" "$scenario"
     elif [[ "$scenario" != "home" && "$workflow_lifecycle" == "normal" ]]; then
       echo "warning: scenario=$scenario has no preparation hook; fixture setup is not reproducible" >&2
     fi

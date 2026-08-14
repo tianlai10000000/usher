@@ -7398,6 +7398,7 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon",
  "usher-messages",
+ "usher-preview",
  "usher-search",
  "usher-ui",
  "usher-ui-settings",
@@ -7419,6 +7420,14 @@ dependencies = [
  "slint",
  "slint-build",
  "usher-state-store",
+]
+
+[[package]]
+name = "usher-preview"
+version = "0.0.8-alpha.1"
+dependencies = [
+ "image",
+ "pulldown-cmark",
 ]
 
 [[package]]
