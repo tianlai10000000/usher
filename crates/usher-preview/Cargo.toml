@@ -7,10 +7,12 @@ publish = false
 
 [features]
 default = ["markdown", "image", "plain-text"]
-markdown = ["dep:pulldown-cmark"]
+markdown = ["dep:pulldown-cmark", "dep:syntect", "dep:two-face"]
 image = ["dep:image"]
 plain-text = []
 
 [dependencies]
 image = { version = "0.25", optional = true, default-features = true }
 pulldown-cmark = { version = "0.13", optional = true }
+syntect = { version = "5.3", optional = true, default-features = false, features = ["default-fancy"] }
+two-face = { version = "0.5", optional = true, default-features = false, features = ["syntect-fancy"] }

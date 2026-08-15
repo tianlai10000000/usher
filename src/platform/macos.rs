@@ -252,8 +252,8 @@ pub(crate) fn detect_system_dark_mode() -> bool {
     unsafe { msg_send![value, isEqualToString: dark] }
 }
 
-fn native_view(window: &MainWindow) -> Option<*mut Object> {
-    let window_handle = window.window().window_handle();
+fn native_view_for_slint_window(window: &slint::Window) -> Option<*mut Object> {
+    let window_handle = window.window_handle();
     let handle = window_handle.window_handle().ok()?;
     let raw_window_handle::RawWindowHandle::AppKit(appkit_handle) = handle.as_ref() else {
         return None;
@@ -262,10 +262,103 @@ fn native_view(window: &MainWindow) -> Option<*mut Object> {
     (!view.is_null()).then_some(view)
 }
 
-fn native_window(window: &MainWindow) -> Option<*mut Object> {
-    let view = native_view(window)?;
+fn native_view(window: &MainWindow) -> Option<*mut Object> {
+    native_view_for_slint_window(window.window())
+}
+
+fn native_window_for_slint_window(window: &slint::Window) -> Option<*mut Object> {
+    let view = native_view_for_slint_window(window)?;
     let window: *mut Object = unsafe { msg_send![view, window] };
     (!window.is_null()).then_some(window)
+}
+
+fn native_window(window: &MainWindow) -> Option<*mut Object> {
+    native_window_for_slint_window(window.window())
+}
+
+thread_local! {
+    static ARTIFACT_PREVIEW_RESIZE_WINDOWS: std::cell::RefCell<std::collections::HashSet<usize>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+/// Bridge AppKit's exact live-resize lifecycle into the detached preview only.
+/// The observer is filtered to this NSWindow, so it never mutates MainWindow's
+/// interaction state or another preview host.
+pub(crate) fn install_artifact_preview_live_resize(window: &crate::ArtifactPreviewWindow) {
+    let Some(native_window) = native_window_for_slint_window(window.window()) else {
+        return;
+    };
+    let key = native_window as usize;
+    let already_installed = ARTIFACT_PREVIEW_RESIZE_WINDOWS.with(|windows| {
+        let mut windows = windows.borrow_mut();
+        !windows.insert(key)
+    });
+    if already_installed {
+        return;
+    }
+
+    let Some(center_class) = Class::get("NSNotificationCenter") else {
+        ARTIFACT_PREVIEW_RESIZE_WINDOWS.with(|windows| {
+            windows.borrow_mut().remove(&key);
+        });
+        return;
+    };
+    let center: *mut Object = unsafe { msg_send![center_class, defaultCenter] };
+    let (Some(begin_name), Some(end_name)) = (
+        nsstring("NSWindowWillStartLiveResizeNotification"),
+        nsstring("NSWindowDidEndLiveResizeNotification"),
+    ) else {
+        ARTIFACT_PREVIEW_RESIZE_WINDOWS.with(|windows| {
+            windows.borrow_mut().remove(&key);
+        });
+        return;
+    };
+    if center.is_null() {
+        ARTIFACT_PREVIEW_RESIZE_WINDOWS.with(|windows| {
+            windows.borrow_mut().remove(&key);
+        });
+        return;
+    }
+
+    let begin_window = window.as_weak();
+    let begin = ConcreteBlock::new(move |_notification: *mut Object| {
+        if let Some(window) = begin_window.upgrade() {
+            window.set_native_live_resizing(true);
+        }
+    })
+    .copy();
+    let end_window = window.as_weak();
+    let end = ConcreteBlock::new(move |_notification: *mut Object| {
+        if let Some(window) = end_window.upgrade() {
+            window.set_native_live_resizing(false);
+        }
+    })
+    .copy();
+    let queue: *mut Object = std::ptr::null_mut();
+    let begin_observer: *mut Object = unsafe {
+        msg_send![
+            center,
+            addObserverForName: begin_name
+            object: native_window
+            queue: queue
+            usingBlock: &*begin
+        ]
+    };
+    let end_observer: *mut Object = unsafe {
+        msg_send![
+            center,
+            addObserverForName: end_name
+            object: native_window
+            queue: queue
+            usingBlock: &*end
+        ]
+    };
+    if begin_observer.is_null() || end_observer.is_null() {
+        ARTIFACT_PREVIEW_RESIZE_WINDOWS.with(|windows| {
+            windows.borrow_mut().remove(&key);
+        });
+        log::warn!("[ArtifactPreview] Failed to install detached live-resize observers");
+    }
 }
 
 /// Point size for sidebar/back/forward SF Symbols inside the 28 pt accessory

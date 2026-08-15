@@ -195,10 +195,19 @@ macOS 全尺寸标题栏下方时，可拖动 scrollbar track 必须从原生标
 ## Markdown presentation / Markdown 展示
 
 Markdown remains native: `pulldown-cmark` owns CommonMark/GFM parsing and Slint
-1.17 `StyledText` owns inline emphasis/link shaping. The shared Preview surface
-maps those semantics to official GitHub Primer typography, spacing, colors,
-heading dividers, quote rules, table separators, and bordered monospace code
-blocks. A feature-owned Parley adapter measures exact block extents only when the
+1.17 `StyledText` owns inline emphasis/link shaping. Fenced code preserves the
+first info-string word as its language; the provider uses `syntect` with
+`two-face`'s bat-curated Sublime/TextMate syntax set and the InspiredGitHub theme
+to prepare compact light/dark token spans on the existing preview worker. This
+set includes TypeScript/TSX and other languages absent from `syntect`'s defaults;
+unknown or omitted languages fall back to plain monospace text. The shared Preview surface maps
+those semantics to official GitHub Primer typography, spacing, colors, heading
+dividers, transparent quotes with a 4 px leading rule, table separators, and
+bordered monospace code blocks. Theme changes select the already-prepared token
+projection and must not reparse Markdown or re-run highlighting. Code tokens are
+rendered directly as native Slint `Text` rows with explicit foreground colors;
+they are never round-tripped through Markdown or HTML markup. A feature-owned
+Parley adapter measures exact block extents only when the
 document revision or settled content width changes. The shared
 `usher-virtual-list` facade maps those extents into a bounded visible/overscan
 projection. The Preview `Flickable` and exactly one application-owned Primer
@@ -210,8 +219,15 @@ add Wry, WebView, HTML/CSS injection, or a browser helper process. Provider
 parsing remains independent from this replaceable visual theme.
 
 Markdown 保持原生实现：`pulldown-cmark` 负责 CommonMark/GFM 解析，Slint 1.17
-`StyledText` 负责行内强调和链接排版；共享 Preview Surface 使用 GitHub Primer 的
-字体层级、间距、语义色、标题分隔、引用线、表格分隔和带边框等宽代码块。不得为该
+`StyledText` 负责行内强调和链接排版。围栏代码块保留 info string 的第一个单词作为
+语言；Provider 在既有 Preview Worker 上使用 `syntect`、`two-face` 维护的 bat
+Sublime/TextMate 语法集合与 InspiredGitHub 主题生成紧凑的亮色/暗色 token。该集合补齐
+`syntect` 默认包缺失的 TypeScript/TSX 等语言；未知或未声明语言自动回退为纯等宽文本。
+共享 Preview Surface 使用 GitHub Primer 的字体层级、间距、语义色、
+标题分隔、透明底加 4px 左侧强调线的引用块、表格分隔和带边框等宽代码块。主题切换只
+选择已经准备好的 token 投影，不得重新解析 Markdown 或重新执行高亮。代码 token
+必须以带显式前景色的原生 Slint `Text` 行直接绘制，禁止再经 Markdown 或 HTML 标记
+二次转换。不得为该
 视觉主题引入 Wry、WebView、HTML/CSS 注入或浏览器辅助进程。Feature 自有 Parley
 适配器只在文档 revision 或稳定内容宽度变化时测量精确 block extent；共享
 `usher-virtual-list` 门面据此生成有界可见/overscan 投影。Preview `Flickable` 与唯一的
@@ -246,14 +262,17 @@ development-only application adapter constructs `ArtifactSource` values and
 submits them through the same `ArtifactPreviewHandle`, registry, worker, and
 active host used by production callers. The playground feature includes the
 fixture bridge, while normal and Release builds compile neither the fixture
-payloads nor their visible controls.
+payloads nor their visible controls. A `test-fixtures` build may set
+`USHER_ARTIFACT_PREVIEW_FIXTURE` to a fixture id to open that payload through
+the production facade at startup for repeatable visual regression capture.
 
 可选的 UI Components 演练场提供 Markdown、PNG 图片、纯文本、JSON 文本和不支持
 二进制样例。
 UI 只发出 fixture id；仅开发构建存在的应用适配器负责构造 `ArtifactSource`，并通过
 生产调用方共用的 `ArtifactPreviewHandle`、Registry、Worker 和当前 Host 打开。
 演练场 feature 自动包含 fixture bridge；普通构建和 Release 构建均不编译样例数据，
-也不显示对应控件。
+也不显示对应控件。`test-fixtures` 构建可通过 `USHER_ARTIFACT_PREVIEW_FIXTURE` 指定
+fixture id，在启动时经生产 facade 自动打开对应 payload，用于可重复的视觉回归截图。
 
 ## State, lifecycle, and concurrency / 状态、生命周期与并发
 

@@ -9,7 +9,7 @@ use parley::fontique::SourceCache;
 use parley::style::{
     FontFamily, FontFamilyName, FontStyle, FontWeight, OverflowWrap, TextWrapMode, WordBreak,
 };
-use parley::{FontContext, LayoutContext, StyleProperty};
+use parley::{FontContext, LayoutContext, LineHeight, StyleProperty};
 use slint::{Model, ModelRc, VecModel};
 use usher_virtual_list::{VirtualList, VirtualWindow};
 
@@ -330,6 +330,16 @@ impl MarkdownVirtualLayoutBridge {
         }
 
         let metrics = block_metrics(block.kind);
+        if block.kind == ArtifactPreviewBlockKind::CodeBlock {
+            let line_count = block.plain_text.as_str().lines().count().max(1) as f32;
+            return to_u32(
+                line_count * metrics.line_height
+                    + metrics.padding_top
+                    + metrics.padding_bottom
+                    + edge_padding,
+            )
+            .max(1);
+        }
         let text_width = (block_width - metrics.content_inset * 2.0).max(1.0);
         let family = if block.kind == ArtifactPreviewBlockKind::CodeBlock {
             "monospace"
@@ -358,6 +368,9 @@ impl MarkdownVirtualLayoutBridge {
                 .ranged_builder(&mut self.font_context, text, 1.0, false);
         builder.push_default(FontFamily::List(Cow::Borrowed(&families)));
         builder.push_default(StyleProperty::FontSize(font_size));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
+            block_metrics(block.kind).line_height,
+        )));
         builder.push_default(StyleProperty::WordBreak(WordBreak::Normal));
         builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
         builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
@@ -405,6 +418,7 @@ impl MarkdownVirtualLayoutBridge {
 #[derive(Clone, Copy)]
 struct BlockMetrics {
     font_size: f32,
+    line_height: f32,
     content_inset: f32,
     padding_top: f32,
     padding_bottom: f32,
@@ -414,48 +428,56 @@ fn block_metrics(kind: ArtifactPreviewBlockKind) -> BlockMetrics {
     match kind {
         ArtifactPreviewBlockKind::Heading1 => BlockMetrics {
             font_size: 26.0,
+            line_height: 32.0,
             content_inset: 0.0,
             padding_top: 16.0,
             padding_bottom: 12.0,
         },
         ArtifactPreviewBlockKind::Heading2 => BlockMetrics {
             font_size: 22.0,
+            line_height: 28.0,
             content_inset: 0.0,
             padding_top: 20.0,
             padding_bottom: 12.0,
         },
         ArtifactPreviewBlockKind::Heading3 => BlockMetrics {
             font_size: 18.0,
+            line_height: 24.0,
             content_inset: 0.0,
             padding_top: 16.0,
             padding_bottom: 6.0,
         },
         ArtifactPreviewBlockKind::CodeBlock => BlockMetrics {
-            font_size: 12.0,
-            content_inset: 12.0,
-            padding_top: 12.0,
-            padding_bottom: 12.0,
+            font_size: 13.0,
+            line_height: 20.0,
+            content_inset: 16.0,
+            padding_top: 40.0,
+            padding_bottom: 16.0,
         },
         ArtifactPreviewBlockKind::Quote => BlockMetrics {
             font_size: 15.0,
+            line_height: 18.0,
             content_inset: 16.0,
             padding_top: 8.0,
-            padding_bottom: 8.0,
+            padding_bottom: 0.0,
         },
         ArtifactPreviewBlockKind::TableRow => BlockMetrics {
             font_size: 13.0,
+            line_height: 18.0,
             content_inset: 8.0,
             padding_top: 8.0,
             padding_bottom: 8.0,
         },
         ArtifactPreviewBlockKind::ListItem => BlockMetrics {
             font_size: 15.0,
+            line_height: 21.0,
             content_inset: 0.0,
             padding_top: 2.0,
             padding_bottom: 2.0,
         },
         ArtifactPreviewBlockKind::Paragraph | ArtifactPreviewBlockKind::Rule => BlockMetrics {
             font_size: 15.0,
+            line_height: 21.0,
             content_inset: 0.0,
             padding_top: 4.0,
             padding_bottom: 8.0,
@@ -504,6 +526,8 @@ mod tests {
         ArtifactPreviewBlock {
             kind,
             styled: slint::StyledText::from_plain_text(text),
+            code_lines: ModelRc::default(),
+            code_language: "".into(),
             plain_text: text.into(),
             layout_spans: ModelRc::default(),
         }
@@ -543,6 +567,46 @@ mod tests {
         assert_eq!(first.content_height, middle.content_height);
         assert_eq!(first.content_height, end.content_height);
         assert_eq!(end.scroll_offset, (end.content_height - 420.0).max(0.0));
+    }
+
+    #[test]
+    fn short_cjk_quote_does_not_reserve_excessive_bottom_space() {
+        let quote = block(
+            ArtifactPreviewBlockKind::Quote,
+            "注意：appId 和 universalLink 必须由微信开放平台申请并配置，否则无法正常唤起微信。",
+        );
+        let mut bridge = MarkdownVirtualLayoutBridge::default();
+
+        let extent = bridge.block_extent(&quote, 520.0, ".AppleSystemUIFont", false, false);
+
+        assert!(extent <= 100, "short quote reserved {extent}px");
+    }
+
+    #[test]
+    fn narrow_cjk_quote_with_inline_code_does_not_reserve_an_extra_line() {
+        let mut quote = block(
+            ArtifactPreviewBlockKind::Quote,
+            "注意：注册操作必须在调用其他企业微信功能（如 share()、isInstalled() 或\nstartup()）之前完成，否则可能导致功能调用失败。",
+        );
+        let spans = ["share()", "isInstalled()", "startup()"]
+            .into_iter()
+            .map(|code| {
+                let start = quote.plain_text.as_str().find(code).expect("inline code") as i32;
+                crate::ArtifactPreviewInlineSpan {
+                    kind: ArtifactPreviewInlineKind::Code,
+                    start,
+                    end: start + code.len() as i32,
+                }
+            })
+            .collect::<Vec<_>>();
+        quote.layout_spans = ModelRc::new(Rc::new(VecModel::from(spans)));
+        let mut bridge = MarkdownVirtualLayoutBridge::default();
+
+        // A roughly 355px docked panel leaves a 323px Markdown block after
+        // the narrow document padding used by the Slint surface.
+        let extent = bridge.block_extent(&quote, 323.0, ".AppleSystemUIFont", false, false);
+
+        assert!(extent <= 96, "narrow quote reserved {extent}px");
     }
 
     #[test]

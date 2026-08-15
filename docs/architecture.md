@@ -197,8 +197,13 @@ window-local debounce covers backends that publish width changes without
 native begin/end notifications. Neither path reuses the main-window resize flag.
 Releasing either gesture commits the exact final content width once. Markdown,
 image, and text providers remain unaware of host shape and resize lifecycle.
-The native Markdown surface combines `pulldown-cmark`, Slint `StyledText`, and
-official Primer visual tokens; no WebView/browser runtime is part of the host.
+The native Markdown surface combines `pulldown-cmark`, worker-side `syntect`
+highlighting with the bat-curated `two-face` syntax set, Slint `StyledText` for inline prose, direct native Slint `Text`
+rows for colored code tokens, and official Primer visual tokens. Fenced code
+retains its language and carries prepared light/dark token projections without
+an intermediate Markdown/HTML conversion; theme changes do not repeat parsing
+or highlighting. No WebView/browser runtime is
+part of the host.
 The feature-owned Parley layout bridge measures every block at a settled content
 width and supplies one exact extent model to `usher-virtual-list`, the Preview
 `Flickable`, and the application-owned Primer scrollbar. Ordinary scrolling
@@ -239,7 +244,12 @@ action enum and anchor rectangle through the dedicated factory-local
 maps those enum values to separate literal surfaces. No label string crosses a
 list delegate. Settings mounts a local generic `GitHubTooltipOverlayHost` for
 shared controls; that host remounts its text-measurement surface for each claim
-token. Both factory pages reuse the
+token. Messages keeps its factory root and visual tree stable after the first
+visit to avoid Slint 1.17.1 factory remount corruption. Its bridge clears the
+row model on exit and hydrates the latest Store snapshot before reactivation,
+so an inactive Inbox retains no projected rows. Rebuilding the visual tree per
+visit was rejected after a release A/B showed no material RSS saving and mixed
+physical-footprint regressions. Both factory pages reuse the
 same anchor-based offset/flip/shift/size implementation as `MainWindow` without
 attempting to share a global instance across the factory boundary.
 Changing `settings.slint` or
@@ -596,15 +606,23 @@ Presentation does not receive provider JSON or credentials. Provider adapters do
 
 Chat history is append-only JSONL at `im/chat_history.jsonl`. New records persist a complete RFC 3339 instant with the local offset; the Rust presentation projection converts it into calendar-aware local labels (time today, yesterday, the day before yesterday, weekday within six days, month/day within the year, and full date across years), while legacy time-only values remain readable unchanged. Startup loads a recent tail into the Rust session, but the Chat component and bounded Slint message model are mounted only on the Chat route. Leaving Chat destroys its UI tree and clears the Slint model/projection cache; re-entry reconstructs the visible window from the session. Assistant messages retain a width-independent readable text projection; projections longer than 1,200 Unicode scalar values are bounded inline and expose the complete response through the existing title action. Formatted blocks are prepared by `usher-preview` and shown by the application-level preview host. Late history or assistant responses continue updating persistence/session without repopulating a hidden UI.
 
-The production virtual-window policy mounts no more than 32 single-role rows, and each row
-instantiates only its active role subtree. Actual viewport-position changes commit a new bounded
+Production mounts every currently loaded row in one stable `VecModel`, instantiates only each
+row's active role subtree, and keeps both virtual spacers at zero. This removes estimated-height
+spacer geometry from user-facing scrolling because mixed short, error, and large messages can
+otherwise place the complete bounded window outside the real viewport. Startup loads 20 recent
+messages and explicit or automatic history pagination adds 10 at a time. The bounded virtual-window
+implementation remains isolated behind the `chat-performance` fixture for continued measurement;
+it is not a production rendering path. In that benchmark, viewport-position changes commit a new bounded
 window before the viewport consumes the configured pixel overscan and does not
 pad a window of large rows merely to reach the row cap; it never rebuilds
 the complete history, and no delayed idle work mutates the model after scrolling
 stops. One route-owned `VecModel` keeps its identity while shifts remove and insert
 only the non-overlapping prefix/suffix rows, preserving delegates for overlapping
 stable message IDs. Same-event-loop window requests are coalesced and commit from the
-latest viewport position; an overlapping shift introduces at most two new rows. Each
+latest viewport position. An ordinary wheel/touchpad overlapping shift introduces at most two
+new rows, while direct scrollbar drag commits treat the destination as random access and bypass
+that cap and the ordinary 2,400 px overscan. Pointer-up performs one final uncapped convergence
+at the exact release position and retains the visible-only drag window until ordinary scrolling. Each
 optimized mutation leaves viewport position ownership with Flickable and performs no
 ordinary anchor write. Exact stable-ID correction is reserved for history prepend and
 settled resize. Spacer and document extents come from a width-keyed prefix computed
@@ -624,13 +642,14 @@ bottom for at most 800 ms while initial measurements settle; wheel or scrollbar 
 cancels it immediately. A resize beginning at the bottom retains that intent, while a
 resize elsewhere retains its visible stable-ID anchor. The benchmark records mutation cost, mutation-to-first-render
 latency, changed row counts, and commit-adjacent frame gaps; every optimized run
-must remain at or below 50 ms for the last metric while retaining zero stable blank
-exposure, zero post-stop commits, no more than 32 mounted rows, and at most one pixel
+must keep commit-adjacent p95 and every mutation-to-render latency at or below 50 ms
+while retaining zero stable blank exposure, zero post-stop commits, no more than 32 mounted rows, and at most one pixel
 of bottom distance during startup size settlement. Direct scrollbar gestures freeze
 their scroll maximum, thumb geometry, and pointer grab offset until release. Flickable
 observes wheel/touchpad direction across the complete viewport; the benchmark also
-requires at least ten such samples and no more than one pixel of drag or wheel reverse
-movement.
+requires at least ten such samples, no more than one pixel of drag or wheel reverse
+movement, at least five rendered samples in each 24-step fast drag, and no more than
+one pixel of virtual blank during either drag or release.
 
 Chat presentation is split between route composition in `ui/views/chat.slint`
 and reusable message/welcome components in `ui/components/chat/`. It uses the

@@ -174,8 +174,11 @@ observer 提供同样的 Host 局部状态；有界的窗口局部 debounce 覆�
 变化而不发布原生 begin/end 通知的 backend。两条路径都绝不复用主窗口 resize 标志。
 两种手势松开后均只提交一次精确最终内容宽度；Markdown、图片和文本 Provider 不感知
 Host 形态与 resize 生命周期。
-原生 Markdown Surface 组合 `pulldown-cmark`、Slint `StyledText` 与官方 Primer
-视觉 token，不引入 WebView 或浏览器 runtime。Feature 自有 Parley 布局桥在稳定内容
+原生 Markdown Surface 组合 `pulldown-cmark`、Worker 侧 `syntect` 高亮与 bat 维护的
+`two-face` 语法集合、用于行内正文的
+Slint `StyledText`、直接绘制彩色代码 token 的原生 Slint `Text` 行，以及官方 Primer
+视觉 token。围栏代码块保留语言并携带准备好的亮色/暗色 token 投影，不再经过
+Markdown/HTML 二次转换；主题切换不重复解析或高亮；不引入 WebView 或浏览器 runtime。Feature 自有 Parley 布局桥在稳定内容
 宽度下测量全部 block，并把同一份精确 extent model 提供给 `usher-virtual-list`、Preview
 `Flickable` 与应用自有 Primer scrollbar；普通滚动只更新有界的可见 block 投影。因此
 viewport 位于精确的 3-block overscan 安全区内时复用同一个稳定 `VecModel`；跨出安全区
@@ -205,7 +208,11 @@ global 自动共享。Messages Inbox 行只把动作枚举与锚点矩形发布�
 `MessageTooltipOverlayState`，由页面唯一的 `GitHubMessageTooltipOverlayHost` 把枚举
 映射到相互独立的字面量 surface，任何标签字符串都不穿过列表 delegate。Settings 为
 共享控件挂载本地通用 `GitHubTooltipOverlayHost`，并在每个新 claim token 到来时重建
-文本测量 surface。两个 factory
+文本测量 surface。Messages 首次访问后保留稳定 factory 根与视觉树，以规避 Slint
+1.17.1 的 factory 重挂载损坏。退出时 bridge 清空行 model，重新进入时先从最新
+Store 快照 hydration 再激活，因此非活动 Inbox 不保留投影行。逐次重建视觉树的
+Release A/B 没有测得实质 RSS 节省，且 physical footprint 出现混合回退，因此该
+候选被拒绝。两个 factory
 页面都复用与 `MainWindow` 相同的锚点式 offset/flip/shift/size 实现，但不尝试跨
 factory 边界共享 global 实例。修改 `settings.slint` 或
 `messages.slint` 不得重新生成或编译
@@ -510,12 +517,17 @@ Provider adapters
 
 聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。新记录持久化带本地时区偏移的完整 RFC 3339 时间；Rust 展示投影按本地自然日转换为分层标签（今天显示时分、昨天、前天、六天内显示星期、同年显示月日、跨年显示完整日期），旧版仅时分记录继续兼容原样显示。启动时最近一段只加载到 Rust session；Chat 组件及有界 Slint 消息 model 仅在 Chat 路由挂载。离开 Chat 会销毁 UI 树并清空 Slint model/投影缓存，重新进入时从 session 重建可见窗口。Assistant 消息保留宽度无关的可读文本投影；超过 1,200 个 Unicode scalar value 的投影在 Chat 内有界展示，并通过现有标题入口打开完整回复。格式化 block 由 `usher-preview` 后台准备并交给应用级预览 Host 展示。迟到的历史分页或 assistant 响应继续更新持久化/session，但不得填充隐藏 UI。
 
-生产虚拟窗口最多挂载 32 条单角色行，每行只实例化当前角色对应的子树。实际 viewport 位置变化必须在
-viewport 消耗既定像素 overscan 前提交新的有界窗口；连续大行不得仅为凑满行数上限而
+生产路径在一个稳定 `VecModel` 中挂载当前已加载的全部消息，每行只实例化当前角色对应的子树，
+并将上下虚拟 spacer 固定为零。这样移除了用户滚动中的估算行高 spacer，因为短消息、错误消息
+与大消息混合时，估算坐标会把整个有界窗口放到真实 viewport 之外。启动加载最近 20 条，显式或
+自动历史分页每次增加 10 条。现有有界虚拟窗口仅保留在隔离的 `chat-performance` fixture 中继续
+量测，不再是生产渲染路径。该基准中的 viewport 位置变化必须在 viewport 消耗既定像素 overscan 前提交新的有界窗口；连续大行不得仅为凑满行数上限而
 扩大挂载窗口，且不得重建完整历史。滚动停止后不得有延迟任务修改 model；路由自有的
 `VecModel` 在整个挂载期保持同一身份，窗口移动只增删非重叠的头尾行，稳定消息 ID 重叠区的
 delegate 保持不变。同一 event-loop 周期内的窗口请求会合并，并按最新 viewport 位置提交；
-存在重叠的窗口移动每次最多引入两行。optimized 普通窗口变更不写 viewport 锚点，位置始终
+普通滚轮/触控板的重叠移动每次最多引入两行，直接拖拽滚动条则按随机访问处理并绕过该限制及
+普通 2,400 px overscan，pointer-up 还会按精确松手位置执行一次最终无上限收敛，并把仅覆盖
+可见区的 drag 窗口保留到下一次普通滚动。optimized 普通窗口变更不写 viewport 锚点，位置始终
 由 Flickable 独占；只有历史 prepend 与稳定 resize 使用按稳定消息 ID 的精确补偿。Spacer 与
 document extent 在滚动前由 width-keyed prefix 给出，该 prefix 使用与消息行相同的有界投影和
 Parley shaping，并计入气泡区段、角色最小高度、间距及 Slint line-box rounding。mounted 内容
@@ -528,10 +540,11 @@ baseline 路径仅供可复现交互基准通过环境变量选择，不进入�
 底部后会把 Flickable 精确底部最多固定 800 ms，等待初始测量稳定；滚轮或滚动条输入会立即
 取消固定。resize 从底部开始时保留贴底意图，其他位置继续保留可见稳定 ID 锚点。
 基准分别记录模型变更耗时、变更到首个完成渲染的延迟、增删行数和提交相邻帧间隔；每个
-optimized 轮次的最后一项都必须不超过 50 ms，并保持稳定空白为零、停止滚动后提交为零、
+optimized 轮次的提交相邻帧 p95 及每次变更到渲染的延迟都必须不超过 50 ms，并保持稳定空白为零、停止滚动后提交为零、
 挂载行数不超过 32，且启动尺寸稳定期间的离底距离不超过 1 px。直接滚动条手势会冻结 scroll
 maximum、thumb 几何和指针抓取偏移直到 release；完整 viewport 的滚轮/触控板方向由 Flickable
-观测，基准还要求至少十个方向样本，且拖拽或滚轮逆向移动不得超过 1 px。
+观测，基准还要求至少十个方向样本，拖拽或滚轮逆向移动不得超过 1 px；两个方向的 24 步
+快速拖拽分别至少产生 5 个渲染样本，拖拽期间及松手后的虚拟空白也不得超过 1 px。
 
 Chat 展示层拆分为 `ui/views/chat.slint` 的路由组合与
 `ui/components/chat/` 的消息/欢迎组件，并统一使用应用自有 GitHub

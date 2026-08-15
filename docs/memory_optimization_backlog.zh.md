@@ -395,6 +395,41 @@ Terminal Scrollback 已有上限，但一个可见帧可能同时存在于 `vt10
 - 迟到的异步响应仍受序列保护，不能重新填回已清空状态。
 - 固定大型 PR fixture 在真正不可达事件后释放重型 owned model/cache；分配器高水位行为与活着的所有权分开报告。
 
+### MEM-14 — 重建非活动 Messages 视觉树
+
+状态：候选已拒绝（2026-08-14）
+
+候选保留独立生成的 Messages factory 根，但只在 `Route.Messages` 活动时挂载
+ScrollView 与 Tooltip host；基线持续挂载这些视觉节点。两组都使用已有生命周期桥接：
+退出时清空投影行 model，重新进入前完成 hydration；Store 订阅以及其他页面上的
+Banner 和未读通知表面始终保持活动。
+
+受控 A/B 使用当前持久化的 8 行 MessageCenter 快照、Release/FemtoVG、800×600
+逻辑窗口与 2.00 缩放，两轮 Messages 进入/退出，每相位 5 个样本；每个 variant
+运行 3 个隔离进程并按轮次交错。6 份日志全部验证了
+`Home → Messages → Home → Messages → Home`、两次投影行为 0 的 inactive 生命周期
+事件，以及第二次进入时 8 行 hydration。
+
+| 指标 | 稳定视觉树基线 | 仅活动时挂载候选 | 候选 − 基线 |
+| --- | ---: | ---: | ---: |
+| 第 1 轮离开后稳定 RSS | 120.41 MiB | 121.23 MiB | +0.83 MiB (+0.7%) |
+| 第 2 轮离开后稳定 RSS | 120.77 MiB | 121.47 MiB | +0.70 MiB (+0.6%) |
+| 第 2 轮 RSS 高于启动值 | 9.88 MiB | 9.50 MiB | -0.38 MiB (-3.8%) |
+| 第 2 轮离开后稳定 footprint | 112.56 MiB | 119.58 MiB | +7.02 MiB (+6.2%) |
+| 第 2 轮 footprint 高于启动值 | 32.45 MiB | 38.56 MiB | +6.11 MiB (+18.8%) |
+| 全程实测 RSS 峰值 | 120.94 MiB | 121.64 MiB | +0.70 MiB (+0.6%) |
+| 全程实测 footprint 峰值 | 112.84 MiB | 120.58 MiB | +7.73 MiB (+6.9%) |
+
+结论：**拒绝仅活动时挂载视觉树**。归一化 RSS 方向略有改善，但远低于默认
+10 MiB/5% 门槛；3 组配对运行的第 2 轮离开后绝对 RSS 均更高，physical footprint
+结果也混合且有两组明显回退。生产行为保留稳定 factory 视觉树与已有的离页行 model
+释放。生命周期诊断继续保留，用于直接验证投影所有权。
+
+证据位于 Git 忽略的
+`memory-benchmark-results/messages-ui107-ab-20260814/`。冻结的 baseline/candidate
+SHA-256 已记录在 `metadata.tsv`，同目录保留原始样本、逐轮摘要、完整日志与生成对比。
+基准运行时工作区为脏状态，Preview、Chat 与 macOS 平台的无关修改均原样保留。
+
 ## 当前不优先处理
 
 - Home 空闲 UI 模型：本次测量只有 9 个项目行、10 个标签、没有 PR 行、没有 Review 行，模型文本仅数 KiB。

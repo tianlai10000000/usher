@@ -4,8 +4,8 @@ use crate::chat::renderer::{clear_render_cache, record_model_commit, render_for_
 use crate::chat::session::ChatSessionService;
 use crate::chat::virtual_layout::{
     VirtualRenderSignature, VirtualWindowPolicy, clear_virtual_layout_cache,
-    compute_spacers_for_fixed_window, compute_virtual_window_with_estimates,
-    current_virtual_document_height_px, get_adaptive_row_height_px, smooth_adaptive_row_height_px,
+    compute_history_window, compute_spacers_for_fixed_window, current_virtual_document_height_px,
+    get_adaptive_row_height_px, smooth_adaptive_row_height_px,
 };
 use crate::{MainWindow, Route};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
@@ -522,6 +522,46 @@ fn apply_chat_state_to_ui(
     wrap_width_override_px: Option<i32>,
     limit_scroll_insertions: bool,
 ) {
+    apply_chat_state_to_ui_with_policy(
+        ui,
+        session,
+        include_loading_placeholder,
+        wrap_width_override_px,
+        limit_scroll_insertions,
+        None,
+    );
+}
+
+fn apply_chat_state_to_ui_for_scrollbar_drag(
+    ui: &MainWindow,
+    session: &Arc<Mutex<ChatSessionService>>,
+    include_loading_placeholder: bool,
+    wrap_width_override_px: Option<i32>,
+    moving_down: bool,
+) {
+    let window_policy = if crate::chat::performance::variant().is_optimized() {
+        VirtualWindowPolicy::direct_scrollbar_drag(moving_down)
+    } else {
+        VirtualWindowPolicy::baseline()
+    };
+    apply_chat_state_to_ui_with_policy(
+        ui,
+        session,
+        include_loading_placeholder,
+        wrap_width_override_px,
+        false,
+        Some(window_policy),
+    );
+}
+
+fn apply_chat_state_to_ui_with_policy(
+    ui: &MainWindow,
+    session: &Arc<Mutex<ChatSessionService>>,
+    include_loading_placeholder: bool,
+    wrap_width_override_px: Option<i32>,
+    limit_scroll_insertions: bool,
+    window_policy_override: Option<VirtualWindowPolicy>,
+) {
     let (
         messages,
         can_load_more,
@@ -556,15 +596,19 @@ fn apply_chat_state_to_ui(
                 (ui.get_chat_layout_window_height() - 180.0).clamp(360.0, 1400.0);
             let wrap_width_px = wrap_width_override_px.unwrap_or_else(|| compute_wrap_width_px(ui));
             ACTIVE_VIRTUAL_WRAP_WIDTH_PX.with(|width| width.set(wrap_width_px));
+            let virtualization_enabled = crate::chat::performance::fixture_enabled();
             let row_estimate_px = get_adaptive_row_height_px();
-            let window_policy = if crate::chat::performance::variant().is_optimized() {
-                VirtualWindowPolicy::optimized()
-            } else {
-                VirtualWindowPolicy::baseline()
-            };
+            let window_policy = window_policy_override.unwrap_or_else(|| {
+                if crate::chat::performance::variant().is_optimized() {
+                    VirtualWindowPolicy::optimized()
+                } else {
+                    VirtualWindowPolicy::baseline()
+                }
+            });
             let (mut start, mut end, mut top_px, mut bottom_px, sampled_avg_height_px) =
-                compute_virtual_window_with_estimates(
+                compute_history_window(
                     all_messages,
+                    virtualization_enabled,
                     scroll_offset_px,
                     viewport_height_px,
                     wrap_width_px,
@@ -572,6 +616,7 @@ fn apply_chat_state_to_ui(
                     window_policy,
                 );
             if limit_scroll_insertions
+                && virtualization_enabled
                 && crate::chat::performance::variant().is_optimized()
                 && let Some(previous) = LAST_RENDER_SIGNATURE.with(|last| *last.borrow())
                 && previous.total_len == total
@@ -599,7 +644,11 @@ fn apply_chat_state_to_ui(
                 }
             }
             smooth_adaptive_row_height_px(sampled_avg_height_px);
-            let document_height_px = current_virtual_document_height_px();
+            let document_height_px = if virtualization_enabled {
+                current_virtual_document_height_px()
+            } else {
+                0.0
+            };
             (
                 all_messages[start..end].to_vec(),
                 guard.can_load_more(),
@@ -843,10 +892,45 @@ pub fn setup_interactive(ui: &MainWindow) {
         schedule_anchor_compensation(ui_weak_geometry.clone());
     });
 
+    let ui_weak_scrollbar = ui_weak.clone();
+    let session_scrollbar = session.clone();
+    let observed_scroll_bucket_scrollbar = observed_scroll_bucket.clone();
+    let applied_scroll_bucket_scrollbar = applied_scroll_bucket.clone();
+    let virtual_commit_in_progress_scrollbar = virtual_commit_in_progress.clone();
     ui.on_chat_scrollbar_dragging_changed(move |dragging| {
+        clear_pending_anchor();
         if dragging {
-            clear_pending_anchor();
+            return;
         }
+
+        // A direct thumb drag is random access, and pointer-up can arrive before
+        // the coalesced scroll callback has consumed its final position. Commit
+        // the exact destination once without the wheel path's two-row cap.
+        let Some(ui) = ui_weak_scrollbar.upgrade() else {
+            return;
+        };
+        if ui.get_current_route() != Route::Chat
+            || ui.get_chat_history_restoring()
+            || crate::is_window_interacting()
+            || virtual_commit_in_progress_scrollbar.get()
+            || MODEL_MUTATION_IN_PROGRESS.with(Cell::get)
+            || ANCHOR_SCROLL_WRITE_IN_PROGRESS.with(Cell::get)
+        {
+            return;
+        }
+        let scroll_bucket = virtual_scroll_bucket((-ui.get_chat_scroll_position()).max(0.0));
+        let moving_down = scroll_bucket > applied_scroll_bucket_scrollbar.get();
+        observed_scroll_bucket_scrollbar.set(scroll_bucket);
+        applied_scroll_bucket_scrollbar.set(scroll_bucket);
+        virtual_commit_in_progress_scrollbar.set(true);
+        apply_chat_state_to_ui_for_scrollbar_drag(
+            &ui,
+            &session_scrollbar,
+            ui.get_chat_is_sending(),
+            Some(active_wrap_width_px(&ui)),
+            moving_down,
+        );
+        virtual_commit_in_progress_scrollbar.set(false);
     });
 
     let ui_weak_layout = ui_weak.clone();
@@ -1223,13 +1307,23 @@ pub fn setup_interactive(ui: &MainWindow) {
             }
             applied_bucket.set(scroll_bucket);
             commit_in_progress.set(true);
-            apply_chat_state_to_ui(
-                &ui,
-                &session,
-                ui.get_chat_is_sending(),
-                Some(active_wrap_width_px(&ui)),
-                true,
-            );
+            if ui.get_chat_scrollbar_dragging() {
+                apply_chat_state_to_ui_for_scrollbar_drag(
+                    &ui,
+                    &session,
+                    ui.get_chat_is_sending(),
+                    Some(active_wrap_width_px(&ui)),
+                    moving_down,
+                );
+            } else {
+                apply_chat_state_to_ui(
+                    &ui,
+                    &session,
+                    ui.get_chat_is_sending(),
+                    Some(active_wrap_width_px(&ui)),
+                    true,
+                );
+            }
             // Model assignment can synchronously emit geometry callbacks, so
             // guard only that stack. The zero-delay scheduler coalesces input
             // without leaving an idle poll after wheel motion stops.

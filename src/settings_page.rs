@@ -8,6 +8,7 @@
 use std::sync::{Arc, Mutex};
 
 use slint::{ComponentFactory, ComponentHandle, Global};
+use usher_preview::{IMAGE_PROVIDER_ID, MARKDOWN_PROVIDER_ID, PLAIN_TEXT_PROVIDER_ID};
 use usher_ui_settings::{AppState as SettingsAppState, GitHubSettingsPage};
 
 use crate::{AppState, MainWindow, UpdateLogic};
@@ -121,6 +122,11 @@ fn sync_state_from_window(window: &MainWindow, page: &GitHubSettingsPage) {
     target.set_tracing_logger_active(source.get_tracing_logger_active());
     target.set_terminal_verbose_logging(source.get_terminal_verbose_logging());
     target.set_ui_sound_effects(source.get_ui_sound_effects());
+    target.set_artifact_preview_presentation_mode(source.get_artifact_preview_presentation_mode());
+    target.set_artifact_preview_markdown_enabled(source.get_artifact_preview_markdown_enabled());
+    target.set_artifact_preview_image_enabled(source.get_artifact_preview_image_enabled());
+    target
+        .set_artifact_preview_plain_text_enabled(source.get_artifact_preview_plain_text_enabled());
     target.set_git_github_token(source.get_git_github_token());
     target.set_git_gitlab_token(source.get_git_gitlab_token());
     target.set_git_gitee_token(source.get_git_gitee_token());
@@ -210,6 +216,44 @@ fn bind_callbacks(window: &MainWindow, page: &GitHubSettingsPage) {
         }
     });
 
+    let page_weak = page.as_weak();
+    let window_weak = window.as_weak();
+    state.on_set_artifact_preview_presentation_mode(move |mode| {
+        let mode = mode.clamp(0, 1);
+        if let Some(page) = page_weak.upgrade() {
+            SettingsAppState::get(&page).set_artifact_preview_presentation_mode(mode);
+        }
+        if let Some(window) = window_weak.upgrade() {
+            let state = AppState::get(&window);
+            state.set_artifact_preview_presentation_mode(mode);
+            state.invoke_set_artifact_preview_presentation_mode(mode);
+        }
+    });
+
+    let page_weak = page.as_weak();
+    let window_weak = window.as_weak();
+    state.on_set_artifact_preview_provider_enabled(move |provider_id, enabled| {
+        if let Some(page) = page_weak.upgrade() {
+            let state = SettingsAppState::get(&page);
+            match provider_id.as_str() {
+                MARKDOWN_PROVIDER_ID => state.set_artifact_preview_markdown_enabled(enabled),
+                IMAGE_PROVIDER_ID => state.set_artifact_preview_image_enabled(enabled),
+                PLAIN_TEXT_PROVIDER_ID => state.set_artifact_preview_plain_text_enabled(enabled),
+                _ => {}
+            }
+        }
+        if let Some(window) = window_weak.upgrade() {
+            let state = AppState::get(&window);
+            match provider_id.as_str() {
+                MARKDOWN_PROVIDER_ID => state.set_artifact_preview_markdown_enabled(enabled),
+                IMAGE_PROVIDER_ID => state.set_artifact_preview_image_enabled(enabled),
+                PLAIN_TEXT_PROVIDER_ID => state.set_artifact_preview_plain_text_enabled(enabled),
+                _ => {}
+            }
+            state.invoke_set_artifact_preview_provider_enabled(provider_id, enabled);
+        }
+    });
+
     let window_weak = window.as_weak();
     state.on_save_git_tokens(move |github, gitlab, gitee, gitee_enterprise| {
         if let Some(window) = window_weak.upgrade() {
@@ -268,4 +312,64 @@ fn bind_callbacks(window: &MainWindow, page: &GitHubSettingsPage) {
             AppState::get(&window).invoke_test_ai_agent_connection(base_url, api_key, model);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    use slint::Global;
+    use usher_preview::IMAGE_PROVIDER_ID;
+    use usher_ui_settings::{AppState as SettingsAppState, GitHubSettingsPage};
+
+    use super::{bind_callbacks, sync_state_from_window};
+    use crate::{AppState, MainWindow};
+
+    #[test]
+    fn preview_state_and_callbacks_cross_the_settings_factory_boundary() {
+        i_slint_backend_testing::init_no_event_loop();
+        let window = MainWindow::new().expect("main window");
+        let page = GitHubSettingsPage::new().expect("settings page");
+        let window_state = AppState::get(&window);
+
+        window_state.set_artifact_preview_presentation_mode(1);
+        window_state.set_artifact_preview_markdown_enabled(false);
+        window_state.set_artifact_preview_image_enabled(true);
+        window_state.set_artifact_preview_plain_text_enabled(false);
+        sync_state_from_window(&window, &page);
+
+        let page_state = SettingsAppState::get(&page);
+        assert_eq!(page_state.get_artifact_preview_presentation_mode(), 1);
+        assert!(!page_state.get_artifact_preview_markdown_enabled());
+        assert!(page_state.get_artifact_preview_image_enabled());
+        assert!(!page_state.get_artifact_preview_plain_text_enabled());
+
+        let forwarded_mode = Rc::new(Cell::new(-1));
+        let observed_mode = forwarded_mode.clone();
+        window_state.on_set_artifact_preview_presentation_mode(move |mode| {
+            observed_mode.set(mode);
+        });
+        let forwarded_provider = Rc::new(RefCell::new(None));
+        let observed_provider = forwarded_provider.clone();
+        window_state.on_set_artifact_preview_provider_enabled(move |provider_id, enabled| {
+            *observed_provider.borrow_mut() = Some((provider_id.to_string(), enabled));
+        });
+
+        bind_callbacks(&window, &page);
+        window_state.set_artifact_preview_presentation_mode(0);
+        page_state.set_artifact_preview_presentation_mode(0);
+        page_state.invoke_set_artifact_preview_presentation_mode(1);
+        page_state.invoke_set_artifact_preview_provider_enabled(IMAGE_PROVIDER_ID.into(), false);
+
+        assert_eq!(forwarded_mode.get(), 1);
+        assert_eq!(page_state.get_artifact_preview_presentation_mode(), 1);
+        assert_eq!(window_state.get_artifact_preview_presentation_mode(), 1);
+        assert!(!page_state.get_artifact_preview_image_enabled());
+        assert!(!window_state.get_artifact_preview_image_enabled());
+        assert_eq!(
+            forwarded_provider.borrow().as_ref(),
+            Some(&(IMAGE_PROVIDER_ID.to_owned(), false))
+        );
+    }
 }

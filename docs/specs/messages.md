@@ -43,9 +43,11 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
 - `ui/main.slint` lazily creates one stable factory/page shell on the first
   Inbox visit. Route changes hide rather than remount that shell; while hidden,
   the bridge releases the potentially large Slint row model and skips page
-  projection work while the Store keeps accepting Actions and updating the
-  global unread selector. Re-entry rehydrates the row model from the latest
-  Store snapshot before making the page active.
+  projection while the Store keeps accepting Actions and updating the global
+  unread selector. Re-entry rehydrates the row model from the latest Store
+  snapshot before making the page active. The stable visual tree remains
+  mounted: a three-run release A/B found no material RSS saving from rebuilding
+  it on each visit and observed mixed physical-footprint regressions.
 - `src/notification.rs` continues to own transient queued Banners and mirrors
   every created application notification into the durable message center.
 - `ui/components/messages/github_message_components.slint` owns reusable Inbox
@@ -77,7 +79,8 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
 - `ui/main.slint` 在首次进入 Inbox 时才懒创建一个稳定 factory/page shell；路由
   切换只隐藏、不重新挂载该 shell。隐藏期间 bridge 释放可能很大的 Slint 行 model，
   并跳过页面投影；Store 仍继续接收 Action、更新全局未读 selector。重新进入时先从
-  最新 Store 快照 hydration 行 model，再激活页面。
+  最新 Store 快照 hydration 行 model，再激活页面。视觉树保持稳定挂载：三轮 Release
+  A/B 未测得逐次重建带来的实质 RSS 节省，且 physical footprint 结果出现混合回退。
 - `src/notification.rs` 继续负责短时排队 Banner，并把每条应用通知镜像到持久消息中心。
 - `ui/components/messages/github_message_components.slint` 负责可复用 Inbox 行视觉，
   并登记到 UI Components 演练场。
@@ -266,6 +269,10 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
 - While Messages is closed, publish several messages from other routes, then
   open/reopen Messages and verify automatic Store hydration shows the newest
   rows and counts on the first visible frame.
+- With memory diagnostics enabled, leave Messages and verify the lifecycle log
+  reports `active=false projected_rows=0`; repeat enter/leave and verify the
+  projected row model remains empty while inactive and rehydrates before the
+  first visible frame after re-entry.
 - From a non-Messages route, publish a permanent Banner, delete or Clear all its
   Inbox row, leave Messages, and verify the Banner is gone from the queue.
 - Queue three-plus Banners off Messages, confirm only the head shows with a
@@ -303,6 +310,9 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   与新的未读/总数一致。
 - Messages 关闭期间从其他页面发布多条消息，再打开/重新打开 Messages，确认 Store
   自动 hydration 在首个可见帧展示最新消息行与计数。
+- 启用内存诊断后离开 Messages，确认生命周期日志显示
+  `active=false projected_rows=0`；重复进入/离开，确认非活动期间投影行 model 保持
+  为空，并在重新进入后的首个可见帧前完成 hydration。
 - 在非 Messages 路由发布一条常驻 Banner，删除或 Clear all 对应 Inbox 行后离开
   Messages，确认 Banner 已从队列消失。
 - 在非 Messages 路由连续排队 3 条以上 Banner，确认只显示队首且出现 Dismiss all，

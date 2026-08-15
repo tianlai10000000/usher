@@ -8,7 +8,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(feature = "markdown")]
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+#[cfg(feature = "markdown")]
+use std::sync::LazyLock;
+#[cfg(feature = "markdown")]
+use syntect::easy::HighlightLines;
+#[cfg(feature = "markdown")]
+use syntect::highlighting::{FontStyle, Theme, ThemeSet};
+#[cfg(feature = "markdown")]
+use syntect::parsing::SyntaxSet;
 
 pub const MARKDOWN_PROVIDER_ID: &str = "markdown";
 pub const IMAGE_PROVIDER_ID: &str = "image";
@@ -114,6 +122,17 @@ pub struct MarkdownBlock {
     pub kind: MarkdownBlockKind,
     pub text: String,
     pub spans: Vec<MarkdownInlineSpan>,
+    pub code_language: String,
+    pub code_spans: Vec<MarkdownCodeSpan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownCodeSpan {
+    pub text: String,
+    pub light_color: [u8; 4],
+    pub dark_color: [u8; 4],
+    pub bold: bool,
+    pub italic: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -411,7 +430,7 @@ impl PreviewProvider for MarkdownProvider {
     ) -> Result<PreparedArtifact, PreviewError> {
         cancellation.check()?;
         let markdown = source.text()?;
-        let document = parse_markdown(markdown, &source.title);
+        let document = parse_markdown_inner(markdown, &source.title, Some(cancellation))?;
         cancellation.check()?;
         let approximate_bytes = markdown.len()
             + document
@@ -423,6 +442,12 @@ impl PreviewProvider for MarkdownProvider {
                             .spans
                             .iter()
                             .map(|span| span.text.len() + span.href.len() + 16)
+                            .sum::<usize>()
+                        + block.code_language.len()
+                        + block
+                            .code_spans
+                            .iter()
+                            .map(|span| span.text.len() + 24)
                             .sum::<usize>()
                         + 32
                 })
@@ -595,10 +620,21 @@ struct PendingBlock {
     kind: MarkdownBlockKind,
     text: String,
     spans: Vec<MarkdownInlineSpan>,
+    code_language: String,
 }
 
 #[cfg(feature = "markdown")]
 pub fn parse_markdown(markdown: &str, fallback_title: &str) -> MarkdownDocument {
+    parse_markdown_inner(markdown, fallback_title, None)
+        .expect("non-cancellable Markdown parsing cannot be cancelled")
+}
+
+#[cfg(feature = "markdown")]
+fn parse_markdown_inner(
+    markdown: &str,
+    fallback_title: &str,
+    cancellation: Option<&CancellationToken>,
+) -> Result<MarkdownDocument, PreviewError> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
@@ -620,12 +656,17 @@ pub fn parse_markdown(markdown: &str, fallback_title: &str) -> MarkdownDocument 
                     kind: pending.kind,
                     text,
                     spans: pending.spans,
+                    code_language: pending.code_language,
+                    code_spans: Vec::new(),
                 });
             }
         }
     };
 
-    for event in Parser::new_ext(markdown, options) {
+    for (event_index, event) in Parser::new_ext(markdown, options).enumerate() {
+        if event_index % 256 == 0 && cancellation.is_some_and(CancellationToken::is_cancelled) {
+            return Err(PreviewError::Cancelled);
+        }
         match event {
             Event::Start(Tag::Heading { level, .. }) => {
                 finalize(&mut blocks, &mut current);
@@ -641,9 +682,11 @@ pub fn parse_markdown(markdown: &str, fallback_title: &str) -> MarkdownDocument 
                 current = Some(PendingBlock::new(MarkdownBlockKind::Quote));
             }
             Event::End(TagEnd::BlockQuote(_)) => finalize(&mut blocks, &mut current),
-            Event::Start(Tag::CodeBlock(_)) => {
+            Event::Start(Tag::CodeBlock(kind)) => {
                 finalize(&mut blocks, &mut current);
-                current = Some(PendingBlock::new(MarkdownBlockKind::CodeBlock));
+                let mut block = PendingBlock::new(MarkdownBlockKind::CodeBlock);
+                block.code_language = code_language(&kind);
+                current = Some(block);
             }
             Event::End(TagEnd::CodeBlock) => finalize(&mut blocks, &mut current),
             Event::Start(Tag::List(_)) => list_depth += 1,
@@ -726,6 +769,8 @@ pub fn parse_markdown(markdown: &str, fallback_title: &str) -> MarkdownDocument 
                     kind: MarkdownBlockKind::Rule,
                     text: String::new(),
                     spans: Vec::new(),
+                    code_language: String::new(),
+                    code_spans: Vec::new(),
                 });
             }
             Event::Html(html) | Event::InlineHtml(html) => {
@@ -737,6 +782,12 @@ pub fn parse_markdown(markdown: &str, fallback_title: &str) -> MarkdownDocument 
         }
     }
     finalize(&mut blocks, &mut current);
+
+    for block in &mut blocks {
+        if block.kind == MarkdownBlockKind::CodeBlock {
+            block.code_spans = highlight_code(&block.text, &block.code_language, cancellation)?;
+        }
+    }
 
     let title = blocks
         .iter()
@@ -764,11 +815,11 @@ pub fn parse_markdown(markdown: &str, fallback_title: &str) -> MarkdownDocument 
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    MarkdownDocument {
+    Ok(MarkdownDocument {
         title,
         plain_text,
         blocks,
-    }
+    })
 }
 
 #[cfg(feature = "markdown")]
@@ -778,6 +829,7 @@ impl PendingBlock {
             kind,
             text: String::new(),
             spans: Vec::new(),
+            code_language: String::new(),
         }
     }
 
@@ -796,6 +848,135 @@ impl PendingBlock {
             href: href.to_string(),
         });
     }
+}
+
+#[cfg(feature = "markdown")]
+fn code_language(kind: &CodeBlockKind<'_>) -> String {
+    match kind {
+        CodeBlockKind::Indented => String::new(),
+        CodeBlockKind::Fenced(info) => info
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .trim_matches(|character| matches!(character, '{' | '}' | '.'))
+            .to_ascii_lowercase(),
+    }
+}
+
+#[cfg(feature = "markdown")]
+struct MarkdownHighlightResources {
+    syntaxes: SyntaxSet,
+    light_theme: Theme,
+}
+
+#[cfg(feature = "markdown")]
+static MARKDOWN_HIGHLIGHT_RESOURCES: LazyLock<MarkdownHighlightResources> = LazyLock::new(|| {
+    let mut themes = ThemeSet::load_defaults().themes;
+    MarkdownHighlightResources {
+        syntaxes: two_face::syntax::extra_newlines(),
+        light_theme: themes
+            .remove("InspiredGitHub")
+            .expect("syntect must bundle the InspiredGitHub theme"),
+    }
+});
+
+#[cfg(feature = "markdown")]
+fn highlight_code(
+    source: &str,
+    language: &str,
+    cancellation: Option<&CancellationToken>,
+) -> Result<Vec<MarkdownCodeSpan>, PreviewError> {
+    let resources = &*MARKDOWN_HIGHLIGHT_RESOURCES;
+    let syntax = resolve_code_syntax(&resources.syntaxes, language);
+    let mut highlighter = HighlightLines::new(syntax, &resources.light_theme);
+    let mut spans = Vec::<MarkdownCodeSpan>::new();
+    for (line_index, line) in source.split_inclusive('\n').enumerate() {
+        if line_index % 64 == 0 && cancellation.is_some_and(CancellationToken::is_cancelled) {
+            return Err(PreviewError::Cancelled);
+        }
+        let ranges = highlighter
+            .highlight_line(line, &resources.syntaxes)
+            .unwrap_or_else(|_| vec![(syntect::highlighting::Style::default(), line)]);
+        for (style, text) in ranges {
+            let light_color = [
+                style.foreground.a,
+                style.foreground.r,
+                style.foreground.g,
+                style.foreground.b,
+            ];
+            let dark_color = github_dark_color(light_color);
+            let bold = style.font_style.contains(FontStyle::BOLD);
+            let italic = style.font_style.contains(FontStyle::ITALIC);
+            if let Some(previous) = spans.last_mut()
+                && previous.light_color == light_color
+                && previous.dark_color == dark_color
+                && previous.bold == bold
+                && previous.italic == italic
+            {
+                previous.text.push_str(text);
+            } else if !text.is_empty() {
+                spans.push(MarkdownCodeSpan {
+                    text: text.to_string(),
+                    light_color,
+                    dark_color,
+                    bold,
+                    italic,
+                });
+            }
+        }
+    }
+    Ok(spans)
+}
+
+#[cfg(feature = "markdown")]
+fn resolve_code_syntax<'a>(
+    syntaxes: &'a SyntaxSet,
+    language: &str,
+) -> &'a syntect::parsing::SyntaxReference {
+    let language = language.trim();
+    if language.is_empty() {
+        return syntaxes.find_syntax_plain_text();
+    }
+
+    syntaxes
+        .find_syntax_by_token(language)
+        .or_else(|| syntaxes.find_syntax_by_extension(language))
+        .or_else(|| {
+            syntaxes
+                .syntaxes()
+                .iter()
+                .find(|syntax| syntax.name.eq_ignore_ascii_case(language))
+        })
+        .unwrap_or_else(|| syntaxes.find_syntax_plain_text())
+}
+
+#[cfg(feature = "markdown")]
+fn github_dark_color(color: [u8; 4]) -> [u8; 4] {
+    let [alpha, red, green, blue] = color;
+    let mapped = match [red, green, blue] {
+        [0x24, 0x29, 0x2f] | [0x24, 0x29, 0x2e] => [0xe6, 0xed, 0xf3],
+        [0x6a, 0x73, 0x7d] | [0x57, 0x60, 0x6a] => [0x8b, 0x94, 0x9e],
+        [0x00, 0x5c, 0xc5] => [0x79, 0xc0, 0xff],
+        [0x03, 0x2f, 0x62] => [0xa5, 0xd6, 0xff],
+        [0x22, 0x86, 0x3a] => [0x7e, 0xe7, 0x87],
+        [0x6f, 0x42, 0xc1] => [0xd2, 0xa8, 0xff],
+        [0xd7, 0x3a, 0x49] | [0xb3, 0x1d, 0x28] => [0xff, 0x7b, 0x72],
+        [0xe3, 0x62, 0x09] => [0xff, 0xa6, 0x57],
+        _ => {
+            let luminance =
+                (u32::from(red) * 299 + u32::from(green) * 587 + u32::from(blue) * 114) / 1000;
+            if luminance < 150 {
+                [
+                    red.saturating_add((255 - red) / 2),
+                    green.saturating_add((255 - green) / 2),
+                    blue.saturating_add((255 - blue) / 2),
+                ]
+            } else {
+                [red, green, blue]
+            }
+        }
+    };
+    [alpha, mapped[0], mapped[1], mapped[2]]
 }
 
 #[cfg(feature = "markdown")]
@@ -885,6 +1066,63 @@ mod tests {
     }
 
     #[test]
+    fn fenced_code_preserves_language_and_generates_theme_aware_tokens() {
+        let document = parse_markdown("```javascript\nconst count = 42; // <ready>\n```", "Code");
+        let code = document
+            .blocks
+            .iter()
+            .find(|block| block.kind == MarkdownBlockKind::CodeBlock)
+            .expect("fenced code block");
+
+        assert_eq!(code.code_language, "javascript");
+        assert_eq!(
+            code.code_spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            code.text
+        );
+        assert!(
+            code.code_spans
+                .iter()
+                .map(|span| span.light_color)
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                >= 3
+        );
+        assert!(
+            code.code_spans
+                .iter()
+                .any(|span| span.light_color != span.dark_color)
+        );
+    }
+
+    #[test]
+    fn typescript_fence_resolves_to_a_highlighted_syntax() {
+        let document = parse_markdown(
+            "```typescript\nimport { WeCom } from '@picc/jsbridge';\nawait WeCom.register({ appId: 'your-app-id' });\n```",
+            "Code",
+        );
+        let code = document
+            .blocks
+            .iter()
+            .find(|block| block.kind == MarkdownBlockKind::CodeBlock)
+            .expect("fenced code block");
+
+        assert_eq!(code.code_language, "typescript");
+        assert!(
+            code.code_spans
+                .iter()
+                .map(|span| span.light_color)
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                >= 3,
+            "typescript unexpectedly fell back to plain text: {:?}",
+            code.code_spans
+        );
+    }
+
+    #[test]
     fn disabled_provider_does_not_prepare_explicit_markdown() {
         let mut registry = PreviewRegistry::with_builtins();
         assert!(registry.set_enabled(MARKDOWN_PROVIDER_ID, false));
@@ -905,6 +1143,18 @@ mod tests {
             &cancellation,
         );
         assert_eq!(result.unwrap_err(), PreviewError::Cancelled);
+    }
+
+    #[test]
+    fn cancellation_stops_markdown_parsing_and_highlighting() {
+        let cancellation = CancellationToken::default();
+        cancellation.cancel();
+
+        assert_eq!(
+            parse_markdown_inner("```rust\nfn main() {}\n```", "Code", Some(&cancellation))
+                .unwrap_err(),
+            PreviewError::Cancelled
+        );
     }
 
     #[test]

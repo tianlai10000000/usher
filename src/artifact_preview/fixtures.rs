@@ -17,7 +17,8 @@ This document exercises **strong text**, *emphasis*, `inline code`, and an
 - [x] Completed task
 - [ ] Pending task
 
-> Preview providers prepare content independently from docked and detached hosts.
+> 注意：注册操作必须在调用其他企业微信功能（如 `share()`、`isInstalled()` 或
+> `startup()`）之前完成，否则可能导致功能调用失败。
 
 ## Table
 
@@ -30,12 +31,24 @@ This document exercises **strong text**, *emphasis*, `inline code`, and an
 ## Code
 
 ```rust
+// Fenced code keeps its language and is highlighted before reaching Slint.
 let source = ArtifactSource::inline_markdown(
     "fixture:preview:markdown",
     "preview-document.md",
     markdown,
 );
 preview.open_source(source);
+```
+
+```typescript
+import { WeCom } from '@picc/jsbridge';
+
+// 注册企业微信应用
+await WeCom.register({
+    appId: 'your-app-id',      // 企业微信开发者ID
+    corpId: 'your-corp-id',    // 企业微信企业ID
+    agentId: 'your-agent-id',  // 企业微信企业应用ID
+});
 ```
 
 ---
@@ -89,6 +102,12 @@ pub(super) fn setup(ui: &MainWindow, handle: ArtifactPreviewHandle) {
         };
         handle.open_source(source);
     });
+
+    if let Ok(fixture_id) = std::env::var("USHER_ARTIFACT_PREVIEW_FIXTURE")
+        && !fixture_id.trim().is_empty()
+    {
+        ui.invoke_open_artifact_preview_fixture(fixture_id.into());
+    }
 }
 
 fn markdown_fixture() -> ArtifactSource {

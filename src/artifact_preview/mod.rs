@@ -18,8 +18,9 @@ pub use usher_preview::{ArtifactBody, ArtifactHint, ArtifactSource};
 use crate::app_runtime::shared_runtime;
 use crate::settings::PreviewSettings;
 use crate::{
-    AppState, ArtifactPreviewBlock, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind,
-    ArtifactPreviewInlineSpan, ArtifactPreviewKind, ArtifactPreviewWindow, MainWindow,
+    AppState, ArtifactPreviewBlock, ArtifactPreviewBlockKind, ArtifactPreviewCodeLine,
+    ArtifactPreviewCodeToken, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan,
+    ArtifactPreviewKind, ArtifactPreviewWindow, MainWindow,
 };
 
 #[cfg(feature = "test-fixtures")]
@@ -408,8 +409,22 @@ enum UiPreparedContent {
 struct UiPreparedMarkdownBlock {
     kind: ArtifactPreviewBlockKind,
     styled: slint::StyledText,
+    code_lines: Vec<UiPreparedCodeLine>,
+    code_language: String,
     plain_text: String,
     layout_spans: Vec<ArtifactPreviewInlineSpan>,
+}
+
+struct UiPreparedCodeLine {
+    tokens: Vec<UiPreparedCodeToken>,
+}
+
+struct UiPreparedCodeToken {
+    text: String,
+    light_color: [u8; 4],
+    dark_color: [u8; 4],
+    bold: bool,
+    italic: bool,
 }
 
 impl UiPreparedPayload {
@@ -530,6 +545,36 @@ impl UiPreparedMarkdownBlock {
         ArtifactPreviewBlock {
             kind: self.kind,
             styled: self.styled,
+            code_lines: ModelRc::new(Rc::new(VecModel::from(
+                self.code_lines
+                    .into_iter()
+                    .map(|line| ArtifactPreviewCodeLine {
+                        tokens: ModelRc::new(Rc::new(VecModel::from(
+                            line.tokens
+                                .into_iter()
+                                .map(|token| ArtifactPreviewCodeToken {
+                                    text: token.text.into(),
+                                    light_color: slint::Color::from_argb_u8(
+                                        token.light_color[0],
+                                        token.light_color[1],
+                                        token.light_color[2],
+                                        token.light_color[3],
+                                    ),
+                                    dark_color: slint::Color::from_argb_u8(
+                                        token.dark_color[0],
+                                        token.dark_color[1],
+                                        token.dark_color[2],
+                                        token.dark_color[3],
+                                    ),
+                                    bold: token.bold,
+                                    italic: token.italic,
+                                })
+                                .collect::<Vec<_>>(),
+                        ))),
+                    })
+                    .collect::<Vec<_>>(),
+            ))),
+            code_language: self.code_language.into(),
             plain_text: self.plain_text.into(),
             layout_spans: ModelRc::new(Rc::new(VecModel::from(self.layout_spans))),
         }
@@ -573,9 +618,43 @@ fn adapt_markdown_block(block: &CoreMarkdownBlock) -> UiPreparedMarkdownBlock {
             CoreBlockKind::TableRow => ArtifactPreviewBlockKind::TableRow,
         },
         styled: styled_text_for(block),
+        code_lines: prepared_code_lines(block),
+        code_language: block.code_language.clone(),
         plain_text: block.text.clone(),
         layout_spans,
     }
+}
+
+fn prepared_code_lines(block: &CoreMarkdownBlock) -> Vec<UiPreparedCodeLine> {
+    if block.kind != CoreBlockKind::CodeBlock {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+    let mut tokens = Vec::new();
+    for span in &block.code_spans {
+        for segment in span.text.split_inclusive('\n') {
+            let text = segment.strip_suffix('\n').unwrap_or(segment);
+            if !text.is_empty() {
+                tokens.push(UiPreparedCodeToken {
+                    text: text.to_owned(),
+                    light_color: span.light_color,
+                    dark_color: span.dark_color,
+                    bold: span.bold,
+                    italic: span.italic,
+                });
+            }
+            if segment.ends_with('\n') {
+                lines.push(UiPreparedCodeLine {
+                    tokens: std::mem::take(&mut tokens),
+                });
+            }
+        }
+    }
+    if !tokens.is_empty() || lines.is_empty() {
+        lines.push(UiPreparedCodeLine { tokens });
+    }
+    lines
 }
 
 fn styled_text_for(block: &CoreMarkdownBlock) -> slint::StyledText {
@@ -1121,6 +1200,38 @@ mod tests {
     #[test]
     fn inline_markdown_escaping_preserves_literal_punctuation() {
         assert_eq!(escape_inline_markdown("a * b [c]"), "a \\* b \\[c\\]");
+    }
+
+    #[test]
+    fn real_typescript_markdown_reaches_slint_with_distinct_token_colors() {
+        let document = usher_preview::parse_markdown(
+            "```typescript\nimport { WeCom } from '@picc/jsbridge';\nawait WeCom.register({ appId: 'your-app-id' });\n```",
+            "Code",
+        );
+        let block = document
+            .blocks
+            .iter()
+            .find(|block| block.kind == CoreBlockKind::CodeBlock)
+            .expect("typescript code block");
+        let ui_block = adapt_markdown_block(block).into_ui_block();
+        let mut rendered_lines = Vec::new();
+        let mut light_colors = std::collections::HashSet::new();
+
+        for line in ui_block.code_lines.iter() {
+            let mut rendered_line = String::new();
+            for token in line.tokens.iter() {
+                rendered_line.push_str(token.text.as_str());
+                let color = token.light_color.to_argb_u8();
+                light_colors.insert((color.alpha, color.red, color.green, color.blue));
+            }
+            rendered_lines.push(rendered_line);
+        }
+
+        assert_eq!(rendered_lines.join("\n"), block.text);
+        assert!(
+            light_colors.len() >= 3,
+            "Slint model lost TypeScript token colors: {light_colors:?}"
+        );
     }
 
     #[test]

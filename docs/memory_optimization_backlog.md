@@ -395,6 +395,48 @@ Acceptance:
 - Late async responses remain sequence-guarded and cannot repopulate cleared state.
 - The fixed large PR fixture shows heavy owned models/caches released after the true unreachable event; allocator high-water behavior is reported separately from live ownership.
 
+### MEM-14 — Rebuild the inactive Messages visual tree
+
+Status: Candidate rejected (2026-08-14)
+
+The candidate kept the independently generated Messages factory root stable but
+mounted its ScrollView and tooltip host only while `Route.Messages` was active.
+The baseline kept those visual nodes mounted. Both variants used the same
+existing lifecycle bridge: the projected row model is cleared on exit,
+rehydrated before re-entry, and the Store subscription plus off-route Banner and
+unread notification surfaces remain active.
+
+The controlled A/B used the current persisted eight-row MessageCenter snapshot,
+Release/FemtoVG, an 800×600 logical window at scale factor 2.00, two
+Messages enter/leave cycles, five samples per phase, and three isolated processes
+per variant interleaved by run. All six logs verified
+`Home → Messages → Home → Messages → Home`, two inactive lifecycle events with
+zero projected rows, and one second-entry hydration with eight rows.
+
+| Metric | Stable visual baseline | Active-only candidate | Candidate − baseline |
+| --- | ---: | ---: | ---: |
+| Cycle-1 post-leave settled RSS | 120.41 MiB | 121.23 MiB | +0.83 MiB (+0.7%) |
+| Cycle-2 post-leave settled RSS | 120.77 MiB | 121.47 MiB | +0.70 MiB (+0.6%) |
+| Cycle-2 RSS above startup | 9.88 MiB | 9.50 MiB | -0.38 MiB (-3.8%) |
+| Cycle-2 post-leave settled footprint | 112.56 MiB | 119.58 MiB | +7.02 MiB (+6.2%) |
+| Cycle-2 footprint above startup | 32.45 MiB | 38.56 MiB | +6.11 MiB (+18.8%) |
+| Overall sampled RSS peak | 120.94 MiB | 121.64 MiB | +0.70 MiB (+0.6%) |
+| Overall sampled footprint peak | 112.84 MiB | 120.58 MiB | +7.73 MiB (+6.9%) |
+
+Decision: **reject the active-only visual tree**. Its normalized RSS direction was
+slightly favorable but far below the default 10 MiB/5% threshold, absolute RSS
+was higher in all three paired cycle-2 post-leave runs, and physical-footprint
+results were mixed with two material regressions. Production retains the stable
+factory visual tree and the already-established off-route row-model release.
+Lifecycle diagnostics remain because they directly verify projection ownership.
+
+Evidence is under
+`memory-benchmark-results/messages-ui107-ab-20260814/` (Git-ignored). The frozen
+baseline/candidate SHA-256 values are recorded in `metadata.tsv`; raw samples,
+per-run summaries, exact logs, and the generated comparison are retained beside
+it. The benchmark ran from a dirty worktree, with unrelated Preview, Chat, and
+macOS platform edits preserved.
+
 ## Items not currently worth prioritizing
 
 - Idle Home UI models: the measured run had 9 project rows, 10 tags, no PR rows, no review lines, and only a few KiB of model text.

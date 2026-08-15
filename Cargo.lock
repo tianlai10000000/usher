@@ -7176,6 +7176,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "two-face"
+version = "0.5.2+bat-0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "915be7adc2ff6f4338acbf71f3eda0a146f46003b992a1669c674308610efdac"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "syntect",
+]
+
+[[package]]
 name = "typed-index-collections"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7373,6 +7384,7 @@ dependencies = [
  "flate2",
  "fs2",
  "futures-util",
+ "i-slint-backend-testing",
  "image",
  "lazy_static",
  "libc",
@@ -7428,6 +7440,8 @@ version = "0.0.8-alpha.1"
 dependencies = [
  "image",
  "pulldown-cmark",
+ "syntect",
+ "two-face",
 ]
 
 [[package]]

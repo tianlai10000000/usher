@@ -113,11 +113,16 @@ impl MessagePageBridge {
                 // while another route was visible are therefore included.
                 apply_page_snapshot(page, snapshot);
                 page.set_active(true);
+                log::debug!(
+                    "[Messages][Lifecycle] active=true projected_rows={}",
+                    page.get_messages().row_count()
+                );
             });
         } else {
             self.with_page(|page| {
                 page.set_active(false);
                 release_page_rows(page);
+                log::debug!("[Messages][Lifecycle] active=false projected_rows=0");
             });
         }
     }

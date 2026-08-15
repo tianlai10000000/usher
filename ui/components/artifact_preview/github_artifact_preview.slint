@@ -2,7 +2,7 @@ import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
 import { GitHubScrollView, GitHubVirtualListScrollbar } from "../github_scroll_view.slint";
-import { GitHubSpinner } from "../github_spinner.slint";
+import { GitHubCenteredLoadingState } from "../github_spinner.slint";
 
 export enum ArtifactPreviewKind {
     None,
@@ -38,9 +38,23 @@ export struct ArtifactPreviewInlineSpan {
     end: int,
 }
 
+export struct ArtifactPreviewCodeToken {
+    text: string,
+    light-color: color,
+    dark-color: color,
+    bold: bool,
+    italic: bool,
+}
+
+export struct ArtifactPreviewCodeLine {
+    tokens: [ArtifactPreviewCodeToken],
+}
+
 export struct ArtifactPreviewBlock {
     kind: ArtifactPreviewBlockKind,
     styled: styled-text,
+    code-lines: [ArtifactPreviewCodeLine],
+    code-language: string,
     plain-text: string,
     layout-spans: [ArtifactPreviewInlineSpan],
 }
@@ -70,7 +84,7 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
     private property <bool> is-table:
         root.block.kind == ArtifactPreviewBlockKind.TableRow;
     private property <length> content-inset:
-        root.is-code ? GitHubMetrics.size-12
+        root.is-code ? GitHubMetrics.size-16
             : root.is-quote ? GitHubMetrics.size-16
             : root.is-table ? GitHubMetrics.size-8
             : 0px;
@@ -78,7 +92,7 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
         root.block.kind == ArtifactPreviewBlockKind.Heading1 ? GitHubMetrics.size-16
             : root.block.kind == ArtifactPreviewBlockKind.Heading2 ? GitHubMetrics.size-20
             : root.block.kind == ArtifactPreviewBlockKind.Heading3 ? GitHubMetrics.size-16
-            : root.is-code ? GitHubMetrics.size-12
+            : root.is-code ? GitHubMetrics.size-40
             : root.is-quote || root.is-table ? GitHubMetrics.size-8
             : root.block.kind == ArtifactPreviewBlockKind.ListItem ? GitHubMetrics.size-2
             : GitHubMetrics.size-4;
@@ -88,24 +102,34 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
             ? GitHubMetrics.size-12
             : root.block.kind == ArtifactPreviewBlockKind.Heading3
                 ? GitHubMetrics.size-6
-            : root.is-code ? GitHubMetrics.size-12
-            : root.is-quote || root.is-table ? GitHubMetrics.size-8
+            : root.is-code ? GitHubMetrics.size-16
+            : root.is-quote ? 0px
+            : root.is-table ? GitHubMetrics.size-8
             : root.block.kind == ArtifactPreviewBlockKind.ListItem ? GitHubMetrics.size-2
             : GitHubMetrics.size-8;
 
+    private property <length> code-line-height: 20px;
     private property <length> intrinsic-height: root.block.kind == ArtifactPreviewBlockKind.Rule
         ? GitHubMetrics.size-16
-        : (root.is-code ? code-text.preferred-height : block-text.preferred-height)
+        : (root.is-code
+                ? max(1, root.block.code-lines.length) * root.code-line-height
+                : block-text.preferred-height)
             + root.block-padding-top + root.block-padding-bottom;
     height: root.forced-height > 0px ? root.forced-height : root.intrinsic-height;
+    clip: root.is-code;
     background: root.is-code ? GitHubTheme.code-canvas
-        : root.is-quote ? GitHubTheme.canvas-subtle
+        : root.is-quote ? GitHubTheme.border-default
         : transparent;
     border-width: root.is-code ? GitHubMetrics.border-thin : 0px;
     border-color: root.is-code ? GitHubTheme.border-muted : transparent;
-    border-radius: root.is-code || root.is-quote
-        ? GitHubMetrics.radius-medium
-        : 0px;
+    border-radius: root.is-code ? GitHubMetrics.radius-medium : 0px;
+
+    if root.is-quote: Rectangle {
+        x: GitHubMetrics.size-4;
+        width: parent.width - self.x;
+        height: parent.height;
+        background: GitHubTheme.canvas-default;
+    }
 
     if root.block.kind == ArtifactPreviewBlockKind.Heading1
             || root.block.kind == ArtifactPreviewBlockKind.Heading2: Rectangle {
@@ -146,16 +170,53 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
         link-clicked(url) => { root.open-link(url); }
     }
 
-    code-text := Text {
+    code-lines := VerticalLayout {
         visible: root.block.kind == ArtifactPreviewBlockKind.CodeBlock;
         x: root.content-inset;
         y: root.block-padding-top;
         width: parent.width - self.x * 2;
-        text: root.block.plain-text;
-        color: GitHubTheme.fg-default;
+        height: max(1, root.block.code-lines.length) * root.code-line-height;
+        spacing: 0px;
+
+        for line in root.block.code-lines: code-line := HorizontalLayout {
+            width: parent.width;
+            height: root.code-line-height;
+            spacing: 0px;
+
+            for token in line.tokens: Text {
+                width: self.preferred-width;
+                height: parent.height;
+                text: token.text;
+                color: GitHubTheme.dark-mode ? token.dark-color : token.light-color;
+                font-family: "monospace";
+                font-size: 13px;
+                font-weight: token.bold ? 600 : 400;
+                font-italic: token.italic;
+                vertical-alignment: center;
+                wrap: no-wrap;
+                overflow: clip;
+            }
+        }
+    }
+
+    if root.is-code: Rectangle {
+        x: GitHubMetrics.border-thin;
+        y: GitHubMetrics.size-32;
+        width: parent.width - GitHubMetrics.border-thin * 2;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+
+    if root.is-code && root.block.code-language != "": Text {
+        x: root.content-inset;
+        y: GitHubMetrics.size-8;
+        width: parent.width - root.content-inset * 2;
+        height: GitHubMetrics.size-16;
+        text: root.block.code-language;
+        color: GitHubTheme.fg-muted;
         font-family: "monospace";
-        font-size: 12px;
-        wrap: word-wrap;
+        font-size: GitHubMetrics.text-small;
+        vertical-alignment: center;
     }
 }
 
@@ -232,22 +293,14 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
     background: GitHubTheme.canvas-default;
 
     if root.loading: Rectangle {
+        width: parent.width;
+        height: parent.height;
         background: GitHubTheme.canvas-default;
 
-        VerticalLayout {
-            width: min(parent.width, 280px);
-            x: (parent.width - self.width) / 2;
-            y: max(GitHubMetrics.size-32, (parent.height - self.preferred-height) / 2);
-            alignment: center;
-            spacing: GitHubMetrics.size-12;
-
-            GitHubSpinner { width: GitHubMetrics.size-24; height: GitHubMetrics.size-24; }
-            Text {
-                text: "Preparing preview";
-                color: GitHubTheme.fg-muted;
-                font-size: GitHubMetrics.text-medium;
-                horizontal-alignment: center;
-            }
+        GitHubCenteredLoadingState {
+            width: parent.width;
+            height: parent.height;
+            label: "Preparing preview";
         }
     }
 

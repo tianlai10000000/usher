@@ -1,6 +1,5 @@
-use crate::chat::markdown::{build_assistant_render_payload, plain_text_to_display};
+use crate::chat::markdown::project_assistant_content;
 use crate::{ChatMessage, MessageRole, MessageStatus};
-use slint::ModelRc;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 /// 消息 ID 计数器
@@ -21,8 +20,8 @@ pub fn create_user_message(content: String) -> ChatMessage {
         role: MessageRole::User,
         status: MessageStatus::Normal,
         rendered_content: content.clone().into(),
-        is_markdown: false,
-        markdown_blocks: ModelRc::default(),
+        preview_available: false,
+        preview_title: "".into(),
         content: content.into(),
         timestamp: get_current_timestamp(),
     }
@@ -32,15 +31,15 @@ pub fn create_user_message(content: String) -> ChatMessage {
 pub fn create_assistant_message(content: String) -> ChatMessage {
     let id = next_message_id();
     log::debug!("[Chat::Turn] Creating assistant message (id: {})", id);
-    let payload = build_assistant_render_payload(&content);
+    let projection = project_assistant_content(&content);
 
     ChatMessage {
         id,
         role: MessageRole::Assistant,
         status: MessageStatus::Normal,
-        rendered_content: payload.rendered_text.into(),
-        is_markdown: payload.is_markdown,
-        markdown_blocks: payload.blocks.as_slice().into(),
+        rendered_content: projection.text.into(),
+        preview_available: projection.preview_available,
+        preview_title: projection.preview_title.into(),
         content: content.into(),
         timestamp: get_current_timestamp(),
     }
@@ -56,8 +55,8 @@ pub fn create_loading_message() -> ChatMessage {
         role: MessageRole::Assistant,
         status: MessageStatus::Normal,
         rendered_content: "".into(),
-        is_markdown: false,
-        markdown_blocks: ModelRc::default(),
+        preview_available: false,
+        preview_title: "".into(),
         content: "".into(), // 空内容表示加载中
         timestamp: "".into(),
     }
@@ -76,9 +75,9 @@ pub fn create_error_message(error: String) -> ChatMessage {
         id,
         role: MessageRole::Assistant,
         status: MessageStatus::Error,
-        rendered_content: plain_text_to_display(&error).into(),
-        is_markdown: false,
-        markdown_blocks: ModelRc::default(),
+        rendered_content: project_assistant_content(&error).text.into(),
+        preview_available: false,
+        preview_title: "".into(),
         content: error.into(),
         timestamp: get_current_timestamp(),
     }

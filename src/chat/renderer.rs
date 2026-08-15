@@ -1,12 +1,10 @@
-use super::markdown::{
-    build_assistant_render_payload, build_assistant_render_payload_with_wrap_width,
-};
+use super::markdown::{AssistantProjection, project_assistant_content};
 use super::persistence::{StoredChatMessage, StoredMessageRole, StoredMessageStatus};
 use crate::{ChatMessage, MessageRole, MessageStatus};
-use slint::{Model, ModelRc};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 const DEFAULT_RENDER_CACHE_CAPACITY: usize = 96;
 const DEFAULT_RENDER_CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -14,15 +12,14 @@ const LOADING_PLACEHOLDER_ID: i32 = -1;
 
 struct CachedRender {
     rendered_content: Arc<str>,
-    is_markdown: bool,
-    markdown_blocks: Arc<[crate::MarkdownBlock]>,
+    preview_available: bool,
+    preview_title: &'static str,
     approx_bytes: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct CacheKey {
     message_id: i64,
-    wrap_width_px: i32,
 }
 
 struct LruRenderCache {
@@ -45,12 +42,9 @@ impl LruRenderCache {
     }
 
     fn get(&mut self, key: CacheKey) -> Option<Arc<CachedRender>> {
-        if let Some(value) = self.values.get(&key).cloned() {
-            self.touch(key);
-            Some(value)
-        } else {
-            None
-        }
+        let value = self.values.get(&key).cloned()?;
+        self.touch(key);
+        Some(value)
     }
 
     fn insert(&mut self, key: CacheKey, value: Arc<CachedRender>) {
@@ -60,16 +54,16 @@ impl LruRenderCache {
         self.current_bytes = self.current_bytes.saturating_add(value.approx_bytes);
         self.touch(key);
         while self.values.len() > self.capacity || self.current_bytes > self.max_bytes {
-            if let Some(evict) = self.order.pop_front() {
-                if let Some(old) = self.values.remove(&evict) {
-                    self.current_bytes = self.current_bytes.saturating_sub(old.approx_bytes);
-                }
+            if let Some(evict) = self.order.pop_front()
+                && let Some(old) = self.values.remove(&evict)
+            {
+                self.current_bytes = self.current_bytes.saturating_sub(old.approx_bytes);
             }
         }
     }
 
     fn touch(&mut self, key: CacheKey) {
-        self.order.retain(|k| *k != key);
+        self.order.retain(|candidate| *candidate != key);
         self.order.push_back(key);
     }
 }
@@ -91,30 +85,52 @@ impl ChatMessageRenderer {
     fn render_messages(
         &mut self,
         source: &[StoredChatMessage],
-        wrap_width_override_px: Option<i32>,
         include_loading_placeholder: bool,
     ) -> Vec<ChatMessage> {
         let mut result =
             Vec::with_capacity(source.len() + usize::from(include_loading_placeholder));
-
-        for message in source {
-            result.push(self.render_single(message, wrap_width_override_px));
-        }
-
+        result.extend(source.iter().map(|message| self.render_single(message)));
         if include_loading_placeholder {
             result.push(Self::loading_placeholder());
         }
-
         result
     }
 
-    fn render_single(
-        &mut self,
-        source: &StoredChatMessage,
-        wrap_width_override_px: Option<i32>,
-    ) -> ChatMessage {
+    fn assistant_projection(&mut self, source: &StoredChatMessage) -> Arc<CachedRender> {
+        let key = CacheKey {
+            message_id: source.id,
+        };
+        if let Some(hit) = self.cache.get(key) {
+            return hit;
+        }
+
+        let (_, display_content) = assistant_display(source);
+        let AssistantProjection {
+            text,
+            preview_available,
+            preview_title,
+            markdown,
+        } = project_assistant_content(display_content);
+        if markdown {
+            MARKDOWN_PROJECTION_COUNT.with(|count| count.set(count.get().wrapping_add(1)));
+        }
+        let rendered_content = Arc::<str>::from(text);
+        let computed = Arc::new(CachedRender {
+            approx_bytes: rendered_content
+                .len()
+                .saturating_add(preview_title.len())
+                .saturating_add(std::mem::size_of::<CachedRender>()),
+            rendered_content,
+            preview_available,
+            preview_title,
+        });
+        self.cache.insert(key, computed.clone());
+        computed
+    }
+
+    fn render_single(&mut self, source: &StoredChatMessage) -> ChatMessage {
         let id = i64_to_i32(source.id);
-        let timestamp = source.timestamp.clone();
+        let timestamp = super::timestamp::format_for_display(&source.timestamp);
 
         match source.role {
             StoredMessageRole::User => ChatMessage {
@@ -123,72 +139,21 @@ impl ChatMessageRenderer {
                 status: MessageStatus::Normal,
                 content: source.content.clone().into(),
                 rendered_content: "".into(),
-                is_markdown: false,
-                markdown_blocks: ModelRc::default(),
+                preview_available: false,
+                preview_title: "".into(),
                 timestamp: timestamp.into(),
             },
             StoredMessageRole::Assistant => {
                 let (stored_status, display_content) = assistant_display(source);
-                let status = message_status_for_ui(stored_status);
-
-                // 非 markdown 内容渲染成本低，且缓存会额外持有整段文本副本，直接跳过缓存以降低内存。
-                if !super::markdown::looks_like_markdown(display_content) {
-                    return ChatMessage {
-                        id,
-                        role: MessageRole::Assistant,
-                        status,
-                        content: display_content.into(),
-                        rendered_content: display_content.into(),
-                        is_markdown: false,
-                        markdown_blocks: ModelRc::default(),
-                        timestamp: timestamp.into(),
-                    };
-                }
-
-                let wrap_key = wrap_width_override_px.unwrap_or(-1);
-                let cache_key = CacheKey {
-                    message_id: source.id,
-                    wrap_width_px: wrap_key,
-                };
-
-                let rendered = if let Some(hit) = self.cache.get(cache_key) {
-                    hit
-                } else {
-                    let payload = if let Some(width) = wrap_width_override_px {
-                        build_assistant_render_payload_with_wrap_width(
-                            display_content,
-                            Some(width as f32),
-                        )
-                    } else {
-                        build_assistant_render_payload(display_content)
-                    };
-                    let rendered_text = if payload.is_markdown {
-                        // markdown 块渲染时不会用到 rendered_content，避免重复占用大字符串。
-                        Arc::<str>::from("")
-                    } else {
-                        Arc::<str>::from(payload.rendered_text)
-                    };
-                    let blocks: Arc<[crate::MarkdownBlock]> = payload.blocks.into();
-                    let approx_bytes =
-                        rendered_text.len() + estimate_markdown_blocks_bytes(&blocks);
-                    let computed = Arc::new(CachedRender {
-                        rendered_content: rendered_text,
-                        is_markdown: payload.is_markdown,
-                        markdown_blocks: blocks,
-                        approx_bytes,
-                    });
-                    self.cache.insert(cache_key, computed.clone());
-                    computed
-                };
-
+                let rendered = self.assistant_projection(source);
                 ChatMessage {
                     id,
                     role: MessageRole::Assistant,
-                    status,
+                    status: message_status_for_ui(stored_status),
                     content: display_content.into(),
                     rendered_content: rendered.rendered_content.as_ref().into(),
-                    is_markdown: rendered.is_markdown,
-                    markdown_blocks: rendered.markdown_blocks.as_ref().into(),
+                    preview_available: rendered.preview_available,
+                    preview_title: rendered.preview_title.into(),
                     timestamp: timestamp.into(),
                 }
             }
@@ -202,8 +167,8 @@ impl ChatMessageRenderer {
             status: MessageStatus::Normal,
             content: "".into(),
             rendered_content: "".into(),
-            is_markdown: false,
-            markdown_blocks: ModelRc::default(),
+            preview_available: false,
+            preview_title: "".into(),
             timestamp: "".into(),
         }
     }
@@ -213,14 +178,12 @@ fn assistant_display(message: &StoredChatMessage) -> (StoredMessageStatus, &str)
     if message.status != StoredMessageStatus::Normal {
         return (message.status, message.content.as_str());
     }
-
     if let Some(content) = strip_legacy_status_prefix(&message.content, '❌') {
         return (StoredMessageStatus::Error, content);
     }
     if let Some(content) = strip_legacy_status_prefix(&message.content, '✅') {
         return (StoredMessageStatus::Success, content);
     }
-
     (StoredMessageStatus::Normal, message.content.as_str())
 }
 
@@ -238,74 +201,128 @@ fn message_status_for_ui(status: StoredMessageStatus) -> MessageStatus {
     }
 }
 
-fn estimate_markdown_blocks_bytes(blocks: &[crate::MarkdownBlock]) -> usize {
-    let mut sum = 0usize;
-    for block in blocks {
-        sum = sum.saturating_add(block.text.len());
-        for line in block.inline_lines.iter() {
-            for span in line.spans.iter() {
-                sum = sum
-                    .saturating_add(span.text.len())
-                    .saturating_add(span.href.len())
-                    .saturating_add(16);
-            }
-        }
-        sum = sum.saturating_add(32);
-    }
-    sum
+#[derive(Debug, Clone)]
+pub(super) struct ModelMutationDiagnostic {
+    pub(super) revision: u64,
+    pub(super) duration: Duration,
+    pub(super) completed_at: Instant,
+    pub(super) inserted_rows: usize,
+    pub(super) removed_rows: usize,
+    pub(super) incremental: bool,
 }
 
 thread_local! {
     static RENDERER: RefCell<ChatMessageRenderer> = RefCell::new(ChatMessageRenderer::new());
+    static MODEL_COMMIT_COUNT: Cell<u64> = const { Cell::new(0) };
+    static MARKDOWN_PROJECTION_COUNT: Cell<usize> = const { Cell::new(0) };
+    static LATEST_MODEL_MUTATION: RefCell<Option<ModelMutationDiagnostic>> = const { RefCell::new(None) };
 }
 
 pub fn render_for_ui(
     source: &[StoredChatMessage],
-    wrap_width_override_px: Option<i32>,
     include_loading_placeholder: bool,
 ) -> Vec<ChatMessage> {
     RENDERER.with(|renderer| {
-        renderer.borrow_mut().render_messages(
-            source,
-            wrap_width_override_px,
-            include_loading_placeholder,
-        )
+        renderer
+            .borrow_mut()
+            .render_messages(source, include_loading_placeholder)
     })
 }
 
+pub(super) fn projection_for_layout(source: &StoredChatMessage) -> (Arc<str>, bool) {
+    match source.role {
+        StoredMessageRole::User => (Arc::<str>::from(source.content.as_str()), false),
+        StoredMessageRole::Assistant => RENDERER.with(|renderer| {
+            let rendered = renderer.borrow_mut().assistant_projection(source);
+            (
+                rendered.rendered_content.clone(),
+                rendered.preview_available,
+            )
+        }),
+    }
+}
+
 pub fn clear_render_cache() {
-    RENDERER.with(|renderer| {
-        *renderer.borrow_mut() = ChatMessageRenderer::new();
+    RENDERER.with(|renderer| *renderer.borrow_mut() = ChatMessageRenderer::new());
+}
+
+pub fn record_model_commit(
+    duration: Duration,
+    inserted_rows: usize,
+    removed_rows: usize,
+    incremental: bool,
+) {
+    let revision = MODEL_COMMIT_COUNT.with(|count| {
+        let revision = count.get().wrapping_add(1);
+        count.set(revision);
+        revision
+    });
+    LATEST_MODEL_MUTATION.with(|latest| {
+        *latest.borrow_mut() = Some(ModelMutationDiagnostic {
+            revision,
+            duration,
+            completed_at: Instant::now(),
+            inserted_rows,
+            removed_rows,
+            incremental,
+        });
     });
 }
 
+pub(crate) fn diagnostic_counts() -> (u64, usize) {
+    (
+        MODEL_COMMIT_COUNT.with(Cell::get),
+        MARKDOWN_PROJECTION_COUNT.with(Cell::get),
+    )
+}
+
+pub(super) fn latest_model_mutation() -> Option<ModelMutationDiagnostic> {
+    LATEST_MODEL_MUTATION.with(|latest| latest.borrow().clone())
+}
+
 fn i64_to_i32(value: i64) -> i32 {
-    if value > i32::MAX as i64 {
-        i32::MAX
-    } else if value < i32::MIN as i64 {
-        i32::MIN
-    } else {
-        value as i32
-    }
+    value.clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
 #[cfg(test)]
 mod tests {
-    use super::assistant_display;
-    use crate::chat::persistence::{StoredChatMessage, StoredMessageRole, StoredMessageStatus};
+    use super::*;
+    use crate::chat::markdown::MAX_INLINE_PROJECTION_CHARS;
 
-    #[test]
-    fn legacy_status_emoji_is_removed_from_display_text() {
-        let message = StoredChatMessage {
+    fn message(content: impl Into<String>) -> StoredChatMessage {
+        StoredChatMessage {
             id: 1,
             role: StoredMessageRole::Assistant,
             status: StoredMessageStatus::Normal,
-            content: "❌ connection failed".to_string(),
+            content: content.into(),
             timestamp: "12:00".to_string(),
-        };
+        }
+    }
 
+    #[test]
+    fn legacy_status_emoji_is_removed_from_display_text() {
+        let message = message("❌ connection failed");
         let (status, content) = assistant_display(&message);
         assert_eq!(status, StoredMessageStatus::Error);
         assert_eq!(content, "connection failed");
+    }
+
+    #[test]
+    fn assistant_projection_is_bounded_and_retains_full_preview_source() {
+        let source = message("answer ".repeat(300));
+        let row = ChatMessageRenderer::new().render_single(&source);
+        assert!(row.rendered_content.chars().count() <= MAX_INLINE_PROJECTION_CHARS);
+        assert!(row.rendered_content.ends_with("..."));
+        assert!(row.preview_available);
+        assert_eq!(row.content.as_str(), source.content);
+    }
+
+    #[test]
+    fn markdown_message_exposes_formatted_preview_without_inline_blocks() {
+        let source = message("# Result\n\n```rust\nfn main() {}\n```");
+        let row = ChatMessageRenderer::new().render_single(&source);
+        assert!(row.preview_available);
+        assert_eq!(row.preview_title.as_str(), "Open formatted response");
+        assert!(row.rendered_content.contains("fn main() {}"));
     }
 }

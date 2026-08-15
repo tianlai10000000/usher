@@ -94,12 +94,15 @@ export component GitHubSettingsNavItem inherits Rectangle {
 
 export component GitHubButton inherits Rectangle {
     in property <string> text;
+    in property <image> leading-icon;
     in property <bool> primary: false;
     in property <bool> danger: false;
     in property <bool> selected: false;
     in property <bool> disabled: false;
     in property <bool> busy: false;
     in property <length> label-font-size: GitHubMetrics.text-medium;
+    private property <bool> has-leading-icon:
+        root.leading-icon.width > 0 && root.leading-icon.height > 0;
     private property <bool> keyboard-focus-visible: false;
     callback clicked();
 
@@ -198,8 +201,24 @@ export component GitHubButton inherits Rectangle {
                 : (GitHubTheme.fg-default);
     }
 
+    if root.has-leading-icon && !root.busy: Image {
+        x: root.pad-x;
+        y: (parent.height - self.height) / 2;
+        width: GitHubMetrics.icon-medium;
+        height: GitHubMetrics.icon-medium;
+        source: root.leading-icon;
+        image-fit: contain;
+        colorize: root.primary || (root.danger && button-touch.has-hover)
+            ? GitHubTheme.fg-on-emphasis
+            : root.danger
+                ? GitHubTheme.danger-fg
+                : GitHubTheme.fg-default;
+    }
+
     Text {
-        x: root.busy ? root.pad-x + root.spinner-slot : root.pad-x;
+        x: root.busy || root.has-leading-icon
+            ? root.pad-x + root.spinner-slot
+            : root.pad-x;
         width: parent.width - self.x - root.pad-x;
         height: parent.height;
         text: root.text;

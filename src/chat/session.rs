@@ -1,7 +1,6 @@
 use super::persistence::{
     HistoryPage, JsonlHistoryStore, StoredChatMessage, StoredMessageRole, StoredMessageStatus,
 };
-use chrono::Local;
 use std::io;
 
 const DEFAULT_STARTUP_LOAD: usize = 20;
@@ -109,6 +108,59 @@ impl ChatSessionService {
         );
     }
 
+    pub(crate) fn install_performance_fixture(&mut self) {
+        if !super::performance::fixture_enabled() {
+            return;
+        }
+
+        let timestamp = super::timestamp::current_timestamp();
+        let assistant_body = "The optimized Chat fixture keeps a bounded readable projection while the complete response remains available in Preview. ".repeat(14);
+        self.loaded_messages = (0..45)
+            .flat_map(|group| {
+                let base = i64::from(group) * 4 + 1;
+                [
+                    StoredChatMessage {
+                        id: base,
+                        role: StoredMessageRole::User,
+                        status: StoredMessageStatus::Normal,
+                        content: format!("Performance fixture prompt {}", group + 1),
+                        timestamp: timestamp.clone(),
+                    },
+                    StoredChatMessage {
+                        id: base + 1,
+                        role: StoredMessageRole::Assistant,
+                        status: StoredMessageStatus::Normal,
+                        content: format!("# Fixture response\n\n{assistant_body}"),
+                        timestamp: timestamp.clone(),
+                    },
+                    StoredChatMessage {
+                        id: base + 2,
+                        role: StoredMessageRole::Assistant,
+                        status: StoredMessageStatus::Normal,
+                        content: format!("## Follow-up detail\n\n{assistant_body}"),
+                        timestamp: timestamp.clone(),
+                    },
+                    StoredChatMessage {
+                        id: base + 3,
+                        role: StoredMessageRole::Assistant,
+                        status: StoredMessageStatus::Normal,
+                        content: format!("### Final detail\n\n{assistant_body}"),
+                        timestamp: timestamp.clone(),
+                    },
+                ]
+            })
+            .collect();
+        self.can_load_more = false;
+        self.next_id = self
+            .loaded_messages
+            .last()
+            .map_or(1, |message| message.id.saturating_add(1));
+        log::info!(
+            "[Chat::PerformanceFixture] Installed {} in-memory messages",
+            self.loaded_messages.len()
+        );
+    }
+
     fn append_message(
         &mut self,
         role: StoredMessageRole,
@@ -131,5 +183,5 @@ impl ChatSessionService {
 }
 
 fn current_timestamp() -> String {
-    Local::now().format("%H:%M").to_string()
+    super::timestamp::current_timestamp()
 }

@@ -36,7 +36,7 @@ import { GitHubScrollView } from "./components/github_scroll_view.slint";
 import { GitHubActionMenu } from "./components/github_action_menu.slint";
 import { GitHubIconButton } from "./components/button/github_icon_button.slint";
 import { GitHubTheme, GitHubMetrics } from "./theme/github_theme.slint";
-import { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, GitHubArtifactPreviewPanel, GitHubArtifactPreviewResizeHandle, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
+import { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewCodeToken, ArtifactPreviewCodeLine, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, GitHubArtifactPreviewPanel, GitHubArtifactPreviewResizeHandle, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
 
 export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
@@ -52,7 +52,7 @@ export { ChatMessage, ChatSelectionRect, MessageRole, MessageStatus } from "./vi
 export { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 export { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
-export { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
+export { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewCodeToken, ArtifactPreviewCodeLine, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
 
 export struct SidebarMotionStep {
     progress: float,

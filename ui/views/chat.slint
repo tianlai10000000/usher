@@ -254,15 +254,16 @@ export component GitHubChatPage inherits Rectangle {
 
                     if root.loading-history || root.can-load-more-history: Rectangle {
                         width: parent.width;
-                        height: GitHubMetrics.size-40;
+                        height: GitHubMetrics.size-36;
                         background: transparent;
 
                         GitHubButton {
                             x: (parent.width - self.width) / 2;
                             y: GitHubMetrics.size-4;
-                            text: root.loading-history
-                                ? "Loading history"
-                                : "Load earlier messages";
+                            height: GitHubMetrics.control-small-size;
+                            text: "Load more";
+                            leading-icon: @image-url("../assets/icons/octicon-arrow-up-16.svg");
+                            label-font-size: GitHubMetrics.text-small;
                             busy: root.loading-history;
                             disabled: root.loading-history;
                             clicked => { root.load-more-history(); }

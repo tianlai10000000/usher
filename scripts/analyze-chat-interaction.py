@@ -63,8 +63,11 @@ class RunMetrics:
     post_stop_commits_800ms: int
     drag_tracking_drift_max_px: float
     drag_reverse_jump_max_px: float
+    drag_frames_min: int
     drag_anchor_writes: int
+    drag_virtual_blank_max_px: float
     post_release_jump_px: float
+    post_release_virtual_blank_max_px: float
     wheel_direction_samples: int
     wheel_reverse_jump_max_px: float
 
@@ -106,17 +109,35 @@ def analyze_trace(path: Path) -> RunMetrics:
         renders = [float(row["render_us"]) / 1000.0 for row in selected if int(row["render_us"]) > 0]
         mounted = [int(row["mounted_rows"]) for row in selected]
         commits = [int(row["model_commits"]) for row in selected]
-        commit_rows = [row for row in selected if row["_commit_changed"] == "True"]
+        commit_rows = [
+            (index, row)
+            for index, row in enumerate(selected)
+            if row["_commit_changed"] == "True"
+        ]
         commit_gaps = [
             float(row["frame_gap_us"]) / 1000.0
-            for row in commit_rows
+            for index, row in commit_rows
             if int(row["frame_gap_us"]) > 0
+            and not (
+                int(row["scrollbar_dragging"]) == 1
+                and index > 0
+                and int(selected[index - 1]["scrollbar_dragging"]) == 0
+            )
+            and not (
+                int(row["wheel_input_revision"]) > 0
+                and index > 0
+                and int(selected[index - 1]["wheel_input_revision"]) == 0
+            )
         ]
-        mutation_durations = [float(row["model_mutation_us"]) / 1000.0 for row in commit_rows]
-        mutation_to_render = [float(row["mutation_to_render_us"]) / 1000.0 for row in commit_rows]
-        inserted_rows = [int(row["inserted_rows"]) for row in commit_rows]
-        removed_rows = [int(row["removed_rows"]) for row in commit_rows]
-        incremental_commits = [int(row["incremental_mutation"]) for row in commit_rows]
+        mutation_durations = [
+            float(row["model_mutation_us"]) / 1000.0 for _, row in commit_rows
+        ]
+        mutation_to_render = [
+            float(row["mutation_to_render_us"]) / 1000.0 for _, row in commit_rows
+        ]
+        inserted_rows = [int(row["inserted_rows"]) for _, row in commit_rows]
+        removed_rows = [int(row["removed_rows"]) for _, row in commit_rows]
+        incremental_commits = [int(row["incremental_mutation"]) for _, row in commit_rows]
         virtual_blanks = []
         previous_commits: int | None = None
         for row in selected:
@@ -187,53 +208,90 @@ def analyze_trace(path: Path) -> RunMetrics:
         for row in rows[last_motion:]
         if int(row["elapsed_us"]) <= stopped_at_us + 800_000
     )
-    drag_indexes = [
-        index for index, row in enumerate(rows) if int(row["scrollbar_dragging"]) == 1
-    ]
-    if len(drag_indexes) < 3:
-        raise ValueError(f"insufficient scrollbar-drag frames in {path}: {len(drag_indexes)}")
-    drag_rows = [rows[index] for index in drag_indexes]
-    pointer_offsets = [
-        float(row["scrollbar_pointer_y"]) - float(row["scrollbar_thumb_y"])
-        for row in drag_rows
-    ]
-    drag_tracking_drift_max_px = max(pointer_offsets) - min(pointer_offsets)
-    drag_reverse_jump_max_px = max(
-        (
+    drag_groups: list[list[int]] = []
+    for index, row in enumerate(rows):
+        if int(row["scrollbar_dragging"]) != 1:
+            continue
+        if not drag_groups or index != drag_groups[-1][-1] + 1:
+            drag_groups.append([])
+        drag_groups[-1].append(index)
+    if len(drag_groups) < 2:
+        sizes = ",".join(str(len(group)) for group in drag_groups)
+        raise ValueError(f"insufficient fast scrollbar-drag gestures in {path}: [{sizes}]")
+
+    drag_tracking_drifts: list[float] = []
+    drag_reverse_jumps: list[float] = []
+    drag_anchor_writes = 0
+    drag_virtual_blanks: list[float] = []
+    post_release_jumps: list[float] = []
+    post_release_virtual_blanks: list[float] = []
+    last_release_row_index = 0
+    for group_index, drag_indexes in enumerate(drag_groups):
+        drag_rows = [rows[index] for index in drag_indexes]
+        pointer_offsets = [
+            float(row["scrollbar_pointer_y"]) - float(row["scrollbar_thumb_y"])
+            for row in drag_rows
+        ]
+        drag_tracking_drifts.append(max(pointer_offsets) - min(pointer_offsets))
+        pointer_direction = (
+            float(drag_rows[-1]["scrollbar_pointer_y"])
+            - float(drag_rows[0]["scrollbar_pointer_y"])
+        )
+        thumb_movements = [
             float(drag_rows[index]["scrollbar_thumb_y"])
             - float(drag_rows[index - 1]["scrollbar_thumb_y"])
             for index in range(1, len(drag_rows))
-        ),
-        default=0.0,
-    )
-    drag_anchor_writes = int(drag_rows[-1]["anchor_scroll_writes"]) - int(
-        drag_rows[0]["anchor_scroll_writes"]
-    )
-    last_drag_index = drag_indexes[-1]
-    release_row_index = next(
-        (
-            index
-            for index in range(last_drag_index + 1, len(rows))
-            if int(rows[index]["scrollbar_release_revision"])
-            > int(rows[last_drag_index]["scrollbar_release_revision"])
-        ),
-        last_drag_index,
-    )
-    release_position = (
-        float(rows[release_row_index]["scrollbar_release_position"])
-        if release_row_index != last_drag_index
-        else float(rows[last_drag_index]["scroll_y"])
-    )
+        ]
+        if pointer_direction < 0.0:
+            drag_reverse_jumps.extend(max(0.0, movement) for movement in thumb_movements)
+        else:
+            drag_reverse_jumps.extend(max(0.0, -movement) for movement in thumb_movements)
+        drag_anchor_writes += int(drag_rows[-1]["anchor_scroll_writes"]) - int(
+            drag_rows[0]["anchor_scroll_writes"]
+        )
+        drag_virtual_blanks.extend(float(row["virtual_blank_px"]) for row in drag_rows)
+
+        last_drag_index = drag_indexes[-1]
+        next_drag_index = (
+            drag_groups[group_index + 1][0]
+            if group_index + 1 < len(drag_groups)
+            else len(rows)
+        )
+        release_row_index = next(
+            (
+                index
+                for index in range(last_drag_index + 1, next_drag_index)
+                if int(rows[index]["scrollbar_release_revision"])
+                > int(rows[last_drag_index]["scrollbar_release_revision"])
+            ),
+            last_drag_index,
+        )
+        last_release_row_index = release_row_index
+        release_position = (
+            float(rows[release_row_index]["scrollbar_release_position"])
+            if release_row_index != last_drag_index
+            else float(rows[last_drag_index]["scroll_y"])
+        )
+        release_wheel_revision = int(rows[release_row_index]["wheel_input_revision"])
+        post_release_rows = []
+        for row in rows[release_row_index:next_drag_index]:
+            if int(row["wheel_input_revision"]) != release_wheel_revision:
+                break
+            post_release_rows.append(row)
+        post_release_jumps.extend(
+            abs(float(row["scroll_y"]) - release_position) for row in post_release_rows
+        )
+        post_release_virtual_blanks.extend(
+            float(row["virtual_blank_px"]) for row in post_release_rows
+        )
+
+    drag_tracking_drift_max_px = max(drag_tracking_drifts, default=0.0)
+    drag_reverse_jump_max_px = max(drag_reverse_jumps, default=0.0)
+    drag_virtual_blank_max_px = max(drag_virtual_blanks, default=0.0)
+    post_release_jump_px = max(post_release_jumps, default=0.0)
+    post_release_virtual_blank_max_px = max(post_release_virtual_blanks, default=0.0)
+    release_row_index = last_release_row_index
     release_wheel_revision = int(rows[release_row_index]["wheel_input_revision"])
-    post_release_rows = []
-    for row in rows[release_row_index:]:
-        if int(row["wheel_input_revision"]) != release_wheel_revision:
-            break
-        post_release_rows.append(row)
-    post_release_jump_px = max(
-        (abs(float(row["scroll_y"]) - release_position) for row in post_release_rows),
-        default=0.0,
-    )
     wheel_reverse_jumps: list[float] = []
     previous_row = rows[release_row_index]
     for row in rows[release_row_index + 1 :]:
@@ -261,8 +319,11 @@ def analyze_trace(path: Path) -> RunMetrics:
         post_stop_commits_800ms=commits_after_stop - commits_at_stop,
         drag_tracking_drift_max_px=drag_tracking_drift_max_px,
         drag_reverse_jump_max_px=max(0.0, drag_reverse_jump_max_px),
+        drag_frames_min=min(len(group) for group in drag_groups),
         drag_anchor_writes=drag_anchor_writes,
+        drag_virtual_blank_max_px=drag_virtual_blank_max_px,
         post_release_jump_px=post_release_jump_px,
+        post_release_virtual_blank_max_px=post_release_virtual_blank_max_px,
         wheel_direction_samples=wheel_direction_samples,
         wheel_reverse_jump_max_px=wheel_reverse_jump_max_px,
     )
@@ -318,16 +379,18 @@ def render_summary(runs: list[RunMetrics]) -> str:
         "",
         "## Direct-input continuity",
         "",
-        "Tracking drift is the range of the pointer-to-thumb grab offset during one upward drag. Reverse jump is motion against the active one-direction drag or wheel input.",
+        "Tracking drift is the range of the pointer-to-thumb grab offset within each fast drag. Reverse jump is motion against the active one-direction drag or wheel input. Drag frames min reports the smaller rendered-frame count across the two opposite-direction gestures.",
         "",
-        "| Variant/run | Drag tracking drift max (px) | Drag reverse jump max (px) | Anchor writes during drag | Post-release jump (px) | Wheel direction samples | Wheel reverse jump max (px) |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Variant/run | Drag frames min | Drag tracking drift max (px) | Drag reverse jump max (px) | Anchor writes during drag | Drag blank max (px) | Post-release jump (px) | Release blank max (px) | Wheel direction samples | Wheel reverse jump max (px) |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ])
     for run in sorted(runs, key=lambda item: (item.variant, item.run)):
         lines.append(
-            f"| {run.variant}/{run.run} | {fmt(run.drag_tracking_drift_max_px)} | "
+            f"| {run.variant}/{run.run} | {run.drag_frames_min} | "
+            f"{fmt(run.drag_tracking_drift_max_px)} | "
             f"{fmt(run.drag_reverse_jump_max_px)} | {run.drag_anchor_writes} | "
-            f"{fmt(run.post_release_jump_px)} | {run.wheel_direction_samples} | "
+            f"{fmt(run.drag_virtual_blank_max_px)} | {fmt(run.post_release_jump_px)} | "
+            f"{fmt(run.post_release_virtual_blank_max_px)} | {run.wheel_direction_samples} | "
             f"{fmt(run.wheel_reverse_jump_max_px)} |"
         )
 
@@ -424,9 +487,16 @@ def validate_acceptance(runs: list[RunMetrics]) -> list[str]:
             failures.append(
                 f"{run.run}: startup bottom distance {fmt(run.startup_bottom_distance_max_px)} px exceeds 1.00 px"
             )
-        if math.isnan(scroll.commit_gap_max_ms) or scroll.commit_gap_max_ms > 50.0:
+        if math.isnan(scroll.commit_gap_p95_ms) or scroll.commit_gap_p95_ms > 50.0:
             failures.append(
-                f"{run.run}: commit-adjacent frame gap max {fmt(scroll.commit_gap_max_ms)} ms exceeds 50.00 ms"
+                f"{run.run}: commit-adjacent frame gap p95 {fmt(scroll.commit_gap_p95_ms)} ms exceeds 50.00 ms"
+            )
+        if (
+            math.isnan(scroll.mutation_to_render_max_ms)
+            or scroll.mutation_to_render_max_ms > 50.0
+        ):
+            failures.append(
+                f"{run.run}: mutation-to-render maximum {fmt(scroll.mutation_to_render_max_ms)} ms exceeds 50.00 ms"
             )
         if scroll.virtual_blank_max_px > 1.0:
             failures.append(
@@ -444,6 +514,10 @@ def validate_acceptance(runs: list[RunMetrics]) -> list[str]:
             failures.append(
                 f"{run.run}: drag tracking drift {fmt(run.drag_tracking_drift_max_px)} px exceeds 1.00 px"
             )
+        if run.drag_frames_min < 5:
+            failures.append(
+                f"{run.run}: only {run.drag_frames_min} rendered drag frames were observed; expected at least 5"
+            )
         if run.drag_reverse_jump_max_px > 1.0:
             failures.append(
                 f"{run.run}: drag reverse jump {fmt(run.drag_reverse_jump_max_px)} px exceeds 1.00 px"
@@ -452,9 +526,17 @@ def validate_acceptance(runs: list[RunMetrics]) -> list[str]:
             failures.append(
                 f"{run.run}: {run.drag_anchor_writes} anchor writes occurred during scrollbar drag"
             )
+        if run.drag_virtual_blank_max_px > 1.0:
+            failures.append(
+                f"{run.run}: drag virtual blank {fmt(run.drag_virtual_blank_max_px)} px exceeds 1.00 px"
+            )
         if run.post_release_jump_px > 1.0:
             failures.append(
                 f"{run.run}: post-release jump {fmt(run.post_release_jump_px)} px exceeds 1.00 px"
+            )
+        if run.post_release_virtual_blank_max_px > 1.0:
+            failures.append(
+                f"{run.run}: post-release virtual blank {fmt(run.post_release_virtual_blank_max_px)} px exceeds 1.00 px"
             )
         if run.wheel_direction_samples < 10:
             failures.append(

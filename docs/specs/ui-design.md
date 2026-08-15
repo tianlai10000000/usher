@@ -219,8 +219,9 @@ expanded/collapsed, and success confirmation.
 - `GitHubButton`: Primer default/primary/danger action variants, medium 32 px
   control geometry by default, semibold single-line label, stable loading
   dimensions (width measured with the visible weight-600 label plus a reserved
-  leading spinner slot), duplicate-start protection, Enter/Space activation,
-  and a visible focus outline.
+  leading slot), optional leading icon that is replaced in-place by the busy
+  spinner, duplicate-start protection, Enter/Space activation, and a visible
+  focus outline.
 - `GitHubIconButton`: the shared basis for every icon-only action; centered
   Octicon, default/primary/danger/invisible states, small/medium/large control
   geometry, loading support, Enter/Space activation, focus outline, and an
@@ -644,12 +645,13 @@ expanded/collapsed, and success confirmation.
   `GitHubSettingsSectionMenuButton` at compact widths. Both paths expose the
   same sections and keyboard contract; form controls remain shared components
   under `ui/components/settings/`.
-- Chat uses an unframed work surface, bounded virtual history,
+- Chat uses an unframed work surface, the complete currently loaded history,
   `GitHubScrollView`, compact bordered message surfaces, and a responsive
-  bordered composer. Suggestions are standard GitHub buttons and sending is a
-  medium IconButton, not a floating circular action. User-facing Chat failures
-  use one application language and concise recovery text; technical HTTP
-  details remain in bounded logs rather than message bubbles.
+  bordered composer. Its in-flow history pagination action uses the small 28 px
+  default-button geometry and a concise label. Suggestions are standard GitHub
+  buttons and sending is a medium IconButton, not a floating circular action.
+  User-facing Chat failures use one application language and concise recovery
+  text; technical HTTP details remain in bounded logs rather than message bubbles.
 - Terminal chrome reuses shared GitHub controls, but terminal cells retain
   their dedicated monospace/ANSI rendering contract. Product theme changes
   must not recolor or reflow PTY-provided cell content.

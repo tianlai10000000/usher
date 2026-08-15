@@ -1,33 +1,97 @@
 //! Pure bounded-window layout for Chat history.
 
-use std::cell::{Cell, RefCell};
-use std::sync::{Arc, Mutex};
-
-use crate::chat::markdown::looks_like_markdown;
 use crate::chat::persistence::{StoredChatMessage, StoredMessageRole};
-use crate::chat::session::ChatSessionService;
+use crate::chat::renderer::projection_for_layout;
+use std::cell::{Cell, RefCell};
 
 const VIRTUAL_ROW_ESTIMATED_HEIGHT_PX: f32 = 108.0;
-const VIRTUAL_MIN_VISIBLE_ROWS: usize = 8;
-const VIRTUAL_OVERSCAN_ROWS: usize = 40;
-const VIRTUAL_MAX_WINDOW_ROWS: usize = 56;
-const VIRTUAL_OVERSCAN_PX: f32 = 1200.0;
+const MESSAGE_SPACING_PX: f32 = 8.0;
 
 thread_local! {
     static ADAPTIVE_ROW_HEIGHT_PX: Cell<f32> = const { Cell::new(VIRTUAL_ROW_ESTIMATED_HEIGHT_PX) };
     static VIRTUAL_LAYOUT_CACHE: RefCell<VirtualLayoutCache> = RefCell::new(VirtualLayoutCache::new());
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct VirtualWindowPolicy {
+    min_visible_rows: usize,
+    max_window_rows: usize,
+    overscan_px: f32,
+    fill_window: bool,
+    prefer_rows_before: bool,
+}
+
+impl VirtualWindowPolicy {
+    pub(super) const fn baseline() -> Self {
+        Self {
+            min_visible_rows: 8,
+            max_window_rows: 56,
+            overscan_px: 1_200.0,
+            fill_window: true,
+            prefer_rows_before: false,
+        }
+    }
+
+    pub(super) const fn optimized() -> Self {
+        Self {
+            min_visible_rows: 8,
+            max_window_rows: 32,
+            overscan_px: 2_400.0,
+            fill_window: false,
+            prefer_rows_before: false,
+        }
+    }
+
+    pub(super) const fn direct_scrollbar_drag(moving_down: bool) -> Self {
+        Self {
+            min_visible_rows: 8,
+            max_window_rows: 32,
+            overscan_px: 0.0,
+            fill_window: false,
+            prefer_rows_before: !moving_down,
+        }
+    }
+}
+
 pub(super) fn get_adaptive_row_height_px() -> f32 {
     ADAPTIVE_ROW_HEIGHT_PX.with(Cell::get)
 }
 
+pub(super) fn full_history_window(
+    total: usize,
+    row_estimate_px: f32,
+) -> (usize, usize, f32, f32, f32) {
+    (0, total, 0.0, 0.0, row_estimate_px)
+}
+
+pub(super) fn compute_history_window(
+    messages: &[StoredChatMessage],
+    virtualization_enabled: bool,
+    scroll_offset_px: f32,
+    viewport_height_px: f32,
+    wrap_width_px: i32,
+    row_estimate_px: f32,
+    policy: VirtualWindowPolicy,
+) -> (usize, usize, f32, f32, f32) {
+    if virtualization_enabled {
+        compute_virtual_window_with_estimates(
+            messages,
+            scroll_offset_px,
+            viewport_height_px,
+            wrap_width_px,
+            row_estimate_px,
+            policy,
+        )
+    } else {
+        full_history_window(messages.len(), row_estimate_px)
+    }
+}
+
 pub(super) fn smooth_adaptive_row_height_px(sample: f32) {
-    let clamped = sample.clamp(72.0, 220.0);
+    let clamped = sample.clamp(72.0, 560.0);
     ADAPTIVE_ROW_HEIGHT_PX.with(|cell| {
         let current = cell.get();
-        let next = current * 0.86 + clamped * 0.14;
-        cell.set(next);
+        cell.set(current * 0.86 + clamped * 0.14);
     });
 }
 
@@ -37,122 +101,141 @@ pub(super) fn compute_virtual_window_with_estimates(
     viewport_height_px: f32,
     wrap_width_px: i32,
     row_estimate_px: f32,
+    policy: VirtualWindowPolicy,
 ) -> (usize, usize, f32, f32, f32) {
     let total = messages.len();
     if total == 0 {
         return (0, 0, 0.0, 0.0, row_estimate_px);
     }
 
-    let visible_rows = ((viewport_height_px / row_estimate_px.max(72.0)).ceil() as usize)
-        .max(VIRTUAL_MIN_VISIBLE_ROWS);
-    let window_rows = (visible_rows + VIRTUAL_OVERSCAN_ROWS * 2)
-        .min(VIRTUAL_MAX_WINDOW_ROWS)
-        .max(visible_rows);
-
     VIRTUAL_LAYOUT_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        let sampled_avg_height_px = cache.ensure(messages, wrap_width_px);
+        let sampled_average = cache.ensure(messages, wrap_width_px);
         let prefix = cache.prefix_slice();
+        let visible_rows = ((viewport_height_px / row_estimate_px.max(72.0)).ceil() as usize)
+            .max(policy.min_visible_rows)
+            .min(policy.max_window_rows);
+        let target_start = (scroll_offset_px - policy.overscan_px).max(0.0);
+        let target_end = scroll_offset_px + viewport_height_px + policy.overscan_px;
+        let mut start = item_at_offset(prefix, target_start);
+        let mut end = (item_at_offset(prefix, target_end) + 1).min(total);
 
-        let target_start = (scroll_offset_px - VIRTUAL_OVERSCAN_PX).max(0.0);
-        let target_end = scroll_offset_px + viewport_height_px + VIRTUAL_OVERSCAN_PX;
-
-        let mut start = find_first_index_after_offset(prefix, target_start);
-        let mut end = find_first_index_after_offset(prefix, target_end);
-
-        if end <= start {
-            end = (start + visible_rows).min(total);
+        let desired_rows = if policy.fill_window {
+            policy.max_window_rows
+        } else {
+            visible_rows
+        };
+        expand_window(
+            &mut start,
+            &mut end,
+            desired_rows,
+            total,
+            policy.prefer_rows_before,
+        );
+        if end.saturating_sub(start) > policy.max_window_rows {
+            end = (start + policy.max_window_rows).min(total);
         }
-        if end.saturating_sub(start) > window_rows {
-            end = (start + window_rows).min(total);
-        }
-        if end.saturating_sub(start) < window_rows {
-            let missing = window_rows - end.saturating_sub(start);
-            end = (end + missing).min(total);
-            let adjusted = end.saturating_sub(window_rows);
-            start = start.min(adjusted);
-        }
 
-        let top_spacer_px = prefix[start];
-        let total_height = prefix[total];
-        let bottom_spacer_px = (total_height - prefix[end]).max(0.0);
-        (
-            start,
-            end,
-            top_spacer_px,
-            bottom_spacer_px,
-            sampled_avg_height_px,
-        )
+        let top_spacer = prefix[start];
+        let document_height = prefix[total];
+        let bottom_spacer = (document_height - prefix[end]).max(0.0);
+        (start, end, top_spacer, bottom_spacer, sampled_average)
     })
 }
 
-fn find_first_index_after_offset(prefix: &[f32], target: f32) -> usize {
-    // prefix[i] = total height of first i items
-    // Return the first item index whose bottom is after target.
+pub(super) fn compute_spacers_for_fixed_window(
+    messages: &[StoredChatMessage],
+    start: usize,
+    end: usize,
+    wrap_width_px: i32,
+    _optimized: bool,
+) -> Option<(f32, f32, f32)> {
+    if start > end || end > messages.len() {
+        return None;
+    }
+    VIRTUAL_LAYOUT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let average = cache.ensure(messages, wrap_width_px);
+        let prefix = cache.prefix_slice();
+        Some((
+            prefix[start],
+            (prefix[messages.len()] - prefix[end]).max(0.0),
+            average,
+        ))
+    })
+}
+
+pub(super) fn current_virtual_document_height_px() -> f32 {
+    VIRTUAL_LAYOUT_CACHE.with(|cache| cache.borrow().prefix.last().copied().unwrap_or(0.0))
+}
+
+pub(super) fn clear_virtual_layout_cache() {
+    VIRTUAL_LAYOUT_CACHE.with(|cache| *cache.borrow_mut() = VirtualLayoutCache::new());
+    ADAPTIVE_ROW_HEIGHT_PX.with(|height| height.set(VIRTUAL_ROW_ESTIMATED_HEIGHT_PX));
+}
+
+fn expand_window(
+    start: &mut usize,
+    end: &mut usize,
+    desired: usize,
+    total: usize,
+    prefer_rows_before: bool,
+) {
+    if end.saturating_sub(*start) >= desired {
+        return;
+    }
+    let missing = desired - end.saturating_sub(*start);
+    let before_target = if prefer_rows_before {
+        missing.div_ceil(2)
+    } else {
+        missing / 2
+    };
+    let before = before_target.min(*start);
+    *start -= before;
+    *end = (*end + missing - before).min(total);
+    if end.saturating_sub(*start) < desired {
+        *start = end.saturating_sub(desired);
+    }
+}
+
+fn item_at_offset(prefix: &[f32], target: f32) -> usize {
     if prefix.len() <= 1 {
         return 0;
     }
-    let mut lo = 0usize;
-    let mut hi = prefix.len() - 1;
-    while lo < hi {
-        let mid = (lo + hi) / 2;
-        if prefix[mid] < target {
-            lo = mid + 1;
+    let mut low = 0usize;
+    let mut high = prefix.len() - 1;
+    while low < high {
+        let middle = (low + high) / 2;
+        if prefix[middle] <= target {
+            low = middle + 1;
         } else {
-            hi = mid;
+            high = middle;
         }
     }
-    lo.saturating_sub(1).min(prefix.len().saturating_sub(2))
+    low.saturating_sub(1).min(prefix.len() - 2)
 }
 
 fn estimate_message_height_px(message: &StoredChatMessage, wrap_width_px: f32) -> f32 {
     let bubble_width = wrap_width_px.clamp(220.0, 960.0);
-    let chars_per_line = (bubble_width / 8.4).clamp(22.0, 90.0);
-    let lines_from_len = (message.content.chars().count() as f32 / chars_per_line).ceil();
-    let lines_from_breaks = message.content.matches('\n').count() as f32 + 1.0;
-    let mut lines = lines_from_len.max(lines_from_breaks);
-
-    let is_markdown = matches!(message.role, StoredMessageRole::Assistant)
-        && looks_like_markdown(&message.content);
-    if is_markdown {
-        let md_boost = message.content.matches("```").count() as f32 * 1.5
-            + message.content.matches("- ").count() as f32 * 0.35
-            + message.content.matches("# ").count() as f32 * 0.7;
-        lines += md_boost.min(16.0);
-    }
-
-    let base = match message.role {
-        StoredMessageRole::User => 58.0,
-        StoredMessageRole::Assistant => 66.0,
+    let text_width = (bubble_width - 24.0).max(1.0);
+    let (projection, preview_available) = projection_for_layout(message);
+    let measured_text_height = crate::chat::text_selection::measure_wrapped_system_text_height(
+        projection.as_ref(),
+        text_width,
+        14.0,
+    )
+    .ceil();
+    let timestamp_height = 14.0;
+    let preview_height = if preview_available { 26.0 } else { 0.0 };
+    let vertical_padding = 16.0;
+    let role_minimum: f32 = match message.role {
+        StoredMessageRole::User => 48.0,
+        StoredMessageRole::Assistant => 58.0,
     };
-    let line_height = if is_markdown { 20.0 } else { 18.0 };
-    (base + lines * line_height).clamp(58.0, 560.0)
-}
-
-pub(super) fn estimate_prepended_batch_height_px(
-    session: &Arc<Mutex<ChatSessionService>>,
-    loaded_count: usize,
-    wrap_width_px: i32,
-) -> f32 {
-    if loaded_count == 0 {
-        return 0.0;
-    }
-    let guard = match session.lock() {
-        Ok(g) => g,
-        Err(e) => {
-            log::error!(
-                "[Chat::Session] Lock poisoned while estimating prepended height: {}",
-                e
-            );
-            return 0.0;
-        }
-    };
-    guard
-        .loaded_messages()
-        .iter()
-        .take(loaded_count)
-        .map(|m| estimate_message_height_px(m, wrap_width_px as f32))
-        .sum()
+    (measured_text_height + timestamp_height + preview_height + vertical_padding)
+        .max(role_minimum)
+        .min(4_000.0)
+        + MESSAGE_SPACING_PX
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,7 +251,6 @@ pub(super) struct VirtualRenderSignature {
     pub(super) total_len: usize,
     pub(super) start: usize,
     pub(super) end: usize,
-    pub(super) wrap_width_px: i32,
     pub(super) include_loading_placeholder: bool,
 }
 
@@ -179,7 +261,7 @@ struct VirtualLayoutCache {
 }
 
 impl VirtualLayoutCache {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             key: None,
             prefix: Vec::new(),
@@ -194,17 +276,12 @@ impl VirtualLayoutCache {
             self.sampled_avg_height_px = VIRTUAL_ROW_ESTIMATED_HEIGHT_PX;
             return self.sampled_avg_height_px;
         };
-
-        let valid = self.key == Some(key) && self.prefix.len() == key.len + 1;
-        if valid {
+        if self.key == Some(key) && self.prefix.len() == key.len + 1 {
             return self.sampled_avg_height_px;
         }
-
-        if self.try_incremental_rebuild(messages, key) {
-            return self.sampled_avg_height_px;
+        if !self.try_incremental_rebuild(messages, key) {
+            self.rebuild(messages, key);
         }
-
-        self.rebuild(messages, key);
         self.sampled_avg_height_px
     }
 
@@ -216,20 +293,12 @@ impl VirtualLayoutCache {
         self.prefix.clear();
         self.prefix.reserve(messages.len() + 1);
         self.prefix.push(0.0);
-
-        let mut sampled_sum = 0.0f32;
+        let mut sum = 0.0;
         for message in messages {
-            let h = estimate_message_height_px(message, key.wrap_width_px as f32);
-            sampled_sum += h;
-            let next = self.prefix.last().copied().unwrap_or(0.0) + h;
-            self.prefix.push(next);
+            sum += estimate_message_height_px(message, key.wrap_width_px as f32);
+            self.prefix.push(sum);
         }
-
-        self.sampled_avg_height_px = if messages.is_empty() {
-            VIRTUAL_ROW_ESTIMATED_HEIGHT_PX
-        } else {
-            sampled_sum / messages.len() as f32
-        };
+        self.sampled_avg_height_px = sum / messages.len() as f32;
         self.key = Some(key);
     }
 
@@ -241,84 +310,64 @@ impl VirtualLayoutCache {
         let Some(old_key) = self.key else {
             return false;
         };
-        if old_key.wrap_width_px != new_key.wrap_width_px {
+        if old_key.wrap_width_px != new_key.wrap_width_px
+            || self.prefix.len() != old_key.len + 1
+            || new_key.len <= old_key.len
+        {
             return false;
         }
-        if self.prefix.len() != old_key.len + 1 || new_key.len <= old_key.len {
-            return false;
-        }
-
-        if self.try_prepend_incremental(messages, old_key, new_key) {
-            return true;
-        }
-        if self.try_append_incremental(messages, old_key, new_key) {
-            return true;
-        }
-        false
+        self.try_prepend(messages, old_key, new_key) || self.try_append(messages, old_key, new_key)
     }
 
-    fn try_prepend_incremental(
+    fn try_prepend(
         &mut self,
         messages: &[StoredChatMessage],
         old_key: VirtualLayoutKey,
         new_key: VirtualLayoutKey,
     ) -> bool {
-        if old_key.last_id != new_key.last_id || old_key.first_id == new_key.first_id {
-            return false;
-        }
-
         let added = new_key.len - old_key.len;
-        let Some(anchor) = messages.get(added) else {
-            return false;
-        };
-        if anchor.id != old_key.first_id {
+        if old_key.last_id != new_key.last_id
+            || messages.get(added).map(|message| message.id) != Some(old_key.first_id)
+        {
             return false;
         }
-
-        let mut new_prefix = Vec::with_capacity(new_key.len + 1);
-        new_prefix.push(0.0);
-        let mut added_sum = 0.0f32;
+        let mut prefix = Vec::with_capacity(new_key.len + 1);
+        prefix.push(0.0);
+        let mut added_sum = 0.0;
         for message in &messages[..added] {
-            let h = estimate_message_height_px(message, new_key.wrap_width_px as f32);
-            added_sum += h;
-            new_prefix.push(added_sum);
+            added_sum += estimate_message_height_px(message, new_key.wrap_width_px as f32);
+            prefix.push(added_sum);
         }
-        for old in self.prefix.iter().skip(1) {
-            new_prefix.push(added_sum + *old);
-        }
-
+        prefix.extend(self.prefix.iter().skip(1).map(|old| added_sum + old));
         let old_sum = self.sampled_avg_height_px * old_key.len as f32;
         self.sampled_avg_height_px = (old_sum + added_sum) / new_key.len as f32;
-        self.prefix = new_prefix;
+        self.prefix = prefix;
         self.key = Some(new_key);
         true
     }
 
-    fn try_append_incremental(
+    fn try_append(
         &mut self,
         messages: &[StoredChatMessage],
         old_key: VirtualLayoutKey,
         new_key: VirtualLayoutKey,
     ) -> bool {
-        if old_key.first_id != new_key.first_id || old_key.last_id == new_key.last_id {
+        if old_key.first_id != new_key.first_id
+            || messages
+                .get(old_key.len.saturating_sub(1))
+                .map(|message| message.id)
+                != Some(old_key.last_id)
+        {
             return false;
         }
-        let Some(anchor) = messages.get(old_key.len.saturating_sub(1)) else {
-            return false;
-        };
-        if anchor.id != old_key.last_id {
-            return false;
-        }
-
-        let mut tail_sum = 0.0f32;
+        let mut tail_sum = 0.0;
         let mut running = self.prefix.last().copied().unwrap_or(0.0);
         for message in &messages[old_key.len..] {
-            let h = estimate_message_height_px(message, new_key.wrap_width_px as f32);
-            tail_sum += h;
-            running += h;
+            let height = estimate_message_height_px(message, new_key.wrap_width_px as f32);
+            tail_sum += height;
+            running += height;
             self.prefix.push(running);
         }
-
         let old_sum = self.sampled_avg_height_px * old_key.len as f32;
         self.sampled_avg_height_px = (old_sum + tail_sum) / new_key.len as f32;
         self.key = Some(new_key);
@@ -326,12 +375,10 @@ impl VirtualLayoutCache {
     }
 
     fn make_key(messages: &[StoredChatMessage], wrap_width_px: i32) -> Option<VirtualLayoutKey> {
-        let first = messages.first()?;
-        let last = messages.last()?;
         Some(VirtualLayoutKey {
             len: messages.len(),
-            first_id: first.id,
-            last_id: last.id,
+            first_id: messages.first()?.id,
+            last_id: messages.last()?.id,
             wrap_width_px,
         })
     }
@@ -355,33 +402,133 @@ mod tests {
     #[test]
     fn empty_history_has_an_empty_window() {
         assert_eq!(
-            compute_virtual_window_with_estimates(&[], 0.0, 600.0, 640, 108.0),
+            compute_virtual_window_with_estimates(
+                &[],
+                0.0,
+                600.0,
+                640,
+                108.0,
+                VirtualWindowPolicy::optimized(),
+            ),
             (0, 0, 0.0, 0.0, 108.0)
         );
     }
 
     #[test]
-    fn large_history_keeps_the_render_window_bounded() {
+    fn production_history_window_never_exposes_virtual_spacers() {
+        let messages = (0..180)
+            .map(|id| {
+                let content = if id % 3 == 0 {
+                    "large message line\n".repeat(120)
+                } else {
+                    format!("short message {id}")
+                };
+                message(id, content)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            compute_history_window(
+                &messages,
+                false,
+                48_000.0,
+                680.0,
+                640,
+                108.0,
+                VirtualWindowPolicy::optimized(),
+            ),
+            (0, 180, 0.0, 0.0, 108.0)
+        );
+    }
+
+    #[test]
+    fn optimized_history_keeps_the_render_window_bounded() {
+        clear_virtual_layout_cache();
         let messages = (0..200)
             .map(|id| message(id, format!("message {id}")))
             .collect::<Vec<_>>();
-        let (start, end, top, bottom, _) =
-            compute_virtual_window_with_estimates(&messages, 8_000.0, 720.0, 640, 108.0);
-
+        let (start, end, top, bottom, _) = compute_virtual_window_with_estimates(
+            &messages,
+            8_000.0,
+            720.0,
+            640,
+            108.0,
+            VirtualWindowPolicy::optimized(),
+        );
         assert!(start < end);
-        assert!(end - start <= VIRTUAL_MAX_WINDOW_ROWS);
+        assert!(end - start <= 32);
         assert!(top > 0.0);
         assert!(bottom >= 0.0);
     }
 
     #[test]
-    fn narrower_layout_estimates_more_height_for_long_messages() {
-        let messages = vec![message(1, "long text ".repeat(120))];
-        let (_, _, _, _, narrow) =
-            compute_virtual_window_with_estimates(&messages, 0.0, 600.0, 260, 108.0);
-        let (_, _, _, _, wide) =
-            compute_virtual_window_with_estimates(&messages, 0.0, 600.0, 900, 108.0);
+    fn direct_scrollbar_drag_covers_a_tall_viewport_without_normal_overscan() {
+        clear_virtual_layout_cache();
+        let messages = (0..200)
+            .map(|id| message(id, "short row"))
+            .collect::<Vec<_>>();
+        let scroll_offset = 4_800.0;
+        let viewport_height = 1_400.0;
+        let (start, end, top, bottom, _) = compute_virtual_window_with_estimates(
+            &messages,
+            scroll_offset,
+            viewport_height,
+            640,
+            108.0,
+            VirtualWindowPolicy::direct_scrollbar_drag(false),
+        );
+        let document_height = current_virtual_document_height_px();
 
-        assert!(narrow > wide);
+        assert!(end - start <= 32);
+        assert!(top <= scroll_offset);
+        assert!(document_height - bottom >= scroll_offset + viewport_height);
+    }
+
+    #[test]
+    fn direct_scrollbar_drag_covers_a_large_row_viewport() {
+        clear_virtual_layout_cache();
+        let large_content = "large message line\n".repeat(120);
+        let messages = (0..40)
+            .map(|id| message(id, large_content.clone()))
+            .collect::<Vec<_>>();
+        let scroll_offset = 12_000.0;
+        let viewport_height = 680.0;
+        let (start, end, top, bottom, _) = compute_virtual_window_with_estimates(
+            &messages,
+            scroll_offset,
+            viewport_height,
+            640,
+            560.0,
+            VirtualWindowPolicy::direct_scrollbar_drag(false),
+        );
+        let document_height = current_virtual_document_height_px();
+
+        assert!(end - start <= 8);
+        assert!(top <= scroll_offset);
+        assert!(document_height - bottom >= scroll_offset + viewport_height);
+    }
+
+    #[test]
+    fn direct_drag_expansion_biases_the_extra_row_toward_motion() {
+        let (mut up_start, mut up_end) = (10, 12);
+        expand_window(&mut up_start, &mut up_end, 5, 30, true);
+        assert_eq!((up_start, up_end), (8, 13));
+
+        let (mut down_start, mut down_end) = (10, 12);
+        expand_window(&mut down_start, &mut down_end, 5, 30, false);
+        assert_eq!((down_start, down_end), (9, 14));
+    }
+
+    #[test]
+    fn fixed_window_spacers_share_the_document_extent() {
+        clear_virtual_layout_cache();
+        let messages = (0..20)
+            .map(|id| message(id, "message body"))
+            .collect::<Vec<_>>();
+        let (top, bottom, _) =
+            compute_spacers_for_fixed_window(&messages, 5, 10, 640, true).unwrap();
+        assert!(top > 0.0);
+        assert!(bottom > 0.0);
+        assert!(current_virtual_document_height_px() > top + bottom);
     }
 }

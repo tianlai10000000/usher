@@ -77,12 +77,13 @@ git_dirty=false
   printf 'renderer\twinit-femtovg\n'
   printf 'fixture\tchat-performance-v2 (180 messages; three consecutive near-limit assistant rows per user row)\n'
   printf 'runs_per_variant\t%s\n' "$runs"
+  printf 'instance_namespace\tchat-interaction-%s\n' "$timestamp"
   printf 'resize_input\tcontinuous width-only 1280x860 -> 800x860 -> 1280x860, 80 steps per leg, 8 ms\n'
-  printf 'scrollbar_drag_input\tthumb drag from bottom toward top, 520 px, 160 steps, 8 ms\n'
+  printf 'scrollbar_drag_input\ttwo fast thumb drags bottom-to-top and top-to-bottom, 520 px, 24 steps, 8 ms\n'
   printf 'scroll_input\tcontinuous +320/-320 px, 3200 events per leg, 8 ms\n'
   printf 'post_stop_guard\tno optimized model commit within 800 ms after final viewport movement\n'
   printf 'startup_bottom_guard\tbottom distance <= 1 px after initial bottom positioning and before resize input\n'
-  printf 'commit_gap_guard\tevery optimized commit-adjacent frame gap <= 50 ms\n'
+  printf 'commit_latency_guard\toptimized commit-adjacent p95 <= 50 ms and every mutation-to-render latency <= 50 ms\n'
 } > "$result_dir/metadata.tsv"
 
 active_pid=""
@@ -143,6 +144,7 @@ for run in $(seq 1 "$runs"); do
       USHER_MEMORY_BENCHMARK_RUN="$run" \
       USHER_MEMORY_WINDOW_CONTROL=signal-file-v1 \
       USHER_MEMORY_WINDOW_CONTROL_FILE="$active_control_file" \
+      USHER_BENCHMARK_INSTANCE_NAMESPACE="chat-interaction-$timestamp" \
       USHER_CHAT_PERF_VARIANT="$variant" \
       USHER_CHAT_PERF_TRACE="$trace" \
       USHER_CHAT_PERF_TRACE_WARMUP_MS=0 \
@@ -155,17 +157,22 @@ for run in $(seq 1 "$runs"); do
       sed -n '1,160p' "$log" >&2
       die "window did not become ready for $variant run $run"
     fi
-    if ! wait_for_log "$active_pid" "$log" '\[Chat::PerformanceFixture\] mounted'; then
+    set_window_size "$active_pid" 1280 860 \
+      || die "application did not confirm logical size=1280x860"
+    # Use the same deterministic Chat navigation gesture as the Preview
+    # interaction benchmarks, then require route-level evidence before input.
+    "$window_control" click-burst "$active_pid" 64 150 2 200
+    if ! wait_for_log "$active_pid" "$log" '\[Memory\]\[UI\] route=Chat'; then
       sed -n '1,180p' "$log" >&2
       die "Chat fixture was not mounted for $variant run $run"
     fi
 
-    set_window_size "$active_pid" 1280 860 \
-      || die "application did not confirm logical size=1280x860"
     sleep 2
     "$window_control" resize-cycle "$active_pid" 800 860 80 8
     sleep 0.8
-    "$window_control" pointer-drag "$active_pid" 1275 680 0 -520 160 8
+    "$window_control" pointer-drag "$active_pid" 1275 680 0 -520 24 8
+    sleep 0.4
+    "$window_control" pointer-drag "$active_pid" 1275 160 0 520 24 8
     sleep 0.8
     "$window_control" scroll-cycle "$active_pid" 900 400 320 3200 8
     sleep 0.8
@@ -196,6 +203,9 @@ for run in $(seq 1 "$runs"); do
       END { if (!seen || maximum - minimum < 10) exit 1 }
     ' "$trace" || die "trace has insufficient Flickable wheel-direction samples: $trace"
     if [[ "$variant" == "optimized" ]]; then
+      awk -F '\t' '
+        NR > 1 && $16 == 1 && $9 > 1 { exit 1 }
+      ' "$trace" || die "optimized trace exposed a virtual spacer during direct scrollbar drag: $trace"
       awk -F '\t' '
         NR > 1 && $3 == "scroll" {
           if (seen && $8 == previous_commits && $9 > 1) exit 1
