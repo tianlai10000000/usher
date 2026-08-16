@@ -76,6 +76,22 @@ existing `target/` still contains historical unpacked objects. See
 [build performance and artifact policy](docs/build-performance.md) for the
 measured trade-offs and cleanup guidance.
 
+For UI/Rust iteration that does not touch the PR Review detail page, use the
+explicit development shell. It keeps a separate target directory and replaces
+the complete PR Review feature package with a protocol-compatible empty
+implementation:
+
+```sh
+./scripts/dev-shell-check.sh
+./scripts/dev-shell-run.sh
+```
+
+PowerShell equivalents are `scripts/dev-shell-check.ps1` and
+`scripts/dev-shell-run.ps1`. The mode intentionally redirects attempts to open
+PR Review back to Workflow. Default builds and every existing release command
+still compile the complete page; use normal `cargo check --locked` and
+`cargo run --locked` before delivering PR Review or final application changes.
+
 In-process Slint live preview is development-only and excluded from normal and
 release builds. Use the project scripts for fast UI validation and visual
 iteration:

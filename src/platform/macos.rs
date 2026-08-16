@@ -1,8 +1,8 @@
-use std::ffi::CString;
+use std::ffi::{CString, c_void};
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use block::ConcreteBlock;
+use block2::RcBlock;
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, Object, Sel};
 use raw_window_handle::HasWindowHandle;
@@ -321,19 +321,17 @@ pub(crate) fn install_artifact_preview_live_resize(window: &crate::ArtifactPrevi
     }
 
     let begin_window = window.as_weak();
-    let begin = ConcreteBlock::new(move |_notification: *mut Object| {
+    let begin = RcBlock::new(move |_notification: *mut c_void| {
         if let Some(window) = begin_window.upgrade() {
             window.set_native_live_resizing(true);
         }
-    })
-    .copy();
+    });
     let end_window = window.as_weak();
-    let end = ConcreteBlock::new(move |_notification: *mut Object| {
+    let end = RcBlock::new(move |_notification: *mut c_void| {
         if let Some(window) = end_window.upgrade() {
             window.set_native_live_resizing(false);
         }
-    })
-    .copy();
+    });
     let queue: *mut Object = std::ptr::null_mut();
     let begin_observer: *mut Object = unsafe {
         msg_send![
@@ -793,19 +791,20 @@ fn install_app_event_monitor(window: *mut Object) -> bool {
     // Observe title-bar clicks and key-down events in one application-local
     // monitor. Key codes avoid input-method-dependent logical punctuation.
     // NSEventMaskLeftMouseDown = 1 << 1; NSEventMaskKeyDown = 1 << 10.
-    let handler = ConcreteBlock::new(move |event: *mut Object| -> *mut Object {
+    let handler = RcBlock::new(move |event_ptr: *mut c_void| -> *mut c_void {
+        let event = event_ptr.cast::<Object>();
         if event.is_null() {
-            return event;
+            return event_ptr;
         }
         let event_window: *mut Object = unsafe { msg_send![event, window] };
         if event_window != window {
-            return event;
+            return event_ptr;
         }
         let event_type: u64 = unsafe { msg_send![event, type] };
         if event_type == 10 {
             let key_code: u16 = unsafe { msg_send![event, keyCode] };
             let Some(key) = macos_shortcut_key(key_code) else {
-                return event;
+                return event_ptr;
             };
             let flags: u64 = unsafe { msg_send![event, modifierFlags] };
             let handled = TITLEBAR_UI
@@ -824,7 +823,7 @@ fn install_app_event_monitor(window: *mut Object) -> bool {
             if handled {
                 return std::ptr::null_mut();
             }
-            return event;
+            return event_ptr;
         }
         let location: NSPoint = unsafe { msg_send![event, locationInWindow] };
         let content_layout: NSRect = unsafe { msg_send![window, contentLayoutRect] };
@@ -836,9 +835,8 @@ fn install_app_event_monitor(window: *mut Object) -> bool {
                 }
             });
         }
-        event
-    })
-    .copy();
+        event_ptr
+    });
 
     let monitor: *mut Object = unsafe {
         msg_send![

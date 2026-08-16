@@ -445,6 +445,268 @@ the component registry.
 - Do not add `sccache`, mold/lld, or another linker until timings identify cold
   dependency builds or linking as the dominant remaining phase.
 
+## 2026-08-15 baseline and rejected PR filter reduction
+
+Measurements were repeated on the same 10-core Apple M2 Pro with 32 GiB of
+memory, Cargo 1.92.0, rustc 1.92.0, the default FemtoVG feature set, and commit
+`e9e9e4d`. The workspace had no `target/` directory at the start. A cold
+`cargo build --locked --timings` took 165 seconds. The critical generated
+`usher-ui` unit alone took 100.85 seconds after its 9.21-second Slint build
+script, while the final binary unit took 2.65 seconds. This confirms that the
+generated UI Rust frontend remains the dominant cold-build unit; the linker is
+not the bottleneck.
+
+Before optimization, the default main UI generated 40,566,802 bytes and
+436,532 lines of Rust from 214 tracked Slint/resource inputs. Its artifacts
+included a 429,445,528-byte rlib, an 85,605,053-byte rmeta, and 1.89 GiB of
+`usher-ui` incremental state after the cold build. The handwritten application
+Slint tree had reached 28,290 lines, up from the 23,426-line 2026-08-03
+baseline.
+
+Real harmless content edits produced the following warm baseline. Cargo's
+reported build duration is used so an unrelated external Cargo lock wait cannot
+distort the compiler comparison.
+
+| Scenario | Samples | Median |
+| --- | --- | ---: |
+| No source change | 0.75 / 0.28 / 0.27 s | 0.28 s |
+| `src/lib.rs` comment edit | 7.47 / 3.58 / 3.47 s | 3.58 s |
+| `ui/main.slint` comment edit | 51.97 / 31.42 / 29.90 s | 31.42 s |
+
+Direct Slint code-generation probes identified PR Review at 12,917,608 bytes,
+Workflow at 10,139,453 bytes, and the PR-list filter/menu dependency surface at
+3,715,355 bytes. The PR filter menu represented Reviews, Assignee, Sort, and
+the compact More menu as 19 separate static `GitHubFilterMenuItem` instances.
+A candidate replaced those duplicates with three fixed option models and three
+repeater delegates while preserving labels, values, ordering, 32 px row
+geometry, compact section offsets, selection routing, and the existing typed
+callbacks. The generated-size results below describe that experiment, not the
+current source tree.
+
+| Generated probe | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| PR filter/list components | 3,715,355 bytes | 1,530,462 bytes | -58.8% |
+| `GitHubPullRequestFlow` | 5,207,308 bytes | 2,927,141 bytes | -43.8% |
+| Workflow page | 10,139,453 bytes | 7,854,494 bytes | -22.5% |
+| Default main UI | 40,566,802 bytes | 38,274,867 bytes | -5.65% |
+| Default main UI lines | 436,532 | 408,312 | -6.46% |
+
+The initial sequential screen produced baseline samples of 51.97 / 31.42 /
+29.90 seconds and candidate samples of 43.84 / 27.59 / 42.84 / 27.06 / 26.96
+seconds. The independent medians appeared to improve from 31.42 to 27.59
+seconds, or 12.2%. That screen was not a controlled A/B: the sample counts were
+unequal, the complete baseline ran before the complete candidate, and both
+sides shared changing incremental state. It is retained only as preliminary
+evidence and is superseded by the controlled result below.
+
+### Controlled PR-filter A/B
+
+The 2026-08-16 follow-up exported commit `e9e9e4d` into equal-length isolated A
+and B source paths. A kept the 19 static menu instances; B contained only the
+repeater candidate. Each side used its own target directory, the same locked
+dependency graph and default FemtoVG features, one isolated cold build, and one
+real Slint-edit warm-up. The measured hot workload then alternated the same
+equal-length comment edit in `ui/main.slint` for eight rounds. Order was `BA`,
+`AB`, repeated four times. No measured sample was discarded.
+
+| Round | Order | A static | B repeater | B - A |
+| ---: | :---: | ---: | ---: | ---: |
+| 1 | BA | 60.00 s | 55.54 s | -4.46 s |
+| 2 | AB | 38.89 s | 39.08 s | +0.19 s |
+| 3 | BA | 56.35 s | 50.67 s | -5.68 s |
+| 4 | AB | 35.89 s | 55.53 s | +19.64 s |
+| 5 | BA | 40.37 s | 52.99 s | +12.62 s |
+| 6 | AB | 39.57 s | 55.37 s | +15.80 s |
+| 7 | BA | 60.00 s | 36.03 s | -23.97 s |
+| 8 | AB | 56.58 s | 56.54 s | -0.04 s |
+
+The independent totals are bimodal and misleading when separated from their
+rounds: A's median is 48.36 seconds and B's is 54.18 seconds. The paired
+`B - A` median is only +0.075 seconds. Cargo timing provides the more useful
+critical-path breakdown:
+
+| Hot metric | A median | B median | Independent change | Paired B - A median |
+| --- | ---: | ---: | ---: | ---: |
+| Total | 48.360 s | 54.180 s | +12.03% | +0.075 s |
+| Slint code generation | 7.390 s | 7.215 s | -2.37% | -0.255 s |
+| Generated `usher-ui` | 38.075 s | 44.020 s | +15.61% | -0.195 s |
+| Application library | 2.085 s | 2.310 s | +10.79% | +0.225 s |
+| Binary | 2.415 s | 2.720 s | +12.63% | +0.105 s |
+
+Three cold pairs used fresh independent targets with `AB`, `BA`, `AB` order.
+The total samples were A = 154 / 164 / 178 seconds and B = 177 / 167 / 170
+seconds. Their independent medians are 164 and 170 seconds; paired differences
+are +23 / +3 / -8 seconds, with a +3-second median. Median target size was
+5.83 GiB for A and 5.65 GiB for B, a 3.2% reduction.
+
+| Cold metric | A median | B median | Independent change | Paired B - A median |
+| --- | ---: | ---: | ---: | ---: |
+| Total | 164.00 s | 170.00 s | +3.66% | +3.00 s |
+| Slint code generation | 10.40 s | 10.34 s | -0.58% | -0.38 s |
+| Generated `usher-ui` | 95.79 s | 103.10 s | +7.63% | +4.98 s |
+| Application library | 9.34 s | 10.28 s | +10.06% | +0.94 s |
+| Binary | 3.05 s | 2.82 s | -7.54% | -0.15 s |
+
+Final decision: reject the repeater candidate and restore the static menu. It
+does not improve paired hot or cold wall time by the required 10%, and its 3.2%
+target reduction also misses the size gate. The exact generated-code reduction
+is real but is too small at the full-root level to produce a reliable build
+improvement. The wide and compact fixture checks passed, so correctness did not
+cause the rejection. Repeated measurements expanded the temporary targets; all
+isolated cold targets were removed after their timing reports and sizes were
+recorded. This cleanup is benchmark disposal, not a compile-speed technique.
+
+## 2026-08-16 dependency and Rust upgrade
+
+This batch separated dependency modernization from compiler performance. The
+direct-dependency A/B used Rust 1.92.0 on both sides. A was the previous lock
+and manifest; B upgraded `webbrowser` 1.2.2 -> 1.2.4, `base64` 0.23.0 ->
+0.23.1, and `dark-light` 2.0.0 -> 3.0.0. `dark-light` now has default features
+disabled because Usher calls only its synchronous platform API; this removes
+the old `async-std` stack on the supported resolver graph.
+
+Both sides used the same source, default FemtoVG features, fresh independent
+target directories, and `cargo build --locked --timings`. The dependency
+upgrade is retained for maintenance and platform-dependency hygiene, not as a
+compile-time optimization:
+
+| Metric | A: previous dependencies | B: upgraded dependencies | Change |
+| --- | ---: | ---: | ---: |
+| Cold wall time | 134.99 s | 136.93 s | 1.4% slower |
+| Cargo-reported time | 134 s | 136 s | 1.5% slower |
+| Packages in `Cargo.lock` | 853 | 842 | -11 |
+| Unique dependency-tree lines | 612 | 599 | -13 |
+| Duplicate-tree lines | 354 | 363 | +9 |
+| Target size | 2,591,508 KiB | 2,591,684 KiB | effectively flat |
+| Incremental size | 1,100,392 KiB | 1,100,520 KiB | effectively flat |
+
+The macOS callback dependency was then migrated from unmaintained `block`
+0.1.6 to `block2` 0.6.2. `RcBlock` retains the copied Objective-C block
+lifetime used by notification observers and the application-local event
+monitor; the AppKit callback boundary uses ABI-equivalent `*mut c_void` and
+converts to `objc::runtime::Object` internally. An isolated locked check of the
+application after this migration completed in 3.19 seconds, and Rust 1.97 no
+longer reports the `block` future-incompatibility warning. This removes one
+lock package and one unique dependency-tree line.
+
+Rustup stable was upgraded from rustc/Cargo 1.92.0 to 1.97.1, LLVM 21.1.3 to
+22.1.6, and rustup 1.28.2 to 1.29.0. C below uses the same upgraded dependency
+graph as B, so it isolates the compiler/toolchain change:
+
+| Metric | B: Rust 1.92.0 | C: Rust 1.97.1 | Change |
+| --- | ---: | ---: | ---: |
+| Cold wall time | 136.93 s | 130.07 s | 5.0% faster |
+| Cargo-reported time | 136 s | 130 s | 4.4% faster |
+| Cold `usher-ui` check unit | 72.8 s | 64.8 s | 11.0% faster |
+| Target size | 2,591,012 KiB | 2,780,852 KiB | 7.3% larger |
+| Incremental size | 1,099,864 KiB | 1,164,396 KiB | 5.9% larger |
+
+Three Rust 1.97 hot Slint samples were 29.93 / 26.73 / 48.17 seconds, with a
+29.93-second median. The comparable Rust 1.92 median was 31.42 seconds, a 4.7%
+improvement. The upgrade is retained because the compiler is newer, removes a
+future-incompatibility warning, and improves the dominant cold `usher-ui` unit;
+it is not presented as a workspace-wide 10% build-speed result. The larger
+artifacts are the measured tradeoff.
+
+After the compiler upgrade, `cargo update` refreshed another 68 compatible
+transitive packages, including Rustls, ICU, Futures, Ureq, Wasm bindings, and
+platform support crates. A subsequent online dry run selected zero additional
+packages for Rust 1.97.1. The current graph contains 841 lock packages, 598
+unique dependency-tree lines, and 363 duplicate-tree lines. `generic-array`
+0.14.9 and old `toml` 0.8 patch releases remain constrained by transitive
+consumers; the application's direct `toml` dependency is already on 1.1.
+
+The following candidates were deliberately not retained:
+
+- Parley 0.11 requires Fontique 0.11, while Slint 1.17 exposes its shared
+  custom-font collection through Fontique 0.10. A separate collection would
+  break alignment with fonts registered into Slint on macOS, so Parley remains
+  at 0.10.
+- Restricting the application `image` features is not behavior-preserving:
+  project logos and downloaded avatars currently accept any decoder enabled by
+  `image`, while the Preview spec guarantees PNG/JPEG/GIF/WebP. Slint's macro
+  compiler also enables the complete image format set, so narrowing only the
+  application dependency would create another feature identity without
+  removing the existing full-format compile unit.
+- Slint debug metadata was already disabled. Explicitly enabling it increased
+  generated output from 40,566,802 bytes / 436,532 lines to 41,094,241 bytes /
+  446,045 lines. `SLINT_EMBED_RESOURCES=false` left output effectively flat at
+  40,568,133 bytes and introduced runtime source-path dependencies.
+- A content-aware build-script output experiment rewrote generated `main.rs`
+  only when its bytes changed, but Cargo still rechecked `usher-ui` after a
+  Slint comment edit. That sample took 38.14 seconds in total, including 29.2
+  seconds for `usher-ui` and 7.6 seconds for its build script. The experiment
+  was fully reverted.
+
+## 2026-08-16 opt-in PR Review development shell
+
+This batch keeps the complete PR Review detail page as one feature package
+instead of repeating the rejected cross-crate Workflow/PR Review split. The
+stable `@pr-review` Slint library entry exposes one public page protocol.
+Default and release builds map it to the complete implementation; the explicit
+non-default `dev-shell` feature maps the whole package to an empty compatible
+implementation. Rust redirects direct `PrReview` navigation to Workflow only
+in that development mode. Future Project, notification, or search entry points
+can consume the same package without making Workflow route ownership part of
+the page contract.
+
+The default generated output remains effectively unchanged from the preceding
+40,566,802-byte / 436,532-line baseline. The package switch removes the complete
+PR Review render tree from the opt-in shell:
+
+| Generated root metric | Full/default | `dev-shell` | Change |
+| --- | ---: | ---: | ---: |
+| Rust bytes | 40,566,851 | 27,941,262 | -12,625,589 (-31.1%) |
+| Rust lines | 436,535 | 304,945 | -131,590 (-30.1%) |
+| Item trees | 984 | 702 | -282 (-28.7%) |
+| Tracked dependencies | 214 | 192 | -22 (-10.3%) |
+| Direct Slint generation | 6,314 ms | 4,356 ms | -1,958 ms (-31.0%) |
+
+The controlled build used rustc/Cargo 1.97.1 on the same 10-core M2 Pro with
+32 GiB, default FemtoVG, commit `e9e9e4d` plus this working-tree candidate, and
+separate `target/dev-shell-ab/full` and `target/dev-shell-ab/dev-shell`
+directories. One full-then-shell cold pair used `cargo build --locked
+--timings`; the order can favor the second run through system caches, so the
+cold pair is supporting evidence rather than an independent multi-pair median.
+The dominant `usher-ui` reduction and alternating hot pairs point in the same
+direction.
+
+| Cold metric | Full/default | `dev-shell` | Change |
+| --- | ---: | ---: | ---: |
+| Wall time | 177.38 s | 128.56 s | -48.82 s (-27.5%) |
+| Cargo-reported total | 177 s | 128 s | -49 s (-27.7%) |
+| Generated `usher-ui` unit | 106.5 s | 66.9 s | -39.6 s (-37.2%) |
+| `usher-ui` build script | 11.8 s | 9.3 s | -2.5 s (-21.2%) |
+| Target size | 7,336,264 KiB | 6,208,248 KiB | -15.4% |
+| Incremental size | 3,033,040 KiB | 2,287,568 KiB | -24.6% |
+
+After one real-edit warm-up per target, three equal-length harmless comment
+changes in `ui/main.slint` ran in `BA`, `AB`, `BA` order. No measured sample was
+discarded:
+
+| Round | Order | Full/default | `dev-shell` | Shell - full |
+| ---: | :---: | ---: | ---: | ---: |
+| 1 | BA | 41.28 s | 34.44 s | -6.84 s |
+| 2 | AB | 40.57 s | 33.84 s | -6.73 s |
+| 3 | BA | 41.16 s | 23.82 s | -17.34 s |
+| Median | | 41.16 s | 33.84 s | -6.84 s paired |
+
+Independent hot medians improve by 17.8%; the paired-difference median is a
+16.6% improvement relative to the full median. Median `usher-ui`, build-script,
+and application units were 30.1 / 7.7 / 1.8 seconds for full builds and 25.7 /
+5.8 / 2.1 seconds for the shell. The retained batch exceeds the 10% acceptance
+gate and the 15% hot target, although its 33.84-second hot median does not reach
+the stretch goal below 25 seconds; only the fastest shell sample did.
+
+Changing and restoring only
+`ui/views/workflow/pr_review_workspace.slint` completed a warmed `dev-shell`
+build in 0.37 seconds without `Compiling usher-ui`, proving that the complete
+page is absent from that dependency graph. `scripts/dev-shell-check.sh` and
+`scripts/dev-shell-run.sh`, plus PowerShell equivalents, keep this Cargo
+identity under `target/dev-shell`. Normal and release commands do not enable
+the feature, and final delivery still requires the complete default checks and
+manual PR Review validation.
+
 ## Cleanup
 
 Changing the profile does not remove historical artifacts. After upgrading,
@@ -711,7 +973,222 @@ Workflow crate、Rust 桥接、临时模型和相关 UI 协议，Workflow 恢复
 当前编译图，也不得据此继续拆分 Workflow 或 PR Review。详细问题与回滚范围见
 [`workflow-optimization-rollback.md`](workflow-optimization-rollback.md)。
 
+## 2026-08-15 当前基线与已否决的 PR 筛选菜单压缩
+
+本轮继续使用同一台 10 核 Apple M2 Pro、32 GiB 内存机器，工具链为 Cargo 1.92.0、
+rustc 1.92.0，源码为提交 `e9e9e4d`，默认只启用 FemtoVG。开始测量时不存在
+`target/`。冷 `cargo build --locked --timings` 耗时 165 秒；其中 Slint build
+script 为 9.21 秒，生成后的 `usher-ui` 单元为 100.85 秒，最终 binary 单元仅为
+2.65 秒。当前冷构建主因仍是生成 UI 的 Rust 前端，不是链接器。
+
+优化前默认主 UI 由 214 个 Slint/资源输入生成 40,566,802 字节、436,532 行 Rust；
+产物包含 429,445,528 字节 rlib、85,605,053 字节 rmeta，以及冷构建后的 1.89 GiB
+`usher-ui` 增量状态。应用自有 Slint 已增长到 28,290 行，高于 2026-08-03 的
+23,426 行基线。
+
+真实无语义内容修改的热构建基线如下。表中使用 Cargo 报告的构建时间，避免一次无关的
+外部 Cargo 锁等待干扰编译器 A/B。
+
+| 场景 | 样本 | 中位数 |
+| --- | --- | ---: |
+| 无源码修改 | 0.75 / 0.28 / 0.27 秒 | 0.28 秒 |
+| `src/lib.rs` 注释修改 | 7.47 / 3.58 / 3.47 秒 | 3.58 秒 |
+| `ui/main.slint` 注释修改 | 51.97 / 31.42 / 29.90 秒 | 31.42 秒 |
+
+直接 Slint codegen 探针测得 PR Review 为 12,917,608 字节，Workflow 为
+10,139,453 字节，PR 列表筛选/菜单依赖面为 3,715,355 字节。PR 筛选菜单原先为
+Reviews、Assignee、Sort 和紧凑 More 菜单静态展开 19 个
+`GitHubFilterMenuItem`。候选实现曾将其替换为三组固定 option model 和三个 repeater
+delegate，同时保持标签、值、顺序、32px 行高、紧凑菜单分区位置、选中路由和现有
+强类型 callback 不变。下表的生成体积属于该实验，不代表当前源码。
+
+| 生成探针 | 修改前 | 修改后 | 变化 |
+| --- | ---: | ---: | ---: |
+| PR 筛选/列表组件 | 3,715,355 字节 | 1,530,462 字节 | -58.8% |
+| `GitHubPullRequestFlow` | 5,207,308 字节 | 2,927,141 字节 | -43.8% |
+| Workflow 页面 | 10,139,453 字节 | 7,854,494 字节 | -22.5% |
+| 默认主 UI | 40,566,802 字节 | 38,274,867 字节 | -5.65% |
+| 默认主 UI 行数 | 436,532 | 408,312 | -6.46% |
+
+初筛先后运行了完整基线与完整候选：基线为 51.97 / 31.42 / 29.90 秒，候选为
+43.84 / 27.59 / 42.84 / 27.06 / 26.96 秒。两组独立中位数看似从 31.42 秒降到
+27.59 秒，即提升 12.2%。但该初筛不是受控 A/B：两侧样本数不同、所有基线都先于
+所有候选运行，且共享 target 的增量状态持续变化。该结果只作为初步证据保留，以下面的
+受控结果为准。
+
+### PR 筛选菜单受控 A/B
+
+2026-08-16 的复测将提交 `e9e9e4d` 导出到路径等长的隔离 A、B 源码目录。A 保持 19 个
+静态菜单项，B 仅增加 repeater 候选。两侧分别使用独立 target、相同 locked 依赖、默认
+FemtoVG feature、一次隔离冷构建和一次真实 Slint 修改预热。随后在
+`ui/main.slint` 中反复切换同一条等长注释，按 `BA`、`AB` 交替执行 8 轮。所有正式
+样本均保留，没有人工删点。
+
+| 轮次 | 顺序 | A 静态实现 | B repeater | B - A |
+| ---: | :---: | ---: | ---: | ---: |
+| 1 | BA | 60.00 秒 | 55.54 秒 | -4.46 秒 |
+| 2 | AB | 38.89 秒 | 39.08 秒 | +0.19 秒 |
+| 3 | BA | 56.35 秒 | 50.67 秒 | -5.68 秒 |
+| 4 | AB | 35.89 秒 | 55.53 秒 | +19.64 秒 |
+| 5 | BA | 40.37 秒 | 52.99 秒 | +12.62 秒 |
+| 6 | AB | 39.57 秒 | 55.37 秒 | +15.80 秒 |
+| 7 | BA | 60.00 秒 | 36.03 秒 | -23.97 秒 |
+| 8 | AB | 56.58 秒 | 56.54 秒 | -0.04 秒 |
+
+两侧总耗时呈双峰分布，脱离配对轮次单看独立中位数会产生误导：A 为 48.36 秒，B 为
+54.18 秒；逐轮 `B - A` 的中位数仅为 +0.075 秒。Cargo timing 的关键路径拆分更有
+解释力：
+
+| 热构建指标 | A 中位数 | B 中位数 | 独立变化 | 配对 B - A 中位数 |
+| --- | ---: | ---: | ---: | ---: |
+| 总耗时 | 48.360 秒 | 54.180 秒 | +12.03% | +0.075 秒 |
+| Slint codegen | 7.390 秒 | 7.215 秒 | -2.37% | -0.255 秒 |
+| 生成 `usher-ui` | 38.075 秒 | 44.020 秒 | +15.61% | -0.195 秒 |
+| 应用 library | 2.085 秒 | 2.310 秒 | +10.79% | +0.225 秒 |
+| binary | 2.415 秒 | 2.720 秒 | +12.63% | +0.105 秒 |
+
+冷构建使用全新的独立 target，按 `AB`、`BA`、`AB` 执行三组。A 的总耗时为
+154 / 164 / 178 秒，B 为 177 / 167 / 170 秒；独立中位数分别为 164 和 170 秒，
+配对差为 +23 / +3 / -8 秒，中位数 +3 秒。target 体积中位数从 A 的 5.83 GiB
+降到 B 的 5.65 GiB，仅减少 3.2%。
+
+| 冷构建指标 | A 中位数 | B 中位数 | 独立变化 | 配对 B - A 中位数 |
+| --- | ---: | ---: | ---: | ---: |
+| 总耗时 | 164.00 秒 | 170.00 秒 | +3.66% | +3.00 秒 |
+| Slint codegen | 10.40 秒 | 10.34 秒 | -0.58% | -0.38 秒 |
+| 生成 `usher-ui` | 95.79 秒 | 103.10 秒 | +7.63% | +4.98 秒 |
+| 应用 library | 9.34 秒 | 10.28 秒 | +10.06% | +0.94 秒 |
+| binary | 3.05 秒 | 2.82 秒 | -7.54% | -0.15 秒 |
+
+最终决定：否决 repeater 候选并恢复静态菜单。它没有让配对热构建或冷构建达到 10%
+收益门槛，target 仅减少 3.2%，也未达到体积门槛。生成代码减少本身真实存在，但落到完整
+根 UI 后不足以形成可靠构建收益。宽屏和紧凑 fixture 验收均通过，因此否决原因不是功能
+正确性。重复测量产生的隔离冷 target 已在保存 timing 和体积后删除；这只是清理临时基准
+产物，不是编译提速手段。
+
+## 2026-08-16 依赖与 Rust 升级
+
+本批把“依赖现代化”与“编译器性能”分开测量。直接依赖 A/B 两侧都使用 Rust
+1.92.0：A 为原 manifest/lock；B 将 `webbrowser` 1.2.2 升到 1.2.4、`base64`
+0.23.0 升到 0.23.1、`dark-light` 2.0.0 升到 3.0.0。Usher 只调用
+`dark-light` 的同步平台 API，因此关闭其默认 feature，移除了旧 `async-std` 栈。
+
+两侧源码、默认 FemtoVG feature 相同，分别使用全新独立 target，并执行
+`cargo build --locked --timings`。这批依赖升级的保留理由是版本维护和平台依赖图
+清理，不是构建提速：
+
+| 指标 | A：原依赖 | B：升级后依赖 | 变化 |
+| --- | ---: | ---: | ---: |
+| 冷构建 wall time | 134.99 秒 | 136.93 秒 | 慢 1.4% |
+| Cargo 报告耗时 | 134 秒 | 136 秒 | 慢 1.5% |
+| `Cargo.lock` package 数 | 853 | 842 | -11 |
+| 依赖树唯一行数 | 612 | 599 | -13 |
+| 重复依赖树行数 | 354 | 363 | +9 |
+| Target 体积 | 2,591,508 KiB | 2,591,684 KiB | 基本不变 |
+| Incremental 体积 | 1,100,392 KiB | 1,100,520 KiB | 基本不变 |
+
+macOS callback 随后从无人维护的 `block` 0.1.6 迁移到 `block2` 0.6.2。
+`RcBlock` 保持 notification observer 与应用内 event monitor 所需的 Objective-C
+复制 block 生命周期；AppKit callback 边界使用 ABI 等价的 `*mut c_void`，内部再转换
+为 `objc::runtime::Object`。迁移后的隔离 locked check 为 3.19 秒，Rust 1.97 不再
+报告 `block` 的 future-incompatibility warning；锁文件和唯一依赖树各再减少一项。
+
+Rustup stable 从 rustc/Cargo 1.92.0 升到 1.97.1，LLVM 从 21.1.3 升到 22.1.6，
+rustup 从 1.28.2 升到 1.29.0。下表 C 与 B 使用同一份升级后依赖图，只比较工具链：
+
+| 指标 | B：Rust 1.92.0 | C：Rust 1.97.1 | 变化 |
+| --- | ---: | ---: | ---: |
+| 冷构建 wall time | 136.93 秒 | 130.07 秒 | 快 5.0% |
+| Cargo 报告耗时 | 136 秒 | 130 秒 | 快 4.4% |
+| 冷 `usher-ui` check 单元 | 72.8 秒 | 64.8 秒 | 快 11.0% |
+| Target 体积 | 2,591,012 KiB | 2,780,852 KiB | 增加 7.3% |
+| Incremental 体积 | 1,099,864 KiB | 1,164,396 KiB | 增加 5.9% |
+
+Rust 1.97 的三次 Slint 热改样本为 29.93 / 26.73 / 48.17 秒，中位数 29.93 秒；
+Rust 1.92 的可比中位数为 31.42 秒，改善约 4.7%。保留新版工具链是因为它更新、消除
+未来兼容 warning，且主导冷路径的 `usher-ui` 单元达到 11.0% 改善；不能把它表述为
+整个 workspace 达到 10% 提速，产物增大也是实测代价。
+
+工具链升级后，`cargo update` 又刷新了 68 个 semver 兼容的间接依赖，包括 Rustls、
+ICU、Futures、Ureq、Wasm bindings 和平台支撑包。联网 dry run 随后显示 Rust
+1.97.1 下还可选择的更新为 0。当前锁文件含 841 个 package、依赖树 598 个唯一行和
+363 个重复行。`generic-array` 0.14.9 与旧 `toml` 0.8 patch 仍受间接消费者版本范围
+限制；应用直接依赖的 `toml` 已是 1.1。
+
+以下候选明确不保留：
+
+- Parley 0.11 要求 Fontique 0.11，而 Slint 1.17 通过 Fontique 0.10 暴露共享自定义
+  字体集合。另建字体集合会破坏 macOS 注册字体与 Slint 的一致性，因此保留 Parley
+  0.10。
+- 收窄应用 `image` feature 不能保证行为不变：项目 Logo 与下载头像当前接受 `image`
+  已启用的任意 decoder，Preview spec 则明确承诺 PNG/JPEG/GIF/WebP。Slint macro
+  compiler 同时会启用完整图片格式，只收窄应用依赖会新增 feature identity，却不能
+  移除已有完整格式编译单元。
+- Slint debug metadata 默认已经关闭；显式开启后，生成量从 40,566,802 字节、
+  436,532 行增至 41,094,241 字节、446,045 行。`SLINT_EMBED_RESOURCES=false`
+  的输出仍为 40,568,133 字节，几乎不变，还引入源码绝对路径运行时依赖。
+- content-aware build output 实验只在字节变化时改写生成 `main.rs`，但 Slint 注释修改
+  后 Cargo 仍重查 `usher-ui`。该样本总计 38.14 秒，其中 `usher-ui` 29.2 秒、build
+  script 7.6 秒，实验已完整回滚。
+
 每批统一记录工具链、硬件、commit、feature/profile、无改动/Rust/Slint 三类样本、
 Cargo timing、生成文件体积、target/incremental 体积。合并前至少执行三次热样本，
 冷构建使用独立 target，并完成 `cargo fmt --all`、`cargo check --locked`、
 `cargo test --lib --locked` 与 `git diff --check`。
+
+## 2026-08-16 显式 PR Review 开发 Shell
+
+本批没有再次采用已否决的 Workflow/PR Review 跨 crate 拆分，而是把 PR Review
+详情页完整保留为一个 feature package。稳定的 `@pr-review` Slint library 入口暴露
+统一页面协议：默认和 Release 构建映射到完整实现；显式、非默认的 `dev-shell`
+feature 把整个包映射到兼容的空实现。Rust 只在该开发模式把直接进入
+`PrReview` 的导航回退到 Workflow。未来 Project、通知或搜索入口可消费同一个包，
+无需让 Workflow 路由成为页面所有者。
+
+默认生成量相对上一轮 40,566,802 字节 / 436,532 行基线仅增加 49 字节 / 3 行，
+可视为不变。显式开发 Shell 从编译图中移除了完整 PR Review 渲染树：
+
+| 根生成指标 | 完整/默认 | `dev-shell` | 变化 |
+| --- | ---: | ---: | ---: |
+| Rust 字节 | 40,566,851 | 27,941,262 | -12,625,589（-31.1%） |
+| Rust 行数 | 436,535 | 304,945 | -131,590（-30.1%） |
+| Item tree | 984 | 702 | -282（-28.7%） |
+| 跟踪依赖 | 214 | 192 | -22（-10.3%） |
+| 直接 Slint 生成 | 6,314 ms | 4,356 ms | -1,958 ms（-31.0%） |
+
+受控构建使用同一台 10 核 M2 Pro / 32 GiB、rustc/Cargo 1.97.1、默认
+FemtoVG、提交 `e9e9e4d` 加本批工作区候选，并分别使用
+`target/dev-shell-ab/full` 与 `target/dev-shell-ab/dev-shell`。冷构建只执行一组
+完整模式在前、Shell 在后的 `cargo build --locked --timings`；系统缓存可能偏向
+第二次，因此这组冷数据只作为辅助证据，不冒充多组独立中位数。主导的
+`usher-ui` 单元和交替热样本给出了同方向结果。
+
+| 冷构建指标 | 完整/默认 | `dev-shell` | 变化 |
+| --- | ---: | ---: | ---: |
+| Wall time | 177.38 秒 | 128.56 秒 | -48.82 秒（-27.5%） |
+| Cargo 报告总耗时 | 177 秒 | 128 秒 | -49 秒（-27.7%） |
+| 生成 `usher-ui` 单元 | 106.5 秒 | 66.9 秒 | -39.6 秒（-37.2%） |
+| `usher-ui` build script | 11.8 秒 | 9.3 秒 | -2.5 秒（-21.2%） |
+| Target 体积 | 7,336,264 KiB | 6,208,248 KiB | -15.4% |
+| Incremental 体积 | 3,033,040 KiB | 2,287,568 KiB | -24.6% |
+
+两侧各完成一次真实修改预热后，对 `ui/main.slint` 进行三次等长无语义注释修改，
+按 `BA`、`AB`、`BA` 交替执行，未删除任何正式样本：
+
+| 轮次 | 顺序 | 完整/默认 | `dev-shell` | Shell - 完整 |
+| ---: | :---: | ---: | ---: | ---: |
+| 1 | BA | 41.28 秒 | 34.44 秒 | -6.84 秒 |
+| 2 | AB | 40.57 秒 | 33.84 秒 | -6.73 秒 |
+| 3 | BA | 41.16 秒 | 23.82 秒 | -17.34 秒 |
+| 中位数 | | 41.16 秒 | 33.84 秒 | 配对 -6.84 秒 |
+
+两侧独立热中位数改善 17.8%，配对差中位数相对完整模式中位数改善 16.6%。完整
+模式的 `usher-ui` / build script / 应用单元中位数为 30.1 / 7.7 / 1.8 秒，
+Shell 为 25.7 / 5.8 / 2.1 秒。本批达到 10% 接受门槛及 15% 热改目标，因此保留；
+但 `33.84` 秒热中位数尚未达到低于 25 秒的延伸目标，只有最快样本达到。
+
+只修改并恢复 `ui/views/workflow/pr_review_workspace.slint` 后，预热的
+`dev-shell` 构建在 0.37 秒内完成，且没有出现 `Compiling usher-ui`，证明完整页面
+不在该模式依赖图中。`scripts/dev-shell-check.sh`、`scripts/dev-shell-run.sh` 及
+PowerShell 对应入口把该 Cargo identity 固定在 `target/dev-shell`。普通和 Release
+命令不会启用此 feature；最终交付仍需执行完整默认检查并手工验证 PR Review。

@@ -10,6 +10,14 @@ Usher is a desktop-first Rust application. Slint owns presentation and declarati
 
 Production builds select Winit with FemtoVG/OpenGL at compile time. Skia and FemtoVG/WGPU are opt-in Cargo features used for renderer diagnostics and A/B comparisons, so normal builds cannot silently change renderer because multiple implementations were linked. Slint's in-process live preview and the UI Components playground are explicit `live-preview` and `ui-components` development features; neither is compiled into default or production builds. The WGPU path is not a production default because current macOS tests reduce physical footprint but increase RSS.
 
+PR Review is exposed through the stable `@pr-review` Slint feature-package
+entry, independent of the route that opens it. Default and release builds map
+that entry to the complete page. The explicit non-default `dev-shell` feature
+maps the whole package to a protocol-compatible empty implementation and
+normalizes `PrReview` navigation back to Workflow, so unrelated shell work does
+not compile the large review render tree. This is not a cross-crate page split;
+all complete-page state, overlays, and interactions remain together.
+
 On macOS, entering or leaving full screen re-aligns native title-bar controls after AppKit's final layout and publishes the native full-screen state to Slint so the breadcrumb can release the removed leading chrome; the traffic-light cluster is shifted 8 pt right onto the sidebar icon centerline, and application-owned controls are always placed beyond those lights while present.
 
 ## System context
@@ -91,7 +99,8 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `ui/views/` | Route-level page composition only. Active entries use `GitHub*Page` names and import all visual building blocks from `ui/components/`; view files do not declare local controls. |
 | `ui/views/job_run.slint` | Application-level `Route.JobRun` composition, reusable from any source route. |
 | `ui/views/ui_components.slint` | Route-only composition for the interactive UI Components playground. |
-| `ui/views/workflow/` | Workflow route composition and the full-window PR review page. Flow, tab, filter, field, and panel components live under `ui/components/workflow/`. |
+| `ui/views/workflow/` | Workflow route composition and the complete full-window PR Review implementation. Flow, tab, filter, field, and panel components live under `ui/components/workflow/`. |
+| `ui/features/pr_review/` | Stable PR Review feature-package entry and public page protocol. Build configuration maps `@pr-review` to the complete implementation or the explicit `dev-shell` replacement; routes are consumers, not owners, so future entry points reuse the same package. |
 | `ui/components/` | Central ownership for every application visual component: controls, rows, cards, menus, tabs, panels, dialogs, fields, feedback, and feature-specific building blocks. GitHub/Primer implementations use `GitHub*` symbols. |
 | `ui/components/artifact_preview/` | Shared application-level preview shell, width-independent Markdown/text/image surfaces, docked panel, and detached native window. It owns no parsing or I/O. |
 | `ui/components/about/`, `chat/`, `project/`, `workflow/` | Feature-owned GitHub/Primer visual building blocks extracted from route views; they own no I/O or route transitions. |
@@ -113,7 +122,7 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `ui/components/dialog/github_dialog.slint` | Shared responsive Primer Dialog chrome, backdrop input ownership, initial close-control focus, header/body/footer safe areas, Esc dismiss (unless `modal`), close behavior, narrow full-window layout, and action states for global, project, PR-review, and update dialogs. Its optional external viewport keeps route-owned surfaces centered on the complete application window and paints one continuous backdrop across docked shell chrome. Root state continues that backdrop through the macOS title-bar inset; `src/platform/macos.rs` shields application-owned title-bar accessories while leaving AppKit traffic lights interactive. Native-title-bar clicks mirror ordinary backdrop dismissal without weakening non-dismissible dialogs. Feature body content nests as `@children`. |
 | `ui/components/toast/`, `ui/components/notify/` | Shared compact Primer Banner-style transient and queued feedback; the root renders one newest-first queued notification Banner at a time, discloses capped-queue overflow against the durable unread total, and keeps batch operations in a compact ActionMenu. |
 | `ui/components/messages/` | Reusable GitHub Inbox message rows with read/unread, semantic level, metadata, and mounted row actions; registered in UI Components. |
-| `ui/components/pr_review/` | PR Review public UI structs plus reusable shell, file-tree, and diff controls; cross-region state stays in the workspace view. |
+| `ui/components/pr_review/` | PR Review public UI structs plus reusable shell, file-tree, and diff controls; cross-region state stays in the complete page implementation. |
 | `ui/theme/github_theme.slint` | Application-owned `GitHubTheme` semantic color roles and `GitHubMetrics` Primer geometry, control, typography, overlay, and breakpoint tokens. Raw functional UI colors are centralized here. |
 | `material-1.7.1-fixed/` | Vendored Material source aligned with Slint v1.17.1. |
 | `vendor/i-slint-live-preview/` | Temporary Slint 1.17.1 override selected only by the opt-in `live-preview` feature. Its documented `mtime` guard prevents spurious macOS watcher events from causing an endless recompile loop. |

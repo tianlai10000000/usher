@@ -50,6 +50,11 @@ fn available_route(route: Route) -> Route {
         return Route::Home;
     }
 
+    #[cfg(feature = "dev-shell")]
+    if route == Route::PrReview {
+        return Route::Workflow;
+    }
+
     route
 }
 
@@ -307,6 +312,18 @@ mod tests {
         let state = route_ui_state(Route::UiComponents);
         assert_eq!(state.navigation_current_index, -1);
         assert_eq!(route_for_navigation_index(3), None);
+    }
+
+    #[test]
+    #[cfg(feature = "dev-shell")]
+    fn pr_review_route_returns_to_workflow_in_dev_shell() {
+        assert_eq!(available_route(Route::PrReview), Route::Workflow);
+    }
+
+    #[test]
+    #[cfg(not(feature = "dev-shell"))]
+    fn pr_review_route_remains_available_in_full_builds() {
+        assert_eq!(available_route(Route::PrReview), Route::PrReview);
     }
 
     #[test]

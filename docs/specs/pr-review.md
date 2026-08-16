@@ -65,7 +65,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/workflow/pr_review/timeline.rs` owns Conversation/Commit Slint model conversion, deterministic row sizing and connection/grouping rules, plus display/chronological commit-range mapping.
 - `src/git/model.rs`, `locator.rs`, and `diff.rs` own provider-neutral models, remote location, and unified-diff parsing. Provider modules own request/response handling; Gitee authentication/endpoints, decoding, Conversation/Commit normalization, readiness, and revert capability are isolated under `src/git/gitee/`.
 - `src/codereview/api/` owns provider endpoint URL templates only.
-- `ui/views/workflow/pr_review_workspace.slint` owns cross-region state, review layout, and user interaction. `ui/components/pr_review/shell.slint` owns public structs and shell controls; `content.slint` owns reusable file-tree and diff content controls. `ui/main.slint` mounts the workspace only for the dedicated `PrReview` route.
+- `ui/features/pr_review/` owns the stable page-package entry and public protocol. Default/release builds map `@pr-review` to the complete `ui/views/workflow/pr_review_workspace.slint` implementation; the explicit `dev-shell` build maps the whole package to a protocol-compatible empty implementation and makes the route unavailable. The complete implementation owns cross-region state, review layout, and user interaction. `ui/components/pr_review/shell.slint` owns public structs and shell controls; `content.slint` owns reusable file-tree and diff content controls. Routes and future entry points consume the package rather than own it.
 - `src/workflow/pr_list.rs` owns list-page selection, list request sequencing, pagination presentation, and UTC+08:00 timestamp formatting.
 - `src/workflow/bindings.rs` supplies the selected project context, remote-URL copy, local-folder reveal via `src/platform/`, and the optional `fat`/`uat`/`prod` count refresh.
 - `src/git/overview.rs` owns provider-neutral `fat`/`uat`/`prod` count aggregation; Provider selection, authentication, requests, and response normalization remain in the Git façade and adapters.
@@ -81,7 +81,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/workflow/pr_review/timeline.rs` 负责 Conversation/Commit Slint model 转换、确定性行高和连接/分组规则，以及展示顺序与时间顺序之间的 commit range 映射。
 - `src/git/model.rs`、`locator.rs`、`diff.rs` 分别负责 Provider-neutral 模型、remote 定位和 unified diff 解析。Provider 模块负责请求/响应；Gitee 的鉴权/endpoint、解码、Conversation/Commit 归一化、readiness 和 revert capability 分别隔离在 `src/git/gitee/` 下。
 - `src/codereview/api/` 只负责 Provider endpoint URL 模板。
-- `ui/views/workflow/pr_review_workspace.slint` 负责跨区域状态、审核布局和交互；`ui/components/pr_review/shell.slint` 负责公开 struct 与外壳控件，`content.slint` 负责可复用文件树和 Diff 内容控件；`ui/main.slint` 只在独立的 `PrReview` 路由挂载工作区。
+- `ui/features/pr_review/` 负责稳定的页面包入口和公开协议。默认/Release 构建把 `@pr-review` 映射到完整的 `ui/views/workflow/pr_review_workspace.slint` 实现；显式 `dev-shell` 构建把整个包映射到协议兼容的空实现，并让该路由不可用。完整实现负责跨区域状态、审核布局和交互；`ui/components/pr_review/shell.slint` 负责公开 struct 与外壳控件，`content.slint` 负责可复用文件树和 Diff 内容控件。路由及后续入口只消费该包，不拥有它。
 - `src/workflow/pr_list.rs` 负责列表页选择、列表请求序列、防止旧响应覆盖、分页展示和东八区时间格式化。
 - `src/workflow/bindings.rs` 提供当前项目上下文、远程 URL 复制、经 `src/platform/` 打开本地目录，以及可选的 `fat`/`uat`/`prod` 数量刷新。
 - `src/git/overview.rs` 负责 Provider-neutral 的 `fat`/`uat`/`prod` 计数聚合；Provider 选择、鉴权、请求和响应归一化继续由 Git façade 与 adapter 负责。

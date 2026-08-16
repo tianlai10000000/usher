@@ -10,6 +10,12 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 
 生产构建在编译期固定选择 Winit + FemtoVG/OpenGL。Skia 和 FemtoVG/WGPU 作为显式启用的 Cargo feature，仅用于渲染器诊断和 A/B 对比，避免常规构建因同时链接多个实现而静默切换渲染器。Slint 应用内实时预览和 UI Components 演练场分别由显式的 `live-preview`、`ui-components` 开发 feature 控制，默认构建和生产构建都不会编译它们。当前 macOS 测试中 WGPU 虽降低 physical footprint，但会增加 RSS，因此不作为生产默认配置。
 
+PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与打开它的
+路由解耦。默认和 Release 构建把该入口映射到完整页面；显式、非默认的
+`dev-shell` feature 会把整个包映射到协议兼容的空实现，并把 `PrReview` 导航
+回退到 Workflow，使无关 Shell 修改不编译大型审核渲染树。这不是跨 crate 拆页；
+完整页面的状态、浮层和交互仍作为一个整体保留。
+
 在 macOS 上，进入或退出全屏后会在 AppKit 最终标题栏布局完成时重新对齐原生控件，并把原生全屏状态发布给 Slint，使面包屑释放已经移除的左侧 Chrome 占位；交通灯簇整体右移 8pt 以对齐侧栏图标中线，存在这些按钮时应用自有控件始终位于其右侧。
 
 ## 系统上下文
@@ -91,7 +97,8 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/views/` | 只负责路由级页面编排；活跃入口统一使用 `GitHub*Page` 命名，并从 `ui/components/` 引入全部视觉积木，view 文件不再声明局部控件。 |
 | `ui/views/job_run.slint` | 应用级 `Route.JobRun` 装配，可从任意来源路由复用。 |
 | `ui/views/ui_components.slint` | 交互式 UI Components 演练场的纯路由编排。 |
-| `ui/views/workflow/` | Workflow 路由编排和全窗口 PR Review 页面；Flow、Tab、Filter、Field、Panel 组件归 `ui/components/workflow/`。 |
+| `ui/views/workflow/` | Workflow 路由编排和完整的全窗口 PR Review 实现；Flow、Tab、Filter、Field、Panel 组件归 `ui/components/workflow/`。 |
+| `ui/features/pr_review/` | 稳定的 PR Review feature package 入口及公开页面协议；构建配置把 `@pr-review` 映射到完整实现或显式 `dev-shell` 替代实现。路由只是使用方而非所有者，后续入口复用同一个包。 |
 | `ui/components/` | 所有应用视觉组件的统一归属目录，包括 Control、Row、Card、Menu、Tab、Panel、Dialog、Field、Feedback 和功能专用视觉积木；GitHub/Primer 实现统一使用 `GitHub*` 符号。 |
 | `ui/components/artifact_preview/` | 应用级通用预览外壳、基于 Primer token 的原生 Markdown/文本/图片 Surface、右侧固定面板与独立原生窗口；不承担解析或 I/O，也不引入 WebView。 |
 | `ui/components/about/`、`chat/`、`project/`、`workflow/` | 从路由页面抽出的功能级 GitHub/Primer 视觉积木，不负责 I/O 或路由跳转。 |
@@ -113,7 +120,7 @@ Usher 是桌面优先的 Rust 应用。Slint 负责展示和声明式 UI 状态�
 | `ui/components/dialog/github_dialog.slint` | 全局、项目、PR Review 和更新弹窗共用的响应式 Primer Dialog 外壳，统一遮罩输入归属、初始关闭按钮焦点、Header/Body/Footer 安全边距、Esc 关闭（`modal` 时禁用）、窄屏全窗口布局、关闭行为与操作状态；可选的外部视口使路由内弹窗始终按完整应用窗口居中，并跨固定 Shell Chrome 绘制连续遮罩；根状态继续把遮罩延伸到 macOS 标题栏 inset，`src/platform/macos.rs` 在保留 AppKit 交通灯可用的同时屏蔽应用自有标题栏附件；原生标题栏点击复用普通遮罩关闭语义，不会削弱不可关闭 Dialog；功能正文以 `@children` 嵌套。 |
 | `ui/components/toast/`、`ui/components/notify/` | 共用的紧凑 Primer Banner 风格瞬时/排队反馈；根层同一时刻只渲染最新的一条排队通知（最新在前、最多 3 条），用持久未读总数明示队列上限之外的通知，并把批量操作收入紧凑 ActionMenu。 |
 | `ui/components/messages/` | 可复用 GitHub Inbox 消息行，统一已读/未读、语义级别、元数据和常驻行操作，并登记到 UI Components。 |
-| `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在工作区视图。 |
+| `ui/components/pr_review/` | PR Review 的公开 UI struct、可复用外壳/文件树/Diff 控件；跨区域状态仍留在完整页面实现。 |
 | `ui/theme/github_theme.slint` | 应用自有的 `GitHubTheme` 语义色，以及 `GitHubMetrics` Primer 几何、控件、字体、浮层与断点令牌；功能性 UI 原始颜色统一在此管理。 |
 | `material-1.7.1-fixed/` | 与 Slint v1.17.1 对齐的 Material 源码。 |
 | `vendor/i-slint-live-preview/` | 仅由显式 `live-preview` feature 选择的临时 Slint 1.17.1 override；其中有文档记录的 `mtime` 保护避免 macOS 文件监听误报引发无限重编译。 |

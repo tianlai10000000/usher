@@ -73,6 +73,19 @@ cargo ide-check
 `cargo clean`。实测取舍和清理建议见
 [构建性能与产物策略](docs/build-performance.md)。
 
+修改内容不涉及 PR Review 详情页时，可使用显式开发 Shell。它使用独立 target
+目录，并把完整 PR Review feature package 替换为协议兼容的空实现：
+
+```sh
+./scripts/dev-shell-check.sh
+./scripts/dev-shell-run.sh
+```
+
+PowerShell 对应入口为 `scripts/dev-shell-check.ps1` 和
+`scripts/dev-shell-run.ps1`。该模式会有意把进入 PR Review 的尝试回退到
+Workflow。默认构建和所有现有 Release 命令仍会编译完整页面；涉及 PR Review 或
+最终交付前，仍必须执行普通 `cargo check --locked` 和 `cargo run --locked`。
+
 应用内 Slint 实时预览仅用于开发，常规构建和 Release 构建默认不包含它。UI 快速
 校验和可视化迭代统一使用项目脚本：
 

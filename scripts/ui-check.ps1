@@ -12,6 +12,7 @@ try {
     & slint-viewer --check `
         -L "material=material-1.7.1-fixed/material.slint" `
         -L "ui-components=ui/features/ui_components_enabled.slint" `
+        -L "pr-review=ui/features/pr_review/full.slint" `
         "ui/main.slint"
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
