@@ -1107,9 +1107,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 // a single scroll, so the Write box sits after the last event
                 // instead of staying pinned to the viewport bottom.
                 x: max(24px, (parent.width - min(920px, parent.width - 48px)) / 2);
-                y: 20px;
+                y: 0px;
                 width: min(920px, parent.width - 48px);
-                height: parent.height - 40px;
+                height: parent.height;
                 horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
                 vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
                 viewport-width: self.visible-width;
@@ -1120,7 +1120,10 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     width: max(0px, conversation-scroll.visible-width - 32px);
                     spacing: 16px;
                     alignment: start;
-                    padding-bottom: 24px;
+                    // Keep the initial breathing room below the tabs inside the
+                    // scroll document so it moves away with the conversation.
+                    padding-top: 20px;
+                    padding-bottom: 20px;
 
                 if root.conversation-items.length == 0: Rectangle {
                     width: parent.width;
@@ -1358,15 +1361,15 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         }
 
                         if item.kind == "merged": Rectangle {
-                            x: 54px;
-                            y: (parent.height - 28px) / 2;
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 14px;
+                            x: 52px;
+                            y: (parent.height - 32px) / 2;
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
                             background: root.github-done-fg;
                             Image {
-                                x: 6px;
-                                y: 6px;
+                                x: 8px;
+                                y: 8px;
                                 width: 16px;
                                 height: 16px;
                                 source: @image-url("../../assets/icons/octicon-git-merge-16.svg");
@@ -1438,20 +1441,86 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         }
 
                         if item.kind == "review_summary": Rectangle {
-                            x: 56px;
-                            y: (parent.height - 24px) / 2;
-                            width: 24px;
-                            height: 24px;
-                            border-radius: 12px;
-                            background: root.github-bg-default;
+                            x: 52px;
+                            y: (parent.height - 32px) / 2;
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: root.github-bg-muted;
                             Image {
-                                x: 4px;
-                                y: 4px;
+                                x: 8px;
+                                y: 8px;
+                                width: 16px;
+                                height: 16px;
+                                source: item.state == "approved"
+                                    ? @image-url("../../assets/icons/octicon-check-16.svg")
+                                    : ((item.state == "changes_requested" || item.state == "rejected")
+                                        ? @image-url("../../assets/icons/octicon-x-16.svg")
+                                        : @image-url("../../assets/icons/octicon-eye-16.svg"));
+                                colorize: root.github-fg-muted;
+                            }
+                        }
+
+                        if item.kind == "review_requested": Rectangle {
+                            x: 52px;
+                            y: (parent.height - 32px) / 2;
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: root.github-bg-muted;
+                            Image {
+                                x: 8px;
+                                y: 8px;
                                 width: 16px;
                                 height: 16px;
                                 source: @image-url("../../assets/icons/octicon-eye-16.svg");
                                 colorize: root.github-fg-muted;
                             }
+                        }
+
+                        if item.kind == "review_requested": HorizontalLayout {
+                            x: 96px;
+                            width: parent.width - 96px;
+                            height: parent.height;
+                            spacing: 7px;
+                            cross-axis-alignment: center;
+                            GitHubConversationAvatar {
+                                avatar-size: 20px;
+                                label-size: 9px;
+                                avatar: item.avatar;
+                                fallback-label: item.avatar-label;
+                            }
+                            Text {
+                                width: self.preferred-width;
+                                text: item.author;
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: root.github-fg-default;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                width: self.preferred-width;
+                                text: item.body;
+                                font-size: 13px;
+                                color: root.github-fg-muted;
+                                vertical-alignment: center;
+                            }
+                            if item.state != "": Text {
+                                width: self.preferred-width;
+                                text: item.state;
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: root.github-fg-default;
+                                vertical-alignment: center;
+                            }
+                            if item.created-at != "": GitHubRelativeTimestamp {
+                                text: item.created-at;
+                                tooltip-text: item.created-at-tooltip;
+                                tooltip-above: true;
+                                foreground-color: root.github-fg-muted;
+                                label-font-size: 12px;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
                         }
 
                         if item.kind == "review_summary": HorizontalLayout {
@@ -1536,11 +1605,11 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         }
 
                         if item.kind == "event": Rectangle {
-                            x: 54px;
-                            y: (parent.height - 28px) / 2;
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 14px;
+                            x: 52px;
+                            y: (parent.height - 32px) / 2;
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
                             background: root.github-bg-muted;
                             border-width: 1px;
                             border-color: root.github-border-default;

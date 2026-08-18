@@ -28,6 +28,21 @@ pub(super) fn enterprise_pull_request_endpoint(
         ))
 }
 
+pub(super) fn enterprise_project_endpoint(
+    template: &str,
+    repo_project_id: &str,
+) -> Result<String, String> {
+    if repo_project_id.trim().is_empty() {
+        return Err("Gitee project id is empty.".to_string());
+    }
+    Ok(template
+        .replace("{api_base_url}", enterprise_api_base_url()?.as_str())
+        .replace(
+            "{project_id}",
+            percent_encode_path(repo_project_id.trim()).as_str(),
+        ))
+}
+
 pub(super) fn enterprise_web_pull_request_review_endpoint(
     locator: &RepoLocator,
     pull_request_iid: &str,

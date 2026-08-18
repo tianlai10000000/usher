@@ -512,6 +512,7 @@ export component MainWindow inherits Window {
     in property <int> workflow-pr-list-page: 1;
     in property <int> workflow-pr-list-page-count: 1;
     in property <string> workflow-pr-list-state: "open";
+    in property <string> workflow-pr-list-query: "is:pr is:open";
     in property <string> workflow-pr-list-review-filter: "all";
     in property <string> workflow-pr-list-assignee-filter: "any";
     in property <string> workflow-pr-list-sort-filter: "newest";
@@ -648,6 +649,7 @@ export component MainWindow inherits Window {
     callback job-run-stop();
     callback job-run-load-step-log(int);
     callback workflow-pr-list-state-change(string);
+    callback workflow-pr-list-query-change(string);
     callback workflow-pr-list-page-change(int);
     callback workflow-pr-list-review-filter-change(string);
     callback workflow-pr-list-assignee-filter-change(string);
@@ -1158,6 +1160,7 @@ export component MainWindow inherits Window {
                             pr-list-page: root.workflow-pr-list-page;
                             pr-list-page-count: root.workflow-pr-list-page-count;
                             pr-list-state: root.workflow-pr-list-state;
+                            pr-list-query: root.workflow-pr-list-query;
                             pr-list-review-filter: root.workflow-pr-list-review-filter;
                             pr-list-assignee-filter: root.workflow-pr-list-assignee-filter;
                             pr-list-sort-filter: root.workflow-pr-list-sort-filter;
@@ -1202,6 +1205,9 @@ export component MainWindow inherits Window {
                             }
                             pr-list-state-change(state) => {
                                 root.workflow-pr-list-state-change(state);
+                            }
+                            pr-list-query-change(query) => {
+                                root.workflow-pr-list-query-change(query);
                             }
                             pr-list-page-change(page) => {
                                 root.workflow-pr-list-page-change(page);

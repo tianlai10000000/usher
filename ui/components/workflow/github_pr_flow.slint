@@ -22,7 +22,7 @@ import { GitHubTheme } from "../../theme/github_theme.slint";
 
 
 
-import { GitHubPullRequestStateButton, GitHubPullRequestFilterMoreButton, GitHubPullRequestFilterMenu, GitHubPullRequestListStatePanel, WorkflowPullRequestItem } from "./github_pr_list_components.slint";
+import { GitHubPullRequestSearchField, GitHubPullRequestClearQueryButton, GitHubPullRequestStateButton, GitHubPullRequestFilterMoreButton, GitHubPullRequestFilterMenu, GitHubPullRequestListStatePanel, WorkflowPullRequestItem } from "./github_pr_list_components.slint";
 export { WorkflowPullRequestItem } from "./github_pr_list_components.slint";
 export component GitHubPullRequestFlow {
     in property <length> viewport-global-x: 0px;
@@ -40,12 +40,14 @@ export component GitHubPullRequestFlow {
     in property <int> pr-page: 1;
     in property <int> pr-page-count: 1;
     in property <string> pr-state: "open";
+    in property <string> pr-query: "is:pr is:open";
     in property <string> pr-review-filter: "all";
     in property <string> pr-assignee-filter: "any";
     in property <string> pr-sort-filter: "newest";
     in property <bool> pr-loading: false;
     in property <string> pr-error: "";
     callback change-state(string);
+    callback change-query(string);
     callback change-page(int);
     callback change-review-filter(string);
     callback change-assignee-filter(string);
@@ -60,6 +62,10 @@ export component GitHubPullRequestFlow {
     private property <length> hovered-inline-tooltip-height: 1px;
     private property <bool> compact-filters: root.width < 620px;
     private property <bool> wrap-row-branches: root.width < 760px;
+    private property <bool> canonical-state-query:
+        (root.pr-state == "open" && root.pr-query == "is:pr is:open")
+        || (root.pr-state == "closed" && root.pr-query == "is:pr is:closed");
+    private property <length> query-area-height: root.canonical-state-query ? 48px : 80px;
     private property <bool> supports-review-filter: root.repo-type == "github";
     private property <bool> supports-assignee-filter: root.repo-type == "github"
         || root.repo-type == "gitlab";
@@ -67,7 +73,9 @@ export component GitHubPullRequestFlow {
     private property <length> header-height: 48px;
     private property <string> empty-title: root.pr-state == "open"
         ? "There aren’t any open pull requests."
-        : "There aren’t any closed pull requests.";
+        : (root.pr-state == "merged"
+            ? "There aren’t any merged pull requests."
+            : "There aren’t any closed pull requests.");
     private property <color> canvas-default: GitHubTheme.canvas-default;
     private property <color> canvas-subtle: GitHubTheme.canvas-subtle;
     private property <color> border-default: GitHubTheme.border-default;
@@ -87,7 +95,7 @@ export component GitHubPullRequestFlow {
     private property <length> menu-anchor-right: 0px;
     // Lock geometry so a taller Workflow panel cannot stretch the list card
     // and pull the pagination footer inside its border.
-    height: root.list-height + root.pagination-block-height;
+    height: root.query-area-height + root.list-height + root.pagination-block-height;
     vertical-stretch: 0;
 
     // Same stacking contract as the review-workspace Diff view / file-filter /
@@ -112,12 +120,27 @@ export component GitHubPullRequestFlow {
         }
     }
 
+    search-field := GitHubPullRequestSearchField {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        text: root.pr-query;
+        accepted(query) => { root.change-query(query); }
+    }
+
+    if !root.canonical-state-query: GitHubPullRequestClearQueryButton {
+        x: 0px;
+        y: 40px;
+        clicked => { root.change-query("is:pr is:open"); }
+    }
+
     // Keep the card and pager in one explicit layout. Absolute y coordinates
     // can still be compressed by an ancestor's layout constraints; a real
     // sibling layout preserves the 16px gap even on a tall Closed page.
     content-layout := VerticalLayout {
+        y: root.query-area-height;
         width: root.width;
-        height: root.height;
+        height: root.height - root.query-area-height;
         spacing: root.show-pagination ? 16px : 0px;
         alignment: start;
 
@@ -139,7 +162,7 @@ export component GitHubPullRequestFlow {
                 z: 10;
                 background: root.canvas-subtle;
 
-            HorizontalLayout {
+            if root.canonical-state-query: HorizontalLayout {
                 x: 4px;
                 width: open-state-btn.width + closed-state-btn.width;
                 height: parent.height;
@@ -158,6 +181,15 @@ export component GitHubPullRequestFlow {
                     count: root.pr-closed-total;
                     selected(value) => { root.change-state(value); }
                 }
+            }
+
+            if !root.canonical-state-query: GitHubPullRequestStateButton {
+                x: 4px;
+                label: "Total";
+                value: "total";
+                selected-value: "total";
+                count: root.pr-total-exact ? root.pr-total : -1;
+                selected(value) => { }
             }
 
             // Keep status and filters on one GitHub-style toolbar row.

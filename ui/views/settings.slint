@@ -31,8 +31,12 @@ export component GitHubSettingsPage inherits Rectangle {
     in-out property <int> ai-agent-provider-index: -1;
     in-out property <bool> update-checking: false;
 
-    private property <int> selected-section: 0;
-    private property <int> hosting-config-tab: 0;
+    // ComponentFactory pages are destroyed with their route. Start each new
+    // tree from a sentinel and select the defaults on the next UI tick so
+    // Slint 1.17.1 cannot reuse a stale tab binding from the previous tree.
+    private property <int> selected-section: -1;
+    private property <int> hosting-config-tab: -1;
+    private property <bool> initial-tab-sync-pending: true;
     private property <bool> compact-navigation-open: false;
     private property <length> page-gutter: root.width >= 1000px ? 48px : 16px;
     private property <length> available-width: max(0px, root.width - root.page-gutter * 2);
@@ -40,6 +44,16 @@ export component GitHubSettingsPage inherits Rectangle {
     private property <bool> compact-layout: root.page-width < 768px;
     private property <length> nav-width: 180px;
     private property <length> nav-content-gap: 32px;
+
+    initial-tab-sync := Timer {
+        interval: 1ms;
+        running: root.initial-tab-sync-pending;
+        triggered => {
+            root.selected-section = 0;
+            root.hosting-config-tab = 0;
+            root.initial-tab-sync-pending = false;
+        }
+    }
 
     settings-scroll := GitHubScrollView {
         width: root.width;
@@ -130,9 +144,9 @@ export component GitHubSettingsPage inherits Rectangle {
 
                             GitHubSettingsSectionMenuButton {
                                 width: parent.width;
-                                text: root.selected-section == 0 ? "General"
-                                    : (root.selected-section == 1 ? "Code hosting"
-                                        : (root.selected-section == 2 ? "AI Agent" : "Diagnostics"));
+                                text: root.selected-section == 1 ? "Code hosting"
+                                    : (root.selected-section == 2 ? "AI Agent"
+                                        : (root.selected-section == 3 ? "Diagnostics" : "General"));
                                 open: root.compact-navigation-open;
                                 clicked => {
                                     root.compact-navigation-open = !root.compact-navigation-open;

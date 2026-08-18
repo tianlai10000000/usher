@@ -25,11 +25,7 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
     let controller = WorkflowPrListController {
         context: Arc::new(Mutex::new(None)),
         visited_pages: Arc::new(Mutex::new(HashMap::new())),
-        filters: Arc::new(Mutex::new(PullRequestFilters {
-            reviews: "all".to_string(),
-            assignee: "any".to_string(),
-            sort: "newest".to_string(),
-        })),
+        filters: Arc::new(Mutex::new(default_pull_request_filters())),
         request_sequence: Arc::new(AtomicU64::new(0)),
         count_sequence: Arc::new(AtomicU64::new(0)),
         fixture_enabled: review_status_fixture_enabled(),
@@ -41,11 +37,47 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
-        state_controller.clear_and_load_page(
-            &ui,
-            PullRequestState::parse(state.as_str()).unwrap_or(PullRequestState::Open),
-            1,
-        );
+        let state = PullRequestState::parse(state.as_str()).unwrap_or(PullRequestState::Open);
+        let filters = default_pull_request_filters();
+        if let Ok(mut current) = state_controller.filters.lock() {
+            *current = filters.clone();
+        }
+        ui.set_workflow_pr_list_query(format_pull_request_query(state, &filters).into());
+        ui.set_workflow_pr_list_review_filter(filters.reviews.into());
+        ui.set_workflow_pr_list_assignee_filter(filters.assignee.into());
+        ui.set_workflow_pr_list_sort_filter(filters.sort.into());
+        state_controller.clear_and_load_page(&ui, state, 1);
+        state_controller.refresh_state_totals(&ui);
+    });
+
+    let query_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_list_query_change(move |query| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        let current_sort = query_controller
+            .filters
+            .lock()
+            .map(|filters| filters.sort.clone())
+            .unwrap_or_else(|_| "newest".to_string());
+        let (state, filters) = match parse_pull_request_query(query.as_str(), current_sort.as_str())
+        {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                ui.set_workflow_pr_list_error(error.into());
+                return;
+            }
+        };
+        ui.set_workflow_pr_list_query(format_pull_request_query(state, &filters).into());
+        ui.set_workflow_pr_list_review_filter(filters.reviews.clone().into());
+        ui.set_workflow_pr_list_assignee_filter(filters.assignee.clone().into());
+        ui.set_workflow_pr_list_sort_filter(filters.sort.clone().into());
+        if let Ok(mut current) = query_controller.filters.lock() {
+            *current = filters;
+        }
+        query_controller.clear_and_load_page(&ui, state, 1);
+        query_controller.refresh_state_totals(&ui);
     });
 
     let page_controller = controller.clone();
@@ -67,6 +99,14 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
         };
         if let Ok(mut filters) = review_controller.filters.lock() {
             filters.reviews = value.to_string();
+            ui.set_workflow_pr_list_query(
+                format_pull_request_query(
+                    PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
+                        .unwrap_or(PullRequestState::Open),
+                    &filters,
+                )
+                .into(),
+            );
         }
         ui.set_workflow_pr_list_review_filter(value);
         let state = PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
@@ -83,6 +123,14 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
         };
         if let Ok(mut filters) = assignee_controller.filters.lock() {
             filters.assignee = value.to_string();
+            ui.set_workflow_pr_list_query(
+                format_pull_request_query(
+                    PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
+                        .unwrap_or(PullRequestState::Open),
+                    &filters,
+                )
+                .into(),
+            );
         }
         ui.set_workflow_pr_list_assignee_filter(value);
         let state = PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
@@ -99,6 +147,14 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
         };
         if let Ok(mut filters) = sort_controller.filters.lock() {
             filters.sort = value.to_string();
+            ui.set_workflow_pr_list_query(
+                format_pull_request_query(
+                    PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
+                        .unwrap_or(PullRequestState::Open),
+                    &filters,
+                )
+                .into(),
+            );
         }
         ui.set_workflow_pr_list_sort_filter(value);
         let state = PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
@@ -135,11 +191,7 @@ impl WorkflowPrListController {
             *context = None;
         }
         if let Ok(mut filters) = self.filters.lock() {
-            *filters = PullRequestFilters {
-                reviews: "all".to_string(),
-                assignee: "any".to_string(),
-                sort: "newest".to_string(),
-            };
+            *filters = default_pull_request_filters();
         }
         clear_pages(&self.visited_pages);
         reset_ui(ui);
@@ -370,10 +422,18 @@ impl WorkflowPrListController {
             }
         };
         let total = items.len() as u32;
+        let page_count = total.div_ceil(PAGE_SIZE).max(1);
+        let requested_page = page.max(1).min(page_count);
+        let start = requested_page.saturating_sub(1).saturating_mul(PAGE_SIZE) as usize;
+        let visible_items = items
+            .into_iter()
+            .skip(start)
+            .take(PAGE_SIZE as usize)
+            .collect::<Vec<_>>();
         ui.set_workflow_pr_list_loading(false);
         ui.set_workflow_pr_list_error("".into());
         ui.set_workflow_pr_list_state(state.as_str().into());
-        apply_page_to_ui(ui, page.min(1), items, 1, true);
+        apply_page_to_ui(&ui, requested_page, visible_items, page_count, true);
         ui.set_workflow_pr_list_total(total as i32);
         set_state_total(ui, state, total);
     }
@@ -393,6 +453,112 @@ impl WorkflowPrListController {
             .unwrap_or(-1);
         ui.set_workflow_pr_list_open_total(open_total);
         ui.set_workflow_pr_list_closed_total(closed_total);
+    }
+}
+
+fn parse_pull_request_query(
+    value: &str,
+    _current_sort: &str,
+) -> Result<(PullRequestState, PullRequestFilters), String> {
+    let mut state = None;
+    let mut filters = PullRequestFilters {
+        query: String::new(),
+        reviews: "all".to_string(),
+        assignee: "any".to_string(),
+        sort: "newest".to_string(),
+    };
+    let mut query_terms = Vec::new();
+    let mut unmerged = false;
+
+    for token in value.split_whitespace() {
+        let normalized = token.to_ascii_lowercase();
+        let parsed_state = match normalized.as_str() {
+            "is:open" | "state:open" => Some(PullRequestState::Open),
+            "is:closed" | "state:closed" => Some(PullRequestState::Closed),
+            "is:merged" | "state:merged" => Some(PullRequestState::Merged),
+            _ => None,
+        };
+        if let Some(parsed_state) = parsed_state {
+            if state.is_some_and(|current| current != parsed_state) {
+                return Err(
+                    "Use only one PR state qualifier: is:open, is:closed, or is:merged."
+                        .to_string(),
+                );
+            }
+            state = Some(parsed_state);
+            continue;
+        }
+
+        match normalized.as_str() {
+            "is:pr" | "type:pr" => {}
+            "is:unmerged" => unmerged = true,
+            "review:required" => filters.reviews = "required".to_string(),
+            "review:approved" => filters.reviews = "approved".to_string(),
+            "review:changes_requested" | "review:changes-requested" => {
+                filters.reviews = "changes-requested".to_string();
+            }
+            "no:assignee" => filters.assignee = "none".to_string(),
+            "assignee:@me" => filters.assignee = "me".to_string(),
+            "sort:created-desc" => filters.sort = "newest".to_string(),
+            "sort:created-asc" => filters.sort = "oldest".to_string(),
+            "sort:updated-desc" => filters.sort = "updated-desc".to_string(),
+            "sort:updated-asc" => filters.sort = "updated-asc".to_string(),
+            _ => query_terms.push(token),
+        }
+    }
+
+    filters.query = query_terms.join(" ");
+    let state = match (state, unmerged) {
+        (Some(PullRequestState::Closed), true) => PullRequestState::ClosedUnmerged,
+        (Some(PullRequestState::Merged), true) => {
+            return Err("is:merged and is:unmerged cannot be combined.".to_string());
+        }
+        (Some(state), _) => state,
+        (None, true) => {
+            return Err(
+                "Combine is:unmerged with is:closed or is:open for portable filtering.".to_string(),
+            );
+        }
+        (None, false) => PullRequestState::Open,
+    };
+    Ok((state, filters))
+}
+
+fn format_pull_request_query(state: PullRequestState, filters: &PullRequestFilters) -> String {
+    let mut parts = vec!["is:pr".to_string()];
+    let state_query = state.github_query();
+    if !state_query.is_empty() {
+        parts.push(state_query.to_string());
+    }
+    if !filters.query.trim().is_empty() {
+        parts.push(filters.query.trim().to_string());
+    }
+    match filters.reviews.as_str() {
+        "required" => parts.push("review:required".to_string()),
+        "approved" => parts.push("review:approved".to_string()),
+        "changes-requested" => parts.push("review:changes_requested".to_string()),
+        _ => {}
+    }
+    match filters.assignee.as_str() {
+        "none" => parts.push("no:assignee".to_string()),
+        "me" => parts.push("assignee:@me".to_string()),
+        _ => {}
+    }
+    match filters.sort.as_str() {
+        "oldest" => parts.push("sort:created-asc".to_string()),
+        "updated-desc" => parts.push("sort:updated-desc".to_string()),
+        "updated-asc" => parts.push("sort:updated-asc".to_string()),
+        _ => {}
+    }
+    parts.join(" ")
+}
+
+fn default_pull_request_filters() -> PullRequestFilters {
+    PullRequestFilters {
+        query: String::new(),
+        reviews: "all".to_string(),
+        assignee: "any".to_string(),
+        sort: "newest".to_string(),
     }
 }
 
@@ -479,7 +645,7 @@ fn render_remote_page(
 fn set_state_total(ui: &MainWindow, state: PullRequestState, total: u32) {
     match state {
         PullRequestState::Open => ui.set_workflow_pr_list_open_total(total as i32),
-        PullRequestState::Closed | PullRequestState::Merged => {
+        PullRequestState::Closed | PullRequestState::ClosedUnmerged | PullRequestState::Merged => {
             ui.set_workflow_pr_list_closed_total(total as i32);
         }
         PullRequestState::All => {}
@@ -678,6 +844,7 @@ fn reset_ui(ui: &MainWindow) {
     ui.set_workflow_pr_list_page(1);
     ui.set_workflow_pr_list_page_count(1);
     ui.set_workflow_pr_list_state("open".into());
+    ui.set_workflow_pr_list_query("is:pr is:open".into());
     ui.set_workflow_pr_list_review_filter("all".into());
     ui.set_workflow_pr_list_assignee_filter("any".into());
     ui.set_workflow_pr_list_sort_filter("newest".into());
@@ -689,9 +856,10 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::{
-        format_github_absolute_tooltip, format_github_relative_time_at,
-        format_updated_at_in_utc_plus_eight,
+        format_github_absolute_tooltip, format_github_relative_time_at, format_pull_request_query,
+        format_updated_at_in_utc_plus_eight, parse_pull_request_query,
     };
+    use crate::git::PullRequestState;
 
     #[test]
     fn formats_provider_timestamps_in_utc_plus_eight() {
@@ -745,6 +913,62 @@ mod tests {
         assert_eq!(
             format_github_absolute_tooltip("2026-07-15T05:26:44Z"),
             "Jul 15, 2026, 1:26 PM GMT+8"
+        );
+    }
+
+    #[test]
+    fn parses_and_formats_github_style_merged_queries() {
+        let (state, filters) = parse_pull_request_query(
+            "toolbar parity is:pr is:merged review:approved assignee:@me sort:updated-desc",
+            "updated-desc",
+        )
+        .unwrap();
+
+        assert_eq!(state, PullRequestState::Merged);
+        assert_eq!(filters.query, "toolbar parity");
+        assert_eq!(filters.reviews, "approved");
+        assert_eq!(filters.assignee, "me");
+        assert_eq!(filters.sort, "updated-desc");
+        assert_eq!(
+            format_pull_request_query(state, &filters),
+            "is:pr is:merged toolbar parity review:approved assignee:@me sort:updated-desc"
+        );
+    }
+
+    #[test]
+    fn rejects_conflicting_pull_request_state_qualifiers() {
+        let error = parse_pull_request_query("is:pr is:open is:merged", "newest").unwrap_err();
+        assert!(error.contains("only one PR state qualifier"));
+    }
+
+    #[test]
+    fn distinguishes_closed_without_merge_from_the_closed_union() {
+        let (state, filters) =
+            parse_pull_request_query("is:pr is:closed is:unmerged", "newest").unwrap();
+
+        assert_eq!(state, PullRequestState::ClosedUnmerged);
+        assert!(filters.query.is_empty());
+        assert_eq!(
+            format_pull_request_query(state, &filters),
+            "is:pr is:closed is:unmerged"
+        );
+    }
+
+    #[test]
+    fn parses_github_sort_qualifiers_and_resets_missing_sort_to_newest() {
+        let (_, oldest) =
+            parse_pull_request_query("is:pr is:open sort:created-asc", "updated-desc").unwrap();
+        assert_eq!(oldest.sort, "oldest");
+        assert_eq!(
+            format_pull_request_query(PullRequestState::Open, &oldest),
+            "is:pr is:open sort:created-asc"
+        );
+
+        let (_, cleared) = parse_pull_request_query("is:pr is:open", "updated-desc").unwrap();
+        assert_eq!(cleared.sort, "newest");
+        assert_eq!(
+            format_pull_request_query(PullRequestState::Open, &cleared),
+            "is:pr is:open"
         );
     }
 }

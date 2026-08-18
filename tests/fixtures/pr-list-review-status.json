@@ -65,6 +65,138 @@
       "review_status": "changes_requested",
       "conversation_count": 5,
       "updated_hours_ago": 960
+    },
+    {
+      "number": "99007",
+      "title": "Keep query text synchronized after selecting Reviews",
+      "state": "open",
+      "author": "frontend-maintainer",
+      "source_branch": "feature/query-review-sync",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 2,
+      "updated_hours_ago": 4
+    },
+    {
+      "number": "99008",
+      "title": "Preserve search terms when switching to Closed",
+      "state": "open",
+      "author": "workflow-owner",
+      "source_branch": "test/state-query-preservation",
+      "target_branch": "develop",
+      "review_status": "review_required",
+      "conversation_count": 4,
+      "updated_hours_ago": 10
+    },
+    {
+      "number": "99009",
+      "title": "Exercise pull request list pagination page two",
+      "state": "open",
+      "author": "pagination-bot",
+      "source_branch": "fixture/open-page-two-a",
+      "target_branch": "main",
+      "review_status": "none",
+      "conversation_count": 0,
+      "updated_hours_ago": 14
+    },
+    {
+      "number": "99010",
+      "title": "Keep pagination stable after a query is cleared",
+      "state": "open",
+      "author": "pagination-bot",
+      "source_branch": "fixture/open-page-two-b",
+      "target_branch": "main",
+      "review_status": "none",
+      "conversation_count": 0,
+      "updated_hours_ago": 18
+    },
+    {
+      "number": "99011",
+      "title": "Render an assignee filter together with search qualifiers",
+      "state": "open",
+      "author": "filter-owner",
+      "source_branch": "feature/assignee-query",
+      "target_branch": "release/next",
+      "review_status": "changes_requested",
+      "conversation_count": 7,
+      "updated_hours_ago": 22
+    },
+    {
+      "number": "99012",
+      "title": "Keep a compact toolbar usable at the narrow breakpoint",
+      "state": "open",
+      "author": "responsive-owner",
+      "source_branch": "feature/compact-filter-toolbar",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 1,
+      "updated_hours_ago": 30
+    },
+    {
+      "number": "99013",
+      "title": "Exercise an empty keyword result without losing the query",
+      "state": "open",
+      "author": "search-owner",
+      "source_branch": "test/search-empty-state",
+      "target_branch": "main",
+      "review_status": "review_required",
+      "conversation_count": 6,
+      "updated_hours_ago": 36
+    },
+    {
+      "number": "99014",
+      "title": "Keep provider-neutral state parsing deterministic",
+      "state": "open",
+      "author": "adapter-owner",
+      "source_branch": "feature/provider-state-parser",
+      "target_branch": "main",
+      "review_status": "none",
+      "conversation_count": 3,
+      "updated_hours_ago": 48
+    },
+    {
+      "number": "99015",
+      "title": "Merged query toolbar provider parity",
+      "state": "merged",
+      "author": "adapter-owner",
+      "source_branch": "feature/merged-provider-parity",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 8,
+      "updated_hours_ago": 120
+    },
+    {
+      "number": "99016",
+      "title": "Merged result remains inside the GitHub Closed union",
+      "state": "merged",
+      "author": "release-bot",
+      "source_branch": "release/merged-union",
+      "target_branch": "main",
+      "review_status": "approved",
+      "conversation_count": 10,
+      "updated_hours_ago": 144
+    },
+    {
+      "number": "99017",
+      "title": "Closed without merge remains distinguishable",
+      "state": "closed",
+      "author": "maintainer",
+      "source_branch": "experiment/closed-unmerged",
+      "target_branch": "main",
+      "review_status": "changes_requested",
+      "conversation_count": 2,
+      "updated_hours_ago": 168
+    },
+    {
+      "number": "99018",
+      "title": "Second closed row validates mixed terminal states",
+      "state": "closed",
+      "author": "maintainer",
+      "source_branch": "experiment/closed-mixed-state",
+      "target_branch": "develop",
+      "review_status": "none",
+      "conversation_count": 1,
+      "updated_hours_ago": 192
     }
   ]
 }

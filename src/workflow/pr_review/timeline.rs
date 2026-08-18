@@ -23,7 +23,7 @@ pub(super) fn empty_commit_model() -> ModelRc<WorkflowPrCommit> {
 fn conversation_row_height(item: &PullRequestConversationItem) -> i32 {
     match item.kind.as_str() {
         "commit" => 36,
-        "commits" | "event" | "merged" | "review_summary" => 48,
+        "commits" | "event" | "merged" | "review_requested" | "review_summary" => 48,
         _ => conversation_card_row_height(item.body.as_str()),
     }
 }

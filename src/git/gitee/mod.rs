@@ -32,10 +32,10 @@ use decode::*;
 use readiness::{gitee_enterprise_merge_readiness, gitee_public_merge_readiness};
 use revert::{enterprise_commit_refs_can_revert, enterprise_data_object};
 use transport::{
-    enterprise_authenticated_builder, enterprise_pull_request_endpoint,
-    enterprise_repository_commit_endpoint, enterprise_web_pull_request_review_endpoint,
-    parse_gitee_merge_method, public_authenticated_builder, public_authenticated_request,
-    public_repo_endpoint,
+    enterprise_authenticated_builder, enterprise_project_endpoint,
+    enterprise_pull_request_endpoint, enterprise_repository_commit_endpoint,
+    enterprise_web_pull_request_review_endpoint, parse_gitee_merge_method,
+    public_authenticated_builder, public_authenticated_request, public_repo_endpoint,
 };
 
 /// Fetch the stable provider project id for a remote repository.
@@ -183,12 +183,25 @@ async fn get_enterprise_pull_requests(
         request = request.header("enterprise", enterprise);
     }
     if let Some(state) = state {
-        request = request.query(&[("state", state.gitee_query())]);
+        request = request.query(&gitee_enterprise_state_query(state));
+    }
+    if !filters.query.trim().is_empty() {
+        request = request.query(&[("search", filters.query.trim())]);
     }
     if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
         request = request.header("PRIVATE-TOKEN", token);
     }
     decode_pull_request_page(request, page, per_page).await
+}
+
+fn gitee_enterprise_state_query(state: PullRequestState) -> Vec<(&'static str, &'static str)> {
+    if state == PullRequestState::Closed {
+        // GitHub's Closed tab includes both merged and closed-without-merge.
+        // Gitee Enterprise exposes a multi-state query for the same union.
+        vec![("states[]", "closed"), ("states[]", "merged")]
+    } else {
+        vec![("state", state.gitee_query())]
+    }
 }
 
 fn enterprise_api_base_url() -> Result<String, String> {
@@ -805,7 +818,7 @@ pub(super) async fn get_pull_request_conversation(
     pull_request_iid: &str,
 ) -> Result<Vec<PullRequestConversationItem>, String> {
     let profile = gitee_api_profile(locator);
-    let (detail_payload, notes, current_user) = match profile {
+    let (detail_payload, notes, current_user, operate_logs) = match profile {
         GiteeApiProfile::EnterpriseV8 => {
             let detail_endpoint = enterprise_pull_request_endpoint(
                 endpoints::ENTERPRISE_MERGE_REQUEST_URL,
@@ -814,6 +827,11 @@ pub(super) async fn get_pull_request_conversation(
             )?;
             let notes_endpoint = enterprise_pull_request_endpoint(
                 endpoints::ENTERPRISE_MERGE_REQUEST_NOTES_URL,
+                repo_project_id,
+                pull_request_iid,
+            )?;
+            let operate_logs_endpoint = enterprise_pull_request_endpoint(
+                endpoints::ENTERPRISE_MERGE_REQUEST_OPERATE_LOGS_URL,
                 repo_project_id,
                 pull_request_iid,
             )?;
@@ -845,9 +863,21 @@ pub(super) async fn get_pull_request_conversation(
                 .await
                 .ok()
             };
-            let (detail, notes, current_user) =
-                tokio::join!(detail_future, notes_future, current_user_future);
-            (detail?, notes?, current_user)
+            let operate_logs_future = async {
+                http::send_json(
+                    enterprise_authenticated_builder(http::get(operate_logs_endpoint)),
+                    RequestOptions::new("Load Gitee enterprise pull request operation logs"),
+                )
+                .await
+                .ok()
+            };
+            let (detail, notes, current_user, operate_logs) = tokio::join!(
+                detail_future,
+                notes_future,
+                current_user_future,
+                operate_logs_future
+            );
+            (detail?, notes?, current_user, operate_logs)
         }
         GiteeApiProfile::PublicV5 => {
             let detail_endpoint = public_repo_endpoint(
@@ -862,20 +892,44 @@ pub(super) async fn get_pull_request_conversation(
                 Some(pull_request_iid),
                 None,
             );
-            let detail = http::send_json(
-                public_authenticated_request(detail_endpoint),
-                RequestOptions::new("Load Gitee public pull request conversation header"),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-            let notes = http::send_json(
-                public_authenticated_request(comments_endpoint)
-                    .query(&[("page", "1"), ("per_page", "100")]),
-                RequestOptions::new("Load Gitee public pull request comments"),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-            (detail, notes, None)
+            let operate_logs_endpoint = public_repo_endpoint(
+                endpoints::PUBLIC_PULL_REQUEST_OPERATE_LOGS_URL,
+                locator,
+                Some(pull_request_iid),
+                None,
+            );
+            let detail_future = async {
+                http::send_json(
+                    public_authenticated_request(detail_endpoint),
+                    RequestOptions::new("Load Gitee public pull request conversation header"),
+                )
+                .await
+                .map_err(|error| error.to_string())
+            };
+            let notes_future = async {
+                http::send_json(
+                    public_authenticated_request(comments_endpoint)
+                        .query(&[("page", "1"), ("per_page", "100")]),
+                    RequestOptions::new("Load Gitee public pull request comments"),
+                )
+                .await
+                .map_err(|error| error.to_string())
+            };
+            let operate_logs_future = async {
+                http::send_json(
+                    public_authenticated_request(operate_logs_endpoint).query(&[
+                        ("sort", "asc"),
+                        ("page", "1"),
+                        ("per_page", "100"),
+                    ]),
+                    RequestOptions::new("Load Gitee public pull request operation logs"),
+                )
+                .await
+                .ok()
+            };
+            let (detail, notes, operate_logs) =
+                tokio::join!(detail_future, notes_future, operate_logs_future);
+            (detail?, notes?, None, operate_logs)
         }
     };
     let detail = if profile == GiteeApiProfile::EnterpriseV8 {
@@ -938,48 +992,204 @@ pub(super) async fn get_pull_request_conversation(
         }
     }
 
+    let operate_log_values = operate_logs.as_ref().and_then(pull_request_values);
+    let mut operate_log_activity = operate_log_values
+        .map(|values| decode_gitee_operate_log_activity(values))
+        .unwrap_or_default();
     if profile == GiteeApiProfile::EnterpriseV8 {
-        items.extend(enterprise_review_summaries(detail, current_user.as_ref()));
+        merge_gitee_review_summaries(
+            &mut operate_log_activity,
+            enterprise_review_summaries(detail, current_user.as_ref()),
+        );
     }
+    items.extend(operate_log_activity);
+
+    let merged_at = string_field(detail, "merged_at").filter(|value| !value.trim().is_empty());
+    let merge_sha = string_field(detail, "merge_commit_sha")
+        .or_else(|| nested_string(detail, "merge_commit", "sha"))
+        .filter(|value| !value.trim().is_empty());
+    let merge_commit_future = async {
+        if profile == GiteeApiProfile::EnterpriseV8 && merged_at.is_some() && merge_sha.is_some() {
+            load_enterprise_merge_commit(
+                repo_project_id,
+                pull_request_iid,
+                merge_sha.as_deref().unwrap_or_default(),
+            )
+            .await
+        } else {
+            None
+        }
+    };
+    let merge_actor_account = (profile == GiteeApiProfile::EnterpriseV8 && merged_at.is_some())
+        .then(|| gitee_merge_actor_account(detail, operate_log_values))
+        .flatten();
+    let merge_actor_user_future = async {
+        if let Some(account) = merge_actor_account.as_deref() {
+            load_enterprise_merge_actor_user(repo_project_id, account).await
+        } else {
+            None
+        }
+    };
+    let (commits, merge_commit, merge_actor_user) = tokio::join!(
+        get_pull_request_commits(locator, repo_project_id, pull_request_iid),
+        merge_commit_future,
+        merge_actor_user_future,
+    );
 
     // Structured commit/merge rows mirror GitHub Conversation activity for both
     // Gitee profiles. Failures stay silent so notes still render.
-    if let Ok(commits) = get_pull_request_commits(locator, repo_project_id, pull_request_iid).await
-    {
+    if let Ok(commits) = commits {
         items.extend(conversation_commit_batch_items(&commits));
     }
-    if let Some(merged_at) =
-        string_field(detail, "merged_at").filter(|value| !value.trim().is_empty())
-    {
-        let merge_sha = string_field(detail, "merge_commit_sha")
-            .or_else(|| nested_string(detail, "merge_commit", "sha"))
-            .unwrap_or_default();
+    if let (Some(merged_at), Some(merge_sha)) = (merged_at, merge_sha) {
         let target_branch = string_field(detail, "target_branch")
             .or_else(|| nested_string(detail, "base", "ref"))
             .unwrap_or_default();
-        let author = nested_string(detail, "merged_by", "name")
-            .or_else(|| nested_string(detail, "merged_by", "username"))
-            .or_else(|| nested_string(detail, "merged_by", "login"))
-            .or_else(|| nested_string(detail, "user", "login"))
-            .or_else(|| nested_string(detail, "author", "name"))
-            .unwrap_or_else(|| "Unknown author".to_string());
-        if !merge_sha.trim().is_empty() {
-            items.push(conversation_merged_item(
-                author.as_str(),
-                merge_sha.as_str(),
-                if target_branch.trim().is_empty() {
-                    "main"
-                } else {
-                    target_branch.as_str()
-                },
-                merged_at.as_str(),
-            ));
-        }
+        let merge_event = gitee_merge_event_with_user(
+            detail,
+            operate_log_values,
+            merge_commit.as_ref(),
+            merge_actor_user.as_ref(),
+        );
+        let mut merged_item = conversation_merged_item(
+            merge_event.author.as_str(),
+            merge_sha.as_str(),
+            if target_branch.trim().is_empty() {
+                "main"
+            } else {
+                target_branch.as_str()
+            },
+            if merge_event.created_at.trim().is_empty() {
+                merged_at.as_str()
+            } else {
+                merge_event.created_at.as_str()
+            },
+        );
+        merged_item.avatar_url = merge_event.avatar_url;
+        items.push(merged_item);
     }
 
     let description = items.remove(0);
     let activity = items;
     Ok(finalize_conversation_timeline(description, activity))
+}
+
+async fn load_enterprise_merge_actor_user(repo_project_id: &str, account: &str) -> Option<Value> {
+    let members_endpoint =
+        enterprise_project_endpoint(endpoints::ENTERPRISE_PROJECT_MEMBERS_URL, repo_project_id)
+            .ok()?;
+    let members: Option<Value> = http::send_json(
+        enterprise_authenticated_builder(http::get(members_endpoint)).query(&[
+            ("is_all", "true"),
+            ("with_page", "true"),
+            ("page", "1"),
+            ("per_page", "100"),
+            ("query", account),
+        ]),
+        RequestOptions::new("Resolve Gitee enterprise merge actor from project members"),
+    )
+    .await
+    .ok();
+    if let Some(user) = members
+        .as_ref()
+        .and_then(|payload| select_enterprise_user(payload, account))
+        .filter(|user| enterprise_user_has_distinct_display_name(user, account))
+    {
+        return Some(user.clone());
+    }
+
+    let users_endpoint = endpoints::ENTERPRISE_USERS_URL
+        .replace("{api_base_url}", enterprise_api_base_url().ok()?.as_str());
+    let users: Value = http::send_json(
+        enterprise_authenticated_builder(http::get(users_endpoint)).query(&[("search", account)]),
+        RequestOptions::new("Resolve Gitee enterprise merge actor from user directory"),
+    )
+    .await
+    .ok()?;
+    select_enterprise_user(&users, account)
+        .filter(|user| enterprise_user_has_distinct_display_name(user, account))
+        .cloned()
+}
+
+fn select_enterprise_user<'a>(payload: &'a Value, account: &str) -> Option<&'a Value> {
+    let account = account.trim();
+    let users = enterprise_user_values(payload)?;
+    users
+        .iter()
+        .find(|user| {
+            enterprise_user_login(user).is_some_and(|value| value.eq_ignore_ascii_case(account))
+        })
+        .or_else(|| {
+            users.iter().find(|user| {
+                string_field(user, "email")
+                    .and_then(|email| email.split_once('@').map(|(local, _)| local.to_string()))
+                    .is_some_and(|local| local.eq_ignore_ascii_case(account))
+            })
+        })
+        .or_else(|| {
+            users.iter().find(|user| {
+                string_field(user, "name").is_some_and(|name| name.eq_ignore_ascii_case(account))
+            })
+        })
+}
+
+fn enterprise_user_values(payload: &Value) -> Option<&Vec<Value>> {
+    payload
+        .as_array()
+        .or_else(|| payload.get("data").and_then(Value::as_array))
+        .or_else(|| payload.get("members").and_then(Value::as_array))
+        .or_else(|| payload.get("users").and_then(Value::as_array))
+        .or_else(|| {
+            let data = payload.get("data")?;
+            data.get("members")
+                .and_then(Value::as_array)
+                .or_else(|| data.get("users").and_then(Value::as_array))
+        })
+}
+
+fn enterprise_user_has_distinct_display_name(user: &Value, account: &str) -> bool {
+    [
+        "display_name",
+        "displayName",
+        "nickname",
+        "nick_name",
+        "real_name",
+        "realName",
+        "full_name",
+        "fullName",
+        "remark",
+        "name",
+    ]
+    .into_iter()
+    .filter_map(|field| string_field(user, field))
+    .any(|name| {
+        let name = name.trim();
+        !name.is_empty()
+            && !name.eq_ignore_ascii_case(account)
+            && !name
+                .split_once('@')
+                .is_some_and(|(local, _)| local.eq_ignore_ascii_case(account))
+    })
+}
+
+async fn load_enterprise_merge_commit(
+    repo_project_id: &str,
+    pull_request_iid: &str,
+    merge_sha: &str,
+) -> Option<Value> {
+    let endpoint = enterprise_repository_commit_endpoint(
+        endpoints::ENTERPRISE_REPOSITORY_COMMIT_URL,
+        repo_project_id,
+        merge_sha,
+    )
+    .ok()?;
+    let payload: Value = http::send_json(
+        enterprise_authenticated_builder(http::get(endpoint)).query(&[("pr_id", pull_request_iid)]),
+        RequestOptions::new("Load Gitee enterprise merge commit actor"),
+    )
+    .await
+    .ok()?;
+    Some(enterprise_data_object(&payload).clone())
 }
 
 fn enterprise_review_summaries(
@@ -1580,6 +1790,107 @@ async fn get_public_pull_requests(
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
+    if matches!(
+        state,
+        Some(PullRequestState::Merged | PullRequestState::ClosedUnmerged)
+    ) || !filters.query.trim().is_empty()
+    {
+        return get_filtered_public_pull_requests(locator, state, filters, page, per_page).await;
+    }
+    get_public_pull_request_server_page(locator, state, filters, page, per_page).await
+}
+
+async fn get_filtered_public_pull_requests(
+    locator: &RepoLocator,
+    state: Option<PullRequestState>,
+    filters: &PullRequestFilters,
+    page: u32,
+    per_page: u32,
+) -> Result<PullRequestPage, String> {
+    const SCAN_PAGE_SIZE: u32 = 100;
+    const MAX_SCAN_PAGES: u32 = 30;
+
+    let server_state = if matches!(
+        state,
+        Some(PullRequestState::Merged | PullRequestState::ClosedUnmerged)
+    ) {
+        Some(PullRequestState::Closed)
+    } else {
+        state
+    };
+    let mut matches = Vec::new();
+    let mut exhausted = false;
+
+    for server_page in 1..=MAX_SCAN_PAGES {
+        let result = get_public_pull_request_server_page(
+            locator,
+            server_state,
+            filters,
+            server_page,
+            SCAN_PAGE_SIZE,
+        )
+        .await?;
+        let batch_len = result.items.len();
+        matches.extend(result.items.into_iter().filter(|item| {
+            (state != Some(PullRequestState::Merged) || item.state == "merged")
+                && (state != Some(PullRequestState::ClosedUnmerged) || item.state == "closed")
+                && matches_public_query(item, filters.query.as_str())
+        }));
+
+        let reached_provider_end = result
+            .page_count
+            .is_some_and(|page_count| server_page >= page_count)
+            || batch_len < SCAN_PAGE_SIZE as usize;
+        if reached_provider_end {
+            exhausted = true;
+            break;
+        }
+    }
+
+    let per_page = per_page.max(1);
+    let requested_page = page.max(1);
+    let total = matches.len() as u32;
+    let start = requested_page.saturating_sub(1).saturating_mul(per_page) as usize;
+    let items = matches
+        .into_iter()
+        .skip(start)
+        .take(per_page as usize)
+        .collect::<Vec<_>>();
+    let page_count = if exhausted {
+        total.div_ceil(per_page).max(1)
+    } else if items.len() == per_page as usize {
+        requested_page.saturating_add(1)
+    } else {
+        requested_page.max(1)
+    };
+    Ok(PullRequestPage {
+        items,
+        total,
+        total_exact: exhausted,
+        page_count: Some(page_count),
+    })
+}
+
+fn matches_public_query(item: &PullRequestItem, query: &str) -> bool {
+    let haystack = format!(
+        "{} {} {} {}",
+        item.title, item.author, item.source_branch, item.target_branch
+    )
+    .to_ascii_lowercase();
+    query
+        .split_whitespace()
+        .map(|term| term.trim_matches(['\'', '"']).to_ascii_lowercase())
+        .filter(|term| !term.is_empty())
+        .all(|term| haystack.contains(term.as_str()))
+}
+
+async fn get_public_pull_request_server_page(
+    locator: &RepoLocator,
+    state: Option<PullRequestState>,
+    filters: &PullRequestFilters,
+    page: u32,
+    per_page: u32,
+) -> Result<PullRequestPage, String> {
     let per_page = per_page.max(1);
     let endpoint = endpoints::PUBLIC_PULL_REQUESTS_URL
         .replace("{scheme}", locator.scheme.as_str())
@@ -1680,12 +1991,14 @@ fn pull_request_values(payload: &Value) -> Option<&Vec<Value>> {
         return Some(values);
     }
 
-    const COLLECTION_KEYS: [&str; 8] = [
+    const COLLECTION_KEYS: [&str; 10] = [
         "items",
         "list",
         "content",
         "commits",
         "notes",
+        "operate_logs",
+        "operation_logs",
         "merge_requests",
         "pull_requests",
         "records",
@@ -1833,6 +2146,7 @@ fn to_pull_request_item(value: &Value) -> PullRequestItem {
             .unwrap_or_else(|| "—".to_string()),
         review_status: gitee_list_review_status(value),
         conversation_count: conversation_count_from_detail(value),
+        created_at: string_field(value, "created_at").unwrap_or_default(),
         updated_at: string_field(value, "updated_at")
             .unwrap_or_else(|| "Unknown update time".to_string()),
         web_url: string_field(value, "web_url")
@@ -1911,17 +2225,22 @@ mod tests {
     use super::{
         bounded_list_total, commit_count_from_diff_payload, complete_collection_total,
         decode_commit, decode_conversation_comment, decode_conversation_review,
-        decode_pull_request_diff, enterprise_commit_probe_total, enterprise_commit_refs_can_revert,
-        enterprise_compare_diff_payload, enterprise_data_object, enterprise_note_payload,
-        enterprise_review_belongs_to_current_user, enterprise_review_dismissal_payload,
-        enterprise_review_payload, enterprise_review_summaries,
+        decode_gitee_operate_log_activity, decode_pull_request_diff, enterprise_commit_probe_total,
+        enterprise_commit_refs_can_revert, enterprise_compare_diff_payload, enterprise_data_object,
+        enterprise_note_payload, enterprise_review_belongs_to_current_user,
+        enterprise_review_dismissal_payload, enterprise_review_payload,
+        enterprise_review_summaries, enterprise_user_has_distinct_display_name,
         enterprise_web_pull_request_review_endpoint, expand_enterprise_conversation_notes,
-        gitee_enterprise_list_sort, gitee_enterprise_merge_readiness, gitee_list_review_status,
-        gitee_public_list_sort, gitee_public_merge_readiness, normalize_enterprise_commit_order,
-        pull_request_values, select_enterprise_project_id, trusted_enterprise_commit_count,
+        gitee_enterprise_list_sort, gitee_enterprise_merge_readiness, gitee_enterprise_state_query,
+        gitee_list_review_status, gitee_merge_actor_account, gitee_merge_event,
+        gitee_merge_event_with_user, gitee_public_list_sort, gitee_public_merge_readiness,
+        merge_gitee_review_summaries, normalize_enterprise_commit_order, pull_request_values,
+        select_enterprise_project_id, select_enterprise_user, trusted_enterprise_commit_count,
     };
     use crate::codereview::api::gitee as endpoints;
-    use crate::git::{PullRequestReadinessKind, PullRequestReviewStatus, parse_repo_locator};
+    use crate::git::{
+        PullRequestReadinessKind, PullRequestReviewStatus, PullRequestState, parse_repo_locator,
+    };
     use reqwest::header::HeaderMap;
 
     #[test]
@@ -1937,6 +2256,22 @@ mod tests {
         assert_eq!(
             gitee_list_review_status(&json!({ "review_state": "review_rejected" })),
             PullRequestReviewStatus::ChangesRequested
+        );
+    }
+
+    #[test]
+    fn maps_github_closed_semantics_to_gitee_enterprise_multi_state_query() {
+        assert_eq!(
+            gitee_enterprise_state_query(PullRequestState::Closed),
+            vec![("states[]", "closed"), ("states[]", "merged")]
+        );
+        assert_eq!(
+            gitee_enterprise_state_query(PullRequestState::ClosedUnmerged),
+            vec![("state", "closed")]
+        );
+        assert_eq!(
+            gitee_enterprise_state_query(PullRequestState::Merged),
+            vec![("state", "merged")]
         );
     }
 
@@ -2122,6 +2457,358 @@ mod tests {
             &detail["general_reviewers"][0],
             &json!({ "id": 16, "username": "bob" })
         ));
+    }
+
+    #[test]
+    fn enterprise_documented_reviewer_shape_uses_name_and_allow_merge_state() {
+        let detail = json!({
+            "general_reviewers": [
+                {
+                    "id": 15,
+                    "uuid": "review-owner-uuid",
+                    "name": "Review Owner",
+                    "user_name": "review-owner",
+                    "email": "review-owner@example.com",
+                    "avatar_url": "https://gitee.example/review-owner.png",
+                    "approve_status": "approved"
+                }
+            ],
+            "primary_reviewers": []
+        });
+
+        let summaries = enterprise_review_summaries(&detail, None);
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].kind, "review_summary");
+        assert_eq!(summaries[0].author, "Review Owner");
+        assert_eq!(summaries[0].state, "approved");
+        assert_eq!(summaries[0].body, "approved these changes");
+        assert!(!summaries[0].author.contains('@'));
+    }
+
+    #[test]
+    fn decodes_gitee_reviewer_assignment_and_review_operation_logs() {
+        let logs = vec![
+            json!({
+                "id": 101,
+                "user": {
+                    "name": "PR author",
+                    "avatar_url": "https://gitee.example/author.png"
+                },
+                "target": { "name": "Alice Reviewer" },
+                "content": "指派了 <a>Alice Reviewer</a> 参与评审",
+                "created_at": "2026-07-27T10:31:57+08:00",
+                "action_type": "set_assignee"
+            }),
+            json!({
+                "id": 102,
+                "user": {
+                    "name": "Alice Reviewer",
+                    "avatar_url": "https://gitee.example/alice.png"
+                },
+                "content": "审查通过",
+                "created_at": "2026-07-27T10:35:00+08:00",
+                "action_type": "accepted_pr"
+            }),
+            json!({
+                "id": 103,
+                "user": { "name": "Bob Reviewer" },
+                "content": "requested changes",
+                "createdAt": "2026-07-27T10:36:00+08:00",
+                "actionType": "review_rejected"
+            }),
+        ];
+
+        let activity = decode_gitee_operate_log_activity(&logs);
+
+        assert_eq!(activity.len(), 3);
+        assert_eq!(activity[0].kind, "review_requested");
+        assert_eq!(activity[0].author, "PR author");
+        assert_eq!(activity[0].body, "requested a review from");
+        assert_eq!(activity[0].state, "Alice Reviewer");
+        assert_eq!(activity[1].kind, "review_summary");
+        assert_eq!(activity[1].author, "Alice Reviewer");
+        assert_eq!(activity[1].state, "approved");
+        assert_eq!(activity[1].body, "approved these changes");
+        assert_eq!(activity[1].avatar_url, "https://gitee.example/alice.png");
+        assert_eq!(activity[2].state, "rejected");
+        assert_eq!(activity[2].body, "requested changes");
+    }
+
+    #[test]
+    fn decodes_gitee_allow_merge_log_as_a_github_style_approval() {
+        let activity = decode_gitee_operate_log_activity(&[json!({
+            "id": 104,
+            "user": {
+                "name": "reviewer@example.com",
+                "remark": "Review Owner"
+            },
+            "title": "允许合并 Pull Request",
+            "created_at": "2026-07-27T10:37:00+08:00",
+            "operating": "allow_merge_pr"
+        })]);
+
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].kind, "review_summary");
+        assert_eq!(activity[0].author, "Review Owner");
+        assert_eq!(activity[0].state, "approved");
+        assert_eq!(activity[0].body, "approved these changes");
+    }
+
+    #[test]
+    fn unwraps_nested_gitee_operation_log_collections() {
+        let payload = json!({
+            "data": {
+                "operate_logs": [
+                    { "id": 104, "content": "允许合并 Pull Request" }
+                ]
+            }
+        });
+
+        let values = pull_request_values(&payload).expect("operation logs");
+
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0]["id"], 104);
+    }
+
+    #[test]
+    fn decodes_structured_gitee_approval_when_log_text_is_generic() {
+        let activity = decode_gitee_operate_log_activity(&[json!({
+            "id": 105,
+            "operator": { "display_name": "Review Owner" },
+            "content": "更新了 Pull Request",
+            "created_at": "2026-07-27T10:38:00+08:00",
+            "action_type": "update_pull_request",
+            "review_state": "review_approved"
+        })]);
+
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].author, "Review Owner");
+        assert_eq!(activity[0].state, "approved");
+    }
+
+    #[test]
+    fn gitee_merge_actor_prefers_operation_log_then_dedicated_detail_identity() {
+        let detail = json!({
+            "user": { "name": "PR author" },
+            "merged_by": { "name": "Detail merger" }
+        });
+        let logs = vec![json!({
+            "id": 201,
+            "user": {
+                "name": "Actual merger",
+                "avatar_url": "https://gitee.example/merger.png"
+            },
+            "content": "合并了Pull Request",
+            "created_at": "2026-07-27T10:40:00+08:00",
+            "action_type": "merged_pr"
+        })];
+
+        let from_log = gitee_merge_event(&detail, Some(&logs), None);
+        assert_eq!(from_log.author, "Actual merger");
+        assert_eq!(from_log.avatar_url, "https://gitee.example/merger.png");
+        assert_eq!(from_log.created_at, "2026-07-27T10:40:00+08:00");
+
+        let from_detail = gitee_merge_event(
+            &json!({
+                "user": { "name": "PR author" },
+                "merge_user": { "username": "dedicated-merger" }
+            }),
+            None,
+            None,
+        );
+        assert_eq!(from_detail.author, "dedicated-merger");
+    }
+
+    #[test]
+    fn gitee_merge_actor_reads_documented_string_merged_by() {
+        let event = gitee_merge_event(
+            &json!({
+                "author": { "name": "PR author" },
+                "merged_by": "Merge Owner"
+            }),
+            None,
+            None,
+        );
+
+        assert_eq!(event.author, "Merge Owner");
+    }
+
+    #[test]
+    fn gitee_merge_actor_uses_detail_display_name_instead_of_log_email() {
+        let detail = json!({
+            "merged_by": {
+                "name": "Merge Owner",
+                "username": "merge-owner@example.com"
+            }
+        });
+        let logs = vec![json!({
+            "id": 202,
+            "user": { "name": "merge-owner@example.com" },
+            "content": "合并了Pull Request",
+            "created_at": "2026-07-27T10:40:00+08:00",
+            "action_type": "merged_pr"
+        })];
+
+        let event = gitee_merge_event(&detail, Some(&logs), None);
+
+        assert_eq!(event.author, "Merge Owner");
+        assert_eq!(event.created_at, "2026-07-27T10:40:00+08:00");
+    }
+
+    #[test]
+    fn gitee_merge_actor_never_displays_a_full_email_address() {
+        let logs = vec![json!({
+            "id": 203,
+            "user": { "name": "merge-owner@example.com" },
+            "content": "合并了Pull Request",
+            "created_at": "2026-07-27T10:40:00+08:00",
+            "action_type": "merged_pr"
+        })];
+
+        let event = gitee_merge_event(&json!({}), Some(&logs), None);
+
+        assert_eq!(event.author, "merge-owner");
+    }
+
+    #[test]
+    fn gitee_merge_actor_never_falls_back_to_pull_request_author() {
+        let event = gitee_merge_event(
+            &json!({
+                "user": { "name": "PR author" },
+                "author": { "name": "PR author" }
+            }),
+            None,
+            None,
+        );
+
+        assert_eq!(event.author, "Unknown merger");
+    }
+
+    #[test]
+    fn gitee_merge_actor_uses_commit_name_when_detail_only_has_an_email_account() {
+        let event = gitee_merge_event(
+            &json!({ "merged_by": "chenxuegen@example.com" }),
+            None,
+            Some(&json!({
+                "committer_name": "陈雪根",
+                "committer_email": "chenxuegen@example.com"
+            })),
+        );
+
+        assert_eq!(event.author, "陈雪根");
+    }
+
+    #[test]
+    fn gitee_merge_actor_account_uses_the_recorded_merger_instead_of_the_pr_author() {
+        assert_eq!(
+            gitee_merge_actor_account(
+                &json!({
+                    "author": { "username": "pr-author" },
+                    "merged_by": "chenxuegen@example.com"
+                }),
+                None,
+            )
+            .as_deref(),
+            Some("chenxuegen")
+        );
+    }
+
+    #[test]
+    fn enterprise_member_directory_resolves_a_merger_account_to_its_display_name() {
+        let payload = json!({
+            "data": [
+                {
+                    "username": "chenxuegen-old",
+                    "name": "Wrong User"
+                },
+                {
+                    "username": "chenxuegen",
+                    "name": "陈雪根",
+                    "avatar_url": "https://gitee.example/chenxuegen.png"
+                }
+            ]
+        });
+        let user = select_enterprise_user(&payload, "chenxuegen").expect("exact member");
+        let event = gitee_merge_event_with_user(
+            &json!({ "merged_by": "chenxuegen" }),
+            None,
+            Some(&json!({ "committer_name": "chenxuegen" })),
+            Some(user),
+        );
+
+        assert_eq!(event.author, "陈雪根");
+        assert_eq!(event.avatar_url, "https://gitee.example/chenxuegen.png");
+    }
+
+    #[test]
+    fn enterprise_member_directory_never_accepts_a_fuzzy_only_match() {
+        let payload = json!([
+            { "username": "chenxuegen-old", "name": "Wrong User" },
+            { "username": "other", "name": "chenxuegen-old" }
+        ]);
+
+        assert!(select_enterprise_user(&payload, "chenxuegen").is_none());
+    }
+
+    #[test]
+    fn enterprise_member_account_label_does_not_override_a_better_commit_name() {
+        let account_only = json!({
+            "username": "chenxuegen",
+            "name": "chenxuegen",
+            "avatar_url": "https://gitee.example/account.png"
+        });
+        let display_name = json!({
+            "username": "chenxuegen",
+            "name": "陈雪根"
+        });
+
+        assert!(!enterprise_user_has_distinct_display_name(
+            &account_only,
+            "chenxuegen"
+        ));
+        assert!(enterprise_user_has_distinct_display_name(
+            &display_name,
+            "chenxuegen"
+        ));
+    }
+
+    #[test]
+    fn gitee_merge_actor_keeps_dedicated_display_name_over_commit_fallback() {
+        let event = gitee_merge_event(
+            &json!({ "merged_by": { "name": "Merge Owner" } }),
+            None,
+            Some(&json!({ "committer_name": "Committer Name" })),
+        );
+
+        assert_eq!(event.author, "Merge Owner");
+    }
+
+    #[test]
+    fn operation_log_review_keeps_active_enterprise_dismissal_capability() {
+        let mut activity = decode_gitee_operate_log_activity(&[json!({
+            "id": 301,
+            "user": { "name": "Alice", "username": "alice" },
+            "content": "审查通过",
+            "created_at": "2026-07-27T10:35:00+08:00",
+            "action_type": "approved_pr"
+        })]);
+        let detail = json!({
+            "general_reviewers": [
+                { "id": 15, "username": "alice", "name": "Alice", "approve_status": "approved" }
+            ]
+        });
+        let current_user = json!({ "data": { "id": 15, "username": "alice" } });
+
+        merge_gitee_review_summaries(
+            &mut activity,
+            enterprise_review_summaries(&detail, Some(&current_user)),
+        );
+
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].created_at, "2026-07-27T10:35:00+08:00");
+        assert_eq!(activity[0].review_id, "15");
+        assert!(activity[0].can_dismiss);
     }
 
     #[test]

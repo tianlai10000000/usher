@@ -52,6 +52,31 @@ pub(super) async fn get_pull_requests(
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
+    if state == Some(PullRequestState::Closed) {
+        return get_gitlab_closed_pull_requests(locator, repo_project_id, filters, page, per_page)
+            .await;
+    }
+    get_gitlab_pull_request_server_page(
+        locator,
+        repo_project_id,
+        state,
+        filters,
+        page,
+        per_page,
+        true,
+    )
+    .await
+}
+
+async fn get_gitlab_pull_request_server_page(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    state: Option<PullRequestState>,
+    filters: &PullRequestFilters,
+    page: u32,
+    per_page: u32,
+    hydrate_visible: bool,
+) -> Result<PullRequestPage, String> {
     let repo_project_id = repo_project_id.trim();
     if repo_project_id.is_empty() {
         return Err("GitLab project id is empty.".to_string());
@@ -77,6 +102,9 @@ pub(super) async fn get_pull_requests(
         ]);
     if let Some(state) = state {
         request = request.query(&[("state", state.gitlab_query())]);
+    }
+    if !filters.query.trim().is_empty() {
+        request = request.query(&[("search", filters.query.trim()), ("in", "title")]);
     }
     request = match filters.assignee.as_str() {
         "none" => request
@@ -111,12 +139,13 @@ pub(super) async fn get_pull_requests(
             target_branch: string_field(value, "target_branch").unwrap_or_else(|| "—".to_string()),
             review_status: gitlab_list_review_status(value),
             conversation_count: conversation_count_from_detail(value),
+            created_at: string_field(value, "created_at").unwrap_or_default(),
             updated_at: string_field(value, "updated_at")
                 .unwrap_or_else(|| "Unknown update time".to_string()),
             web_url: string_field(value, "web_url").unwrap_or_default(),
         })
         .collect::<Vec<_>>();
-    let items = if per_page == 1 {
+    let items = if per_page == 1 || !hydrate_visible {
         items
     } else {
         hydrate_gitlab_review_statuses(locator, repo_project_id, items).await
@@ -128,6 +157,112 @@ pub(super) async fn get_pull_requests(
         page_count: header_u32(&headers, "x-total-pages"),
         items,
     })
+}
+
+async fn get_gitlab_closed_pull_requests(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    filters: &PullRequestFilters,
+    page: u32,
+    per_page: u32,
+) -> Result<PullRequestPage, String> {
+    let per_page = per_page.max(1);
+    let requested_page = page.max(1);
+    let prefix_len = requested_page.saturating_mul(per_page);
+    let closed_future = load_gitlab_state_prefix(
+        locator,
+        repo_project_id,
+        PullRequestState::Closed,
+        filters,
+        prefix_len,
+    );
+    let merged_future = load_gitlab_state_prefix(
+        locator,
+        repo_project_id,
+        PullRequestState::Merged,
+        filters,
+        prefix_len,
+    );
+    let (closed_result, merged_result) = tokio::join!(closed_future, merged_future);
+    let (mut closed, closed_total, closed_exact) = closed_result?;
+    let (merged, merged_total, merged_exact) = merged_result?;
+    closed.extend(merged);
+    sort_gitlab_items(&mut closed, filters.sort.as_str());
+
+    let total = closed_total.saturating_add(merged_total);
+    let start = requested_page.saturating_sub(1).saturating_mul(per_page) as usize;
+    let mut items = closed
+        .into_iter()
+        .skip(start)
+        .take(per_page as usize)
+        .collect::<Vec<_>>();
+    if per_page != 1 {
+        items = hydrate_gitlab_review_statuses(locator, repo_project_id, items).await;
+    }
+    let total_exact = closed_exact && merged_exact;
+    let page_count = if total_exact {
+        total.div_ceil(per_page).max(1)
+    } else if items.len() == per_page as usize {
+        requested_page.saturating_add(1)
+    } else {
+        requested_page.max(1)
+    };
+    Ok(PullRequestPage {
+        items,
+        total,
+        total_exact,
+        page_count: Some(page_count),
+    })
+}
+
+async fn load_gitlab_state_prefix(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    state: PullRequestState,
+    filters: &PullRequestFilters,
+    prefix_len: u32,
+) -> Result<(Vec<PullRequestItem>, u32, bool), String> {
+    let per_page = prefix_len.clamp(1, 100);
+    let page_limit = prefix_len.div_ceil(per_page).max(1);
+    let mut items = Vec::new();
+    let mut total = 0;
+    let mut total_exact = false;
+
+    for page in 1..=page_limit {
+        let result = get_gitlab_pull_request_server_page(
+            locator,
+            repo_project_id,
+            Some(state),
+            filters,
+            page,
+            per_page,
+            false,
+        )
+        .await?;
+        if page == 1 {
+            total = result.total;
+            total_exact = result.total_exact;
+        }
+        let batch_len = result.items.len();
+        items.extend(result.items);
+        if batch_len < per_page as usize || items.len() >= prefix_len as usize {
+            break;
+        }
+    }
+    items.truncate(prefix_len as usize);
+    Ok((items, total, total_exact))
+}
+
+fn sort_gitlab_items(items: &mut [PullRequestItem], sort: &str) {
+    items.sort_by(|left, right| {
+        let ordering = match sort {
+            "oldest" => left.created_at.cmp(&right.created_at),
+            "updated-desc" => right.updated_at.cmp(&left.updated_at),
+            "updated-asc" => left.updated_at.cmp(&right.updated_at),
+            _ => right.created_at.cmp(&left.created_at),
+        };
+        ordering.then_with(|| right.number.cmp(&left.number))
+    });
 }
 
 async fn hydrate_gitlab_review_statuses(
@@ -705,10 +840,7 @@ pub(super) async fn get_pull_request_conversation(
     {
         let merge_sha = string_field(&detail, "merge_commit_sha").unwrap_or_default();
         let target_branch = string_field(&detail, "target_branch").unwrap_or_default();
-        let author = nested_string(&detail, "merged_by", "name")
-            .or_else(|| nested_string(&detail, "merged_by", "username"))
-            .or_else(|| nested_string(&detail, "author", "name"))
-            .unwrap_or_else(|| "Unknown author".to_string());
+        let author = gitlab_merge_actor(&detail);
         if !merge_sha.trim().is_empty() {
             activity.push(conversation_merged_item(
                 author.as_str(),
@@ -724,6 +856,40 @@ pub(super) async fn get_pull_request_conversation(
     }
 
     Ok(finalize_conversation_timeline(description, activity))
+}
+
+fn gitlab_merge_actor(detail: &Value) -> String {
+    let Some(merged_by) = detail.get("merged_by") else {
+        return "Unknown merger".to_string();
+    };
+    ["display_name", "displayName", "name"]
+        .into_iter()
+        .filter_map(|key| string_field(merged_by, key))
+        .find(|label| !label.trim().is_empty() && !looks_like_email(label))
+        .or_else(|| {
+            ["username", "user_name", "login"]
+                .into_iter()
+                .find_map(|key| string_field(merged_by, key))
+                .filter(|label| !label.trim().is_empty())
+        })
+        .or_else(|| {
+            ["name", "email"]
+                .into_iter()
+                .filter_map(|key| string_field(merged_by, key))
+                .find_map(|email| {
+                    email
+                        .split_once('@')
+                        .map(|(account, _)| account.to_string())
+                })
+        })
+        .unwrap_or_else(|| "Unknown merger".to_string())
+}
+
+fn looks_like_email(value: &str) -> bool {
+    let Some((local, domain)) = value.trim().split_once('@') else {
+        return false;
+    };
+    !local.is_empty() && domain.contains('.') && !domain.chars().any(char::is_whitespace)
 }
 
 fn gitlab_approval_summaries(
@@ -1302,10 +1468,29 @@ mod tests {
 
     use super::{
         gitlab_action_state, gitlab_approval_review_status, gitlab_approval_summaries,
-        gitlab_list_review_status, gitlab_list_sort, gitlab_merge_methods, gitlab_merge_payload,
-        gitlab_merge_readiness, is_gitlab_review_system_note,
+        gitlab_list_review_status, gitlab_list_sort, gitlab_merge_actor, gitlab_merge_methods,
+        gitlab_merge_payload, gitlab_merge_readiness, is_gitlab_review_system_note,
+        sort_gitlab_items,
     };
-    use crate::git::{PullRequestMergeMethod, PullRequestReadinessKind, PullRequestReviewStatus};
+    use crate::git::{
+        PullRequestItem, PullRequestMergeMethod, PullRequestReadinessKind, PullRequestReviewStatus,
+    };
+
+    fn list_item(number: &str, created_at: &str, updated_at: &str) -> PullRequestItem {
+        PullRequestItem {
+            number: number.to_string(),
+            title: String::new(),
+            state: "closed".to_string(),
+            author: String::new(),
+            source_branch: String::new(),
+            target_branch: String::new(),
+            review_status: PullRequestReviewStatus::None,
+            conversation_count: None,
+            created_at: created_at.to_string(),
+            updated_at: updated_at.to_string(),
+            web_url: String::new(),
+        }
+    }
 
     #[test]
     fn maps_gitlab_list_approval_states_to_github_statuses() {
@@ -1334,6 +1519,51 @@ mod tests {
                 PullRequestReviewStatus::None,
             ),
             PullRequestReviewStatus::Approved
+        );
+    }
+
+    #[test]
+    fn gitlab_merge_actor_prefers_display_name_and_never_uses_pr_author() {
+        assert_eq!(
+            gitlab_merge_actor(&json!({
+                "merged_by": {
+                    "display_name": "Merge Owner",
+                    "name": "merge-owner@example.com",
+                    "username": "merge-owner"
+                },
+                "author": { "name": "PR Author" }
+            })),
+            "Merge Owner"
+        );
+        assert_eq!(
+            gitlab_merge_actor(&json!({ "author": { "name": "PR Author" } })),
+            "Unknown merger"
+        );
+    }
+
+    #[test]
+    fn merges_gitlab_closed_and_merged_prefixes_in_provider_sort_order() {
+        let mut items = vec![
+            list_item("1", "2026-08-01T00:00:00Z", "2026-08-04T00:00:00Z"),
+            list_item("2", "2026-08-03T00:00:00Z", "2026-08-02T00:00:00Z"),
+            list_item("3", "2026-08-02T00:00:00Z", "2026-08-05T00:00:00Z"),
+        ];
+
+        sort_gitlab_items(&mut items, "newest");
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["2", "3", "1"]
+        );
+        sort_gitlab_items(&mut items, "updated-desc");
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["3", "1", "2"]
         );
     }
 

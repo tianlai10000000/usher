@@ -48,6 +48,7 @@ pub(crate) struct PullRequestItem {
     /// Provider-neutral review decision shown on the pull-request list.
     pub(crate) review_status: PullRequestReviewStatus,
     pub(crate) conversation_count: Option<u32>,
+    pub(crate) created_at: String,
     pub(crate) updated_at: String,
     pub(crate) web_url: String,
 }
@@ -84,6 +85,9 @@ pub(crate) struct PullRequestPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct PullRequestFilters {
+    /// Provider-neutral title/search terms entered in the GitHub-style query
+    /// field after portable qualifiers have been removed.
+    pub(crate) query: String,
     pub(crate) reviews: String,
     pub(crate) assignee: String,
     pub(crate) sort: String,
@@ -197,7 +201,8 @@ fn json_u32(value: &serde_json::Value) -> Option<u32> {
 pub(crate) struct PullRequestConversationItem {
     pub(crate) id: String,
     /// Portable timeline kinds: `description`, `comment`, `review`, `event`,
-    /// `commits` (batch header), `commit` (row under a batch), `merged`.
+    /// `review_requested`, `review_summary`, `commits` (batch header), `commit`
+    /// (row under a batch), `merged`.
     pub(crate) kind: String,
     pub(crate) author: String,
     pub(crate) avatar_url: String,
@@ -698,6 +703,7 @@ pub(crate) struct PullRequestRevertResult {
 pub(crate) enum PullRequestState {
     Open,
     Closed,
+    ClosedUnmerged,
     Merged,
     All,
 }
@@ -707,6 +713,7 @@ impl PullRequestState {
         match value.trim().to_ascii_lowercase().as_str() {
             "open" | "opened" => Some(Self::Open),
             "closed" => Some(Self::Closed),
+            "closed-unmerged" => Some(Self::ClosedUnmerged),
             "merged" => Some(Self::Merged),
             "all" => Some(Self::All),
             _ => None,
@@ -717,6 +724,7 @@ impl PullRequestState {
         match self {
             Self::Open => "open",
             Self::Closed => "closed",
+            Self::ClosedUnmerged => "closed-unmerged",
             Self::Merged => "merged",
             Self::All => "all",
         }
@@ -725,7 +733,7 @@ impl PullRequestState {
     pub(super) const fn gitee_query(self) -> &'static str {
         match self {
             Self::Open => "opened",
-            Self::Closed => "closed",
+            Self::Closed | Self::ClosedUnmerged => "closed",
             Self::Merged => "merged",
             Self::All => "all",
         }
@@ -734,7 +742,7 @@ impl PullRequestState {
     pub(super) const fn gitee_public_query(self) -> &'static str {
         match self {
             Self::Open => "open",
-            Self::Closed | Self::Merged => "closed",
+            Self::Closed | Self::ClosedUnmerged | Self::Merged => "closed",
             Self::All => "all",
         }
     }
@@ -742,16 +750,17 @@ impl PullRequestState {
     pub(super) const fn gitlab_query(self) -> &'static str {
         match self {
             Self::Open => "opened",
-            Self::Closed => "closed",
+            Self::Closed | Self::ClosedUnmerged => "closed",
             Self::Merged => "merged",
             Self::All => "all",
         }
     }
 
-    pub(super) const fn github_query(self) -> &'static str {
+    pub(crate) const fn github_query(self) -> &'static str {
         match self {
             Self::Open => "is:open",
             Self::Closed => "is:closed",
+            Self::ClosedUnmerged => "is:closed is:unmerged",
             Self::Merged => "is:merged",
             Self::All => "",
         }

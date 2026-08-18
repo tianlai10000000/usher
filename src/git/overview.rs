@@ -81,6 +81,7 @@ mod tests {
             target_branch: target_branch.to_string(),
             review_status: Default::default(),
             conversation_count: None,
+            created_at: String::new(),
             updated_at: String::new(),
             web_url: String::new(),
         }

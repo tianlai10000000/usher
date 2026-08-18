@@ -26,6 +26,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     callback tag-open-add();
     callback tag-open-remove();
     callback pr-list-state-change(string);
+    callback pr-list-query-change(string);
     callback pr-list-page-change(int);
     callback pr-list-review-filter-change(string);
     callback pr-list-assignee-filter-change(string);
@@ -67,6 +68,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in property <int> pr-list-page: 1;
     in property <int> pr-list-page-count: 1;
     in property <string> pr-list-state: "open";
+    in property <string> pr-list-query: "is:pr is:open";
     in property <string> pr-list-review-filter: "all";
     in property <string> pr-list-assignee-filter: "any";
     in property <string> pr-list-sort-filter: "newest";
@@ -249,12 +251,14 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 pr-page: root.pr-list-page;
                 pr-page-count: root.pr-list-page-count;
                 pr-state: root.pr-list-state;
+                pr-query: root.pr-list-query;
                 pr-review-filter: root.pr-list-review-filter;
                 pr-assignee-filter: root.pr-list-assignee-filter;
                 pr-sort-filter: root.pr-list-sort-filter;
                 pr-loading: root.pr-list-loading;
                 pr-error: root.pr-list-error;
                 change-state(state) => { root.pr-list-state-change(state); }
+                change-query(query) => { root.pr-list-query-change(query); }
                 change-page(page) => { root.pr-list-page-change(page); }
                 change-review-filter(value) => { root.pr-list-review-filter-change(value); }
                 change-assignee-filter(value) => { root.pr-list-assignee-filter-change(value); }

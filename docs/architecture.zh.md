@@ -215,7 +215,19 @@ global 自动共享。Messages Inbox 行只把动作枚举与锚点矩形发布�
 `MessageTooltipOverlayState`，由页面唯一的 `GitHubMessageTooltipOverlayHost` 把枚举
 映射到相互独立的字面量 surface，任何标签字符串都不穿过列表 delegate。Settings 为
 共享控件挂载本地通用 `GitHubTooltipOverlayHost`，并在每个新 claim token 到来时重建
-文本测量 surface。Messages 首次访问后保留稳定 factory 根与视觉树，以规避 Slint
+文本测量 surface。Settings 与 Messages 的路由生命周期刻意不同：Settings 的
+`ComponentContainer` 必须继续按路由条件创建，离开 Settings 时销毁 factory 产品，
+使对应视觉树 RSS 可以被回收。禁止用常驻隐藏 Settings 树来规避选择器问题。
+
+在单次 Settings factory 产品内部，Slint 1.17.1 的选择器内容必须使用固定挂载的
+叶子节点，并通过 `visible` 与显式活动高度选择当前内容。禁止用 `if` 节点重建互斥的
+section 或 provider 表单，否则 factory 重建和重复 Tab 切换可能保留兄弟节点的标签、
+placeholder、值或选中态。路由级选择索引必须从哨兵值开始，并在下一次 UI tick 切到
+默认值，以便新建视觉树主动失效旧绑定。选择器文字、选中样式和显示字段必须来自同一
+状态源。该规则覆盖 Settings section 菜单、Git hosting provider 和 AI Agent provider
+预设。
+
+Messages 首次访问后保留稳定 factory 根与视觉树，以规避 Slint
 1.17.1 的 factory 重挂载损坏。退出时 bridge 清空行 model，重新进入时先从最新
 Store 快照 hydration 再激活，因此非活动 Inbox 不保留投影行。逐次重建视觉树的
 Release A/B 没有测得实质 RSS 节省，且 physical footprint 出现混合回退，因此该
@@ -385,7 +397,7 @@ Webhook HTTP Listener 或任何提供方专属 Schema。
 
 ### Workflow
 
-Workflow 在所有支持的宽度下统一使用 GitHub 仓库页的 UnderlineNav 交互；低于 720px 时，仓库路径与操作从身份页头移入尾部 kebab 浮层。PR 列表严格复刻 GitHub 响应式筛选工具栏：Open/Closed 与筛选保持同一行；低于 620px 时直接保留 Assignee，把 Reviews 与 Sort 合并进一个分组 kebab ActionMenu。所有菜单互斥，第一次点击即可切换。PR 行在 Slint 中测量标题换行后的实际高度，由纵向布局累加每行自然高度；Workflow Shell 直接消费组件最终高度，不再自行预测固定行高。GitHub 仓库会把这些菜单映射为原生 Search qualifier 和排序参数，并在切换后重置分页重新请求，其他 Provider 会忽略不支持的 GitHub qualifier。项目或筛选条件变化时独立获取 Open 与 Closed 总数，页头不再复用当前选中分页的临时数量。总数仍在加载或计数请求失败时，页头按 Primer 降级体验隐藏数字并保留 Open/Closed 标签，而不是长期停留在加载占位。列表时间使用相对时间，并提供东八区绝对时间 Tooltip。
+Workflow 在所有支持的宽度下统一使用 GitHub 仓库页的 UnderlineNav 交互；低于 720px 时，仓库路径与操作从身份页头移入尾部 kebab 浮层。PR 列表严格复刻 GitHub 查询与响应式筛选交互：卡片上方放置 Search 风格查询框，Open/Closed 与筛选保持在卡片页头同一行；低于 620px 时直接保留 Assignee，把 Reviews 与 Sort 合并进一个分组 kebab ActionMenu。所有菜单互斥，第一次点击即可切换。Closed 使用 GitHub 语义，包含 merged 与关闭未合并。`is:merged` 和 `is:closed is:unmerged` 分别筛选两个精确子集；与 GitHub 一致，任何非标准查询都会把 Open/Closed 替换为“清除查询”入口与 Total 汇总。PR 行在 Slint 中测量标题换行后的实际高度，由纵向布局累加每行自然高度；Workflow Shell 直接消费组件最终高度，不再自行预测固定行高。Controller 解析可移植的状态/Review/Assignee qualifier，使查询框与工具栏切换保持同步，并在查询变化后重置分页。Provider adapter 负责翻译归一化查询：GitHub 使用原生 Search qualifier，Gitee 企业版使用文档规定的状态/search 参数，GitLab 为 Closed 合并按 Provider 顺序排列的 closed/merged 前缀，Gitee 公有 v5 无法精确服务端筛选时执行有界客户端扫描。项目或筛选条件变化时独立获取 Open 与 Closed 总数，页头不再复用当前选中分页的临时数量。总数仍在加载或计数请求失败时，页头按 Primer 降级体验隐藏数字并保留当前汇总标签，而不是长期停留在加载占位。列表时间使用相对时间，并提供东八区绝对时间 Tooltip。
 
 PR 行把绝对时间 Tooltip 的命中区限制在时间文字本身，并预留响应式尾部操作组。长标题在操作组之前自动换行；目标/源分支对在宽布局同行展示，在窄布局移到续行。Provider 列表/详情字段可提供 Conversation 数量。Conversation 会直接在 Tab 0 打开审核路由；AI Review 打开既有 Files changed 审核工作区。
 
@@ -464,7 +476,11 @@ PR 列表评审结论在 adapter 边界统一为“需要评审”“已批准�
 
 固定的 PR 列表评审状态验收数据归 `tests/` 所有，只有同时启用 `test-fixtures` Cargo feature 和指定的 `USHER_PR_LIST_FIXTURE` 选择器时才能进入。默认与生产构建不会编译 fixture 桥接模块，也不会嵌入其 JSON。fixture 仍通过正常列表控制器进入同一个 Slint model、筛选、排序与响应式布局，但不会进入 Provider adapter。
 
+`workflow/pr_list.rs` 同时拥有可移植查询语法和逻辑分页边界。默认查询为 `is:pr is:open`；顶层状态操作只有 Open/Closed，归一化状态另含 merged 与关闭未合并。Controller 对每次 query/page 响应做序列保护。GitLab 只合并满足当前逻辑页所需的有界 closed/merged 前缀，确定最终可见行后才补全 approvals；Gitee 公有版仅在 v5 无法表达的精确子集或关键词搜索中扫描，且最多读取 30 个 Provider 分页。
+
 仓库 PR 列表归现有 Workflow 的 PR Tab 所有。`workflow/pr_list.rs` 在 event loop 之外读取当前项目持久化的 `repo_project_id`、`repo_type`，并且只在进入或用户切换页码时，通过 `src/git/` 懒加载对应的 10 条远端数据。GitHub 保留搜索接口提供的总数，并发请求当前页每个 PR 的详情，从而补齐源分支和目标分支名称。控制器在将列表值传给 Slint 前，把可解析的 Provider 更新时间统一格式化为东八区（UTC+08:00），并在 Provider 提供时使用准确总数驱动顶部总数和底部分页。页面默认显式查询 open 状态，用户可切换 open/closed/merged/all；请求序号保证旧项目、旧筛选或旧页码的延迟响应不会覆盖当前视图。请求成功且零条数据时显示随筛选状态变化的插画空状态；网络、鉴权或响应结构异常仍使用独立且可重试的错误状态。点击列表行后导航到全窗口 `Route.PrReview`；Workflow 组件实例会被销毁，但列表/root model 状态继续保留，因此 Back 可在不重载列表的情况下重建 PR Tab。审核路由拥有 GitHub 风格的 Conversation、Commits、Files changed 三个 Tab。Conversation 与 Commits 的 *内容* 只在第一次选中时通过 Provider-neutral model 加载：GitHub 组合 PR detail、issue comments、reviews，以及 issue timeline 活动（`committed` 批量、`merged` 与部分系统事件）；Gitee 公版 v5 使用 PR detail/comments/commits，并从 commits 与合并元数据合成提交/合并活动；Gitee 企业版 v8 使用 MR detail/notes/commits，并根据 detail 中 `general_reviewers` / `primary_reviewers` 的 `approve_status` 生成评审摘要；在展开嵌套 `notes[].note` 后同样合成活动，普通评论正文从 `note` / 嵌套 `note.note` / `comment` / 字符串 `content` 读取（忽略对象形态的 `content`），MR commit 时间取 `created_at`；GitLab 使用 MR detail/notes/commits，合成同一套可移植的 `commits`/`commit`/`merged` 行并过滤重复系统 note。Tab 角标数字不等待 Conversation/Commits Tab 激活：它们来自随 diff 加载携带的轻量 PR/MR 摘要字段（`commit_count`、`conversation_count`、`files.length`）。若 Provider 省略总数，adapter 可发起一次有界计数探测（GitHub/GitLab 的 Link/`X-Total` + `per_page=1`；Gitee 公有版短页 `per_page=100`；Gitee 企业版 diffs `commits_size`、MR `user_notes_count`/`notes_count`，或 `with_page=true&per_page=1` + `meta.total_count`）。完整 Conversation 时间线与 commits 列表仍只在打开对应 Tab（或 commit 选择器）时懒加载。Provider-neutral 终结器把每个 `commits` 头与其后连续的 `commit` 行作为一个不可拆分的块排序，因此即使各提交 authored time 不同，三家 Provider 的 GitHub 风格 `added N commits` 记录也不会与提交列表分离。Conversation 批次内的 commit 子行与 Commits Tab（含 Files changed 的 commit 选择器）均按从新到旧展示；adapter 仍把列表归一为从旧到新，控制器在连续范围比较前把展示索引映射回去。远端 review 或 merge 成功后会使 Conversation 时间线缓存失效；若 Conversation 正处于激活状态，则立即重新加载。Files changed 控制器加载并归一化所选 PR diff，根据文件路径构建可折叠目录树，并让路径筛选、目录展开和上一项/下一项文件导航保持本地操作。其 commit 选择器复用懒加载提交列表，把连续范围分发到各 Provider 的仓库 compare endpoint；原始 PR detail 和已加载范围在当前审核期间保持缓存。`workflow/syntax_highlight.rs` 在 UI 层之外使用 `syntect` 把当前文件转换为适配主题的 token model，同时保留 Tab 和显示列宽。切换文件或展开 hunk 时，旧行 model 会保留到新高亮 model 完成，再由 event loop 原子替换；只有真正切换文件时才重置 viewport。点击 hunk 时先记录被点击行的实际屏幕位置。model 替换后，目标 delegate 上报布局后的内容位置，Slint 在有界的多个布局帧内重复应用由此得到的视觉锚点。该方案不再估算软换行行高：仍存在的 hunk 控件保持在指针下方；若分隔行消失，首条新增源码占据原控件位置。在 macOS 上，原生 live-resize 通知会冻结审核工作区的内部几何尺寸，并把每条可见行的 token repeater 临时替换为一个纯等宽文本节点；live resize 结束时恢复最终几何尺寸和完整的 token 着色组件树。
+
+Gitee 企业版 Conversation adapter 把文档定义的评审人 `approve_status` 映射成 Provider-neutral 的 GitHub 评审摘要。操作日志只以尽力而为方式补齐真实操作人和时间，Provider 原生话术不得进入 Slint。合并活动从合并操作日志或 `merged_by` 等专用字段取得合并人；若这些来源只有邮箱/账号标签，则静默调用文档定义的项目成员接口做账号精确匹配，以成员资料的 `name` 与头像补全展示，用户目录作为静默 fallback。Merge commit 的 `committer_name` 只是更低优先级的 Git 身份。模糊目录结果必须拒绝，完整邮箱地址不得作为操作人标签，且绝不以 PR 作者作为合并人回退。GitLab 同样只使用 `merged_by` 并禁止 PR 作者回退；GitHub 保持原生 `actor.login` 展示。
 
 审核页头采用 GitHub 的两步命令模型。标题旁的 GitHub 风格就绪徽标使用 Primer 语义色渲染归一化类型/详情，但合并语义由各 adapter 独立负责：GitHub 映射 REST mergeability，Gitee 企业版映射 v8 `current_state` 条件，Gitee 公有版只映射 v5 字段，GitLab 映射 `detailed_merge_status` 并请求异步重算。共享 enum 只是展示边界，绝不能把一个 Provider 的判定条件套到另一个 Provider。`Review changes` 提交显式的 Provider-neutral Comment、Approve 或 Request changes；不受支持的选项保持可见但禁用。Conversation Tab 底部另有 GitHub 风格纯文本评论框（`Write` + 绿色 `Comment`），提交同一 Comment 动作。符合条件的 `review_summary` 行使用 GitHub 的逐条评审 kebab 与必填原因的 `Dismiss review` 弹窗；页头聚合状态只作展示。Provider-neutral 撤回门面在仓库权限允许时把选中的 review id 交给 GitHub dismissal endpoint；GitLab 先写入原因 note，再撤销当前 Token 用户的 approval；Gitee 企业版通过实际可用的 Web API 路由 `/api/code/api/{full_path}/-/pull_requests/{iid}/reviews` 撤回当前 Token 用户的评审，请求体严格为 `{"state":"initialized"}`。没有该 Web 路由的企业版部署会静默回退到文档规定的 v8 reviews 路由，成功后再以 best-effort MR note 记录必填原因；Gitee 公有版 v5 不具备撤回能力。Provider 成功后刷新远端状态，绝不自动开始合并。`Merge pull request` 只由最新的归一化 `PullRequestActionState` 启用，并且只展示 adapter 返回的策略。GitHub 支持仓库启用的 merge、squash、rebase；Gitee 企业 v8 映射评审状态，Approve 未填写 summary 时省略可选的 `comment` 字段，并按 `restrict_merge_type` 支持 merge、squash、rebase、fast-forward；Gitee 公有 v5 支持评论和 merge/squash，但没有 approve/request-changes endpoint。GitLab 支持评论、批准，以及携带 SHA 防护的 merge/squash 和显式删除来源分支；项目 `squash_option` 限制可选策略，稳定版 REST API 没有对应写命令，因此 Request changes 保持禁用。
 

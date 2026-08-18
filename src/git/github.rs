@@ -2,6 +2,7 @@
 
 use base64::Engine as _;
 use futures_util::future::join_all;
+use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde::Deserialize;
 use serde_json::Value;
@@ -65,6 +66,10 @@ pub(super) async fn get_pull_requests(
             query.push(' ');
             query.push_str(state_query);
         }
+    }
+    if !filters.query.trim().is_empty() {
+        query.push(' ');
+        query.push_str(filters.query.trim());
     }
     match filters.reviews.as_str() {
         "required" => query.push_str(" review:required"),
@@ -130,6 +135,7 @@ pub(super) async fn get_pull_requests(
             target_branch: "—".to_string(),
             review_status: PullRequestReviewStatus::None,
             conversation_count: conversation_count_from_detail(value),
+            created_at: string_field(value, "created_at").unwrap_or_default(),
             updated_at: string_field(value, "updated_at")
                 .unwrap_or_else(|| "Unknown update time".to_string()),
             web_url: string_field(value, "html_url").unwrap_or_default(),
@@ -562,21 +568,39 @@ pub(super) async fn get_pull_request_conversation(
         .await
         .map_err(|error| error.to_string())
     };
-    let comments_future = load_github_pages(
-        locator,
-        comments_endpoint,
-        "Load GitHub pull request comments",
-    );
-    let reviews_future = load_github_pages(
-        locator,
-        reviews_endpoint,
-        "Load GitHub pull request reviews",
-    );
-    let timeline_future = load_github_pages(
-        locator,
-        timeline_endpoint,
-        "Load GitHub pull request timeline",
-    );
+    // GitHub permits PR detail reads with Contents access, while comments,
+    // reviews, timeline, and files require Pull requests access. Resolve the
+    // detail first so a later 404 can be reported as a token permission issue
+    // instead of being confused with a missing pull request.
+    let detail = detail_future.await?;
+    let has_token = configured_token(RepoType::GitHub).is_some();
+    let comments_future = async {
+        load_github_pages(
+            locator,
+            comments_endpoint,
+            "Load GitHub pull request comments",
+        )
+        .await
+        .map_err(|error| github_pull_request_collection_error(error, has_token))
+    };
+    let reviews_future = async {
+        load_github_pages(
+            locator,
+            reviews_endpoint,
+            "Load GitHub pull request reviews",
+        )
+        .await
+        .map_err(|error| github_pull_request_collection_error(error, has_token))
+    };
+    let timeline_future = async {
+        load_github_pages(
+            locator,
+            timeline_endpoint,
+            "Load GitHub pull request timeline",
+        )
+        .await
+        .map_err(|error| github_pull_request_collection_error(error, has_token))
+    };
     let repository_future = async {
         Ok::<Option<Value>, String>(
             http::send_json(
@@ -587,8 +611,7 @@ pub(super) async fn get_pull_request_conversation(
             .ok(),
         )
     };
-    let (detail, comments, reviews, timeline, repository) = tokio::try_join!(
-        detail_future,
+    let (comments, reviews, timeline, repository) = tokio::try_join!(
         comments_future,
         reviews_future,
         timeline_future,
@@ -751,6 +774,35 @@ fn decode_github_timeline_activity(
                     ));
                 }
             }
+            "review_requested" => {
+                flush_commits(&mut pending_commits, &mut items);
+                let author = nested_string(event, "actor", "login")
+                    .unwrap_or_else(|| "Unknown author".to_string());
+                let reviewer = nested_string(event, "requested_reviewer", "login")
+                    .or_else(|| nested_string(event, "requested_team", "name"))
+                    .or_else(|| nested_string(event, "requested_team", "slug"));
+                let created_at = string_field(event, "created_at").unwrap_or_default();
+                let body = reviewer
+                    .as_ref()
+                    .filter(|reviewer| !reviewer.trim().is_empty())
+                    .map(|_| "requested a review from".to_string())
+                    .unwrap_or_else(|| "requested a review".to_string());
+                items.push(PullRequestConversationItem {
+                    id: format!(
+                        "event-review-requested-{}",
+                        string_field(event, "id").unwrap_or_else(|| created_at.clone())
+                    ),
+                    kind: "review_requested".to_string(),
+                    author,
+                    avatar_url: nested_string(event, "actor", "avatar_url").unwrap_or_default(),
+                    author_association: String::new(),
+                    body,
+                    created_at,
+                    state: reviewer.unwrap_or_default(),
+                    review_id: String::new(),
+                    can_dismiss: false,
+                });
+            }
             "closed"
             | "reopened"
             | "head_ref_force_pushed"
@@ -811,7 +863,9 @@ pub(super) async fn get_pull_request_commits(
         Some(pull_request_number),
         None,
     );
-    let values = load_github_pages(locator, endpoint, "Load GitHub pull request commits").await?;
+    let values = load_github_pages(locator, endpoint, "Load GitHub pull request commits")
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(values.iter().map(decode_commit).collect())
 }
 
@@ -925,7 +979,7 @@ async fn load_github_pages(
     locator: &RepoLocator,
     endpoint: String,
     operation: &'static str,
-) -> Result<Vec<Value>, String> {
+) -> http::HttpResult<Vec<Value>> {
     let mut values = Vec::new();
     for page in 1..=30u32 {
         let batch: Vec<Value> = http::send_json(
@@ -933,8 +987,7 @@ async fn load_github_pages(
                 .query(&[("page", page.to_string()), ("per_page", "100".to_string())]),
             RequestOptions::new(operation),
         )
-        .await
-        .map_err(|error| error.to_string())?;
+        .await?;
         let complete = batch.len() < 100;
         values.extend(batch);
         if complete {
@@ -942,6 +995,14 @@ async fn load_github_pages(
         }
     }
     Ok(values)
+}
+
+fn github_pull_request_collection_error(error: http::HttpError, has_token: bool) -> String {
+    if error.status == Some(StatusCode::NOT_FOUND) && has_token {
+        return "GitHub could read the pull request but not its conversation data. Grant the configured fine-grained token Pull requests: Read-only access to this repository, then try again."
+            .to_string();
+    }
+    error.to_string()
 }
 
 pub(super) async fn submit_pull_request_review(
@@ -1452,11 +1513,12 @@ mod tests {
     use super::{
         aggregate_review_state, decode_commit, decode_github_timeline_activity,
         decode_revert_pull_request_result, github_can_dismiss_reviews, github_list_review_status,
-        github_merge_readiness, github_review_action, graphql_url_from_rest_base,
-        link_rel_last_page, open_pull_request_count_query, pull_request_branches,
-        revert_pull_request_payload, single_item_page_total,
+        github_merge_readiness, github_pull_request_collection_error, github_review_action,
+        graphql_url_from_rest_base, link_rel_last_page, open_pull_request_count_query,
+        pull_request_branches, revert_pull_request_payload, single_item_page_total,
     };
     use crate::git::{PullRequestReadinessKind, PullRequestReviewStatus, parse_repo_locator};
+    use crate::http::{HttpError, HttpErrorKind};
 
     #[test]
     fn scopes_overview_count_to_repository_state_and_target_branch() {
@@ -1465,6 +1527,28 @@ mod tests {
             open_pull_request_count_query(&locator, "fat"),
             "repo:acme/widget is:pr is:open base:fat"
         );
+    }
+
+    #[test]
+    fn explains_github_collection_not_found_after_an_authenticated_detail_read() {
+        let error = HttpError {
+            kind: HttpErrorKind::Status,
+            operation: "Load GitHub pull request comments".to_string(),
+            method: Some(reqwest::Method::GET),
+            url: Some(
+                reqwest::Url::parse("https://api.github.com/repos/acme/widget/issues/1/comments")
+                    .unwrap(),
+            ),
+            status: Some(reqwest::StatusCode::NOT_FOUND),
+            message: "HTTP request returned status 404".to_string(),
+            response_body: None,
+        };
+
+        let message = github_pull_request_collection_error(error.clone(), true);
+        assert!(message.contains("Pull requests: Read-only"));
+
+        let anonymous_message = github_pull_request_collection_error(error, false);
+        assert!(anonymous_message.contains("404 Not Found"));
     }
 
     #[test]
@@ -1661,6 +1745,36 @@ mod tests {
         let items = decode_github_timeline_activity(&timeline, "main");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].kind, "merged");
+    }
+
+    #[test]
+    fn decodes_github_requested_reviewer_and_team_timeline_events() {
+        let timeline = vec![
+            json!({
+                "id": 10,
+                "event": "review_requested",
+                "actor": { "login": "maintainer" },
+                "requested_reviewer": { "login": "alice" },
+                "created_at": "2026-07-20T10:00:00Z"
+            }),
+            json!({
+                "id": 11,
+                "event": "review_requested",
+                "actor": { "login": "maintainer" },
+                "requested_team": { "name": "Core Reviewers" },
+                "created_at": "2026-07-20T10:01:00Z"
+            }),
+        ];
+
+        let items = decode_github_timeline_activity(&timeline, "main");
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].kind, "review_requested");
+        assert_eq!(items[0].author, "maintainer");
+        assert_eq!(items[0].body, "requested a review from");
+        assert_eq!(items[0].state, "alice");
+        assert_eq!(items[1].body, "requested a review from");
+        assert_eq!(items[1].state, "Core Reviewers");
     }
 
     #[test]

@@ -21,6 +21,145 @@ export struct WorkflowPullRequestItem {
     web-url: string,
 }
 
+export component GitHubPullRequestSearchField inherits Rectangle {
+    in property <string> text;
+    in property <string> placeholder: "Search all pull requests";
+    callback accepted(string);
+
+    private property <string> draft-text: root.text;
+    changed text => { root.draft-text = root.text; }
+
+    height: GitHubMetrics.control-medium-size;
+    border-radius: GitHubMetrics.radius-medium;
+    border-width: search-input.has-focus ? GitHubMetrics.focus-outline-width : 1px;
+    border-color: search-input.has-focus
+        ? GitHubTheme.focus-outline
+        : GitHubTheme.border-default;
+    background: GitHubTheme.canvas-default;
+    clip: false;
+
+    Image {
+        x: search-input.has-focus ? 9px : 10px;
+        y: 8px;
+        width: GitHubMetrics.icon-medium;
+        height: GitHubMetrics.icon-medium;
+        source: @image-url("../../assets/icons/octicon-search-16.svg");
+        colorize: GitHubTheme.fg-muted;
+    }
+
+    search-input := TextInput {
+        x: search-input.has-focus ? 33px : 34px;
+        y: (parent.height - self.preferred-height) / 2;
+        width: parent.width - self.x - 12px;
+        text <=> root.draft-text;
+        single-line: true;
+        font-size: 14px;
+        color: GitHubTheme.fg-default;
+        selection-background-color: GitHubTheme.selection-bg;
+        selection-foreground-color: self.color;
+        accessible-role: text-input;
+        accessible-enabled: true;
+        accessible-label: root.placeholder;
+        accessible-value <=> self.text;
+        accepted => { root.accepted(root.draft-text); }
+    }
+
+    if root.draft-text == "" && !search-input.has-focus: Text {
+        x: 34px;
+        width: parent.width - 46px;
+        height: parent.height;
+        text: root.placeholder;
+        font-size: 14px;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+}
+
+export component GitHubPullRequestClearQueryButton inherits Rectangle {
+    callback clicked();
+
+    private property <bool> keyboard-focus-visible: false;
+    private property <string> label: "Clear current search query, filters, and sorts";
+    private property <length> label-width: max(32px, label-measure.preferred-width);
+    width: 24px + root.label-width;
+    height: 32px;
+    background: transparent;
+
+    clear-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        accessible-role: button;
+        accessible-enabled: true;
+        accessible-label: root.label;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.keyboard-focus-visible = false;
+        }
+    }
+
+    if clear-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -4px;
+        y: 2px;
+        width: parent.width + 8px;
+        height: parent.height - 4px;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: GitHubMetrics.focus-outline-width;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
+
+    Image {
+        x: 0px;
+        y: 7px;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../../assets/icons/octicon-x-circle-fill-16.svg");
+        colorize: GitHubTheme.fg-muted;
+    }
+
+    label-measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: 13px;
+        font-weight: 600;
+        wrap: no-wrap;
+    }
+
+    Text {
+        x: 24px;
+        width: root.label-width;
+        height: parent.height;
+        text: root.label;
+        font-size: 13px;
+        font-weight: 600;
+        color: clear-touch.has-hover ? GitHubTheme.accent-fg : GitHubTheme.fg-muted;
+        vertical-alignment: center;
+    }
+
+    clear-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => {
+            root.keyboard-focus-visible = false;
+            clear-focus.focus();
+            root.clicked();
+        }
+    }
+}
+
 export component GitHubPullRequestStateButton inherits Rectangle {
     in property <string> label;
     in property <string> value;
@@ -28,8 +167,7 @@ export component GitHubPullRequestStateButton inherits Rectangle {
     in property <int> count: 0;
     callback selected(string);
 
-    private property <bool> active: root.selected-value == root.value
-        || (root.value == "closed" && root.selected-value == "merged");
+    private property <bool> active: root.selected-value == root.value;
     private property <bool> keyboard-focus-visible: false;
     // Primer degraded experiences: when a count is unavailable (loading or
     // failed), hide the number and keep the interactive label.
@@ -93,7 +231,7 @@ export component GitHubPullRequestStateButton inherits Rectangle {
         y: 16px;
         width: 16px;
         height: 16px;
-        source: root.value == "open"
+        source: root.value == "open" || root.value == "total"
             ? @image-url("../../assets/icons/octicon-git-pull-request-16.svg")
             : @image-url("../../assets/icons/octicon-check-16.svg");
         colorize: root.active

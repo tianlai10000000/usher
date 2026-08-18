@@ -217,15 +217,23 @@ export component GitHubSettingsPane inherits Rectangle {
     callback check-update();
     callback simulate-crash();
 
-    height: pane-content.preferred-height;
+    height: pane-content.height;
     background: transparent;
+    clip: true;
 
-    pane-content := VerticalLayout {
+    pane-content := Rectangle {
         width: root.width;
-        spacing: 24px;
-        alignment: start;
+        height: root.selected-section == 1 ? code-hosting-section.preferred-height
+            : (root.selected-section == 2 ? ai-agent-section.preferred-height
+                : (root.selected-section == 3 ? diagnostics-section.preferred-height
+                    : general-section.preferred-height));
+        background: transparent;
 
-        if root.selected-section == 0: VerticalLayout {
+        // Fixed leaves avoid stale sibling bindings when the factory page is
+        // rebuilt or a section changes under Slint 1.17.1.
+        general-section := VerticalLayout {
+            height: parent.height;
+            visible: root.selected-section == 0;
             width: parent.width;
             spacing: 24px;
             alignment: start;
@@ -444,7 +452,9 @@ export component GitHubSettingsPane inherits Rectangle {
             }
         }
 
-        if root.selected-section == 1: VerticalLayout {
+        code-hosting-section := VerticalLayout {
+            height: parent.height;
+            visible: root.selected-section == 1;
             width: parent.width;
             spacing: 24px;
             alignment: start;
@@ -576,52 +586,68 @@ export component GitHubSettingsPane inherits Rectangle {
                     }
                 }
 
-                if root.hosting-config-tab == 0: VerticalLayout {
+                provider-form-host := Rectangle {
                     width: parent.width;
-                    spacing: 12px;
-                    GitHubTextField {
-                        label: "Gitee API base URL";
-                        text <=> AppState.git-gitee-api-base-url;
-                        placeholder: "https://code.example.com/api/v8";
-                        edited(_) => { root.git-hosting-config-saved = false; }
+                    height: max(gitee-provider-form.preferred-height,
+                        max(github-provider-form.preferred-height, gitlab-provider-form.preferred-height));
+                    background: transparent;
+                    clip: true;
+
+                    // Select fixed provider leaves by visibility; rebuilding
+                    // conditional field trees can retain the previous labels.
+                    gitee-provider-form := VerticalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 12px;
+                        visible: root.hosting-config-tab == 0;
+                        GitHubTextField {
+                            label: "Gitee API base URL";
+                            text <=> AppState.git-gitee-api-base-url;
+                            placeholder: "https://code.example.com/api/v8";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
+                        GitHubTextField {
+                            label: "Gitee Enterprise";
+                            text <=> AppState.git-gitee-enterprise;
+                            placeholder: "enterprise-name";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
                     }
-                    GitHubTextField {
-                        label: "Gitee Enterprise";
-                        text <=> AppState.git-gitee-enterprise;
-                        placeholder: "enterprise-name";
-                        edited(_) => { root.git-hosting-config-saved = false; }
+                    github-provider-form := VerticalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 12px;
+                        visible: root.hosting-config-tab == 1;
+                        GitHubTextField {
+                            label: "GitHub API base URL";
+                            text <=> AppState.git-github-api-base-url;
+                            placeholder: "https://github.example.com/api/v3";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
+                        GitHubTextField {
+                            label: "GitHub Enterprise";
+                            text <=> AppState.git-github-enterprise;
+                            placeholder: "enterprise-name";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
                     }
-                }
-                if root.hosting-config-tab == 1: VerticalLayout {
-                    width: parent.width;
-                    spacing: 12px;
-                    GitHubTextField {
-                        label: "GitHub API base URL";
-                        text <=> AppState.git-github-api-base-url;
-                        placeholder: "https://github.example.com/api/v3";
-                        edited(_) => { root.git-hosting-config-saved = false; }
-                    }
-                    GitHubTextField {
-                        label: "GitHub Enterprise";
-                        text <=> AppState.git-github-enterprise;
-                        placeholder: "enterprise-name";
-                        edited(_) => { root.git-hosting-config-saved = false; }
-                    }
-                }
-                if root.hosting-config-tab == 2: VerticalLayout {
-                    width: parent.width;
-                    spacing: 12px;
-                    GitHubTextField {
-                        label: "GitLab API base URL";
-                        text <=> AppState.git-gitlab-api-base-url;
-                        placeholder: "https://gitlab.example.com/api/v4";
-                        edited(_) => { root.git-hosting-config-saved = false; }
-                    }
-                    GitHubTextField {
-                        label: "GitLab Enterprise";
-                        text <=> AppState.git-gitlab-enterprise;
-                        placeholder: "enterprise-name";
-                        edited(_) => { root.git-hosting-config-saved = false; }
+                    gitlab-provider-form := VerticalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 12px;
+                        visible: root.hosting-config-tab == 2;
+                        GitHubTextField {
+                            label: "GitLab API base URL";
+                            text <=> AppState.git-gitlab-api-base-url;
+                            placeholder: "https://gitlab.example.com/api/v4";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
+                        GitHubTextField {
+                            label: "GitLab Enterprise";
+                            text <=> AppState.git-gitlab-enterprise;
+                            placeholder: "enterprise-name";
+                            edited(_) => { root.git-hosting-config-saved = false; }
+                        }
                     }
                 }
 
@@ -647,7 +673,9 @@ export component GitHubSettingsPane inherits Rectangle {
             }
         }
 
-        if root.selected-section == 2: VerticalLayout {
+        ai-agent-section := VerticalLayout {
+            height: parent.height;
+            visible: root.selected-section == 2;
             width: parent.width;
             spacing: 24px;
             alignment: start;
@@ -797,7 +825,9 @@ export component GitHubSettingsPane inherits Rectangle {
             }
         }
 
-        if root.selected-section == 3: VerticalLayout {
+        diagnostics-section := VerticalLayout {
+            height: parent.height;
+            visible: root.selected-section == 3;
             width: parent.width;
             spacing: 8px;
             alignment: start;

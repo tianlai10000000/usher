@@ -38,6 +38,7 @@ pub(super) fn filtered_review_status_fixture(
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .filter(|item| matches_state(item, state))
+        .filter(|item| matches_query(item, filters.query.as_str()))
         .filter(|item| matches_review(item, filters.reviews.as_str()))
         .collect::<Vec<_>>();
     match filters.sort.as_str() {
@@ -54,6 +55,19 @@ pub(super) fn filtered_review_status_fixture(
         }),
     }
     Ok(items)
+}
+
+fn matches_query(item: &PullRequestItem, query: &str) -> bool {
+    let haystack = format!(
+        "{} {} {} {}",
+        item.title, item.author, item.source_branch, item.target_branch
+    )
+    .to_ascii_lowercase();
+    query
+        .split_whitespace()
+        .map(|term| term.trim_matches(['\'', '"']).to_ascii_lowercase())
+        .filter(|term| !term.is_empty())
+        .all(|term| haystack.contains(term.as_str()))
 }
 
 impl FixturePullRequestItem {
@@ -74,6 +88,8 @@ impl FixturePullRequestItem {
             target_branch: self.target_branch,
             review_status,
             conversation_count: self.conversation_count,
+            created_at: (now - Duration::hours(self.updated_hours_ago + 1))
+                .to_rfc3339_opts(SecondsFormat::Secs, true),
             updated_at: (now - Duration::hours(self.updated_hours_ago))
                 .to_rfc3339_opts(SecondsFormat::Secs, true),
             web_url: String::new(),
@@ -85,6 +101,7 @@ fn matches_state(item: &PullRequestItem, state: PullRequestState) -> bool {
     match state {
         PullRequestState::Open => item.state == "open",
         PullRequestState::Closed => matches!(item.state.as_str(), "closed" | "merged"),
+        PullRequestState::ClosedUnmerged => item.state == "closed",
         PullRequestState::Merged => item.state == "merged",
         PullRequestState::All => true,
     }
@@ -96,5 +113,47 @@ fn matches_review(item: &PullRequestItem, review_filter: &str) -> bool {
         "approved" => item.review_status == PullRequestReviewStatus::Approved,
         "changes-requested" => item.review_status == PullRequestReviewStatus::ChangesRequested,
         _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::filtered_review_status_fixture;
+    use crate::git::{PullRequestFilters, PullRequestState};
+
+    #[test]
+    fn filters_mock_data_by_merged_state_and_query_terms() {
+        let filters = PullRequestFilters {
+            query: "provider parity".to_string(),
+            reviews: "all".to_string(),
+            assignee: "any".to_string(),
+            sort: "newest".to_string(),
+        };
+        let items =
+            filtered_review_status_fixture(PullRequestState::Merged, &filters, Utc::now()).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].number, "99015");
+    }
+
+    #[test]
+    fn mock_data_exercises_open_pagination_and_closed_union() {
+        let filters = PullRequestFilters::default();
+        let open =
+            filtered_review_status_fixture(PullRequestState::Open, &filters, Utc::now()).unwrap();
+        let closed =
+            filtered_review_status_fixture(PullRequestState::Closed, &filters, Utc::now()).unwrap();
+        let merged =
+            filtered_review_status_fixture(PullRequestState::Merged, &filters, Utc::now()).unwrap();
+        let closed_unmerged =
+            filtered_review_status_fixture(PullRequestState::ClosedUnmerged, &filters, Utc::now())
+                .unwrap();
+
+        assert!(open.len() > 10);
+        assert!(closed.len() > merged.len());
+        assert!(merged.len() >= 3);
+        assert_eq!(closed.len(), merged.len() + closed_unmerged.len());
     }
 }
