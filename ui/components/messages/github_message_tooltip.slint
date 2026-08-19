@@ -50,13 +50,6 @@ export component GitHubMarkReadTooltipAnchor inherits Rectangle {
 
     function publish() {
         if root.active && !root.detached && root.width > 0px && root.height > 0px {
-            debug(
-                "[tooltip.show] scope=messages node=MessageMarkToggleAction.MarkRead text=Mark as read x={} y={} width={} height={}",
-                root.absolute-position.x,
-                root.absolute-position.y,
-                root.width,
-                root.height,
-            );
             MessageTooltipOverlayState.show(
                 MessageTooltipKind.MarkRead,
                 root.absolute-position.x,
@@ -114,13 +107,6 @@ export component GitHubMarkUnreadTooltipAnchor inherits Rectangle {
 
     function publish() {
         if root.active && !root.detached && root.width > 0px && root.height > 0px {
-            debug(
-                "[tooltip.show] scope=messages node=MessageMarkToggleAction.MarkUnread text=Mark as unread x={} y={} width={} height={}",
-                root.absolute-position.x,
-                root.absolute-position.y,
-                root.width,
-                root.height,
-            );
             MessageTooltipOverlayState.show(
                 MessageTooltipKind.MarkUnread,
                 root.absolute-position.x,
@@ -178,13 +164,6 @@ export component GitHubDeleteTooltipAnchor inherits Rectangle {
 
     function publish() {
         if root.active && !root.detached && root.width > 0px && root.height > 0px {
-            debug(
-                "[tooltip.show] scope=messages node=MessageDeleteAction text=Delete x={} y={} width={} height={}",
-                root.absolute-position.x,
-                root.absolute-position.y,
-                root.width,
-                root.height,
-            );
             MessageTooltipOverlayState.show(
                 MessageTooltipKind.Delete,
                 root.absolute-position.x,

@@ -21,13 +21,25 @@ pub struct AppSettings {
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
 
-    /// Tracing logger active
+    /// Standard-output application logs
+    #[serde(default = "default_application_console_logging")]
+    pub application_console_logging: bool,
+
+    /// Plain-text application file logs (`usher.log`)
+    #[serde(default = "default_application_file_logging")]
+    pub application_file_logging: bool,
+
+    /// Structured tracing file logs (`usher_tracing.log`)
     #[serde(default = "default_tracing_logger_active")]
     pub tracing_logger_active: bool,
 
     /// Verbose terminal logging active
     #[serde(default = "default_terminal_verbose_logging")]
     pub terminal_verbose_logging: bool,
+
+    /// Periodic process and UI memory diagnostics
+    #[serde(default = "default_memory_diagnostics_logging")]
+    pub memory_diagnostics_logging: bool,
 
     /// Play system UI click sounds (breadcrumb Back for now)
     #[serde(default = "default_ui_sound_effects")]
@@ -169,12 +181,24 @@ fn default_auto_update() -> bool {
     true // Default to enabled
 }
 
+fn default_application_console_logging() -> bool {
+    true
+}
+
+fn default_application_file_logging() -> bool {
+    cfg!(debug_assertions)
+}
+
 fn default_tracing_logger_active() -> bool {
     true // Default to enabled
 }
 
 fn default_terminal_verbose_logging() -> bool {
     false // Default to disabled
+}
+
+fn default_memory_diagnostics_logging() -> bool {
+    cfg!(debug_assertions)
 }
 
 fn default_ui_sound_effects() -> bool {
@@ -198,8 +222,11 @@ impl Default for AppSettings {
         Self {
             theme_mode: default_theme_mode(),
             auto_update: default_auto_update(),
+            application_console_logging: default_application_console_logging(),
+            application_file_logging: default_application_file_logging(),
             tracing_logger_active: default_tracing_logger_active(),
             terminal_verbose_logging: default_terminal_verbose_logging(),
+            memory_diagnostics_logging: default_memory_diagnostics_logging(),
             ui_sound_effects: default_ui_sound_effects(),
             navigation_drawer_expanded: default_navigation_drawer_expanded(),
             preview: PreviewSettings::default(),
@@ -329,6 +356,18 @@ impl SettingsManager {
         }
     }
 
+    pub fn set_application_console_logging(&self, enabled: bool) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.application_console_logging = enabled;
+        }
+    }
+
+    pub fn set_application_file_logging(&self, enabled: bool) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.application_file_logging = enabled;
+        }
+    }
+
     /// Update tracing logger active setting
     pub fn set_tracing_logger_active(&self, enabled: bool) {
         if let Ok(mut settings) = self.settings.write() {
@@ -340,6 +379,12 @@ impl SettingsManager {
     pub fn set_terminal_verbose_logging(&self, enabled: bool) {
         if let Ok(mut settings) = self.settings.write() {
             settings.terminal_verbose_logging = enabled;
+        }
+    }
+
+    pub fn set_memory_diagnostics_logging(&self, enabled: bool) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.memory_diagnostics_logging = enabled;
         }
     }
 
@@ -467,6 +512,16 @@ pub fn save_auto_update(enabled: bool) {
     });
 }
 
+pub fn save_application_console_logging(enabled: bool) {
+    get_settings_manager().set_application_console_logging(enabled);
+    schedule_settings_save();
+}
+
+pub fn save_application_file_logging(enabled: bool) {
+    get_settings_manager().set_application_file_logging(enabled);
+    schedule_settings_save();
+}
+
 /// Save tracing logger active setting asynchronously
 pub fn save_tracing_logger_active(enabled: bool) {
     get_settings_manager().set_tracing_logger_active(enabled);
@@ -480,6 +535,19 @@ pub fn save_tracing_logger_active(enabled: bool) {
 /// Save terminal verbose logging setting asynchronously
 pub fn save_terminal_verbose_logging(enabled: bool) {
     get_settings_manager().set_terminal_verbose_logging(enabled);
+    Timer::single_shot(std::time::Duration::from_millis(100), || {
+        if let Err(e) = get_settings_manager().save() {
+            log::error!("[Settings] Failed to save settings: {}", e);
+        }
+    });
+}
+
+pub fn save_memory_diagnostics_logging(enabled: bool) {
+    get_settings_manager().set_memory_diagnostics_logging(enabled);
+    schedule_settings_save();
+}
+
+fn schedule_settings_save() {
     Timer::single_shot(std::time::Duration::from_millis(100), || {
         if let Err(e) = get_settings_manager().save() {
             log::error!("[Settings] Failed to save settings: {}", e);
@@ -609,8 +677,11 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     let app_state = AppState::get(app);
     app_state.set_theme_mode(settings.theme_mode);
     app_state.set_auto_update(settings.auto_update);
+    app_state.set_application_console_logging(settings.application_console_logging);
+    app_state.set_application_file_logging(settings.application_file_logging);
     app_state.set_tracing_logger_active(settings.tracing_logger_active);
     app_state.set_terminal_verbose_logging(settings.terminal_verbose_logging);
+    app_state.set_memory_diagnostics_logging(settings.memory_diagnostics_logging);
     app_state.set_ui_sound_effects(settings.ui_sound_effects);
     app_state.set_artifact_preview_presentation_mode(
         if settings.preview.presentation_mode == "detached" {
@@ -646,11 +717,14 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     app.invoke_restore_navigation_drawer_state(settings.navigation_drawer_expanded);
 
     log::info!(
-        "[Settings] Applied settings: theme_mode={}, auto_update={}, tracing_logger_active={}, terminal_verbose_logging={}, ui_sound_effects={}, navigation_drawer_expanded={}, git_tokens=({}/{}/{}), ai.agent=({}/{}/{})",
+        "[Settings] Applied settings: theme_mode={}, auto_update={}, application_console_logging={}, application_file_logging={}, tracing_logger_active={}, terminal_verbose_logging={}, memory_diagnostics_logging={}, ui_sound_effects={}, navigation_drawer_expanded={}, git_tokens=({}/{}/{}), ai.agent=({}/{}/{})",
         settings.theme_mode,
         settings.auto_update,
+        settings.application_console_logging,
+        settings.application_file_logging,
         settings.tracing_logger_active,
         settings.terminal_verbose_logging,
+        settings.memory_diagnostics_logging,
         settings.ui_sound_effects,
         settings.navigation_drawer_expanded,
         if settings.git.platform.github.token.is_empty() {
@@ -742,6 +816,30 @@ auto_update = false
         assert!(settings.preview.providers.markdown);
         assert!(settings.preview.providers.image);
         assert!(settings.preview.providers.plain_text);
+        assert!(settings.application_console_logging);
+        assert_eq!(settings.application_file_logging, cfg!(debug_assertions));
+        assert!(settings.tracing_logger_active);
+        assert!(!settings.terminal_verbose_logging);
+        assert_eq!(settings.memory_diagnostics_logging, cfg!(debug_assertions));
+    }
+
+    #[test]
+    fn writes_granular_logging_settings() {
+        let settings = AppSettings {
+            application_console_logging: false,
+            application_file_logging: false,
+            tracing_logger_active: false,
+            terminal_verbose_logging: false,
+            memory_diagnostics_logging: false,
+            ..Default::default()
+        };
+
+        let serialized = toml::to_string(&settings).unwrap();
+        assert!(serialized.contains("application_console_logging = false"));
+        assert!(serialized.contains("application_file_logging = false"));
+        assert!(serialized.contains("tracing_logger_active = false"));
+        assert!(serialized.contains("terminal_verbose_logging = false"));
+        assert!(serialized.contains("memory_diagnostics_logging = false"));
     }
 
     #[test]

@@ -214,7 +214,8 @@ export component GitHubProjectDialog {
                             GitHubToggle {
                                 x: parent.width - 60px;
                                 y: 22px;
-                                checked <=> root.is-pr-auto-update;
+                                checked: root.is-pr-auto-update;
+                                toggled(value) => { root.is-pr-auto-update = value; }
                             }
                         }
 

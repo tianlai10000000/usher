@@ -563,7 +563,8 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 GitHubToggle {
                     x: parent.width - GitHubMetrics.size-64;
                     y: 142px;
-                    checked <=> root.toggle-checked;
+                    checked: root.toggle-checked;
+                    toggled(value) => { root.toggle-checked = value; }
                 }
             }
         }

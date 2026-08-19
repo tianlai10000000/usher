@@ -27,11 +27,12 @@ export global AppState {
     // auto-update
     in-out property <bool> auto-update: true; // default enabled
     
-    // tracing logger
+    // logging outputs and diagnostics
+    in-out property <bool> application-console-logging: true;
+    in-out property <bool> application-file-logging: false;
     in-out property <bool> tracing-logger-active: true; // default enabled
-
-    // terminal verbose logging
     in-out property <bool> terminal-verbose-logging: false;
+    in-out property <bool> memory-diagnostics-logging: false;
 
     // UI click sound effects (system sound; currently breadcrumb Back only)
     in-out property <bool> ui-sound-effects: false;
@@ -73,11 +74,12 @@ export global AppState {
     // auto-update
     callback toggle-auto-update(enabled: bool);
     
-    // tracing logger
+    // logging outputs and diagnostics
+    callback toggle-application-console-logging(enabled: bool);
+    callback toggle-application-file-logging(enabled: bool);
     callback toggle-tracing-logger-active(enabled: bool);
-
-    // terminal verbose logging
     callback toggle-terminal-verbose-logging(enabled: bool);
+    callback toggle-memory-diagnostics-logging(enabled: bool);
 
     // UI click sound effects
     callback toggle-ui-sound-effects(enabled: bool);

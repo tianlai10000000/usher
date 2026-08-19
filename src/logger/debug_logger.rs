@@ -13,8 +13,10 @@
 //! // Initialize the logger
 //! init_logger(LogConfig {
 //!     level: log::LevelFilter::Debug,
-//!     write_to_file: true,
+//!     console_output: true,
+//!     file_output: true,
 //!     log_file_path: Some("/path/to/app.log".into()),
+//!     log_per_day: false,
 //! }).expect("Failed to init logger");
 //!
 //! // Use standard log macros
@@ -26,18 +28,22 @@
 use chrono::Local;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::LevelFilter;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Logger configuration
 #[derive(Clone, Debug)]
 pub struct DebugLogConfig {
     /// Log level
     pub level: LevelFilter,
-    /// Whether to write to file
-    pub write_to_file: bool,
-    /// Log file path (if write_to_file is true)
+    /// Whether to write to standard output
+    pub console_output: bool,
+    /// Whether to write to the application log file
+    pub file_output: bool,
+    /// Log file path
     pub log_file_path: Option<PathBuf>,
     /// Whether to organize logs by date (YYYY-MM-DD/usher.log)
     pub log_per_day: bool,
@@ -47,7 +53,8 @@ impl Default for DebugLogConfig {
     fn default() -> Self {
         Self {
             level: LevelFilter::Info,
-            write_to_file: false,
+            console_output: true,
+            file_output: false,
             log_file_path: None,
             log_per_day: false,
         }
@@ -56,6 +63,62 @@ impl Default for DebugLogConfig {
 
 /// Global logger initialization state
 static LOGGER_INITIALIZED: OnceLock<bool> = OnceLock::new();
+static CONSOLE_OUTPUT_ENABLED: AtomicBool = AtomicBool::new(true);
+static FILE_OUTPUT_ENABLED: AtomicBool = AtomicBool::new(false);
+
+struct LazyLogFile {
+    path: PathBuf,
+    file: Option<File>,
+}
+
+impl LazyLogFile {
+    fn file(&mut self) -> io::Result<&mut File> {
+        if self.file.is_none() {
+            if let Some(parent) = self.path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            self.file = Some(
+                OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&self.path)?,
+            );
+        }
+        Ok(self.file.as_mut().expect("log file initialized"))
+    }
+}
+
+impl Write for LazyLogFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if !file_output_enabled() {
+            return Ok(buf.len());
+        }
+        self.file()?.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if !file_output_enabled() {
+            return Ok(());
+        }
+        self.file()?.flush()
+    }
+}
+
+pub fn set_console_output_enabled(enabled: bool) {
+    CONSOLE_OUTPUT_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn set_file_output_enabled(enabled: bool) {
+    FILE_OUTPUT_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+fn console_output_enabled() -> bool {
+    CONSOLE_OUTPUT_ENABLED.load(Ordering::Relaxed)
+}
+
+fn file_output_enabled() -> bool {
+    FILE_OUTPUT_ENABLED.load(Ordering::Relaxed)
+}
 
 /// Get the default log file path
 /// Uses the directories crate to get the system standard log directory
@@ -100,6 +163,9 @@ pub fn get_default_log_path(log_per_day: bool) -> PathBuf {
 /// # Note
 /// This function can only be called once. Subsequent calls will return Ok but won't reconfigure.
 pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
+    set_console_output_enabled(config.console_output);
+    set_file_output_enabled(config.file_output);
+
     // Check if already initialized
     if LOGGER_INITIALIZED.get().is_some() {
         return Ok(());
@@ -124,6 +190,7 @@ pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
                 message
             ))
         })
+        .filter(|_| console_output_enabled())
         .level(config.level)
         // Suppress verbose logs from third-party libraries
         .level_for("reqwest", LevelFilter::Warn)
@@ -144,62 +211,42 @@ pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
     // Create main dispatch
     let mut main_dispatch = fern::Dispatch::new().chain(console_dispatch);
 
-    let resolved_log_path = if config.write_to_file {
-        Some(
-            config
-                .log_file_path
-                .clone()
-                .unwrap_or_else(|| get_default_log_path(config.log_per_day)),
-        )
-    } else {
-        None
-    };
+    let resolved_log_path = config
+        .log_file_path
+        .clone()
+        .unwrap_or_else(|| get_default_log_path(config.log_per_day));
 
-    // If file output is enabled
-    if let Some(log_path) = resolved_log_path.clone() {
-        // Ensure log directory exists
-        if let Some(parent) = log_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create log directory: {}", e))?;
-        }
+    let file_dispatch = fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{}] [{}] [{}] {}",
+                Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .filter(|_| file_output_enabled())
+        .level(config.level)
+        .level_for("reqwest", LevelFilter::Warn)
+        .level_for("hyper", LevelFilter::Warn)
+        .level_for("hyper_util", LevelFilter::Warn)
+        .level_for("h2", LevelFilter::Warn)
+        .level_for("rustls", LevelFilter::Warn)
+        .level_for("tokio_util", LevelFilter::Warn)
+        .level_for("tungstenite", LevelFilter::Warn)
+        .level_for("tracing", LevelFilter::Warn)
+        .level_for("wgpu", LevelFilter::Warn)
+        .level_for("wgpu_core", LevelFilter::Warn)
+        .level_for("wgpu_hal", LevelFilter::Warn)
+        .level_for("wgpu_types", LevelFilter::Warn)
+        .level_for("naga", LevelFilter::Warn)
+        .chain(Box::new(LazyLogFile {
+            path: resolved_log_path.clone(),
+            file: None,
+        }) as Box<dyn Write + Send>);
 
-        // Open log file (append mode)
-        let log_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-            .map_err(|e| format!("Failed to open log file: {}", e))?;
-
-        // File log formatter (without colors)
-        let file_dispatch = fern::Dispatch::new()
-            .format(|out, message, record| {
-                out.finish(format_args!(
-                    "[{}] [{}] [{}] {}",
-                    Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                    record.level(),
-                    record.target(),
-                    message
-                ))
-            })
-            .level(config.level)
-            // Suppress verbose logs from third-party libraries
-            .level_for("reqwest", LevelFilter::Warn)
-            .level_for("hyper", LevelFilter::Warn)
-            .level_for("hyper_util", LevelFilter::Warn)
-            .level_for("h2", LevelFilter::Warn)
-            .level_for("rustls", LevelFilter::Warn)
-            .level_for("tokio_util", LevelFilter::Warn)
-            .level_for("tungstenite", LevelFilter::Warn)
-            .level_for("tracing", LevelFilter::Warn)
-            .level_for("wgpu", LevelFilter::Warn)
-            .level_for("wgpu_core", LevelFilter::Warn)
-            .level_for("wgpu_hal", LevelFilter::Warn)
-            .level_for("wgpu_types", LevelFilter::Warn)
-            .level_for("naga", LevelFilter::Warn)
-            .chain(log_file);
-
-        main_dispatch = main_dispatch.chain(file_dispatch);
-    }
+    main_dispatch = main_dispatch.chain(file_dispatch);
 
     // Apply logger configuration
     main_dispatch
@@ -211,10 +258,11 @@ pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
 
     // TODO: Print actual resolved config values
     log::debug!(
-        "Debug Logger initialized successfully! - Level: {:?}, PerDay: {:?}, WriteToFile: {:?}, Log file path: {:?}",
+        "Debug Logger initialized successfully! - Level: {:?}, PerDay: {:?}, ConsoleOutput: {:?}, FileOutput: {:?}, Log file path: {:?}",
         config.level,
         config.log_per_day,
-        config.write_to_file,
+        config.console_output,
+        config.file_output,
         resolved_log_path
     );
 

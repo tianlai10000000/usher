@@ -10,7 +10,7 @@ use slint::{ComponentHandle, Global, Model, ModelRc, Rgba8Pixel, SharedPixelBuff
 use usher_preview::{
     CancellationToken, IMAGE_PROVIDER_ID, MARKDOWN_PROVIDER_ID, MarkdownBlock as CoreMarkdownBlock,
     MarkdownBlockKind as CoreBlockKind, MarkdownInlineKind, PLAIN_TEXT_PROVIDER_ID,
-    PreparedArtifact, PreparedContent, PreviewRegistry,
+    PreparedArtifact, PreparedContent, PreviewPreparationProgress, PreviewRegistry,
 };
 
 pub use usher_preview::{ArtifactBody, ArtifactHint, ArtifactSource};
@@ -92,7 +92,9 @@ struct PreviewUiRuntime {
     mode: PresentationMode,
     current: Option<UiPayload>,
     loading_title: Option<slint::SharedString>,
+    loading_message: slint::SharedString,
     detached: Option<ArtifactPreviewWindow>,
+    docked_virtual_layout: Rc<RefCell<MarkdownVirtualLayoutBridge>>,
 }
 
 impl Default for PreviewUiRuntime {
@@ -101,7 +103,9 @@ impl Default for PreviewUiRuntime {
             mode: PresentationMode::Docked,
             current: None,
             loading_title: None,
+            loading_message: "Preparing preview".into(),
             detached: None,
+            docked_virtual_layout: Rc::new(RefCell::new(MarkdownVirtualLayoutBridge::default())),
         }
     }
 }
@@ -181,6 +185,25 @@ impl ArtifactPreviewHandle {
         let (generation, cancellation) = self.service.begin_request();
         show_loading(&ui, title.clone());
 
+        let progress_service = self.service.clone();
+        let progress_ui = self.ui.clone();
+        cancellation.set_progress_handler(move |progress| {
+            let message = preparation_progress_message(progress);
+            if !progress_service.is_current(generation) {
+                return;
+            }
+            let progress_service = progress_service.clone();
+            let progress_ui = progress_ui.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if !progress_service.is_current(generation) {
+                    return;
+                }
+                if let Some(ui) = progress_ui.upgrade() {
+                    update_loading_message(&ui, message);
+                }
+            });
+        });
+
         let registry = self
             .service
             .registry
@@ -223,6 +246,17 @@ impl ArtifactPreviewHandle {
     }
 }
 
+fn preparation_progress_message(progress: PreviewPreparationProgress) -> String {
+    match progress {
+        PreviewPreparationProgress::ParserLoading { display_name, .. } => {
+            format!("Loading {display_name} parser...")
+        }
+        PreviewPreparationProgress::ParserReady { display_name, .. } => {
+            format!("{display_name} parser ready. Preparing preview...")
+        }
+    }
+}
+
 pub(crate) fn setup(ui: &MainWindow, settings: &PreviewSettings) -> ArtifactPreviewHandle {
     let performance_optimized =
         std::env::var("USHER_PREVIEW_PERF_VARIANT").as_deref() != Ok("baseline");
@@ -235,8 +269,12 @@ pub(crate) fn setup(ui: &MainWindow, settings: &PreviewSettings) -> ArtifactPrev
             "baseline"
         }
     );
-    let docked_virtual_layout =
-        Rc::new(RefCell::new(MarkdownVirtualLayoutBridge::from_environment()));
+    let docked_virtual_layout = PREVIEW_UI.with(|runtime| {
+        let mut runtime = runtime.borrow_mut();
+        runtime.docked_virtual_layout =
+            Rc::new(RefCell::new(MarkdownVirtualLayoutBridge::from_environment()));
+        runtime.docked_virtual_layout.clone()
+    });
     let layout_bridge = docked_virtual_layout.clone();
     ui.on_artifact_preview_layout_markdown_window(
         move |revision, blocks, scroll_offset, visible_height, content_width, font_family| {
@@ -707,6 +745,18 @@ fn show_loading(ui: &MainWindow, title: String) {
         let mut runtime = runtime.borrow_mut();
         runtime.current = None;
         runtime.loading_title = Some(title.into());
+        runtime.loading_message = "Preparing preview".into();
+        present_runtime(ui, &mut runtime);
+    });
+}
+
+fn update_loading_message(ui: &MainWindow, message: String) {
+    PREVIEW_UI.with(|runtime| {
+        let mut runtime = runtime.borrow_mut();
+        if runtime.loading_title.is_none() || runtime.current.is_some() {
+            return;
+        }
+        runtime.loading_message = message.into();
         present_runtime(ui, &mut runtime);
     });
 }
@@ -715,6 +765,7 @@ fn show_payload(ui: &MainWindow, payload: UiPayload) {
     PREVIEW_UI.with(|runtime| {
         let mut runtime = runtime.borrow_mut();
         runtime.loading_title = None;
+        runtime.loading_message = "Preparing preview".into();
         runtime.current = Some(payload);
         present_runtime(ui, &mut runtime);
     });
@@ -735,9 +786,9 @@ fn present_runtime(ui: &MainWindow, runtime: &mut PreviewUiRuntime) {
     let has_content = runtime.current.is_some() || runtime.loading_title.is_some();
     if !has_content {
         if runtime.mode == PresentationMode::Docked {
-            begin_main_host_close(ui);
+            begin_main_host_close(ui, runtime.docked_virtual_layout.clone());
         } else {
-            clear_main_host_immediately(ui);
+            clear_main_host_immediately(ui, &runtime.docked_virtual_layout);
         }
         if let Some(window) = runtime.detached.take() {
             let _ = window.hide();
@@ -750,7 +801,7 @@ fn present_runtime(ui: &MainWindow, runtime: &mut PreviewUiRuntime) {
             if let Some(payload) = runtime.current.as_ref() {
                 apply_payload_to_main(ui, payload);
             } else if let Some(title) = runtime.loading_title.as_ref() {
-                apply_loading_to_main(ui, title);
+                apply_loading_to_main(ui, title, &runtime.loading_message);
             }
             if let Some(window) = runtime.detached.take() {
                 let _ = window.hide();
@@ -763,7 +814,7 @@ fn present_runtime(ui: &MainWindow, runtime: &mut PreviewUiRuntime) {
             if let Some(payload) = runtime.current.as_ref() {
                 apply_payload_to_window(&window, payload);
             } else if let Some(title) = runtime.loading_title.as_ref() {
-                apply_loading_to_window(&window, title);
+                apply_loading_to_window(&window, title, &runtime.loading_message);
             }
             center_detached_window(ui, &window);
             if let Err(error) = window.show() {
@@ -771,7 +822,7 @@ fn present_runtime(ui: &MainWindow, runtime: &mut PreviewUiRuntime) {
             } else {
                 install_detached_live_resize_bridge(&window);
             }
-            clear_main_host_immediately(ui);
+            clear_main_host_immediately(ui, &runtime.docked_virtual_layout);
         }
     }
 }
@@ -891,10 +942,15 @@ fn apply_payload_to_main(ui: &MainWindow, payload: &UiPayload) {
     ui.set_artifact_preview_visible(true);
 }
 
-fn apply_loading_to_main(ui: &MainWindow, title: &slint::SharedString) {
+fn apply_loading_to_main(
+    ui: &MainWindow,
+    title: &slint::SharedString,
+    message: &slint::SharedString,
+) {
     HOST_VISUAL_GENERATION.fetch_add(1, Ordering::AcqRel);
     clear_main_payload(ui);
     ui.set_artifact_preview_title(title.clone());
+    ui.set_artifact_preview_loading_message(message.clone());
     ui.set_artifact_preview_loading(true);
     ui.set_artifact_preview_visible(true);
 }
@@ -917,9 +973,14 @@ fn next_layout_revision() -> i32 {
     (HOST_VISUAL_GENERATION.fetch_add(1, Ordering::AcqRel) as i32).wrapping_add(1)
 }
 
-fn apply_loading_to_window(window: &ArtifactPreviewWindow, title: &slint::SharedString) {
+fn apply_loading_to_window(
+    window: &ArtifactPreviewWindow,
+    title: &slint::SharedString,
+    message: &slint::SharedString,
+) {
     clear_window_payload(window);
     window.set_document_title(title.clone());
+    window.set_loading_message(message.clone());
     window.set_loading(true);
 }
 
@@ -929,10 +990,11 @@ fn clear_hosts(ui: &MainWindow) {
         let animate_docked_close = runtime.mode == PresentationMode::Docked;
         runtime.current = None;
         runtime.loading_title = None;
+        runtime.loading_message = "Preparing preview".into();
         if animate_docked_close {
-            begin_main_host_close(ui);
+            begin_main_host_close(ui, runtime.docked_virtual_layout.clone());
         } else {
-            clear_main_host_immediately(ui);
+            clear_main_host_immediately(ui, &runtime.docked_virtual_layout);
         }
         if let Some(window) = runtime.detached.take() {
             clear_window_payload(&window);
@@ -941,7 +1003,10 @@ fn clear_hosts(ui: &MainWindow) {
     });
 }
 
-fn begin_main_host_close(ui: &MainWindow) {
+fn begin_main_host_close(
+    ui: &MainWindow,
+    docked_virtual_layout: Rc<RefCell<MarkdownVirtualLayoutBridge>>,
+) {
     let visual_generation = HOST_VISUAL_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
     ui.set_artifact_preview_visible(false);
     ui.set_artifact_preview_loading(false);
@@ -957,15 +1022,20 @@ fn begin_main_host_close(ui: &MainWindow) {
             && HOST_VISUAL_GENERATION.load(Ordering::Acquire) == visual_generation
         {
             clear_main_payload(&ui);
+            docked_virtual_layout.borrow_mut().reset_document();
         }
     });
 }
 
-fn clear_main_host_immediately(ui: &MainWindow) {
+fn clear_main_host_immediately(
+    ui: &MainWindow,
+    docked_virtual_layout: &Rc<RefCell<MarkdownVirtualLayoutBridge>>,
+) {
     HOST_VISUAL_GENERATION.fetch_add(1, Ordering::AcqRel);
     ui.set_artifact_preview_visible(false);
     ui.set_artifact_preview_loading(false);
     clear_main_payload(ui);
+    docked_virtual_layout.borrow_mut().reset_document();
 }
 
 fn clear_main_payload(ui: &MainWindow) {
@@ -1154,18 +1224,31 @@ fn memory_benchmark_fixture_config() -> Option<(PresentationMode, bool)> {
 }
 
 fn memory_benchmark_markdown_fixture() -> String {
+    const TYPESCRIPT_FIXTURE: &str = "artifact-preview-markdown-typescript-256k-371-blocks-v1";
+    let typescript = std::env::var("USHER_MEMORY_FIXTURE").as_deref() == Ok(TYPESCRIPT_FIXTURE);
+    memory_benchmark_markdown_fixture_for(if typescript { "typescript" } else { "rust" })
+}
+
+fn memory_benchmark_markdown_fixture_for(language: &str) -> String {
     const TARGET_BYTES: usize = 256 * 1024;
-    const SECTION_START: &str = "## Result\n\n- **Passed**: `cargo test --lib --locked`\n- [Report](https://example.invalid/report)\n\n> Width-independent projection keeps Chat resize cheap.\n\n```rust\n";
-    const CODE_LINE: &str = "let preview = registry.prepare(source, &cancellation)?;\n";
+    const SECTION_PREFIX: &str = "## Result\n\n- **Passed**: `cargo test --lib --locked`\n- [Report](https://example.invalid/report)\n\n> Width-independent projection keeps Chat resize cheap.\n\n```";
+    const RUST_CODE_LINE: &str = "let preview = registry.prepare(source, &cancellation)?;\n";
+    const TYPESCRIPT_CODE_LINE: &str = "const preview = registry.prepare(source, cancellation);\n";
     const SECTION_END: &str =
         "```\n\n| Metric | Value |\n| --- | ---: |\n| model commits | 2 |\n| projections | 1 |\n\n";
+    let code_line = if language == "typescript" {
+        TYPESCRIPT_CODE_LINE
+    } else {
+        RUST_CODE_LINE
+    };
+    let section_start = format!("{SECTION_PREFIX}{language}\n");
     let mut markdown = String::with_capacity(TARGET_BYTES);
     markdown.push_str("# Artifact preview benchmark\n\n");
-    let section_bytes = SECTION_START.len() + CODE_LINE.len() * 96 + SECTION_END.len();
+    let section_bytes = section_start.len() + code_line.len() * 96 + SECTION_END.len();
     while markdown.len() + section_bytes <= TARGET_BYTES {
-        markdown.push_str(SECTION_START);
+        markdown.push_str(&section_start);
         for _ in 0..96 {
-            markdown.push_str(CODE_LINE);
+            markdown.push_str(code_line);
         }
         markdown.push_str(SECTION_END);
     }
@@ -1184,6 +1267,26 @@ mod tests {
         assert_eq!(PresentationMode::from_index(0), PresentationMode::Docked);
         assert_eq!(PresentationMode::from_index(1), PresentationMode::Detached);
         assert_eq!(PresentationMode::from_index(2), PresentationMode::Docked);
+    }
+
+    #[test]
+    fn parser_progress_messages_name_the_active_language() {
+        assert_eq!(
+            preparation_progress_message(PreviewPreparationProgress::ParserLoading {
+                language: "typescript".to_string(),
+                loader_id: "typescript",
+                display_name: "TypeScript".to_string(),
+            }),
+            "Loading TypeScript parser..."
+        );
+        assert_eq!(
+            preparation_progress_message(PreviewPreparationProgress::ParserReady {
+                language: "typescript".to_string(),
+                loader_id: "typescript",
+                display_name: "TypeScript".to_string(),
+            }),
+            "TypeScript parser ready. Preparing preview..."
+        );
     }
 
     #[test]
@@ -1235,7 +1338,11 @@ mod tests {
     }
 
     #[test]
-    fn memory_benchmark_fixture_has_a_fixed_size() {
-        assert_eq!(memory_benchmark_markdown_fixture().len(), 256 * 1024);
+    fn memory_benchmark_fixtures_have_a_fixed_size() {
+        for language in ["rust", "typescript"] {
+            let fixture = memory_benchmark_markdown_fixture_for(language);
+            assert_eq!(fixture.len(), 256 * 1024);
+            assert!(fixture.contains(&format!("```{language}\n")));
+        }
     }
 }

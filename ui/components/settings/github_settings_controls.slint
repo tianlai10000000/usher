@@ -248,7 +248,9 @@ export component GitHubButton inherits Rectangle {
 }
 
 export component GitHubToggle inherits Rectangle {
-    in-out property <bool> checked: false;
+    // Host state is authoritative so external actions such as "Disable all"
+    // cannot leave the switch's visual state behind.
+    in property <bool> checked: false;
     in property <bool> enabled: true;
     in property <bool> loading: false;
     private property <bool> keyboard-focus-visible: false;
@@ -279,8 +281,7 @@ export component GitHubToggle inherits Rectangle {
         key-pressed(event) => {
             root.keyboard-focus-visible = true;
             if (root.interactive && (event.text == Key.Return || event.text == " ")) {
-                root.checked = !root.checked;
-                root.toggled(root.checked);
+                root.toggled(!root.checked);
                 return accept;
             }
             return reject;
@@ -343,8 +344,7 @@ export component GitHubToggle inherits Rectangle {
         clicked => {
             root.keyboard-focus-visible = false;
             toggle-focus.focus();
-            root.checked = !root.checked;
-            root.toggled(root.checked);
+            root.toggled(!root.checked);
         }
     }
 }

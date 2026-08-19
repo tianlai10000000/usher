@@ -130,7 +130,7 @@ export component GitHubSettingsSectionHeader inherits Rectangle {
 export component GitHubSettingToggleRow inherits Rectangle {
     in property <string> title;
     in property <string> description;
-    in-out property <bool> checked: false;
+    in property <bool> checked: false;
     in property <bool> enabled: true;
     callback toggled(bool);
 
@@ -166,7 +166,7 @@ export component GitHubSettingToggleRow inherits Rectangle {
     GitHubToggle {
         x: parent.width - self.width;
         y: 20px;
-        checked <=> root.checked;
+        checked: root.checked;
         enabled: root.enabled;
         toggled(value) => { root.toggled(value); }
     }
@@ -216,6 +216,25 @@ export component GitHubSettingsPane inherits Rectangle {
     in-out property <bool> update-checking: false;
     callback check-update();
     callback simulate-crash();
+    private property <bool> any-log-output-enabled:
+        AppState.application-console-logging
+        || AppState.application-file-logging
+        || AppState.tracing-logger-active
+        || AppState.terminal-verbose-logging
+        || AppState.memory-diagnostics-logging;
+
+    function set-all-log-output(enabled: bool) {
+        AppState.application-console-logging = enabled;
+        AppState.application-file-logging = enabled;
+        AppState.tracing-logger-active = enabled;
+        AppState.terminal-verbose-logging = enabled;
+        AppState.memory-diagnostics-logging = enabled;
+        AppState.toggle-application-console-logging(enabled);
+        AppState.toggle-application-file-logging(enabled);
+        AppState.toggle-tracing-logger-active(enabled);
+        AppState.toggle-terminal-verbose-logging(enabled);
+        AppState.toggle-memory-diagnostics-logging(enabled);
+    }
 
     height: pane-content.height;
     background: transparent;
@@ -524,7 +543,8 @@ export component GitHubSettingsPane inherits Rectangle {
                     GitHubToggle {
                         x: 0px;
                         y: 8px;
-                        checked <=> root.reveal-git-tokens;
+                        checked: root.reveal-git-tokens;
+                        toggled(value) => { root.reveal-git-tokens = value; }
                     }
                     Text {
                         x: 60px;
@@ -775,7 +795,8 @@ export component GitHubSettingsPane inherits Rectangle {
                     GitHubToggle {
                         x: 0px;
                         y: 8px;
-                        checked <=> root.reveal-ai-agent-api-key;
+                        checked: root.reveal-ai-agent-api-key;
+                        toggled(value) => { root.reveal-ai-agent-api-key = value; }
                     }
                     Text {
                         x: 60px;
@@ -834,12 +855,74 @@ export component GitHubSettingsPane inherits Rectangle {
 
             GitHubSettingsSectionHeader {
                 title: "Diagnostics";
-                description: "Control local diagnostic output and failure testing.";
+                description: "Choose where application logs are written and which detailed diagnostics are included.";
+            }
+
+            HorizontalLayout {
+                width: parent.width;
+                height: 32px;
+                alignment: space-between;
+
+                Text {
+                    text: "Logging controls";
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: GitHubTheme.fg-default;
+                    vertical-alignment: center;
+                }
+
+                GitHubButton {
+                    width: 96px;
+                    text: root.any-log-output-enabled ? "Disable all" : "Enable all";
+                    clicked => { root.set-all-log-output(!root.any-log-output-enabled); }
+                }
+            }
+
+            Text {
+                width: parent.width;
+                height: 24px;
+                text: "Log destinations";
+                font-size: 14px;
+                font-weight: 600;
+                color: GitHubTheme.fg-default;
+                vertical-alignment: center;
             }
 
             GitHubSettingToggleRow {
-                title: "Tracing file logs";
-                description: "Write detailed application traces to the local log directory.";
+                title: "Console output";
+                description: "Write application logs to the process standard output.";
+                checked: AppState.application-console-logging;
+                toggled(value) => {
+                    AppState.application-console-logging = value;
+                    AppState.toggle-application-console-logging(value);
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: GitHubTheme.border-default;
+            }
+
+            GitHubSettingToggleRow {
+                title: "Application file logs";
+                description: "Write plain-text application logs to usher.log.";
+                checked: AppState.application-file-logging;
+                toggled(value) => {
+                    AppState.application-file-logging = value;
+                    AppState.toggle-application-file-logging(value);
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: GitHubTheme.border-default;
+            }
+
+            GitHubSettingToggleRow {
+                title: "Structured tracing file";
+                description: "Write structured tracing events to usher_tracing.log.";
                 checked: AppState.tracing-logger-active;
                 toggled(value) => {
                     AppState.tracing-logger-active = value;
@@ -853,13 +936,39 @@ export component GitHubSettingsPane inherits Rectangle {
                 background: GitHubTheme.border-default;
             }
 
+            Text {
+                width: parent.width;
+                height: 32px;
+                text: "Detailed diagnostics";
+                font-size: 14px;
+                font-weight: 600;
+                color: GitHubTheme.fg-default;
+                vertical-alignment: bottom;
+            }
+
             GitHubSettingToggleRow {
-                title: "Terminal verbose logs";
-                description: "Include verbose terminal session diagnostics in local logs.";
+                title: "Terminal verbose diagnostics";
+                description: "Include input, PTY output, viewport, and render details in enabled outputs.";
                 checked: AppState.terminal-verbose-logging;
                 toggled(value) => {
                     AppState.terminal-verbose-logging = value;
                     AppState.toggle-terminal-verbose-logging(value);
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: GitHubTheme.border-default;
+            }
+
+            GitHubSettingToggleRow {
+                title: "Memory diagnostics";
+                description: "Include periodic process memory and retained UI model measurements.";
+                checked: AppState.memory-diagnostics-logging;
+                toggled(value) => {
+                    AppState.memory-diagnostics-logging = value;
+                    AppState.toggle-memory-diagnostics-logging(value);
                 }
             }
 

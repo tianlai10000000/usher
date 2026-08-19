@@ -118,12 +118,17 @@ widths stay stable during that transition, so neither tree reflows on every
 animation frame. The feature-owned prepared session is released immediately on
 close; its read-only Slint projection may remain mounted for at most 280ms to
 paint the exit, then blocks, decoded pixels, and other visual payload state are
-cleared. The optimized native host applies the shared exact-extent virtual-list
+cleared. The docked Markdown layout bridge clears its projected rows, block
+extents, projection guards, and font/layout caches at the same boundary while
+retaining the stable Slint model identity registered by the root callback. The
+optimized native host applies the shared exact-extent virtual-list
 facade to Markdown and instantiates only a bounded visible/overscan block window
 at rest. During the docked shell transition, it retains the complete
 prepared model but suspends document painting because FemtoVG otherwise replays
 every descendant when the ancestor clip moves. Header, background, divider, and
-route surfaces remain painted through the complete transition. The
+route surfaces remain painted through the complete transition. The lightweight
+loading spinner and its current parser label remain visible; document-paint
+suspension applies only after a payload is prepared. The
 leading hairline has a wider invisible resize hit target. Hover emphasizes the
 line and shows a column-resize cursor; direct dragging changes the panel width
 within bounded panel/main-content limits. The preferred width survives close,
@@ -153,10 +158,13 @@ Changing the setting is immediate:
 主内容共享一个 260ms 动画 progress：完整宽度的面板始终靠右，只在移动分割线处揭示或
 裁剪，主内容同步预留或回收完全相同的宽度；Preview 与 Chat 文档树在过渡期间保持稳定
 布局宽度，不得逐帧重排。关闭时 Feature 持有的 prepared session 立即释放，只读 Slint
-视觉投影最多保留 280ms 绘制退出动画，随后清除 block、解码像素及其他视觉 payload。
+视觉投影最多保留 280ms 绘制退出动画，随后清除 block、解码像素及其他视觉 payload；
+停靠 Markdown layout bridge 同时清空 projected rows、block extent、projection guard
+及字体/layout 缓存，但保留根 callback 注册的稳定 Slint model 身份。
 优化后的原生 Host 使用共享精确 extent 虚拟列表门面，稳定时只实例化有界的
 可见/overscan Markdown block。停靠 Shell 过渡期间保留完整准备后 model，但暂停文档绘制，因为 FemtoVG 会在祖先
 clip 移动时逐帧重放所有后代；Header、背景、分隔线和路由 Surface 在完整动画期间继续绘制。
+轻量 loading spinner 与当前解析器文案保持可见；文档绘制暂停只作用于准备完成后的 payload。
 分隔线
 拥有更宽的透明 resize 命中区；hover 时强化线条并显示列缩放光标，直接拖拽在面板和主内容
 的安全宽度范围内调整尺寸。用户偏好宽度在当前应用会话内跨关闭、重开、模式切换、路由切换
@@ -194,13 +202,17 @@ macOS 全尺寸标题栏下方时，可拖动 scrollbar track 必须从原生标
 
 ## Markdown presentation / Markdown 展示
 
-Markdown remains native: `pulldown-cmark` owns CommonMark/GFM parsing and Slint
-1.17 `StyledText` owns inline emphasis/link shaping. Fenced code preserves the
-first info-string word as its language; the provider uses `syntect` with
-`two-face`'s bat-curated Sublime/TextMate syntax set and the InspiredGitHub theme
-to prepare compact light/dark token spans on the existing preview worker. This
-set includes TypeScript/TSX and other languages absent from `syntect`'s defaults;
-unknown or omitted languages fall back to plain monospace text. The shared Preview surface maps
+Markdown remains native: `MarkdownParserLoader` owns a `pulldown-cmark` parser,
+while `CodeParserRegistry` owns independently registered language loaders.
+`ParserLoadStrategy::OnDemand` is the production default; explicit
+`PreloadAll` initializes every registered loader. A cold loader is initialized
+once and its parser is cached by normalized fence language. TypeScript/TSX uses
+the dedicated `TsParserLoader` backed by Tree-sitter; JavaScript has a dedicated
+loader and other languages use `SyntectParserLoader`. The latter two share one
+lazy `syntect` repository with `two-face`'s bat-curated syntax set, avoiding
+duplicate complete syntax repositories. Unknown or omitted languages fall back
+to plain monospace text. Slint 1.17 `StyledText` owns inline emphasis/link
+shaping. The shared Preview surface maps
 those semantics to official GitHub Primer typography, spacing, colors, heading
 dividers, transparent quotes with a 4 px leading rule, table separators, and
 bordered monospace code blocks. Theme changes select the already-prepared token
@@ -218,11 +230,14 @@ document offsets, with bottom content reached only at 100 percent. It does not
 add Wry, WebView, HTML/CSS injection, or a browser helper process. Provider
 parsing remains independent from this replaceable visual theme.
 
-Markdown 保持原生实现：`pulldown-cmark` 负责 CommonMark/GFM 解析，Slint 1.17
-`StyledText` 负责行内强调和链接排版。围栏代码块保留 info string 的第一个单词作为
-语言；Provider 在既有 Preview Worker 上使用 `syntect`、`two-face` 维护的 bat
-Sublime/TextMate 语法集合与 InspiredGitHub 主题生成紧凑的亮色/暗色 token。该集合补齐
-`syntect` 默认包缺失的 TypeScript/TSX 等语言；未知或未声明语言自动回退为纯等宽文本。
+Markdown 保持原生实现：`MarkdownParserLoader` 持有 `pulldown-cmark` 解析器，
+`CodeParserRegistry` 持有彼此独立注册的语言 loader。生产默认使用
+`ParserLoadStrategy::OnDemand`，显式 `PreloadAll` 会初始化所有已注册 loader；冷 loader
+只初始化一次，并按规范化围栏语言缓存 parser。TypeScript/TSX 使用 Tree-sitter 支撑的
+专用 `TsParserLoader`；JavaScript 使用独立 loader，其他语言由
+`SyntectParserLoader` 处理。后两者共享一份惰性 `syntect` Repository 与 `two-face`
+维护的 bat 语法集合，避免重复完整语法库。未知或未声明语言自动回退为纯等宽文本。
+Slint 1.17 `StyledText` 负责行内强调和链接排版。
 共享 Preview Surface 使用 GitHub Primer 的字体层级、间距、语义色、
 标题分隔、透明底加 4px 左侧强调线的引用块、表格分隔和带边框等宽代码块。主题切换只
 选择已经准备好的 token 投影，不得重新解析 Markdown 或重新执行高亮。代码 token
@@ -280,10 +295,16 @@ fixture id，在启动时经生产 facade 自动打开对应 payload，用于可
 - The application facade owns one monotonically increasing request generation;
   completion from an older generation is discarded.
 - Preparing a new artifact cancels the previous preparation when possible.
+- A cold language-loader cache miss reports `ParserLoading` then `ParserReady`;
+  a cache hit reports neither. Cancellation before cache insertion reports no
+  `ParserReady` and leaves no parser entry.
+- The UI progress bridge checks the request generation before and on the Slint
+  event loop, so stale progress cannot replace a newer Preview's loading label.
 - Worker completion enters Slint only through `slint::invoke_from_event_loop`
   with weak window handles.
 - Host close clears the active feature session immediately and clears the visual
-  payload/decoded image after the bounded docked exit transition.
+  payload/decoded image plus docked virtual-layout caches after the bounded
+  docked exit transition.
 - The facade retains exactly one prepared session. Replacing or closing it drops
   the previous block model or decoded pixels; there is no multi-entry prepared
   artifact cache.

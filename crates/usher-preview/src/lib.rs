@@ -1,22 +1,23 @@
 //! Framework-neutral artifact preview providers and registry.
 
+#[cfg(feature = "markdown")]
+pub mod parser;
+
+#[cfg(feature = "markdown")]
+pub use parser::{
+    CodeParser, CodeParserLoader, CodeParserRegistry, JavaScriptParserLoader, MarkdownParser,
+    MarkdownParserLoader, ParserLoadStrategy, SyntectParserLoader, TsParserLoader, parse_markdown,
+};
+
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
-#[cfg(feature = "markdown")]
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-#[cfg(feature = "markdown")]
-use std::sync::LazyLock;
-#[cfg(feature = "markdown")]
-use syntect::easy::HighlightLines;
-#[cfg(feature = "markdown")]
-use syntect::highlighting::{FontStyle, Theme, ThemeSet};
-#[cfg(feature = "markdown")]
-use syntect::parsing::SyntaxSet;
+#[cfg(all(feature = "markdown", test))]
+use parser::parse_markdown_inner;
 
 pub const MARKDOWN_PROVIDER_ID: &str = "markdown";
 pub const IMAGE_PROVIDER_ID: &str = "image";
@@ -167,16 +168,60 @@ pub struct PreparedArtifact {
     pub approximate_bytes: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreviewPreparationProgress {
+    ParserLoading {
+        language: String,
+        loader_id: &'static str,
+        display_name: String,
+    },
+    ParserReady {
+        language: String,
+        loader_id: &'static str,
+        display_name: String,
+    },
+}
+
+type ProgressHandler = dyn Fn(PreviewPreparationProgress) + Send + Sync;
+
+struct CancellationState {
+    cancelled: AtomicBool,
+    parser_cancellation: AtomicUsize,
+    progress_handler: Mutex<Option<Arc<ProgressHandler>>>,
+}
+
+impl Default for CancellationState {
+    fn default() -> Self {
+        Self {
+            cancelled: AtomicBool::new(false),
+            parser_cancellation: AtomicUsize::new(0),
+            progress_handler: Mutex::new(None),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
-pub struct CancellationToken(Arc<AtomicBool>);
+pub struct CancellationToken(Arc<CancellationState>);
 
 impl CancellationToken {
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
+        self.0.cancelled.store(true, Ordering::Release);
+        self.0.parser_cancellation.store(1, Ordering::Release);
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.0.cancelled.load(Ordering::Acquire)
+    }
+
+    pub fn set_progress_handler(
+        &self,
+        handler: impl Fn(PreviewPreparationProgress) + Send + Sync + 'static,
+    ) {
+        *self
+            .0
+            .progress_handler
+            .lock()
+            .expect("preview progress handler lock poisoned") = Some(Arc::new(handler));
     }
 
     fn check(&self) -> Result<(), PreviewError> {
@@ -184,6 +229,24 @@ impl CancellationToken {
             Err(PreviewError::Cancelled)
         } else {
             Ok(())
+        }
+    }
+
+    #[cfg(feature = "markdown")]
+    pub(crate) fn parser_cancellation_flag(&self) -> &AtomicUsize {
+        &self.0.parser_cancellation
+    }
+
+    #[cfg(feature = "markdown")]
+    pub(crate) fn report_progress(&self, progress: PreviewPreparationProgress) {
+        let handler = self
+            .0
+            .progress_handler
+            .lock()
+            .expect("preview progress handler lock poisoned")
+            .clone();
+        if let Some(handler) = handler {
+            handler(progress);
         }
     }
 }
@@ -299,12 +362,23 @@ impl PreviewRegistry {
         #[cfg(any(feature = "markdown", feature = "image", feature = "plain-text"))]
         let mut registry = Self::new();
         #[cfg(feature = "markdown")]
-        registry.register(MarkdownProvider);
+        registry.register(MarkdownProvider::new(ParserLoadStrategy::OnDemand));
         #[cfg(feature = "image")]
         registry.register(ImageProvider);
         #[cfg(feature = "plain-text")]
         registry.register(PlainTextProvider);
         #[cfg(any(feature = "markdown", feature = "image", feature = "plain-text"))]
+        registry
+    }
+
+    #[cfg(feature = "markdown")]
+    pub fn with_builtins_and_parser_strategy(strategy: ParserLoadStrategy) -> Self {
+        let mut registry = Self::new();
+        registry.register(MarkdownProvider::new(strategy));
+        #[cfg(feature = "image")]
+        registry.register(ImageProvider);
+        #[cfg(feature = "plain-text")]
+        registry.register(PlainTextProvider);
         registry
     }
 
@@ -398,7 +472,18 @@ fn materialize(
 }
 
 #[cfg(feature = "markdown")]
-struct MarkdownProvider;
+struct MarkdownProvider {
+    parser: Arc<dyn MarkdownParser>,
+}
+
+#[cfg(feature = "markdown")]
+impl MarkdownProvider {
+    fn new(strategy: ParserLoadStrategy) -> Self {
+        Self {
+            parser: MarkdownParserLoader::with_builtins(strategy).load(),
+        }
+    }
+}
 
 #[cfg(feature = "markdown")]
 impl PreviewProvider for MarkdownProvider {
@@ -430,7 +515,7 @@ impl PreviewProvider for MarkdownProvider {
     ) -> Result<PreparedArtifact, PreviewError> {
         cancellation.check()?;
         let markdown = source.text()?;
-        let document = parse_markdown_inner(markdown, &source.title, Some(cancellation))?;
+        let document = self.parser.parse(markdown, &source.title, cancellation)?;
         cancellation.check()?;
         let approximate_bytes = markdown.len()
             + document
@@ -614,380 +699,6 @@ impl PreviewProvider for PlainTextProvider {
     }
 }
 
-#[cfg(feature = "markdown")]
-#[derive(Clone)]
-struct PendingBlock {
-    kind: MarkdownBlockKind,
-    text: String,
-    spans: Vec<MarkdownInlineSpan>,
-    code_language: String,
-}
-
-#[cfg(feature = "markdown")]
-pub fn parse_markdown(markdown: &str, fallback_title: &str) -> MarkdownDocument {
-    parse_markdown_inner(markdown, fallback_title, None)
-        .expect("non-cancellable Markdown parsing cannot be cancelled")
-}
-
-#[cfg(feature = "markdown")]
-fn parse_markdown_inner(
-    markdown: &str,
-    fallback_title: &str,
-    cancellation: Option<&CancellationToken>,
-) -> Result<MarkdownDocument, PreviewError> {
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_TASKLISTS);
-
-    let mut blocks = Vec::new();
-    let mut current: Option<PendingBlock> = None;
-    let mut list_depth = 0usize;
-    let mut strong = false;
-    let mut emphasis = false;
-    let mut link_href: Option<String> = None;
-    let mut in_image = false;
-
-    let finalize = |blocks: &mut Vec<MarkdownBlock>, current: &mut Option<PendingBlock>| {
-        if let Some(pending) = current.take() {
-            let text = pending.text.trim_end().to_string();
-            if !text.trim().is_empty() {
-                blocks.push(MarkdownBlock {
-                    kind: pending.kind,
-                    text,
-                    spans: pending.spans,
-                    code_language: pending.code_language,
-                    code_spans: Vec::new(),
-                });
-            }
-        }
-    };
-
-    for (event_index, event) in Parser::new_ext(markdown, options).enumerate() {
-        if event_index % 256 == 0 && cancellation.is_some_and(CancellationToken::is_cancelled) {
-            return Err(PreviewError::Cancelled);
-        }
-        match event {
-            Event::Start(Tag::Heading { level, .. }) => {
-                finalize(&mut blocks, &mut current);
-                current = Some(PendingBlock::new(heading_kind(level)));
-            }
-            Event::End(TagEnd::Heading(_)) => finalize(&mut blocks, &mut current),
-            Event::Start(Tag::Paragraph) => {
-                current.get_or_insert_with(|| PendingBlock::new(MarkdownBlockKind::Paragraph));
-            }
-            Event::End(TagEnd::Paragraph) => finalize(&mut blocks, &mut current),
-            Event::Start(Tag::BlockQuote(_)) => {
-                finalize(&mut blocks, &mut current);
-                current = Some(PendingBlock::new(MarkdownBlockKind::Quote));
-            }
-            Event::End(TagEnd::BlockQuote(_)) => finalize(&mut blocks, &mut current),
-            Event::Start(Tag::CodeBlock(kind)) => {
-                finalize(&mut blocks, &mut current);
-                let mut block = PendingBlock::new(MarkdownBlockKind::CodeBlock);
-                block.code_language = code_language(&kind);
-                current = Some(block);
-            }
-            Event::End(TagEnd::CodeBlock) => finalize(&mut blocks, &mut current),
-            Event::Start(Tag::List(_)) => list_depth += 1,
-            Event::End(TagEnd::List(_)) => list_depth = list_depth.saturating_sub(1),
-            Event::Start(Tag::Item) => {
-                finalize(&mut blocks, &mut current);
-                let mut item = PendingBlock::new(MarkdownBlockKind::ListItem);
-                item.push(
-                    MarkdownInlineKind::Text,
-                    "",
-                    &format!("{}• ", "  ".repeat(list_depth.saturating_sub(1))),
-                );
-                current = Some(item);
-            }
-            Event::End(TagEnd::Item) => finalize(&mut blocks, &mut current),
-            Event::Start(Tag::Table(_)) => finalize(&mut blocks, &mut current),
-            Event::Start(Tag::TableRow) => {
-                finalize(&mut blocks, &mut current);
-                current = Some(PendingBlock::new(MarkdownBlockKind::TableRow));
-            }
-            Event::End(TagEnd::TableRow) => finalize(&mut blocks, &mut current),
-            Event::End(TagEnd::TableCell) => {
-                if let Some(block) = current.as_mut() {
-                    block.push(MarkdownInlineKind::Text, "", " | ");
-                }
-            }
-            Event::Start(Tag::Strong) => strong = true,
-            Event::End(TagEnd::Strong) => strong = false,
-            Event::Start(Tag::Emphasis) => emphasis = true,
-            Event::End(TagEnd::Emphasis) => emphasis = false,
-            Event::Start(Tag::Link { dest_url, .. }) => link_href = Some(dest_url.to_string()),
-            Event::End(TagEnd::Link) => link_href = None,
-            Event::Start(Tag::Image { dest_url, .. }) => {
-                in_image = true;
-                link_href = Some(dest_url.to_string());
-            }
-            Event::End(TagEnd::Image) => {
-                in_image = false;
-                link_href = None;
-            }
-            Event::TaskListMarker(checked) => {
-                current
-                    .get_or_insert_with(|| PendingBlock::new(MarkdownBlockKind::ListItem))
-                    .push(
-                        MarkdownInlineKind::Text,
-                        "",
-                        if checked { "[x] " } else { "[ ] " },
-                    );
-            }
-            Event::Text(text) => {
-                let block =
-                    current.get_or_insert_with(|| PendingBlock::new(MarkdownBlockKind::Paragraph));
-                let kind = if link_href.is_some() {
-                    MarkdownInlineKind::Link
-                } else if strong {
-                    MarkdownInlineKind::Strong
-                } else if emphasis {
-                    MarkdownInlineKind::Emphasis
-                } else {
-                    MarkdownInlineKind::Text
-                };
-                if in_image {
-                    block.push(MarkdownInlineKind::Text, "", "Image: ");
-                }
-                block.push(kind, link_href.as_deref().unwrap_or(""), &text);
-            }
-            Event::Code(text) => {
-                current
-                    .get_or_insert_with(|| PendingBlock::new(MarkdownBlockKind::Paragraph))
-                    .push(MarkdownInlineKind::Code, "", &text);
-            }
-            Event::SoftBreak | Event::HardBreak => {
-                current
-                    .get_or_insert_with(|| PendingBlock::new(MarkdownBlockKind::Paragraph))
-                    .push(MarkdownInlineKind::Text, "", "\n");
-            }
-            Event::Rule => {
-                finalize(&mut blocks, &mut current);
-                blocks.push(MarkdownBlock {
-                    kind: MarkdownBlockKind::Rule,
-                    text: String::new(),
-                    spans: Vec::new(),
-                    code_language: String::new(),
-                    code_spans: Vec::new(),
-                });
-            }
-            Event::Html(html) | Event::InlineHtml(html) => {
-                current
-                    .get_or_insert_with(|| PendingBlock::new(MarkdownBlockKind::Paragraph))
-                    .push(MarkdownInlineKind::Text, "", &html);
-            }
-            _ => {}
-        }
-    }
-    finalize(&mut blocks, &mut current);
-
-    for block in &mut blocks {
-        if block.kind == MarkdownBlockKind::CodeBlock {
-            block.code_spans = highlight_code(&block.text, &block.code_language, cancellation)?;
-        }
-    }
-
-    let title = blocks
-        .iter()
-        .find(|block| {
-            matches!(
-                block.kind,
-                MarkdownBlockKind::Heading1
-                    | MarkdownBlockKind::Heading2
-                    | MarkdownBlockKind::Heading3
-            )
-        })
-        .map(|block| block.text.trim())
-        .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| fallback_title.trim())
-        .to_string();
-    let title = if title.is_empty() {
-        "Markdown document".to_string()
-    } else {
-        title.chars().take(120).collect()
-    };
-    let plain_text = blocks
-        .iter()
-        .filter(|block| block.kind != MarkdownBlockKind::Rule)
-        .map(|block| block.text.trim_end())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-
-    Ok(MarkdownDocument {
-        title,
-        plain_text,
-        blocks,
-    })
-}
-
-#[cfg(feature = "markdown")]
-impl PendingBlock {
-    fn new(kind: MarkdownBlockKind) -> Self {
-        Self {
-            kind,
-            text: String::new(),
-            spans: Vec::new(),
-            code_language: String::new(),
-        }
-    }
-
-    fn push(&mut self, kind: MarkdownInlineKind, href: &str, text: &str) {
-        self.text.push_str(text);
-        if let Some(last) = self.spans.last_mut()
-            && last.kind == kind
-            && last.href == href
-        {
-            last.text.push_str(text);
-            return;
-        }
-        self.spans.push(MarkdownInlineSpan {
-            kind,
-            text: text.to_string(),
-            href: href.to_string(),
-        });
-    }
-}
-
-#[cfg(feature = "markdown")]
-fn code_language(kind: &CodeBlockKind<'_>) -> String {
-    match kind {
-        CodeBlockKind::Indented => String::new(),
-        CodeBlockKind::Fenced(info) => info
-            .split_whitespace()
-            .next()
-            .unwrap_or_default()
-            .trim_matches(|character| matches!(character, '{' | '}' | '.'))
-            .to_ascii_lowercase(),
-    }
-}
-
-#[cfg(feature = "markdown")]
-struct MarkdownHighlightResources {
-    syntaxes: SyntaxSet,
-    light_theme: Theme,
-}
-
-#[cfg(feature = "markdown")]
-static MARKDOWN_HIGHLIGHT_RESOURCES: LazyLock<MarkdownHighlightResources> = LazyLock::new(|| {
-    let mut themes = ThemeSet::load_defaults().themes;
-    MarkdownHighlightResources {
-        syntaxes: two_face::syntax::extra_newlines(),
-        light_theme: themes
-            .remove("InspiredGitHub")
-            .expect("syntect must bundle the InspiredGitHub theme"),
-    }
-});
-
-#[cfg(feature = "markdown")]
-fn highlight_code(
-    source: &str,
-    language: &str,
-    cancellation: Option<&CancellationToken>,
-) -> Result<Vec<MarkdownCodeSpan>, PreviewError> {
-    let resources = &*MARKDOWN_HIGHLIGHT_RESOURCES;
-    let syntax = resolve_code_syntax(&resources.syntaxes, language);
-    let mut highlighter = HighlightLines::new(syntax, &resources.light_theme);
-    let mut spans = Vec::<MarkdownCodeSpan>::new();
-    for (line_index, line) in source.split_inclusive('\n').enumerate() {
-        if line_index % 64 == 0 && cancellation.is_some_and(CancellationToken::is_cancelled) {
-            return Err(PreviewError::Cancelled);
-        }
-        let ranges = highlighter
-            .highlight_line(line, &resources.syntaxes)
-            .unwrap_or_else(|_| vec![(syntect::highlighting::Style::default(), line)]);
-        for (style, text) in ranges {
-            let light_color = [
-                style.foreground.a,
-                style.foreground.r,
-                style.foreground.g,
-                style.foreground.b,
-            ];
-            let dark_color = github_dark_color(light_color);
-            let bold = style.font_style.contains(FontStyle::BOLD);
-            let italic = style.font_style.contains(FontStyle::ITALIC);
-            if let Some(previous) = spans.last_mut()
-                && previous.light_color == light_color
-                && previous.dark_color == dark_color
-                && previous.bold == bold
-                && previous.italic == italic
-            {
-                previous.text.push_str(text);
-            } else if !text.is_empty() {
-                spans.push(MarkdownCodeSpan {
-                    text: text.to_string(),
-                    light_color,
-                    dark_color,
-                    bold,
-                    italic,
-                });
-            }
-        }
-    }
-    Ok(spans)
-}
-
-#[cfg(feature = "markdown")]
-fn resolve_code_syntax<'a>(
-    syntaxes: &'a SyntaxSet,
-    language: &str,
-) -> &'a syntect::parsing::SyntaxReference {
-    let language = language.trim();
-    if language.is_empty() {
-        return syntaxes.find_syntax_plain_text();
-    }
-
-    syntaxes
-        .find_syntax_by_token(language)
-        .or_else(|| syntaxes.find_syntax_by_extension(language))
-        .or_else(|| {
-            syntaxes
-                .syntaxes()
-                .iter()
-                .find(|syntax| syntax.name.eq_ignore_ascii_case(language))
-        })
-        .unwrap_or_else(|| syntaxes.find_syntax_plain_text())
-}
-
-#[cfg(feature = "markdown")]
-fn github_dark_color(color: [u8; 4]) -> [u8; 4] {
-    let [alpha, red, green, blue] = color;
-    let mapped = match [red, green, blue] {
-        [0x24, 0x29, 0x2f] | [0x24, 0x29, 0x2e] => [0xe6, 0xed, 0xf3],
-        [0x6a, 0x73, 0x7d] | [0x57, 0x60, 0x6a] => [0x8b, 0x94, 0x9e],
-        [0x00, 0x5c, 0xc5] => [0x79, 0xc0, 0xff],
-        [0x03, 0x2f, 0x62] => [0xa5, 0xd6, 0xff],
-        [0x22, 0x86, 0x3a] => [0x7e, 0xe7, 0x87],
-        [0x6f, 0x42, 0xc1] => [0xd2, 0xa8, 0xff],
-        [0xd7, 0x3a, 0x49] | [0xb3, 0x1d, 0x28] => [0xff, 0x7b, 0x72],
-        [0xe3, 0x62, 0x09] => [0xff, 0xa6, 0x57],
-        _ => {
-            let luminance =
-                (u32::from(red) * 299 + u32::from(green) * 587 + u32::from(blue) * 114) / 1000;
-            if luminance < 150 {
-                [
-                    red.saturating_add((255 - red) / 2),
-                    green.saturating_add((255 - green) / 2),
-                    blue.saturating_add((255 - blue) / 2),
-                ]
-            } else {
-                [red, green, blue]
-            }
-        }
-    };
-    [alpha, mapped[0], mapped[1], mapped[2]]
-}
-
-#[cfg(feature = "markdown")]
-fn heading_kind(level: HeadingLevel) -> MarkdownBlockKind {
-    match level {
-        HeadingLevel::H1 => MarkdownBlockKind::Heading1,
-        HeadingLevel::H2 => MarkdownBlockKind::Heading2,
-        _ => MarkdownBlockKind::Heading3,
-    }
-}
-
 pub fn looks_like_markdown(content: &str) -> bool {
     let trimmed = content.trim();
     if trimmed.is_empty() {
@@ -1123,6 +834,46 @@ mod tests {
     }
 
     #[test]
+    fn unknown_fence_falls_back_to_plain_text() {
+        let document = parse_markdown("```usher-unknown\nalpha < beta\n```", "Code");
+        let code = document
+            .blocks
+            .iter()
+            .find(|block| block.kind == MarkdownBlockKind::CodeBlock)
+            .expect("fenced code block");
+
+        assert_eq!(code.code_language, "usher-unknown");
+        assert_eq!(code.code_spans.len(), 1);
+        assert_eq!(code.code_spans[0].text, code.text);
+        assert_eq!(code.code_spans[0].light_color, [255, 50, 50, 50]);
+    }
+
+    #[test]
+    fn multiple_fences_preserve_each_highlighted_source() {
+        let document = parse_markdown(
+            "```javascript\nconst ready = true;\n```\n\n```typescript\nconst count: number = 2;\n```",
+            "Code",
+        );
+        let code_blocks = document
+            .blocks
+            .iter()
+            .filter(|block| block.kind == MarkdownBlockKind::CodeBlock)
+            .collect::<Vec<_>>();
+
+        assert_eq!(code_blocks.len(), 2);
+        for block in code_blocks {
+            assert_eq!(
+                block
+                    .code_spans
+                    .iter()
+                    .map(|span| span.text.as_str())
+                    .collect::<String>(),
+                block.text
+            );
+        }
+    }
+
+    #[test]
     fn disabled_provider_does_not_prepare_explicit_markdown() {
         let mut registry = PreviewRegistry::with_builtins();
         assert!(registry.set_enabled(MARKDOWN_PROVIDER_ID, false));
@@ -1218,6 +969,47 @@ mod tests {
             panic!("expected image payload");
         };
         assert_eq!((image.width, image.height), (2, 3));
+    }
+
+    #[cfg(feature = "markdown")]
+    #[test]
+    #[ignore = "release-only quantitative benchmark"]
+    fn markdown_parser_rss_probe() {
+        assert!(!cfg!(debug_assertions), "run this benchmark with --release");
+        let fixture =
+            std::env::var("USHER_PREVIEW_PARSER_FIXTURE").unwrap_or_else(|_| "plain".to_string());
+        let markdown = match fixture.as_str() {
+            "plain" => "# Parser probe\n\nNo fenced code in this fixture.\n",
+            "javascript" => "```javascript\nconst count = 42; // ready\n```\n",
+            "rust" => "```rust\nlet preview = registry.prepare(source, &cancellation)?;\n```\n",
+            "typescript" => {
+                "```typescript\nimport { WeCom } from '@picc/jsbridge';\nawait WeCom.register({ appId: 'your-app-id' });\n```\n"
+            }
+            other => panic!("unknown parser fixture: {other}"),
+        };
+
+        let started = Instant::now();
+        let document = black_box(parse_markdown(markdown, "Parser probe"));
+        let token_count = document
+            .blocks
+            .iter()
+            .map(|block| block.code_spans.len())
+            .sum::<usize>();
+        println!(
+            "markdown_parser_rss_probe fixture={} elapsed_us={} blocks={} tokens={} pid={}",
+            fixture,
+            started.elapsed().as_micros(),
+            document.blocks.len(),
+            token_count,
+            std::process::id(),
+        );
+
+        let hold_ms = std::env::var("USHER_PREVIEW_PARSER_HOLD_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(2_000);
+        std::thread::sleep(std::time::Duration::from_millis(hold_ms));
+        black_box(document);
     }
 
     #[cfg(feature = "markdown")]

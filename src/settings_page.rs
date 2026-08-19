@@ -119,8 +119,11 @@ fn sync_state_from_window(window: &MainWindow, page: &GitHubSettingsPage) {
     target.set_effective_dark_mode(source.get_effective_dark_mode());
     target.set_version(source.get_version());
     target.set_auto_update(source.get_auto_update());
+    target.set_application_console_logging(source.get_application_console_logging());
+    target.set_application_file_logging(source.get_application_file_logging());
     target.set_tracing_logger_active(source.get_tracing_logger_active());
     target.set_terminal_verbose_logging(source.get_terminal_verbose_logging());
+    target.set_memory_diagnostics_logging(source.get_memory_diagnostics_logging());
     target.set_ui_sound_effects(source.get_ui_sound_effects());
     target.set_artifact_preview_presentation_mode(source.get_artifact_preview_presentation_mode());
     target.set_artifact_preview_markdown_enabled(source.get_artifact_preview_markdown_enabled());
@@ -190,6 +193,24 @@ fn bind_callbacks(window: &MainWindow, page: &GitHubSettingsPage) {
     });
 
     let window_weak = window.as_weak();
+    state.on_toggle_application_console_logging(move |enabled| {
+        if let Some(window) = window_weak.upgrade() {
+            let state = AppState::get(&window);
+            state.set_application_console_logging(enabled);
+            state.invoke_toggle_application_console_logging(enabled);
+        }
+    });
+
+    let window_weak = window.as_weak();
+    state.on_toggle_application_file_logging(move |enabled| {
+        if let Some(window) = window_weak.upgrade() {
+            let state = AppState::get(&window);
+            state.set_application_file_logging(enabled);
+            state.invoke_toggle_application_file_logging(enabled);
+        }
+    });
+
+    let window_weak = window.as_weak();
     state.on_toggle_tracing_logger_active(move |enabled| {
         if let Some(window) = window_weak.upgrade() {
             let state = AppState::get(&window);
@@ -204,6 +225,15 @@ fn bind_callbacks(window: &MainWindow, page: &GitHubSettingsPage) {
             let state = AppState::get(&window);
             state.set_terminal_verbose_logging(enabled);
             state.invoke_toggle_terminal_verbose_logging(enabled);
+        }
+    });
+
+    let window_weak = window.as_weak();
+    state.on_toggle_memory_diagnostics_logging(move |enabled| {
+        if let Some(window) = window_weak.upgrade() {
+            let state = AppState::get(&window);
+            state.set_memory_diagnostics_logging(enabled);
+            state.invoke_toggle_memory_diagnostics_logging(enabled);
         }
     });
 

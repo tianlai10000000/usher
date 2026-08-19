@@ -325,6 +325,7 @@ for scenario in "${scenario_items[@]}"; do
       USHER_MEMORY_SCENARIO="$scenario" \
       USHER_MEMORY_BENCHMARK_RUN="$run" \
       USHER_MEMORY_BUILD_PROFILE="$build_profile" \
+      USHER_MEMORY_FIXTURE="$fixture_label" \
       USHER_MEMORY_WINDOW_CONTROL=signal-file-v1 \
       USHER_MEMORY_WINDOW_CONTROL_FILE="$active_control_file" \
       USHER_TOKIO_WORKER_THREADS="$tokio_workers" \

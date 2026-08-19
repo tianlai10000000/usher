@@ -148,13 +148,15 @@ To compare the experimental FemtoVG/WGPU path (not the production default):
 SLINT_BACKEND=winit-femtovg-wgpu cargo run --no-default-features --features renderer-femtovg-wgpu
 ```
 
-Debug builds write five-second process-memory samples and lifecycle checkpoints to the normal Usher log. To enable the same diagnostics in a release build:
+Debug builds enable five-second process-memory samples and lifecycle checkpoints by default; they can be disabled under **Settings → Diagnostics → Memory diagnostics**. To force the same diagnostics in a release benchmark:
 
 ```sh
 USHER_MEMORY_DIAGNOSTICS=1 ./usher
 ```
 
 Filter for `[Memory][Diag]`, `[Memory][UI]`, and `[Workflow][PR Review][Memory]` to correlate RSS/physical-footprint changes with window size and PR model/cache ownership.
+
+For interactive troubleshooting, open **Settings → Diagnostics** and manually enable only the output destination and detail source needed for the reproduction. `Terminal verbose diagnostics` and `Memory diagnostics` add records but still require `Console output` and/or `Application file logs` to make those records visible. Use `Enable all` only for a short cross-cutting capture, then restore the previous rows or select `Disable all`. Record the reproduction time and avoid entering or sharing secrets while Terminal verbose capture is active. See the [diagnostic logging specification](docs/specs/diagnostics.md) for the switch matrix, file destinations, and collection checklist.
 
 On macOS, run the repeatable two-cycle release benchmark with:
 
@@ -174,7 +176,7 @@ Usher uses `directories::ProjectDirs::from("com", "usher", "app")` to select pla
 | Project registry | local data directory: `project/projects.json` |
 | Chat history | local data directory: `im/chat_history.jsonl` |
 | Durable notification inbox and read state | local data directory: `messages/messages.json` |
-| Logs | local data directory: `logs/<date>/usher.log` |
+| Logs | local data directory: `logs/<date>/usher.log` and `logs/<date>/usher_tracing.log` |
 | Cached remote project logos | temporary directory: `usher-logo-cache/` |
 
 GitHub, GitLab, and Gitee tokens can be managed from Settings. Gitee public and enterprise credentials are separate; the repository remote host selects public v5 or the configured enterprise v8 API without sharing tokens. The **Code Hosting API Configuration** section stores a per-provider enterprise API URL and enterprise name under `[git.platform.<provider>]`; enter either the service host or the complete REST API root (for example, `https://git.example.com` or `https://git.example.com/api/v4`). The provider version path is added when omitted. These values are local-only and used only when the configured API host matches a repository remote. The **AI Agent** section accepts an OpenAI-compatible Base URL, API Key, and Model Name; it provides an extensible provider selector, editable model name, and a non-billable connection test. Settings are saved under `[ai.agent]`. Do not commit generated settings, logs, histories, or credentials. See [AI Agent configuration](docs/specs/ai-agent.md).

@@ -33,9 +33,10 @@ use readiness::{gitee_enterprise_merge_readiness, gitee_public_merge_readiness};
 use revert::{enterprise_commit_refs_can_revert, enterprise_data_object};
 use transport::{
     enterprise_authenticated_builder, enterprise_project_endpoint,
-    enterprise_pull_request_endpoint, enterprise_repository_commit_endpoint,
-    enterprise_web_pull_request_review_endpoint, parse_gitee_merge_method,
-    public_authenticated_builder, public_authenticated_request, public_repo_endpoint,
+    enterprise_pull_request_endpoint, enterprise_pull_request_get,
+    enterprise_repository_commit_endpoint, enterprise_web_pull_request_review_endpoint,
+    parse_gitee_merge_method, public_authenticated_builder, public_authenticated_request,
+    public_repo_endpoint,
 };
 
 /// Fetch the stable provider project id for a remote repository.
@@ -245,11 +246,6 @@ pub(super) async fn get_pull_request_diff(
             "{merge_request_iid}",
             percent_encode_path(pull_request_iid.trim()).as_str(),
         );
-    let detail_endpoint = enterprise_pull_request_endpoint(
-        endpoints::ENTERPRISE_MERGE_REQUEST_URL,
-        repo_project_id,
-        pull_request_iid,
-    )?;
     let mut diffs_request = http::post(diffs_endpoint)
         .header("OAUTH", "enabled")
         .header(ACCEPT, "application/json")
@@ -284,12 +280,19 @@ pub(super) async fn get_pull_request_diff(
     // MR detail supplies Conversation/Commits badge summaries without waiting for
     // the lazy Conversation tab payload.
     let detail_future = async {
-        http::send_json(
-            enterprise_authenticated_builder(http::get(detail_endpoint)),
+        let detail_endpoint = enterprise_pull_request_endpoint(
+            endpoints::ENTERPRISE_MERGE_REQUEST_URL,
+            repo_project_id,
+            pull_request_iid,
+        )?;
+        let detail: Value = http::send_json(
+            enterprise_pull_request_get(detail_endpoint),
             RequestOptions::new("Load Gitee enterprise pull request detail summary"),
         )
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+        log_enterprise_pull_request_detail_shape("diff-summary", &detail);
+        Ok::<Value, String>(detail)
     };
     let (payload, detail) = tokio::join!(diffs_future, detail_future);
     let payload = payload?;
@@ -662,7 +665,7 @@ async fn get_enterprise_pull_request_action_state(
         pull_request_iid,
     )?;
     let current: Value = http::send_json(
-        enterprise_authenticated_builder(http::get(current_endpoint)),
+        enterprise_pull_request_get(current_endpoint),
         RequestOptions::new("Load Gitee enterprise merge state"),
     )
     .await
@@ -674,11 +677,12 @@ async fn get_enterprise_pull_request_action_state(
         pull_request_iid,
     )?;
     let detail: Value = http::send_json(
-        enterprise_authenticated_builder(http::get(detail_endpoint)),
+        enterprise_pull_request_get(detail_endpoint),
         RequestOptions::new("Load Gitee enterprise pull request details"),
     )
     .await
     .map_err(|error| error.to_string())?;
+    log_enterprise_pull_request_detail_shape("action-state", &detail);
 
     let has_token = configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_some();
     let current_object = enterprise_data_object(&current);
@@ -818,20 +822,10 @@ pub(super) async fn get_pull_request_conversation(
     pull_request_iid: &str,
 ) -> Result<Vec<PullRequestConversationItem>, String> {
     let profile = gitee_api_profile(locator);
-    let (detail_payload, notes, current_user, operate_logs) = match profile {
+    let (detail_payload, notes, current_user, historical_activity) = match profile {
         GiteeApiProfile::EnterpriseV8 => {
-            let detail_endpoint = enterprise_pull_request_endpoint(
-                endpoints::ENTERPRISE_MERGE_REQUEST_URL,
-                repo_project_id,
-                pull_request_iid,
-            )?;
             let notes_endpoint = enterprise_pull_request_endpoint(
                 endpoints::ENTERPRISE_MERGE_REQUEST_NOTES_URL,
-                repo_project_id,
-                pull_request_iid,
-            )?;
-            let operate_logs_endpoint = enterprise_pull_request_endpoint(
-                endpoints::ENTERPRISE_MERGE_REQUEST_OPERATE_LOGS_URL,
                 repo_project_id,
                 pull_request_iid,
             )?;
@@ -839,12 +833,19 @@ pub(super) async fn get_pull_request_conversation(
             let current_user_endpoint = endpoints::ENTERPRISE_CURRENT_USER_URL
                 .replace("{api_base_url}", api_base_url.as_str());
             let detail_future = async {
-                http::send_json(
-                    enterprise_authenticated_builder(http::get(detail_endpoint)),
+                let detail_endpoint = enterprise_pull_request_endpoint(
+                    endpoints::ENTERPRISE_MERGE_REQUEST_URL,
+                    repo_project_id,
+                    pull_request_iid,
+                )?;
+                let detail: Value = http::send_json(
+                    enterprise_pull_request_get(detail_endpoint),
                     RequestOptions::new("Load Gitee enterprise merge request conversation header"),
                 )
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+                log_enterprise_pull_request_detail_shape("conversation", &detail);
+                Ok::<Value, String>(detail)
             };
             let notes_future = async {
                 http::send_json(
@@ -863,21 +864,9 @@ pub(super) async fn get_pull_request_conversation(
                 .await
                 .ok()
             };
-            let operate_logs_future = async {
-                http::send_json(
-                    enterprise_authenticated_builder(http::get(operate_logs_endpoint)),
-                    RequestOptions::new("Load Gitee enterprise pull request operation logs"),
-                )
-                .await
-                .ok()
-            };
-            let (detail, notes, current_user, operate_logs) = tokio::join!(
-                detail_future,
-                notes_future,
-                current_user_future,
-                operate_logs_future
-            );
-            (detail?, notes?, current_user, operate_logs)
+            let (detail, notes, current_user) =
+                tokio::join!(detail_future, notes_future, current_user_future);
+            (detail?, notes?, current_user, None)
         }
         GiteeApiProfile::PublicV5 => {
             let detail_endpoint = public_repo_endpoint(
@@ -992,17 +981,17 @@ pub(super) async fn get_pull_request_conversation(
         }
     }
 
-    let operate_log_values = operate_logs.as_ref().and_then(pull_request_values);
-    let mut operate_log_activity = operate_log_values
+    let historical_activity_values = historical_activity.as_ref().and_then(pull_request_values);
+    let mut normalized_activity = historical_activity_values
         .map(|values| decode_gitee_operate_log_activity(values))
         .unwrap_or_default();
     if profile == GiteeApiProfile::EnterpriseV8 {
         merge_gitee_review_summaries(
-            &mut operate_log_activity,
+            &mut normalized_activity,
             enterprise_review_summaries(detail, current_user.as_ref()),
         );
     }
-    items.extend(operate_log_activity);
+    items.extend(normalized_activity);
 
     let merged_at = string_field(detail, "merged_at").filter(|value| !value.trim().is_empty());
     let merge_sha = string_field(detail, "merge_commit_sha")
@@ -1021,7 +1010,7 @@ pub(super) async fn get_pull_request_conversation(
         }
     };
     let merge_actor_account = (profile == GiteeApiProfile::EnterpriseV8 && merged_at.is_some())
-        .then(|| gitee_merge_actor_account(detail, operate_log_values))
+        .then(|| gitee_merge_actor_account(detail, historical_activity_values))
         .flatten();
     let merge_actor_user_future = async {
         if let Some(account) = merge_actor_account.as_deref() {
@@ -1047,7 +1036,7 @@ pub(super) async fn get_pull_request_conversation(
             .unwrap_or_default();
         let merge_event = gitee_merge_event_with_user(
             detail,
-            operate_log_values,
+            historical_activity_values,
             merge_commit.as_ref(),
             merge_actor_user.as_ref(),
         );
@@ -1174,7 +1163,7 @@ fn enterprise_user_has_distinct_display_name(user: &Value, account: &str) -> boo
 
 async fn load_enterprise_merge_commit(
     repo_project_id: &str,
-    pull_request_iid: &str,
+    _pull_request_iid: &str,
     merge_sha: &str,
 ) -> Option<Value> {
     let endpoint = enterprise_repository_commit_endpoint(
@@ -1184,7 +1173,7 @@ async fn load_enterprise_merge_commit(
     )
     .ok()?;
     let payload: Value = http::send_json(
-        enterprise_authenticated_builder(http::get(endpoint)).query(&[("pr_id", pull_request_iid)]),
+        enterprise_authenticated_builder(http::get(endpoint)),
         RequestOptions::new("Load Gitee enterprise merge commit actor"),
     )
     .await
@@ -1230,6 +1219,54 @@ fn enterprise_review_summaries(
             })
         })
         .collect()
+}
+
+fn log_enterprise_pull_request_detail_shape(context: &str, payload: &Value) {
+    let detail = enterprise_data_object(payload);
+    let general = detail
+        .get("general_reviewers")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let primary = detail
+        .get("primary_reviewers")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let mut approved = 0usize;
+    let mut rejected = 0usize;
+    let mut commented = 0usize;
+    let mut initialized = 0usize;
+    let mut empty = 0usize;
+    let mut other = 0usize;
+    for reviewer in general.iter().chain(primary.iter()) {
+        match string_field(reviewer, "approve_status")
+            .map(|state| normalize_enterprise_review_state(state.as_str()))
+            .unwrap_or_default()
+            .as_str()
+        {
+            "approved" => approved += 1,
+            "rejected" => rejected += 1,
+            "commented" => commented += 1,
+            "initialized" => initialized += 1,
+            "" => empty += 1,
+            _ => other += 1,
+        }
+    }
+    log::debug!(
+        "[CodeReview][Gitee] Enterprise MR detail shape: context={} id={} iid={} general_reviewers={} primary_reviewers={} approve_status_counts=approved:{},rejected:{},commented:{},initialized:{},empty:{},other:{}",
+        context,
+        string_field(detail, "id").unwrap_or_else(|| "missing".to_string()),
+        string_field(detail, "iid").unwrap_or_else(|| "missing".to_string()),
+        general.len(),
+        primary.len(),
+        approved,
+        rejected,
+        commented,
+        initialized,
+        empty,
+        other,
+    );
 }
 
 fn enterprise_review_belongs_to_current_user(review: &Value, current_user: &Value) -> bool {
@@ -1695,7 +1732,7 @@ pub(super) async fn revert_pull_request(
                 pull_request_iid,
             )?;
             let detail: Value = http::send_json(
-                enterprise_authenticated_builder(http::get(detail_endpoint)),
+                enterprise_pull_request_get(detail_endpoint),
                 RequestOptions::new("Reload Gitee enterprise pull request before revert"),
             )
             .await
@@ -2227,15 +2264,16 @@ mod tests {
         decode_commit, decode_conversation_comment, decode_conversation_review,
         decode_gitee_operate_log_activity, decode_pull_request_diff, enterprise_commit_probe_total,
         enterprise_commit_refs_can_revert, enterprise_compare_diff_payload, enterprise_data_object,
-        enterprise_note_payload, enterprise_review_belongs_to_current_user,
-        enterprise_review_dismissal_payload, enterprise_review_payload,
-        enterprise_review_summaries, enterprise_user_has_distinct_display_name,
-        enterprise_web_pull_request_review_endpoint, expand_enterprise_conversation_notes,
-        gitee_enterprise_list_sort, gitee_enterprise_merge_readiness, gitee_enterprise_state_query,
-        gitee_list_review_status, gitee_merge_actor_account, gitee_merge_event,
-        gitee_merge_event_with_user, gitee_public_list_sort, gitee_public_merge_readiness,
-        merge_gitee_review_summaries, normalize_enterprise_commit_order, pull_request_values,
-        select_enterprise_project_id, select_enterprise_user, trusted_enterprise_commit_count,
+        enterprise_note_payload, enterprise_pull_request_get,
+        enterprise_review_belongs_to_current_user, enterprise_review_dismissal_payload,
+        enterprise_review_payload, enterprise_review_summaries,
+        enterprise_user_has_distinct_display_name, enterprise_web_pull_request_review_endpoint,
+        expand_enterprise_conversation_notes, gitee_enterprise_list_sort,
+        gitee_enterprise_merge_readiness, gitee_enterprise_state_query, gitee_list_review_status,
+        gitee_merge_actor_account, gitee_merge_event, gitee_merge_event_with_user,
+        gitee_public_list_sort, gitee_public_merge_readiness, merge_gitee_review_summaries,
+        normalize_enterprise_commit_order, pull_request_values, select_enterprise_project_id,
+        select_enterprise_user, trusted_enterprise_commit_count,
     };
     use crate::codereview::api::gitee as endpoints;
     use crate::git::{
@@ -2256,6 +2294,20 @@ mod tests {
         assert_eq!(
             gitee_list_review_status(&json!({ "review_state": "review_rejected" })),
             PullRequestReviewStatus::ChangesRequested
+        );
+    }
+
+    #[test]
+    fn enterprise_pull_request_reads_use_the_path_iid_without_a_global_pr_id() {
+        let request = enterprise_pull_request_get(
+            "https://gitee.example.com/api/v8/projects/3/merge_requests/11".to_string(),
+        )
+        .build()
+        .expect("request");
+
+        assert_eq!(
+            request.url().as_str(),
+            "https://gitee.example.com/api/v8/projects/3/merge_requests/11"
         );
     }
 
@@ -2553,6 +2605,34 @@ mod tests {
         assert_eq!(activity[0].author, "Review Owner");
         assert_eq!(activity[0].state, "approved");
         assert_eq!(activity[0].body, "approved these changes");
+    }
+
+    #[test]
+    fn decodes_structured_enterprise_review_activity_as_a_github_style_approval() {
+        let payload = json!({
+            "data": [{
+                "id": 1867793,
+                "action": "review_pr",
+                "desc": "新增了评审意见",
+                "created_at": "2026-08-17T14:49:59.779767+08:00",
+                "data": { "state": "approved" },
+                "user": {
+                    "name": "时津津",
+                    "avatar_url": "https://gitee.example/shijinjin.png"
+                }
+            }]
+        });
+
+        let activity = decode_gitee_operate_log_activity(
+            pull_request_values(&payload).expect("enterprise activity collection"),
+        );
+
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity[0].kind, "review_summary");
+        assert_eq!(activity[0].author, "时津津");
+        assert_eq!(activity[0].state, "approved");
+        assert_eq!(activity[0].body, "approved these changes");
+        assert_eq!(activity[0].created_at, "2026-08-17T14:49:59.779767+08:00");
     }
 
     #[test]

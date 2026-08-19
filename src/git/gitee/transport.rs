@@ -47,6 +47,18 @@ pub(super) fn enterprise_web_pull_request_review_endpoint(
     locator: &RepoLocator,
     pull_request_iid: &str,
 ) -> Result<String, String> {
+    enterprise_web_pull_request_endpoint(
+        super::endpoints::ENTERPRISE_WEB_PULL_REQUEST_REVIEWS_URL,
+        locator,
+        pull_request_iid,
+    )
+}
+
+fn enterprise_web_pull_request_endpoint(
+    template: &str,
+    locator: &RepoLocator,
+    pull_request_iid: &str,
+) -> Result<String, String> {
     if pull_request_iid.trim().is_empty() {
         return Err("Gitee pull request number is empty.".to_string());
     }
@@ -57,7 +69,7 @@ pub(super) fn enterprise_web_pull_request_review_endpoint(
         .map(percent_encode_path)
         .collect::<Vec<_>>()
         .join("/");
-    Ok(super::endpoints::ENTERPRISE_WEB_PULL_REQUEST_REVIEWS_URL
+    Ok(template
         .replace("{scheme}", locator.scheme.as_str())
         .replace("{authority}", locator.authority.as_str())
         .replace("{full_path}", full_path.as_str())
@@ -70,16 +82,28 @@ pub(super) fn enterprise_web_pull_request_review_endpoint(
 pub(super) fn enterprise_authenticated_builder(
     request: reqwest::RequestBuilder,
 ) -> reqwest::RequestBuilder {
+    let mut request = enterprise_base_builder(request);
+    if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
+        request = request.header("PRIVATE-TOKEN", token);
+    }
+    request
+}
+
+fn enterprise_base_builder(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
     let mut request = request
         .header("OAUTH", "enabled")
         .header(ACCEPT, "application/json");
     if let Some(enterprise) = configured_enterprise(RepoType::Gitee) {
         request = request.header("enterprise", enterprise);
     }
-    if let Some(token) = configured_gitee_token(GiteeApiProfile::EnterpriseV8) {
-        request = request.header("PRIVATE-TOKEN", token);
-    }
     request
+}
+
+pub(super) fn enterprise_pull_request_get(endpoint: String) -> reqwest::RequestBuilder {
+    // The path already identifies the pull request by IID. Enterprise v8 uses
+    // `pr_id` for the distinct global pull-request id only when the path IID is
+    // zero; sending the IID as `pr_id` can select the wrong record shape.
+    enterprise_authenticated_builder(http::get(endpoint))
 }
 
 pub(super) fn public_authenticated_builder(

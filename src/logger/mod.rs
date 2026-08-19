@@ -26,15 +26,13 @@ pub fn setup_tracing_logger(_app: &MainWindow, active: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn setup_debug_logger(app: &MainWindow, active: bool) -> Result<()> {
-    if !active {
-        return Ok(());
-    }
+pub fn setup_debug_logger(app: &MainWindow, console_output: bool, file_output: bool) -> Result<()> {
     init_debug_logger(DebugLogConfig {
         level: log::LevelFilter::Debug,
-        write_to_file: cfg!(debug_assertions), // Write to file in debug mode
-        log_file_path: None,                   // Use default path
-        log_per_day: true,                     // Organize logs by date (YYYY-MM-DD/usher.log)
+        console_output,
+        file_output,
+        log_file_path: None,
+        log_per_day: true,
     })
     .map_err(|e| anyhow::Error::msg(e))?;
 

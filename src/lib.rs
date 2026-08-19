@@ -73,7 +73,7 @@ mod terminal;
 mod logger;
 use logger::error_handing;
 use logger::tracing_logger;
-use logger::{setup_debug_logger, setup_tracing_logger};
+use logger::{debug_logger, setup_debug_logger, setup_tracing_logger};
 
 mod router;
 use router::{Router, route_for_navigation_index};
@@ -176,12 +176,13 @@ fn save_settings_with_feedback<F>(
 }
 
 fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWindow> {
+    let loaded_settings = settings::load_settings();
+    memory_diagnostics::set_logging_enabled(loaded_settings.memory_diagnostics_logging);
     memory_diagnostics::initialize_baseline();
     log::info!("Usher v{} starting...", env!("CARGO_PKG_VERSION"));
 
     // ========= Pre-Window Settings ========= //
     // Load settings BEFORE creating window to set app appearance early (prevents theme flash)
-    let loaded_settings = settings::load_settings();
 
     // Set app-level appearance before window is created (prevents flash on macOS).
     // Auto clears any forced AppKit appearance so the process can track the OS.
@@ -212,7 +213,12 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     });
 
     // Initialize debug logger after window is created (needs app for callbacks)
-    setup_debug_logger(&app, true).unwrap_or_else(|e| eprintln!("Debug Logger init failed: {}", e)); // eprintln here since logger not yet initialized
+    setup_debug_logger(
+        &app,
+        loaded_settings.application_console_logging,
+        loaded_settings.application_file_logging,
+    )
+    .unwrap_or_else(|e| eprintln!("Debug Logger init failed: {}", e)); // eprintln here since logger not yet initialized
     log::info!("[SidebarMotion] mode={}", sidebar_motion_mode.label());
     memory_diagnostics::log_checkpoint("startup.debug_logger_ready");
 
@@ -280,6 +286,21 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     });
 
     // ========= Tracing File Logs ========= //
+    AppState::get(&app).on_toggle_application_console_logging(move |enabled| {
+        settings::save_application_console_logging(enabled);
+        debug_logger::set_console_output_enabled(enabled);
+        log::info!("[Settings] Console logging changed to: {}", enabled);
+    });
+
+    AppState::get(&app).on_toggle_application_file_logging(move |enabled| {
+        settings::save_application_file_logging(enabled);
+        debug_logger::set_file_output_enabled(enabled);
+        log::info!(
+            "[Settings] Application file logging changed to: {}",
+            enabled
+        );
+    });
+
     AppState::get(&app).on_toggle_tracing_logger_active(move |enabled| {
         settings::save_tracing_logger_active(enabled);
         if let Err(e) = tracing_logger::set_tracing_active(enabled) {
@@ -296,6 +317,12 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
             "[Settings] Terminal verbose logging changed to: {}",
             enabled
         );
+    });
+
+    AppState::get(&app).on_toggle_memory_diagnostics_logging(move |enabled| {
+        settings::save_memory_diagnostics_logging(enabled);
+        memory_diagnostics::set_logging_enabled(enabled);
+        log::info!("[Settings] Memory diagnostics changed to: {}", enabled);
     });
 
     // ========= UI Sound Effects ========= //

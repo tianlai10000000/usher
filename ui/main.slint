@@ -360,6 +360,7 @@ export component MainWindow inherits Window {
     // worker; the root owns only one docked presentation host.
     in-out property <bool> artifact-preview-visible: false;
     in-out property <bool> artifact-preview-loading: false;
+    in-out property <string> artifact-preview-loading-message: "Preparing preview";
     in-out property <string> artifact-preview-title: "Preview";
     in-out property <ArtifactPreviewKind> artifact-preview-kind: ArtifactPreviewKind.None;
     in property <[ArtifactPreviewBlock]> artifact-preview-blocks: [];
@@ -889,7 +890,7 @@ export component MainWindow inherits Window {
     }
     
     show-update-dialog(latest-version, current-version) => {
-        debug("MainWindow: show-update-dialog 回调被调用, latest-version={}, current-version={}", latest-version, current-version);
+        DebugLogger.info("MainWindow: update dialog requested, latest-version=" + latest-version + ", current-version=" + current-version);
 
         DialogManager.show({
             id: "update-dialog",
@@ -1531,6 +1532,7 @@ export component MainWindow inherits Window {
             preview-image: root.artifact-preview-image;
             error-text: root.artifact-preview-error;
             loading: root.artifact-preview-loading;
+            loading-message: root.artifact-preview-loading-message;
             can-copy: root.artifact-preview-can-copy;
             can-open-external: root.artifact-preview-can-open-external;
             copy-content: root.artifact-preview-copy-content;

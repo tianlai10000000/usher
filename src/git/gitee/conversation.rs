@@ -181,10 +181,18 @@ fn latest_gitee_merge_log(operate_logs: Option<&Vec<Value>>) -> Option<&Value> {
 }
 
 fn gitee_operate_log_content(value: &Value) -> String {
-    let content = ["content", "title", "message", "description", "body", "note"]
-        .into_iter()
-        .find_map(|key| string_field(value, key))
-        .unwrap_or_default();
+    let content = [
+        "content",
+        "title",
+        "message",
+        "description",
+        "desc",
+        "body",
+        "note",
+    ]
+    .into_iter()
+    .find_map(|key| string_field(value, key))
+    .unwrap_or_default();
     conversation_body_to_plain_text(content.as_str())
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -447,20 +455,34 @@ fn gitee_operate_log_review_state(
     content: &str,
 ) -> Option<&'static str> {
     let lower_content = content.to_ascii_lowercase();
-    let structured_state = [
-        "review_state",
-        "reviewState",
-        "review_status",
-        "reviewStatus",
-        "approve_status",
-        "approveStatus",
-        "result",
-        "state",
-    ]
-    .into_iter()
-    .find_map(|key| string_field(value, key))
-    .unwrap_or_default()
-    .to_ascii_lowercase();
+    let data = value.get("data");
+    let structured_state = std::iter::once(Some(value))
+        .chain([
+            data,
+            value.get("review"),
+            data.and_then(|data| data.get("review")),
+            data.and_then(|data| data.get("review_detail")),
+        ])
+        .flatten()
+        .find_map(|candidate| {
+            [
+                "review_state",
+                "reviewState",
+                "review_status",
+                "reviewStatus",
+                "approve_status",
+                "approveStatus",
+                "approve_state",
+                "approveState",
+                "result",
+                "status",
+                "state",
+            ]
+            .into_iter()
+            .find_map(|key| string_field(candidate, key))
+        })
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     if action.contains("reject")
         || action.contains("disallow")
         || action.contains("request_changes")

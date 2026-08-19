@@ -57,16 +57,6 @@ export global TooltipOverlayState {
 
     show(node, text, anchor-x, anchor-y, anchor-width, anchor-height, placement, alignment) => {
         root.token += 1;
-        debug(
-            "[tooltip.show] token={} scope=generic node={} text={} x={} y={} width={} height={}",
-            root.token,
-            node,
-            text,
-            anchor-x,
-            anchor-y,
-            anchor-width,
-            anchor-height,
-        );
         root.text = text;
         root.anchor-x = anchor-x;
         root.anchor-y = anchor-y;

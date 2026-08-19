@@ -168,9 +168,12 @@ Surface。详见 [specs/status-bar.md](specs/status-bar.md)。
 宽度；完整面板始终靠右，Preview 与 Chat 文档布局在边界移动期间保持稳定，不逐帧重排。
 Feature 门面立即释放 prepared session，只读 Slint 视觉投影最多保留 280ms 绘制退出
 动画，随后清空。FemtoVG 会在祖先 clip 移动时重放后代绘制，因此固定 Host 在 260ms
-Shell 过渡期间只暂停文档绘制，同时保留准备后的 model；稳定后 Markdown Surface 使用
+Shell 过渡期间只暂停文档绘制，同时保留准备后的 model；轻量 spinner 与解析器加载
+文案在该过渡期间仍保持可见。稳定后 Markdown Surface 使用
 `usher-virtual-list` 精确 extent 门面，只实例化有界的可见/overscan block，在不改变
-Provider/Session 所有权的前提下限制正文恢复的一次性成本。预览模块自有的 resize-handle 组件负责稳定命中区、光标、
+Provider/Session 所有权的前提下限制正文恢复的一次性成本。清除视觉投影时还会重置
+Feature 自有的虚拟 rows、extent、projection guard 以及 Parley 字体/layout 缓存，同时
+保留根 callback 使用的稳定 Slint model 身份。预览模块自有的 resize-handle 组件负责稳定命中区、光标、
 hover 反馈和 pointer cancel 生命周期；根 Shell 持有有界的会话宽度，并对预览与路由面板
 对称应用。
 
@@ -181,11 +184,16 @@ observer 提供同样的 Host 局部状态；有界的窗口局部 debounce 覆�
 变化而不发布原生 begin/end 通知的 backend。两条路径都绝不复用主窗口 resize 标志。
 两种手势松开后均只提交一次精确最终内容宽度；Markdown、图片和文本 Provider 不感知
 Host 形态与 resize 生命周期。
-原生 Markdown Surface 组合 `pulldown-cmark`、Worker 侧 `syntect` 高亮与 bat 维护的
-`two-face` 语法集合、用于行内正文的
+原生 Markdown Surface 使用独立 `MarkdownParserLoader` 与语言解析器 Registry。
+生产默认采用 `OnDemand`，`PreloadAll` 必须显式选择；TypeScript/TSX 由专用
+Tree-sitter loader 负责，JavaScript 与通用语言 fallback 共享一份惰性初始化的
+`syntect`/`two-face` Repository。Loader 初始化与高亮都留在 Preview Worker；用于行内正文的
 Slint `StyledText`、直接绘制彩色代码 token 的原生 Slint `Text` 行，以及官方 Primer
 视觉 token。围栏代码块保留语言并携带准备好的亮色/暗色 token 投影，不再经过
-Markdown/HTML 二次转换；主题切换不重复解析或高亮；不引入 WebView 或浏览器 runtime。Feature 自有 Parley 布局桥在稳定内容
+Markdown/HTML 二次转换；主题切换不重复解析或高亮；不引入 WebView 或浏览器 runtime。
+冷解析器 cache miss 发布 `ParserLoading` 与 `ParserReady` 进度。应用门面通过 weak
+window 在 Slint event loop 上更新共享 spinner 文案，并在投递前后都检查 request
+generation，取消或过期任务不能覆盖新 Preview。Feature 自有 Parley 布局桥在稳定内容
 宽度下测量全部 block，并把同一份精确 extent model 提供给 `usher-virtual-list`、Preview
 `Flickable` 与应用自有 Primer scrollbar；普通滚动只更新有界的可见 block 投影。因此
 viewport 位于精确的 3-block overscan 安全区内时复用同一个稳定 `VecModel`；跨出安全区
@@ -338,7 +346,7 @@ unpacked 策略升级后，开发者应执行一次完整 `cargo clean`；后续
 Slint 窗口启动时不显示标准标题。macOS 等待原生标题栏附件时不挂载替代的 Slint
 控件；该区域只显示最终 AppKit 侧栏与历史控件。
 
-Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_DIAGNOSTICS=1` 启用。`[Memory][Diag]` 记录当前/峰值 RSS 与物理 footprint、相对上次/启动基线的增量、进程生命周期高水位、运行/场景标识，以及最近页面、逻辑/物理窗口尺寸、缩放和 Terminal 可见性；同时保留 VM 分类、region、Mach port、线程、fault 与 page-in。`[Memory][UI]` 关联稳定后的页面/窗口变化，`[Workflow][PR Review][Memory]` 等功能归属日志只记录有界 model/cache 的数量和容量，不得输出源码内容或凭据。采样任务复用共享 runtime，并由正常的 pre-shutdown 流程停止。`scripts/benchmark-memory.sh` 负责 macOS Release 测量协议并汇总外部 RSS/footprint 采样。仅在显式设置 `USHER_MEMORY_WINDOW_CONTROL=signal-file-v1` 时，基准专用信号 Worker 才读取每个 run 独立的命令文件，并把 AppKit resize/fullscreen 请求投递到 Slint event loop；pre-shutdown 会关闭其信号 handle。外部 Swift helper 只读取 CoreGraphics 窗口状态，用于确认每次切换并独立记录实际全屏尺寸。基准元数据记录应用变体与二进制哈希；比较器只允许渲染器、应用所有权或 Tokio worker 中的一个维度变化，其他 fixture/协议不匹配一律拒绝。
+Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可在运行时关闭，Release 基准仍可通过 `USHER_MEMORY_DIAGNOSTICS=1` 强制启用。`[Memory][Diag]` 记录当前/峰值 RSS 与物理 footprint、相对上次/启动基线的增量、进程生命周期高水位、运行/场景标识，以及最近页面、逻辑/物理窗口尺寸、缩放和 Terminal 可见性；同时保留 VM 分类、region、Mach port、线程、fault 与 page-in。`[Memory][UI]` 关联稳定后的页面/窗口变化，`[Workflow][PR Review][Memory]` 等功能归属日志只记录有界 model/cache 的数量和容量，不得输出源码内容或凭据。采样任务复用共享 runtime，并由正常的 pre-shutdown 流程停止。`scripts/benchmark-memory.sh` 负责 macOS Release 测量协议并汇总外部 RSS/footprint 采样。仅在显式设置 `USHER_MEMORY_WINDOW_CONTROL=signal-file-v1` 时，基准专用信号 Worker 才读取每个 run 独立的命令文件，并把 AppKit resize/fullscreen 请求投递到 Slint event loop；pre-shutdown 会关闭其信号 handle。外部 Swift helper 只读取 CoreGraphics 窗口状态，用于确认每次切换并独立记录实际全屏尺寸。基准元数据记录应用变体与二进制哈希；比较器只允许渲染器、应用所有权或 Tokio worker 中的一个维度变化，其他 fixture/协议不匹配一律拒绝。
 
 ## 并发模型
 
@@ -352,7 +360,7 @@ Debug 构建默认启用进程内存诊断；Release 构建通过 `USHER_MEMORY_
 
 ### 设置
 
-`AppSettings` 以 TOML 保存到平台配置目录，包括主题、自动更新、日志开关、Terminal 诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称，以及位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
+`AppSettings` 以 TOML 保存到平台配置目录，包括主题、自动更新、相互独立的 Console/`usher.log`/`usher_tracing.log` 输出目标、Terminal verbose 与内存诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称，以及位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置。Logger 输出目标通过运行时原子过滤控制；`usher.log` 在首次启用写入时按需打开，Settings 使用 GitHub 风格的 `Enable all` / `Disable all` 批量操作，同时保留每项独立状态。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
 
 手工保存凭据、代码托管 Endpoint 与 AI Agent 配置时，文件持久化必须在
 Slint event loop 之外执行。完成结果回到 event loop 后，只有持久化成功
@@ -480,7 +488,7 @@ PR 列表评审结论在 adapter 边界统一为“需要评审”“已批准�
 
 仓库 PR 列表归现有 Workflow 的 PR Tab 所有。`workflow/pr_list.rs` 在 event loop 之外读取当前项目持久化的 `repo_project_id`、`repo_type`，并且只在进入或用户切换页码时，通过 `src/git/` 懒加载对应的 10 条远端数据。GitHub 保留搜索接口提供的总数，并发请求当前页每个 PR 的详情，从而补齐源分支和目标分支名称。控制器在将列表值传给 Slint 前，把可解析的 Provider 更新时间统一格式化为东八区（UTC+08:00），并在 Provider 提供时使用准确总数驱动顶部总数和底部分页。页面默认显式查询 open 状态，用户可切换 open/closed/merged/all；请求序号保证旧项目、旧筛选或旧页码的延迟响应不会覆盖当前视图。请求成功且零条数据时显示随筛选状态变化的插画空状态；网络、鉴权或响应结构异常仍使用独立且可重试的错误状态。点击列表行后导航到全窗口 `Route.PrReview`；Workflow 组件实例会被销毁，但列表/root model 状态继续保留，因此 Back 可在不重载列表的情况下重建 PR Tab。审核路由拥有 GitHub 风格的 Conversation、Commits、Files changed 三个 Tab。Conversation 与 Commits 的 *内容* 只在第一次选中时通过 Provider-neutral model 加载：GitHub 组合 PR detail、issue comments、reviews，以及 issue timeline 活动（`committed` 批量、`merged` 与部分系统事件）；Gitee 公版 v5 使用 PR detail/comments/commits，并从 commits 与合并元数据合成提交/合并活动；Gitee 企业版 v8 使用 MR detail/notes/commits，并根据 detail 中 `general_reviewers` / `primary_reviewers` 的 `approve_status` 生成评审摘要；在展开嵌套 `notes[].note` 后同样合成活动，普通评论正文从 `note` / 嵌套 `note.note` / `comment` / 字符串 `content` 读取（忽略对象形态的 `content`），MR commit 时间取 `created_at`；GitLab 使用 MR detail/notes/commits，合成同一套可移植的 `commits`/`commit`/`merged` 行并过滤重复系统 note。Tab 角标数字不等待 Conversation/Commits Tab 激活：它们来自随 diff 加载携带的轻量 PR/MR 摘要字段（`commit_count`、`conversation_count`、`files.length`）。若 Provider 省略总数，adapter 可发起一次有界计数探测（GitHub/GitLab 的 Link/`X-Total` + `per_page=1`；Gitee 公有版短页 `per_page=100`；Gitee 企业版 diffs `commits_size`、MR `user_notes_count`/`notes_count`，或 `with_page=true&per_page=1` + `meta.total_count`）。完整 Conversation 时间线与 commits 列表仍只在打开对应 Tab（或 commit 选择器）时懒加载。Provider-neutral 终结器把每个 `commits` 头与其后连续的 `commit` 行作为一个不可拆分的块排序，因此即使各提交 authored time 不同，三家 Provider 的 GitHub 风格 `added N commits` 记录也不会与提交列表分离。Conversation 批次内的 commit 子行与 Commits Tab（含 Files changed 的 commit 选择器）均按从新到旧展示；adapter 仍把列表归一为从旧到新，控制器在连续范围比较前把展示索引映射回去。远端 review 或 merge 成功后会使 Conversation 时间线缓存失效；若 Conversation 正处于激活状态，则立即重新加载。Files changed 控制器加载并归一化所选 PR diff，根据文件路径构建可折叠目录树，并让路径筛选、目录展开和上一项/下一项文件导航保持本地操作。其 commit 选择器复用懒加载提交列表，把连续范围分发到各 Provider 的仓库 compare endpoint；原始 PR detail 和已加载范围在当前审核期间保持缓存。`workflow/syntax_highlight.rs` 在 UI 层之外使用 `syntect` 把当前文件转换为适配主题的 token model，同时保留 Tab 和显示列宽。切换文件或展开 hunk 时，旧行 model 会保留到新高亮 model 完成，再由 event loop 原子替换；只有真正切换文件时才重置 viewport。点击 hunk 时先记录被点击行的实际屏幕位置。model 替换后，目标 delegate 上报布局后的内容位置，Slint 在有界的多个布局帧内重复应用由此得到的视觉锚点。该方案不再估算软换行行高：仍存在的 hunk 控件保持在指针下方；若分隔行消失，首条新增源码占据原控件位置。在 macOS 上，原生 live-resize 通知会冻结审核工作区的内部几何尺寸，并把每条可见行的 token repeater 临时替换为一个纯等宽文本节点；live resize 结束时恢复最终几何尺寸和完整的 token 着色组件树。
 
-Gitee 企业版 Conversation adapter 把文档定义的评审人 `approve_status` 映射成 Provider-neutral 的 GitHub 评审摘要。操作日志只以尽力而为方式补齐真实操作人和时间，Provider 原生话术不得进入 Slint。合并活动从合并操作日志或 `merged_by` 等专用字段取得合并人；若这些来源只有邮箱/账号标签，则静默调用文档定义的项目成员接口做账号精确匹配，以成员资料的 `name` 与头像补全展示，用户目录作为静默 fallback。Merge commit 的 `committer_name` 只是更低优先级的 Git 身份。模糊目录结果必须拒绝，完整邮箱地址不得作为操作人标签，且绝不以 PR 作者作为合并人回退。GitLab 同样只使用 `merged_by` 并禁止 PR 作者回退；GitHub 保持原生 `actor.login` 展示。
+Gitee 企业版 Conversation 只使用 PAT 鉴权的 v8 API。detail/current-state URL 已在路径中携带 PR IID 时，不再把同一个 IID 重复作为 `pr_id`。只有 MR detail 的评审人字段明确返回 `approved` 或 `rejected` 才生成评审行。应用不调用依赖浏览器会话的 `/pull_requests/{iid}/activities`，也不保存、不转发、不记录浏览器 Cookie。Provider 原生话术不得进入 Slint。合并人从 `merged_by` 等专用详情字段取得；若这些字段只有邮箱/账号标签，则静默调用文档定义的项目成员接口做账号精确匹配，以成员资料的 `name` 与头像补全展示，用户目录作为静默 fallback。Merge commit 的 `committer_name` 只是更低优先级的 Git 身份。模糊目录结果必须拒绝，完整邮箱地址不得作为操作人标签，且绝不以 PR 作者作为合并人回退。GitLab 同样只使用 `merged_by` 并禁止 PR 作者回退；GitHub 保持原生 `actor.login` 展示。
 
 审核页头采用 GitHub 的两步命令模型。标题旁的 GitHub 风格就绪徽标使用 Primer 语义色渲染归一化类型/详情，但合并语义由各 adapter 独立负责：GitHub 映射 REST mergeability，Gitee 企业版映射 v8 `current_state` 条件，Gitee 公有版只映射 v5 字段，GitLab 映射 `detailed_merge_status` 并请求异步重算。共享 enum 只是展示边界，绝不能把一个 Provider 的判定条件套到另一个 Provider。`Review changes` 提交显式的 Provider-neutral Comment、Approve 或 Request changes；不受支持的选项保持可见但禁用。Conversation Tab 底部另有 GitHub 风格纯文本评论框（`Write` + 绿色 `Comment`），提交同一 Comment 动作。符合条件的 `review_summary` 行使用 GitHub 的逐条评审 kebab 与必填原因的 `Dismiss review` 弹窗；页头聚合状态只作展示。Provider-neutral 撤回门面在仓库权限允许时把选中的 review id 交给 GitHub dismissal endpoint；GitLab 先写入原因 note，再撤销当前 Token 用户的 approval；Gitee 企业版通过实际可用的 Web API 路由 `/api/code/api/{full_path}/-/pull_requests/{iid}/reviews` 撤回当前 Token 用户的评审，请求体严格为 `{"state":"initialized"}`。没有该 Web 路由的企业版部署会静默回退到文档规定的 v8 reviews 路由，成功后再以 best-effort MR note 记录必填原因；Gitee 公有版 v5 不具备撤回能力。Provider 成功后刷新远端状态，绝不自动开始合并。`Merge pull request` 只由最新的归一化 `PullRequestActionState` 启用，并且只展示 adapter 返回的策略。GitHub 支持仓库启用的 merge、squash、rebase；Gitee 企业 v8 映射评审状态，Approve 未填写 summary 时省略可选的 `comment` 字段，并按 `restrict_merge_type` 支持 merge、squash、rebase、fast-forward；Gitee 公有 v5 支持评论和 merge/squash，但没有 approve/request-changes endpoint。GitLab 支持评论、批准，以及携带 SHA 防护的 merge/squash 和显式删除来源分支；项目 `squash_option` 限制可选策略，稳定版 REST API 没有对应写命令，因此 Request changes 保持禁用。
 

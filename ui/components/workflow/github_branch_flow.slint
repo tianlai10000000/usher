@@ -103,7 +103,8 @@ export component GitHubBranchFlow {
             GitHubToggle {
                 x: parent.width - GitHubMetrics.size-64;
                 y: GitHubMetrics.size-20;
-                checked <=> root.recreate-remote;
+                checked: root.recreate-remote;
+                toggled(value) => { root.recreate-remote = value; }
             }
         }
 

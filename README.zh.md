@@ -137,13 +137,15 @@ SLINT_BACKEND=winit-skia cargo run --no-default-features --features renderer-ski
 SLINT_BACKEND=winit-femtovg-wgpu cargo run --no-default-features --features renderer-femtovg-wgpu
 ```
 
-Debug 构建会通过现有 Usher 日志每 5 秒记录一次进程内存，并记录生命周期检查点。Release 构建可通过以下方式启用同样的诊断：
+Debug 构建默认每 5 秒记录一次进程内存并记录生命周期检查点，可在 **Settings → Diagnostics → Memory diagnostics** 中关闭。Release 基准可通过以下方式强制启用同样的诊断：
 
 ```sh
 USHER_MEMORY_DIAGNOSTICS=1 ./usher
 ```
 
 筛选 `[Memory][Diag]`、`[Memory][UI]` 和 `[Workflow][PR Review][Memory]`，可以把 RSS/物理 footprint 变化与窗口尺寸、PR model/cache 归属对应起来。
+
+交互式排查时，打开 **Settings → Diagnostics**，根据复现问题手动开启最小必要的输出目标与诊断来源。`Terminal verbose diagnostics` 和 `Memory diagnostics` 只增加记录内容，仍需同时开启 `Console output` 和/或 `Application file logs` 才能看到这些记录。只有跨模块问题暂时无法定位时，才在最短复现期间使用 `Enable all`；采集完成后恢复原开关或选择 `Disable all`。应记录复现时间；Terminal verbose 开启期间不要输入或分享密钥。开关组合、文件位置与采集清单见[诊断日志规格](docs/specs/diagnostics.md)。
 
 在 macOS 上，可运行以下可重复的双循环 Release 基准：
 
@@ -163,7 +165,7 @@ Usher 使用 `directories::ProjectDirs::from("com", "usher", "app")` 选择各�
 | 项目列表 | 本地数据目录：`project/projects.json` |
 | 聊天历史 | 本地数据目录：`im/chat_history.jsonl` |
 | 持久通知 Inbox 与已读状态 | 本地数据目录：`messages/messages.json` |
-| 日志 | 本地数据目录：`logs/<date>/usher.log` |
+| 日志 | 本地数据目录：`logs/<date>/usher.log` 和 `logs/<date>/usher_tracing.log` |
 | 远程项目 Logo 缓存 | 临时目录：`usher-logo-cache/` |
 
 GitHub、GitLab 和 Gitee Token 可在设置页面管理。Gitee 公有版与企业版凭据独立保存，仓库 remote host 自动选择公有 v5 或已配置的企业 v8 API，两套 Token 不共用。**代码托管 API 配置**区块以 `[git.platform.<provider>]` 保存各平台企业版 API 地址和企业名称；可填写服务主机或完整 REST API 根地址（例如 `https://git.example.com` 或 `https://git.example.com/api/v4`），缺少版本路径时由对应 Provider 自动补齐。这些值只保存在本地，且仅在配置的 API 主机与项目 remote 主机匹配时使用。**AI Agent** 区块支持 OpenAI-compatible 的 Base URL、API Key 和模型名称，提供可扩展的 Provider 选择器、可编辑模型名和不产生生成费用的连通性测试。设置保存至 `[ai.agent]`。不要提交生成的设置、日志、聊天记录或凭据。详见 [AI Agent 配置规格](docs/specs/ai-agent.md)。

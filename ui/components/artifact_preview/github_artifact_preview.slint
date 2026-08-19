@@ -276,6 +276,7 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
     in property <image> preview-image;
     in property <string> error-text: "";
     in property <bool> loading: false;
+    in property <string> loading-message: "Preparing preview";
     in property <bool> layout-resizing: false;
     in property <bool> virtualized-markdown: true;
     in property <int> markdown-layout-revision: 0;
@@ -300,7 +301,7 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
         GitHubCenteredLoadingState {
             width: parent.width;
             height: parent.height;
-            label: "Preparing preview";
+            label: root.loading-message;
         }
     }
 
@@ -481,6 +482,7 @@ export component GitHubArtifactPreviewPanel inherits Rectangle {
     in property <image> preview-image;
     in property <string> error-text: "";
     in property <bool> loading: false;
+    in property <string> loading-message: "Preparing preview";
     in property <bool> can-copy: false;
     in property <bool> can-open-external: false;
     in property <string> copy-content: "";
@@ -596,13 +598,16 @@ export component GitHubArtifactPreviewPanel inherits Rectangle {
         GitHubArtifactPreviewSurface {
             width: root.content-layout-width;
             height: parent.height;
-            visible: !root.content-suspended;
+            // Keep the lightweight loading layer visible while the docked shell
+            // opens; only prepared document painting needs suspension.
+            visible: root.loading || !root.content-suspended;
             preview-kind: root.preview-kind;
             markdown-blocks: root.markdown-blocks;
             plain-text: root.plain-text;
             preview-image: root.preview-image;
             error-text: root.error-text;
             loading: root.loading;
+            loading-message: root.loading-message;
             layout-resizing: root.layout-resizing;
             virtualized-markdown: root.performance-optimized;
             markdown-layout-revision: root.markdown-layout-revision;
@@ -637,6 +642,7 @@ export component ArtifactPreviewWindow inherits Window {
     in property <image> preview-image;
     in property <string> error-text: "";
     in property <bool> loading: false;
+    in property <string> loading-message: "Preparing preview";
     in property <bool> can-copy: false;
     in property <bool> can-open-external: false;
     in property <string> copy-content: "";
@@ -697,6 +703,7 @@ export component ArtifactPreviewWindow inherits Window {
         preview-image: root.preview-image;
         error-text: root.error-text;
         loading: root.loading;
+        loading-message: root.loading-message;
         can-copy: root.can-copy;
         can-open-external: root.can-open-external;
         copy-content: root.copy-content;

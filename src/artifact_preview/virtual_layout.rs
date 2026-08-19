@@ -109,6 +109,21 @@ fn preview_font_context() -> FontContext {
 }
 
 impl MarkdownVirtualLayoutBridge {
+    pub(super) fn reset_document(&mut self) {
+        self.list
+            .replace_item_extents(&[], MARKDOWN_OVERSCAN_BLOCKS);
+        self.layout_key = None;
+        self.window = VirtualWindow::default();
+        self.rows_model.set_vec(Vec::new());
+        self.projected_indices.clear();
+        self.content_extent = 0;
+        self.projection_guard = None;
+        self.last_scroll_offset = None;
+        self.pending_scroll_activity = None;
+        self.font_context = preview_font_context();
+        self.layout_context = LayoutContext::new();
+    }
+
     pub(super) fn layout(
         &mut self,
         revision: i32,
@@ -691,5 +706,32 @@ mod tests {
 
         assert_ne!(first.rows, second.rows);
         assert_eq!(bridge.projection_commits, 2);
+    }
+
+    #[test]
+    fn reset_document_clears_rows_extents_and_layout_caches() {
+        let blocks = ModelRc::new(Rc::new(VecModel::from(vec![
+            block(ArtifactPreviewBlockKind::Paragraph, &"body ".repeat(200)),
+            block(ArtifactPreviewBlockKind::CodeBlock, &"code();\n".repeat(40)),
+        ])));
+        let mut bridge = MarkdownVirtualLayoutBridge::default();
+        let window = bridge.layout(11, &blocks, 0.0, 300.0, 500.0, "sans-serif");
+        let stable_rows = window.rows.clone();
+
+        assert!(stable_rows.row_count() > 0);
+        assert!(bridge.content_extent > 0);
+        assert!(bridge.layout_key.is_some());
+
+        bridge.reset_document();
+
+        assert_eq!(stable_rows.row_count(), 0);
+        assert_eq!(bridge.rows_model.row_count(), 0);
+        assert!(bridge.projected_indices.is_empty());
+        assert_eq!(bridge.content_extent, 0);
+        assert!(bridge.layout_key.is_none());
+        assert!(bridge.projection_guard.is_none());
+        assert!(bridge.last_scroll_offset.is_none());
+        assert!(bridge.pending_scroll_activity.is_none());
+        assert!(bridge.window.items.is_empty());
     }
 }

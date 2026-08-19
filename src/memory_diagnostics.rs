@@ -136,15 +136,20 @@ struct RunMetadata {
 
 static DIAGNOSTIC_STATE: OnceLock<Mutex<DiagnosticState>> = OnceLock::new();
 static RUN_METADATA: OnceLock<RunMetadata> = OnceLock::new();
+static LOGGING_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
 static SAMPLER_STARTED: AtomicBool = AtomicBool::new(false);
 static SAMPLER_STOP: AtomicBool = AtomicBool::new(false);
 static SAMPLE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn diagnostics_enabled() -> bool {
-    cfg!(debug_assertions)
+    LOGGING_ENABLED.load(Ordering::Relaxed)
         || std::env::var("USHER_MEMORY_DIAGNOSTICS")
             .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
             .unwrap_or(false)
+}
+
+pub(crate) fn set_logging_enabled(enabled: bool) {
+    LOGGING_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
 /// Capture the baseline before the Slint window and renderer are constructed.
@@ -207,23 +212,25 @@ pub(crate) fn record_ui_context(
 }
 
 pub(crate) fn start_periodic_logging() {
-    if !diagnostics_enabled() || SAMPLER_STARTED.swap(true, Ordering::SeqCst) {
+    if SAMPLER_STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
     SAMPLER_STOP.store(false, Ordering::SeqCst);
     let metadata = run_metadata();
-    log::info!(
-        "[Memory][Diag] periodic sampler started: pid={} run_id={} scenario={} benchmark_run={} interval_ms={} debug_build={} build_profile={} compiled_renderer={} slint_backend_env={}",
-        metadata.pid,
-        metadata.run_id,
-        metadata.scenario,
-        metadata.benchmark_run,
-        SAMPLE_INTERVAL.as_millis(),
-        cfg!(debug_assertions),
-        metadata.build_profile,
-        metadata.compiled_renderer,
-        metadata.requested_backend,
-    );
+    if diagnostics_enabled() {
+        log::info!(
+            "[Memory][Diag] periodic sampler started: pid={} run_id={} scenario={} benchmark_run={} interval_ms={} debug_build={} build_profile={} compiled_renderer={} slint_backend_env={}",
+            metadata.pid,
+            metadata.run_id,
+            metadata.scenario,
+            metadata.benchmark_run,
+            SAMPLE_INTERVAL.as_millis(),
+            cfg!(debug_assertions),
+            metadata.build_profile,
+            metadata.compiled_renderer,
+            metadata.requested_backend,
+        );
+    }
     crate::app_runtime::shared_runtime().spawn(async {
         let mut interval = tokio::time::interval(SAMPLE_INTERVAL);
         // The startup checkpoints already cover the immediate sample.
@@ -235,12 +242,14 @@ pub(crate) fn start_periodic_logging() {
             }
             log_checkpoint("periodic");
         }
-        let metadata = run_metadata();
-        log::info!(
-            "[Memory][Diag] periodic sampler stopped: pid={} run_id={}",
-            metadata.pid,
-            metadata.run_id,
-        );
+        if diagnostics_enabled() {
+            let metadata = run_metadata();
+            log::info!(
+                "[Memory][Diag] periodic sampler stopped: pid={} run_id={}",
+                metadata.pid,
+                metadata.run_id,
+            );
+        }
     });
 }
 

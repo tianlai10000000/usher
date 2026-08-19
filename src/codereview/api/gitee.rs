@@ -18,8 +18,6 @@ pub(crate) const ENTERPRISE_WEB_PULL_REQUEST_REVIEWS_URL: &str =
     "{scheme}://{authority}/api/code/api/{full_path}/-/pull_requests/{pull_request_iid}/reviews";
 pub(crate) const ENTERPRISE_MERGE_REQUEST_NOTES_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/notes";
-pub(crate) const ENTERPRISE_MERGE_REQUEST_OPERATE_LOGS_URL: &str =
-    "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/operate_logs";
 pub(crate) const ENTERPRISE_MERGE_REQUEST_COMMITS_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests/{merge_request_iid}/commits";
 pub(crate) const ENTERPRISE_MERGE_REQUEST_CURRENT_STATE_URL: &str =
