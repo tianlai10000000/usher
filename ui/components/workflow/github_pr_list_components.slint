@@ -19,6 +19,9 @@ export struct WorkflowPullRequestItem {
     updated-at-raw: string,
     updated-at-tooltip: string,
     web-url: string,
+    ai-review-status: string,
+    ai-review-task-id: string,
+    ai-review-finding-count: int,
 }
 
 export component GitHubPullRequestSearchField inherits Rectangle {

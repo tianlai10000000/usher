@@ -48,6 +48,7 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `crates/usher-state-store/` | 与框架无关的跨页面 State 接口与内置引擎：强类型 reducer/action、不可变 revision 快照、selector、立即 hydration、自动单调订阅与 RAII 取消。Feature 门面隐藏具体引擎，未来可通过 adapter 替换社区 Store。 |
 | `crates/usher-virtual-list/` | 与框架无关的可变行高虚拟列表门面：精确 item extent、offset/index 映射、有界 overscan 窗口与精确 item reveal。私有 adapter 当前使用社区 `virtualizer` 引擎；Feature 与 Slint bridge 只依赖本地接口，底层可替换。 |
 | `crates/usher-preview/` | 与框架无关的 Artifact 描述、Provider/Registry 契约、运行时策略、准备后 payload，以及构建期可拆卸的 Markdown/图片/纯文本 Provider；不依赖 Chat、MainWindow 或 Slint。 |
+| `crates/usher-ai-review/` | 可选且与框架无关的 AI Review 领域包：规则/配置 reducer、动态有界调度器、Review 输入/Session、diff 分块、Prompt 构造、响应解析和 finding 聚合；不依赖 MainWindow 或 Slint。 |
 | `src/app_runtime.rs` | 进程级 Tokio runtime，生产默认使用 2 个 worker；runtime 线程安装 tracing dispatch，并保留显式环境覆盖用于受控基准。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint 与生命周期高水位、启动/运行元数据、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
 | `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观（强制浅色/深色，或 Auto 时跟随系统）、标题栏附件、窗口交互通知、用于关闭可消隐临时弹层的原生标题栏点击桥接、macOS PR Review 字体注册、`NSSound` 点击音，以及用于 Auto 实时跟随的 `AppleInterfaceThemeChangedNotification`；`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
@@ -67,14 +68,15 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `src/jobs/` | 应用级 Job 生命周期 model、来源无关运行描述符/UI 投影，以及按 source key 的动作分发；不拥有任何 Feature 进程。 |
 | `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行；Tag 与 PR Review 通过稳定文件 façade 暴露内部 controller 和纯逻辑模块。 |
 | `src/terminal/` | PTY 生命周期、viewport 同步、渲染、选择和项目切换；纯输入映射、诊断与刷新节流使用独立模块。 |
-| `src/chat/` | 聊天请求、会话、JSONL 持久化、宽度无关的纯文本/Artifact 投影、有界渲染缓存、分页、UI 绑定和纯有界虚拟布局；完整 Artifact 渲染归通用预览 Feature。 |
+| `src/chat/` | AI/RAG 共用 Chat 展示和交互、按模式隔离的 Session/JSONL 历史、transport、宽度无关纯文本/Artifact 投影、有界渲染缓存、分页和纯有界虚拟布局；完整 Artifact 渲染归通用预览 Feature。 |
+| `src/ai_review/` | 可选 AI Review 配置门面和应用 controller；负责 State Store 订阅、自动持久化 Worker、动态任务调度、按需加载 diff/规则、AI 调用、Session 存储、取消、通知和不依赖路由的 PR 结果投影。 |
 | `src/artifact_preview/` | 应用预览门面：Provider 策略、后台准备、过期结果取消、Slint model 适配、单活动 Session，以及固定面板与独立窗口之间的即时迁移。其 `test-fixtures` 适配器仅在开发构建存在，并让演练样例通过同一门面提交。 |
 | `src/update/` | Release 检查、流式下载、进度、取消、安装和重启。 |
 | `src/router/` | 路由映射、历史、可见性和可达性 transition；不执行 feature 清理。 |
 | `src/shortcuts/` | 应用命令 ID、声明式键位、平台归一化匹配、路由作用域、冲突校验、分发与展示标签。 |
 | `src/app_lifecycle.rs` | composition 层 route lifecycle hook，在 transition 后协调跨 feature 清理。 |
 | `src/settings.rs` | TOML 设置模型和持久化，包含 AI Agent 凭据。 |
-| `src/ai/` | 独立的 OpenAI-compatible AI Agent 集成；`agent.rs` 负责连通性测试，不负责 RAG Chat。 |
+| `src/ai/` | 共用 OpenAI-compatible AI Agent transport；`agent.rs` 负责连通性测试，以及 AI Chat/AI Code Review 使用的 chat completion；不负责 RAG transport 或 Feature 状态。 |
 | `src/network.rs` | 后台网络探测和 `AppState.network-online`。 |
 | `src/http/mod.rs` | 共享异步/阻塞 reqwest 客户端、拦截器、统一错误和可选 UI 反馈。 |
 | `src/logger/` | Debug 日志、tracing 和 panic/error 支持。 |
@@ -99,9 +101,10 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `ui/views/ui_components.slint` | 交互式 UI Components 演练场的纯路由编排。 |
 | `ui/views/workflow/` | Workflow 路由编排和完整的全窗口 PR Review 实现；Flow、Tab、Filter、Field、Panel 组件归 `ui/components/workflow/`。 |
 | `ui/features/pr_review/` | 稳定的 PR Review feature package 入口及公开页面协议；构建配置把 `@pr-review` 映射到完整实现或显式 `dev-shell` 替代实现。路由只是使用方而非所有者，后续入口复用同一个包。 |
+| `ui/features/ai_review/`、`ui/features/ai_review_settings/` | 可选编译包，提供完整实现和协议兼容 disabled 实现；完整 Review 包只暴露 PR 右侧面板，不拥有独立路由。 |
 | `ui/components/` | 所有应用视觉组件的统一归属目录，包括 Control、Row、Card、Menu、Tab、Panel、Dialog、Field、Feedback 和功能专用视觉积木；GitHub/Primer 实现统一使用 `GitHub*` 符号。 |
 | `ui/components/artifact_preview/` | 应用级通用预览外壳、基于 Primer token 的原生 Markdown/文本/图片 Surface、右侧固定面板与独立原生窗口；不承担解析或 I/O，也不引入 WebView。 |
-| `ui/components/about/`、`chat/`、`project/`、`workflow/` | 从路由页面抽出的功能级 GitHub/Primer 视觉积木，不负责 I/O 或路由跳转。 |
+| `ui/components/about/`、`ai_review/`、`chat/`、`project/`、`workflow/` | 从路由页面抽出的功能级 GitHub/Primer 视觉积木，不负责 I/O 或路由跳转。 |
 | `ui/components/showcase/` | GitHub/Primer 属性对比矩阵，以及把依赖业务 model 的组合组件链接到真实路由的登记表；可选 Preview 样例只发出 fixture id，不得绕过 Provider 或 Host；新增或实质变更的视觉组件必须同步登记。 |
 | `ui/components/button/github_icon_button.slint` | 图标按钮、浮动按钮、Terminal、项目卡片和复制操作共用的 `GitHubIconButton` 基础，统一键盘焦点、Tooltip、加载态和语义变体。 |
 | `ui/components/label/github_counter_label.slint` | 共用的强类型 Primer CounterLabel，提供 Default/Primary/Secondary Scheme、可选上限、紧凑叠加几何与零值隐藏；状态栏通知徽标及后续导航/操作计数统一复用。 |

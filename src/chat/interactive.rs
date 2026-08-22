@@ -1,12 +1,15 @@
+use crate::ai::agent::{self, CompletionMessage};
 use crate::app_runtime::shared_runtime;
 use crate::chat::chat::{handle_api_error, send_message_to_server};
+use crate::chat::persistence::StoredMessageRole;
 use crate::chat::renderer::{clear_render_cache, record_model_commit, render_for_ui};
-use crate::chat::session::ChatSessionService;
+use crate::chat::session::{ChatMode, ChatRequestState, ChatSessions};
 use crate::chat::virtual_layout::{
     VirtualRenderSignature, VirtualWindowPolicy, clear_virtual_layout_cache,
     compute_history_window, compute_spacers_for_fixed_window, current_virtual_document_height_px,
     get_adaptive_row_height_px, smooth_adaptive_row_height_px,
 };
+use crate::settings::load_settings;
 use crate::{MainWindow, Route};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
@@ -33,6 +36,7 @@ const MOUNTED_EDGE_GUARD_PX: f32 = 2400.0;
 const LAYOUT_SETTLE_DELAY_MS: u64 = 80;
 const MAX_NEW_ROWS_PER_SCROLL_COMMIT: usize = 2;
 const STICK_TO_BOTTOM_THRESHOLD_PX: f32 = 96.0;
+const MAX_AI_CONTEXT_MESSAGES: usize = 20;
 
 fn virtual_scroll_bucket(scroll_offset_px: f32) -> i32 {
     (scroll_offset_px.max(0.0) / VIRTUAL_SCROLL_BUCKET_HEIGHT_PX).floor() as i32
@@ -244,7 +248,13 @@ fn schedule_anchor_compensation(ui_weak: slint::Weak<MainWindow>) {
 struct ChatMessageModelBridge {
     incremental: bool,
     rows_model: Rc<VecModel<crate::ChatMessage>>,
-    mounted_ids: RefCell<Vec<i32>>,
+    mounted_keys: RefCell<Vec<ChatMessageRowKey>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChatMessageRowKey {
+    mode: ChatMode,
+    id: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,7 +269,7 @@ impl ChatMessageModelBridge {
         Self {
             incremental,
             rows_model: Rc::new(VecModel::default()),
-            mounted_ids: RefCell::new(Vec::new()),
+            mounted_keys: RefCell::new(Vec::new()),
         }
     }
 
@@ -272,16 +282,20 @@ impl ChatMessageModelBridge {
     fn replace_rows(
         &self,
         ui: &MainWindow,
+        mode: ChatMode,
         next_rows: Vec<crate::ChatMessage>,
         next_top_spacer: f32,
         next_bottom_spacer: f32,
     ) -> ModelMutationCounts {
-        let next_ids = next_rows.iter().map(|row| row.id).collect::<Vec<_>>();
+        let next_keys = next_rows
+            .iter()
+            .map(|row| ChatMessageRowKey { mode, id: row.id })
+            .collect::<Vec<_>>();
         if !self.incremental {
             let removed = ui.get_chat_messages().row_count();
             let inserted = next_rows.len();
             ui.set_chat_messages(next_rows.as_slice().into());
-            *self.mounted_ids.borrow_mut() = next_ids;
+            *self.mounted_keys.borrow_mut() = next_keys;
             return ModelMutationCounts {
                 inserted,
                 removed,
@@ -289,8 +303,8 @@ impl ChatMessageModelBridge {
             };
         }
 
-        let old_ids = self.mounted_ids.borrow().clone();
-        if old_ids == next_ids {
+        let old_keys = self.mounted_keys.borrow().clone();
+        if old_keys == next_keys {
             ui.set_chat_virtual_top_spacer(next_top_spacer);
             ui.set_chat_virtual_bottom_spacer(next_bottom_spacer);
             return ModelMutationCounts {
@@ -309,7 +323,7 @@ impl ChatMessageModelBridge {
             ui.set_chat_virtual_bottom_spacer(next_bottom_spacer);
         }
 
-        let overlap = longest_contiguous_overlap(&old_ids, &next_ids);
+        let overlap = longest_contiguous_overlap(&old_keys, &next_keys);
         let (inserted, removed) = if let Some((old_start, next_start, overlap_len)) = overlap {
             for (index, row) in next_rows.iter().take(next_start).cloned().enumerate() {
                 self.rows_model.insert(index, row);
@@ -320,17 +334,17 @@ impl ChatMessageModelBridge {
             for _ in 0..old_start {
                 self.rows_model.remove(next_start);
             }
-            let old_suffix = old_ids.len().saturating_sub(old_start + overlap_len);
+            let old_suffix = old_keys.len().saturating_sub(old_start + overlap_len);
             for _ in 0..old_suffix {
                 self.rows_model.remove(next_start + overlap_len);
             }
             (
                 next_rows.len().saturating_sub(overlap_len),
-                old_ids.len().saturating_sub(overlap_len),
+                old_keys.len().saturating_sub(overlap_len),
             )
         } else {
             self.rows_model.set_vec(next_rows);
-            (next_ids.len(), old_ids.len())
+            (next_keys.len(), old_keys.len())
         };
         if next_top_spacer <= old_top_spacer {
             ui.set_chat_virtual_top_spacer(next_top_spacer);
@@ -338,7 +352,7 @@ impl ChatMessageModelBridge {
         if next_bottom_spacer <= old_bottom_spacer {
             ui.set_chat_virtual_bottom_spacer(next_bottom_spacer);
         }
-        *self.mounted_ids.borrow_mut() = next_ids;
+        *self.mounted_keys.borrow_mut() = next_keys;
         ModelMutationCounts {
             inserted,
             removed,
@@ -347,7 +361,7 @@ impl ChatMessageModelBridge {
     }
 
     fn clear(&self, ui: &MainWindow) {
-        self.mounted_ids.borrow_mut().clear();
+        self.mounted_keys.borrow_mut().clear();
         if self.incremental {
             self.rows_model.set_vec(Vec::new());
         } else {
@@ -356,7 +370,10 @@ impl ChatMessageModelBridge {
     }
 }
 
-fn longest_contiguous_overlap(old: &[i32], next: &[i32]) -> Option<(usize, usize, usize)> {
+fn longest_contiguous_overlap<T: PartialEq>(
+    old: &[T],
+    next: &[T],
+) -> Option<(usize, usize, usize)> {
     let mut best = None;
     for (old_start, old_id) in old.iter().enumerate() {
         for (next_start, next_id) in next.iter().enumerate() {
@@ -517,7 +534,8 @@ fn compute_wrap_width_for_chat_width(chat_width: f32) -> i32 {
 
 fn apply_chat_state_to_ui(
     ui: &MainWindow,
-    session: &Arc<Mutex<ChatSessionService>>,
+    session: &Arc<Mutex<ChatSessions>>,
+    mode: ChatMode,
     include_loading_placeholder: bool,
     wrap_width_override_px: Option<i32>,
     limit_scroll_insertions: bool,
@@ -525,6 +543,7 @@ fn apply_chat_state_to_ui(
     apply_chat_state_to_ui_with_policy(
         ui,
         session,
+        mode,
         include_loading_placeholder,
         wrap_width_override_px,
         limit_scroll_insertions,
@@ -534,7 +553,8 @@ fn apply_chat_state_to_ui(
 
 fn apply_chat_state_to_ui_for_scrollbar_drag(
     ui: &MainWindow,
-    session: &Arc<Mutex<ChatSessionService>>,
+    session: &Arc<Mutex<ChatSessions>>,
+    mode: ChatMode,
     include_loading_placeholder: bool,
     wrap_width_override_px: Option<i32>,
     moving_down: bool,
@@ -547,6 +567,7 @@ fn apply_chat_state_to_ui_for_scrollbar_drag(
     apply_chat_state_to_ui_with_policy(
         ui,
         session,
+        mode,
         include_loading_placeholder,
         wrap_width_override_px,
         false,
@@ -556,7 +577,8 @@ fn apply_chat_state_to_ui_for_scrollbar_drag(
 
 fn apply_chat_state_to_ui_with_policy(
     ui: &MainWindow,
-    session: &Arc<Mutex<ChatSessionService>>,
+    session: &Arc<Mutex<ChatSessions>>,
+    mode: ChatMode,
     include_loading_placeholder: bool,
     wrap_width_override_px: Option<i32>,
     limit_scroll_insertions: bool,
@@ -578,17 +600,22 @@ fn apply_chat_state_to_ui_with_policy(
             }
         };
 
-        let all_messages = guard.loaded_messages();
+        let all_messages = guard.messages_for(mode);
         let total = all_messages.len();
 
         if total == 0 {
             (
                 Vec::new(),
-                guard.can_load_more(),
+                guard.can_load_more_for(mode),
                 0.0f32,
                 0.0f32,
                 0.0f32,
-                None,
+                Some(VirtualRenderSignature {
+                    total_len: 0,
+                    start: 0,
+                    end: 0,
+                    include_loading_placeholder,
+                }),
             )
         } else {
             let scroll_offset_px = (-ui.get_chat_scroll_position()).max(0.0);
@@ -651,7 +678,7 @@ fn apply_chat_state_to_ui_with_policy(
             };
             (
                 all_messages[start..end].to_vec(),
-                guard.can_load_more(),
+                guard.can_load_more_for(mode),
                 top_px,
                 bottom_px,
                 document_height_px,
@@ -685,7 +712,7 @@ fn apply_chat_state_to_ui_with_policy(
             slot.borrow()
                 .as_ref()
                 .expect("Chat message model must be initialized on the event loop")
-                .replace_rows(ui, rendered, top_spacer_px, bottom_spacer_px)
+                .replace_rows(ui, mode, rendered, top_spacer_px, bottom_spacer_px)
         });
         MODEL_MUTATION_IN_PROGRESS.with(|active| active.set(false));
         MESSAGE_GEOMETRIES.with(|geometries| {
@@ -698,6 +725,13 @@ fn apply_chat_state_to_ui_with_policy(
             counts.inserted,
             counts.removed,
             counts.incremental,
+        );
+        log::debug!(
+            "[Chat::Model] committed mode={mode:?} rows={} inserted={} removed={} incremental={}",
+            messages.len(),
+            counts.inserted,
+            counts.removed,
+            counts.incremental
         );
         schedule_anchor_compensation(ui.as_weak());
     } else {
@@ -727,14 +761,24 @@ fn clear_chat_ui_state(ui: &MainWindow) {
 
 fn schedule_chat_ui_mount(
     ui_weak: slint::Weak<MainWindow>,
-    session: Arc<Mutex<ChatSessionService>>,
+    session: Arc<Mutex<ChatSessions>>,
+    mode: ChatMode,
+    revision: u64,
+    current_revision: Rc<Cell<u64>>,
     scroll_to_latest: bool,
 ) {
     slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
-        if ui.get_current_route() != Route::Chat {
+        if ui.get_current_route() != Route::Chat
+            || !chat_ui_mount_is_current(
+                mode,
+                revision,
+                chat_mode_from_ui(&ui),
+                current_revision.get(),
+            )
+        {
             return;
         }
 
@@ -747,6 +791,7 @@ fn schedule_chat_ui_mount(
         apply_chat_state_to_ui(
             &ui,
             &session,
+            mode,
             ui.get_chat_is_sending(),
             Some(active_wrap_width_px(&ui)),
             false,
@@ -758,15 +803,30 @@ fn schedule_chat_ui_mount(
     });
 }
 
-fn begin_chat_ui_mount(ui: &MainWindow, session: &Arc<Mutex<ChatSessionService>>) {
+fn begin_chat_ui_mount(ui: &MainWindow, session: &Arc<Mutex<ChatSessions>>, mode: ChatMode) {
     let has_history = session
         .lock()
-        .map(|guard| !guard.loaded_messages().is_empty())
+        .map(|guard| !guard.messages_for(mode).is_empty())
         .unwrap_or_else(|error| {
             log::error!("[Chat::Session] Lock poisoned while mounting Chat: {error}");
             false
         });
     ui.set_chat_history_restoring(has_history);
+}
+
+fn next_chat_ui_mount_revision(current_revision: &Cell<u64>) -> u64 {
+    let revision = current_revision.get().wrapping_add(1);
+    current_revision.set(revision);
+    revision
+}
+
+fn chat_ui_mount_is_current(
+    expected_mode: ChatMode,
+    expected_revision: u64,
+    current_mode: ChatMode,
+    current_revision: u64,
+) -> bool {
+    expected_mode == current_mode && expected_revision == current_revision
 }
 
 fn schedule_loading_phase_tick(
@@ -828,12 +888,49 @@ fn scroll_chat_to_bottom(ui: &MainWindow) {
     ui.set_chat_scroll_to_bottom_revision(ui.get_chat_scroll_to_bottom_revision().wrapping_add(1));
 }
 
+fn chat_mode_from_ui(ui: &MainWindow) -> ChatMode {
+    if ui.get_chat_ai_mode() {
+        ChatMode::Ai
+    } else {
+        ChatMode::Rag
+    }
+}
+
+fn ai_completion_messages(
+    history: &[crate::chat::persistence::StoredChatMessage],
+) -> Vec<CompletionMessage> {
+    let mut messages = Vec::with_capacity(MAX_AI_CONTEXT_MESSAGES + 1);
+    messages.push(CompletionMessage::system(
+        "You are Usher's general-purpose software engineering assistant. Give concrete, concise, and technically defensible answers. Ask for missing context when it materially changes the answer.",
+    ));
+    let start = history.len().saturating_sub(MAX_AI_CONTEXT_MESSAGES);
+    messages.extend(history[start..].iter().map(|message| match message.role {
+        StoredMessageRole::User => CompletionMessage::user(message.content.clone()),
+        StoredMessageRole::Assistant => CompletionMessage::assistant(message.content.clone()),
+    }));
+    messages
+}
+
+async fn send_chat_message(
+    mode: ChatMode,
+    user_message: &str,
+    ai_history: Vec<CompletionMessage>,
+) -> Result<String, crate::http::HttpError> {
+    match mode {
+        ChatMode::Ai => {
+            let settings = load_settings().ai.agent;
+            agent::complete(&settings, &ai_history, "Send AI chat message").await
+        }
+        ChatMode::Rag => send_message_to_server(user_message).await,
+    }
+}
+
 /// 设置聊天交互逻辑和事件回调
 pub fn setup_interactive(ui: &MainWindow) {
     log::info!("[Chat::Interactive] Setting up interactive callbacks...");
     let runtime = shared_runtime();
 
-    let mut session = match ChatSessionService::bootstrap_default() {
+    let mut session = match ChatSessions::bootstrap_default() {
         Ok(s) => s,
         Err(e) => {
             log::error!("[Chat::Storage] Failed to initialize chat storage: {}", e);
@@ -842,6 +939,9 @@ pub fn setup_interactive(ui: &MainWindow) {
     };
     session.install_performance_fixture();
     let session = Arc::new(Mutex::new(session));
+    let request_state = Arc::new(Mutex::new(ChatRequestState::default()));
+    ui.set_chat_ai_mode(true);
+    ui.set_chat_ai_model_name(load_settings().ai.agent.model.into());
     let model_bridge = Rc::new(ChatMessageModelBridge::new(
         crate::chat::performance::variant().is_optimized(),
     ));
@@ -850,7 +950,7 @@ pub fn setup_interactive(ui: &MainWindow) {
 
     {
         if let Ok(guard) = session.lock() {
-            guard.log_storage_path();
+            guard.log_storage_paths();
             log::info!(
                 "[Chat::History] bootstrap loaded_messages={} can_load_more={}",
                 guard.loaded_messages().len(),
@@ -868,9 +968,51 @@ pub fn setup_interactive(ui: &MainWindow) {
     let auto_load_armed = Rc::new(Cell::new(true));
     let virtual_commit_in_progress = Rc::new(Cell::new(false));
     let virtual_commit_scheduled = Rc::new(Cell::new(false));
+    let chat_ui_mount_revision = Rc::new(Cell::new(0u64));
     let layout_revision = Rc::new(Cell::new(0u64));
     let settled_layout_size = Rc::new(Cell::new((0i32, 0i32)));
     let layout_stick_to_bottom = Rc::new(Cell::new(false));
+
+    let ui_weak_mode = ui_weak.clone();
+    let session_mode = session.clone();
+    let request_state_mode = request_state.clone();
+    let chat_ui_mount_revision_mode = chat_ui_mount_revision.clone();
+    ui.on_chat_switch_mode(move |ai_mode| {
+        let Some(ui) = ui_weak_mode.upgrade() else {
+            return;
+        };
+        let mode = if ai_mode { ChatMode::Ai } else { ChatMode::Rag };
+        if chat_mode_from_ui(&ui) == mode {
+            return;
+        }
+        if let Ok(mut sessions) = session_mode.lock() {
+            sessions.set_active_mode(mode);
+        } else {
+            log::error!("[Chat::Session] Lock poisoned while switching mode");
+            return;
+        }
+        clear_history_anchor_state();
+        clear_virtual_layout_cache();
+        clear_render_cache();
+        LAST_RENDER_SIGNATURE.with(|last| *last.borrow_mut() = None);
+        ui.set_chat_ai_mode(ai_mode);
+        ui.set_chat_loading_history(false);
+        let sending = request_state_mode
+            .lock()
+            .map(|state| state.is_sending(mode))
+            .unwrap_or(false);
+        ui.set_chat_is_sending(sending);
+        let revision = next_chat_ui_mount_revision(&chat_ui_mount_revision_mode);
+        begin_chat_ui_mount(&ui, &session_mode, mode);
+        schedule_chat_ui_mount(
+            ui.as_weak(),
+            session_mode.clone(),
+            mode,
+            revision,
+            chat_ui_mount_revision_mode.clone(),
+            true,
+        );
+    });
 
     let ui_weak_geometry = ui_weak.clone();
     ui.on_chat_message_geometry(move |message_id, y, height, position_changed| {
@@ -926,6 +1068,7 @@ pub fn setup_interactive(ui: &MainWindow) {
         apply_chat_state_to_ui_for_scrollbar_drag(
             &ui,
             &session_scrollbar,
+            chat_mode_from_ui(&ui),
             ui.get_chat_is_sending(),
             Some(active_wrap_width_px(&ui)),
             moving_down,
@@ -980,6 +1123,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                 apply_chat_state_to_ui(
                     &ui,
                     &session,
+                    chat_mode_from_ui(&ui),
                     ui.get_chat_is_sending(),
                     Some(compute_wrap_width_for_chat_width(width)),
                     false,
@@ -998,8 +1142,17 @@ pub fn setup_interactive(ui: &MainWindow) {
     // source of truth and reconstructs the bounded UI model when Chat is entered.
     if ui.get_current_route() == Route::Chat {
         has_entered_chat_once.set(true);
-        begin_chat_ui_mount(ui, &session);
-        schedule_chat_ui_mount(ui.as_weak(), session.clone(), true);
+        let mode = chat_mode_from_ui(ui);
+        let revision = next_chat_ui_mount_revision(&chat_ui_mount_revision);
+        begin_chat_ui_mount(ui, &session, mode);
+        schedule_chat_ui_mount(
+            ui.as_weak(),
+            session.clone(),
+            mode,
+            revision,
+            chat_ui_mount_revision.clone(),
+            true,
+        );
     } else {
         clear_chat_ui_state(ui);
     }
@@ -1015,6 +1168,7 @@ pub fn setup_interactive(ui: &MainWindow) {
             }
 
             ui.set_chat_loading_history(true);
+            let mode = chat_mode_from_ui(&ui);
             log::debug!("[Chat::History] Start loading older messages...");
             let session_for_ui = session_load_more.clone();
             let session_for_task = session_load_more.clone();
@@ -1025,7 +1179,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                         .lock()
                         .map_err(|e| format!("session lock poisoned: {e}"))?;
                     guard
-                        .load_more_history()
+                        .load_more_history_for(mode)
                         .map_err(|e| format!("load history failed: {e}"))
                 })
                 .await;
@@ -1037,7 +1191,9 @@ pub fn setup_interactive(ui: &MainWindow) {
 
                     match io_result {
                         Ok(Ok(loaded_count)) => {
-                            if ui.get_current_route() == Route::Chat {
+                            if ui.get_current_route() == Route::Chat
+                                && chat_mode_from_ui(&ui) == mode
+                            {
                                 if loaded_count > 0 {
                                     capture_visible_history_anchor(&ui);
                                 }
@@ -1046,6 +1202,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                                 apply_chat_state_to_ui(
                                     &ui,
                                     &session_for_ui,
+                                    mode,
                                     ui.get_chat_is_sending(),
                                     Some(wrap_width_px),
                                     false,
@@ -1055,12 +1212,16 @@ pub fn setup_interactive(ui: &MainWindow) {
                         }
                         Ok(Err(e)) => {
                             PENDING_HISTORY_ANCHOR.with(|pending| pending.set(None));
-                            ui.set_chat_loading_history(false);
+                            if chat_mode_from_ui(&ui) == mode {
+                                ui.set_chat_loading_history(false);
+                            }
                             log::error!("[Chat::Storage] Failed to load older history: {}", e);
                         }
                         Err(e) => {
                             PENDING_HISTORY_ANCHOR.with(|pending| pending.set(None));
-                            ui.set_chat_loading_history(false);
+                            if chat_mode_from_ui(&ui) == mode {
+                                ui.set_chat_loading_history(false);
+                            }
                             log::error!("[Chat::Storage] Background load task join failed: {}", e);
                         }
                     }
@@ -1071,6 +1232,7 @@ pub fn setup_interactive(ui: &MainWindow) {
 
     // 处理发送消息回调
     let session_send = session.clone();
+    let request_state_send = request_state.clone();
     let runtime_send = runtime.clone();
     ui.on_chat_send_message(move |text: slint::SharedString| {
         let ui_weak_local = ui_weak.clone();
@@ -1088,7 +1250,8 @@ pub fn setup_interactive(ui: &MainWindow) {
             return;
         }
 
-        let append_result = {
+        let mode = chat_mode_from_ui(&ui);
+        let (append_result, ai_history) = {
             let mut guard = match session_send.lock() {
                 Ok(g) => g,
                 Err(e) => {
@@ -1096,7 +1259,13 @@ pub fn setup_interactive(ui: &MainWindow) {
                     return;
                 }
             };
-            guard.append_user_message(text_str.clone())
+            let result = guard.append_user_message(text_str.clone());
+            let history = if result.is_ok() && mode == ChatMode::Ai {
+                ai_completion_messages(guard.messages_for(mode))
+            } else {
+                Vec::new()
+            };
+            (result, history)
         };
 
         if let Err(e) = append_result {
@@ -1106,12 +1275,16 @@ pub fn setup_interactive(ui: &MainWindow) {
 
         ui.set_chat_input_text("".into());
         ui.set_chat_is_sending(true);
+        if let Ok(mut state) = request_state_send.lock() {
+            state.set_sending(mode, true);
+        }
 
         start_loading_phase_animation(ui.as_weak(), loading_phase_active_send.clone());
 
         apply_chat_state_to_ui(
             &ui,
             &session_send,
+            mode,
             true,
             Some(active_wrap_width_px(&ui)),
             false,
@@ -1121,31 +1294,28 @@ pub fn setup_interactive(ui: &MainWindow) {
         // 异步发送消息到服务器并处理响应
         let ui_weak_clone = ui_weak.clone();
         let session_response = session_send.clone();
+        let request_state_response = request_state_send.clone();
         let loading_phase_active_response = loading_phase_active_send.clone();
 
         runtime_send.spawn(async move {
-            let result = send_message_to_server(&text_str).await;
+            let result = send_chat_message(mode, &text_str, ai_history).await;
 
             let _ = slint::invoke_from_event_loop(move || {
                 let Some(ui) = ui_weak_clone.upgrade() else {
                     return;
                 };
 
-                loading_phase_active_response.store(false, Ordering::Relaxed);
-
                 let mut guard = match session_response.lock() {
                     Ok(g) => g,
                     Err(e) => {
                         log::error!("[Chat::Session] Lock poisoned: {}", e);
-                        ui.set_chat_is_sending(false);
-                        ui.set_chat_loading_phase(0);
                         return;
                     }
                 };
 
                 match result {
                     Ok(response) => {
-                        if let Err(e) = guard.append_assistant_message(response) {
+                        if let Err(e) = guard.append_assistant_message_for(mode, response) {
                             log::error!(
                                 "[Chat::Storage] Failed to persist assistant message: {}",
                                 e
@@ -1154,19 +1324,26 @@ pub fn setup_interactive(ui: &MainWindow) {
                     }
                     Err(err) => {
                         let friendly = handle_api_error(&err);
-                        if let Err(e) = guard.append_assistant_error(friendly) {
+                        if let Err(e) = guard.append_assistant_error_for(mode, friendly) {
                             log::error!("[Chat::Storage] Failed to persist error message: {}", e);
                         }
                     }
                 }
                 drop(guard);
 
-                ui.set_chat_is_sending(false);
-                ui.set_chat_loading_phase(0);
-                if ui.get_current_route() == Route::Chat {
+                if let Ok(mut state) = request_state_response.lock() {
+                    state.set_sending(mode, false);
+                }
+                if chat_mode_from_ui(&ui) == mode {
+                    loading_phase_active_response.store(false, Ordering::Relaxed);
+                    ui.set_chat_is_sending(false);
+                    ui.set_chat_loading_phase(0);
+                }
+                if ui.get_current_route() == Route::Chat && chat_mode_from_ui(&ui) == mode {
                     apply_chat_state_to_ui(
                         &ui,
                         &session_response,
+                        mode,
                         false,
                         Some(active_wrap_width_px(&ui)),
                         false,
@@ -1311,6 +1488,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                 apply_chat_state_to_ui_for_scrollbar_drag(
                     &ui,
                     &session,
+                    chat_mode_from_ui(&ui),
                     ui.get_chat_is_sending(),
                     Some(active_wrap_width_px(&ui)),
                     moving_down,
@@ -1319,6 +1497,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                 apply_chat_state_to_ui(
                     &ui,
                     &session,
+                    chat_mode_from_ui(&ui),
                     ui.get_chat_is_sending(),
                     Some(active_wrap_width_px(&ui)),
                     true,
@@ -1338,14 +1517,34 @@ pub fn setup_interactive(ui: &MainWindow) {
     let auto_load_armed_route = auto_load_armed.clone();
     let loading_phase_active_route = loading_phase_active.clone();
     let has_entered_chat_once_route = has_entered_chat_once.clone();
+    let request_state_route = request_state.clone();
+    let chat_ui_mount_revision_route = chat_ui_mount_revision.clone();
 
     ui.on_chat_route_visible_changed(move |visible| {
         if visible {
             let first_entry = !has_entered_chat_once_route.replace(true);
             if let Some(ui) = ui_weak_route.upgrade() {
-                begin_chat_ui_mount(&ui, &session_route);
+                let mode = chat_mode_from_ui(&ui);
+                if let Ok(mut sessions) = session_route.lock() {
+                    sessions.set_active_mode(mode);
+                }
+                let sending = request_state_route
+                    .lock()
+                    .map(|state| state.is_sending(mode))
+                    .unwrap_or(false);
+                ui.set_chat_is_sending(sending);
+                ui.set_chat_ai_model_name(load_settings().ai.agent.model.into());
+                let revision = next_chat_ui_mount_revision(&chat_ui_mount_revision_route);
+                begin_chat_ui_mount(&ui, &session_route, mode);
+                schedule_chat_ui_mount(
+                    ui.as_weak(),
+                    session_route.clone(),
+                    mode,
+                    revision,
+                    chat_ui_mount_revision_route.clone(),
+                    first_entry,
+                );
             }
-            schedule_chat_ui_mount(ui_weak_route.clone(), session_route.clone(), first_entry);
             if let Some(ui) = ui_weak_route.upgrade() {
                 let bucket = virtual_scroll_bucket((-ui.get_chat_scroll_position()).max(0.0));
                 observed_scroll_bucket_route.set(bucket);
@@ -1353,6 +1552,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                 auto_load_armed_route.set(true);
             }
         } else {
+            next_chat_ui_mount_revision(&chat_ui_mount_revision_route);
             clear_history_anchor_state();
             clear_virtual_layout_cache();
             stop_loading_phase_animation(ui_weak_route.clone(), loading_phase_active_route.clone());
@@ -1382,6 +1582,33 @@ mod tests {
     }
 
     #[test]
+    fn rapid_mode_switch_rejects_stale_delayed_mounts() {
+        let revision = Cell::new(0);
+        let initial_ai = next_chat_ui_mount_revision(&revision);
+        let rag = next_chat_ui_mount_revision(&revision);
+        let latest_ai = next_chat_ui_mount_revision(&revision);
+
+        assert!(!chat_ui_mount_is_current(
+            ChatMode::Ai,
+            initial_ai,
+            ChatMode::Ai,
+            revision.get(),
+        ));
+        assert!(!chat_ui_mount_is_current(
+            ChatMode::Rag,
+            rag,
+            ChatMode::Ai,
+            revision.get(),
+        ));
+        assert!(chat_ui_mount_is_current(
+            ChatMode::Ai,
+            latest_ai,
+            ChatMode::Ai,
+            revision.get(),
+        ));
+    }
+
+    #[test]
     fn contiguous_overlap_preserves_the_stable_middle_window() {
         assert_eq!(
             longest_contiguous_overlap(&[10, 11, 12, 13], &[12, 13, 14, 15]),
@@ -1393,6 +1620,33 @@ mod tests {
         );
         assert_eq!(longest_contiguous_overlap(&[1, 2], &[3, 4]), None);
         assert_eq!(longest_contiguous_overlap(&[], &[1]), None);
+    }
+
+    #[test]
+    fn identical_message_ids_from_different_modes_never_reuse_rows() {
+        let ai = [
+            ChatMessageRowKey {
+                mode: ChatMode::Ai,
+                id: 1,
+            },
+            ChatMessageRowKey {
+                mode: ChatMode::Ai,
+                id: 2,
+            },
+        ];
+        let rag = [
+            ChatMessageRowKey {
+                mode: ChatMode::Rag,
+                id: 1,
+            },
+            ChatMessageRowKey {
+                mode: ChatMode::Rag,
+                id: 2,
+            },
+        ];
+
+        assert_eq!(longest_contiguous_overlap(&ai, &rag), None);
+        assert_eq!(longest_contiguous_overlap(&ai, &ai), Some((0, 0, 2)));
     }
 
     #[test]

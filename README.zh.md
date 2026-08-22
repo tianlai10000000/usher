@@ -10,7 +10,8 @@ Usher 是一个处于 Alpha 阶段的桌面 Git 项目工作台，用于管理�
 - 统计 GitHub、GitLab 和 Gitee 兼容服务上 `fat`、`uat`、`prod` 分支的 PR/MR 数量。
 - 按项目隔离执行 Branch 校验、Tag 自动化、分阶段 CD 与 Pull Request 流程。
 - 在当前页面打开项目感知的终端抽屉。
-- 配置独立的 OpenAI-compatible AI Agent Provider（如 DeepSeek）；既有 RAG Chat 页面保持独立。
+- 在同一 Chat 页面使用 OpenAI-compatible AI 对话或隔离的 RAG 对话，两种模式历史独立。
+- 按设置并发执行最多 8 个 AI Code Review，在 PR diff 右侧查看 finding 并进行 Review 专属追问。
 - 提供可持久化应用内消息与操作系统原生通知，以及 Toast、托盘、更新和网络状态反馈。
 - 支持亮色、暗色和跟随系统主题。
 - 通过统一的 reqwest HTTP 拦截管线发送应用网络请求。
@@ -51,6 +52,13 @@ cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
 git diff --check
+```
+
+AI Code Review 是默认产品构建启用的可拆卸 Cargo feature。受限构建可排除其核心包和
+UI/Settings bridge：
+
+```sh
+cargo check --no-default-features --features renderer-femtovg --locked
 ```
 
 日常 `dev` 和 `test` 构建保留源码行号与增量编译，但不再使用 macOS 默认的
@@ -163,12 +171,14 @@ Usher 使用 `directories::ProjectDirs::from("com", "usher", "app")` 选择各�
 | --- | --- |
 | 设置、Git 平台 Token/API 根地址和 AI Agent 凭据 | 配置目录：`settings.toml` |
 | 项目列表 | 本地数据目录：`project/projects.json` |
-| 聊天历史 | 本地数据目录：`im/chat_history.jsonl` |
+| RAG / AI Chat 历史 | 本地数据目录：`im/chat_history.jsonl` / `im/ai_chat_history.jsonl` |
+| AI Review 规则、默认值、项目绑定、并发数 | 配置目录：`ai-review.json` |
+| AI Review 任务摘要与完成 Session | 本地数据目录：`ai-review/` |
 | 持久通知 Inbox 与已读状态 | 本地数据目录：`messages/messages.json` |
 | 日志 | 本地数据目录：`logs/<date>/usher.log` 和 `logs/<date>/usher_tracing.log` |
 | 远程项目 Logo 缓存 | 临时目录：`usher-logo-cache/` |
 
-GitHub、GitLab 和 Gitee Token 可在设置页面管理。Gitee 公有版与企业版凭据独立保存，仓库 remote host 自动选择公有 v5 或已配置的企业 v8 API，两套 Token 不共用。**代码托管 API 配置**区块以 `[git.platform.<provider>]` 保存各平台企业版 API 地址和企业名称；可填写服务主机或完整 REST API 根地址（例如 `https://git.example.com` 或 `https://git.example.com/api/v4`），缺少版本路径时由对应 Provider 自动补齐。这些值只保存在本地，且仅在配置的 API 主机与项目 remote 主机匹配时使用。**AI Agent** 区块支持 OpenAI-compatible 的 Base URL、API Key 和模型名称，提供可扩展的 Provider 选择器、可编辑模型名和不产生生成费用的连通性测试。设置保存至 `[ai.agent]`。不要提交生成的设置、日志、聊天记录或凭据。详见 [AI Agent 配置规格](docs/specs/ai-agent.md)。
+GitHub、GitLab 和 Gitee Token 可在设置页面管理。Gitee 公有版与企业版凭据独立保存，仓库 remote host 自动选择公有 v5 或已配置的企业 v8 API，两套 Token 不共用。**代码托管 API 配置**区块以 `[git.platform.<provider>]` 保存各平台企业版 API 地址和企业名称；可填写服务主机或完整 REST API 根地址（例如 `https://git.example.com` 或 `https://git.example.com/api/v4`），缺少版本路径时由对应 Provider 自动补齐。这些值只保存在本地，且仅在配置的 API 主机与项目 remote 主机匹配时使用。**AI Agent** 区块支持 OpenAI-compatible 的 Base URL、API Key 和模型名称；**AI Review** 配置本地 Markdown 规则、默认规则和并发上限。配置分别保存到 `[ai.agent]` 和 `ai-review.json`。不要提交生成的设置、日志、聊天记录、Review Session 或凭据。详见 [AI Agent 配置规格](docs/specs/ai-agent.md)和 [AI Code Review](docs/specs/ai-code-review.md)。
 
 ## 架构概览
 
@@ -186,7 +196,9 @@ src/main.rs
      -> src/jobs/              可复用 Job model 与应用级运行页投影
      -> src/workflow/          Branch / Tag / PR / CD 状态与执行
      -> src/terminal/          PTY 会话和终端渲染
-     -> src/chat/              聊天请求、历史、文本投影、UI 绑定
+     -> src/chat/              AI/RAG 共用 Chat、隔离历史、UI 绑定
+     -> crates/usher-ai-review/ 可选无 UI Review 领域和调度器
+     -> src/ai_review/         可选 Review controller 与持久化
      -> crates/usher-preview/ Provider 注册及 Markdown/图片/文本准备
      -> src/artifact_preview/ 通用右侧面板/独立窗口预览 Host
      -> crates/usher-messages/ 持久消息中心、系统投递与独立 Inbox UI

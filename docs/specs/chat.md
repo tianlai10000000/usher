@@ -2,9 +2,9 @@
 
 ## Scope / 范围
 
-This is the stable contract for persisted Chat history, message presentation, history rendering, and inline request failures.
+This is the stable contract for the shared AI/RAG Chat presentation, isolated persisted histories, history rendering, and inline request failures.
 
-本文约束 Chat 历史持久化、消息展示、历史渲染和请求失败的内联反馈。
+本文约束 AI/RAG 共用 Chat 展示层、隔离历史持久化、历史渲染和请求失败的内联反馈。
 
 ## Ownership / 所有权
 
@@ -16,8 +16,11 @@ This is the stable contract for persisted Chat history, message presentation, hi
   `src/chat/virtual_layout.rs`.
 - Presentation: `ui/views/chat.slint`, bridged through `ui/main.slint`.
 
+- 持久化和双 Session 状态：`src/chat/persistence.rs`、`src/chat/session.rs`。
+- 宽度无关 UI 行投影及有界投影缓存：`src/chat/renderer.rs`、`src/chat/markdown.rs`。
 - 异步请求与路由交互：`src/chat/interactive.rs`。
 - 仅基准使用的有界高度估算、prefix cache 与虚拟窗口选择：`src/chat/virtual_layout.rs`。
+- 展示：`ui/views/chat.slint`，通过 `ui/main.slint` 桥接。
 
 ## Invariants / 不变量
 
@@ -131,6 +134,25 @@ This is the stable contract for persisted Chat history, message presentation, hi
     the next ordinary scroll movement. Flickable's `flicked()` callback observes
     wheel/touchpad direction across the complete viewport without adding a second
     position-writing chain.
+29. One Primer segmented control switches the shared page between AI Chat and
+    RAG. AI uses the OpenAI-compatible provider configured under `[ai.agent]`;
+    RAG continues to use the repository-knowledge endpoint in `src/chat/chat.rs`.
+30. AI and RAG persist to separate JSONL files: `im/ai_chat_history.jsonl` and
+    the legacy `im/chat_history.jsonl`. Pagination, next IDs, loaded tails, and
+    sending state are isolated by mode.
+31. AI requests include at most the latest 20 loaded AI messages plus one
+    feature-owned system instruction. Switching mode while a response is in
+    flight must not cancel it, append it to the other history, clear the other
+    mode's sending state, or project it into the other mode.
+32. A late response may update its original Rust session and persistence while
+    hidden. It updates the Slint model only when Chat is visible and that same
+    mode is active.
+33. Every Chat model projection is bound to an explicit mode. Delayed route or
+    mode mounts carry a monotonically increasing revision and may commit only
+    when both their mode and revision still match the visible Chat state.
+34. Incremental message-row identity includes both mode and persisted message
+    ID. Switching to an empty mode still commits an empty render signature and
+    removes every row mounted by the previous mode.
 
 1. Chat 历史继续使用 JSONL；缺少 `status` 字段的旧记录按普通消息兼容读取。
 2. 应用生成的错误/成功状态与正文分开保存，并使用矢量图标展示；禁止重新加入会触发彩色字体回退的固定 Emoji 前缀。
@@ -208,6 +230,20 @@ This is the stable contract for persisted Chat history, message presentation, hi
     的每次合并提交都必须直接收敛到最新随机访问目标，pointer-up 还必须按精确松手位置执行
     一次最终无上限收敛，并将仅覆盖可见区的 drag 窗口保留到下一次普通滚动。滚轮/触控板
     方向由 Flickable `flicked()` 观测，不得增加第二条位置写入链。
+29. 同一个页面使用 Primer segmented control 在 AI Chat 与 RAG 间切换。AI 使用
+    `[ai.agent]` 配置的 OpenAI-compatible Provider；RAG 继续使用
+    `src/chat/chat.rs` 中的仓库知识 endpoint。
+30. AI 与 RAG 分别持久化到 `im/ai_chat_history.jsonl` 和旧有
+    `im/chat_history.jsonl`；分页、next ID、加载尾部和发送状态按模式隔离。
+31. AI 请求最多携带最近 20 条已加载 AI 消息和一条 Feature 自有 system 指令。
+    响应进行中切换模式不得取消请求、写入另一历史、清除另一模式 sending 状态，或把
+    响应投影到另一模式。
+32. 晚到响应可以更新原模式 Rust Session 与持久化；只有 Chat 可见且原模式仍为活动模式时，
+    才更新 Slint model。
+33. 每次 Chat model 投影都必须绑定明确的模式。延迟执行的路由或模式挂载携带单调递增的
+    revision，只有其模式和 revision 都仍与可见 Chat 状态一致时才能提交。
+34. 增量消息行身份必须同时包含模式和持久化消息 ID。切换到空历史模式时仍必须提交空的
+    render signature，并删除上一模式挂载的全部消息行。
 
 ## Regression checklist / 回归检查
 
@@ -223,6 +259,8 @@ This is the stable contract for persisted Chat history, message presentation, hi
   loading state replaces the welcome view until messages appear. With an empty
   history, verify the welcome view appears without a restoration loading state.
 - While a request or history page is loading, leave Chat and verify the response persists without recreating the Chat component/model; re-enter and verify the completed content appears.
+- Switch AI Chat -> RAG while each mode has an in-flight request; verify responses,
+  loading states, pagination, and persisted histories remain isolated.
 - Resize the window on a non-Chat route with existing Chat history and verify Chat delegates/text layout do not appear in the resize profile.
 - Resize repeatedly on Chat and verify the model-commit and Markdown-projection
   counters remain unchanged throughout width-only interaction.

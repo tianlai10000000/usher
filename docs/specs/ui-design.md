@@ -539,7 +539,9 @@ expanded/collapsed, and success confirmation.
   centered, and apply the shared 1 px optical correction for compact text.
   Items own selected, hover, disabled, Enter/Space, and
   keyboard-visible focus states, and always report `clicked` (callers may
-  ignore a re-selection). Live numeric suffixes use the item's integer `count`
+  ignore a re-selection). Pointer activation must focus and report `clicked`
+  from the same physical press, including immediately after a TextInput or
+  another control held focus. Live numeric suffixes use the item's integer `count`
   input. The item renders `label`, `" ("`, the integer, and `")"` as separate
   `Text` nodes — never as one concatenated string property. Call sites must not
   concatenate changing numbers into `label` either; a finished `"All (N)"`
@@ -597,10 +599,12 @@ expanded/collapsed, and success confirmation.
   above application chrome, so a modal backdrop covers the complete window,
   including the native-title-bar inset and any persistent status bar. A route
   host that occupies only the main content column supplies the complete window
-  viewport in host-local coordinates; both the surface and backdrop use that
-  viewport, so docked navigation cannot shift the Dialog center or create a
-  backdrop seam. On
-  macOS, the standard close/minimize/zoom traffic lights remain above the
+  width in host-local coordinates. Its backdrop plus the root title-bar
+  continuation cover the complete window without a seam, while the Dialog
+  surface is centered inside the content-safe viewport below the native macOS
+  title bar so its top radius and shadow cannot be clipped. Docked navigation
+  must not shift the Dialog center. On macOS, the standard
+  close/minimize/zoom traffic lights remain above the
   backdrop and clickable; application-owned sidebar/back/forward title-bar
   accessories remain below it and must expose no hover, Tooltip, or click
   interaction while the backdrop is visible. Native-title-bar clicks also

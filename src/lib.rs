@@ -53,6 +53,8 @@ use chat::setup_chat;
 pub mod artifact_preview;
 
 mod ai;
+#[cfg(feature = "ai-code-review")]
+mod ai_review;
 
 mod app_lifecycle;
 mod app_runtime;
@@ -790,6 +792,12 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     setup_workflow(&app);
     memory_diagnostics::log_checkpoint("startup.workflow_ready");
 
+    #[cfg(feature = "ai-code-review")]
+    let ai_review_controller =
+        ai_review::setup_ai_review(&app, &settings_page, message_center.clone());
+    #[cfg(feature = "ai-code-review")]
+    memory_diagnostics::log_checkpoint("startup.ai_review_ready");
+
     // ========= System Tray ========= //
     // Setup system tray icon with context menu
     // Using native macOS API implementation to avoid Objective-C class registration conflicts
@@ -831,6 +839,12 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     shutdown::register_pre_shutdown_task_with_priority("shutdown_terminal", PRIORITY_HIGH, || {
         shutdown_terminal();
     });
+    #[cfg(feature = "ai-code-review")]
+    shutdown::register_pre_shutdown_task_with_priority(
+        "shutdown_ai_review",
+        PRIORITY_HIGH,
+        move || ai_review_controller.shutdown(),
+    );
     let message_center_for_shutdown = message_center.clone();
     shutdown::register_pre_shutdown_task_with_priority(
         "shutdown_message_center",

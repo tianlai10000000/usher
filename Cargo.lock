@@ -7320,14 +7320,25 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tray-icon",
+ "usher-ai-review",
  "usher-messages",
  "usher-preview",
  "usher-search",
+ "usher-state-store",
  "usher-ui",
  "usher-ui-settings",
  "usher-virtual-list",
  "vt100",
  "webbrowser",
+]
+
+[[package]]
+name = "usher-ai-review"
+version = "0.0.8-alpha.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "usher-state-store",
 ]
 
 [[package]]

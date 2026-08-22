@@ -6,6 +6,7 @@ use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 const HISTORY_FILE_NAME: &str = "chat_history.jsonl";
+pub(crate) const AI_HISTORY_FILE_NAME: &str = "ai_chat_history.jsonl";
 const TAIL_CHUNK_SIZE: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +63,10 @@ pub struct JsonlHistoryStore {
 
 impl JsonlHistoryStore {
     pub fn new_default() -> io::Result<Self> {
+        Self::new_default_named(HISTORY_FILE_NAME)
+    }
+
+    pub(crate) fn new_default_named(file_name: &str) -> io::Result<Self> {
         let base_dir = if let Some(proj_dirs) = ProjectDirs::from("com", "usher", "app") {
             proj_dirs.data_local_dir().to_path_buf()
         } else {
@@ -69,7 +74,18 @@ impl JsonlHistoryStore {
         };
         let im_dir = base_dir.join("im");
         fs::create_dir_all(&im_dir)?;
-        let file_path = im_dir.join(HISTORY_FILE_NAME);
+        let file_path = im_dir.join(file_name);
+        if !file_path.exists() {
+            File::create(&file_path)?;
+        }
+        Ok(Self { file_path })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_test_path(file_path: PathBuf) -> io::Result<Self> {
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         if !file_path.exists() {
             File::create(&file_path)?;
         }

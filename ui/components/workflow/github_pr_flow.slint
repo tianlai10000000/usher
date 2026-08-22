@@ -1,10 +1,11 @@
 import { GitHubTooltip } from "../github_tooltip.slint";
 import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
-import { GitHubActionMenu } from "../github_action_menu.slint";
+import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
 import { GitHubCenteredLoadingState } from "../github_spinner.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubFilterMenuButton } from "../github_filter_menu.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
+import { AiReviewRuleChoice } from "@ai-review";
 
 
 
@@ -46,6 +47,9 @@ export component GitHubPullRequestFlow {
     in property <string> pr-sort-filter: "newest";
     in property <bool> pr-loading: false;
     in property <string> pr-error: "";
+    in property <[AiReviewRuleChoice]> ai-review-rule-options: [];
+    in property <string> ai-review-project-rule-id: "";
+    in property <string> ai-review-project-rule-name: "No preset";
     callback change-state(string);
     callback change-query(string);
     callback change-page(int);
@@ -53,6 +57,9 @@ export component GitHubPullRequestFlow {
     callback change-assignee-filter(string);
     callback change-sort-filter(string);
     callback open-detail(string, string, string, string, string, string, int);
+    callback start-ai-review(string, string, string, string);
+    callback open-ai-review(string);
+    callback set-ai-review-rule(string);
 
     private property <string> active-menu: "";
     private property <string> hovered-inline-tooltip: "";
@@ -209,6 +216,17 @@ export component GitHubPullRequestFlow {
                     height: parent.height;
                     spacing: 0px;
                     alignment: end;
+
+                    if root.ai-review-rule-options.length > 0: rule-btn := GitHubFilterMenuButton {
+                        label: "AI rule: " + root.ai-review-project-rule-name;
+                        menu-open: root.active-menu == "ai-rule";
+                        selected: root.active-menu == "ai-rule" || root.ai-review-project-rule-id != "";
+                        clicked => {
+                            root.menu-anchor-right = self.absolute-position.x
+                                - root.absolute-position.x + self.width;
+                            root.active-menu = root.active-menu == "ai-rule" ? "" : "ai-rule";
+                        }
+                    }
 
                     if !root.compact-filters && root.supports-review-filter: reviews-btn := GitHubFilterMenuButton {
                         label: "Reviews";
@@ -914,9 +932,21 @@ export component GitHubPullRequestFlow {
                         width: 16px;
                         height: 16px;
                         source: @image-url("../../assets/icons/octicon-copilot-16.svg");
-                        colorize: ai-review-touch.has-hover
-                            ? GitHubTheme.accent-fg
-                            : root.fg-muted;
+                        colorize: item.ai-review-status == "completed"
+                            ? GitHubTheme.success-fg
+                            : (item.ai-review-status == "failed"
+                                ? GitHubTheme.danger-fg
+                                : (ai-review-touch.has-hover
+                                    ? GitHubTheme.accent-fg
+                                    : root.fg-muted));
+                    }
+                    if item.ai-review-status == "queued" || item.ai-review-status == "running": Rectangle {
+                        x: 22px;
+                        y: 4px;
+                        width: 6px;
+                        height: 6px;
+                        border-radius: 3px;
+                        background: GitHubTheme.accent-fg;
                     }
                     ai-review-touch := TouchArea {
                         width: parent.width;
@@ -924,27 +954,38 @@ export component GitHubPullRequestFlow {
                         mouse-cursor: pointer;
                         changed has-hover => {
                             if self.has-hover {
-                                root.hovered-inline-tooltip = "Review pull request with AI";
+                                root.hovered-inline-tooltip = item.ai-review-status == "queued"
+                                    ? "AI review queued"
+                                    : (item.ai-review-status == "running"
+                                        ? "AI review in progress"
+                                        : (item.ai-review-status == "completed"
+                                            ? "Open AI review (" + item.ai-review-finding-count + ")"
+                                            : (item.ai-review-status == "failed"
+                                                ? "AI review failed; start again"
+                                                : "Review pull request with AI")));
                                 root.hovered-inline-tooltip-x = self.absolute-position.x
                                     - root.absolute-position.x;
                                 root.hovered-inline-tooltip-y = self.absolute-position.y
                                     - root.absolute-position.y;
                                 root.hovered-inline-tooltip-width = self.width;
                                 root.hovered-inline-tooltip-height = self.height;
-                            } else if root.hovered-inline-tooltip == "Review pull request with AI" {
+                            } else {
                                 root.hovered-inline-tooltip = "";
                             }
                         }
                         clicked => {
-                            root.open-detail(
+                            if item.ai-review-status == "completed"
+                                || item.ai-review-status == "queued"
+                                || item.ai-review-status == "running" {
+                                root.open-ai-review(item.ai-review-task-id);
+                            } else {
+                                root.start-ai-review(
                                 item.number,
                                 item.title,
-                                item.author,
                                 item.source-branch,
                                 item.target-branch,
-                                item.updated-at-raw,
-                                2,
-                            );
+                                );
+                            }
                         }
                     }
                 }
@@ -1047,14 +1088,31 @@ export component GitHubPullRequestFlow {
         anchor-width: 0px;
         anchor-height: root.header-height;
         menu-width: 200px;
-        content-height: root.active-menu == "assignee"
+        content-height: root.active-menu == "ai-rule"
+            ? min(320px, max(48px, root.ai-review-rule-options.length * 48px))
+            : (root.active-menu == "assignee"
             ? 128px
-            : (root.active-menu == "more" ? 313px : 160px);
+            : (root.active-menu == "more" ? 313px : 160px));
         menu-max-height: 432px;
         align: "end";
         dismiss-requested => { root.active-menu = ""; }
 
-        GitHubPullRequestFilterMenu {
+        if root.active-menu == "ai-rule": VerticalLayout {
+            width: parent.width;
+            spacing: 0px;
+            for rule in root.ai-review-rule-options: GitHubActionListItem {
+                text: rule.name;
+                description: rule.inherited ? "Follows the Settings default" : "Project override";
+                selectable: true;
+                selected: rule.selected;
+                activated => {
+                    root.set-ai-review-rule(rule.id);
+                    root.active-menu = "";
+                }
+            }
+        }
+
+        if root.active-menu != "ai-rule": GitHubPullRequestFilterMenu {
             width: parent.width;
             menu-type: root.active-menu;
             review-selected-value: root.pr-review-filter;

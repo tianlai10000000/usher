@@ -83,7 +83,10 @@ export component GitHubDialog inherits FocusScope {
             } else {
                 root.focus();
             }
-        } else if root.has-focus {
+        } else {
+            // The close control normally owns focus. Clear the complete
+            // FocusScope unconditionally so the first post-dialog pointer
+            // press reaches its target instead of only retiring stale focus.
             root.clear-focus();
         }
     }

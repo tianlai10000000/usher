@@ -661,6 +661,7 @@ fn apply_page_to_ui(
 ) {
     let items = items.iter().map(to_slint_item).collect::<Vec<_>>();
     ui.set_workflow_pr_list_items(ModelRc::new(VecModel::from(items)));
+    ui.invoke_ai_review_refresh_pr_rows();
     ui.set_workflow_pr_list_page(page as i32);
     ui.set_workflow_pr_list_page_count(page_count.max(1) as i32);
     ui.set_workflow_pr_list_total_exact(total_is_exact);
@@ -683,6 +684,9 @@ fn to_slint_item(item: &PullRequestItem) -> WorkflowPullRequestItem {
         updated_at_raw: item.updated_at.clone().into(),
         updated_at_tooltip: format_github_absolute_tooltip(item.updated_at.as_str()).into(),
         web_url: item.web_url.clone().into(),
+        ai_review_status: "".into(),
+        ai_review_task_id: "".into(),
+        ai_review_finding_count: 0,
     }
 }
 

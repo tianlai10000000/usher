@@ -1,11 +1,12 @@
 import { ListView, ScrollView } from "@material";
-import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { AppState } from "../../state/app_state.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
 import { GitHubDialog } from "../../components/dialog/github_dialog.slint";
-import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubReviewActionButton, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
 import { GitHubTreeIndentGuides, GitHubCommitMessageToggleButton, GitHubFileToolbarButton, GitHubCommitSummaryNavButton, GitHubFileChangeTypeIcon, GitHubSelectableDiffCode, GitHubSplitDiffSide, GitHubDiffViewPreview, GitHubDiffViewChoice, GitHubDiffSettingsPopover, GitHubFileTreeToggleButton, GitHubFileMenuButton, GitHubDiffStatSegment, GitHubDiffStatBar, GitHubFileDiffStat, GitHubCodeRenderingIndicator, GitHubLargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, GitHubDiffFindBar } from "../../components/pr_review/content.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
+import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
 import { GitHubTooltip } from "../../components/github_tooltip.slint";
 import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubCenteredLoadingState } from "../../components/github_spinner.slint";
@@ -13,6 +14,11 @@ import { GitHubVirtualListScrollbar } from "../../components/github_scroll_view.
 import { GitHubActionListItem, GitHubActionMenu, GitHubActionMenuTriggerArea } from "../../components/github_action_menu.slint";
 import { PullRequestReviewPageContract } from "../../features/pr_review/contract.slint";
 export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContract {
+    // This route intentionally spans the full window so its Dialogs can cover
+    // the docked AI Review panel. Do not let the root FocusScope consume a
+    // panel click merely to focus itself; nested PR controls own their focus.
+    focus-on-click: false;
+
     // Full application viewport used by route-owned root overlays. The page
     // root stays at x=0; ordinary review content applies shell-leading-inset
     // internally so the sidebar can translate it without moving the large
@@ -674,11 +680,20 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         }
     }
 
-    VerticalLayout {
+    // The viewport follows the AI Review divider on every pointer move while
+    // the expensive diff layout below keeps its pre-drag width. Shrinking
+    // clips the frozen tree; releasing the pointer commits the final layout.
+    content-viewport := Rectangle {
         x: root.shell-leading-inset;
-        width: root.stable-layout-width;
-        height: root.stable-layout-height;
-        spacing: 0px;
+        width: root.content-width;
+        height: root.height;
+        clip: true;
+        background: root.github-bg-default;
+
+        VerticalLayout {
+            width: root.stable-layout-width;
+            height: root.stable-layout-height;
+            spacing: 0px;
 
         Rectangle {
             width: parent.width;
@@ -891,7 +906,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 max(18px, min(214px, self.diff-settings-anchor-x - self.diff-settings-popover-x));
 
             HorizontalLayout {
-                padding-right: 24px;
+                padding-right: 0px;
                 spacing: 0px;
 
                 files-toolbar-leading := Rectangle {
@@ -1033,6 +1048,26 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         copy-requested => {
                             root.copy-commit-sha(root.commits[root.commit-range-start].sha)
                         }
+                    }
+                }
+
+                Rectangle {
+                    // Keep the Primer 32px action mounted with a 12px trailing
+                    // inset so it remains distinct from the review-pane divider.
+                    width: GitHubMetrics.control-medium-size + GitHubMetrics.size-12;
+                    height: parent.height;
+                    GitHubIconButton {
+                        y: (parent.height - self.height) / 2;
+                        icon: @image-url("../../assets/icons/octicon-copilot-16.svg");
+                        invisible: true;
+                        selected: root.ai-review-panel-visible;
+                        loading: root.ai-review-status == "running";
+                        tooltip-text: root.ai-review-panel-visible
+                            ? "Close AI code review"
+                            : "Review this pull request with AI";
+                        tooltip-align-right: true;
+                        button-enabled: true;
+                        clicked => { root.toggle-ai-review(); }
                     }
                 }
             }
@@ -3683,6 +3718,18 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 }
             }
         }
+        }
+
+        // Paint the split-pane boundary in the live viewport instead of the
+        // frozen diff tree so it remains visible throughout a divider drag.
+        if root.ai-review-panel-visible: Rectangle {
+            x: parent.width - GitHubMetrics.border-thin;
+            y: 0px;
+            width: GitHubMetrics.border-thin;
+            height: parent.height;
+            z: 200;
+            background: root.github-border-default;
+        }
     }
 
     review-actions-menu := GitHubActionMenu {
@@ -3739,9 +3786,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
     commit-dialog-frame := GitHubDialog {
         viewport-x: -root.absolute-position.x;
-        viewport-y: -root.absolute-position.y;
+        viewport-y: 0px;
         viewport-width: root.application-width;
-        viewport-height: root.application-height;
+        viewport-height: root.height;
         backdrop-y: 0px;
         backdrop-height: root.height;
         dialog-visible: root.commit-range-dialog-open;
@@ -3969,9 +4016,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
     dismiss-review-dialog-frame := GitHubDialog {
         viewport-x: -root.absolute-position.x;
-        viewport-y: -root.absolute-position.y;
+        viewport-y: 0px;
         viewport-width: root.application-width;
-        viewport-height: root.application-height;
+        viewport-height: root.height;
         backdrop-y: 0px;
         backdrop-height: root.height;
         dialog-visible: root.dismiss-review-dialog-open;
@@ -4043,9 +4090,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
     review-dialog-frame := GitHubDialog {
         viewport-x: -root.absolute-position.x;
-        viewport-y: -root.absolute-position.y;
+        viewport-y: 0px;
         viewport-width: root.application-width;
-        viewport-height: root.application-height;
+        viewport-height: root.height;
         backdrop-y: 0px;
         backdrop-height: root.height;
         dialog-visible: root.review-dialog-open;
@@ -4134,9 +4181,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
     merge-dialog-frame := GitHubDialog {
         viewport-x: -root.absolute-position.x;
-        viewport-y: -root.absolute-position.y;
+        viewport-y: 0px;
         viewport-width: root.application-width;
-        viewport-height: root.application-height;
+        viewport-height: root.height;
         backdrop-y: 0px;
         backdrop-height: root.height;
         dialog-visible: root.merge-dialog-open;
@@ -4247,9 +4294,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
     revert-dialog-frame := GitHubDialog {
         viewport-x: -root.absolute-position.x;
-        viewport-y: -root.absolute-position.y;
+        viewport-y: 0px;
         viewport-width: root.application-width;
-        viewport-height: root.application-height;
+        viewport-height: root.height;
         backdrop-y: 0px;
         backdrop-height: root.height;
         dialog-visible: root.revert-dialog-open;

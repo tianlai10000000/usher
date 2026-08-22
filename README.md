@@ -10,7 +10,8 @@ Usher is an alpha-stage desktop workspace for managing local Git projects and re
 - Inspect open PR/MR counts for `fat`, `uat`, and `prod` across GitHub, GitLab, and Gitee-compatible servers.
 - Run project-scoped Branch validation, Tag automation, staged CD, and pull-request workflows.
 - Open a project-aware terminal drawer without leaving the current page.
-- Configure an independent OpenAI-compatible AI Agent provider (such as DeepSeek); the existing RAG chat view remains separate.
+- Use one Chat page for OpenAI-compatible AI conversation or isolated RAG conversation, with separate histories.
+- Run up to eight configurable concurrent AI code reviews; inspect findings beside the PR diff and ask review-scoped follow-up questions.
 - Receive durable in-app messages plus native OS notifications, alongside toast, tray, update, and network-status feedback.
 - Switch between light, dark, and system theme modes.
 - Route all application HTTP traffic through a shared reqwest-based interception pipeline.
@@ -51,6 +52,13 @@ cargo fmt --all
 cargo check --locked
 cargo test --lib --locked
 git diff --check
+```
+
+AI Code Review is a detachable Cargo feature enabled by the default product
+build. For a constrained build without its core package or UI/settings bridge:
+
+```sh
+cargo check --no-default-features --features renderer-femtovg --locked
 ```
 
 Everyday `dev` and `test` builds retain source line tables and incremental
@@ -174,12 +182,14 @@ Usher uses `directories::ProjectDirs::from("com", "usher", "app")` to select pla
 | --- | --- |
 | Settings, Git platform tokens/API roots, and AI Agent credentials | config directory: `settings.toml` |
 | Project registry | local data directory: `project/projects.json` |
-| Chat history | local data directory: `im/chat_history.jsonl` |
+| RAG / AI Chat histories | local data directory: `im/chat_history.jsonl` / `im/ai_chat_history.jsonl` |
+| AI Review rules, default, project bindings, concurrency | config directory: `ai-review.json` |
+| AI Review task summaries and completed sessions | local data directory: `ai-review/` |
 | Durable notification inbox and read state | local data directory: `messages/messages.json` |
 | Logs | local data directory: `logs/<date>/usher.log` and `logs/<date>/usher_tracing.log` |
 | Cached remote project logos | temporary directory: `usher-logo-cache/` |
 
-GitHub, GitLab, and Gitee tokens can be managed from Settings. Gitee public and enterprise credentials are separate; the repository remote host selects public v5 or the configured enterprise v8 API without sharing tokens. The **Code Hosting API Configuration** section stores a per-provider enterprise API URL and enterprise name under `[git.platform.<provider>]`; enter either the service host or the complete REST API root (for example, `https://git.example.com` or `https://git.example.com/api/v4`). The provider version path is added when omitted. These values are local-only and used only when the configured API host matches a repository remote. The **AI Agent** section accepts an OpenAI-compatible Base URL, API Key, and Model Name; it provides an extensible provider selector, editable model name, and a non-billable connection test. Settings are saved under `[ai.agent]`. Do not commit generated settings, logs, histories, or credentials. See [AI Agent configuration](docs/specs/ai-agent.md).
+GitHub, GitLab, and Gitee tokens can be managed from Settings. Gitee public and enterprise credentials are separate; the repository remote host selects public v5 or the configured enterprise v8 API without sharing tokens. The **Code Hosting API Configuration** section stores a per-provider enterprise API URL and enterprise name under `[git.platform.<provider>]`; enter either the service host or the complete REST API root (for example, `https://git.example.com` or `https://git.example.com/api/v4`). The provider version path is added when omitted. These values are local-only and used only when the configured API host matches a repository remote. The **AI Agent** section accepts an OpenAI-compatible Base URL, API Key, and Model Name; **AI Review** configures reusable local Markdown rules, the default rule, and the concurrent task limit. Settings are saved under `[ai.agent]` and `ai-review.json`. Do not commit generated settings, logs, histories, review sessions, or credentials. See [AI Agent configuration](docs/specs/ai-agent.md) and [AI Code Review](docs/specs/ai-code-review.md).
 
 ## Architecture at a glance
 
@@ -197,7 +207,9 @@ src/main.rs
      -> src/jobs/              reusable Job model and application run route projection
      -> src/workflow/          Branch / Tag / PR / CD state and execution
      -> src/terminal/          PTY session and terminal rendering
-     -> src/chat/              chat transport, history, text projection, UI binding
+     -> src/chat/              shared AI/RAG chat, isolated histories, UI binding
+     -> crates/usher-ai-review/ optional headless review domain and scheduler
+     -> src/ai_review/         optional review controller and persistence
      -> crates/usher-preview/ provider registry and Markdown/image/text preparation
      -> src/artifact_preview/ shared docked/detached preview hosts
      -> crates/usher-messages/ durable message center, OS delivery, isolated inbox UI

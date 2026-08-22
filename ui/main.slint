@@ -7,6 +7,7 @@ import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.sl
 import { GitHubJobRunPage as JobRunPage } from "./views/job_run.slint";
 import { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 import { GitHubPullRequestReviewPage } from "@pr-review";
+import { GitHubAiReviewPanel, AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem } from "@ai-review";
 import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit, GitHubHeaderActionStrip } from "./components/pr_review/shell.slint";
 import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 
@@ -51,6 +52,7 @@ export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, ChatSelectionRect, MessageRole, MessageStatus } from "./views/chat.slint";
 export { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 export { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
+export { AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem } from "@ai-review";
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 export { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewCodeToken, ArtifactPreviewCodeLine, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
 
@@ -266,13 +268,16 @@ export component MainWindow inherits Window {
     private property <length> pr-readiness-anchor-y: 0px;
     private property <length> pr-readiness-anchor-width: 0px;
     private property <length> pr-readiness-anchor-height: 0px;
+    private property <bool> pr-review-dialog-visible:
+        root.current-route == Route.PrReview
+            && (root.workflow-pr-review-dialog-open
+                || root.workflow-pr-dismiss-review-dialog-open
+                || root.workflow-pr-merge-dialog-open
+                || root.workflow-pr-revert-dialog-open
+                || root.workflow-pr-commit-range-dialog-open);
     out property <bool> modal-overlay-visible:
         root.project-show-add-modal
-            || (root.current-route == Route.PrReview
-                && (root.workflow-pr-review-dialog-open
-                    || root.workflow-pr-merge-dialog-open
-                    || root.workflow-pr-revert-dialog-open
-                    || root.workflow-pr-commit-range-dialog-open))
+            || root.pr-review-dialog-visible
             || (DialogManager.visible && DialogManager.overlay)
             || UpdateLogic.is-downloading
             || (ToastManager.visible && ToastManager.overlay);
@@ -315,6 +320,8 @@ export component MainWindow inherits Window {
     // Chat 相关属性和回调
     in property <[ChatMessage]> chat-messages: [];
     in-out property <string> chat-input-text: "";
+    in-out property <bool> chat-ai-mode: true;
+    in property <string> chat-ai-model-name: "";
     in property <bool> chat-is-sending: false;
     // Same-binary A/B switch. Production defaults to the optimized path; Rust
     // selects the legacy baseline only for controlled performance runs.
@@ -342,6 +349,7 @@ export component MainWindow inherits Window {
     in-out property <int> chat-scroll-to-bottom-revision: 0;
     in-out property <int> chat-loading-phase: 0;
     callback chat-send-message(string);
+    callback chat-switch-mode(bool);
     callback chat-load-more-history();
     callback chat-open-artifact(string, string, string);
     callback chat-scroll-position-changed(length);
@@ -355,6 +363,68 @@ export component MainWindow inherits Window {
     pure callback chat-resolve-selection-rects(string, int, int, float, float, string, float) -> [ChatSelectionRect];
     callback chat-copy-selection(string, int, int) -> bool;
     callback chat-route-visible-changed(bool);
+
+    // Optional AI Code Review. The task engine owns durable/background state;
+    // these values are only the route-scoped presentation projection.
+    in property <[AiReviewTaskItem]> ai-review-tasks: [];
+    in-out property <string> ai-review-current-task-id: "";
+    in property <string> ai-review-project-name: "";
+    in property <string> ai-review-pull-request-number: "";
+    in property <string> ai-review-pull-request-title: "";
+    in property <string> ai-review-rule-names: "";
+    in property <string> ai-review-model-name: "";
+    in property <string> ai-review-status: "";
+    in property <int> ai-review-progress-percent: 0;
+    in property <string> ai-review-summary: "";
+    in property <string> ai-review-error: "";
+    in property <[AiReviewFindingItem]> ai-review-findings: [];
+    in property <[AiReviewConversationItem]> ai-review-conversation: [];
+    in-out property <string> ai-review-message-input: "";
+    in-out property <string> ai-review-extra-requirements: "";
+    in-out property <bool> ai-review-chat-sending: false;
+    in-out property <bool> ai-review-panel-visible: false;
+    private property <length> ai-review-panel-min-width: 360px;
+    private property <length> ai-review-main-min-width: GitHubMetrics.overlay-width-medium;
+    private property <length> ai-review-panel-max-width: max(
+        root.ai-review-panel-min-width,
+        min(
+            GitHubMetrics.overlay-width-xlarge,
+            root.pr-content-width - root.ai-review-main-min-width
+        )
+    );
+    // Zero selects the responsive default. A drag stores only a session
+    // preference; window changes clamp the rendered value without destroying it.
+    private property <length> ai-review-panel-preferred-width: 0px;
+    private property <bool> ai-review-panel-resizing: false;
+    private property <length> ai-review-panel-drag-start-width: 0px;
+    private property <length> ai-review-panel-auto-width: min(
+        root.ai-review-panel-max-width,
+        max(root.ai-review-panel-min-width, root.width * 0.34)
+    );
+    private property <length> ai-review-panel-width:
+        root.ai-review-panel-preferred-width > 0px
+            ? max(
+                root.ai-review-panel-min-width,
+                min(
+                    root.ai-review-panel-max-width,
+                    root.ai-review-panel-preferred-width
+                )
+            )
+            : root.ai-review-panel-auto-width;
+    in property <[AiReviewRuleChoice]> ai-review-rule-options: [];
+    in property <string> ai-review-project-rule-id: "";
+    in property <string> ai-review-project-rule-name: "";
+    callback workflow-ai-review-start(string, string, string, string);
+    callback ai-review-open(string);
+    callback ai-review-toggle-current();
+    callback ai-review-close-panel();
+    callback ai-review-select-finding(string, int);
+    callback ai-review-set-project-rule(string);
+    callback ai-review-cancel(string);
+    callback ai-review-rerun(string);
+    callback ai-review-send-message(string);
+    callback ai-review-route-visible-changed(bool);
+    callback ai-review-refresh-pr-rows();
 
     // Application-level artifact preview. Providers prepare these values on a
     // worker; the root owns only one docked presentation host.
@@ -830,6 +900,9 @@ export component MainWindow inherits Window {
     }
 
     changed current-route => {
+        root.ai-review-route-visible-changed(
+            root.current-route == Route.PrReview && root.ai-review-panel-visible
+        );
         root.page-memory-diag-pending = true;
         root.sidebar-preview-visible = false;
         root.sidebar-preview-dismiss-pending = false;
@@ -842,6 +915,12 @@ export component MainWindow inherits Window {
         }
         page-scroll-view.viewport_y = 0px;
         root.page-scroll-reset-pending = true;
+    }
+
+    changed ai-review-panel-visible => {
+        root.ai-review-route-visible-changed(
+            root.current-route == Route.PrReview && root.ai-review-panel-visible
+        );
     }
 
     changed workflow-pr-review-number => {
@@ -1167,6 +1246,9 @@ export component MainWindow inherits Window {
                             pr-list-sort-filter: root.workflow-pr-list-sort-filter;
                             pr-list-loading: root.workflow-pr-list-loading;
                             pr-list-error: root.workflow-pr-list-error;
+                            ai-review-rule-options: root.ai-review-rule-options;
+                            ai-review-project-rule-id: root.ai-review-project-rule-id;
+                            ai-review-project-rule-name: root.ai-review-project-rule-name;
                             pr-count-auto-update: root.workflow-pr-count-auto-update;
                             pr-count-loading: root.workflow-pr-count-loading;
                             pr-count-failed: root.workflow-pr-count-failed;
@@ -1231,6 +1313,11 @@ export component MainWindow inherits Window {
                             pr-open-detail(number, title, author, source-branch, target-branch, updated-at, initial-tab) => {
                                 root.workflow-pr-review-open(number, title, author, source-branch, target-branch, updated-at, initial-tab);
                             }
+                            pr-start-ai-review(number, title, source-branch, target-branch) => {
+                                root.workflow-ai-review-start(number, title, source-branch, target-branch);
+                            }
+                            pr-open-ai-review(task-id) => { root.ai-review-open(task-id); }
+                            pr-set-ai-review-rule(id) => { root.ai-review-set-project-rule(id); }
                             cd-start(environment-name, release-name, commit-hash) => {
                                 root.workflow-cd-start(environment-name, release-name, commit-hash);
                             }
@@ -1411,6 +1498,8 @@ export component MainWindow inherits Window {
                 height: parent.height;
                 messages: root.chat-messages;
                 input-text <=> root.chat-input-text;
+                ai-mode: root.chat-ai-mode;
+                ai-model-name: root.chat-ai-model-name;
                 is-sending: root.chat-is-sending;
                 performance-optimized: root.chat-performance-optimized;
                 live-resizing: root.chat-performance-optimized
@@ -1434,6 +1523,9 @@ export component MainWindow inherits Window {
                 }
                 send-message(text) => {
                     root.chat-send-message(text);
+                }
+                switch-mode(ai-mode) => {
+                    root.chat-switch-mode(ai-mode);
                 }
                 load-more-history() => {
                     root.chat-load-more-history();
@@ -1975,8 +2067,13 @@ export component MainWindow inherits Window {
         application-width: root.width;
         application-height: root.height;
         shell-leading-inset: root.pr-content-x;
-        shell-content-width: root.pr-content-width;
-        live-resizing: root.window-live-resizing;
+        shell-content-width: max(
+            0px,
+            root.pr-content-width - (root.ai-review-panel-visible ? root.ai-review-panel-width : 0px)
+        );
+        // Divider drags use the same bounded-cost projection as native live
+        // resize and commit the expensive diff layout once on release.
+        live-resizing: root.window-live-resizing || root.ai-review-panel-resizing;
         project-name: root.workflow-project-name;
         provider: root.workflow-pr-repo-type;
         pull-request-number: root.workflow-pr-review-number;
@@ -2062,6 +2159,9 @@ export component MainWindow inherits Window {
         merge-method-squash: root.workflow-pr-merge-method-squash;
         merge-method-rebase: root.workflow-pr-merge-method-rebase;
         merge-method-fast-forward: root.workflow-pr-merge-method-fast-forward;
+        ai-review-status: root.ai-review-status;
+        ai-review-finding-count: root.ai-review-findings.length;
+        ai-review-panel-visible: root.ai-review-panel-visible;
         select-tab(tab) => { root.workflow-pr-review-select-tab(tab); }
         ensure-commits => { root.workflow-pr-review-ensure-commits(); }
         apply-commit-range(start, end) => { root.workflow-pr-review-apply-commit-range(start, end); }
@@ -2168,6 +2268,76 @@ export component MainWindow inherits Window {
         dismiss-review(review-id, reason) => { root.workflow-pr-dismiss-review(review-id, reason); }
         merge(method, remove-source-branch) => { root.workflow-pr-merge(method, remove-source-branch); }
         revert => { root.workflow-pr-revert(); }
+        toggle-ai-review => { root.ai-review-toggle-current(); }
+    }
+
+    if root.current-route == Route.PrReview && root.ai-review-panel-visible: GitHubAiReviewPanel {
+        x: root.width - root.ai-review-panel-width;
+        y: root.native-titlebar-inset;
+        width: root.ai-review-panel-width;
+        height: root.height - root.native-titlebar-inset;
+        // Keep this sibling below the PR route so its z:3000 Dialogs cover the
+        // complete panel. The route's full-window FocusScope is pointer-
+        // transparent outside its controls, so panel inputs still receive the
+        // first press.
+        z: 790;
+        task-id: root.ai-review-current-task-id;
+        project-name: root.ai-review-project-name;
+        pull-request-number: root.ai-review-pull-request-number;
+        pull-request-title: root.ai-review-pull-request-title;
+        rule-names: root.ai-review-rule-names;
+        model-name: root.ai-review-model-name;
+        status: root.ai-review-status;
+        progress-percent: root.ai-review-progress-percent;
+        summary: root.ai-review-summary;
+        error-text: root.ai-review-error;
+        findings: root.ai-review-findings;
+        conversation: root.ai-review-conversation;
+        message-input <=> root.ai-review-message-input;
+        extra-requirements <=> root.ai-review-extra-requirements;
+        chat-sending <=> root.ai-review-chat-sending;
+        close => { root.ai-review-close-panel(); }
+        cancel(task-id) => { root.ai-review-cancel(task-id); }
+        re-review(extra) => { root.ai-review-rerun(extra); }
+        send-message(message) => { root.ai-review-send-message(message); }
+        select-finding(file, line) => { root.ai-review-select-finding(file, line); }
+    }
+
+    GitHubArtifactPreviewResizeHandle {
+        x: root.width - root.ai-review-panel-width - 4px;
+        y: root.native-titlebar-inset;
+        height: root.height - root.native-titlebar-inset;
+        visible: root.current-route == Route.PrReview && root.ai-review-panel-visible;
+        resize-enabled: self.visible
+            && !root.window-live-resizing
+            && !root.pr-review-dialog-visible;
+        // Keep the complete 9px hit target above ordinary PR content so the
+        // first pointer-down captures the drag. Dialog visibility disables the
+        // handle above, leaving its modal surface/backdrop to own all input.
+        z: 805;
+        drag-started => {
+            root.ai-review-panel-resizing = true;
+            root.ai-review-panel-drag-start-width = root.ai-review-panel-width;
+            root.ai-review-panel-preferred-width = root.ai-review-panel-width;
+        }
+        drag-delta(delta) => {
+            if root.ai-review-panel-resizing {
+                root.ai-review-panel-preferred-width = max(
+                    root.ai-review-panel-min-width,
+                    min(
+                        root.ai-review-panel-max-width,
+                        root.ai-review-panel-width - delta
+                    )
+                );
+            }
+        }
+        drag-finished(cancelled) => {
+            if cancelled {
+                root.ai-review-panel-preferred-width =
+                    root.ai-review-panel-drag-start-width;
+            }
+            root.ai-review-panel-resizing = false;
+        }
     }
 
     // PR actions live above the PR surface so the readiness ActionMenu can
@@ -2412,9 +2582,10 @@ export component MainWindow inherits Window {
         }
     }
 
-    // PR Dialog backdrops now paint the complete window from the shared
-    // component. Keep only a root input shield over the sidebar because hit
-    // testing outside a route component's own bounds is not guaranteed.
+    // PR Dialogs paint the complete route content area, including the AI
+    // Review panel. Keep a root input shield over the sidebar because hit
+    // testing outside a route component's own bounds is not guaranteed; the
+    // title-bar continuation above completes the full-window scrim.
     if root.current-route == Route.PrReview
             && (root.workflow-pr-review-dialog-open
                 || root.workflow-pr-dismiss-review-dialog-open

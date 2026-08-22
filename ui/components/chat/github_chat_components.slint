@@ -386,6 +386,8 @@ export component GitHubMessageBubble inherits Rectangle {
 }
 
 export component GitHubChatWelcomeView inherits Rectangle {
+    in property <string> title: "Welcome to Usher Chat";
+    in property <string> description: "Start a conversation by typing a message below.";
     in property <[string]> suggestions: [
         "What can you help me with?",
         "Tell me a joke",
@@ -404,7 +406,7 @@ export component GitHubChatWelcomeView inherits Rectangle {
         padding: GitHubMetrics.size-32;
 
         Text {
-            text: "Welcome to Usher Chat";
+            text: root.title;
             color: GitHubTheme.fg-default;
             font-size: GitHubMetrics.heading-small;
             font-weight: 600;
@@ -412,7 +414,7 @@ export component GitHubChatWelcomeView inherits Rectangle {
         }
 
         Text {
-            text: "Start a conversation by typing a message below.";
+            text: root.description;
             color: GitHubTheme.fg-muted;
             font-size: 14px;
             horizontal-alignment: center;

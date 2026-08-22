@@ -1239,6 +1239,33 @@ impl WorkflowPrReviewController {
             return;
         }
 
+        if ai_review_fixture_enabled() {
+            let detail = Arc::new(SharedDiffDetail::from(ai_review_fixture_diff_detail()));
+            ui.set_workflow_pr_review_loading(false);
+            ui.set_workflow_pr_review_ignore_whitespace_supported(false);
+            ui.set_workflow_pr_review_ignore_whitespace(false);
+            if let Ok(mut cache) = self.cache.lock() {
+                *cache = Some(ReviewCache {
+                    project_alias: project_alias.clone(),
+                    request: request.clone(),
+                    metadata: ProjectRepositoryMetadata {
+                        repo_project_id: "ai-review-fixture".to_string(),
+                        repo_type: "github".to_string(),
+                        remote_repo: "https://example.invalid/ai-review/fixture".to_string(),
+                    },
+                    all_detail: detail.clone(),
+                    base_detail: detail.clone(),
+                    range_diffs: BoundedCache::new(RANGE_DIFF_CACHE_CAPACITY),
+                    expanded_files: HashMap::new(),
+                    loaded_large_diffs: HashSet::new(),
+                });
+            }
+            self.apply_detail(ui, &detail);
+            self.refresh_action_state(ui);
+            self.log_memory_diagnostics("ai_review_fixture.loaded_and_applied");
+            return;
+        }
+
         self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.clear();
@@ -2919,6 +2946,75 @@ fn commit_detail_source_tab(tab: i32) -> Option<i32> {
     matches!(tab, 0 | 1).then_some(tab)
 }
 
+fn ai_review_fixture_enabled() -> bool {
+    std::env::var("USHER_AI_REVIEW_FIXTURE").as_deref() == Ok("review-v1")
+}
+
+fn ai_review_fixture_diff_detail() -> PullRequestDiffDetail {
+    PullRequestDiffDetail {
+        files: vec![PullRequestDiffFile {
+            path: "src/fixture_0000.rs".to_string(),
+            old_path: "src/fixture_0000.rs".to_string(),
+            change_type: "edit_file".to_string(),
+            added_lines: 3,
+            removed_lines: 0,
+            viewed: false,
+            lines: vec![
+                PullRequestDiffLine {
+                    old_line: 0,
+                    new_line: 0,
+                    kind: "hunk".to_string(),
+                    content: "@@ -8,3 +8,6 @@ fn persist_valid_input() {".to_string(),
+                },
+                PullRequestDiffLine {
+                    old_line: 8,
+                    new_line: 8,
+                    kind: "context".to_string(),
+                    content: "let result = validate(input);".to_string(),
+                },
+                PullRequestDiffLine {
+                    old_line: 0,
+                    new_line: 9,
+                    kind: "addition".to_string(),
+                    content: "record_validation(result);".to_string(),
+                },
+                PullRequestDiffLine {
+                    old_line: 0,
+                    new_line: 10,
+                    kind: "addition".to_string(),
+                    content: "notify_observers(result);".to_string(),
+                },
+                PullRequestDiffLine {
+                    old_line: 9,
+                    new_line: 11,
+                    kind: "context".to_string(),
+                    content: "let value = normalize(input);".to_string(),
+                },
+                PullRequestDiffLine {
+                    old_line: 0,
+                    new_line: 12,
+                    kind: "addition".to_string(),
+                    content: "persist(input);".to_string(),
+                },
+                PullRequestDiffLine {
+                    old_line: 10,
+                    new_line: 13,
+                    kind: "context".to_string(),
+                    content: "Ok(value)".to_string(),
+                },
+            ],
+        }],
+        added_lines: 3,
+        removed_lines: 0,
+        commit_count: 1,
+        conversation_count: Some(0),
+        base_sha: "fixture-base".to_string(),
+        head_sha: "fixture-head".to_string(),
+        start_sha: "fixture-base".to_string(),
+        too_many_commits: false,
+    }
+}
+
 fn memory_benchmark_diff_detail(seed: usize) -> PullRequestDiffDetail {
     const TOTAL_FILES: usize = 206;
     const TOTAL_LINES: usize = 27_369;
@@ -3313,8 +3409,9 @@ mod tests {
     use super::{
         BoundedCache, HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection, LARGE_DIFF_BYTE_THRESHOLD,
         LARGE_DIFF_LINE_THRESHOLD, RANGE_DIFF_CACHE_CAPACITY, ReviewCache, ReviewRequest,
-        SharedDiffDetail, build_tree_items, commit_detail_source_tab, diff_storage_stats,
-        expand_all_hunk_context, expand_all_hunk_context_from_sources, expand_hunk_context,
+        SharedDiffDetail, ai_review_fixture_diff_detail, build_tree_items,
+        commit_detail_source_tab, diff_storage_stats, expand_all_hunk_context,
+        expand_all_hunk_context_from_sources, expand_hunk_context,
         expand_hunk_context_from_sources, full_source_file, hunk_can_expand_all,
         hunk_can_expand_down, hunk_is_expandable, hunk_scroll_anchor_source_index, is_large_diff,
         owned_diff_storage_stats, restore_original_diff,
@@ -3332,6 +3429,16 @@ mod tests {
             viewed: false,
             lines: Vec::new(),
         }
+    }
+
+    #[test]
+    fn ai_review_fixture_finding_path_and_line_exist_in_diff() {
+        let detail = ai_review_fixture_diff_detail();
+        let file = detail.files.first().expect("fixture file");
+        assert_eq!(file.path, "src/fixture_0000.rs");
+        assert!(file.lines.iter().any(|line| {
+            line.new_line == 12 && line.kind == "addition" && line.content == "persist(input);"
+        }));
     }
 
     #[test]

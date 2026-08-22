@@ -12,6 +12,7 @@ import { GitHubTooltip } from "../../components/github_tooltip.slint";
 import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import { GitHubWorkflowProjectDetails } from "../../components/workflow/github_workflow_components.slint";
+import { AiReviewRuleChoice } from "@ai-review";
 
 
 export component GitHubWorkflowPage inherits GitHubPageView {
@@ -32,6 +33,9 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     callback pr-list-assignee-filter-change(string);
     callback pr-list-sort-filter-change(string);
     callback pr-open-detail(string, string, string, string, string, string, int);
+    callback pr-start-ai-review(string, string, string, string);
+    callback pr-open-ai-review(string);
+    callback pr-set-ai-review-rule(string);
     callback copy-remote-repo(string) -> bool;
     callback open-local-repo(string);
     callback cd-start(string, string, string);
@@ -74,6 +78,9 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in property <string> pr-list-sort-filter: "newest";
     in property <bool> pr-list-loading: false;
     in property <string> pr-list-error: "";
+    in property <[AiReviewRuleChoice]> ai-review-rule-options: [];
+    in property <string> ai-review-project-rule-id: "";
+    in property <string> ai-review-project-rule-name: "No preset";
     in property <bool> pr-count-auto-update: false;
     in property <bool> pr-count-loading: false;
     in property <bool> pr-count-failed: false;
@@ -257,6 +264,9 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 pr-sort-filter: root.pr-list-sort-filter;
                 pr-loading: root.pr-list-loading;
                 pr-error: root.pr-list-error;
+                ai-review-rule-options: root.ai-review-rule-options;
+                ai-review-project-rule-id: root.ai-review-project-rule-id;
+                ai-review-project-rule-name: root.ai-review-project-rule-name;
                 change-state(state) => { root.pr-list-state-change(state); }
                 change-query(query) => { root.pr-list-query-change(query); }
                 change-page(page) => { root.pr-list-page-change(page); }
@@ -266,6 +276,11 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 open-detail(number, title, author, source-branch, target-branch, updated-at, initial-tab) => {
                     root.pr-open-detail(number, title, author, source-branch, target-branch, updated-at, initial-tab);
                 }
+                start-ai-review(number, title, source-branch, target-branch) => {
+                    root.pr-start-ai-review(number, title, source-branch, target-branch);
+                }
+                open-ai-review(task-id) => { root.pr-open-ai-review(task-id); }
+                set-ai-review-rule(id) => { root.pr-set-ai-review-rule(id); }
             }
 
             tag-flow := GitHubTagFlow {

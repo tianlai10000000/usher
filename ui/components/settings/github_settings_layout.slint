@@ -8,6 +8,7 @@ import {
     GitHubTextField,
     GitHubToggle
 } from "./github_settings_controls.slint";
+import { GitHubAiReviewSettingsSection, AiReviewRuleItem } from "@ai-review-settings";
 
 export component GitHubSettingsSectionMenuButton inherits Rectangle {
     in property <string> text;
@@ -214,6 +215,15 @@ export component GitHubSettingsPane inherits Rectangle {
     in-out property <int> ai-agent-provider-index: -1;
     in-out property <int> hosting-config-tab: 0;
     in-out property <bool> update-checking: false;
+    in property <[AiReviewRuleItem]> ai-review-rules: [];
+    in property <int> ai-review-max-concurrent-tasks: 3;
+    in-out property <bool> ai-review-rule-add-pending: false;
+    in-out property <string> ai-review-rule-name-error: "";
+    in-out property <string> ai-review-rule-path-error: "";
+    callback ai-review-set-max-concurrent-tasks(int);
+    callback ai-review-add-rule(string, string);
+    callback ai-review-delete-rule(string);
+    callback ai-review-set-default-rule(string);
     callback check-update();
     callback simulate-crash();
     private property <bool> any-log-output-enabled:
@@ -244,8 +254,9 @@ export component GitHubSettingsPane inherits Rectangle {
         width: root.width;
         height: root.selected-section == 1 ? code-hosting-section.preferred-height
             : (root.selected-section == 2 ? ai-agent-section.preferred-height
-                : (root.selected-section == 3 ? diagnostics-section.preferred-height
-                    : general-section.preferred-height));
+                : (root.selected-section == 3 ? ai-review-section.preferred-height
+                    : (root.selected-section == 4 ? diagnostics-section.preferred-height
+                        : general-section.preferred-height)));
         background: transparent;
 
         // Fixed leaves avoid stale sibling bindings when the factory page is
@@ -846,9 +857,37 @@ export component GitHubSettingsPane inherits Rectangle {
             }
         }
 
-        diagnostics-section := VerticalLayout {
+        ai-review-section := VerticalLayout {
             height: parent.height;
             visible: root.selected-section == 3;
+            width: parent.width;
+            spacing: 24px;
+            alignment: start;
+
+            GitHubSettingsSectionHeader {
+                title: "AI Review";
+                description: "Configure review concurrency and reusable Markdown rule presets.";
+            }
+
+            GitHubAiReviewSettingsSection {
+                width: parent.width;
+                rules: root.ai-review-rules;
+                max-concurrent-tasks: root.ai-review-max-concurrent-tasks;
+                rule-add-pending <=> root.ai-review-rule-add-pending;
+                rule-name-error <=> root.ai-review-rule-name-error;
+                rule-path-error <=> root.ai-review-rule-path-error;
+                set-max-concurrent-tasks(value) => {
+                    root.ai-review-set-max-concurrent-tasks(value);
+                }
+                add-rule(name, path) => { root.ai-review-add-rule(name, path); }
+                delete-rule(id) => { root.ai-review-delete-rule(id); }
+                set-default-rule(id) => { root.ai-review-set-default-rule(id); }
+            }
+        }
+
+        diagnostics-section := VerticalLayout {
+            height: parent.height;
+            visible: root.selected-section == 4;
             width: parent.width;
             spacing: 8px;
             alignment: start;

@@ -1,0 +1,317 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubButton } from "../../components/settings/github_settings_controls.slint";
+import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
+import { GitHubSpinner } from "../../components/github_spinner.slint";
+
+export struct AiReviewRuleItem {
+    id: string,
+    name: string,
+    path: string,
+    is-default: bool,
+}
+
+component AiReviewRuleFieldBase inherits Rectangle {
+    in property <string> label;
+    in-out property <string> text;
+    in property <string> caption: "";
+    in property <bool> enabled: true;
+    in property <bool> loading: false;
+    in property <bool> validation-error: false;
+    in property <string> validation-message: "";
+    out property <bool> input-has-focus: field-input.has-focus;
+    callback edited(string);
+
+    private property <string> supporting-text:
+        root.validation-message != "" ? root.validation-message : root.caption;
+
+    width: 100%;
+    height: root.supporting-text == "" ? 58px : 78px;
+    background: transparent;
+    opacity: root.enabled ? 1 : 0.6;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 20px;
+        text: root.label;
+        font-size: 14px;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+        vertical-alignment: center;
+    }
+
+    field := Rectangle {
+        x: 0px;
+        y: 26px;
+        width: parent.width;
+        height: 32px;
+        border-radius: 6px;
+        border-width: field-input.has-focus ? 2px : 1px;
+        border-color: root.validation-error
+            ? GitHubTheme.danger-emphasis
+            : (field-input.has-focus
+                ? GitHubTheme.accent-fg
+                : GitHubTheme.border-default);
+        background: GitHubTheme.canvas-default;
+        clip: true;
+
+        field-input := TextInput {
+            x: field-input.has-focus ? 11px : 12px;
+            y: (parent.height - self.preferred-height) / 2;
+            width: parent.width
+                - (field-input.has-focus ? 22px : 24px)
+                - (root.loading ? 24px : 0px);
+            text <=> root.text;
+            enabled: root.enabled && !root.loading;
+            input-type: InputType.text;
+            single-line: true;
+            font-size: 14px;
+            letter-spacing: 0px;
+            color: GitHubTheme.fg-default;
+            selection-background-color: GitHubTheme.selection-bg;
+            selection-foreground-color: self.color;
+            accessible-role: text-input;
+            accessible-enabled: self.enabled;
+            accessible-label: root.label;
+            accessible-value <=> self.text;
+            edited => { root.edited(self.text); }
+        }
+    }
+
+    if root.loading: GitHubSpinner {
+        x: field.x + field.width - 24px;
+        y: field.y + 8px;
+        spinner-size: GitHubMetrics.icon-medium;
+    }
+
+    if root.supporting-text != "": Text {
+        x: 0px;
+        y: 62px;
+        width: parent.width;
+        height: 16px;
+        text: root.supporting-text;
+        font-size: 12px;
+        color: root.validation-error
+            ? GitHubTheme.danger-fg
+            : GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// Settings is mounted through an independent ComponentFactory. Each leaf owns
+// its literal placeholder node so Slint 1.17.1 cannot reuse the sibling's stale
+// placeholder paint binding after focus changes.
+component AiReviewRuleNameField inherits AiReviewRuleFieldBase {
+    label: "Rule name";
+
+    if root.text == "" && !root.input-has-focus: Text {
+        x: 12px;
+        y: 26px;
+        width: parent.width - 24px;
+        height: 32px;
+        text: "e.g. Security review";
+        font-size: 14px;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+component AiReviewRulePathField inherits AiReviewRuleFieldBase {
+    label: "Markdown file";
+    caption: "Local .md file, up to 512 KiB.";
+
+    if root.text == "" && !root.input-has-focus: Text {
+        x: 12px;
+        y: 26px;
+        width: parent.width - 24px;
+        height: 32px;
+        text: "/absolute/path/to/review-rules.md";
+        font-size: 14px;
+        color: GitHubTheme.fg-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+export component GitHubAiReviewSettingsSection inherits VerticalLayout {
+    in property <[AiReviewRuleItem]> rules: [];
+    in property <int> max-concurrent-tasks: 3;
+    in-out property <bool> rule-add-pending: false;
+    in-out property <string> rule-name-error: "";
+    in-out property <string> rule-path-error: "";
+    callback set-max-concurrent-tasks(int);
+    callback add-rule(string, string);
+    callback delete-rule(string);
+    callback set-default-rule(string);
+    private property <string> new-rule-name: "";
+    private property <string> new-rule-path: "";
+    private property <string> submitted-rule-name: "";
+    private property <string> submitted-rule-path: "";
+    width: 100%;
+    spacing: 16px;
+    alignment: start;
+
+    changed rule-add-pending => {
+        if (!root.rule-add-pending
+                && root.submitted-rule-name != ""
+                && root.submitted-rule-path != ""
+                && root.rule-name-error == ""
+                && root.rule-path-error == "") {
+            root.new-rule-name = "";
+            root.new-rule-path = "";
+            root.submitted-rule-name = "";
+            root.submitted-rule-path = "";
+        }
+    }
+
+    Text {
+        width: parent.width;
+        text: "Concurrent reviews";
+        font-size: 16px;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+    }
+    HorizontalLayout {
+        width: parent.width;
+        height: GitHubMetrics.size-32;
+        spacing: GitHubMetrics.size-8;
+        alignment: start;
+        GitHubIconButton {
+            control-size: GitHubMetrics.size-32;
+            icon: @image-url("../../assets/icons/octicon-dash-16.svg");
+            tooltip-text: "Decrease concurrent reviews";
+            button-enabled: root.max-concurrent-tasks > 1;
+            clicked => { root.set-max-concurrent-tasks(root.max-concurrent-tasks - 1); }
+        }
+        Text {
+            width: 36px;
+            height: parent.height;
+            text: root.max-concurrent-tasks;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: GitHubTheme.fg-default;
+        }
+        GitHubIconButton {
+            control-size: GitHubMetrics.size-32;
+            icon: @image-url("../../assets/icons/octicon-plus-16.svg");
+            tooltip-text: "Increase concurrent reviews";
+            button-enabled: root.max-concurrent-tasks < 8;
+            clicked => { root.set-max-concurrent-tasks(root.max-concurrent-tasks + 1); }
+        }
+        Text {
+            horizontal-stretch: 1;
+            height: parent.height;
+            text: "Applies to queued tasks immediately; running tasks are not interrupted.";
+            vertical-alignment: center;
+            font-size: 12px;
+            color: GitHubTheme.fg-muted;
+            overflow: elide;
+        }
+    }
+
+    Rectangle { width: parent.width; height: 1px; background: GitHubTheme.border-default; }
+
+    Text {
+        width: parent.width;
+        text: "Review rules";
+        font-size: 16px;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+    }
+    Text {
+        width: parent.width;
+        text: "Markdown files are read only when a review starts.";
+        font-size: 13px;
+        color: GitHubTheme.fg-muted;
+    }
+
+    for rule in root.rules: Rectangle {
+        width: parent.width;
+        height: 56px;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: 1px;
+        border-color: GitHubTheme.border-default;
+        background: GitHubTheme.canvas-subtle;
+        Text {
+            x: 12px;
+            y: 6px;
+            width: max(0px, parent.width - 220px);
+            height: 18px;
+            text: rule.name;
+            font-size: 14px;
+            font-weight: 600;
+            color: GitHubTheme.fg-default;
+            overflow: elide;
+        }
+        Text {
+            x: 12px;
+            y: 30px;
+            width: max(0px, parent.width - 120px);
+            height: 16px;
+            text: rule.path;
+            font-size: 12px;
+            color: GitHubTheme.fg-muted;
+            overflow: elide;
+        }
+        GitHubButton {
+            x: parent.width - 150px;
+            y: 12px;
+            width: 100px;
+            text: rule.is-default ? "Default" : "Set default";
+            disabled: rule.is-default;
+            clicked => { root.set-default-rule(rule.id); }
+        }
+        GitHubIconButton {
+            x: parent.width - 42px;
+            y: 12px;
+            control-size: GitHubMetrics.size-32;
+            icon: @image-url("../../assets/icons/octicon-trash-16.svg");
+            tooltip-text: "Delete review rule";
+            danger: true;
+            clicked => { root.delete-rule(rule.id); }
+        }
+    }
+
+    Rectangle { width: parent.width; height: 1px; background: GitHubTheme.border-default; }
+
+    rule-name-field := AiReviewRuleNameField {
+        text <=> root.new-rule-name;
+        enabled: !root.rule-add-pending;
+        validation-error: root.rule-name-error != "";
+        validation-message: root.rule-name-error;
+        edited(_) => { root.rule-name-error = ""; }
+    }
+    rule-path-field := AiReviewRulePathField {
+        text <=> root.new-rule-path;
+        enabled: !root.rule-add-pending;
+        validation-error: root.rule-path-error != "";
+        validation-message: root.rule-path-error;
+        edited(_) => { root.rule-path-error = ""; }
+    }
+    HorizontalLayout {
+        width: parent.width;
+        height: GitHubMetrics.size-32;
+        alignment: end;
+        GitHubButton {
+            text: "Add rule";
+            primary: true;
+            busy: root.rule-add-pending;
+            disabled: root.rule-add-pending
+                || root.new-rule-name == ""
+                || root.new-rule-path == "";
+            clicked => {
+                root.rule-name-error = "";
+                root.rule-path-error = "";
+                root.submitted-rule-name = root.new-rule-name;
+                root.submitted-rule-path = root.new-rule-path;
+                root.rule-add-pending = true;
+                root.add-rule(root.new-rule-name, root.new-rule-path);
+            }
+        }
+    }
+}

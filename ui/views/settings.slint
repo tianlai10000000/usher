@@ -8,6 +8,8 @@ import {
     GitHubSettingsPane,
     GitHubSettingsSectionMenuButton
 } from "../components/settings/github_settings_layout.slint";
+import { AiReviewRuleItem } from "@ai-review-settings";
+export { AiReviewRuleItem } from "@ai-review-settings";
 
 export component GitHubSettingsPage inherits Rectangle {
     // ComponentContainer clips an external tree but does not rewrite these
@@ -30,6 +32,15 @@ export component GitHubSettingsPage inherits Rectangle {
     in-out property <bool> ai-agent-testing: false;
     in-out property <int> ai-agent-provider-index: -1;
     in-out property <bool> update-checking: false;
+    in property <[AiReviewRuleItem]> ai-review-rules: [];
+    in property <int> ai-review-max-concurrent-tasks: 3;
+    in-out property <bool> ai-review-rule-add-pending: false;
+    in-out property <string> ai-review-rule-name-error: "";
+    in-out property <string> ai-review-rule-path-error: "";
+    callback ai-review-set-max-concurrent-tasks(int);
+    callback ai-review-add-rule(string, string);
+    callback ai-review-delete-rule(string);
+    callback ai-review-set-default-rule(string);
 
     // ComponentFactory pages are destroyed with their route. Start each new
     // tree from a sentinel and select the defaults on the next UI tick so
@@ -111,9 +122,14 @@ export component GitHubSettingsPage inherits Rectangle {
                                     clicked => { root.selected-section = 2; }
                                 }
                                 GitHubSettingsNavItem {
-                                    text: "Diagnostics";
+                                    text: "AI Review";
                                     selected: root.selected-section == 3;
                                     clicked => { root.selected-section = 3; }
+                                }
+                                GitHubSettingsNavItem {
+                                    text: "Diagnostics";
+                                    selected: root.selected-section == 4;
+                                    clicked => { root.selected-section = 4; }
                                 }
                             }
 
@@ -130,6 +146,15 @@ export component GitHubSettingsPage inherits Rectangle {
                                 ai-agent-provider-index <=> root.ai-agent-provider-index;
                                 hosting-config-tab <=> root.hosting-config-tab;
                                 update-checking <=> root.update-checking;
+                                ai-review-rules: root.ai-review-rules;
+                                ai-review-max-concurrent-tasks: root.ai-review-max-concurrent-tasks;
+                                ai-review-rule-add-pending <=> root.ai-review-rule-add-pending;
+                                ai-review-rule-name-error <=> root.ai-review-rule-name-error;
+                                ai-review-rule-path-error <=> root.ai-review-rule-path-error;
+                                ai-review-set-max-concurrent-tasks(value) => { root.ai-review-set-max-concurrent-tasks(value); }
+                                ai-review-add-rule(name, path) => { root.ai-review-add-rule(name, path); }
+                                ai-review-delete-rule(id) => { root.ai-review-delete-rule(id); }
+                                ai-review-set-default-rule(id) => { root.ai-review-set-default-rule(id); }
                                 check-update => { root.check-update(); }
                                 simulate-crash => { root.simulate-crash(); }
                             }
@@ -138,7 +163,7 @@ export component GitHubSettingsPage inherits Rectangle {
                         if root.compact-layout: VerticalLayout {
                             width: parent.width;
                             height: compact-settings-pane.height
-                                + (root.compact-navigation-open ? 208px : 56px);
+                                + (root.compact-navigation-open ? 242px : 56px);
                             spacing: 16px;
                             alignment: start;
 
@@ -146,7 +171,8 @@ export component GitHubSettingsPage inherits Rectangle {
                                 width: parent.width;
                                 text: root.selected-section == 1 ? "Code hosting"
                                     : (root.selected-section == 2 ? "AI Agent"
-                                        : (root.selected-section == 3 ? "Diagnostics" : "General"));
+                                        : (root.selected-section == 3 ? "AI Review"
+                                            : (root.selected-section == 4 ? "Diagnostics" : "General")));
                                 open: root.compact-navigation-open;
                                 clicked => {
                                     root.compact-navigation-open = !root.compact-navigation-open;
@@ -155,7 +181,7 @@ export component GitHubSettingsPage inherits Rectangle {
 
                             if root.compact-navigation-open: Rectangle {
                                 width: parent.width;
-                                height: 136px;
+                                height: 170px;
                                 border-radius: 6px;
                                 border-width: 1px;
                                 border-color: GitHubTheme.border-default;
@@ -183,9 +209,14 @@ export component GitHubSettingsPage inherits Rectangle {
                                         clicked => { root.selected-section = 2; root.compact-navigation-open = false; }
                                     }
                                     GitHubSettingsNavItem {
-                                        text: "Diagnostics";
+                                        text: "AI Review";
                                         selected: root.selected-section == 3;
                                         clicked => { root.selected-section = 3; root.compact-navigation-open = false; }
+                                    }
+                                    GitHubSettingsNavItem {
+                                        text: "Diagnostics";
+                                        selected: root.selected-section == 4;
+                                        clicked => { root.selected-section = 4; root.compact-navigation-open = false; }
                                     }
                                 }
                             }
@@ -203,6 +234,15 @@ export component GitHubSettingsPage inherits Rectangle {
                                 ai-agent-provider-index <=> root.ai-agent-provider-index;
                                 hosting-config-tab <=> root.hosting-config-tab;
                                 update-checking <=> root.update-checking;
+                                ai-review-rules: root.ai-review-rules;
+                                ai-review-max-concurrent-tasks: root.ai-review-max-concurrent-tasks;
+                                ai-review-rule-add-pending <=> root.ai-review-rule-add-pending;
+                                ai-review-rule-name-error <=> root.ai-review-rule-name-error;
+                                ai-review-rule-path-error <=> root.ai-review-rule-path-error;
+                                ai-review-set-max-concurrent-tasks(value) => { root.ai-review-set-max-concurrent-tasks(value); }
+                                ai-review-add-rule(name, path) => { root.ai-review-add-rule(name, path); }
+                                ai-review-delete-rule(id) => { root.ai-review-delete-rule(id); }
+                                ai-review-set-default-rule(id) => { root.ai-review-set-default-rule(id); }
                                 check-update => { root.check-update(); }
                                 simulate-crash => { root.simulate-crash(); }
                             }

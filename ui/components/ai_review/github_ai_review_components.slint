@@ -1,0 +1,127 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+
+// Copilot review comments expose High, Medium, and Low directly. Keep the
+// label mounted so severity changes do not move the finding title.
+export component GitHubAiReviewSeverityLabel inherits Rectangle {
+    in property <string> severity: "low";
+
+    private property <string> label: root.severity == "high"
+        ? "High"
+        : (root.severity == "medium" ? "Medium" : "Low");
+    label-measure := Text {
+        visible: false;
+        text: root.label;
+        font-size: GitHubMetrics.text-small;
+        font-weight: 600;
+    }
+
+    width: max(42px, label-measure.preferred-width + GitHubMetrics.size-12);
+    height: GitHubMetrics.size-20;
+    border-radius: GitHubMetrics.radius-medium;
+    border-width: GitHubMetrics.border-thin;
+    border-color: root.severity == "high"
+        ? GitHubTheme.danger-emphasis
+        : (root.severity == "medium"
+            ? GitHubTheme.attention-emphasis
+            : GitHubTheme.border-default);
+    background: root.severity == "high"
+        ? GitHubTheme.danger-muted
+        : (root.severity == "medium"
+            ? GitHubTheme.attention-muted
+            : GitHubTheme.control-muted-rest);
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        font-size: GitHubMetrics.text-small;
+        font-weight: 600;
+        color: root.severity == "high"
+            ? GitHubTheme.danger-fg
+            : (root.severity == "medium"
+                ? GitHubTheme.attention-fg
+                : GitHubTheme.fg-muted);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// GitHub review-comment density adapted for a Copilot finding. Each item is a
+// compact bordered comment target and opens the matching diff location.
+export component GitHubAiReviewFindingRow inherits Rectangle {
+    in property <string> severity: "low";
+    in property <string> file: "";
+    in property <int> line: 0;
+    in property <string> title: "";
+    in property <string> explanation: "";
+    in property <string> suggestion: "";
+    in property <bool> selected: false;
+    callback activated();
+
+    private property <length> content-x: GitHubMetrics.size-12;
+    private property <length> trailing-width: GitHubMetrics.size-64;
+    private property <length> minimum-row-height: root.suggestion != "" ? 128px : 104px;
+    height: max(root.minimum-row-height, finding-content.preferred-height + GitHubMetrics.size-24);
+    border-radius: GitHubMetrics.radius-medium;
+    border-width: GitHubMetrics.border-thin;
+    border-color: root.selected ? GitHubTheme.accent-emphasis : GitHubTheme.border-default;
+    background: root.selected
+        ? GitHubTheme.accent-subtle
+        : (finding-touch.has-hover
+            ? GitHubTheme.canvas-subtle
+            : GitHubTheme.canvas-default);
+
+    finding-content := VerticalLayout {
+        x: root.content-x;
+        y: GitHubMetrics.size-12;
+        width: parent.width - root.content-x * 2;
+        spacing: GitHubMetrics.size-6;
+
+        Text {
+            width: max(48px, parent.width - root.trailing-width);
+            height: self.preferred-height;
+            text: root.title;
+            font-size: GitHubMetrics.text-medium;
+            font-weight: 600;
+            color: GitHubTheme.fg-default;
+            wrap: word-wrap;
+        }
+        Text {
+            width: parent.width;
+            height: self.preferred-height;
+            text: root.file + (root.line > 0 ? ":" + root.line : "");
+            font-size: GitHubMetrics.text-small;
+            color: GitHubTheme.accent-fg;
+            overflow: elide;
+        }
+        Text {
+            width: parent.width;
+            height: self.preferred-height;
+            text: root.explanation;
+            font-size: GitHubMetrics.text-medium;
+            color: GitHubTheme.fg-default;
+            wrap: word-wrap;
+        }
+        if root.suggestion != "": Text {
+            width: parent.width;
+            height: self.preferred-height;
+            text: root.suggestion;
+            font-size: GitHubMetrics.text-medium;
+            color: GitHubTheme.fg-muted;
+            wrap: word-wrap;
+        }
+    }
+
+    GitHubAiReviewSeverityLabel {
+        x: parent.width - self.width - GitHubMetrics.size-16;
+        y: GitHubMetrics.size-12;
+        severity: root.severity;
+    }
+
+    finding-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.activated(); }
+    }
+}

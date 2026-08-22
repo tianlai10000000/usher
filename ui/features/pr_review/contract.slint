@@ -90,6 +90,9 @@ export component PullRequestReviewPageContract inherits FocusScope {
     in property <bool> merge-method-squash: false;
     in property <bool> merge-method-rebase: false;
     in property <bool> merge-method-fast-forward: false;
+    in property <string> ai-review-status: "";
+    in property <int> ai-review-finding-count: 0;
+    in property <bool> ai-review-panel-visible: false;
     in-out property <length> file-list-preferred-width: 286px;
     in property <string> tree-font-family: ".SF NS";
     in property <string> code-font-family: "Menlo";
@@ -135,4 +138,5 @@ export component PullRequestReviewPageContract inherits FocusScope {
     callback diagnose-diff-scroll(string, float, float, float, float, bool, bool, bool, int, int, int);
     callback view-file();
     callback toggle-commit-message(string);
+    callback toggle-ai-review();
 }

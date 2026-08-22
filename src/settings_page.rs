@@ -8,10 +8,20 @@
 use std::sync::{Arc, Mutex};
 
 use slint::{ComponentFactory, ComponentHandle, Global};
+#[cfg(feature = "ai-code-review")]
+use slint::{Model, ModelRc, VecModel};
 use usher_preview::{IMAGE_PROVIDER_ID, MARKDOWN_PROVIDER_ID, PLAIN_TEXT_PROVIDER_ID};
+#[cfg(feature = "ai-code-review")]
+use usher_ui_settings::AiReviewRuleItem;
 use usher_ui_settings::{AppState as SettingsAppState, GitHubSettingsPage};
 
 use crate::{AppState, MainWindow, UpdateLogic};
+
+#[cfg(feature = "ai-code-review")]
+enum AddReviewRuleError {
+    Name(&'static str),
+    Path(&'static str),
+}
 
 /// Dual-write a host-owned update-checking busy flag onto the isolated Settings
 /// page. Must run on the Slint event loop. Do not rely on Slint `changed` alone:
@@ -30,11 +40,15 @@ pub(crate) fn mirror_ai_agent_testing(ui: &MainWindow, page: &SettingsPageBridge
 #[derive(Clone, Default)]
 pub(crate) struct SettingsPageBridge {
     page: Arc<Mutex<Option<slint::Weak<GitHubSettingsPage>>>>,
+    #[cfg(feature = "ai-code-review")]
+    ai_review_config: Arc<Mutex<Option<crate::ai_review::ReviewConfigFacade>>>,
 }
 
 impl SettingsPageBridge {
     pub(crate) fn install(&self, window: &MainWindow) {
         let page_slot = self.page.clone();
+        #[cfg(feature = "ai-code-review")]
+        let ai_review_config = self.ai_review_config.clone();
         let window_weak = window.as_weak();
 
         window.set_settings_page_factory(ComponentFactory::new(move |_| {
@@ -49,6 +63,15 @@ impl SettingsPageBridge {
 
             sync_state_from_window(&window, &page);
             bind_callbacks(&window, &page);
+            #[cfg(feature = "ai-code-review")]
+            if let Some(config) = ai_review_config
+                .lock()
+                .expect("AI review settings bridge poisoned")
+                .clone()
+            {
+                apply_ai_review_snapshot(&page, config.snapshot().state());
+                bind_ai_review_callbacks(&window, &page, config);
+            }
             *page_slot.lock().expect("settings page bridge poisoned") = Some(page.as_weak());
             Some(page)
         }));
@@ -99,6 +122,23 @@ impl SettingsPageBridge {
         });
     }
 
+    #[cfg(feature = "ai-code-review")]
+    pub(crate) fn configure_ai_review(&self, config: crate::ai_review::ReviewConfigFacade) {
+        *self
+            .ai_review_config
+            .lock()
+            .expect("AI review settings bridge poisoned") = Some(config.clone());
+        self.with_page(|page| apply_ai_review_snapshot(page, config.snapshot().state()));
+    }
+
+    #[cfg(feature = "ai-code-review")]
+    pub(crate) fn apply_ai_review_configuration(
+        &self,
+        state: &usher_ai_review::ReviewConfigurationState,
+    ) {
+        self.with_page(|page| apply_ai_review_snapshot(page, state));
+    }
+
     fn with_page(&self, update: impl FnOnce(&GitHubSettingsPage)) {
         let weak = self
             .page
@@ -109,6 +149,166 @@ impl SettingsPageBridge {
             update(&page);
         }
     }
+}
+
+#[cfg(feature = "ai-code-review")]
+fn apply_ai_review_snapshot(
+    page: &GitHubSettingsPage,
+    state: &usher_ai_review::ReviewConfigurationState,
+) {
+    let rules = state
+        .rules
+        .iter()
+        .map(|rule| AiReviewRuleItem {
+            id: rule.id.0.clone().into(),
+            name: rule.name.clone().into(),
+            path: rule.markdown_path.to_string_lossy().into_owned().into(),
+            is_default: state.default_rule_id.as_ref() == Some(&rule.id),
+        })
+        .collect::<Vec<_>>();
+    let current = page.get_ai_review_rules();
+    if let Some(model) = current
+        .as_any()
+        .downcast_ref::<VecModel<AiReviewRuleItem>>()
+    {
+        sync_ai_review_rule_model(model, &rules);
+    } else {
+        page.set_ai_review_rules(ModelRc::new(VecModel::from(rules)));
+    }
+    page.set_ai_review_max_concurrent_tasks(i32::from(state.max_concurrent_tasks));
+}
+
+#[cfg(feature = "ai-code-review")]
+fn sync_ai_review_rule_model(model: &VecModel<AiReviewRuleItem>, rules: &[AiReviewRuleItem]) {
+    for (index, rule) in rules.iter().enumerate() {
+        if let Some(current) = model.row_data(index)
+            && current.id == rule.id
+        {
+            if !ai_review_rule_items_equal(&current, rule) {
+                model.set_row_data(index, rule.clone());
+            }
+            continue;
+        }
+
+        if let Some(existing_index) = (index + 1..model.row_count()).find(|candidate| {
+            model
+                .row_data(*candidate)
+                .is_some_and(|current| current.id == rule.id)
+        }) {
+            model.remove(existing_index);
+        }
+        model.insert(index, rule.clone());
+    }
+
+    while model.row_count() > rules.len() {
+        model.remove(model.row_count() - 1);
+    }
+}
+
+#[cfg(feature = "ai-code-review")]
+fn ai_review_rule_items_equal(left: &AiReviewRuleItem, right: &AiReviewRuleItem) -> bool {
+    left.id == right.id
+        && left.name == right.name
+        && left.path == right.path
+        && left.is_default == right.is_default
+}
+
+#[cfg(feature = "ai-code-review")]
+fn bind_ai_review_callbacks(
+    _window: &MainWindow,
+    page: &GitHubSettingsPage,
+    config: crate::ai_review::ReviewConfigFacade,
+) {
+    let config_max = config.clone();
+    page.on_ai_review_set_max_concurrent_tasks(move |value| {
+        if let Ok(value) = u8::try_from(value)
+            && let Err(error) = config_max.set_max_concurrent_tasks(value)
+        {
+            log::warn!("[AI Review][Settings] Invalid concurrency: {error:?}");
+        }
+    });
+
+    let config_add = config.clone();
+    let page_weak = page.as_weak();
+    page.on_ai_review_add_rule(move |name, path| {
+        let config = config_add.clone();
+        let page = page_weak.clone();
+        let name = name.to_string();
+        let path = std::path::PathBuf::from(path.as_str().trim());
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let validation_path = path.clone();
+            let validation = tokio::task::spawn_blocking(move || {
+                crate::ai_review::validate_rule_file(&validation_path)
+            })
+            .await;
+            let result = match validation {
+                Ok(Ok(())) => {
+                    let was_empty = config.snapshot().state().rules.is_empty();
+                    match config.upsert_rule(None, name, path) {
+                        Ok(id) => {
+                            if was_empty
+                                && let Err(error) = config.set_default_rule(Some(id))
+                            {
+                                log::warn!(
+                                    "[AI Review][Settings] Failed to select initial default rule: {error:?}"
+                                );
+                            }
+                            Ok(())
+                        }
+                        Err(usher_ai_review::ReviewConfigError::DuplicateName) => Err(
+                            AddReviewRuleError::Name("A rule with this name already exists."),
+                        ),
+                        Err(error) => {
+                            log::warn!("[AI Review][Settings] Failed to add rule: {error:?}");
+                            Err(AddReviewRuleError::Name(
+                                "Enter a non-empty, unique rule name.",
+                            ))
+                        }
+                    }
+                }
+                Ok(Err(error)) => Err(AddReviewRuleError::Path(error.user_message())),
+                Err(error) => {
+                    log::warn!("[AI Review][Settings] Rule validation worker failed: {error}");
+                    Err(AddReviewRuleError::Path(
+                        "The Markdown file could not be validated.",
+                    ))
+                }
+            };
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(page) = page.upgrade() else {
+                    return;
+                };
+                match result {
+                    Ok(()) => {
+                        page.set_ai_review_rule_name_error("".into());
+                        page.set_ai_review_rule_path_error("".into());
+                    }
+                    Err(AddReviewRuleError::Name(message)) => {
+                        page.set_ai_review_rule_name_error(message.into());
+                        page.set_ai_review_rule_path_error("".into());
+                    }
+                    Err(AddReviewRuleError::Path(message)) => {
+                        page.set_ai_review_rule_name_error("".into());
+                        page.set_ai_review_rule_path_error(message.into());
+                    }
+                }
+                page.set_ai_review_rule_add_pending(false);
+            });
+        });
+    });
+
+    let config_delete = config.clone();
+    page.on_ai_review_delete_rule(move |id| {
+        if let Err(error) = config_delete.delete_rule(usher_ai_review::RuleId(id.to_string())) {
+            log::warn!("[AI Review][Settings] Failed to delete rule: {error:?}");
+        }
+    });
+
+    page.on_ai_review_set_default_rule(move |id| {
+        if let Err(error) = config.set_default_rule(Some(usher_ai_review::RuleId(id.to_string()))) {
+            log::warn!("[AI Review][Settings] Failed to set default rule: {error:?}");
+        }
+    });
 }
 
 fn sync_state_from_window(window: &MainWindow, page: &GitHubSettingsPage) {
@@ -350,9 +550,13 @@ mod tests {
     use std::rc::Rc;
 
     use slint::Global;
+    #[cfg(feature = "ai-code-review")]
+    use slint::Model;
     use usher_preview::IMAGE_PROVIDER_ID;
     use usher_ui_settings::{AppState as SettingsAppState, GitHubSettingsPage};
 
+    #[cfg(feature = "ai-code-review")]
+    use super::apply_ai_review_snapshot;
     use super::{bind_callbacks, sync_state_from_window};
     use crate::{AppState, MainWindow};
 
@@ -401,5 +605,58 @@ mod tests {
             forwarded_provider.borrow().as_ref(),
             Some(&(IMAGE_PROVIDER_ID.to_owned(), false))
         );
+    }
+
+    #[cfg(feature = "ai-code-review")]
+    #[test]
+    fn concurrency_updates_preserve_rule_model_identity_and_order() {
+        use std::path::PathBuf;
+
+        use usher_ai_review::{ReviewConfigurationState, ReviewRule, RuleId};
+
+        i_slint_backend_testing::init_no_event_loop();
+        let page = GitHubSettingsPage::new().expect("settings page");
+        let mut state = ReviewConfigurationState {
+            rules: vec![
+                ReviewRule {
+                    id: RuleId("a".into()),
+                    name: "Alpha".into(),
+                    markdown_path: PathBuf::from("/alpha.md"),
+                },
+                ReviewRule {
+                    id: RuleId("b".into()),
+                    name: "Beta".into(),
+                    markdown_path: PathBuf::from("/beta.md"),
+                },
+            ],
+            default_rule_id: Some(RuleId("a".into())),
+            ..Default::default()
+        };
+
+        apply_ai_review_snapshot(&page, &state);
+        let initial_model = page.get_ai_review_rules();
+        let initial_ids = initial_model
+            .iter()
+            .map(|rule| rule.id.to_string())
+            .collect::<Vec<_>>();
+
+        state.max_concurrent_tasks = 6;
+        apply_ai_review_snapshot(&page, &state);
+        let concurrency_model = page.get_ai_review_rules();
+        assert_eq!(initial_model, concurrency_model);
+        assert_eq!(
+            concurrency_model
+                .iter()
+                .map(|rule| rule.id.to_string())
+                .collect::<Vec<_>>(),
+            initial_ids
+        );
+
+        state.default_rule_id = Some(RuleId("b".into()));
+        apply_ai_review_snapshot(&page, &state);
+        let default_model = page.get_ai_review_rules();
+        assert_eq!(initial_model, default_model);
+        assert!(!default_model.row_data(0).expect("Alpha rule").is_default);
+        assert!(default_model.row_data(1).expect("Beta rule").is_default);
     }
 }

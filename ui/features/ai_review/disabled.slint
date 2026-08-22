@@ -1,0 +1,57 @@
+export struct AiReviewTaskItem {
+    id: string,
+    project-key: string,
+    pull-request-number: string,
+    pull-request-title: string,
+    rule-name: string,
+    model-name: string,
+    status: string,
+    progress-percent: int,
+    finding-count: int,
+    error: string,
+}
+
+export struct AiReviewRuleChoice {
+    id: string,
+    name: string,
+    selected: bool,
+    inherited: bool,
+}
+
+export struct AiReviewFindingItem {
+    severity: string,
+    file: string,
+    line: int,
+    title: string,
+    explanation: string,
+    suggestion: string,
+}
+
+export struct AiReviewConversationItem {
+    role: string,
+    content: string,
+}
+
+export component GitHubAiReviewPanel inherits Rectangle {
+    in property <string> task-id: "";
+    in property <string> project-name: "";
+    in property <string> pull-request-number: "";
+    in property <string> pull-request-title: "";
+    in property <string> rule-names: "";
+    in property <string> model-name: "";
+    in property <string> status: "failed";
+    in property <int> progress-percent: 0;
+    in property <string> summary: "";
+    in property <string> error-text: "AI Code Review is not included in this build.";
+    in property <[AiReviewFindingItem]> findings: [];
+    in property <[AiReviewConversationItem]> conversation: [];
+    in-out property <string> message-input: "";
+    in-out property <string> extra-requirements: "";
+    in property <bool> chat-sending: false;
+    callback close();
+    callback cancel(string);
+    callback re-review(string);
+    callback send-message(string);
+    callback select-finding(string, int);
+    background: #ffffff;
+}

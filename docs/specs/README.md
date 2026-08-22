@@ -10,6 +10,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Cross-page state store](state-store.md) | Current / 当前 | `crates/usher-state-store/`, all cross-page state owners and UI bridges |
 | [Shared search navigation](search.md) | Current / 当前 | `crates/usher-search/`, all feature Find adapters |
 | [AI Agent configuration](ai-agent.md) | Current / 当前 | `src/settings.rs`, `src/ai/agent.rs`, `ui/views/settings.slint` |
+| [AI Code Review](ai-code-review.md) | Current / 当前 | `crates/usher-ai-review/`, `src/ai_review/`, PR list/detail and Settings bridges |
 | [Diagnostic logging](diagnostics.md) | Current / 当前 | `src/logger/`, `src/memory_diagnostics.rs`, `src/terminal/`, Settings UI and bridges |
 | [Chat behavior](chat.md) | Current / 当前 | `src/chat/`, `ui/views/chat.slint`, `ui/components/chat/`, `ui/main.slint` |
 | [Artifact preview framework](artifact-preview.md) | Current / 当前 | `crates/usher-preview/`, `src/artifact_preview/`, `ui/components/artifact_preview/`, Settings and all preview callers |

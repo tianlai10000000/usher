@@ -1,0 +1,11 @@
+[package]
+name = "usher-ai-review"
+version = "0.0.8-alpha.1"
+edition = "2024"
+license = "LicenseRef-Proprietary"
+publish = false
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+usher-state-store = { path = "../usher-state-store" }

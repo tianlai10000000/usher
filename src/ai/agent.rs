@@ -5,7 +5,7 @@
 //! their provider calls here and use the shared HTTP module.
 
 use reqwest::{Method, Url};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::http::{self, HttpError, HttpErrorKind, RequestOptions};
 use crate::settings::AiAgentSettings;
@@ -19,6 +19,59 @@ struct ModelsResponse {
 #[derive(Debug, Deserialize)]
 struct ModelDescriptor {
     id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct CompletionMessage {
+    pub role: &'static str,
+    pub content: String,
+}
+
+impl CompletionMessage {
+    pub(crate) fn system(content: impl Into<String>) -> Self {
+        Self {
+            role: "system",
+            content: content.into(),
+        }
+    }
+
+    pub(crate) fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: "user",
+            content: content.into(),
+        }
+    }
+
+    pub(crate) fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: "assistant",
+            content: content.into(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CompletionRequest<'a> {
+    model: &'a str,
+    messages: &'a [CompletionMessage],
+    temperature: f32,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompletionResponse {
+    #[serde(default)]
+    choices: Vec<CompletionChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompletionChoice {
+    message: CompletionResponseMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompletionResponseMessage {
+    #[serde(default)]
+    content: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -86,6 +139,47 @@ pub(crate) async fn test_connection(
             .iter()
             .any(|model| model.id == settings.model.trim()),
     })
+}
+
+/// Execute one OpenAI-compatible chat completion through the shared HTTP path.
+pub(crate) async fn complete(
+    settings: &AiAgentSettings,
+    messages: &[CompletionMessage],
+    operation: &'static str,
+) -> Result<String, HttpError> {
+    validate_settings(settings)?;
+    if messages.is_empty() {
+        return Err(configuration_error(
+            "At least one completion message is required",
+        ));
+    }
+    let url = endpoint_url(&settings.base_url, "chat/completions")?;
+    let request = CompletionRequest {
+        model: settings.model.trim(),
+        messages,
+        temperature: 0.1,
+    };
+    let response = http::send_json::<CompletionResponse>(
+        http::post(url)
+            .bearer_auth(settings.api_key.trim())
+            .json(&request),
+        RequestOptions::new(operation),
+    )
+    .await?;
+    response
+        .choices
+        .into_iter()
+        .map(|choice| choice.message.content)
+        .find(|content| !content.trim().is_empty())
+        .ok_or_else(|| HttpError {
+            kind: HttpErrorKind::Decode,
+            operation: operation.to_string(),
+            method: Some(Method::POST),
+            url: None,
+            status: None,
+            message: "The AI provider returned no completion content".to_string(),
+            response_body: None,
+        })
 }
 
 #[cfg(test)]

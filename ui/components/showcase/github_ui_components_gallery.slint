@@ -21,6 +21,7 @@ import { NotificationIcons } from "../notify/icons.slint";
 import { GitHubNotificationBanner } from "../notify/actions_notify.slint";
 import { DialogManager } from "../dialog/dialog_manager.slint";
 import { GitHubMessageListItem, MessageLevel } from "../messages/github_message_components.slint";
+import { GitHubAiReviewFindingRow, GitHubAiReviewSeverityLabel } from "../ai_review/github_ai_review_components.slint";
 
 component GitHubShowcaseSection inherits Rectangle {
     in property <string> title;
@@ -380,7 +381,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
 
         GitHubShowcaseSection {
             title: "Icon buttons, links, and copy";
-            description: "Visible/invisible icon surfaces, semantic danger, disabled state, link variants, and copy confirmation.";
+            description: "Visible/invisible icon surfaces, Copilot review states, semantic danger, disabled state, links, and copy confirmation.";
             content-height: 142px;
 
             GitHubShowcaseLabel { x: 0px; y: 0px; width: 150px; height: 20px; label: "IconButton"; }
@@ -393,11 +394,14 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 alignment: start;
 
                 for button-state in [
-                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: "Invisible icon button", invisible: true, danger: false, loading: false, enabled: true },
-                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: "Bordered icon button", invisible: false, danger: false, loading: false, enabled: true },
-                    { icon: @image-url("../../assets/icons/octicon-trash-16.svg"), label: "Danger icon button", invisible: false, danger: true, loading: false, enabled: true },
-                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: "Loading", invisible: false, danger: false, loading: true, enabled: true },
-                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: "Disabled", invisible: false, danger: false, loading: false, enabled: false }
+                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: "Invisible icon button", invisible: true, danger: false, loading: false, enabled: true, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: "Bordered icon button", invisible: false, danger: false, loading: false, enabled: true, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-trash-16.svg"), label: "Danger icon button", invisible: false, danger: true, loading: false, enabled: true, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-sync-16.svg"), label: "Loading", invisible: false, danger: false, loading: true, enabled: true, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-plus-16.svg"), label: "Disabled", invisible: false, danger: false, loading: false, enabled: false, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: "Review this pull request with AI", invisible: true, danger: false, loading: false, enabled: true, selected: false },
+                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: "Close AI code review", invisible: true, danger: false, loading: false, enabled: true, selected: true },
+                    { icon: @image-url("../../assets/icons/octicon-copilot-16.svg"), label: "AI code review is running", invisible: true, danger: false, loading: true, enabled: true, selected: false }
                 ]: GitHubIconButton {
                     icon: button-state.icon;
                     tooltip-text: button-state.label;
@@ -405,6 +409,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     danger: button-state.danger;
                     loading: button-state.loading;
                     button-enabled: button-state.enabled;
+                    selected: button-state.selected;
                 }
                 GitHubCopyButton {
                     tooltip-above: false;
@@ -1242,6 +1247,54 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                             read: true,
                             target: ""
                         };
+                    }
+                }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "AI review findings";
+            description: "Copilot-style severity labels and flat actionable rows that navigate to a changed line.";
+            content-height: 328px;
+
+            GitHubShowcaseSampleSurface {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 320px;
+                clip: true;
+
+                VerticalLayout {
+                    width: parent.width;
+                    spacing: 0px;
+
+                    GitHubAiReviewFindingRow {
+                        width: parent.width;
+                        severity: "high";
+                        file: "src/payment/authorize.rs";
+                        line: 84;
+                        title: "Authorization failure is ignored";
+                        explanation: "The new branch continues after a denied authorization response.";
+                        suggestion: "Return the provider error before persisting the transaction.";
+                    }
+                    GitHubAiReviewFindingRow {
+                        width: parent.width;
+                        severity: "medium";
+                        file: "src/cache.rs";
+                        line: 37;
+                        title: "Cache key is not project-scoped";
+                        explanation: "Two open projects can overwrite the same review entry.";
+                        selected: true;
+                    }
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: GitHubMetrics.size-40;
+                        padding-left: GitHubMetrics.size-16;
+                        spacing: GitHubMetrics.size-8;
+                        alignment: start;
+                        GitHubAiReviewSeverityLabel { severity: "high"; }
+                        GitHubAiReviewSeverityLabel { severity: "medium"; }
+                        GitHubAiReviewSeverityLabel { severity: "low"; }
                     }
                 }
             }
