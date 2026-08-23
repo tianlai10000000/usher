@@ -142,6 +142,7 @@ impl ChatMessageRenderer {
                 preview_available: false,
                 preview_title: "".into(),
                 timestamp: timestamp.into(),
+                elapsed: "".into(),
             },
             StoredMessageRole::Assistant => {
                 let (stored_status, display_content) = assistant_display(source);
@@ -155,6 +156,11 @@ impl ChatMessageRenderer {
                     preview_available: rendered.preview_available,
                     preview_title: rendered.preview_title.into(),
                     timestamp: timestamp.into(),
+                    elapsed: source
+                        .elapsed_ms
+                        .map(format_elapsed)
+                        .unwrap_or_default()
+                        .into(),
                 }
             }
         }
@@ -170,8 +176,27 @@ impl ChatMessageRenderer {
             preview_available: false,
             preview_title: "".into(),
             timestamp: "".into(),
+            elapsed: "".into(),
         }
     }
+}
+
+fn format_elapsed(elapsed_ms: u64) -> String {
+    if elapsed_ms < 1_000 {
+        return format!("{}ms", elapsed_ms.max(1));
+    }
+    let seconds = elapsed_ms / 1_000;
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    let minutes = seconds / 60;
+    let remaining_seconds = seconds % 60;
+    if minutes < 60 {
+        return format!("{minutes}m {remaining_seconds:02}s");
+    }
+    let hours = minutes / 60;
+    let remaining_minutes = minutes % 60;
+    format!("{hours}h {remaining_minutes:02}m {remaining_seconds:02}s")
 }
 
 fn assistant_display(message: &StoredChatMessage) -> (StoredMessageStatus, &str) {
@@ -296,6 +321,7 @@ mod tests {
             status: StoredMessageStatus::Normal,
             content: content.into(),
             timestamp: "12:00".to_string(),
+            elapsed_ms: None,
         }
     }
 
@@ -324,5 +350,13 @@ mod tests {
         assert!(row.preview_available);
         assert_eq!(row.preview_title.as_str(), "Open formatted response");
         assert!(row.rendered_content.contains("fn main() {}"));
+    }
+
+    #[test]
+    fn elapsed_time_uses_compact_metadata_labels() {
+        assert_eq!(format_elapsed(842), "842ms");
+        assert_eq!(format_elapsed(42_900), "42s");
+        assert_eq!(format_elapsed(125_000), "2m 05s");
+        assert_eq!(format_elapsed(3_725_000), "1h 02m 05s");
     }
 }

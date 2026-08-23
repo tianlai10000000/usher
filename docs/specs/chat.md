@@ -153,6 +153,10 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 34. Incremental message-row identity includes both mode and persisted message
     ID. Switching to an empty mode still commits an empty render signature and
     removes every row mounted by the previous mode.
+35. Every submitted AI or RAG turn starts one real elapsed timer. The pending
+    assistant row updates once per second, and the terminal assistant or error
+    row persists the measured `elapsed_ms` and renders a compact frozen label.
+    Legacy JSONL rows without `elapsed_ms` remain readable and show no duration.
 
 1. Chat 历史继续使用 JSONL；缺少 `status` 字段的旧记录按普通消息兼容读取。
 2. 应用生成的错误/成功状态与正文分开保存，并使用矢量图标展示；禁止重新加入会触发彩色字体回退的固定 Emoji 前缀。
@@ -244,6 +248,9 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     revision，只有其模式和 revision 都仍与可见 Chat 状态一致时才能提交。
 34. 增量消息行身份必须同时包含模式和持久化消息 ID。切换到空历史模式时仍必须提交空的
     render signature，并删除上一模式挂载的全部消息行。
+35. 每次提交 AI 或 RAG 对话都会启动一个真实耗时计时器；等待中的 assistant 行每秒更新，
+    完成或失败的 assistant 行持久化实测 `elapsed_ms` 并显示紧凑的冻结标签。缺少
+    `elapsed_ms` 的旧 JSONL 记录继续兼容读取且不显示耗时。
 
 ## Regression checklist / 回归检查
 
@@ -289,6 +296,9 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
   duplicate-request loop; verify the explicit pagination action still works.
 - Verify timestamps at today/yesterday/six-day/seven-day/year boundaries, and
   verify a legacy time-only history row remains visible unchanged.
+- Send successful and failing messages in both modes. Verify the pending timer
+  advances, the final duration freezes, survives restart, and does not leak
+  between concurrent AI/RAG requests.
 - Run `scripts/benchmark-chat-interaction.sh --runs 3` against one release binary;
   verify both phases exist in every trace, optimized mounted rows never exceed
   32, commit-adjacent p95 and every mutation-to-render latency are at most 50 ms,

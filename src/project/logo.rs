@@ -276,25 +276,23 @@ pub(super) fn find_cached_remote_logo_path(url: &str) -> Option<PathBuf> {
     None
 }
 
-pub(super) fn download_remote_logo_to_cache(url: &str) -> Option<PathBuf> {
-    let response = http::send_blocking(
-        http::blocking_get(url),
-        RequestOptions::new("Download project logo"),
-    )
-    .ok()?;
+pub(super) async fn download_remote_logo_to_cache(url: &str) -> Option<PathBuf> {
+    let response = http::send(http::get(url), RequestOptions::new("Download project logo"))
+        .await
+        .ok()?;
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let bytes = response.bytes().ok()?;
+    let bytes = response.bytes().await.ok()?;
     let ext = infer_ext_from_content_type(content_type.as_str())
         .or_else(|| infer_ext_from_url(url))
         .unwrap_or("png");
     let cache_path = remote_logo_cache_path(url, ext)?;
     if !cache_path.exists() {
-        fs::write(&cache_path, bytes.as_ref()).ok()?;
+        tokio::fs::write(&cache_path, bytes.as_slice()).await.ok()?;
     }
     Some(cache_path)
 }
@@ -329,8 +327,10 @@ pub(super) fn refresh_logo_preview(
 
     let ui_weak = ui.as_weak();
     let pending_task = pending_remote_logos.clone();
-    std::thread::spawn(move || {
-        let downloaded = download_remote_logo_to_cache(normalized.as_str()).is_some();
+    crate::app_runtime::shared_runtime().spawn(async move {
+        let downloaded = download_remote_logo_to_cache(normalized.as_str())
+            .await
+            .is_some();
         if let Ok(mut guard) = pending_task.lock() {
             guard.remove(normalized.as_str());
         }

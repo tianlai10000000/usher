@@ -3,8 +3,9 @@ import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tool
 import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
 import { GitHubCenteredLoadingState } from "../github_spinner.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
+import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubFilterMenuButton } from "../github_filter_menu.slint";
-import { GitHubTheme } from "../../theme/github_theme.slint";
+import { GitHubMetrics, GitHubTheme } from "../../theme/github_theme.slint";
 import { AiReviewRuleChoice } from "@ai-review";
 
 
@@ -59,6 +60,7 @@ export component GitHubPullRequestFlow {
     callback open-detail(string, string, string, string, string, string, int);
     callback start-ai-review(string, string, string, string);
     callback open-ai-review(string);
+    callback cancel-ai-review(string);
     callback set-ai-review-rule(string);
 
     private property <string> active-menu: "";
@@ -324,9 +326,16 @@ export component GitHubPullRequestFlow {
                 // accent link; hover underlines the title instead of painting
                 // Box-row--hover-gray across the row.
                 background: transparent;
-                private property <length> conversation-action-width: item.conversation-count > 0 ? 48px : 32px;
+                private property <length> conversation-action-width: item.conversation-count > 0 ? 40px : 32px;
                 private property <length> ai-action-width: 32px;
-                private property <length> action-width: self.conversation-action-width + self.ai-action-width + 4px;
+                private property <bool> ai-review-active:
+                    item.ai-review-status == "queued" || item.ai-review-status == "running";
+                private property <length> stop-action-width:
+                    self.ai-review-active ? GitHubMetrics.control-xsmall-size : 0px;
+                private property <length> stop-action-gap: self.ai-review-active ? 4px : 0px;
+                private property <length> action-width:
+                    self.conversation-action-width + self.ai-action-width
+                    + self.stop-action-gap + self.stop-action-width;
                 private property <length> content-x: 38px;
                 // StyledText provides stable paragraph line spacing for mixed
                 // CJK/Latin titles where Text's glyph rows otherwise crowd.
@@ -919,7 +928,8 @@ export component GitHubPullRequestFlow {
                 }
 
                 ai-review-action := Rectangle {
-                    x: parent.width - parent.ai-action-width - 16px;
+                    x: parent.width - parent.stop-action-width - parent.stop-action-gap
+                        - parent.ai-action-width - 16px;
                     y: parent.first-line-center-y - self.height / 2;
                     width: parent.ai-action-width;
                     height: 32px;
@@ -974,6 +984,7 @@ export component GitHubPullRequestFlow {
                             }
                         }
                         clicked => {
+                            root.hovered-inline-tooltip = "";
                             if item.ai-review-status == "completed"
                                 || item.ai-review-status == "queued"
                                 || item.ai-review-status == "running" {
@@ -988,6 +999,23 @@ export component GitHubPullRequestFlow {
                             }
                         }
                     }
+                }
+
+                cancel-ai-review-action := GitHubIconButton {
+                    x: parent.width - GitHubMetrics.control-xsmall-size - 16px;
+                    y: parent.first-line-center-y - self.height / 2;
+                    z: 3;
+                    opacity: parent.ai-review-active ? 1 : 0;
+                    control-size: GitHubMetrics.control-xsmall-size;
+                    visual-size: GitHubMetrics.size-16;
+                    glyph-size: GitHubMetrics.icon-medium;
+                    icon: @image-url("../../assets/icons/github-stop-square-fill-16.svg");
+                    tooltip-text: "Cancel review";
+                    tooltip-align-right: true;
+                    inverse: true;
+                    circular: true;
+                    button-enabled: parent.ai-review-active;
+                    clicked => { root.cancel-ai-review(item.ai-review-task-id); }
                 }
 
                 row-touch := TouchArea {

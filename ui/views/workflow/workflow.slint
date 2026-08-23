@@ -35,6 +35,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     callback pr-open-detail(string, string, string, string, string, string, int);
     callback pr-start-ai-review(string, string, string, string);
     callback pr-open-ai-review(string);
+    callback pr-cancel-ai-review(string);
     callback pr-set-ai-review-rule(string);
     callback copy-remote-repo(string) -> bool;
     callback open-local-repo(string);
@@ -280,6 +281,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                     root.pr-start-ai-review(number, title, source-branch, target-branch);
                 }
                 open-ai-review(task-id) => { root.pr-open-ai-review(task-id); }
+                cancel-ai-review(task-id) => { root.pr-cancel-ai-review(task-id); }
                 set-ai-review-rule(id) => { root.pr-set-ai-review-rule(id); }
             }
 

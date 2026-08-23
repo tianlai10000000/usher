@@ -768,8 +768,8 @@ fn prefetch_remote_logos(
         let state_task = state.clone();
         let pending_logo_task = pending_remote_logos.clone();
         let pending_pr_task = pending_pr_overview.clone();
-        std::thread::spawn(move || {
-            let downloaded = download_remote_logo_to_cache(url.as_str()).is_some();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let downloaded = download_remote_logo_to_cache(url.as_str()).await.is_some();
             if let Ok(mut guard) = pending_logo_task.lock() {
                 guard.remove(url.as_str());
             }

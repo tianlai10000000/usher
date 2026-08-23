@@ -1,12 +1,12 @@
 //! Shared HTTP client and Axios-style interception pipeline.
 //!
-//! Business modules should build requests with [`get`], [`post`], or
-//! [`blocking_get`] and execute them through [`send`], [`send_json`], or
-//! [`send_blocking`]. This keeps timeout, status handling, logging, and UI
-//! feedback policy in one place while still exposing reqwest's mature request
-//! builder API.
+//! Business modules should build requests with [`get`], [`post`], or [`put`]
+//! and execute them through [`send`] or [`send_json`]. This keeps timeout,
+//! status handling, logging, and UI feedback policy in one place while still
+//! exposing reqwest's mature request builder API.
 
 use std::fmt;
+use std::future::Future;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -22,6 +22,7 @@ use crate::{
 };
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_READ_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_ERROR_BODY_CHARS: usize = 2_000;
 
@@ -93,9 +94,39 @@ impl HttpError {
     }
 
     fn decode(error: reqwest::Error, operation: &str) -> Self {
-        let mut result = Self::from_reqwest(error, operation);
-        result.kind = HttpErrorKind::Decode;
-        result
+        Self::from_reqwest(error, operation)
+    }
+
+    fn response_read_idle_timeout(
+        operation: &str,
+        method: Method,
+        url: Url,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            kind: HttpErrorKind::Timeout,
+            operation: operation.to_string(),
+            method: Some(method),
+            url: Some(url),
+            status: None,
+            message: format!(
+                "response body made no progress for {} ms",
+                timeout.as_millis()
+            ),
+            response_body: None,
+        }
+    }
+
+    fn json_decode(error: serde_json::Error, operation: &str, method: Method, url: Url) -> Self {
+        Self {
+            kind: HttpErrorKind::Decode,
+            operation: operation.to_string(),
+            method: Some(method),
+            url: Some(url),
+            status: None,
+            message: error.to_string(),
+            response_body: None,
+        }
     }
 
     /// Stable, user-facing summary suitable for toast/notification content.
@@ -163,6 +194,8 @@ pub(crate) struct RequestOptions {
     pub operation: String,
     pub feedback: ErrorFeedback,
     pub reject_http_errors: bool,
+    pub timeout: Duration,
+    pub read_idle_timeout: Duration,
 }
 
 impl RequestOptions {
@@ -171,12 +204,28 @@ impl RequestOptions {
             operation: operation.into(),
             feedback: ErrorFeedback::Silent,
             reject_http_errors: true,
+            timeout: DEFAULT_TIMEOUT,
+            read_idle_timeout: DEFAULT_READ_IDLE_TIMEOUT,
         }
     }
 
     #[allow(dead_code)]
     pub(crate) fn feedback(mut self, feedback: ErrorFeedback) -> Self {
         self.feedback = feedback;
+        self
+    }
+
+    /// Set the total request timeout. Zero disables the total deadline while
+    /// retaining the shared connect timeout.
+    pub(crate) fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Set the maximum interval without a response-body chunk. Zero disables
+    /// idle detection independently from the total request timeout.
+    pub(crate) fn read_idle_timeout(mut self, timeout: Duration) -> Self {
+        self.read_idle_timeout = timeout;
         self
     }
 
@@ -192,6 +241,8 @@ pub(crate) struct RequestContext<'a> {
     pub method: &'a Method,
     pub url: &'a Url,
     pub headers: &'a mut HeaderMap,
+    pub timeout: Duration,
+    pub read_idle_timeout: Duration,
 }
 
 /// Read-only metadata exposed after headers are received.
@@ -229,10 +280,12 @@ impl HttpInterceptor for LoggingInterceptor {
             return Ok(());
         }
         log::debug!(
-            "[HTTP] -> {} {} headers={} operation={}",
+            "[HTTP] -> {} {} headers={} timeout_ms={} read_idle_timeout_ms={} operation={}",
             request.method,
             redacted_url(request.url),
             request.headers.len(),
+            request.timeout.as_millis(),
+            request.read_idle_timeout.as_millis(),
             request.operation
         );
         Ok(())
@@ -294,7 +347,6 @@ fn redacted_url(url: &Url) -> String {
 
 struct HttpClient {
     asynchronous: reqwest::Client,
-    blocking: reqwest::blocking::Client,
     interceptors: RwLock<Vec<Arc<dyn HttpInterceptor>>>,
 }
 
@@ -303,17 +355,10 @@ impl HttpClient {
         let user_agent = format!("usher/{}", env!("CARGO_PKG_VERSION"));
         let asynchronous = reqwest::Client::builder()
             .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-            .timeout(DEFAULT_TIMEOUT)
-            .user_agent(user_agent.clone())
-            .build()?;
-        let blocking = reqwest::blocking::Client::builder()
-            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
-            .timeout(DEFAULT_TIMEOUT)
             .user_agent(user_agent)
             .build()?;
         Ok(Self {
             asynchronous,
-            blocking,
             interceptors: RwLock::new(vec![Arc::new(LoggingInterceptor)]),
         })
     }
@@ -346,10 +391,6 @@ pub(crate) fn put(url: impl reqwest::IntoUrl) -> reqwest::RequestBuilder {
     HTTP.asynchronous.put(url)
 }
 
-pub(crate) fn blocking_get(url: impl reqwest::IntoUrl) -> reqwest::blocking::RequestBuilder {
-    HTTP.blocking.get(url)
-}
-
 fn truncate_body(body: String) -> String {
     if body.chars().count() <= MAX_ERROR_BODY_CHARS {
         return body;
@@ -376,6 +417,8 @@ fn run_request_interceptors(
         method,
         url,
         headers,
+        timeout: options.timeout,
+        read_idle_timeout: options.read_idle_timeout,
     };
     for interceptor in HTTP.interceptors() {
         if let Err(mut error) = interceptor.on_request(&mut context) {
@@ -415,16 +458,120 @@ fn handle_error(error: HttpError, feedback: ErrorFeedback) -> HttpError {
     error
 }
 
+fn request_total_timeout(timeout: Duration) -> Option<Duration> {
+    (!timeout.is_zero()).then_some(timeout)
+}
+
+async fn await_with_read_idle_timeout<T>(
+    timeout: Duration,
+    future: impl Future<Output = T>,
+) -> Result<T, ()> {
+    if timeout.is_zero() {
+        Ok(future.await)
+    } else {
+        tokio::time::timeout(timeout, future).await.map_err(|_| ())
+    }
+}
+
+/// Response wrapper that keeps body reads inside the shared timeout and error
+/// interception pipeline.
+pub(crate) struct HttpResponse {
+    inner: reqwest::Response,
+    method: Method,
+    url: Url,
+    options: RequestOptions,
+}
+
+impl HttpResponse {
+    pub(crate) fn status(&self) -> StatusCode {
+        self.inner.status()
+    }
+
+    pub(crate) fn headers(&self) -> &HeaderMap {
+        self.inner.headers()
+    }
+
+    pub(crate) fn content_length(&self) -> Option<u64> {
+        self.inner.content_length()
+    }
+
+    async fn chunk_raw(&mut self) -> HttpResult<Option<bytes::Bytes>> {
+        let read = await_with_read_idle_timeout(self.options.read_idle_timeout, self.inner.chunk())
+            .await
+            .map_err(|()| {
+                HttpError::response_read_idle_timeout(
+                    &self.options.operation,
+                    self.method.clone(),
+                    self.url.clone(),
+                    self.options.read_idle_timeout,
+                )
+            })?;
+        read.map_err(|error| HttpError::decode(error, &self.options.operation))
+    }
+
+    pub(crate) async fn chunk(&mut self) -> HttpResult<Option<bytes::Bytes>> {
+        self.chunk_raw()
+            .await
+            .map_err(|error| handle_error(error, self.options.feedback))
+    }
+
+    async fn bytes_raw(mut self) -> HttpResult<Vec<u8>> {
+        let mut body = Vec::new();
+        while let Some(chunk) = self.chunk_raw().await? {
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
+    }
+
+    pub(crate) async fn bytes(self) -> HttpResult<Vec<u8>> {
+        let feedback = self.options.feedback;
+        self.bytes_raw()
+            .await
+            .map_err(|error| handle_error(error, feedback))
+    }
+
+    async fn text_raw(self) -> HttpResult<String> {
+        self.bytes_raw()
+            .await
+            .map(|body| String::from_utf8_lossy(&body).into_owned())
+    }
+
+    pub(crate) async fn text(self) -> HttpResult<String> {
+        let feedback = self.options.feedback;
+        self.text_raw()
+            .await
+            .map_err(|error| handle_error(error, feedback))
+    }
+
+    pub(crate) async fn json<T: DeserializeOwned>(self) -> HttpResult<T> {
+        let feedback = self.options.feedback;
+        let operation = self.options.operation.clone();
+        let method = self.method.clone();
+        let url = self.url.clone();
+        let body = self
+            .bytes_raw()
+            .await
+            .map_err(|error| handle_error(error, feedback))?;
+        serde_json::from_slice(&body).map_err(|error| {
+            handle_error(
+                HttpError::json_decode(error, &operation, method, url),
+                feedback,
+            )
+        })
+    }
+}
+
 pub(crate) async fn send(
     builder: reqwest::RequestBuilder,
     options: RequestOptions,
-) -> HttpResult<reqwest::Response> {
+) -> HttpResult<HttpResponse> {
     let mut request = builder.build().map_err(|error| {
         handle_error(
             HttpError::from_reqwest(error, &options.operation),
             options.feedback,
         )
     })?;
+    *request.timeout_mut() = request_total_timeout(options.timeout);
     let method = request.method().clone();
     let url = request.url().clone();
     run_request_interceptors(&method, &url, request.headers_mut(), &options)
@@ -444,9 +591,18 @@ pub(crate) async fn send(
         started.elapsed(),
         &options,
     );
+    let response = HttpResponse {
+        inner: response,
+        method: method.clone(),
+        url: url.clone(),
+        options: options.clone(),
+    };
     if options.reject_http_errors && !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let body = response
+            .text_raw()
+            .await
+            .map_err(|error| handle_error(error, options.feedback))?;
         return Err(handle_error(
             HttpError::status(&options.operation, method, url, status, truncate_body(body)),
             options.feedback,
@@ -459,53 +615,8 @@ pub(crate) async fn send_json<T: DeserializeOwned>(
     builder: reqwest::RequestBuilder,
     options: RequestOptions,
 ) -> HttpResult<T> {
-    let feedback = options.feedback;
-    let operation = options.operation.clone();
     let response = send(builder, options).await?;
-    response
-        .json::<T>()
-        .await
-        .map_err(|error| handle_error(HttpError::decode(error, &operation), feedback))
-}
-
-pub(crate) fn send_blocking(
-    builder: reqwest::blocking::RequestBuilder,
-    options: RequestOptions,
-) -> HttpResult<reqwest::blocking::Response> {
-    let mut request = builder.build().map_err(|error| {
-        handle_error(
-            HttpError::from_reqwest(error, &options.operation),
-            options.feedback,
-        )
-    })?;
-    let method = request.method().clone();
-    let url = request.url().clone();
-    run_request_interceptors(&method, &url, request.headers_mut(), &options)
-        .map_err(|error| handle_error(error, options.feedback))?;
-    let started = Instant::now();
-    let response = HTTP.blocking.execute(request).map_err(|error| {
-        handle_error(
-            HttpError::from_reqwest(error, &options.operation),
-            options.feedback,
-        )
-    })?;
-    run_response_interceptors(
-        &method,
-        &url,
-        response.status(),
-        response.headers(),
-        started.elapsed(),
-        &options,
-    );
-    if options.reject_http_errors && !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().unwrap_or_default();
-        return Err(handle_error(
-            HttpError::status(&options.operation, method, url, status, truncate_body(body)),
-            options.feedback,
-        ));
-    }
-    Ok(response)
+    response.json::<T>().await
 }
 
 /// Bind centralized error feedback to the Slint managers.
@@ -588,6 +699,31 @@ mod tests {
         let options = RequestOptions::new("Test");
         assert_eq!(options.feedback, ErrorFeedback::Silent);
         assert!(options.reject_http_errors);
+        assert_eq!(options.timeout, DEFAULT_TIMEOUT);
+        assert_eq!(options.read_idle_timeout, DEFAULT_READ_IDLE_TIMEOUT);
+    }
+
+    #[test]
+    fn request_timeout_supports_custom_and_unbounded_values() {
+        let custom = RequestOptions::new("Probe").timeout(Duration::from_secs(3));
+        assert_eq!(
+            request_total_timeout(custom.timeout),
+            Some(Duration::from_secs(3))
+        );
+
+        let unbounded = RequestOptions::new("Long operation").timeout(Duration::ZERO);
+        assert_eq!(request_total_timeout(unbounded.timeout), None);
+    }
+
+    #[tokio::test]
+    async fn read_idle_timeout_is_resettable_and_can_be_disabled() {
+        let timed_out =
+            await_with_read_idle_timeout(Duration::from_millis(1), std::future::pending::<()>())
+                .await;
+        assert!(timed_out.is_err());
+
+        let completed = await_with_read_idle_timeout(Duration::ZERO, async { 7_u8 }).await;
+        assert_eq!(completed, Ok(7));
     }
 
     #[test]
@@ -602,5 +738,17 @@ mod tests {
     fn connectivity_probe_logs_are_suppressed() {
         assert!(is_silent_log_operation("Check network connectivity"));
         assert!(!is_silent_log_operation("Load projects"));
+    }
+
+    #[test]
+    fn json_decode_path_preserves_existing_reqwest_classification() {
+        let error = get("://invalid")
+            .build()
+            .expect_err("invalid URL should fail request construction");
+        assert!(error.is_builder());
+        assert_eq!(
+            HttpError::decode(error, "Decode completion").kind,
+            HttpErrorKind::Build
+        );
     }
 }

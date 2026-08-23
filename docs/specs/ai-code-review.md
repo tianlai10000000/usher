@@ -71,12 +71,15 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
    in the durable task store.
 5. Completion persists one session and publishes a Message Center result.
    Persisted task summaries are bounded to 128 terminal/active entries.
-6. Opening a completed result loads its session on a worker. Closing the panel
-   immediately clears finding/conversation models, input text, and the current
-   projection. Leaving PR Review performs the same cleanup; background tasks
-   continue without a UI dependency.
+6. Opening a completed result loads its review session on a worker. Opening a
+   cancelled or failed task loads its lightweight PR chat session when one
+   exists. Closing the panel immediately clears finding/conversation models,
+   input text, and the current projection. Leaving PR Review performs the same
+   cleanup; background tasks continue without a UI dependency.
 7. Cancellation uses a task flag and queued-task removal. Shutdown stops the
    configuration and task persistence workers in the registered shutdown order.
+   Cancelling a running task immediately marks it cancelled and aborts the
+   in-flight provider completion before another diff chunk can start.
 
 1. 从 PR 列表启动时只入队元数据并留在列表；从 PR 详情启动时可立即打开右侧面板。
 2. 调度器最多启动 Settings 配置的任务数；调高后立即调度队列，调低不打断运行任务，
@@ -85,9 +88,12 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
 4. 只有获得调度槽后才读取 diff、规则、Prompt chunk 和 Provider 响应；持久任务 Store
    不保留大缓冲区。
 5. 完成后持久化一个 Session 并发布 Message Center 结果；任务摘要最多保留 128 条。
-6. 打开完成结果时由 Worker 加载 Session；关闭面板立即清空 finding/conversation model、
-   输入和当前投影。离开 PR Review 执行同样清理；后台任务不依赖 UI。
+6. 打开完成结果时由 Worker 加载 Review Session；打开已取消或失败的任务时，如存在则加载
+   轻量 PR Chat Session。关闭面板立即清空 finding/conversation model、输入和当前投影。
+   离开 PR Review 执行同样清理；后台任务不依赖 UI。
 7. 取消使用任务标记和队列移除；关闭应用时按已注册顺序停止配置与任务持久化 Worker。
+   取消运行中任务时立即标记为已取消，并中止在途 Provider completion，后续 diff
+   分段不得继续启动。
 
 ## Presentation / 展示
 
@@ -100,6 +106,35 @@ segmented mode instead of stacking separate text fields or mounting a second
 conversation header. A mode changes on the first pointer click even when the
 text input previously held focus. The pinned canvas has no full-width rule
 crossing behind the rounded input; the input border alone frames the composer.
+Like GitHub Copilot Chat on a pull request, `Ask` remains available for queued,
+running, completed, failed, and cancelled tasks. The current PR metadata and a
+bounded diff excerpt are its primary context; a completed AI Review result is
+optional additional context. Conversation history is stored locally and sent
+to the Settings-configured OpenAI-compatible AI Agent. Ask only performs
+read-only PR context loading and never submits a hosting-provider comment,
+review, approval, or other write.
+Submitting an Ask message immediately appends the user's message to the visible
+conversation. While the response is pending, an Agent row shows bounded
+operational phases such as PR-context preparation and thinking; these phases
+never claim to expose hidden model reasoning. The composer action becomes the
+same compact Stop control used by Review cancellation. Activating it aborts
+context loading or the in-flight Agent completion without cancelling the AI
+Review task, then marks the visible response as stopped.
+The review status and every pending Ask response show one compact live elapsed
+timer. Review duration starts when the task is enqueued and freezes on
+completion, failure, or cancellation. Ask duration starts on submission;
+successful assistant messages persist their final elapsed milliseconds, while
+stopped and failed visible responses freeze the measured duration immediately.
+Running reviews also show the exact current diff chunk and total chunk count.
+The percentage is derived from completed chunks on a 96-percent processing
+scale; it is workflow progress, not provider token or model-generation progress.
+Legacy task summaries without chunk counts retain the percentage-only fallback.
+While a review is queued or running, the `Review again` composer action becomes
+an enabled inverse circular Stop button with a 20px visual surface, a square
+glyph, and a 24px interaction target. It cancels that task. The PR list keeps
+its Copilot action and adds a denser 16px-visual Stop button with the same 24px
+target directly to its right. Conversation, Copilot, and Stop action centers
+remain evenly spaced while that row's task is active.
 Activating a finding selects its changed file and line in
 the existing diff. The panel uses Primer density and repository-owned `GitHub*`
 components; it is not a standalone review page. Its divider has a persistent resize hit target: dragging
@@ -122,6 +157,25 @@ High/Medium/Low finding 与 Review 专属对话的滚动流，以及一个固定
 `Ask` 与 `Review again` 通过 Primer 分段模式复用同一个 composer，不再堆叠两个输入框
 或挂载第二个对话标题栏；即使输入框此前持有焦点，第一次指针点击也必须完成模式切换。
 固定 composer 的画布不绘制贯穿圆角输入框背后的横线，只由输入框自身边框界定区域。
+与 GitHub Pull Request 中的 Copilot Chat 一致，`Ask` 在任务排队、运行、完成、失败和取消
+状态下均可使用。当前 PR 元数据与有界 diff 摘要是主要上下文；已完成的 AI Review 结果
+只是可选附加上下文。对话历史仅保存在本地，并发送给 Settings 中配置的
+OpenAI-compatible AI Agent。Ask 只读取 PR 上下文，绝不向代码托管平台提交评论、Review、
+Approval 或其他写操作。
+提交 Ask 后，用户消息必须立即追加到可见对话。等待回复期间，Agent 行显示“准备 PR
+上下文”“正在思考”等有界运行阶段；这些阶段不得声称展示模型隐藏推理。Composer
+主操作切换为与 Review 取消一致的紧凑 Stop 控件；点击后中止上下文读取或在途 Agent
+completion，但不取消 AI Review 任务，并在当前对话中标记回复已停止。
+Review 状态和每条等待中的 Ask 回复都显示一个紧凑的实时耗时。Review 从任务入队开始
+计时，并在完成、失败或取消时冻结；Ask 从提交开始计时，成功的 assistant 消息会持久化
+最终毫秒耗时，停止或失败的可见回复立即冻结实测耗时。
+运行中的 Review 同时显示当前 diff chunk 和总 chunk 数。百分比由已完成 chunk 按处理阶段
+最高 96% 推导，表示工作流进度，不是 Provider token 或模型生成进度。缺少 chunk 计数的
+旧任务摘要继续回退显示原有百分比。
+Review 处于排队或运行状态时，`Review again` composer 的主操作切换为带方块图标的可点击
+可视圆形为 20px、交互热区为 24px 的紧凑反色 Stop 按钮，并取消该任务。PR 列表
+保留 Copilot 操作，并在对应行任务活跃时于其右侧显示可视圆形为 16px、交互
+热区仍为 24px 的 Stop 按钮。Conversation、Copilot 与 Stop 三个操作的中心间距必须保持均等。
 点击 finding 会在现有 diff 中选择对应文件与行。面板遵循
 Primer 密度并复用仓库自有 `GitHub*` 组件，不提供独立 Review 页面。分隔线提供常驻拖拽命中区：拖动会保留本次会话的
 宽度偏好，在面板可读最小宽度与剩余 Diff 工作区之间夹紧；轻量 Diff viewport 与裁剪
@@ -144,14 +198,21 @@ the root Slint contract compilable without the task engine.
 Network, invalid model configuration, unreadable rule files, empty diffs, and
 invalid provider JSON fail only the affected task. User-facing task errors are
 bounded and credentials, complete prompts, source payloads, and rule contents
-must never be logged.
+must never be logged. Explicitly cancellable AI Review and review-scoped Ask
+completions have no total request deadline; the shared 10-second connect timeout
+and a 90-second response-body idle timeout still apply. Every received body
+chunk resets that idle timer. Other AI completions retain the shared 30-second
+total and body-idle timeouts.
 
 `ai-code-review` 包含核心包和完整 UI/Settings bridge；默认产品 feature 会启用它，
 可通过 `--no-default-features --features renderer-femtovg` 排除。关闭时使用协议兼容的
 UI stub，根 Slint 仍可编译。
 
 网络、模型配置、规则文件、空 diff 或 Provider JSON 错误只影响对应任务。用户可见错误
-必须有界，日志不得包含凭据、完整 Prompt、源码 payload 或规则正文。
+必须有界，日志不得包含凭据、完整 Prompt、源码 payload 或规则正文。可显式取消的
+AI Review 与 Review 专属 Ask completion 不设置请求总时限，但仍受共享的 10 秒连接
+超时和 90 秒响应体空闲超时约束；每收到一个 body chunk 都会重置空闲计时。其他 AI
+completion 继续使用共享的 30 秒总时限和响应体空闲时限。
 
 ## Regression checklist / 回归检查
 
@@ -162,9 +223,26 @@ UI stub，根 Slint 仍可编译。
   verify PR detail selects Files changed and opens the panel.
 - Select a finding and verify the matching file and changed line are revealed.
 - Send a follow-up question, add one-off requirements, and run Review again.
+- Send an Ask question and verify the user row appears before the Agent
+  completes. Verify the pending Agent row advances from context preparation to
+  thinking, its elapsed timer advances in real time, the Send action becomes
+  Stop, and Stop ends only that response with a frozen duration.
+- Let a review run for more than 300 seconds and verify it continues until the
+  provider completes or the user cancels it. Verify ordinary AI Chat still
+  reports a timeout at the shared 30-second deadline.
+- While a multi-chunk review runs, verify the panel identifies the current and
+  total chunk. Stall a successful response body and verify the task fails after
+  90 seconds of no body progress rather than remaining at one percentage.
+- Cancel or fail a review before a session is created, then focus Ask and send
+  a question. Verify the configured Agent answers using PR context and that no
+  hosting-provider write request is issued.
 - Focus each composer input, then switch between `Ask` and `Review again` with
   one click. Verify the mode changes on that click and no horizontal rule is
   visible behind the rounded input.
+- Start a review in `Review again` mode; verify the composer action changes to
+  an enabled circular Stop button and cancels the task on the first click.
+- Start a review from the PR list; verify the same Stop button appears to the
+  right of Copilot and cancels without opening PR detail.
 - Delete a rule used by a project and verify that project now inherits the
   repaired default.
 - Try relative, missing, non-Markdown, directory, and oversized rule paths;
@@ -184,8 +262,18 @@ UI stub，根 Slint 仍可编译。
 - 从 PR 列表启动后确认仍停留列表；打开完成任务后进入 PR 详情 Files changed 并打开面板。
 - 点击 finding，确认对应文件和变更行被揭示。
 - 发送追问、增加一次性要求并再次 Review。
+- 发送 Ask 后确认用户行在 Agent 完成前立即出现；确认等待行从准备上下文进入思考状态，
+  实时耗时持续增长，Send 操作切换为 Stop，且 Stop 只终止该次回复并冻结耗时。
+- 让 Review 运行超过 300 秒，确认 Provider 完成或用户取消前任务继续运行；同时确认普通
+  AI Chat 仍在共享的 30 秒截止时间触发超时。
+- 在 Session 创建前取消 Review 或让其失败，再聚焦 Ask 并发送问题；确认配置的 Agent
+  使用 PR 上下文回答，且不会发出任何代码托管平台写请求。
 - 分别聚焦两个 composer 输入框，再用一次点击切换 `Ask` / `Review again`；确认该次
   点击立即切换模式，且圆角输入框背后没有横向规则线。
+- 在 `Review again` 模式启动 Review，确认 composer 主操作切换为可点击的圆形 Stop
+  按钮，并在第一次点击时取消任务。
+- 从 PR 列表启动 Review，确认相同的 Stop 按钮显示在 Copilot 右侧，并且无需打开 PR
+  详情即可取消。
 - 删除项目正在使用的规则，确认项目改为继承修复后的默认规则。
 - 分别输入相对路径、不存在路径、非 Markdown 文件、目录和超限文件，确认表单保留输入、
   显示行内错误且不会新增规则。

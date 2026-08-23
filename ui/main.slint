@@ -323,6 +323,7 @@ export component MainWindow inherits Window {
     in-out property <bool> chat-ai-mode: true;
     in property <string> chat-ai-model-name: "";
     in property <bool> chat-is-sending: false;
+    in-out property <int> chat-request-elapsed-seconds: 0;
     // Same-binary A/B switch. Production defaults to the optimized path; Rust
     // selects the legacy baseline only for controlled performance runs.
     in property <bool> chat-performance-optimized: true;
@@ -375,6 +376,9 @@ export component MainWindow inherits Window {
     in property <string> ai-review-model-name: "";
     in property <string> ai-review-status: "";
     in property <int> ai-review-progress-percent: 0;
+    in property <int> ai-review-completed-chunks: 0;
+    in property <int> ai-review-total-chunks: 0;
+    in-out property <int> ai-review-elapsed-seconds: 0;
     in property <string> ai-review-summary: "";
     in property <string> ai-review-error: "";
     in property <[AiReviewFindingItem]> ai-review-findings: [];
@@ -382,6 +386,8 @@ export component MainWindow inherits Window {
     in-out property <string> ai-review-message-input: "";
     in-out property <string> ai-review-extra-requirements: "";
     in-out property <bool> ai-review-chat-sending: false;
+    in-out property <string> ai-review-chat-status: "";
+    in-out property <int> ai-review-chat-elapsed-seconds: 0;
     in-out property <bool> ai-review-panel-visible: false;
     private property <length> ai-review-panel-min-width: 360px;
     private property <length> ai-review-main-min-width: GitHubMetrics.overlay-width-medium;
@@ -421,6 +427,7 @@ export component MainWindow inherits Window {
     callback ai-review-select-finding(string, int);
     callback ai-review-set-project-rule(string);
     callback ai-review-cancel(string);
+    callback ai-review-cancel-message(string);
     callback ai-review-rerun(string);
     callback ai-review-send-message(string);
     callback ai-review-route-visible-changed(bool);
@@ -1317,6 +1324,7 @@ export component MainWindow inherits Window {
                                 root.workflow-ai-review-start(number, title, source-branch, target-branch);
                             }
                             pr-open-ai-review(task-id) => { root.ai-review-open(task-id); }
+                            pr-cancel-ai-review(task-id) => { root.ai-review-cancel(task-id); }
                             pr-set-ai-review-rule(id) => { root.ai-review-set-project-rule(id); }
                             cd-start(environment-name, release-name, commit-hash) => {
                                 root.workflow-cd-start(environment-name, release-name, commit-hash);
@@ -1501,6 +1509,7 @@ export component MainWindow inherits Window {
                 ai-mode: root.chat-ai-mode;
                 ai-model-name: root.chat-ai-model-name;
                 is-sending: root.chat-is-sending;
+                request-elapsed-seconds <=> root.chat-request-elapsed-seconds;
                 performance-optimized: root.chat-performance-optimized;
                 live-resizing: root.chat-performance-optimized
                     && (root.window-live-resizing
@@ -2289,6 +2298,9 @@ export component MainWindow inherits Window {
         model-name: root.ai-review-model-name;
         status: root.ai-review-status;
         progress-percent: root.ai-review-progress-percent;
+        completed-chunks: root.ai-review-completed-chunks;
+        total-chunks: root.ai-review-total-chunks;
+        elapsed-seconds <=> root.ai-review-elapsed-seconds;
         summary: root.ai-review-summary;
         error-text: root.ai-review-error;
         findings: root.ai-review-findings;
@@ -2296,8 +2308,11 @@ export component MainWindow inherits Window {
         message-input <=> root.ai-review-message-input;
         extra-requirements <=> root.ai-review-extra-requirements;
         chat-sending <=> root.ai-review-chat-sending;
+        chat-status: root.ai-review-chat-status;
+        chat-elapsed-seconds <=> root.ai-review-chat-elapsed-seconds;
         close => { root.ai-review-close-panel(); }
         cancel(task-id) => { root.ai-review-cancel(task-id); }
+        cancel-message(task-id) => { root.ai-review-cancel-message(task-id); }
         re-review(extra) => { root.ai-review-rerun(extra); }
         send-message(message) => { root.ai-review-send-message(message); }
         select-finding(file, line) => { root.ai-review-select-finding(file, line); }

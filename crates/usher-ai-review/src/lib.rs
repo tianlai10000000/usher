@@ -355,6 +355,10 @@ pub struct ReviewTaskSummary {
     pub model_name: String,
     pub status: ReviewTaskStatus,
     pub progress_percent: u8,
+    #[serde(default)]
+    pub completed_chunks: u32,
+    #[serde(default)]
+    pub total_chunks: u32,
     pub finding_count: u32,
     pub error: String,
     pub created_at_unix_ms: u64,
@@ -398,9 +402,10 @@ pub enum ReviewTaskAction {
         target: ReviewTarget,
         updated_at_unix_ms: u64,
     },
-    SetProgress {
+    SetChunkProgress {
         id: ReviewTaskId,
-        progress_percent: u8,
+        completed_chunks: u32,
+        total_chunks: u32,
         updated_at_unix_ms: u64,
     },
     Complete {
@@ -485,13 +490,21 @@ pub fn reduce_tasks(
             Some(_) => ReviewTaskActionResult::InvalidTransition,
             None => ReviewTaskActionResult::UnknownTask,
         },
-        ReviewTaskAction::SetProgress {
+        ReviewTaskAction::SetChunkProgress {
             id,
-            progress_percent,
+            completed_chunks,
+            total_chunks,
             updated_at_unix_ms,
         } => match next.tasks.get_mut(&id) {
             Some(task) if task.status == ReviewTaskStatus::Running => {
-                task.progress_percent = progress_percent.clamp(1, 99);
+                task.total_chunks = total_chunks;
+                task.completed_chunks = completed_chunks.min(total_chunks);
+                task.progress_percent = if total_chunks == 0 {
+                    task.progress_percent.max(1)
+                } else {
+                    ((u64::from(task.completed_chunks) * 96) / u64::from(total_chunks)).clamp(1, 96)
+                        as u8
+                };
                 task.updated_at_unix_ms = updated_at_unix_ms;
                 ReviewTaskActionResult::Changed
             }
@@ -506,6 +519,9 @@ pub fn reduce_tasks(
             Some(task) if task.status == ReviewTaskStatus::Running => {
                 task.status = ReviewTaskStatus::Completed;
                 task.progress_percent = 100;
+                if task.total_chunks > 0 {
+                    task.completed_chunks = task.total_chunks;
+                }
                 task.finding_count = finding_count;
                 task.error.clear();
                 task.updated_at_unix_ms = updated_at_unix_ms;
@@ -570,6 +586,8 @@ pub struct ReviewConversationMessage {
     pub role: ReviewConversationRole,
     pub content: String,
     pub created_at_unix_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -834,6 +852,16 @@ mod tests {
         assert_eq!(result.summary, "ok");
     }
 
+    #[test]
+    fn legacy_conversation_message_without_elapsed_time_remains_readable() {
+        let message: ReviewConversationMessage = serde_json::from_str(
+            r#"{"role":"assistant","content":"legacy","created_at_unix_ms":1}"#,
+        )
+        .expect("legacy review conversation");
+
+        assert_eq!(message.elapsed_ms, None);
+    }
+
     fn target(number: &str) -> ReviewTarget {
         ReviewTarget {
             project_key: ProjectReviewKey("github:42".into()),
@@ -857,11 +885,88 @@ mod tests {
             model_name: "fixture".into(),
             status: ReviewTaskStatus::Queued,
             progress_percent: 0,
+            completed_chunks: 0,
+            total_chunks: 0,
             finding_count: 0,
             error: String::new(),
             created_at_unix_ms: 1,
             updated_at_unix_ms: 1,
         }
+    }
+
+    #[test]
+    fn legacy_task_summary_without_chunk_counts_remains_readable() {
+        let task: ReviewTaskSummary = serde_json::from_str(
+            r#"{
+                "id":"legacy-task",
+                "target":{
+                    "project_key":"github:42",
+                    "project_name":"Usher",
+                    "pull_request_number":"7",
+                    "pull_request_title":"Legacy review",
+                    "base_sha":"base",
+                    "head_sha":"head"
+                },
+                "rule_name":"Default",
+                "model_name":"fixture",
+                "status":"running",
+                "progress_percent":41,
+                "finding_count":0,
+                "error":"",
+                "created_at_unix_ms":1,
+                "updated_at_unix_ms":2
+            }"#,
+        )
+        .expect("legacy task summary");
+
+        assert_eq!(task.completed_chunks, 0);
+        assert_eq!(task.total_chunks, 0);
+        assert_eq!(task.progress_percent, 41);
+    }
+
+    #[test]
+    fn chunk_progress_is_normalized_and_drives_percentage() {
+        let queued = task("task-progress", "8");
+        let state = reduce_tasks(
+            &ReviewTaskState::default(),
+            ReviewTaskAction::Enqueue(queued.clone()),
+        )
+        .state;
+        let state = reduce_tasks(
+            &state,
+            ReviewTaskAction::Start {
+                id: queued.id.clone(),
+                updated_at_unix_ms: 2,
+            },
+        )
+        .state;
+        let state = reduce_tasks(
+            &state,
+            ReviewTaskAction::SetChunkProgress {
+                id: queued.id.clone(),
+                completed_chunks: 12,
+                total_chunks: 28,
+                updated_at_unix_ms: 3,
+            },
+        )
+        .state;
+        let running = state.tasks.get(&queued.id).expect("running task");
+        assert_eq!(running.completed_chunks, 12);
+        assert_eq!(running.total_chunks, 28);
+        assert_eq!(running.progress_percent, 41);
+
+        let completed = reduce_tasks(
+            &state,
+            ReviewTaskAction::Complete {
+                id: queued.id.clone(),
+                finding_count: 0,
+                updated_at_unix_ms: 4,
+            },
+        )
+        .state;
+        let completed = completed.tasks.get(&queued.id).expect("completed task");
+        assert_eq!(completed.completed_chunks, 28);
+        assert_eq!(completed.progress_percent, 100);
     }
 
     #[test]

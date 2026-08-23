@@ -7,6 +7,8 @@ export struct AiReviewTaskItem {
     model-name: string,
     status: string,
     progress-percent: int,
+    completed-chunks: int,
+    total-chunks: int,
     finding-count: int,
     error: string,
 }
@@ -30,6 +32,7 @@ export struct AiReviewFindingItem {
 export struct AiReviewConversationItem {
     role: string,
     content: string,
+    elapsed: string,
 }
 
 export component GitHubAiReviewPanel inherits Rectangle {
@@ -41,6 +44,9 @@ export component GitHubAiReviewPanel inherits Rectangle {
     in property <string> model-name: "";
     in property <string> status: "failed";
     in property <int> progress-percent: 0;
+    in property <int> completed-chunks: 0;
+    in property <int> total-chunks: 0;
+    in-out property <int> elapsed-seconds: 0;
     in property <string> summary: "";
     in property <string> error-text: "AI Code Review is not included in this build.";
     in property <[AiReviewFindingItem]> findings: [];
@@ -48,8 +54,11 @@ export component GitHubAiReviewPanel inherits Rectangle {
     in-out property <string> message-input: "";
     in-out property <string> extra-requirements: "";
     in property <bool> chat-sending: false;
+    in property <string> chat-status: "";
+    in-out property <int> chat-elapsed-seconds: 0;
     callback close();
     callback cancel(string);
+    callback cancel-message(string);
     callback re-review(string);
     callback send-message(string);
     callback select-finding(string, int);

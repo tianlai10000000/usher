@@ -3,6 +3,7 @@ use super::persistence::{
     StoredMessageStatus,
 };
 use std::io;
+use std::time::{Duration, Instant};
 
 const DEFAULT_STARTUP_LOAD: usize = 20;
 const DEFAULT_PAGE_SIZE: usize = 10;
@@ -18,6 +19,8 @@ pub(crate) enum ChatMode {
 pub(crate) struct ChatRequestState {
     ai_sending: bool,
     rag_sending: bool,
+    ai_started_at: Option<Instant>,
+    rag_started_at: Option<Instant>,
 }
 
 impl ChatRequestState {
@@ -28,11 +31,38 @@ impl ChatRequestState {
         }
     }
 
-    pub(crate) fn set_sending(&mut self, mode: ChatMode, sending: bool) {
+    pub(crate) fn start(&mut self, mode: ChatMode, started_at: Instant) {
         match mode {
-            ChatMode::Ai => self.ai_sending = sending,
-            ChatMode::Rag => self.rag_sending = sending,
+            ChatMode::Ai => {
+                self.ai_sending = true;
+                self.ai_started_at = Some(started_at);
+            }
+            ChatMode::Rag => {
+                self.rag_sending = true;
+                self.rag_started_at = Some(started_at);
+            }
         }
+    }
+
+    pub(crate) fn finish(&mut self, mode: ChatMode) -> Option<Duration> {
+        match mode {
+            ChatMode::Ai => {
+                self.ai_sending = false;
+                self.ai_started_at.take().map(|started| started.elapsed())
+            }
+            ChatMode::Rag => {
+                self.rag_sending = false;
+                self.rag_started_at.take().map(|started| started.elapsed())
+            }
+        }
+    }
+
+    pub(crate) fn elapsed_seconds(&self, mode: ChatMode) -> u64 {
+        match mode {
+            ChatMode::Ai => self.ai_started_at,
+            ChatMode::Rag => self.rag_started_at,
+        }
+        .map_or(0, |started| started.elapsed().as_secs())
     }
 }
 
@@ -112,22 +142,33 @@ impl ChatSessionService {
             StoredMessageRole::User,
             StoredMessageStatus::Normal,
             content,
+            None,
         )
     }
 
-    pub fn append_assistant_message(&mut self, content: String) -> io::Result<StoredChatMessage> {
+    pub fn append_assistant_message(
+        &mut self,
+        content: String,
+        elapsed_ms: u64,
+    ) -> io::Result<StoredChatMessage> {
         self.append_message(
             StoredMessageRole::Assistant,
             StoredMessageStatus::Normal,
             content,
+            Some(elapsed_ms),
         )
     }
 
-    pub fn append_assistant_error(&mut self, content: String) -> io::Result<StoredChatMessage> {
+    pub fn append_assistant_error(
+        &mut self,
+        content: String,
+        elapsed_ms: u64,
+    ) -> io::Result<StoredChatMessage> {
         self.append_message(
             StoredMessageRole::Assistant,
             StoredMessageStatus::Error,
             content,
+            Some(elapsed_ms),
         )
     }
 
@@ -148,6 +189,7 @@ impl ChatSessionService {
                         status: StoredMessageStatus::Normal,
                         content: format!("Performance fixture prompt {}", group + 1),
                         timestamp: timestamp.clone(),
+                        elapsed_ms: None,
                     },
                     StoredChatMessage {
                         id: base + 1,
@@ -155,6 +197,7 @@ impl ChatSessionService {
                         status: StoredMessageStatus::Normal,
                         content: format!("# Fixture response\n\n{assistant_body}"),
                         timestamp: timestamp.clone(),
+                        elapsed_ms: Some(1_250),
                     },
                     StoredChatMessage {
                         id: base + 2,
@@ -162,6 +205,7 @@ impl ChatSessionService {
                         status: StoredMessageStatus::Normal,
                         content: format!("## Follow-up detail\n\n{assistant_body}"),
                         timestamp: timestamp.clone(),
+                        elapsed_ms: Some(2_500),
                     },
                     StoredChatMessage {
                         id: base + 3,
@@ -169,6 +213,7 @@ impl ChatSessionService {
                         status: StoredMessageStatus::Normal,
                         content: format!("### Final detail\n\n{assistant_body}"),
                         timestamp: timestamp.clone(),
+                        elapsed_ms: Some(3_750),
                     },
                 ]
             })
@@ -189,6 +234,7 @@ impl ChatSessionService {
         role: StoredMessageRole,
         status: StoredMessageStatus,
         content: String,
+        elapsed_ms: Option<u64>,
     ) -> io::Result<StoredChatMessage> {
         let message = StoredChatMessage {
             id: self.next_id,
@@ -196,6 +242,7 @@ impl ChatSessionService {
             status,
             content,
             timestamp: current_timestamp(),
+            elapsed_ms,
         };
         self.next_id = self.next_id.saturating_add(1);
 
@@ -258,16 +305,20 @@ impl ChatSessions {
         &mut self,
         mode: ChatMode,
         content: String,
+        elapsed_ms: u64,
     ) -> io::Result<StoredChatMessage> {
-        self.session_mut(mode).append_assistant_message(content)
+        self.session_mut(mode)
+            .append_assistant_message(content, elapsed_ms)
     }
 
     pub(crate) fn append_assistant_error_for(
         &mut self,
         mode: ChatMode,
         content: String,
+        elapsed_ms: u64,
     ) -> io::Result<StoredChatMessage> {
-        self.session_mut(mode).append_assistant_error(content)
+        self.session_mut(mode)
+            .append_assistant_error(content, elapsed_ms)
     }
 
     pub(crate) fn install_performance_fixture(&mut self) {
@@ -309,18 +360,18 @@ mod tests {
     use super::{ChatMode, ChatRequestState, ChatSessionService, ChatSessions};
     use crate::chat::persistence::JsonlHistoryStore;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn sending_state_is_isolated_by_mode() {
         let mut state = ChatRequestState::default();
-        state.set_sending(ChatMode::Ai, true);
+        state.start(ChatMode::Ai, Instant::now());
 
         assert!(state.is_sending(ChatMode::Ai));
         assert!(!state.is_sending(ChatMode::Rag));
 
-        state.set_sending(ChatMode::Rag, true);
-        state.set_sending(ChatMode::Ai, false);
+        state.start(ChatMode::Rag, Instant::now());
+        state.finish(ChatMode::Ai);
         assert!(!state.is_sending(ChatMode::Ai));
         assert!(state.is_sending(ChatMode::Rag));
     }
@@ -347,7 +398,7 @@ mod tests {
 
         sessions.append_user_message("AI question".into()).unwrap();
         sessions
-            .append_assistant_message_for(ChatMode::Ai, "AI answer".into())
+            .append_assistant_message_for(ChatMode::Ai, "AI answer".into(), 1_250)
             .unwrap();
         sessions.set_active_mode(ChatMode::Rag);
         sessions.append_user_message("RAG question".into()).unwrap();

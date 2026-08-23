@@ -757,6 +757,7 @@ fn clear_chat_ui_state(ui: &MainWindow) {
     ui.set_chat_virtual_bottom_spacer(0.0);
     ui.set_chat_virtual_document_height(0.0);
     ui.set_chat_loading_phase(0);
+    ui.set_chat_request_elapsed_seconds(0);
 }
 
 fn schedule_chat_ui_mount(
@@ -997,11 +998,12 @@ pub fn setup_interactive(ui: &MainWindow) {
         LAST_RENDER_SIGNATURE.with(|last| *last.borrow_mut() = None);
         ui.set_chat_ai_mode(ai_mode);
         ui.set_chat_loading_history(false);
-        let sending = request_state_mode
+        let (sending, elapsed_seconds) = request_state_mode
             .lock()
-            .map(|state| state.is_sending(mode))
-            .unwrap_or(false);
+            .map(|state| (state.is_sending(mode), state.elapsed_seconds(mode)))
+            .unwrap_or((false, 0));
         ui.set_chat_is_sending(sending);
+        ui.set_chat_request_elapsed_seconds(elapsed_seconds.min(i32::MAX as u64) as i32);
         let revision = next_chat_ui_mount_revision(&chat_ui_mount_revision_mode);
         begin_chat_ui_mount(&ui, &session_mode, mode);
         schedule_chat_ui_mount(
@@ -1273,10 +1275,12 @@ pub fn setup_interactive(ui: &MainWindow) {
             return;
         }
 
+        let request_started = Instant::now();
         ui.set_chat_input_text("".into());
         ui.set_chat_is_sending(true);
+        ui.set_chat_request_elapsed_seconds(0);
         if let Ok(mut state) = request_state_send.lock() {
-            state.set_sending(mode, true);
+            state.start(mode, request_started);
         }
 
         start_loading_phase_animation(ui.as_weak(), loading_phase_active_send.clone());
@@ -1296,9 +1300,12 @@ pub fn setup_interactive(ui: &MainWindow) {
         let session_response = session_send.clone();
         let request_state_response = request_state_send.clone();
         let loading_phase_active_response = loading_phase_active_send.clone();
-
         runtime_send.spawn(async move {
             let result = send_chat_message(mode, &text_str, ai_history).await;
+            let elapsed_ms = request_started
+                .elapsed()
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64;
 
             let _ = slint::invoke_from_event_loop(move || {
                 let Some(ui) = ui_weak_clone.upgrade() else {
@@ -1315,7 +1322,9 @@ pub fn setup_interactive(ui: &MainWindow) {
 
                 match result {
                     Ok(response) => {
-                        if let Err(e) = guard.append_assistant_message_for(mode, response) {
+                        if let Err(e) =
+                            guard.append_assistant_message_for(mode, response, elapsed_ms)
+                        {
                             log::error!(
                                 "[Chat::Storage] Failed to persist assistant message: {}",
                                 e
@@ -1324,7 +1333,8 @@ pub fn setup_interactive(ui: &MainWindow) {
                     }
                     Err(err) => {
                         let friendly = handle_api_error(&err);
-                        if let Err(e) = guard.append_assistant_error_for(mode, friendly) {
+                        if let Err(e) = guard.append_assistant_error_for(mode, friendly, elapsed_ms)
+                        {
                             log::error!("[Chat::Storage] Failed to persist error message: {}", e);
                         }
                     }
@@ -1332,12 +1342,13 @@ pub fn setup_interactive(ui: &MainWindow) {
                 drop(guard);
 
                 if let Ok(mut state) = request_state_response.lock() {
-                    state.set_sending(mode, false);
+                    state.finish(mode);
                 }
                 if chat_mode_from_ui(&ui) == mode {
                     loading_phase_active_response.store(false, Ordering::Relaxed);
                     ui.set_chat_is_sending(false);
                     ui.set_chat_loading_phase(0);
+                    ui.set_chat_request_elapsed_seconds(0);
                 }
                 if ui.get_current_route() == Route::Chat && chat_mode_from_ui(&ui) == mode {
                     apply_chat_state_to_ui(
@@ -1528,11 +1539,12 @@ pub fn setup_interactive(ui: &MainWindow) {
                 if let Ok(mut sessions) = session_route.lock() {
                     sessions.set_active_mode(mode);
                 }
-                let sending = request_state_route
+                let (sending, elapsed_seconds) = request_state_route
                     .lock()
-                    .map(|state| state.is_sending(mode))
-                    .unwrap_or(false);
+                    .map(|state| (state.is_sending(mode), state.elapsed_seconds(mode)))
+                    .unwrap_or((false, 0));
                 ui.set_chat_is_sending(sending);
+                ui.set_chat_request_elapsed_seconds(elapsed_seconds.min(i32::MAX as u64) as i32);
                 ui.set_chat_ai_model_name(load_settings().ai.agent.model.into());
                 let revision = next_chat_ui_mount_revision(&chat_ui_mount_revision_route);
                 begin_chat_ui_mount(&ui, &session_route, mode);

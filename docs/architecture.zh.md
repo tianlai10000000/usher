@@ -68,8 +68,8 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `src/jobs/` | 应用级 Job 生命周期 model、来源无关运行描述符/UI 投影，以及按 source key 的动作分发；不拥有任何 Feature 进程。 |
 | `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行；Tag 与 PR Review 通过稳定文件 façade 暴露内部 controller 和纯逻辑模块。 |
 | `src/terminal/` | PTY 生命周期、viewport 同步、渲染、选择和项目切换；纯输入映射、诊断与刷新节流使用独立模块。 |
-| `src/chat/` | AI/RAG 共用 Chat 展示和交互、按模式隔离的 Session/JSONL 历史、transport、宽度无关纯文本/Artifact 投影、有界渲染缓存、分页和纯有界虚拟布局；完整 Artifact 渲染归通用预览 Feature。 |
-| `src/ai_review/` | 可选 AI Review 配置门面和应用 controller；负责 State Store 订阅、自动持久化 Worker、动态任务调度、按需加载 diff/规则、AI 调用、Session 存储、取消、通知和不依赖路由的 PR 结果投影。 |
+| `src/chat/` | AI/RAG 共用 Chat 展示和交互、按模式隔离的 Session/JSONL 历史、请求耗时管理、transport、宽度无关纯文本/Artifact 投影、有界渲染缓存、分页和纯有界虚拟布局；完整 Artifact 渲染归通用预览 Feature。 |
+| `src/ai_review/` | 可选 AI Review 配置门面和应用 controller；负责 State Store 订阅、自动持久化 Worker、动态任务调度、Review/Ask 耗时投影、按需加载 diff/规则、AI 调用、在途 Provider 取消、已完成 Review 与轻量 PR Chat Session 存储、通知和不依赖路由的 PR 结果投影。 |
 | `src/artifact_preview/` | 应用预览门面：Provider 策略、后台准备、过期结果取消、Slint model 适配、单活动 Session，以及固定面板与独立窗口之间的即时迁移。其 `test-fixtures` 适配器仅在开发构建存在，并让演练样例通过同一门面提交。 |
 | `src/update/` | Release 检查、流式下载、进度、取消、安装和重启。 |
 | `src/router/` | 路由映射、历史、可见性和可达性 transition；不执行 feature 清理。 |
@@ -78,7 +78,7 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `src/settings.rs` | TOML 设置模型和持久化，包含 AI Agent 凭据。 |
 | `src/ai/` | 共用 OpenAI-compatible AI Agent transport；`agent.rs` 负责连通性测试，以及 AI Chat/AI Code Review 使用的 chat completion；不负责 RAG transport 或 Feature 状态。 |
 | `src/network.rs` | 后台网络探测和 `AppState.network-online`。 |
-| `src/http/mod.rs` | 共享异步/阻塞 reqwest 客户端、拦截器、统一错误和可选 UI 反馈。 |
+| `src/http/mod.rs` | 唯一共享 reqwest client、单请求总超时/响应体空闲超时策略、统一响应体读取、拦截器、统一错误和可选 UI 反馈。 |
 | `src/logger/` | Debug 日志、tracing 和 panic/error 支持。 |
 | `src/toast.rs` | 单条短时 Toast 管理器绑定。 |
 | `src/notification.rs` | 通知队列、计时器、Hover 暂停、操作按钮和图标。 |
@@ -549,7 +549,7 @@ Provider adapters
 
 ### Chat
 
-聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。新记录持久化带本地时区偏移的完整 RFC 3339 时间；Rust 展示投影按本地自然日转换为分层标签（今天显示时分、昨天、前天、六天内显示星期、同年显示月日、跨年显示完整日期），旧版仅时分记录继续兼容原样显示。启动时最近一段只加载到 Rust session；Chat 组件及有界 Slint 消息 model 仅在 Chat 路由挂载。离开 Chat 会销毁 UI 树并清空 Slint model/投影缓存，重新进入时从 session 重建可见窗口。Assistant 消息保留宽度无关的可读文本投影；超过 1,200 个 Unicode scalar value 的投影在 Chat 内有界展示，并通过现有标题入口打开完整回复。格式化 block 由 `usher-preview` 后台准备并交给应用级预览 Host 展示。迟到的历史分页或 assistant 响应继续更新持久化/session，但不得填充隐藏 UI。
+聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。新记录持久化带本地时区偏移的完整 RFC 3339 时间，终态 assistant 行同时保存实测 `elapsed_ms`。Rust 展示投影按本地自然日转换时间标签，并把耗时转换为紧凑元数据；旧版记录继续兼容原样显示。等待中的对话只使用一个页面级实时 tick 和按模式保存的单调起始时刻；切换模式或重新挂载 Chat 时恢复实际耗时而不重新计时。启动时最近一段只加载到 Rust session；Chat 组件及有界 Slint 消息 model 仅在 Chat 路由挂载。离开 Chat 会销毁 UI 树并清空 Slint model/投影缓存，重新进入时从 session 重建可见窗口。Assistant 消息保留宽度无关的可读文本投影；超过 1,200 个 Unicode scalar value 的投影在 Chat 内有界展示，并通过现有标题入口打开完整回复。格式化 block 由 `usher-preview` 后台准备并交给应用级预览 Host 展示。迟到的历史分页或 assistant 响应继续更新持久化/session，但不得填充隐藏 UI。
 
 生产路径在一个稳定 `VecModel` 中挂载当前已加载的全部消息，每行只实例化当前角色对应的子树，
 并将上下虚拟 spacer 固定为零。这样移除了用户滚动中的估算行高 spacer，因为短消息、错误消息
@@ -658,7 +658,8 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 1. `chat/interactive.rs` 追加并持久化用户消息。
 2. 共享 runtime 使用既有 RAG endpoint 和请求格式调用 `chat/chat.rs`。
 3. `src/http/mod.rs` 依次执行请求拦截、reqwest 请求、状态校验、响应/错误拦截和 RAG JSON 解码。
-4. 结果持久化，并在 event loop 中转换为 Slint model。
+4. 按模式保存的单调起始时刻驱动一个可见页面计时器；结果持久化实测毫秒耗时，
+   并在 event loop 中转换为 Slint model。
 5. 失败会作为 assistant 消息显示，因此该请求保持静默，避免重复 Toast。
 
 ### AI Agent 连通性测试
@@ -680,13 +681,15 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 
 ## HTTP 边界
 
-`src/http/mod.rs` 是唯一允许创建应用级 reqwest client 的位置。它返回 reqwest request builder，不隐藏 query、JSON、header、timeout 和 streaming 能力。
+`src/http/mod.rs` 是唯一允许创建应用自有 reqwest client 的位置。它返回 reqwest request builder，不隐藏 query、JSON 和 header 配置；执行后返回项目自有 `HttpResponse`，JSON、文本、字节和流式 chunk 读取都留在统一超时与错误管线内。
 
 每个请求都提供 `RequestOptions`：
 
 - `operation` 用于稳定日志和用户提示上下文。
 - `reject_http_errors` 默认开启，把非 2xx 响应转换为 `HttpError`，并保留受长度限制的响应正文摘要。
 - `feedback` 默认 `Silent`；用户操作可以选择 Toast、Notification 或两者。
+- `timeout` 默认 30 秒，可传入自定义时长；零表示无总截止时间，独立的 10 秒连接超时仍然生效。
+- `read_idle_timeout` 默认 30 秒，每收到一个响应体 chunk 后重新计时，可自定义；零表示关闭空闲检测。
 
 Interceptor 按注册顺序执行。Request hook 可修改 header；Response hook 可读取状态、header 和耗时；Error hook 接收统一错误。详见 [specs/http.md](specs/http.md)。
 

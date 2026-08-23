@@ -17,6 +17,7 @@ export component GitHubChatPage inherits Rectangle {
     in property <bool> ai-mode: true;
     in property <string> ai-model-name: "";
     in property <bool> is-sending: false;
+    in-out property <int> request-elapsed-seconds: 0;
     in property <bool> performance-optimized: true;
     in property <bool> live-resizing: false;
     in property <bool> can-load-more-history: false;
@@ -76,6 +77,22 @@ export component GitHubChatPage inherits Rectangle {
     private property <int> bottom-scroll-pin-ticks: 0;
     private property <int> latest-wheel-input-revision: 0;
     private property <length> latest-wheel-input-delta: 0px;
+    private property <int> request-elapsed-minutes: root.request-elapsed-seconds / 60;
+    private property <int> request-elapsed-hours: root.request-elapsed-minutes / 60;
+    private property <int> request-elapsed-minute-part: Math.mod(root.request-elapsed-minutes, 60);
+    private property <int> request-elapsed-second-part: Math.mod(root.request-elapsed-seconds, 60);
+    private property <string> request-elapsed-label:
+        root.request-elapsed-hours > 0
+            ? root.request-elapsed-hours + "h "
+                + (root.request-elapsed-minute-part < 10 ? "0" : "")
+                + root.request-elapsed-minute-part + "m "
+                + (root.request-elapsed-second-part < 10 ? "0" : "")
+                + root.request-elapsed-second-part + "s"
+            : root.request-elapsed-minutes > 0
+                ? root.request-elapsed-minutes + "m "
+                    + (root.request-elapsed-second-part < 10 ? "0" : "")
+                    + root.request-elapsed-second-part + "s"
+                : root.request-elapsed-seconds + "s";
     // Keep the complete message viewport at the last stable width during native
     // live resize. The host clips it while the route surface and composer follow
     // the window; releasing the edge commits one final layout at the new width.
@@ -352,6 +369,7 @@ export component GitHubChatPage inherits Rectangle {
                             preview-available: message.preview_available;
                             preview-title: message.preview_title;
                             timestamp: message.timestamp;
+                            elapsed: self.is-loading ? root.request-elapsed-label : message.elapsed;
                             is-loading: message.content == ""
                                 && root.is-sending
                                 && index == root.messages.length - 1;
@@ -402,6 +420,7 @@ export component GitHubChatPage inherits Rectangle {
                         preview-available: false;
                         preview-title: "";
                         timestamp: "";
+                        elapsed: root.request-elapsed-label;
                         is-loading: true;
                     }
 
@@ -427,6 +446,14 @@ export component GitHubChatPage inherits Rectangle {
                 triggered => {
                     root.apply-bottom-scroll();
                     root.bottom-scroll-pin-ticks -= 1;
+                }
+            }
+
+            request-elapsed-timer := Timer {
+                interval: 1s;
+                running: root.is-sending;
+                triggered => {
+                    root.request-elapsed-seconds += 1;
                 }
             }
 

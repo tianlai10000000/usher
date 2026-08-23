@@ -4,11 +4,10 @@
 //! remains the existing RAG endpoint. Future AI Agent capabilities should add
 //! their provider calls here and use the shared HTTP module.
 
-use reqwest::{Method, Url};
-use serde::{Deserialize, Serialize};
-
 use crate::http::{self, HttpError, HttpErrorKind, RequestOptions};
 use crate::settings::AiAgentSettings;
+use reqwest::{Method, Url};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 struct ModelsResponse {
@@ -147,6 +146,32 @@ pub(crate) async fn complete(
     messages: &[CompletionMessage],
     operation: &'static str,
 ) -> Result<String, HttpError> {
+    complete_with_options(settings, messages, RequestOptions::new(operation)).await
+}
+
+/// Execute an explicitly cancellable AI Review completion without a total
+/// request deadline. The shared connect timeout still applies.
+#[cfg(feature = "ai-code-review")]
+pub(crate) async fn complete_review(
+    settings: &AiAgentSettings,
+    messages: &[CompletionMessage],
+    operation: &'static str,
+) -> Result<String, HttpError> {
+    complete_with_options(
+        settings,
+        messages,
+        RequestOptions::new(operation)
+            .timeout(std::time::Duration::ZERO)
+            .read_idle_timeout(std::time::Duration::from_secs(90)),
+    )
+    .await
+}
+
+async fn complete_with_options(
+    settings: &AiAgentSettings,
+    messages: &[CompletionMessage],
+    options: RequestOptions,
+) -> Result<String, HttpError> {
     validate_settings(settings)?;
     if messages.is_empty() {
         return Err(configuration_error(
@@ -159,11 +184,12 @@ pub(crate) async fn complete(
         messages,
         temperature: 0.1,
     };
+    let operation = options.operation.clone();
     let response = http::send_json::<CompletionResponse>(
         http::post(url)
             .bearer_auth(settings.api_key.trim())
             .json(&request),
-        RequestOptions::new(operation),
+        options,
     )
     .await?;
     response
@@ -173,7 +199,7 @@ pub(crate) async fn complete(
         .find(|content| !content.trim().is_empty())
         .ok_or_else(|| HttpError {
             kind: HttpErrorKind::Decode,
-            operation: operation.to_string(),
+            operation,
             method: Some(Method::POST),
             url: None,
             status: None,

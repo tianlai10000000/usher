@@ -67,7 +67,8 @@ chrono = "0.4"
 self_update = { version = "0.44", default-features = false, features = ["reqwest", "archive-tar", "archive-zip", "compression-flate2", "rustls"] }
 tokio = { version = "1.40", features = ["full"] }
 anyhow = "1.0"
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "query", "rustls", "stream", "system-proxy"] }
+bytes = "1"
+reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls", "stream", "system-proxy"] }
 semver = "1.0.27"
 futures-util = "0.3.31"
 tar = "0.4"

@@ -11,7 +11,7 @@ Usher 是一个处于 Alpha 阶段的桌面 Git 项目工作台，用于管理�
 - 按项目隔离执行 Branch 校验、Tag 自动化、分阶段 CD 与 Pull Request 流程。
 - 在当前页面打开项目感知的终端抽屉。
 - 在同一 Chat 页面使用 OpenAI-compatible AI 对话或隔离的 RAG 对话，两种模式历史独立。
-- 按设置并发执行最多 8 个 AI Code Review，在 PR diff 右侧查看 finding 并进行 Review 专属追问。
+- 按设置并发执行最多 8 个 AI Code Review，在 PR diff 右侧查看 finding，并以当前 PR 为上下文和已配置 AI Agent 对话。
 - 提供可持久化应用内消息与操作系统原生通知，以及 Toast、托盘、更新和网络状态反馈。
 - 支持亮色、暗色和跟随系统主题。
 - 通过统一的 reqwest HTTP 拦截管线发送应用网络请求。
@@ -214,11 +214,12 @@ material-1.7.1-fixed/            内置 Slint v1.17.1 Material 库
 
 所有应用自有 HTTP 请求统一通过 `src/http/mod.rs`，该模块是在 reqwest 上进行封装，并没有重新实现 HTTP 客户端。它提供：
 
-- 共享的异步客户端和阻塞客户端；
+- 所有应用自有 HTTP 请求共用一个请求客户端；
 - 请求、响应和错误拦截器；
 - 统一的 `HttpError` 分类和状态码处理；
+- 相互独立的单请求总超时和响应体空闲超时；
 - 每次请求可选静默、Toast、通知或两者同时提示；
-- 保留 reqwest 的请求构建、JSON 解码和流式响应能力。
+- 保留 reqwest 请求构建能力，并统一处理 JSON、文本、字节和流式响应体读取。
 
 后台轮询必须保持静默；用户主动触发的请求可以选择 UI 错误反馈。详见 [docs/specs/http.md](docs/specs/http.md)。
 

@@ -11,7 +11,7 @@ Usher is an alpha-stage desktop workspace for managing local Git projects and re
 - Run project-scoped Branch validation, Tag automation, staged CD, and pull-request workflows.
 - Open a project-aware terminal drawer without leaving the current page.
 - Use one Chat page for OpenAI-compatible AI conversation or isolated RAG conversation, with separate histories.
-- Run up to eight configurable concurrent AI code reviews; inspect findings beside the PR diff and ask review-scoped follow-up questions.
+- Run up to eight configurable concurrent AI code reviews; inspect findings beside the PR diff and chat with the configured AI Agent using the current pull request as context.
 - Receive durable in-app messages plus native OS notifications, alongside toast, tray, update, and network-status feedback.
 - Switch between light, dark, and system theme modes.
 - Route all application HTTP traffic through a shared reqwest-based interception pipeline.
@@ -225,11 +225,13 @@ Read [docs/architecture.md](docs/architecture.md) for ownership, lifecycle, data
 
 All application-owned HTTP calls use `src/http/mod.rs`, which wraps reqwest instead of replacing it. The module provides:
 
-- one shared asynchronous client and one shared blocking client;
+- one shared request client for every application-owned HTTP call;
 - request, response, and error interceptor hooks;
 - normalized `HttpError` categories and status handling;
+- independent per-request total and response-body idle timeouts;
 - per-request error feedback: silent, toast, notification, or both;
-- retained access to reqwest request builders, JSON decoding, and streaming responses.
+- retained access to reqwest request builders plus centralized JSON, text,
+  bytes, and streaming body reads.
 
 Background polling must remain silent. User-initiated requests may opt into UI feedback. See [docs/specs/http.md](docs/specs/http.md).
 

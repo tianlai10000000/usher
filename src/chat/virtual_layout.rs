@@ -396,6 +396,7 @@ mod tests {
             status: StoredMessageStatus::Normal,
             content: content.into(),
             timestamp: "12:00".to_string(),
+            elapsed_ms: None,
         }
     }
 

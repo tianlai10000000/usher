@@ -18,6 +18,7 @@ export component GitHubIconButton inherits FocusScope {
     in property <bool> show-tooltip: true;
     in property <bool> primary: false;
     in property <bool> danger: false;
+    in property <bool> inverse: false;
     in property <bool> invisible: true;
     in property <bool> selected: false;
     in property <bool> button-enabled: true;
@@ -25,6 +26,7 @@ export component GitHubIconButton inherits FocusScope {
     in property <bool> activation-enabled:
         root.button-enabled && !root.loading;
     in property <bool> floating: false;
+    in property <bool> circular: false;
     in property <bool> force-tooltip: false;
     in property <bool> tooltip-above: true;
     in property <bool> tooltip-align-right: false;
@@ -32,9 +34,14 @@ export component GitHubIconButton inherits FocusScope {
     // of centering it across an adjacent sidebar or window boundary.
     in property <bool> tooltip-align-left: false;
     in property <length> control-size: GitHubMetrics.control-medium-size;
+    // Keep the interactive target at Primer's minimum size while allowing a
+    // visually lighter surface for dense inline actions.
+    in property <length> visual-size: root.control-size;
     in property <length> glyph-size: GitHubMetrics.icon-medium;
     in property <color> foreground:
-        root.primary
+        root.inverse
+            ? GitHubTheme.control-inverse-fg
+            : root.primary
             ? GitHubTheme.fg-on-emphasis
             : (root.danger ? GitHubTheme.danger-fg : GitHubTheme.fg-muted);
     // Callers that mirror native shell chrome can provide distinct hover and
@@ -107,23 +114,37 @@ export component GitHubIconButton inherits FocusScope {
         y: -GitHubMetrics.size-2;
         width: parent.width + GitHubMetrics.size-4;
         height: parent.height + GitHubMetrics.size-4;
-        border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+        border-radius: root.circular
+            ? (parent.width + GitHubMetrics.size-4) / 2
+            : GitHubMetrics.radius-medium + GitHubMetrics.size-2;
         border-width: GitHubMetrics.focus-outline-width;
         border-color: GitHubTheme.focus-outline;
         background: transparent;
     }
 
     surface := Rectangle {
-        width: parent.width;
-        height: parent.height;
-        border-radius: GitHubMetrics.radius-medium;
-        border-width: root.invisible ? 0px : GitHubMetrics.border-thin;
-        border-color: root.primary
+        x: (parent.width - root.visual-size) / 2;
+        y: (parent.height - root.visual-size) / 2;
+        width: root.visual-size;
+        height: root.visual-size;
+        border-radius: root.circular
+            ? root.visual-size / 2
+            : GitHubMetrics.radius-medium;
+        border-width: root.invisible && !root.inverse ? 0px : GitHubMetrics.border-thin;
+        border-color: root.inverse
+            ? GitHubTheme.control-inverse-bg
+            : root.primary
             ? GitHubTheme.control-primary-rest
             : (root.danger && button-touch.has-hover
                 ? GitHubTheme.danger-emphasis
                 : GitHubTheme.border-default);
-        background: root.primary
+        background: root.inverse
+            ? (button-touch.pressed
+                ? GitHubTheme.control-inverse-active
+                : (button-touch.has-hover
+                    ? GitHubTheme.control-inverse-hover
+                    : GitHubTheme.control-inverse-bg))
+            : root.primary
             ? (button-touch.pressed
                 ? GitHubTheme.control-primary-active
                 : (button-touch.has-hover

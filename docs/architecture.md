@@ -70,8 +70,8 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/jobs/` | Application-wide Job lifecycle model, source-independent run descriptor/UI projection, and source-keyed action dispatch. It owns no feature process. |
 | `src/workflow/` | Per-project Branch, Tag, PR, and CD state and command execution. Tag and PR Review expose stable file façades with internal controller and pure-logic modules. |
 | `src/terminal/` | PTY lifecycle, viewport synchronization, rendering, selection, and project switching; pure input mapping, diagnostics, and refresh throttling use dedicated modules. |
-| `src/chat/` | Shared AI/RAG Chat presentation and interaction, mode-isolated sessions/JSONL histories, transports, width-independent plain-text/artifact projection, bounded rendering cache, pagination, and pure bounded virtual layout. Full artifact rendering belongs to the shared preview feature. |
-| `src/ai_review/` | Optional AI review configuration facade and application controller. It owns state-store subscriptions, automatic persistence workers, dynamic task scheduling, on-demand diff/rule loading, AI calls, session storage, cancellation, notifications, and route-independent PR result projection. |
+| `src/chat/` | Shared AI/RAG Chat presentation and interaction, mode-isolated sessions/JSONL histories, request elapsed-time ownership, transports, width-independent plain-text/artifact projection, bounded rendering cache, pagination, and pure bounded virtual layout. Full artifact rendering belongs to the shared preview feature. |
+| `src/ai_review/` | Optional AI review configuration facade and application controller. It owns state-store subscriptions, automatic persistence workers, dynamic task scheduling, review/Ask elapsed-time projection, on-demand diff/rule loading, AI calls, in-flight provider cancellation, completed-review and lightweight PR-chat session storage, notifications, and route-independent PR result projection. |
 | `src/artifact_preview/` | Application preview facade: provider policy, background preparation, stale-result cancellation, Slint model adaptation, one active session, and immediate migration between docked and detached hosts. Its `test-fixtures` adapter is development-only and submits playground samples through this same facade. |
 | `src/update/` | Release checks, streamed downloads, progress, cancellation, installation, and restart. |
 | `src/router/` | Route mapping, history, visibility, and reachability transitions; it does not perform feature cleanup. |
@@ -80,7 +80,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/settings.rs` | TOML settings model and persistence, including AI Agent credentials. |
 | `src/ai/` | Shared OpenAI-compatible AI Agent transport; `agent.rs` owns connection tests and chat completions used by AI Chat and AI Code Review. It does not own RAG transport or feature state. |
 | `src/network.rs` | Background connectivity probe and `AppState.network-online`. |
-| `src/http/mod.rs` | Shared asynchronous/blocking reqwest clients, interceptors, error normalization, and optional UI feedback. |
+| `src/http/mod.rs` | The single shared reqwest client, per-request total/body-idle timeout policy, centralized response-body reads, interceptors, error normalization, and optional UI feedback. |
 | `src/logger/` | Debug logging, tracing, and panic/error support. |
 | `src/toast.rs` | Transient single-toast manager binding. |
 | `src/notification.rs` | Queued notifications, timers, hover pause, actions, and icons. |
@@ -648,7 +648,7 @@ Presentation does not receive provider JSON or credentials. Provider adapters do
 
 ### Chat
 
-Chat history is append-only JSONL at `im/chat_history.jsonl`. New records persist a complete RFC 3339 instant with the local offset; the Rust presentation projection converts it into calendar-aware local labels (time today, yesterday, the day before yesterday, weekday within six days, month/day within the year, and full date across years), while legacy time-only values remain readable unchanged. Startup loads a recent tail into the Rust session, but the Chat component and bounded Slint message model are mounted only on the Chat route. Leaving Chat destroys its UI tree and clears the Slint model/projection cache; re-entry reconstructs the visible window from the session. Assistant messages retain a width-independent readable text projection; projections longer than 1,200 Unicode scalar values are bounded inline and expose the complete response through the existing title action. Formatted blocks are prepared by `usher-preview` and shown by the application-level preview host. Late history or assistant responses continue updating persistence/session without repopulating a hidden UI.
+Chat history is append-only JSONL at `im/chat_history.jsonl`. New records persist a complete RFC 3339 instant with the local offset; terminal assistant rows also persist measured `elapsed_ms`. The Rust presentation projection converts timestamps into calendar-aware local labels (time today, yesterday, the day before yesterday, weekday within six days, month/day within the year, and full date across years) and durations into compact metadata, while legacy rows remain readable unchanged. A pending turn uses one page-level real-time tick and a mode-owned monotonic start instant; switching modes or remounting Chat restores the actual elapsed value instead of starting over. Startup loads a recent tail into the Rust session, but the Chat component and bounded Slint message model are mounted only on the Chat route. Leaving Chat destroys its UI tree and clears the Slint model/projection cache; re-entry reconstructs the visible window from the session. Assistant messages retain a width-independent readable text projection; projections longer than 1,200 Unicode scalar values are bounded inline and expose the complete response through the existing title action. Formatted blocks are prepared by `usher-preview` and shown by the application-level preview host. Late history or assistant responses continue updating persistence/session without repopulating a hidden UI.
 
 Production mounts every currently loaded row in one stable `VecModel`, instantiates only each
 row's active role subtree, and keeps both virtual spacers at zero. This removes estimated-height
@@ -783,7 +783,9 @@ of the Slint compile and live-preview dependency graph.
 1. `chat/interactive.rs` appends and persists the user message.
 2. The shared runtime calls `chat/chat.rs` with the existing RAG endpoint and request format.
 3. `src/http/mod.rs` runs request interceptors, executes reqwest, validates status, runs response/error interceptors, and decodes the RAG response.
-4. The result is persisted and transformed for Slint on the event loop.
+4. A mode-owned monotonic start instant drives one visible page timer. The result
+   persists its measured elapsed milliseconds and is transformed for Slint on
+   the event loop.
 5. Failures remain an inline assistant message; the request is silent to prevent duplicate toast feedback.
 
 ### AI Agent connection test
@@ -805,13 +807,16 @@ Settings-triggered update checks publish their up-to-date, update-available, and
 
 ## HTTP boundary
 
-`src/http/mod.rs` is the only place allowed to construct application-wide reqwest clients. It offers request builders rather than hiding reqwest, so callers retain query, JSON, headers, timeouts, and streaming.
+`src/http/mod.rs` is the only place allowed to construct the application-owned reqwest client. It offers request builders rather than hiding reqwest query, JSON, and header configuration. Execution returns the project-owned `HttpResponse`; JSON, text, bytes, and streaming chunk reads stay inside the shared timeout and error pipeline.
 
 Every request supplies `RequestOptions`:
 
 - `operation` provides stable logs and user-facing context.
 - `reject_http_errors` defaults to true and converts non-2xx responses into `HttpError` with a bounded body excerpt.
 - `feedback` defaults to `Silent`; user actions may opt into toast, notification, or both.
+- `timeout` defaults to 30 seconds, accepts a custom duration, and treats zero as no total deadline; the 10-second connect timeout remains independent.
+- `read_idle_timeout` defaults to 30 seconds, resets after every response-body
+  chunk, accepts a custom duration, and treats zero as disabled.
 
 Interceptors execute in registration order. Request hooks may mutate headers; response hooks observe status/headers/timing; error hooks receive normalized failures. See [specs/http.md](specs/http.md).
 

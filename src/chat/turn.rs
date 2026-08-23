@@ -24,6 +24,7 @@ pub fn create_user_message(content: String) -> ChatMessage {
         preview_title: "".into(),
         content: content.into(),
         timestamp: get_current_timestamp(),
+        elapsed: "".into(),
     }
 }
 
@@ -42,6 +43,7 @@ pub fn create_assistant_message(content: String) -> ChatMessage {
         preview_title: projection.preview_title.into(),
         content: content.into(),
         timestamp: get_current_timestamp(),
+        elapsed: "".into(),
     }
 }
 
@@ -59,6 +61,7 @@ pub fn create_loading_message() -> ChatMessage {
         preview_title: "".into(),
         content: "".into(), // 空内容表示加载中
         timestamp: "".into(),
+        elapsed: "".into(),
     }
 }
 
@@ -80,6 +83,7 @@ pub fn create_error_message(error: String) -> ChatMessage {
         preview_title: "".into(),
         content: error.into(),
         timestamp: get_current_timestamp(),
+        elapsed: "".into(),
     }
 }
 

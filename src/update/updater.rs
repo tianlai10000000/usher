@@ -267,13 +267,12 @@ pub async fn perform_update_with_progress(
     progress_callback(0.15, 0, 0, &format!("Downloading v{}...", version));
 
     // Use the shared HTTP pipeline while retaining reqwest streaming.
-    let response = http::send(
+    let mut response = http::send(
         http::get(&download_url)
             .header("User-Agent", format!("usher/{}", cargo_crate_version!()))
-            .header("Accept", "application/octet-stream")
-            .timeout(Duration::from_secs(10 * 60)),
+            .header("Accept", "application/octet-stream"),
         // The updater already owns progress and notification UX.
-        RequestOptions::new("Download update"),
+        RequestOptions::new("Download update").timeout(Duration::from_secs(10 * 60)),
     )
     .await
     .context("Failed to start download")?;
@@ -290,12 +289,13 @@ pub async fn perform_update_with_progress(
 
     // Stream download and report progress
     let mut downloaded: u64 = 0;
-    let mut stream = response.bytes_stream();
-
-    use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
 
-    while let Some(chunk_result) = stream.next().await {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .context("Failed to read download chunk")?
+    {
         // Check if cancelled
         if cancel_flag.load(Ordering::Relaxed) {
             log::debug!(" Download cancelled");
@@ -304,7 +304,6 @@ pub async fn perform_update_with_progress(
             return Err(anyhow::anyhow!("Download cancelled"));
         }
 
-        let chunk = chunk_result.context("Failed to read chunk")?;
         temp_file
             .write_all(&chunk)
             .await

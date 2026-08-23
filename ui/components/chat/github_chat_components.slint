@@ -23,6 +23,7 @@ export struct ChatMessage {
     preview_available: bool,
     preview_title: string,
     timestamp: string,
+    elapsed: string,
 }
 
 export struct ChatSelectionRect {
@@ -145,6 +146,7 @@ export component GitHubMessageBubble inherits Rectangle {
     in property <bool> preview-available: false;
     in property <string> preview-title: "";
     in property <string> timestamp;
+    in property <string> elapsed: "";
     in property <bool> is-loading: false;
     in property <bool> performance-optimized: true;
     in property <string> application-font-family;
@@ -299,7 +301,7 @@ export component GitHubMessageBubble inherits Rectangle {
                         }
 
                         Text {
-                            text: "Thinking";
+                            text: "Thinking" + (root.elapsed == "" ? "" : " · " + root.elapsed);
                             color: GitHubTheme.fg-muted;
                             font-size: 14px;
                         }
@@ -371,9 +373,11 @@ export component GitHubMessageBubble inherits Rectangle {
 
                     // 时间戳
                     Text {
-                        visible: !root.is-loading && root.timestamp != "";
-                        height: (!root.is-loading && root.timestamp != "") ? self.preferred-height : 0px;
-                        text: root.timestamp;
+                        visible: !root.is-loading && (root.timestamp != "" || root.elapsed != "");
+                        height: self.visible ? self.preferred-height : 0px;
+                        text: root.timestamp
+                            + (root.timestamp != "" && root.elapsed != "" ? " · " : "")
+                            + root.elapsed;
                         color: GitHubTheme.fg-muted.with_alpha(0.7);
                         font-size: 11px;
                         horizontal-alignment: left;

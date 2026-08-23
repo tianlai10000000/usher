@@ -7287,6 +7287,7 @@ dependencies = [
  "arboard",
  "base64 0.23.1",
  "block2 0.6.2",
+ "bytes",
  "chrono",
  "config",
  "dark-light",

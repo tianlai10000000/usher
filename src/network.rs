@@ -19,10 +19,11 @@ fn check_online() -> bool {
         ];
 
         for url in urls {
-            let request = http::get(url).timeout(Duration::from_secs(3));
             if let Ok(resp) = http::send(
-                request,
-                RequestOptions::new("Check network connectivity").allow_http_errors(),
+                http::get(url),
+                RequestOptions::new("Check network connectivity")
+                    .timeout(Duration::from_secs(3))
+                    .allow_http_errors(),
             )
             .await
             {

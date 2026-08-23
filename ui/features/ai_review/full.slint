@@ -1,7 +1,7 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubScrollView } from "../../components/github_scroll_view.slint";
 import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
-import { GitHubCenteredLoadingState } from "../../components/github_spinner.slint";
+import { GitHubCenteredLoadingState, GitHubSpinner } from "../../components/github_spinner.slint";
 import { GitHubAiReviewFindingRow } from "../../components/ai_review/github_ai_review_components.slint";
 import { GitHubSegmentedControl, GitHubSegmentedControlDivider, GitHubSegmentedControlItem } from "../../components/github_segmented_control.slint";
 
@@ -14,6 +14,8 @@ export struct AiReviewTaskItem {
     model-name: string,
     status: string,
     progress-percent: int,
+    completed-chunks: int,
+    total-chunks: int,
     finding-count: int,
     error: string,
 }
@@ -37,6 +39,7 @@ export struct AiReviewFindingItem {
 export struct AiReviewConversationItem {
     role: string,
     content: string,
+    elapsed: string,
 }
 
 // Route-independent review surface. The application mounts it only while the
@@ -51,6 +54,9 @@ export component GitHubAiReviewPanel inherits Rectangle {
     in property <string> model-name: "";
     in property <string> status: "queued";
     in property <int> progress-percent: 0;
+    in property <int> completed-chunks: 0;
+    in property <int> total-chunks: 0;
+    in-out property <int> elapsed-seconds: 0;
     in property <string> summary: "";
     in property <string> error-text: "";
     in property <[AiReviewFindingItem]> findings: [];
@@ -58,16 +64,60 @@ export component GitHubAiReviewPanel inherits Rectangle {
     in-out property <string> message-input: "";
     in-out property <string> extra-requirements: "";
     in property <bool> chat-sending: false;
+    in property <string> chat-status: "";
+    in-out property <int> chat-elapsed-seconds: 0;
     callback close();
     callback cancel(string);
+    callback cancel-message(string);
     callback re-review(string);
     callback send-message(string);
     callback select-finding(string, int);
 
     private property <bool> running: root.status == "queued" || root.status == "running";
     private property <bool> review-again-mode: false;
+    private property <bool> composer-stopping:
+        (root.review-again-mode && root.running)
+            || (!root.review-again-mode && root.chat-sending);
     private property <length> header-height: 64px;
     private property <length> composer-height: 136px;
+    private property <int> elapsed-minutes: root.elapsed-seconds / 60;
+    private property <int> elapsed-hours: root.elapsed-minutes / 60;
+    private property <int> elapsed-minute-part: Math.mod(root.elapsed-minutes, 60);
+    private property <int> elapsed-second-part: Math.mod(root.elapsed-seconds, 60);
+    private property <int> current-chunk:
+        root.total-chunks > 0
+            ? (root.completed-chunks < root.total-chunks
+                ? root.completed-chunks + 1
+                : root.total-chunks)
+            : 0;
+    private property <string> elapsed-label:
+        root.elapsed-hours > 0
+            ? root.elapsed-hours + "h "
+                + (root.elapsed-minute-part < 10 ? "0" : "")
+                + root.elapsed-minute-part + "m "
+                + (root.elapsed-second-part < 10 ? "0" : "")
+                + root.elapsed-second-part + "s"
+            : root.elapsed-minutes > 0
+                ? root.elapsed-minutes + "m "
+                    + (root.elapsed-second-part < 10 ? "0" : "")
+                    + root.elapsed-second-part + "s"
+                : root.elapsed-seconds + "s";
+    private property <int> chat-elapsed-minutes: root.chat-elapsed-seconds / 60;
+    private property <int> chat-elapsed-hours: root.chat-elapsed-minutes / 60;
+    private property <int> chat-elapsed-minute-part: Math.mod(root.chat-elapsed-minutes, 60);
+    private property <int> chat-elapsed-second-part: Math.mod(root.chat-elapsed-seconds, 60);
+    private property <string> chat-elapsed-label:
+        root.chat-elapsed-hours > 0
+            ? root.chat-elapsed-hours + "h "
+                + (root.chat-elapsed-minute-part < 10 ? "0" : "")
+                + root.chat-elapsed-minute-part + "m "
+                + (root.chat-elapsed-second-part < 10 ? "0" : "")
+                + root.chat-elapsed-second-part + "s"
+            : root.chat-elapsed-minutes > 0
+                ? root.chat-elapsed-minutes + "m "
+                    + (root.chat-elapsed-second-part < 10 ? "0" : "")
+                    + root.chat-elapsed-second-part + "s"
+                : root.chat-elapsed-seconds + "s";
     background: GitHubTheme.canvas-default;
     border-width: 0px;
     clip: true;
@@ -117,13 +167,20 @@ export component GitHubAiReviewPanel inherits Rectangle {
             overflow: elide;
         }
         GitHubIconButton {
-            x: parent.width - 82px;
-            y: 16px;
-            control-size: GitHubMetrics.size-32;
+            x: parent.width - (root.running ? 74px : 82px);
+            y: root.running ? 20px : 16px;
+            control-size: root.running
+                ? GitHubMetrics.control-xsmall-size
+                : GitHubMetrics.control-medium-size;
+            visual-size: root.running
+                ? GitHubMetrics.size-20
+                : GitHubMetrics.control-medium-size;
             icon: root.running
-                ? @image-url("../../assets/icons/octicon-stop-16.svg")
+                ? @image-url("../../assets/icons/github-stop-square-fill-16.svg")
                 : @image-url("../../assets/icons/octicon-sync-16.svg");
             tooltip-text: root.running ? "Cancel review" : "Review current commit again";
+            inverse: root.running;
+            circular: root.running;
             button-enabled: root.task-id != "";
             clicked => {
                 if root.running {
@@ -162,13 +219,17 @@ export component GitHubAiReviewPanel inherits Rectangle {
                 width: parent.width - 32px;
                 height: 112px;
                 label: root.status == "queued"
-                    ? "AI review queued"
-                    : "Reviewing current changes  " + root.progress-percent + "%";
+                    ? "AI review queued · " + root.elapsed-label
+                    : root.total-chunks > 0
+                        ? "Processing chunk " + root.current-chunk + "/" + root.total-chunks
+                            + " · " + root.elapsed-label + " · " + root.progress-percent + "%"
+                        : "Reviewing current changes · " + root.elapsed-label
+                            + " · " + root.progress-percent + "%";
             }
 
             if root.status == "failed" || root.status == "cancelled": Rectangle {
                 width: parent.width - 32px;
-                height: max(80px, error-message.preferred-height + 32px);
+                height: max(100px, error-message.preferred-height + 58px);
                 border-radius: GitHubMetrics.radius-medium;
                 border-width: GitHubMetrics.border-thin;
                 border-color: root.status == "failed"
@@ -184,6 +245,15 @@ export component GitHubAiReviewPanel inherits Rectangle {
                     font-size: 13px;
                     color: GitHubTheme.fg-default;
                     wrap: word-wrap;
+                }
+                Text {
+                    x: 16px;
+                    y: error-message.y + error-message.height + 8px;
+                    width: parent.width - 32px;
+                    height: 16px;
+                    text: "Elapsed " + root.elapsed-label;
+                    font-size: 11px;
+                    color: GitHubTheme.fg-muted;
                 }
             }
 
@@ -220,8 +290,9 @@ export component GitHubAiReviewPanel inherits Rectangle {
                     width: parent.width;
                     height: self.preferred-height;
                     text: root.findings.length == 0
-                        ? "No actionable findings"
-                        : "Review completed · " + root.findings.length + " finding"
+                        ? "No actionable findings · " + root.elapsed-label
+                        : "Review completed · " + root.elapsed-label + " · "
+                            + root.findings.length + " finding"
                             + (root.findings.length == 1 ? "" : "s");
                     font-size: 14px;
                     font-weight: 600;
@@ -289,7 +360,9 @@ export component GitHubAiReviewPanel inherits Rectangle {
                         }
                     }
                     Text {
-                        text: message.role == "user" ? "You" : "Copilot";
+                        text: message.role == "user"
+                            ? "You"
+                            : (root.model-name == "" ? "AI Agent" : root.model-name);
                         font-size: 13px;
                         font-weight: 600;
                         color: GitHubTheme.fg-default;
@@ -304,7 +377,107 @@ export component GitHubAiReviewPanel inherits Rectangle {
                     color: GitHubTheme.fg-default;
                     wrap: word-wrap;
                 }
+                if message.role != "user" && message.elapsed != "": Text {
+                    width: parent.width;
+                    height: 16px;
+                    text: "Worked for " + message.elapsed;
+                    font-size: 11px;
+                    color: GitHubTheme.fg-muted;
+                }
             }
+
+            if root.chat-sending: VerticalLayout {
+                width: parent.width - 32px;
+                spacing: 8px;
+                accessible-role: progress-indicator;
+                accessible-label: root.chat-status == "" ? "Thinking" : root.chat-status;
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: 24px;
+                    spacing: 8px;
+                    Rectangle {
+                        width: 24px;
+                        height: 24px;
+                        border-radius: 12px;
+                        background: GitHubTheme.canvas-subtle;
+                        Image {
+                            x: 4px;
+                            y: 4px;
+                            width: 16px;
+                            height: 16px;
+                            source: @image-url("../../assets/icons/octicon-copilot-16.svg");
+                            colorize: GitHubTheme.fg-default;
+                        }
+                    }
+                    Text {
+                        text: root.model-name == "" ? "AI Agent" : root.model-name;
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: GitHubTheme.fg-default;
+                        vertical-alignment: center;
+                    }
+                }
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: 22px;
+                    spacing: 8px;
+                    cross-axis-alignment: center;
+                    Rectangle {
+                        width: 16px;
+                        height: 22px;
+                        background: transparent;
+                        GitHubSpinner {
+                            y: 2px;
+                            spinner-size: 16px;
+                            foreground: GitHubTheme.fg-muted;
+                        }
+                    }
+                    Text {
+                        text: (root.chat-status == "" ? "Thinking" : root.chat-status)
+                            + " · " + root.chat-elapsed-label;
+                        font-size: 13px;
+                        color: GitHubTheme.fg-muted;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    changed conversation => {
+        message-scroll.viewport_y = min(
+            0px,
+            message-scroll.visible_height - message-scroll.content_height
+        );
+    }
+    changed chat-sending => {
+        message-scroll.viewport_y = min(
+            0px,
+            message-scroll.visible_height - message-scroll.content_height
+        );
+    }
+    changed chat-status => {
+        message-scroll.viewport_y = min(
+            0px,
+            message-scroll.visible_height - message-scroll.content_height
+        );
+    }
+
+    review-elapsed-timer := Timer {
+        interval: 1s;
+        running: root.running;
+        triggered => {
+            root.elapsed-seconds += 1;
+        }
+    }
+
+    chat-elapsed-timer := Timer {
+        interval: 1s;
+        running: root.chat-sending;
+        triggered => {
+            root.chat-elapsed-seconds += 1;
         }
     }
 
@@ -351,7 +524,8 @@ export component GitHubAiReviewPanel inherits Rectangle {
                 width: parent.width - 52px;
                 height: parent.height - 16px;
                 text <=> root.message-input;
-                enabled: !root.chat-sending && root.status == "completed";
+                enabled: !root.chat-sending && root.task-id != "";
+                accessible-label: "Ask about this pull request";
                 single-line: false;
                 wrap: word-wrap;
                 font-size: 13px;
@@ -386,7 +560,7 @@ export component GitHubAiReviewPanel inherits Rectangle {
                 x: 12px;
                 y: 9px;
                 width: parent.width - 60px;
-                text: "Ask about this review";
+                text: "Ask about this pull request";
                 font-size: 13px;
                 color: GitHubTheme.fg-muted;
             }
@@ -400,25 +574,42 @@ export component GitHubAiReviewPanel inherits Rectangle {
             }
 
             GitHubIconButton {
-                x: parent.width - 40px;
-                y: parent.height - 40px;
-                control-size: GitHubMetrics.size-32;
-                icon: root.review-again-mode
-                    ? @image-url("../../assets/icons/octicon-sync-16.svg")
-                    : @image-url("../../assets/icons/octicon-arrow-up-16.svg");
+                x: parent.width - (root.composer-stopping ? 32px : 40px);
+                y: parent.height - (root.composer-stopping ? 32px : 40px);
+                control-size: root.composer-stopping
+                    ? GitHubMetrics.control-xsmall-size
+                    : GitHubMetrics.control-medium-size;
+                visual-size: root.composer-stopping
+                    ? GitHubMetrics.size-20
+                    : GitHubMetrics.control-medium-size;
+                icon: root.composer-stopping
+                    ? @image-url("../../assets/icons/github-stop-square-fill-16.svg")
+                    : (root.review-again-mode
+                        ? @image-url("../../assets/icons/octicon-sync-16.svg")
+                        : @image-url("../../assets/icons/octicon-arrow-up-16.svg"));
                 tooltip-text: root.review-again-mode
-                    ? (root.running ? "Reviewing" : "Review again")
-                    : (root.chat-sending ? "Sending" : "Send");
-                primary: true;
-                loading: root.review-again-mode ? root.running : root.chat-sending;
+                    ? (root.running ? "Cancel review" : "Review again")
+                    : (root.chat-sending ? "Cancel response" : "Send");
+                primary: !root.composer-stopping;
+                inverse: root.composer-stopping;
+                circular: root.composer-stopping;
+                loading: false;
                 button-enabled: root.review-again-mode
-                    ? (!root.running && root.task-id != "")
-                    : (root.status == "completed" && root.message-input != "");
+                    ? root.task-id != ""
+                    : (root.task-id != "" && (root.chat-sending || root.message-input != ""));
                 clicked => {
                     if root.review-again-mode {
-                        root.re-review(root.extra-requirements);
+                        if root.running {
+                            root.cancel(root.task-id);
+                        } else {
+                            root.re-review(root.extra-requirements);
+                        }
                     } else {
-                        root.send-message(root.message-input);
+                        if root.chat-sending {
+                            root.cancel-message(root.task-id);
+                        } else {
+                            root.send-message(root.message-input);
+                        }
                     }
                 }
             }

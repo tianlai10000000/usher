@@ -33,6 +33,8 @@ pub struct StoredChatMessage {
     pub status: StoredMessageStatus,
     pub content: String,
     pub timestamp: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +55,7 @@ mod tests {
         .expect("legacy history should remain readable");
 
         assert_eq!(message.status, StoredMessageStatus::Normal);
+        assert_eq!(message.elapsed_ms, None);
     }
 }
 
