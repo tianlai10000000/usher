@@ -50,6 +50,16 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="comparison output directory (default: candidate/ab-vs-BASELINE)",
     )
+    parser.add_argument(
+        "--ignore-metadata-key",
+        action="append",
+        default=[],
+        choices=("observed_routes", "observed_ui_contexts"),
+        help=(
+            "ignore one startup-sensitive observation key when the caller's "
+            "acceptance gate explicitly excludes startup samples; may be repeated"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -68,10 +78,15 @@ def read_rows(path: Path) -> list[dict[str, str]]:
 
 
 def validate_metadata(
-    baseline: dict[str, str], candidate: dict[str, str]
+    baseline: dict[str, str],
+    candidate: dict[str, str],
+    ignored_keys: set[str] | None = None,
 ) -> None:
+    ignored_keys = ignored_keys or set()
     errors = []
     for key in MATCHING_METADATA:
+        if key in ignored_keys:
+            continue
         if baseline.get(key) != candidate.get(key):
             errors.append(
                 f"metadata mismatch for {key}: "
@@ -336,7 +351,11 @@ def main() -> None:
     args = parse_args()
     baseline_metadata = read_metadata(args.baseline)
     candidate_metadata = read_metadata(args.candidate)
-    validate_metadata(baseline_metadata, candidate_metadata)
+    validate_metadata(
+        baseline_metadata,
+        candidate_metadata,
+        set(args.ignore_metadata_key),
+    )
     comparisons = compare_summary(
         read_rows(args.baseline / "summary.tsv"),
         read_rows(args.candidate / "summary.tsv"),

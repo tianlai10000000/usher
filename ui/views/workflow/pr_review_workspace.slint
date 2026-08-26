@@ -45,7 +45,6 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     // Rust registers GitHub's preferred macOS monospace face (SFMono-Regular)
     // at startup. Menlo remains the explicit fallback when that system font is
     // unavailable; Slint 1.17 accepts one family name rather than a CSS stack.
-    private property <length> code-font-size: 13px;
     private property <length> code-line-height: 22px;
     private property <length> hunk-line-height: 28px;
     // GitHub Commits tab: one shared card per UTC+08:00 date group.
@@ -187,6 +186,10 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     private property <string> pending-diff-view: root.diff-view;
     private property <bool> pending-ignore-whitespace: root.ignore-whitespace;
     private property <length> content-width: max(0px, root.shell-content-width);
+    // PR content stops above the persistent status bar. Dialog surfaces must
+    // use this actually mounted height as well, otherwise their bottom radius
+    // extends into the reserved strip and is clipped by the route boundary.
+    private property <length> dialog-viewport-height: root.height;
     private property <length> stable-layout-width: root.content-width;
     private property <length> stable-layout-height: root.height;
     // File-filter ActionMenu mounts on the workspace root (above the
@@ -655,6 +658,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         text: root.longest-code-line;
         font-family: root.code-font-family;
         font-size: root.code-font-size;
+        font-weight: 400;
         overflow: clip;
     }
     code-cell-measure := Text {
@@ -662,6 +666,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         text: "00000000000000000000000000000000";
         font-family: root.code-font-family;
         font-size: root.code-font-size;
+        font-weight: 400;
         overflow: clip;
         wrap: no-wrap;
     }
@@ -3185,6 +3190,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                                 vertical-alignment: center;
                                                 font-family: root.code-font-family;
                                                 font-size: root.code-font-size;
+                                                font-weight: 400;
                                                 color: line.kind == "addition" || line.kind == "deletion" ? root.github-fg-default : root.github-fg-muted;
                                             }
                                         }
@@ -3206,6 +3212,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                                 vertical-alignment: center;
                                                 font-family: root.code-font-family;
                                                 font-size: root.code-font-size;
+                                                font-weight: 400;
                                                 color: line.kind == "addition" || line.kind == "deletion" ? root.github-fg-default : root.github-fg-muted;
                                             }
                                         }
@@ -3229,6 +3236,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                                 vertical-alignment: center;
                                                 font-family: root.code-font-family;
                                                 font-size: root.code-font-size;
+                                                font-weight: 400;
                                                 color: root.github-fg-default;
                                             }
                                         }
@@ -3244,6 +3252,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                             overflow: elide;
                                             font-family: root.code-font-family;
                                             font-size: root.code-font-size;
+                                            font-weight: 400;
                                             color: root.hunk-foreground;
                                         }
                                         if line.kind != "hunk" && line.kind != "meta": unified-code := GitHubSelectableDiffCode {
@@ -3480,6 +3489,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         overflow: elide;
                                         font-family: root.code-font-family;
                                         font-size: root.code-font-size;
+                                        font-weight: 400;
                                         color: line.kind == "hunk"
                                             ? root.hunk-foreground
                                             : root.github-fg-muted;
@@ -3788,14 +3798,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         viewport-x: -root.absolute-position.x;
         viewport-y: 0px;
         viewport-width: root.application-width;
-        viewport-height: root.height;
+        viewport-height: root.dialog-viewport-height;
         backdrop-y: 0px;
-        backdrop-height: root.height;
+        backdrop-height: root.dialog-viewport-height;
         dialog-visible: root.commit-range-dialog-open;
         modal: false;
         title: "Select commits to view";
         dialog-width: 640px;
-        dialog-height: min(720px, root.height - 32px);
+        dialog-height: min(720px, root.dialog-viewport-height - 32px);
         body-padding: 0px;
         close-enabled: !root.loading;
         primary-label: "Save";
@@ -4018,9 +4028,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         viewport-x: -root.absolute-position.x;
         viewport-y: 0px;
         viewport-width: root.application-width;
-        viewport-height: root.height;
+        viewport-height: root.dialog-viewport-height;
         backdrop-y: 0px;
-        backdrop-height: root.height;
+        backdrop-height: root.dialog-viewport-height;
         dialog-visible: root.dismiss-review-dialog-open;
         modal: false;
         title: "Dismiss review";
@@ -4092,14 +4102,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         viewport-x: -root.absolute-position.x;
         viewport-y: 0px;
         viewport-width: root.application-width;
-        viewport-height: root.height;
+        viewport-height: root.dialog-viewport-height;
         backdrop-y: 0px;
-        backdrop-height: root.height;
+        backdrop-height: root.dialog-viewport-height;
         dialog-visible: root.review-dialog-open;
         modal: false;
         title: "Review changes";
         dialog-width: 480px;
-        dialog-height: min(500px, root.height - 32px);
+        dialog-height: min(500px, root.dialog-viewport-height - 32px);
         body-padding: 0px;
         close-enabled: !root.action-loading;
         primary-label: root.action-loading ? "Submitting…" : "Submit review";
@@ -4183,14 +4193,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         viewport-x: -root.absolute-position.x;
         viewport-y: 0px;
         viewport-width: root.application-width;
-        viewport-height: root.height;
+        viewport-height: root.dialog-viewport-height;
         backdrop-y: 0px;
-        backdrop-height: root.height;
+        backdrop-height: root.dialog-viewport-height;
         dialog-visible: root.merge-dialog-open;
         modal: false;
         title: "Merge pull request #" + root.pull-request-number;
         dialog-width: 480px;
-        dialog-height: min(470px, root.height - 32px);
+        dialog-height: min(470px, root.dialog-viewport-height - 32px);
         body-padding: 0px;
         close-enabled: !root.action-loading;
         primary-label: root.action-loading ? "Merging…" : "Confirm merge";
@@ -4296,9 +4306,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         viewport-x: -root.absolute-position.x;
         viewport-y: 0px;
         viewport-width: root.application-width;
-        viewport-height: root.height;
+        viewport-height: root.dialog-viewport-height;
         backdrop-y: 0px;
-        backdrop-height: root.height;
+        backdrop-height: root.dialog-viewport-height;
         dialog-visible: root.revert-dialog-open;
         modal: false;
         title: "Revert pull request #" + root.pull-request-number;

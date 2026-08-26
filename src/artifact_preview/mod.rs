@@ -1,16 +1,19 @@
 //! Application adapter for the framework-neutral `usher-preview` registry.
 
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::fs;
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use slint::{ComponentHandle, Global, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use usher_preview::{
-    CancellationToken, IMAGE_PROVIDER_ID, MARKDOWN_PROVIDER_ID, MarkdownBlock as CoreMarkdownBlock,
-    MarkdownBlockKind as CoreBlockKind, MarkdownInlineKind, PLAIN_TEXT_PROVIDER_ID,
-    PreparedArtifact, PreparedContent, PreviewPreparationProgress, PreviewRegistry,
+    CancellationToken, IMAGE_PROVIDER_ID, MARKDOWN_PROVIDER_ID, MAX_SOURCE_BYTES,
+    MarkdownBlock as CoreMarkdownBlock, MarkdownBlockKind as CoreBlockKind, MarkdownInlineKind,
+    PLAIN_TEXT_PROVIDER_ID, PreparedArtifact, PreparedContent, PreviewPreparationProgress,
+    PreviewRegistry,
 };
 
 pub use usher_preview::{ArtifactBody, ArtifactHint, ArtifactSource};
@@ -34,6 +37,13 @@ use virtual_layout::MarkdownVirtualLayoutBridge;
 enum PresentationMode {
     Docked,
     Detached,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ArtifactPreviewContext {
+    #[default]
+    Application,
+    PrReviewSidePanel,
 }
 
 impl PresentationMode {
@@ -90,6 +100,7 @@ impl UiPayload {
 
 struct PreviewUiRuntime {
     mode: PresentationMode,
+    context: ArtifactPreviewContext,
     current: Option<UiPayload>,
     loading_title: Option<slint::SharedString>,
     loading_message: slint::SharedString,
@@ -101,6 +112,7 @@ impl Default for PreviewUiRuntime {
     fn default() -> Self {
         Self {
             mode: PresentationMode::Docked,
+            context: ArtifactPreviewContext::Application,
             current: None,
             loading_title: None,
             loading_message: "Preparing preview".into(),
@@ -178,11 +190,27 @@ pub struct ArtifactPreviewHandle {
 
 impl ArtifactPreviewHandle {
     pub fn open_source(&self, source: ArtifactSource) {
+        self.open_source_in_context(source, ArtifactPreviewContext::Application);
+    }
+
+    pub fn open_pr_review_source(&self, source: ArtifactSource) {
+        self.open_source_in_context(source, ArtifactPreviewContext::PrReviewSidePanel);
+    }
+
+    fn open_source_in_context(&self, source: ArtifactSource, context: ArtifactPreviewContext) {
+        let title = source.title.clone();
+        self.open_resolved_source(title, context, move || Ok(source));
+    }
+
+    fn open_resolved_source<F>(&self, title: String, context: ArtifactPreviewContext, resolve: F)
+    where
+        F: FnOnce() -> Result<ArtifactSource, usher_preview::PreviewError> + Send + 'static,
+    {
         let Some(ui) = self.ui.upgrade() else {
             return;
         };
-        let title = source.title.clone();
         let (generation, cancellation) = self.service.begin_request();
+        set_preview_context(&ui, context);
         show_loading(&ui, title.clone());
 
         let progress_service = self.service.clone();
@@ -214,6 +242,7 @@ impl ArtifactPreviewHandle {
         let ui_weak = self.ui.clone();
         shared_runtime().spawn(async move {
             let prepared = tokio::task::spawn_blocking(move || {
+                let source = resolve()?;
                 let prepared = registry.prepare(source, &cancellation)?;
                 adapt_prepared_worker(prepared, &cancellation)
             })
@@ -243,6 +272,243 @@ impl ArtifactPreviewHandle {
 
     pub fn open_file(&self, path: impl Into<PathBuf>, mime_type: Option<String>) {
         self.open_source(ArtifactSource::file(path, mime_type));
+    }
+
+    /// Opens a repository Markdown file in the PR-side Preview without trusting
+    /// the model-provided path. Resolution and reading happen on the shared
+    /// worker runtime; the canonical target must remain inside the canonical
+    /// repository root.
+    pub fn open_project_markdown(
+        &self,
+        project_root: impl Into<PathBuf>,
+        relative_path: impl Into<PathBuf>,
+    ) {
+        let project_root = project_root.into();
+        let relative_path =
+            PathBuf::from(relative_path.into().to_string_lossy().replace('\\', "/"));
+        let title = relative_path.to_string_lossy().into_owned();
+        self.open_resolved_source(
+            title,
+            ArtifactPreviewContext::PrReviewSidePanel,
+            move || resolve_project_markdown(&project_root, &relative_path),
+        );
+    }
+}
+
+fn resolve_project_markdown(
+    project_root: &Path,
+    relative_path: &Path,
+) -> Result<ArtifactSource, usher_preview::PreviewError> {
+    validate_repository_markdown_path(relative_path)?;
+    let canonical_root = fs::canonicalize(project_root)
+        .map_err(|error| usher_preview::PreviewError::Io(error.to_string()))?;
+    let file = open_repository_markdown_file(&canonical_root, relative_path)?;
+    let bytes = read_bounded_regular_file(file, MAX_SOURCE_BYTES)?;
+    let markdown =
+        String::from_utf8(bytes).map_err(|_| usher_preview::PreviewError::InvalidUtf8)?;
+    let title = relative_path.to_string_lossy().into_owned();
+    Ok(ArtifactSource::inline_markdown(
+        format!(
+            "repository-markdown:{}:{}",
+            canonical_root.display(),
+            relative_path.display()
+        ),
+        title,
+        markdown,
+    ))
+}
+
+#[cfg(unix)]
+fn open_repository_markdown_file(
+    canonical_root: &Path,
+    relative_path: &Path,
+) -> Result<fs::File, usher_preview::PreviewError> {
+    let root = open_repository_root(canonical_root)?;
+    open_repository_markdown_at(&root, relative_path)
+}
+
+#[cfg(unix)]
+fn open_repository_root(
+    canonical_root: &Path,
+) -> Result<std::os::fd::OwnedFd, usher_preview::PreviewError> {
+    use rustix::fs::{Mode, OFlags, open};
+
+    open(
+        canonical_root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|error| usher_preview::PreviewError::Io(error.to_string()))
+}
+
+#[cfg(unix)]
+fn open_repository_markdown_at(
+    root: &std::os::fd::OwnedFd,
+    relative_path: &Path,
+) -> Result<fs::File, usher_preview::PreviewError> {
+    use rustix::fs::{Mode, OFlags, openat};
+
+    let mut current = root
+        .try_clone()
+        .map_err(|error| usher_preview::PreviewError::Io(error.to_string()))?;
+    let mut components = relative_path.components().peekable();
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return Err(usher_preview::PreviewError::Io(
+                "repository Markdown path contains an unsafe component".into(),
+            ));
+        };
+        let final_component = components.peek().is_none();
+        let mut flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+        if !final_component {
+            flags |= OFlags::DIRECTORY;
+        }
+        current = openat(&current, name, flags, Mode::empty()).map_err(|error| {
+            usher_preview::PreviewError::Io(format!(
+                "repository Markdown path could not be opened without following links: {error}"
+            ))
+        })?;
+    }
+    Ok(fs::File::from(current))
+}
+
+#[cfg(target_os = "windows")]
+fn open_repository_markdown_file(
+    canonical_root: &Path,
+    relative_path: &Path,
+) -> Result<fs::File, usher_preview::PreviewError> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+
+    let root = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(canonical_root)
+        .map_err(|error| usher_preview::PreviewError::Io(error.to_string()))?;
+    let root_final = windows_final_path(&root)?;
+    let file = fs::File::open(canonical_root.join(relative_path))
+        .map_err(|error| usher_preview::PreviewError::Io(error.to_string()))?;
+    let target_final = windows_final_path(&file)?;
+    if !windows_path_starts_with(&target_final, &root_final) {
+        return Err(usher_preview::PreviewError::Io(
+            "repository Markdown path escapes the project root".into(),
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_final_path(file: &fs::File) -> Result<PathBuf, usher_preview::PreviewError> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_NAME_NORMALIZED, GetFinalPathNameByHandleW, VOLUME_NAME_DOS,
+    };
+
+    let mut buffer = vec![0u16; 512];
+    loop {
+        let length = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle(),
+                buffer.as_mut_ptr(),
+                buffer.len().min(u32::MAX as usize) as u32,
+                FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
+            )
+        };
+        if length == 0 {
+            return Err(usher_preview::PreviewError::Io(
+                std::io::Error::last_os_error().to_string(),
+            ));
+        }
+        if (length as usize) < buffer.len() {
+            buffer.truncate(length as usize);
+            return Ok(PathBuf::from(OsString::from_wide(&buffer)));
+        }
+        buffer.resize(length as usize + 1, 0);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_path_starts_with(path: &Path, root: &Path) -> bool {
+    let mut path_components = path.components();
+    root.components().all(|root_component| {
+        path_components.next().is_some_and(|path_component| {
+            path_component
+                .as_os_str()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&root_component.as_os_str().to_string_lossy())
+        })
+    })
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
+fn open_repository_markdown_file(
+    _canonical_root: &Path,
+    _relative_path: &Path,
+) -> Result<fs::File, usher_preview::PreviewError> {
+    Err(usher_preview::PreviewError::Io(
+        "secure repository Markdown opening is unsupported on this platform".into(),
+    ))
+}
+
+fn read_bounded_regular_file(
+    file: fs::File,
+    limit: usize,
+) -> Result<Vec<u8>, usher_preview::PreviewError> {
+    let metadata = file
+        .metadata()
+        .map_err(|error| usher_preview::PreviewError::Io(error.to_string()))?;
+    if !metadata.is_file() {
+        return Err(usher_preview::PreviewError::Io(
+            "repository Markdown target is not a regular file".into(),
+        ));
+    }
+    if metadata.len() > limit as u64 {
+        return Err(usher_preview::PreviewError::SourceTooLarge {
+            bytes: metadata.len(),
+            limit,
+        });
+    }
+
+    let mut bytes = Vec::with_capacity(metadata.len().min(limit as u64) as usize);
+    file.take(limit.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| usher_preview::PreviewError::Io(error.to_string()))?;
+    if bytes.len() > limit {
+        return Err(usher_preview::PreviewError::SourceTooLarge {
+            bytes: bytes.len() as u64,
+            limit,
+        });
+    }
+    Ok(bytes)
+}
+
+fn validate_repository_markdown_path(
+    relative_path: &Path,
+) -> Result<(), usher_preview::PreviewError> {
+    let path_text = relative_path.to_string_lossy();
+    let valid_extension = relative_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
+        });
+    let safe_components = !relative_path.as_os_str().is_empty()
+        && !relative_path.is_absolute()
+        && !path_text.contains(':')
+        && path_text
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+        && relative_path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)));
+    if safe_components && valid_extension {
+        Ok(())
+    } else {
+        Err(usher_preview::PreviewError::Io(
+            "repository Markdown path is not a safe relative Markdown file".into(),
+        ))
     }
 }
 
@@ -347,7 +613,13 @@ pub(crate) fn setup(ui: &MainWindow, settings: &PreviewSettings) -> ArtifactPrev
 
     ui.on_artifact_preview_open_link(move |url| {
         let url = url.trim();
-        if !(url.starts_with("https://") || url.starts_with("http://")) {
+        let http = url
+            .get(..7)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"));
+        let https = url
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"));
+        if !(http || https) {
             log::warn!("[ArtifactPreview] Refused non-HTTP link");
             return;
         }
@@ -447,6 +719,8 @@ enum UiPreparedContent {
 struct UiPreparedMarkdownBlock {
     kind: ArtifactPreviewBlockKind,
     styled: slint::StyledText,
+    list_marker: String,
+    list_depth: i32,
     code_lines: Vec<UiPreparedCodeLine>,
     code_language: String,
     plain_text: String,
@@ -583,6 +857,8 @@ impl UiPreparedMarkdownBlock {
         ArtifactPreviewBlock {
             kind: self.kind,
             styled: self.styled,
+            list_marker: self.list_marker.into(),
+            list_depth: self.list_depth,
             code_lines: ModelRc::new(Rc::new(VecModel::from(
                 self.code_lines
                     .into_iter()
@@ -620,8 +896,9 @@ impl UiPreparedMarkdownBlock {
 }
 
 fn adapt_markdown_block(block: &CoreMarkdownBlock) -> UiPreparedMarkdownBlock {
+    let (display_block, list_marker, list_depth) = preview_list_presentation(block);
     let mut byte_offset = 0usize;
-    let layout_spans = block
+    let layout_spans = display_block
         .spans
         .iter()
         .filter_map(|span| {
@@ -635,6 +912,7 @@ fn adapt_markdown_block(block: &CoreMarkdownBlock) -> UiPreparedMarkdownBlock {
                     MarkdownInlineKind::Text => ArtifactPreviewInlineKind::Text,
                     MarkdownInlineKind::Strong => ArtifactPreviewInlineKind::Strong,
                     MarkdownInlineKind::Emphasis => ArtifactPreviewInlineKind::Emphasis,
+                    MarkdownInlineKind::Strikethrough => ArtifactPreviewInlineKind::Strikethrough,
                     MarkdownInlineKind::Code => ArtifactPreviewInlineKind::Code,
                     MarkdownInlineKind::Link => ArtifactPreviewInlineKind::Link,
                 },
@@ -648,6 +926,9 @@ fn adapt_markdown_block(block: &CoreMarkdownBlock) -> UiPreparedMarkdownBlock {
             CoreBlockKind::Heading1 => ArtifactPreviewBlockKind::Heading1,
             CoreBlockKind::Heading2 => ArtifactPreviewBlockKind::Heading2,
             CoreBlockKind::Heading3 => ArtifactPreviewBlockKind::Heading3,
+            CoreBlockKind::Heading4 => ArtifactPreviewBlockKind::Heading4,
+            CoreBlockKind::Heading5 => ArtifactPreviewBlockKind::Heading5,
+            CoreBlockKind::Heading6 => ArtifactPreviewBlockKind::Heading6,
             CoreBlockKind::Paragraph => ArtifactPreviewBlockKind::Paragraph,
             CoreBlockKind::ListItem => ArtifactPreviewBlockKind::ListItem,
             CoreBlockKind::Quote => ArtifactPreviewBlockKind::Quote,
@@ -655,12 +936,63 @@ fn adapt_markdown_block(block: &CoreMarkdownBlock) -> UiPreparedMarkdownBlock {
             CoreBlockKind::Rule => ArtifactPreviewBlockKind::Rule,
             CoreBlockKind::TableRow => ArtifactPreviewBlockKind::TableRow,
         },
-        styled: styled_text_for(block),
+        styled: styled_text_for(&display_block),
+        list_marker,
+        list_depth,
         code_lines: prepared_code_lines(block),
         code_language: block.code_language.clone(),
-        plain_text: block.text.clone(),
+        plain_text: display_block.text,
         layout_spans,
     }
+}
+
+fn preview_list_presentation(block: &CoreMarkdownBlock) -> (CoreMarkdownBlock, String, i32) {
+    let mut display = block.clone();
+    if block.kind != CoreBlockKind::ListItem {
+        return (display, String::new(), 0);
+    }
+
+    let Some(first) = display.spans.first_mut() else {
+        return (display, "•".to_string(), 0);
+    };
+    let Some((prefix_bytes, marker, depth)) = split_preview_list_prefix(&first.text) else {
+        return (display, "•".to_string(), 0);
+    };
+    first.text.replace_range(..prefix_bytes, "");
+    if first.text.is_empty() {
+        display.spans.remove(0);
+    }
+    display.text = display
+        .spans
+        .iter()
+        .map(|span| span.text.as_str())
+        .collect();
+    (display, marker, depth)
+}
+
+fn split_preview_list_prefix(text: &str) -> Option<(usize, String, i32)> {
+    let leading_spaces = text.bytes().take_while(|byte| *byte == b' ').count();
+    let depth = (leading_spaces / 2).min(i32::MAX as usize) as i32;
+    let rest = &text[leading_spaces..];
+    let (marker_bytes, mut marker) = if rest.starts_with("• ") {
+        ("• ".len(), "•".to_string())
+    } else {
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 || !rest[digits..].starts_with(". ") {
+            return None;
+        }
+        (digits + 2, rest[..=digits].to_string())
+    };
+    let mut consumed = leading_spaces + marker_bytes;
+    let after_marker = &text[consumed..];
+    if after_marker.starts_with("[x] ") || after_marker.starts_with("[X] ") {
+        marker = "✓".to_string();
+        consumed += 4;
+    } else if after_marker.starts_with("[ ] ") {
+        marker = "○".to_string();
+        consumed += 4;
+    }
+    Some((consumed, marker, depth))
 }
 
 fn prepared_code_lines(block: &CoreMarkdownBlock) -> Vec<UiPreparedCodeLine> {
@@ -705,20 +1037,41 @@ fn styled_text_for(block: &CoreMarkdownBlock) -> slint::StyledText {
     let mut markdown = String::new();
     let heading = matches!(
         block.kind,
-        CoreBlockKind::Heading1 | CoreBlockKind::Heading2 | CoreBlockKind::Heading3
+        CoreBlockKind::Heading1
+            | CoreBlockKind::Heading2
+            | CoreBlockKind::Heading3
+            | CoreBlockKind::Heading4
+            | CoreBlockKind::Heading5
+            | CoreBlockKind::Heading6
     );
     if heading {
         markdown.push_str("**");
     }
     for span in &block.spans {
-        let text = escape_inline_markdown(&span.text);
         match span.kind {
-            MarkdownInlineKind::Text => markdown.push_str(&text),
-            MarkdownInlineKind::Strong => markdown.push_str(&format!("**{text}**")),
-            MarkdownInlineKind::Emphasis => markdown.push_str(&format!("*{text}*")),
-            MarkdownInlineKind::Code => markdown.push_str(&format!("`{text}`")),
+            MarkdownInlineKind::Text => markdown.push_str(&escape_inline_markdown(&span.text)),
+            MarkdownInlineKind::Strong => {
+                markdown.push_str("**");
+                markdown.push_str(&escape_inline_markdown(&span.text));
+                markdown.push_str("**");
+            }
+            MarkdownInlineKind::Emphasis => {
+                markdown.push('*');
+                markdown.push_str(&escape_inline_markdown(&span.text));
+                markdown.push('*');
+            }
+            MarkdownInlineKind::Strikethrough => {
+                markdown.push_str("~~");
+                markdown.push_str(&escape_inline_markdown(&span.text));
+                markdown.push_str("~~");
+            }
+            MarkdownInlineKind::Code => push_inline_code_markdown(&mut markdown, &span.text),
             MarkdownInlineKind::Link => {
-                markdown.push_str(&format!("[{text}]({})", span.href.replace(')', "\\)")))
+                markdown.push('[');
+                markdown.push_str(&escape_inline_markdown(&span.text));
+                markdown.push_str("](");
+                markdown.push_str(&span.href.replace(')', "\\)"));
+                markdown.push(')');
             }
         }
     }
@@ -727,6 +1080,26 @@ fn styled_text_for(block: &CoreMarkdownBlock) -> slint::StyledText {
     }
     slint::StyledText::from_markdown(&markdown)
         .unwrap_or_else(|_| slint::StyledText::from_plain_text(&block.text))
+}
+
+fn push_inline_code_markdown(markdown: &mut String, text: &str) {
+    let fence_length = text
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or_default()
+        .saturating_add(1);
+    let fence = "`".repeat(fence_length);
+    let pad = text.starts_with('`') || text.ends_with('`');
+    markdown.push_str(&fence);
+    if pad {
+        markdown.push(' ');
+    }
+    markdown.push_str(text);
+    if pad {
+        markdown.push(' ');
+    }
+    markdown.push_str(&fence);
 }
 
 fn escape_inline_markdown(text: &str) -> String {
@@ -748,6 +1121,11 @@ fn show_loading(ui: &MainWindow, title: String) {
         runtime.loading_message = "Preparing preview".into();
         present_runtime(ui, &mut runtime);
     });
+}
+
+fn set_preview_context(ui: &MainWindow, context: ArtifactPreviewContext) {
+    PREVIEW_UI.with(|runtime| runtime.borrow_mut().context = context);
+    ui.set_artifact_preview_pr_side_context(context == ArtifactPreviewContext::PrReviewSidePanel);
 }
 
 fn update_loading_message(ui: &MainWindow, message: String) {
@@ -783,6 +1161,9 @@ fn switch_mode(ui: &MainWindow, mode: PresentationMode) {
 }
 
 fn present_runtime(ui: &MainWindow, runtime: &mut PreviewUiRuntime) {
+    ui.set_artifact_preview_pr_side_context(
+        runtime.context == ArtifactPreviewContext::PrReviewSidePanel,
+    );
     let has_content = runtime.current.is_some() || runtime.loading_title.is_some();
     if !has_content {
         if runtime.mode == PresentationMode::Docked {
@@ -832,11 +1213,13 @@ fn install_detached_live_resize_bridge(window: &ArtifactPreviewWindow) {
     // Try immediately, then retry on bounded event-loop turns. The platform
     // adapter is idempotent once it observes the current native window.
     crate::platform::install_artifact_preview_live_resize(window);
+    crate::platform::install_artifact_preview_titlebar_actions(window);
     for delay in [30, 120] {
         let weak = window.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(delay), move || {
             if let Some(window) = weak.upgrade() {
                 crate::platform::install_artifact_preview_live_resize(&window);
+                crate::platform::install_artifact_preview_titlebar_actions(&window);
             }
         });
     }
@@ -846,7 +1229,9 @@ fn ensure_detached_window(
     ui: &MainWindow,
     runtime: &mut PreviewUiRuntime,
 ) -> Option<ArtifactPreviewWindow> {
+    let dark_mode = AppState::get(ui).get_effective_dark_mode();
     if let Some(window) = runtime.detached.as_ref() {
+        window.set_effective_dark_mode(dark_mode);
         return Some(window.clone_strong());
     }
     let window = match ArtifactPreviewWindow::new() {
@@ -856,8 +1241,11 @@ fn ensure_detached_window(
             return None;
         }
     };
+    window.set_effective_dark_mode(dark_mode);
     window.set_application_font_family(ui.get_application_font_family());
+    window.set_code_font_family(ui.get_workflow_pr_review_code_font_family());
     window.set_performance_optimized(ui.get_artifact_preview_performance_optimized());
+    window.set_native_titlebar_actions(cfg!(target_os = "macos"));
     let detached_virtual_layout =
         Rc::new(RefCell::new(MarkdownVirtualLayoutBridge::from_environment()));
     window.on_layout_markdown_window(
@@ -911,6 +1299,14 @@ fn ensure_detached_window(
     });
     runtime.detached = Some(window);
     runtime.detached.as_ref().map(ComponentHandle::clone_strong)
+}
+
+pub(crate) fn sync_detached_effective_theme(dark_mode: bool) {
+    PREVIEW_UI.with(|runtime| {
+        if let Some(window) = runtime.borrow().detached.as_ref() {
+            window.set_effective_dark_mode(dark_mode);
+        }
+    });
 }
 
 fn center_detached_window(ui: &MainWindow, window: &ArtifactPreviewWindow) {
@@ -967,6 +1363,7 @@ fn apply_payload_to_window(window: &ArtifactPreviewWindow, payload: &UiPayload) 
     window.set_can_open_external(payload.can_open_external);
     window.set_copy_content(payload.copy_content.clone());
     window.set_loading(false);
+    crate::platform::install_artifact_preview_titlebar_actions(window);
 }
 
 fn next_layout_revision() -> i32 {
@@ -982,6 +1379,7 @@ fn apply_loading_to_window(
     window.set_document_title(title.clone());
     window.set_loading_message(message.clone());
     window.set_loading(true);
+    crate::platform::install_artifact_preview_titlebar_actions(window);
 }
 
 fn clear_hosts(ui: &MainWindow) {
@@ -991,6 +1389,7 @@ fn clear_hosts(ui: &MainWindow) {
         runtime.current = None;
         runtime.loading_title = None;
         runtime.loading_message = "Preparing preview".into();
+        runtime.context = ArtifactPreviewContext::Application;
         if animate_docked_close {
             begin_main_host_close(ui, runtime.docked_virtual_layout.clone());
         } else {
@@ -1000,6 +1399,7 @@ fn clear_hosts(ui: &MainWindow) {
             clear_window_payload(&window);
             let _ = window.hide();
         }
+        ui.set_artifact_preview_pr_side_context(false);
     });
 }
 
@@ -1259,7 +1659,20 @@ fn memory_benchmark_markdown_fixture_for(language: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::*;
+
+    fn repository_fixture_root(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "usher-artifact-preview-{name}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
 
     #[test]
     fn presentation_mode_maps_unknown_values_to_docked() {
@@ -1267,6 +1680,62 @@ mod tests {
         assert_eq!(PresentationMode::from_index(0), PresentationMode::Docked);
         assert_eq!(PresentationMode::from_index(1), PresentationMode::Detached);
         assert_eq!(PresentationMode::from_index(2), PresentationMode::Docked);
+    }
+
+    #[test]
+    fn detached_window_receives_initial_reused_and_live_effective_theme() {
+        i_slint_backend_testing::init_no_event_loop();
+        let initial_light = ArtifactPreviewWindow::new().expect("initial light preview window");
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::ZERO);
+        assert!(!initial_light.get_effective_dark_mode());
+        assert!(initial_light.get_palette_synchronized());
+        assert_eq!(AppState::get(&initial_light).get_theme_mode(), 0);
+        assert!(!AppState::get(&initial_light).get_effective_dark_mode());
+
+        let ui = MainWindow::new().expect("main window");
+        let source_state = AppState::get(&ui);
+        source_state.set_theme_mode(1);
+        source_state.set_effective_dark_mode(true);
+
+        let detached = PREVIEW_UI.with(|runtime| {
+            let mut runtime = runtime.borrow_mut();
+            ensure_detached_window(&ui, &mut runtime).expect("detached preview window")
+        });
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::ZERO);
+        detached.set_markdown_layout_revision(42);
+        assert_eq!(
+            detached.get_native_titlebar_actions(),
+            cfg!(target_os = "macos")
+        );
+        assert!(detached.get_effective_dark_mode());
+        assert!(detached.get_palette_synchronized());
+        assert_eq!(AppState::get(&detached).get_theme_mode(), 1);
+        assert!(AppState::get(&detached).get_effective_dark_mode());
+
+        source_state.set_theme_mode(2);
+        source_state.set_effective_dark_mode(false);
+        let reused = PREVIEW_UI.with(|runtime| {
+            let mut runtime = runtime.borrow_mut();
+            ensure_detached_window(&ui, &mut runtime).expect("reused detached preview window")
+        });
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::ZERO);
+        assert!(!reused.get_effective_dark_mode());
+        assert!(reused.get_palette_synchronized());
+        assert_eq!(AppState::get(&detached).get_theme_mode(), 0);
+        assert!(!AppState::get(&detached).get_effective_dark_mode());
+        assert_eq!(detached.get_markdown_layout_revision(), 42);
+
+        sync_detached_effective_theme(true);
+        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::ZERO);
+        assert!(detached.get_effective_dark_mode());
+        assert!(detached.get_palette_synchronized());
+        assert_eq!(AppState::get(&detached).get_theme_mode(), 1);
+        assert!(AppState::get(&detached).get_effective_dark_mode());
+        assert_eq!(detached.get_markdown_layout_revision(), 42);
+
+        PREVIEW_UI.with(|runtime| {
+            runtime.borrow_mut().detached.take();
+        });
     }
 
     #[test]
@@ -1303,6 +1772,155 @@ mod tests {
     #[test]
     fn inline_markdown_escaping_preserves_literal_punctuation() {
         assert_eq!(escape_inline_markdown("a * b [c]"), "a \\* b \\[c\\]");
+    }
+
+    #[test]
+    fn inline_code_markdown_does_not_reintroduce_visible_escape_characters() {
+        let mut markdown = String::new();
+        push_inline_code_markdown(&mut markdown, r"i-slint-backend-* [dev-dependencies]");
+        assert_eq!(markdown, "`i-slint-backend-* [dev-dependencies]`");
+
+        markdown.clear();
+        push_inline_code_markdown(&mut markdown, "call(`value`)");
+        assert_eq!(markdown, "``call(`value`)``");
+    }
+
+    #[test]
+    fn repository_markdown_resolution_reads_only_contained_files() {
+        let root = repository_fixture_root("contained");
+        let nested = root.join("docs/specs");
+        fs::create_dir_all(&nested).expect("fixture directories");
+        fs::write(nested.join("行为.md"), "# Fixture\n\nContained.").expect("fixture markdown");
+
+        let source = resolve_project_markdown(&root, Path::new("docs/specs/行为.md"))
+            .expect("contained Markdown should resolve");
+        assert_eq!(source.title, "docs/specs/行为.md");
+        assert!(matches!(source.body, ArtifactBody::Text(ref text) if text.contains("Contained")));
+
+        fs::remove_dir_all(root).expect("fixture cleanup");
+    }
+
+    #[test]
+    fn repository_markdown_path_rejects_unsafe_or_non_markdown_targets() {
+        for path in [
+            "",
+            "../outside.md",
+            "/absolute.md",
+            "docs/./guide.md",
+            "docs/readme.txt",
+        ] {
+            assert!(
+                validate_repository_markdown_path(Path::new(path)).is_err(),
+                "unexpectedly accepted {path:?}"
+            );
+        }
+        assert!(validate_repository_markdown_path(Path::new("AGENTS.md")).is_ok());
+        assert!(validate_repository_markdown_path(Path::new("docs/guide.MARKDOWN")).is_ok());
+    }
+
+    #[test]
+    fn repository_markdown_reader_enforces_a_hard_handle_read_limit() {
+        let root = repository_fixture_root("bounded-read");
+        fs::create_dir_all(&root).expect("fixture root");
+        let path = root.join("large.md");
+        fs::write(&path, vec![b'x'; 65]).expect("fixture markdown");
+
+        let file = fs::File::open(&path).expect("fixture handle");
+        let error = read_bounded_regular_file(file, 64)
+            .expect_err("oversized opened file must be rejected");
+        assert!(matches!(
+            error,
+            usher_preview::PreviewError::SourceTooLarge {
+                bytes: 65,
+                limit: 64
+            }
+        ));
+
+        fs::remove_dir_all(root).expect("fixture cleanup");
+    }
+
+    #[test]
+    fn repository_markdown_resolution_rejects_invalid_utf8() {
+        let root = repository_fixture_root("invalid-utf8");
+        fs::create_dir_all(&root).expect("fixture root");
+        fs::write(root.join("invalid.md"), [0xff, 0xfe, 0xfd]).expect("fixture bytes");
+
+        let error = resolve_project_markdown(&root, Path::new("invalid.md"))
+            .expect_err("invalid UTF-8 Markdown must be rejected");
+        assert!(matches!(error, usher_preview::PreviewError::InvalidUtf8));
+
+        fs::remove_dir_all(root).expect("fixture cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_markdown_resolution_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = repository_fixture_root("symlink-root");
+        let outside = repository_fixture_root("symlink-outside");
+        fs::create_dir_all(&root).expect("root fixture");
+        fs::create_dir_all(&outside).expect("outside fixture");
+        let outside_file = outside.join("outside.md");
+        fs::write(&outside_file, "# Outside").expect("outside markdown");
+        symlink(&outside_file, root.join("escape.md")).expect("fixture symlink");
+
+        let error = resolve_project_markdown(&root, Path::new("escape.md"))
+            .expect_err("symlink escape must be rejected");
+        assert!(error.to_string().contains("without following links"));
+
+        fs::remove_dir_all(root).expect("root cleanup");
+        fs::remove_dir_all(outside).expect("outside cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_markdown_open_rejects_replacement_after_root_is_open() {
+        use std::os::unix::fs::symlink;
+
+        let root = repository_fixture_root("replacement-root");
+        let outside = repository_fixture_root("replacement-outside");
+        fs::create_dir_all(&root).expect("root fixture");
+        fs::create_dir_all(&outside).expect("outside fixture");
+        let target = root.join("guide.md");
+        let outside_file = outside.join("outside.md");
+        fs::write(&target, "# Safe").expect("initial markdown");
+        fs::write(&outside_file, "# Outside").expect("outside markdown");
+
+        let canonical_root = fs::canonicalize(&root).expect("canonical fixture root");
+        let root_handle = open_repository_root(&canonical_root).expect("repository root handle");
+        validate_repository_markdown_path(Path::new("guide.md")).expect("validated path");
+        fs::remove_file(&target).expect("replace validated target");
+        symlink(&outside_file, &target).expect("replacement symlink");
+
+        let error = open_repository_markdown_at(&root_handle, Path::new("guide.md"))
+            .expect_err("descriptor-relative open must reject the replacement");
+        assert!(error.to_string().contains("without following links"));
+
+        fs::remove_dir_all(root).expect("root cleanup");
+        fs::remove_dir_all(outside).expect("outside cleanup");
+    }
+
+    #[test]
+    fn markdown_lists_reach_preview_with_hanging_markers_and_task_symbols() {
+        let document = usher_preview::parse_markdown_structure(
+            "1. first\n2. second\n\n- [x] complete\n- [ ] pending",
+            "Lists",
+        );
+        let blocks = document
+            .blocks
+            .iter()
+            .map(|block| adapt_markdown_block(block).into_ui_block())
+            .collect::<Vec<_>>();
+
+        assert_eq!(blocks[0].list_marker, "1.");
+        assert_eq!(blocks[0].plain_text, "first");
+        assert_eq!(blocks[1].list_marker, "2.");
+        assert_eq!(blocks[1].plain_text, "second");
+        assert_eq!(blocks[2].list_marker, "✓");
+        assert_eq!(blocks[2].plain_text, "complete");
+        assert_eq!(blocks[3].list_marker, "○");
+        assert_eq!(blocks[3].plain_text, "pending");
     }
 
     #[test]

@@ -80,6 +80,14 @@ if [ -n "$builtin_tooltips" ]; then
     failed=1
 fi
 
+# The application Preview host changes geometry for PR-side context. Mounting a
+# second panel would duplicate the heavy Markdown delegate tree and layout bridge.
+preview_panel_instances=$(rg -c 'GitHubArtifactPreviewPanel[[:space:]]*\{' ui/main.slint || true)
+if [ "$preview_panel_instances" -ne 1 ]; then
+    echo "UI policy: ui/main.slint must mount exactly one Artifact Preview panel (found $preview_panel_instances)" >&2
+    failed=1
+fi
+
 if [ "$failed" -ne 0 ]; then
     exit 1
 fi

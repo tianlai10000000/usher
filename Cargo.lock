@@ -7297,6 +7297,7 @@ dependencies = [
  "fs2",
  "futures-util",
  "i-slint-backend-testing",
+ "i-slint-core",
  "image",
  "lazy_static",
  "libc",
@@ -7308,6 +7309,7 @@ dependencies = [
  "rand 0.10.2",
  "raw-window-handle",
  "reqwest",
+ "rustix 1.1.4",
  "self_update",
  "semver",
  "serde",
@@ -7331,6 +7333,7 @@ dependencies = [
  "usher-virtual-list",
  "vt100",
  "webbrowser",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

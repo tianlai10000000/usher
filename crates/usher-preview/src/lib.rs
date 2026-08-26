@@ -7,6 +7,7 @@ pub mod parser;
 pub use parser::{
     CodeParser, CodeParserLoader, CodeParserRegistry, JavaScriptParserLoader, MarkdownParser,
     MarkdownParserLoader, ParserLoadStrategy, SyntectParserLoader, TsParserLoader, parse_markdown,
+    parse_markdown_structure, parse_markdown_structure_with_cancellation,
 };
 
 use std::collections::HashMap;
@@ -94,6 +95,9 @@ pub enum MarkdownBlockKind {
     Heading1,
     Heading2,
     Heading3,
+    Heading4,
+    Heading5,
+    Heading6,
     Paragraph,
     ListItem,
     Quote,
@@ -107,6 +111,7 @@ pub enum MarkdownInlineKind {
     Text,
     Strong,
     Emphasis,
+    Strikethrough,
     Code,
     Link,
 }

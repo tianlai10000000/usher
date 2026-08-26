@@ -201,7 +201,12 @@ fn styled_line(ranges: Vec<(Style, &str)>) -> HighlightedLine {
         ];
         let dark_color = github_dark_color(color);
         let bold = style.font_style.contains(FontStyle::BOLD);
-        let italic = style.font_style.contains(FontStyle::ITALIC);
+        // GitHub's pull-request diff keeps source glyphs upright. Some syntect
+        // grammars (notably Markdown) mark prose scopes as italic, which makes
+        // complete added paragraphs look like emphasized text rather than code.
+        // Normalize that theme detail here so paint and text geometry receive
+        // the same upright token model.
+        let italic = false;
         for (is_whitespace, segment) in split_whitespace_runs(value) {
             columns += display_columns(segment);
             if is_whitespace {
@@ -437,6 +442,22 @@ mod tests {
             .map(|token| token.color)
             .collect::<HashSet<_>>();
         assert!(colors.len() >= 3);
+    }
+
+    #[test]
+    fn keeps_markdown_diff_source_upright() {
+        let lines = vec![PullRequestDiffLine {
+            old_line: 0,
+            new_line: 1,
+            kind: "addition".to_string(),
+            content: "The current product supports the following workflow:".to_string(),
+        }];
+
+        let highlighted = highlight_diff_lines(&TEST_RESOURCES, "docs/specs/pr-review.md", &lines);
+        assert!(
+            highlighted[0].tokens.iter().all(|token| !token.italic),
+            "PR diff syntax highlighting must not italicize Markdown prose"
+        );
     }
 
     #[test]

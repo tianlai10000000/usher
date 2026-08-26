@@ -11,7 +11,7 @@ enum WindowControlError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .usage:
-            return "usage: macos-window-control count PID | window-list PID | window-id PID | window-size PID | smallest-window-size PID | move-smallest-window PID X Y | ax-resize-smallest-cycle PID WIDTH HEIGHT STEPS INTERVAL_MS | wait-size PID WIDTH HEIGHT TIMEOUT_MS | wait-smallest-size PID WIDTH HEIGHT TIMEOUT_MS | fullscreen-state PID | wait-fullscreen PID true|false TIMEOUT_MS | click-burst PID OFFSET_X OFFSET_Y COUNT INTERVAL_MS | pointer-drag PID OFFSET_X OFFSET_Y DELTA_X DELTA_Y STEPS INTERVAL_MS | pointer-drag-cycle PID OFFSET_X OFFSET_Y DELTA_X STEPS INTERVAL_MS | resize-drag PID WIDTH HEIGHT STEPS INTERVAL_MS | resize-cycle PID WIDTH HEIGHT STEPS INTERVAL_MS | resize-smallest-drag PID WIDTH HEIGHT STEPS INTERVAL_MS | resize-smallest-cycle PID WIDTH HEIGHT STEPS INTERVAL_MS | scroll-burst PID OFFSET_X OFFSET_Y DELTA COUNT INTERVAL_MS | scroll-cycle PID OFFSET_X OFFSET_Y DELTA COUNT INTERVAL_MS"
+            return "usage: macos-window-control count PID | window-count PID | window-list PID | window-id PID | window-size PID | smallest-window-size PID | move-smallest-window PID X Y | ax-resize-smallest-cycle PID WIDTH HEIGHT STEPS INTERVAL_MS | wait-size PID WIDTH HEIGHT TIMEOUT_MS | wait-smallest-size PID WIDTH HEIGHT TIMEOUT_MS | fullscreen-state PID | wait-fullscreen PID true|false TIMEOUT_MS | click-burst PID OFFSET_X OFFSET_Y COUNT INTERVAL_MS | pointer-drag PID OFFSET_X OFFSET_Y DELTA_X DELTA_Y STEPS INTERVAL_MS | pointer-drag-cycle PID OFFSET_X OFFSET_Y DELTA_X STEPS INTERVAL_MS | resize-drag PID WIDTH HEIGHT STEPS INTERVAL_MS | resize-cycle PID WIDTH HEIGHT STEPS INTERVAL_MS | resize-smallest-drag PID WIDTH HEIGHT STEPS INTERVAL_MS | resize-smallest-cycle PID WIDTH HEIGHT STEPS INTERVAL_MS | scroll-burst PID OFFSET_X OFFSET_Y DELTA COUNT INTERVAL_MS | scroll-cycle PID OFFSET_X OFFSET_Y DELTA COUNT INTERVAL_MS"
         case let .invalidPID(value):
             return "invalid PID: \(value)"
         case let .noWindow(pid):
@@ -22,6 +22,17 @@ enum WindowControlError: Error, CustomStringConvertible {
             return "timed out while waiting for \(operation)"
         }
     }
+}
+
+func nativeWindowCount(pid: pid_t) -> Int {
+    let windows = (CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly],
+        kCGNullWindowID
+    ) as? [[String: Any]]) ?? []
+    return windows.filter { window in
+        (window[kCGWindowOwnerPID as String] as? Int32) == pid
+            && (window[kCGWindowLayer as String] as? Int) == 0
+    }.count
 }
 
 func nativeWindowBounds(pid: pid_t) -> CGRect? {
@@ -237,14 +248,21 @@ func waitForSize(
     timeoutMilliseconds: Int
 ) throws {
     let deadline = Date().addingTimeInterval(Double(timeoutMilliseconds) / 1_000.0)
+    var lastBounds: CGRect?
     while Date() < deadline {
-        if let bounds = nativeWindowBounds(pid: pid),
+        lastBounds = nativeWindowBounds(pid: pid)
+        if let bounds = lastBounds,
            abs(bounds.width - width) < 2,
            abs(bounds.height - height) < 2
         {
             return
         }
         Thread.sleep(forTimeInterval: 0.1)
+    }
+    if let bounds = lastBounds {
+        throw WindowControlError.timeout(
+            "size=\(Int(width))x\(Int(height)); last=\(Int(bounds.width))x\(Int(bounds.height))"
+        )
     }
     throw WindowControlError.timeout("size=\(Int(width))x\(Int(height))")
 }
@@ -281,6 +299,13 @@ func clickBurst(
     NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
     Thread.sleep(forTimeInterval: 0.2)
     let point = CGPoint(x: bounds.minX + offsetX, y: bounds.minY + offsetY)
+    CGEvent(
+        mouseEventSource: nil,
+        mouseType: .mouseMoved,
+        mouseCursorPosition: point,
+        mouseButton: .left
+    )?.post(tap: .cghidEventTap)
+    Thread.sleep(forTimeInterval: 0.12)
     for index in 0 ..< count {
         CGEvent(
             mouseEventSource: nil,
@@ -699,6 +724,11 @@ func run() throws {
             throw WindowControlError.usage
         }
         print(nativeWindowBounds(pid: pid) == nil ? 0 : 1)
+    case "window-count":
+        guard arguments.count == 3 else {
+            throw WindowControlError.usage
+        }
+        print(nativeWindowCount(pid: pid))
     case "window-list":
         guard arguments.count == 3 else {
             throw WindowControlError.usage

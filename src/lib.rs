@@ -43,7 +43,7 @@ mod settings_page;
 use settings_page::SettingsPageBridge;
 mod message_center;
 use message_center::MessagePageBridge;
-use usher_messages::MessageCenter;
+use usher_messages::{MessageCenter, NotifyRustDesktopNotifier};
 
 mod constants;
 use constants::shutdown_priority::PRIORITY_HIGH;
@@ -52,16 +52,20 @@ mod chat;
 use chat::setup_chat;
 pub mod artifact_preview;
 
+#[cfg(feature = "ai-code-review")]
+mod agent_response;
 mod ai;
 #[cfg(feature = "ai-code-review")]
 mod ai_review;
 
 mod app_lifecycle;
+mod app_paths;
 mod app_runtime;
 mod memory_diagnostics;
 mod platform;
 mod shortcuts;
 mod sidebar_motion;
+mod transient_input;
 use platform::{
     THEME_MODE_AUTO, apply_native_appearance_for_mode, apply_native_chrome_for_mode,
     effective_dark_mode as get_effective_dark_mode, install_memory_benchmark_window_control,
@@ -70,6 +74,9 @@ use platform::{
     set_title_bar_color, setup_application_font, setup_pr_review_fonts,
     startup_native_chrome_ready,
 };
+#[doc(hidden)]
+pub use transient_input::install_for_window as install_transient_input_bridge;
+
 mod terminal;
 
 mod logger;
@@ -179,6 +186,7 @@ fn save_settings_with_feedback<F>(
 
 fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWindow> {
     let loaded_settings = settings::load_settings();
+    let benchmark_offline = app_paths::benchmark_offline_mode();
     memory_diagnostics::set_logging_enabled(loaded_settings.memory_diagnostics_logging);
     memory_diagnostics::initialize_baseline();
     log::info!("Usher v{} starting...", env!("CARGO_PKG_VERSION"));
@@ -197,7 +205,12 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     app.set_sidebar_motion_display_linked(sidebar_motion_mode.is_display_linked());
     app.on_advance_sidebar_motion(sidebar_motion::advance);
     let settings_page = SettingsPageBridge::default();
-    let message_center = MessageCenter::open_default().context("Failed to open message center")?;
+    let message_center = if let Some(path) = app_paths::message_store_path() {
+        MessageCenter::open_with(path, std::sync::Arc::new(NotifyRustDesktopNotifier))
+    } else {
+        MessageCenter::open_default()
+    }
+    .context("Failed to open message center")?;
     let message_page = MessagePageBridge::new(message_center.clone());
     app.set_platform_is_macos(cfg!(target_os = "macos"));
     message_center.set_application_active(app.get_native_window_active());
@@ -232,9 +245,9 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     // ========= Settings ========= //
     // Apply loaded settings to AppState
     setup_settings(&app, &loaded_settings);
-    let _artifact_preview = artifact_preview::setup(&app, &loaded_settings.preview);
+    let _artifact_preview_handle = artifact_preview::setup(&app, &loaded_settings.preview);
     #[cfg(feature = "test-fixtures")]
-    artifact_preview::setup_fixtures(&app, _artifact_preview.clone());
+    artifact_preview::setup_fixtures(&app, _artifact_preview_handle.clone());
     set_terminal_dark_mode(&app, is_dark);
     // Seed native chrome / sidebar material colors before the first ordered frame.
     set_title_bar_color(&app, is_dark);
@@ -257,7 +270,7 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
 
     // ========= Auto Update ========= //
     // Initialize auto-update based on loaded settings
-    if loaded_settings.auto_update {
+    if loaded_settings.auto_update && !benchmark_offline {
         start_auto_update(
             app.as_weak(),
             updater_ctx.state.clone(),
@@ -274,7 +287,7 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
         settings::save_auto_update(enabled);
 
         // Control auto-update
-        if enabled {
+        if enabled && !benchmark_offline {
             start_auto_update(
                 app_weak_auto.clone(),
                 state_for_auto.clone(),
@@ -628,6 +641,7 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
                                 return;
                             }
                             app_state.set_effective_dark_mode(is_dark);
+                            artifact_preview::sync_detached_effective_theme(is_dark);
                             settings_page.sync_theme(THEME_MODE_AUTO, is_dark);
                             message_page.sync_theme(THEME_MODE_AUTO, is_dark);
                             set_title_bar_color(&win, is_dark);
@@ -647,6 +661,7 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
             if mode == THEME_MODE_AUTO {
                 app_state.set_effective_dark_mode(is_dark);
             }
+            artifact_preview::sync_detached_effective_theme(is_dark);
             settings_page_for_theme.sync_theme(mode, is_dark);
             message_page_for_theme.sync_theme(mode, is_dark);
             set_title_bar_color(&win, is_dark);
@@ -661,6 +676,7 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     let initial_theme = loaded_settings.theme_mode;
     if initial_theme == THEME_MODE_AUTO {
         AppState::get(&app).set_effective_dark_mode(is_dark);
+        artifact_preview::sync_detached_effective_theme(is_dark);
     }
     let app_weak_theme_watch = app.as_weak();
     let settings_page_for_theme_watch = settings_page.clone();
@@ -674,6 +690,7 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
             return;
         }
         app_state.set_effective_dark_mode(is_dark);
+        artifact_preview::sync_detached_effective_theme(is_dark);
         settings_page_for_theme_watch.sync_theme(THEME_MODE_AUTO, is_dark);
         message_page_for_theme_watch.sync_theme(THEME_MODE_AUTO, is_dark);
         set_title_bar_color(&win, is_dark);
@@ -703,7 +720,9 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     setup_http(&app);
 
     // ========= Network ========= //
-    setup_network_monitor(&app);
+    if !benchmark_offline {
+        setup_network_monitor(&app);
+    }
 
     // ========= Dialog ========= //
     setup_dialog(&app);
@@ -793,8 +812,12 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     memory_diagnostics::log_checkpoint("startup.workflow_ready");
 
     #[cfg(feature = "ai-code-review")]
-    let ai_review_controller =
-        ai_review::setup_ai_review(&app, &settings_page, message_center.clone());
+    let ai_review_controller = ai_review::setup_ai_review(
+        &app,
+        &settings_page,
+        message_center.clone(),
+        _artifact_preview_handle.clone(),
+    );
     #[cfg(feature = "ai-code-review")]
     memory_diagnostics::log_checkpoint("startup.ai_review_ready");
 
@@ -931,6 +954,11 @@ pub fn main() {
     // translucent macOS sidebar never reveals desktop content at startup.
     install_titlebar_settings_button(&ui);
     ui.show().unwrap();
+    // The production backend creates its real window adapter during show().
+    // macOS uses its existing application-local event monitor because native
+    // StyledText consumes the Slint event; other backends use the generic hook.
+    #[cfg(not(target_os = "macos"))]
+    transient_input::install(&ui).expect("Failed to install transient input bridge");
     install_memory_benchmark_window_control(&ui);
     // Keep the window invisible while native chrome is attached so the first
     // visible frame is the final shell rather than a staged transition.

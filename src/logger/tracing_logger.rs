@@ -272,8 +272,8 @@ pub fn init_tracing_logger(config: TraceLogConfig) -> Result<()> {
 /// # Arguments
 /// * `log_per_day` - If true, organizes logs by date (YYYY-MM-DD/usher.log)
 pub fn get_default_log_path(log_per_day: bool) -> PathBuf {
-    if let Some(proj_dirs) = directories::ProjectDirs::from("com", "usher", "app") {
-        let base_log_dir = proj_dirs.data_local_dir().join("logs");
+    if let Some(data_dir) = crate::app_paths::data_local_dir() {
+        let base_log_dir = data_dir.join("logs");
 
         let log_dir = if log_per_day {
             // Create date-based subdirectory: logs/YYYY-MM-DD/

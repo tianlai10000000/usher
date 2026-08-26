@@ -13,6 +13,9 @@ export component GitHubScrollView inherits Rectangle {
     // Benchmark-only legacy mode keeps the previous live-geometry mapping.
     // Production freezes the mapping for the complete direct drag gesture.
     in property <bool> stable-scrollbar-drag: true;
+    // Optional blank-viewport interaction reporting for hosts that coordinate
+    // transient overlays across sibling surfaces.
+    in property <bool> report-pointer-interactions: false;
     // Full-size macOS content can extend beneath the native title bar. Keep
     // the document itself edge-to-edge while moving the draggable thumb out
     // of AppKit's window-drag region.
@@ -21,6 +24,7 @@ export component GitHubScrollView inherits Rectangle {
     callback user-scroll-started();
     callback user-wheel-direction(length);
     callback scrollbar-dragging-changed(bool);
+    callback pointer-interaction-started();
 
     out property <bool> scrollbar-dragging: root.dragging;
     out property <length> scrollbar-drag-pointer-y: root.drag-pointer-y;
@@ -57,7 +61,9 @@ export component GitHubScrollView inherits Rectangle {
     private property <int> drag-release-revision: 0;
     private property <length> drag-release-position: 0px;
     private property <bool> pending-wheel-direction: false;
-    private property <length> wheel-position-before-animation: 0px;
+    private property <length> last-observed-viewport-y: 0px;
+    private property <bool> pre-flick-wheel-movement-pending: false;
+    private property <length> pre-flick-wheel-movement: 0px;
     private property <length> displayed-thumb-height:
         root.dragging && root.stable-scrollbar-drag
             ? root.drag-thumb-height
@@ -126,13 +132,36 @@ export component GitHubScrollView inherits Rectangle {
     background: transparent;
     clip: true;
 
+    init => {
+        root.last-observed-viewport-y = root.viewport_y;
+    }
+
     changed viewport_y => {
-        let movement = root.viewport_y - root.wheel-position-before-animation;
+        let movement = root.viewport_y - root.last-observed-viewport-y;
+        root.last-observed-viewport-y = root.viewport_y;
         if root.pending-wheel-direction
             && !root.dragging
             && Math.abs(movement) > 0.25px {
             root.pending-wheel-direction = false;
             root.user-wheel-direction(movement);
+        } else if !root.dragging && Math.abs(movement) > 0.25px {
+            // Discrete wheel and phased touchpad events update the Flickable's
+            // viewport before `flicked`; retain that synchronous movement until
+            // the callback below can attribute it to user input. The zero-delay
+            // timer prevents unrelated programmatic scrolling from becoming a
+            // candidate for a later wheel gesture.
+            root.pre-flick-wheel-movement = movement;
+            root.pre-flick-wheel-movement-pending = true;
+            pre-flick-wheel-expiry.restart();
+        }
+    }
+
+    pre-flick-wheel-expiry := Timer {
+        interval: 0ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.pre-flick-wheel-movement-pending = false;
         }
     }
 
@@ -144,8 +173,24 @@ export component GitHubScrollView inherits Rectangle {
         interactive: root.interactive;
         flicked => {
             root.user-scroll-started();
-            root.wheel-position-before-animation = root.viewport_y;
-            root.pending-wheel-direction = true;
+            if root.pre-flick-wheel-movement-pending {
+                let movement = root.pre-flick-wheel-movement;
+                root.pre-flick-wheel-movement-pending = false;
+                pre-flick-wheel-expiry.stop();
+                root.pending-wheel-direction = false;
+                root.user-wheel-direction(movement);
+            } else {
+                // Unphased mouse wheels begin a physics animation before the
+                // viewport changes. The first animation delta is reported by
+                // `changed viewport_y` with the same movement sign as before.
+                root.pending-wheel-direction = true;
+            }
+        }
+
+        if root.report-pointer-interactions: viewport-interaction := TouchArea {
+            width: scroll-area.width;
+            height: scroll-area.viewport-height;
+            clicked => { root.pointer-interaction-started(); }
         }
 
         content-column := VerticalLayout {

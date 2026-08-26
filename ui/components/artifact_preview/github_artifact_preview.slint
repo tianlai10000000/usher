@@ -1,8 +1,11 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { AppState } from "../../state/app_state.slint";
+import { Palette } from "std-widgets.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
 import { GitHubScrollView, GitHubVirtualListScrollbar } from "../github_scroll_view.slint";
 import { GitHubCenteredLoadingState } from "../github_spinner.slint";
+import { GitHubMarkdownMetrics } from "../markdown/github_markdown_typography.slint";
 
 export enum ArtifactPreviewKind {
     None,
@@ -16,6 +19,9 @@ export enum ArtifactPreviewBlockKind {
     Heading1,
     Heading2,
     Heading3,
+    Heading4,
+    Heading5,
+    Heading6,
     Paragraph,
     ListItem,
     Quote,
@@ -28,6 +34,7 @@ export enum ArtifactPreviewInlineKind {
     Text,
     Strong,
     Emphasis,
+    Strikethrough,
     Code,
     Link,
 }
@@ -53,6 +60,8 @@ export struct ArtifactPreviewCodeLine {
 export struct ArtifactPreviewBlock {
     kind: ArtifactPreviewBlockKind,
     styled: styled-text,
+    list-marker: string,
+    list-depth: int,
     code-lines: [ArtifactPreviewCodeLine],
     code-language: string,
     plain-text: string,
@@ -60,6 +69,7 @@ export struct ArtifactPreviewBlock {
 }
 
 export struct ArtifactPreviewVirtualRow {
+    index: int,
     start: float,
     size: float,
     block: ArtifactPreviewBlock,
@@ -75,6 +85,11 @@ export struct ArtifactPreviewVirtualWindow {
 component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
     in property <ArtifactPreviewBlock> block;
     in property <length> forced-height: 0px;
+    in property <bool> first-block: false;
+    in property <ArtifactPreviewBlockKind> previous-kind: ArtifactPreviewBlockKind.Paragraph;
+    in property <string> body-font-family: "sans-serif";
+    in property <string> application-font-family: "sans-serif";
+    in property <string> code-font-family: "Menlo";
     callback open-link(string);
 
     private property <bool> is-code:
@@ -83,45 +98,77 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
         root.block.kind == ArtifactPreviewBlockKind.Quote;
     private property <bool> is-table:
         root.block.kind == ArtifactPreviewBlockKind.TableRow;
+    private property <bool> is-list:
+        root.block.kind == ArtifactPreviewBlockKind.ListItem;
+    private property <length> list-level-inset:
+        min(2, max(0, root.block.list-depth)) * 24px;
+    private property <length> list-marker-width: 24px;
+    private property <bool> is-heading:
+        root.block.kind == ArtifactPreviewBlockKind.Heading1
+            || root.block.kind == ArtifactPreviewBlockKind.Heading2
+            || root.block.kind == ArtifactPreviewBlockKind.Heading3
+            || root.block.kind == ArtifactPreviewBlockKind.Heading4
+            || root.block.kind == ArtifactPreviewBlockKind.Heading5
+            || root.block.kind == ArtifactPreviewBlockKind.Heading6;
+    private property <bool> previous-is-heading:
+        root.previous-kind == ArtifactPreviewBlockKind.Heading1
+            || root.previous-kind == ArtifactPreviewBlockKind.Heading2
+            || root.previous-kind == ArtifactPreviewBlockKind.Heading3
+            || root.previous-kind == ArtifactPreviewBlockKind.Heading4
+            || root.previous-kind == ArtifactPreviewBlockKind.Heading5
+            || root.previous-kind == ArtifactPreviewBlockKind.Heading6;
     private property <length> content-inset:
-        root.is-code ? GitHubMetrics.size-16
-            : root.is-quote ? GitHubMetrics.size-16
+        root.is-code ? GitHubMetrics.size-12
+            : root.is-quote ? GitHubMetrics.size-12
+            : root.is-list ? root.list-level-inset + root.list-marker-width
             : root.is-table ? GitHubMetrics.size-8
             : 0px;
+    private property <length> code-content-top:
+        root.block.code-language == ""
+            ? 10px
+            : GitHubMarkdownMetrics.code-header-height + GitHubMetrics.size-8;
     private property <length> block-padding-top:
-        root.block.kind == ArtifactPreviewBlockKind.Heading1 ? GitHubMetrics.size-16
-            : root.block.kind == ArtifactPreviewBlockKind.Heading2 ? GitHubMetrics.size-20
-            : root.block.kind == ArtifactPreviewBlockKind.Heading3 ? GitHubMetrics.size-16
-            : root.is-code ? GitHubMetrics.size-40
-            : root.is-quote || root.is-table ? GitHubMetrics.size-8
-            : root.block.kind == ArtifactPreviewBlockKind.ListItem ? GitHubMetrics.size-2
-            : GitHubMetrics.size-4;
+        root.is-heading ? 20px
+            : root.is-code ? root.code-content-top
+            : root.block.kind == ArtifactPreviewBlockKind.Rule ? 28px
+            : root.is-quote ? 8px
+            : root.is-table ? 10px
+            : root.block.kind == ArtifactPreviewBlockKind.ListItem
+                ? (root.previous-kind != ArtifactPreviewBlockKind.ListItem
+                    ? (root.previous-kind == ArtifactPreviewBlockKind.Paragraph
+                            || root.previous-is-heading ? 10px
+                        : root.previous-kind == ArtifactPreviewBlockKind.CodeBlock ? 14px
+                        : root.previous-kind == ArtifactPreviewBlockKind.Quote ? 8px
+                        : 0px)
+                    : 0px)
+            : root.first-block ? 0px
+            : root.previous-kind == ArtifactPreviewBlockKind.Paragraph ? 20px
+            : root.previous-kind == ArtifactPreviewBlockKind.ListItem
+                    || root.previous-is-heading ? 10px
+            : root.previous-kind == ArtifactPreviewBlockKind.CodeBlock ? 14px
+            : root.previous-kind == ArtifactPreviewBlockKind.Quote ? 8px
+            : root.previous-kind == ArtifactPreviewBlockKind.Rule ? 0px
+            : 11px;
     private property <length> block-padding-bottom:
-        root.block.kind == ArtifactPreviewBlockKind.Heading1
-                || root.block.kind == ArtifactPreviewBlockKind.Heading2
-            ? GitHubMetrics.size-12
-            : root.block.kind == ArtifactPreviewBlockKind.Heading3
-                ? GitHubMetrics.size-6
-            : root.is-code ? GitHubMetrics.size-16
-            : root.is-quote ? 0px
-            : root.is-table ? GitHubMetrics.size-8
-            : root.block.kind == ArtifactPreviewBlockKind.ListItem ? GitHubMetrics.size-2
-            : GitHubMetrics.size-8;
+        root.is-code ? 10px
+            : root.is-quote ? GitHubMetrics.size-8
+            : root.is-table ? 10px
+            : 0px;
 
-    private property <length> code-line-height: 20px;
+    private property <length> code-line-height: GitHubMarkdownMetrics.code-line-height;
     private property <length> intrinsic-height: root.block.kind == ArtifactPreviewBlockKind.Rule
-        ? GitHubMetrics.size-16
+        ? 57px
         : (root.is-code
                 ? max(1, root.block.code-lines.length) * root.code-line-height
-                : block-text.preferred-height)
+                : block-text.height)
             + root.block-padding-top + root.block-padding-bottom;
     height: root.forced-height > 0px ? root.forced-height : root.intrinsic-height;
     clip: root.is-code;
-    background: root.is-code ? GitHubTheme.code-canvas
+    background: root.is-code ? GitHubTheme.canvas-subtle
         : root.is-quote ? GitHubTheme.border-default
         : transparent;
     border-width: root.is-code ? GitHubMetrics.border-thin : 0px;
-    border-color: root.is-code ? GitHubTheme.border-muted : transparent;
+    border-color: root.is-code ? GitHubTheme.border-subtle : transparent;
     border-radius: root.is-code ? GitHubMetrics.radius-medium : 0px;
 
     if root.is-quote: Rectangle {
@@ -129,14 +176,6 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
         width: parent.width - self.x;
         height: parent.height;
         background: GitHubTheme.canvas-default;
-    }
-
-    if root.block.kind == ArtifactPreviewBlockKind.Heading1
-            || root.block.kind == ArtifactPreviewBlockKind.Heading2: Rectangle {
-        y: parent.height - GitHubMetrics.border-thin;
-        width: parent.width;
-        height: GitHubMetrics.border-thin;
-        background: GitHubTheme.border-muted;
     }
 
     if root.block.kind == ArtifactPreviewBlockKind.TableRow: Rectangle {
@@ -153,19 +192,58 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
         background: GitHubTheme.border-default;
     }
 
+    if root.is-list: list-marker-text := Text {
+        x: root.list-level-inset;
+        y: root.block-padding-top;
+        width: root.list-marker-width - GitHubMetrics.size-6;
+        height: GitHubMarkdownMetrics.document-body-line-height;
+        text: root.block.list-marker;
+        color: GitHubTheme.fg-default;
+        font-family: root.body-font-family;
+        font-size: GitHubMarkdownMetrics.document-body-font-size;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
     block-text := StyledText {
         visible: root.block.kind != ArtifactPreviewBlockKind.Rule
             && root.block.kind != ArtifactPreviewBlockKind.CodeBlock;
         x: root.content-inset;
         y: root.block-padding-top;
-        width: parent.width - self.x * 2;
+        width: root.is-list
+            ? parent.width - self.x
+            : parent.width - self.x * 2;
+        height: max(
+            root.block.kind == ArtifactPreviewBlockKind.Heading1
+                    ? GitHubMarkdownMetrics.document-heading-1-line-height
+                : root.block.kind == ArtifactPreviewBlockKind.Heading2
+                    ? GitHubMarkdownMetrics.document-heading-2-line-height
+                : root.block.kind == ArtifactPreviewBlockKind.Heading3
+                    ? GitHubMarkdownMetrics.document-heading-3-line-height
+                : root.is-heading
+                    ? GitHubMarkdownMetrics.document-heading-compact-line-height
+                : GitHubMarkdownMetrics.document-body-line-height,
+            self.preferred-height + GitHubMarkdownMetrics.glyph-safety-height
+        );
         text: root.block.styled;
+        default-font-family: root.is-heading
+            ? root.application-font-family
+            : root.body-font-family;
         default-color: root.is-quote ? GitHubTheme.fg-muted : GitHubTheme.fg-default;
-        default-font-size: root.block.kind == ArtifactPreviewBlockKind.Heading1 ? 26px
-            : root.block.kind == ArtifactPreviewBlockKind.Heading2 ? 22px
-            : root.block.kind == ArtifactPreviewBlockKind.Heading3 ? 18px
-            : root.block.kind == ArtifactPreviewBlockKind.TableRow ? 13px
-            : 15px;
+        default-font-size: root.block.kind == ArtifactPreviewBlockKind.Heading1
+                ? GitHubMarkdownMetrics.document-heading-1-font-size
+            : root.block.kind == ArtifactPreviewBlockKind.Heading2
+                ? GitHubMarkdownMetrics.document-heading-2-font-size
+            : root.block.kind == ArtifactPreviewBlockKind.Heading3
+                ? GitHubMarkdownMetrics.document-heading-3-font-size
+            : root.block.kind == ArtifactPreviewBlockKind.Heading4
+                ? GitHubMarkdownMetrics.document-heading-4-font-size
+            : root.block.kind == ArtifactPreviewBlockKind.Heading5
+                    || root.block.kind == ArtifactPreviewBlockKind.Heading6
+                ? GitHubMarkdownMetrics.document-heading-compact-font-size
+            : root.block.kind == ArtifactPreviewBlockKind.TableRow ? GitHubMetrics.text-small
+            : GitHubMarkdownMetrics.document-body-font-size;
         link-color: GitHubTheme.accent-fg;
         link-clicked(url) => { root.open-link(url); }
     }
@@ -188,8 +266,8 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
                 height: parent.height;
                 text: token.text;
                 color: GitHubTheme.dark-mode ? token.dark-color : token.light-color;
-                font-family: "monospace";
-                font-size: 13px;
+                font-family: root.code-font-family;
+                font-size: GitHubMarkdownMetrics.code-font-size;
                 font-weight: token.bold ? 600 : 400;
                 font-italic: token.italic;
                 vertical-alignment: center;
@@ -199,22 +277,14 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
         }
     }
 
-    if root.is-code: Rectangle {
-        x: GitHubMetrics.border-thin;
-        y: GitHubMetrics.size-32;
-        width: parent.width - GitHubMetrics.border-thin * 2;
-        height: GitHubMetrics.border-thin;
-        background: GitHubTheme.border-muted;
-    }
-
     if root.is-code && root.block.code-language != "": Text {
         x: root.content-inset;
-        y: GitHubMetrics.size-8;
+        y: GitHubMetrics.size-4;
         width: parent.width - root.content-inset * 2;
         height: GitHubMetrics.size-16;
         text: root.block.code-language;
         color: GitHubTheme.fg-muted;
-        font-family: "monospace";
+        font-family: root.code-font-family;
         font-size: GitHubMetrics.text-small;
         vertical-alignment: center;
     }
@@ -281,6 +351,11 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
     in property <bool> virtualized-markdown: true;
     in property <int> markdown-layout-revision: 0;
     in property <string> application-font-family: ".AppleSystemUIFont";
+    in property <string> code-font-family: "Menlo";
+    private property <string> markdown-body-font-family:
+        root.application-font-family == ".AppleSystemUIFont"
+            ? "Gujarati MT"
+            : root.application-font-family;
     callback layout-markdown-window(
         int,
         [ArtifactPreviewBlock],
@@ -312,18 +387,25 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
         show-scrollbar: !root.layout-resizing;
 
         markdown-column := VerticalLayout {
-            width: min(parent.width, 880px);
+            width: min(parent.width, 800px);
             x: (parent.width - self.width) / 2;
             spacing: 0px;
-            padding-left: root.width < 560px ? GitHubMetrics.size-16 : GitHubMetrics.size-32;
-            padding-right: root.width < 560px ? GitHubMetrics.size-16 : GitHubMetrics.size-32;
-            padding-top: GitHubMetrics.size-20;
-            padding-bottom: GitHubMetrics.size-48;
+            padding-left: root.width < 560px ? GitHubMetrics.size-16 : GitHubMetrics.size-24;
+            padding-right: root.width < 560px ? GitHubMetrics.size-16 : GitHubMetrics.size-24;
+            padding-top: GitHubMetrics.size-12;
+            padding-bottom: GitHubMetrics.size-32;
             alignment: start;
 
-            for block in root.markdown-blocks: GitHubArtifactPreviewMarkdownBlock {
+            for block[index] in root.markdown-blocks: GitHubArtifactPreviewMarkdownBlock {
                 width: parent.width;
                 block: block;
+                first-block: index == 0;
+                previous-kind: index > 0
+                    ? root.markdown-blocks[index - 1].kind
+                    : ArtifactPreviewBlockKind.Paragraph;
+                body-font-family: root.markdown-body-font-family;
+                application-font-family: root.application-font-family;
+                code-font-family: root.code-font-family;
                 open-link(url) => { root.open-link(url); }
             }
         }
@@ -351,7 +433,7 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
                 max(0.0, -markdown-scroll.viewport-y / 1px),
                 max(1.0, markdown-scroll.height / 1px),
                 max(1.0, root.width / 1px),
-                root.application-font-family
+                root.markdown-body-font-family
             );
             let clamped-y = -next.scroll-offset * 1px;
             if next.projection-revision != self.virtual-window.projection-revision
@@ -389,20 +471,27 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
 
                 markdown-list-block := GitHubArtifactPreviewMarkdownBlock {
                     x: (parent.width - self.width) / 2;
-                    y: row.start <= 0.5 ? GitHubMetrics.size-20 : 0px;
-                    width: min(parent.width, 880px)
+                    y: row.start <= 0.5 ? GitHubMetrics.size-12 : 0px;
+                    width: min(parent.width, 800px)
                         - (root.width < 560px
                             ? GitHubMetrics.size-32
-                            : GitHubMetrics.size-64);
+                            : GitHubMetrics.size-48);
                     forced-height: max(
                         1px,
                         parent.height - self.y
                             - (row.start + row.size
                                     >= markdown-scroll.viewport-height / 1px - 0.5
-                                ? GitHubMetrics.size-48
+                                ? GitHubMetrics.size-32
                                 : 0px)
                     );
                     block: row.block;
+                    first-block: row.index == 0;
+                    previous-kind: row.index > 0
+                        ? root.markdown-blocks[row.index - 1].kind
+                        : ArtifactPreviewBlockKind.Paragraph;
+                    body-font-family: root.markdown-body-font-family;
+                    application-font-family: root.application-font-family;
+                    code-font-family: root.code-font-family;
                     open-link(url) => { root.open-link(url); }
                 }
             }
@@ -487,6 +576,9 @@ export component GitHubArtifactPreviewPanel inherits Rectangle {
     in property <bool> can-open-external: false;
     in property <string> copy-content: "";
     in property <bool> detached: false;
+    // macOS detached windows move these actions into a native title-bar
+    // accessory. Other hosts retain the shared in-content header.
+    in property <bool> show-header: true;
     // Hosts report an active divider/native-window resize. The inexpensive
     // shell follows the live bounds, while the prepared document tree keeps
     // its last settled layout width and is clipped by preview-content-host.
@@ -498,6 +590,7 @@ export component GitHubArtifactPreviewPanel inherits Rectangle {
     in property <bool> performance-optimized: true;
     in property <int> markdown-layout-revision: 0;
     in property <string> application-font-family: ".AppleSystemUIFont";
+    in property <string> code-font-family: "Menlo";
     callback layout-markdown-window(
         int,
         [ArtifactPreviewBlock],
@@ -533,7 +626,8 @@ export component GitHubArtifactPreviewPanel inherits Rectangle {
     header := Rectangle {
         y: 0px;
         width: parent.width;
-        height: GitHubMetrics.size-48;
+        height: root.show-header ? GitHubMetrics.size-48 : 0px;
+        visible: root.show-header;
         background: GitHubTheme.canvas-default;
         z: 100;
 
@@ -612,6 +706,7 @@ export component GitHubArtifactPreviewPanel inherits Rectangle {
             virtualized-markdown: root.performance-optimized;
             markdown-layout-revision: root.markdown-layout-revision;
             application-font-family: root.application-font-family;
+            code-font-family: root.code-font-family;
             layout-markdown-window(
                 revision,
                 blocks,
@@ -635,6 +730,24 @@ export component GitHubArtifactPreviewPanel inherits Rectangle {
 }
 
 export component ArtifactPreviewWindow inherits Window {
+    // Detached windows own an independent Slint component tree. Receive the
+    // resolved application appearance explicitly so the local theme and
+    // standard-widget palette cannot fall back to process defaults.
+    in property <bool> effective-dark-mode: false;
+    out property <bool> palette-synchronized:
+        Palette.color-scheme == (root.effective-dark-mode
+            ? ColorScheme.dark
+            : ColorScheme.light);
+
+    function apply-effective-theme() {
+        AppState.theme-mode = root.effective-dark-mode ? 1 : 0;
+        AppState.effective-dark-mode = root.effective-dark-mode;
+        Palette.color-scheme = root.effective-dark-mode
+            ? ColorScheme.dark
+            : ColorScheme.light;
+    }
+    init => { root.apply-effective-theme(); }
+    changed effective-dark-mode => { root.apply-effective-theme(); }
     in property <string> document-title: "Preview";
     in property <ArtifactPreviewKind> preview-kind: ArtifactPreviewKind.None;
     in property <[ArtifactPreviewBlock]> markdown-blocks: [];
@@ -647,7 +760,9 @@ export component ArtifactPreviewWindow inherits Window {
     in property <bool> can-open-external: false;
     in property <string> copy-content: "";
     in property <string> application-font-family: ".AppleSystemUIFont";
+    in property <string> code-font-family: "Menlo";
     in property <bool> performance-optimized: true;
+    in property <bool> native-titlebar-actions: false;
     in property <int> markdown-layout-revision: 0;
     in-out property <bool> native-live-resizing: false;
     out property <bool> layout-resizing:
@@ -708,11 +823,13 @@ export component ArtifactPreviewWindow inherits Window {
         can-open-external: root.can-open-external;
         copy-content: root.copy-content;
         detached: true;
+        show-header: !root.native-titlebar-actions;
         layout-resizing: root.layout-resizing;
         content-suspended: false;
         performance-optimized: root.performance-optimized;
         markdown-layout-revision: root.markdown-layout-revision;
         application-font-family: root.application-font-family;
+        code-font-family: root.code-font-family;
         layout-markdown-window(
             revision,
             blocks,

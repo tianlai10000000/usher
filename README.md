@@ -71,6 +71,19 @@ isolated heavyweight profile:
 cargo build --profile dev-full
 ```
 
+For routine optimized local builds, use the isolated fast-release profile. It
+keeps the release strip, size optimization, and abort policy, but uses Thin LTO,
+eight codegen units, and incremental compilation for shorter rebuilds:
+
+```sh
+cargo build --profile release-fast --locked
+cargo bundle --profile release-fast
+```
+
+This profile writes to `target/release-fast` and is not used by release
+automation. Final distributable artifacts still use `--release` through the
+existing release scripts.
+
 IDE background diagnostics use a compact, non-incremental profile so repeated
 workspace-wide checks do not duplicate the normal dev cache. VS Code/Cursor
 uses it automatically; run the equivalent check manually with:

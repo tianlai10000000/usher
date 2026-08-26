@@ -8,15 +8,26 @@ export component GitHubLink inherits FocusScope {
     in property <bool> inline: false;
     in property <bool> muted: false;
     in property <bool> link-enabled: true;
+    // Opt-in bound for compact contexts. Existing links keep their intrinsic
+    // width; constrained links elide instead of stretching their underline.
+    in property <length> text-max-width: 0px;
     private property <bool> keyboard-focus-visible: false;
+    private property <length> natural-width: link-label.preferred-width;
     callback clicked();
 
-    width: link-label.preferred-width;
+    width: root.text-max-width > 0px
+        ? min(root.text-max-width, root.natural-width)
+        : root.natural-width;
     height: max(GitHubMetrics.size-20, link-label.preferred-height);
     opacity: root.link-enabled ? 1 : 0.5;
     accessible-role: button;
     accessible-enabled: root.link-enabled;
     accessible-label: root.text;
+    accessible-action-default => {
+        if root.link-enabled {
+            root.clicked();
+        }
+    }
 
     key-pressed(event) => {
         root.keyboard-focus-visible = true;
@@ -34,7 +45,7 @@ export component GitHubLink inherits FocusScope {
     }
 
     link-label := Text {
-        width: self.preferred-width;
+        width: root.text-max-width > 0px ? parent.width : self.preferred-width;
         height: parent.height;
         text: root.text;
         font-size: GitHubMetrics.text-medium;
@@ -43,6 +54,7 @@ export component GitHubLink inherits FocusScope {
             : GitHubTheme.accent-fg;
         vertical-alignment: center;
         wrap: no-wrap;
+        overflow: root.text-max-width > 0px ? elide : clip;
     }
 
     if root.inline || link-touch.has-hover || root.has-focus: Rectangle {

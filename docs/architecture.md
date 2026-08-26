@@ -49,7 +49,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `crates/usher-search/` | Framework-neutral shared Find engine: Unicode-safe non-overlapping text matches, wrapped adjacent-result navigation, and Chromium/Blink `CenterIfNeeded` viewport policy. Features supply only domain/model and visual-wrap adapters. |
 | `crates/usher-state-store/` | Framework-neutral cross-page state port and built-in engine: typed reducers/actions, immutable revisioned snapshots, selectors, immediate hydration, automatic monotonic subscriptions, and RAII cancellation. Feature facades hide the engine so a community Store can replace it through an adapter. |
 | `crates/usher-virtual-list/` | Framework-neutral variable-height virtualization facade: exact item extents, offset/index mapping, bounded overscan windows, and exact item reveal. Its private adapter currently uses the community `virtualizer` engine; features and Slint bridges depend only on the local port so the engine remains replaceable. |
-| `crates/usher-preview/` | Framework-neutral artifact descriptors, provider/registry contracts, runtime policy, prepared payloads, and build-time detachable Markdown/image/plain-text providers. It has no Chat, MainWindow, or Slint dependency. |
+| `crates/usher-preview/` | Framework-neutral artifact descriptors, provider/registry contracts, runtime policy, prepared payloads, and build-time detachable Markdown/image/plain-text providers. Its structure-only Markdown entry preserves blocks and inline semantics without initializing code-highlighting resources. It has no Chat, MainWindow, or Slint dependency. |
 | `crates/usher-ai-review/` | Optional framework-neutral AI review domain package: rule/config reducers, dynamic bounded scheduler, review inputs/sessions, diff chunking, prompt construction, response parsing, and finding aggregation. It has no MainWindow or Slint dependency. |
 | `src/app_runtime.rs` | Process-wide Tokio runtime with two production worker threads. Runtime threads install the tracing dispatch; an explicit environment override exists for controlled benchmarks. |
 | `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots and lifetime high-water marks, startup/run metadata, bounded Slint-model accounting, UI-size correlation, and the cancellable periodic memory sampler. |
@@ -71,8 +71,9 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/workflow/` | Per-project Branch, Tag, PR, and CD state and command execution. Tag and PR Review expose stable file façades with internal controller and pure-logic modules. |
 | `src/terminal/` | PTY lifecycle, viewport synchronization, rendering, selection, and project switching; pure input mapping, diagnostics, and refresh throttling use dedicated modules. |
 | `src/chat/` | Shared AI/RAG Chat presentation and interaction, mode-isolated sessions/JSONL histories, request elapsed-time ownership, transports, width-independent plain-text/artifact projection, bounded rendering cache, pagination, and pure bounded virtual layout. Full artifact rendering belongs to the shared preview feature. |
+| `src/agent_response/` | Width-independent projection for agent-authored Markdown. It owns the 16 KiB/48-block inline budget, the 128-entry/approximately 2 MiB accounted content-identity cache, and opaque repository-Markdown action tokens; it performs no file I/O and does not own a Preview host. |
 | `src/ai_review/` | Optional AI review configuration facade and application controller. It owns state-store subscriptions, automatic persistence workers, dynamic task scheduling, review/Ask elapsed-time projection, on-demand diff/rule loading, AI calls, in-flight provider cancellation, completed-review and lightweight PR-chat session storage, notifications, and route-independent PR result projection. |
-| `src/artifact_preview/` | Application preview facade: provider policy, background preparation, stale-result cancellation, Slint model adaptation, one active session, and immediate migration between docked and detached hosts. Its `test-fixtures` adapter is development-only and submits playground samples through this same facade. |
+| `src/artifact_preview/` | Application preview facade: provider policy, background preparation, stale-result cancellation, Slint model adaptation, one active session, immediate migration between docked and detached hosts, explicit effective-theme synchronization into the detached component tree, and worker-side canonical containment/read for explicitly activated repository Markdown. Its `test-fixtures` adapter is development-only and submits playground samples through this same facade. |
 | `src/update/` | Release checks, streamed downloads, progress, cancellation, installation, and restart. |
 | `src/router/` | Route mapping, history, visibility, and reachability transitions; it does not perform feature cleanup. |
 | `src/shortcuts/` | Application command IDs, declarative key bindings, platform-normalized matching, route scopes, conflict validation, dispatch, and display labels. |
@@ -106,6 +107,7 @@ Repository endpoint definitions and executable behavior are intentionally separa
 | `ui/features/ai_review/`, `ui/features/ai_review_settings/` | Optional compile-time packages with full and disabled protocol-compatible implementations. The full review package exposes a PR-side panel, not a standalone route. |
 | `ui/components/` | Central ownership for every application visual component: controls, rows, cards, menus, tabs, panels, dialogs, fields, feedback, and feature-specific building blocks. GitHub/Primer implementations use `GitHub*` symbols. |
 | `ui/components/artifact_preview/` | Shared application-level preview shell, width-independent Markdown/text/image surfaces, docked panel, and detached native window. It owns no parsing or I/O. |
+| `ui/components/agent_response/` | Compact native block renderer for agent responses. It consumes prepared structure and emits link/action callbacks; it owns no Markdown parsing, repository resolution, or file I/O. |
 | `ui/components/about/`, `ai_review/`, `chat/`, `project/`, `workflow/` | Feature-owned GitHub/Primer visual building blocks extracted from route views; they own no I/O or route transitions. |
 | `ui/components/showcase/` | Interactive GitHub/Primer property matrices and the registry linking model-dependent feature composites to their live routes. Its opt-in Preview fixtures emit fixture ids rather than bypassing providers or hosts. New or materially changed visual components must be registered here. |
 | `ui/components/button/github_icon_button.slint` | Shared `GitHubIconButton` foundation for icon-only, floating, terminal, project-card, and copy actions, including keyboard focus, Tooltip, loading, and semantic variants. |
@@ -211,6 +213,13 @@ document tree at the drag-start layout width. During detached macOS live resize,
 an object-filtered AppKit observer supplies the same host-local state; a bounded
 window-local debounce covers backends that publish width changes without
 native begin/end notifications. Neither path reuses the main-window resize flag.
+The macOS detached host keeps the AppKit document title and mounts its
+capability-driven Copy, External Open, and Close controls in one trailing native
+title-bar accessory. Its shared Slint panel disables the otherwise duplicated
+content Header. The accessory is installed once per native preview window and
+only reflows when a prepared payload changes capabilities, so it does not enter
+the document scroll, animation, or live-resize render paths. Other platforms
+retain the shared content Header and its controls.
 Releasing either gesture commits the exact final content width once. Markdown,
 image, and text providers remain unaware of host shape and resize lifecycle.
 The native Markdown surface uses an independent `MarkdownParserLoader` and a
@@ -220,7 +229,13 @@ JavaScript and the generic language fallback share one lazily initialized
 `syntect`/`two-face` repository. Loader initialization and highlighting stay on
 the Preview worker. Slint `StyledText` handles inline prose, direct native Slint
 `Text` rows render colored code tokens, and the surface uses official Primer
-visual tokens. Fenced code
+visual tokens with the same Codex document rhythm as compact AI Review responses:
+a 14 px body/22 px line box, 24/20/17/15 px headings, 20 px paragraph gaps,
+10 px prose/list-group gaps, and zero extra space between consecutive list rows.
+H1-H6 do not add automatic rules; quote insets and subtle code surfaces share one
+Slint typography token set. For prose, the Parley bridge mirrors the settled
+width, font family, size, inline styles, fixed body rhythm, and glyph safety allowance.
+This prevents mixed-font rows from being clipped or diverging from virtual extents. Fenced code
 retains its language and carries prepared light/dark token projections without
 an intermediate Markdown/HTML conversion; theme changes do not repeat parsing
 or highlighting. No WebView/browser runtime is
@@ -243,11 +258,58 @@ Frozen Preview content hides its scrollbar until the settled trailing edge.
 Root scrollbars beneath macOS full-size content keep their draggable tracks below
 the native title-bar inset so AppKit cannot steal thumb drags for window movement.
 
+The same Markdown parser core exposes a separate structure-only entry for compact
+agent responses. It runs on a worker without constructing or consulting a
+`CodeParserRegistry`; fenced blocks retain their language and source text while
+their highlighted `code_spans` stay empty. `src/agent_response/` uses a
+Codex desktop conversation presentation with the platform system font, a 14 px
+body/22 px line box, 24/20/17/15 px headings, exact paragraph/list-group rhythm,
+and a separate 24 px hanging-list marker gutter. Code rows use the
+platform-registered monospace face
+and a worker-projected line count for stable minimum height. Non-fenced blocks
+normalize one residual model escape layer before Markdown punctuation after
+block assembly; fenced source and link targets remain unchanged. The layer then
+applies a width-independent 16 KiB/48-block projection budget and a content-identity cache
+bounded to 128 entries and an approximate 2 MiB accounted projection-payload
+budget, excluding container and allocator overhead. The same worker prepares Slint `StyledText`;
+the event loop only materializes `ModelRc` values and commits them. The newest
+32 assistant rows retain full structure, the preceding 96 use one marker-free
+plain projection plus the Preview action, and older rows remain raw. These limits
+bound structured projection/cache work, not persisted history or total Slint row
+count. Assistant rows consume the structured blocks; user rows and the
+same-binary benchmark baseline keep the raw-text path. A repository `.md` or
+`.markdown` reference is never sent to Slint as a trusted action target: the
+projection replaces the link destination with an opaque action token and retains
+the token-to-relative-path mapping in Rust.
+
+An AI Review response Preview is bound to the review task's repository context.
+Activating an opaque repository action resolves and reads the file on a worker.
+On Unix, traversal starts from one opened canonical-root descriptor and rejects
+links in every relative component; Windows verifies containment from the final
+paths of the opened root and target handles. The verified regular-file handle is
+size-bounded and read once before it is
+submitted to the common Preview provider pipeline. In Docked mode the PR shell
+uses its existing trailing slot: the one application Preview host moves into
+that geometry and temporarily replaces the
+AI Review surface without reserving the width twice or clearing the conversation.
+Closing that Preview restores the intact conversation. Detached mode remains an
+independent native window and leaves the AI Review panel mounted. PR Dialogs stay
+above either docked surface.
+
+Closing the AI Review panel or leaving `Route.PrReview` clears the inline response
+projection, opaque-action map, and task repository binding. It also dismisses an
+active PR-context Preview only when that Preview is Docked; an already Detached
+Preview remains available as an independent application window. Closing only the
+Docked Preview does not run AI Review cleanup. AI panel close and PR-route exit
+cancel the current Ask so a late completion cannot enter a reopened mount; the
+independently scheduled Review task continues.
+
 `src/platform/` selects one clear CJK-capable application font at startup:
 the native `.AppleSystemUIFont` on macOS, `Microsoft YaHei UI` on Windows, and `Noto Sans`
 elsewhere. `ui/main.slint` exposes that choice as the default for the complete
-ordinary UI tree; page and shared-component code inherit it instead of selecting
-independent faces. Terminal content remains fully independent so its existing
+ordinary UI tree together with Codex desktop's default weight 445; page,
+shared-component, and Slint `StyledText` code inherit those window values instead
+of selecting independent faces. Terminal content remains fully independent so its existing
 cell and toolbar metrics do not change. Within PR Review, only diff source code
 and file-tree content keep the platform-selected specialized faces required by
 their geometry; all other review controls and prose inherit the application font.
@@ -377,7 +439,10 @@ information into its own profile directory. This keeps heavyweight symbols
 separate and allows `cargo clean --profile dev-full` to remove them without
 discarding normal development artifacts. Release and dist profiles remain
 independent: release builds disable debug information and incremental
-compilation.
+compilation. The isolated `release-fast` profile is for routine optimized local
+builds only: it inherits the release runtime policy but uses Thin LTO, eight
+codegen units, and incremental compilation. Release automation continues to use
+the unchanged `release` profile.
 
 Workspace-wide IDE diagnostics use the isolated `ide` profile. It checks all
 targets without debug information or incremental state, preventing background
@@ -788,6 +853,25 @@ of the Slint compile and live-preview dependency graph.
    the event loop.
 5. Failures remain an inline assistant message; the request is silent to prevent duplicate toast feedback.
 
+### AI Review response projection
+
+1. A worker loading or completing a review session passes assistant Markdown to
+   `src/agent_response/`; user content remains raw text and the AI Review surface
+   presents it as a content-sized, right-aligned neutral bubble without identity chrome.
+2. The structure-only parser, bounded cache, and `StyledText` preparation produce
+   width-independent blocks plus opaque repository-action tokens on a worker.
+   Only `ModelRc` materialization and the final model commit run on the event loop.
+3. Activating a response title submits the original Markdown to Artifact Preview.
+   Activating a repository token looks it up in the current task projection and
+   resolves the path against that task's local repository on a worker.
+4. The one Docked Preview host reuses the PR trailing slot and temporarily hides,
+   but does not clear, the AI Review surface. Preview close restores it; Detached
+   Preview does not participate in this replacement.
+5. AI panel close or PR-route exit clears the response projection, token map, and
+   repository binding. It dismisses only a Docked PR-context Preview; an already
+   Detached Preview and background Review work remain independent; the current
+   Ask is cancelled and mount generation rejects stale worker commits.
+
 ### AI Agent connection test
 
 1. Settings saves an independent OpenAI-compatible Base URL, API Key, and model name.
@@ -815,8 +899,12 @@ Every request supplies `RequestOptions`:
 - `reject_http_errors` defaults to true and converts non-2xx responses into `HttpError` with a bounded body excerpt.
 - `feedback` defaults to `Silent`; user actions may opt into toast, notification, or both.
 - `timeout` defaults to 30 seconds, accepts a custom duration, and treats zero as no total deadline; the 10-second connect timeout remains independent.
-- `read_idle_timeout` defaults to 30 seconds, resets after every response-body
-  chunk, accepts a custom duration, and treats zero as disabled.
+- `read_idle_timeout` defaults to 30 seconds, accepts a custom duration, and
+  treats zero as disabled. Its request-scoped body-progress policy defaults to
+  resetting after any response-body chunk; buffered JSON callers may instead
+  require non-whitespace progress so transport heartbeats cannot extend the
+  deadline. The policy describes representation semantics and never branches
+  on a provider host or model name.
 
 Interceptors execute in registration order. Request hooks may mutate headers; response hooks observe status/headers/timing; error hooks receive normalized failures. See [specs/http.md](specs/http.md).
 

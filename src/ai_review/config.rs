@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use directories::ProjectDirs;
 use usher_ai_review::{
     MAX_RULE_BYTES, ProjectReviewKey, ReviewConfigAction, ReviewConfigError,
     ReviewConfigurationState, ReviewRule, RuleBinding, RuleId, reduce_configuration,
@@ -209,14 +208,14 @@ impl PersistenceWorker {
 }
 
 fn default_config_path() -> PathBuf {
-    ProjectDirs::from("com", "usher", "app")
-        .map(|dirs| dirs.config_dir().join("ai-review.json"))
+    crate::app_paths::config_dir()
+        .map(|dir| dir.join("ai-review.json"))
         .unwrap_or_else(|| PathBuf::from("ai-review.json"))
 }
 
 pub(crate) fn default_session_dir() -> PathBuf {
-    ProjectDirs::from("com", "usher", "app")
-        .map(|dirs| dirs.data_local_dir().join("ai-review").join("sessions"))
+    crate::app_paths::data_local_dir()
+        .map(|dir| dir.join("ai-review").join("sessions"))
         .unwrap_or_else(|| PathBuf::from("ai-review/sessions"))
 }
 

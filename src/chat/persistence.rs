@@ -1,4 +1,3 @@
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
@@ -70,11 +69,7 @@ impl JsonlHistoryStore {
     }
 
     pub(crate) fn new_default_named(file_name: &str) -> io::Result<Self> {
-        let base_dir = if let Some(proj_dirs) = ProjectDirs::from("com", "usher", "app") {
-            proj_dirs.data_local_dir().to_path_buf()
-        } else {
-            PathBuf::from(".")
-        };
+        let base_dir = crate::app_paths::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
         let im_dir = base_dir.join("im");
         fs::create_dir_all(&im_dir)?;
         let file_path = im_dir.join(file_name);

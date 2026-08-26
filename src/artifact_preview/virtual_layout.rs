@@ -7,9 +7,10 @@ use parley::fontique::GenericFamily;
 #[cfg(not(test))]
 use parley::fontique::SourceCache;
 use parley::style::{
-    FontFamily, FontFamilyName, FontStyle, FontWeight, OverflowWrap, TextWrapMode, WordBreak,
+    FontFamily, FontFamilyName, FontStyle, FontWeight, LineHeight, OverflowWrap, TextWrapMode,
+    WordBreak,
 };
-use parley::{FontContext, LayoutContext, LineHeight, StyleProperty};
+use parley::{FontContext, LayoutContext, StyleProperty};
 use slint::{Model, ModelRc, VecModel};
 use usher_virtual_list::{VirtualList, VirtualWindow};
 
@@ -19,12 +20,15 @@ use crate::{
 };
 
 const MARKDOWN_OVERSCAN_BLOCKS: usize = 3;
-const MAX_CONTENT_WIDTH: f32 = 880.0;
-const WIDE_HORIZONTAL_PADDING: f32 = 64.0;
+const MAX_CONTENT_WIDTH: f32 = 800.0;
+const WIDE_HORIZONTAL_PADDING: f32 = 48.0;
 const NARROW_HORIZONTAL_PADDING: f32 = 32.0;
 const NARROW_BREAKPOINT: f32 = 560.0;
-const DOCUMENT_TOP_PADDING: f32 = 20.0;
-const DOCUMENT_BOTTOM_PADDING: f32 = 48.0;
+const DOCUMENT_TOP_PADDING: f32 = 12.0;
+const DOCUMENT_BOTTOM_PADDING: f32 = 32.0;
+const GLYPH_SAFETY_HEIGHT: f32 = 4.0;
+const BODY_LINE_HEIGHT: f32 = 22.0;
+const CODE_LINE_HEIGHT: f32 = 19.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LayoutKey {
@@ -143,19 +147,19 @@ impl MarkdownVirtualLayoutBridge {
         if self.layout_key.as_ref() != Some(&key) {
             let text_width = markdown_block_width(content_width);
             let last_index = blocks.row_count().saturating_sub(1);
-            let extents = blocks
-                .iter()
-                .enumerate()
-                .map(|(index, block)| {
-                    self.block_extent(
-                        &block,
-                        text_width,
-                        font_family,
-                        index == 0,
-                        index == last_index,
-                    )
-                })
-                .collect::<Vec<_>>();
+            let mut previous_kind = None;
+            let mut extents = Vec::with_capacity(blocks.row_count());
+            for (index, block) in blocks.iter().enumerate() {
+                extents.push(self.block_extent(
+                    &block,
+                    text_width,
+                    font_family,
+                    previous_kind,
+                    index == 0,
+                    index == last_index,
+                ));
+                previous_kind = Some(block.kind);
+            }
             self.list
                 .replace_item_extents(&extents, MARKDOWN_OVERSCAN_BLOCKS);
             self.content_extent = extents.iter().map(|extent| u64::from(*extent)).sum();
@@ -274,6 +278,7 @@ impl MarkdownVirtualLayoutBridge {
             .iter()
             .filter_map(|item| {
                 Some(ArtifactPreviewVirtualRow {
+                    index: i32::try_from(item.index).unwrap_or(i32::MAX),
                     start: item.start.min(f32::MAX as u64) as f32,
                     size: item.extent as f32,
                     block: blocks.row_data(item.index)?,
@@ -335,34 +340,42 @@ impl MarkdownVirtualLayoutBridge {
         block: &ArtifactPreviewBlock,
         block_width: f32,
         application_font_family: &str,
+        previous_kind: Option<ArtifactPreviewBlockKind>,
         first: bool,
         last: bool,
     ) -> u32 {
         let edge_padding = if first { DOCUMENT_TOP_PADDING } else { 0.0 }
             + if last { DOCUMENT_BOTTOM_PADDING } else { 0.0 };
         if block.kind == ArtifactPreviewBlockKind::Rule {
-            return to_u32(16.0 + edge_padding).max(1);
+            return to_u32(57.0 + edge_padding).max(1);
         }
 
         let metrics = block_metrics(block.kind);
+        let padding_top = block_padding_top(block.kind, previous_kind, first, &block.code_language);
         if block.kind == ArtifactPreviewBlockKind::CodeBlock {
             let line_count = block.plain_text.as_str().lines().count().max(1) as f32;
             return to_u32(
-                line_count * metrics.line_height
-                    + metrics.padding_top
-                    + metrics.padding_bottom
-                    + edge_padding,
+                line_count * CODE_LINE_HEIGHT + padding_top + metrics.padding_bottom + edge_padding,
             )
             .max(1);
         }
-        let text_width = (block_width - metrics.content_inset * 2.0).max(1.0);
+        let content_inset = block_content_inset(block);
+        let text_width = if block.kind == ArtifactPreviewBlockKind::ListItem {
+            block_width - content_inset
+        } else {
+            block_width - content_inset * 2.0
+        }
+        .max(1.0);
         let family = if block.kind == ArtifactPreviewBlockKind::CodeBlock {
             "monospace"
         } else {
             application_font_family
         };
         let text_height = self.measure_text(block, family, metrics.font_size, text_width);
-        to_u32(text_height + metrics.padding_top + metrics.padding_bottom + edge_padding).max(1)
+        to_u32(
+            text_height + GLYPH_SAFETY_HEIGHT + padding_top + metrics.padding_bottom + edge_padding,
+        )
+        .max(1)
     }
 
     fn measure_text(
@@ -383,18 +396,31 @@ impl MarkdownVirtualLayoutBridge {
                 .ranged_builder(&mut self.font_context, text, 1.0, false);
         builder.push_default(FontFamily::List(Cow::Borrowed(&families)));
         builder.push_default(StyleProperty::FontSize(font_size));
-        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
-            block_metrics(block.kind).line_height,
-        )));
         builder.push_default(StyleProperty::WordBreak(WordBreak::Normal));
         builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
         builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
+        if !matches!(
+            block.kind,
+            ArtifactPreviewBlockKind::Heading1
+                | ArtifactPreviewBlockKind::Heading2
+                | ArtifactPreviewBlockKind::Heading3
+                | ArtifactPreviewBlockKind::Heading4
+                | ArtifactPreviewBlockKind::Heading5
+                | ArtifactPreviewBlockKind::Heading6
+        ) {
+            builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
+                BODY_LINE_HEIGHT,
+            )));
+        }
 
         if matches!(
             block.kind,
             ArtifactPreviewBlockKind::Heading1
                 | ArtifactPreviewBlockKind::Heading2
                 | ArtifactPreviewBlockKind::Heading3
+                | ArtifactPreviewBlockKind::Heading4
+                | ArtifactPreviewBlockKind::Heading5
+                | ArtifactPreviewBlockKind::Heading6
         ) {
             builder.push_default(StyleProperty::FontWeight(FontWeight::BOLD));
         }
@@ -421,7 +447,9 @@ impl MarkdownVirtualLayoutBridge {
                     ))),
                     start..end,
                 ),
-                ArtifactPreviewInlineKind::Text | ArtifactPreviewInlineKind::Link => {}
+                ArtifactPreviewInlineKind::Text
+                | ArtifactPreviewInlineKind::Strikethrough
+                | ArtifactPreviewInlineKind::Link => {}
             }
         }
         let mut layout = builder.build(text);
@@ -433,71 +461,122 @@ impl MarkdownVirtualLayoutBridge {
 #[derive(Clone, Copy)]
 struct BlockMetrics {
     font_size: f32,
-    line_height: f32,
-    content_inset: f32,
-    padding_top: f32,
     padding_bottom: f32,
 }
 
 fn block_metrics(kind: ArtifactPreviewBlockKind) -> BlockMetrics {
     match kind {
         ArtifactPreviewBlockKind::Heading1 => BlockMetrics {
-            font_size: 26.0,
-            line_height: 32.0,
-            content_inset: 0.0,
-            padding_top: 16.0,
-            padding_bottom: 12.0,
-        },
-        ArtifactPreviewBlockKind::Heading2 => BlockMetrics {
-            font_size: 22.0,
-            line_height: 28.0,
-            content_inset: 0.0,
-            padding_top: 20.0,
-            padding_bottom: 12.0,
-        },
-        ArtifactPreviewBlockKind::Heading3 => BlockMetrics {
-            font_size: 18.0,
-            line_height: 24.0,
-            content_inset: 0.0,
-            padding_top: 16.0,
-            padding_bottom: 6.0,
-        },
-        ArtifactPreviewBlockKind::CodeBlock => BlockMetrics {
-            font_size: 13.0,
-            line_height: 20.0,
-            content_inset: 16.0,
-            padding_top: 40.0,
-            padding_bottom: 16.0,
-        },
-        ArtifactPreviewBlockKind::Quote => BlockMetrics {
-            font_size: 15.0,
-            line_height: 18.0,
-            content_inset: 16.0,
-            padding_top: 8.0,
+            font_size: 24.0,
             padding_bottom: 0.0,
         },
-        ArtifactPreviewBlockKind::TableRow => BlockMetrics {
-            font_size: 13.0,
-            line_height: 18.0,
-            content_inset: 8.0,
-            padding_top: 8.0,
+        ArtifactPreviewBlockKind::Heading2 => BlockMetrics {
+            font_size: 20.0,
+            padding_bottom: 0.0,
+        },
+        ArtifactPreviewBlockKind::Heading3 => BlockMetrics {
+            font_size: 17.0,
+            padding_bottom: 0.0,
+        },
+        ArtifactPreviewBlockKind::Heading4 => BlockMetrics {
+            font_size: 15.0,
+            padding_bottom: 0.0,
+        },
+        ArtifactPreviewBlockKind::Heading5 | ArtifactPreviewBlockKind::Heading6 => BlockMetrics {
+            font_size: 15.0,
+            padding_bottom: 0.0,
+        },
+        ArtifactPreviewBlockKind::CodeBlock => BlockMetrics {
+            font_size: 12.0,
+            padding_bottom: 10.0,
+        },
+        ArtifactPreviewBlockKind::Quote => BlockMetrics {
+            font_size: 14.0,
             padding_bottom: 8.0,
+        },
+        ArtifactPreviewBlockKind::TableRow => BlockMetrics {
+            font_size: 12.0,
+            padding_bottom: 10.0,
         },
         ArtifactPreviewBlockKind::ListItem => BlockMetrics {
-            font_size: 15.0,
-            line_height: 21.0,
-            content_inset: 0.0,
-            padding_top: 2.0,
-            padding_bottom: 2.0,
+            font_size: 14.0,
+            padding_bottom: 0.0,
         },
         ArtifactPreviewBlockKind::Paragraph | ArtifactPreviewBlockKind::Rule => BlockMetrics {
-            font_size: 15.0,
-            line_height: 21.0,
-            content_inset: 0.0,
-            padding_top: 4.0,
-            padding_bottom: 8.0,
+            font_size: 14.0,
+            padding_bottom: 0.0,
         },
     }
+}
+
+fn block_content_inset(block: &ArtifactPreviewBlock) -> f32 {
+    match block.kind {
+        ArtifactPreviewBlockKind::CodeBlock | ArtifactPreviewBlockKind::Quote => 12.0,
+        ArtifactPreviewBlockKind::TableRow => 8.0,
+        ArtifactPreviewBlockKind::ListItem => block.list_depth.clamp(0, 2) as f32 * 24.0 + 24.0,
+        _ => 0.0,
+    }
+}
+
+fn block_padding_top(
+    kind: ArtifactPreviewBlockKind,
+    previous: Option<ArtifactPreviewBlockKind>,
+    first: bool,
+    code_language: &str,
+) -> f32 {
+    if is_heading(kind) {
+        return 20.0;
+    }
+    match kind {
+        ArtifactPreviewBlockKind::CodeBlock => {
+            if code_language.is_empty() {
+                10.0
+            } else {
+                32.0
+            }
+        }
+        ArtifactPreviewBlockKind::Quote => 8.0,
+        ArtifactPreviewBlockKind::TableRow => 10.0,
+        ArtifactPreviewBlockKind::ListItem => match previous {
+            Some(ArtifactPreviewBlockKind::ListItem) | None => 0.0,
+            Some(previous)
+                if previous == ArtifactPreviewBlockKind::Paragraph || is_heading(previous) =>
+            {
+                10.0
+            }
+            Some(ArtifactPreviewBlockKind::CodeBlock) => 14.0,
+            Some(ArtifactPreviewBlockKind::Quote) => 8.0,
+            Some(_) => 0.0,
+        },
+        ArtifactPreviewBlockKind::Paragraph => {
+            if first {
+                return 0.0;
+            }
+            match previous {
+                Some(ArtifactPreviewBlockKind::Paragraph) => 20.0,
+                Some(ArtifactPreviewBlockKind::ListItem) => 10.0,
+                Some(previous) if is_heading(previous) => 10.0,
+                Some(ArtifactPreviewBlockKind::CodeBlock) => 14.0,
+                Some(ArtifactPreviewBlockKind::Quote) => 8.0,
+                Some(ArtifactPreviewBlockKind::Rule) => 0.0,
+                Some(_) | None => 11.0,
+            }
+        }
+        ArtifactPreviewBlockKind::Rule => 28.0,
+        _ => 11.0,
+    }
+}
+
+fn is_heading(kind: ArtifactPreviewBlockKind) -> bool {
+    matches!(
+        kind,
+        ArtifactPreviewBlockKind::Heading1
+            | ArtifactPreviewBlockKind::Heading2
+            | ArtifactPreviewBlockKind::Heading3
+            | ArtifactPreviewBlockKind::Heading4
+            | ArtifactPreviewBlockKind::Heading5
+            | ArtifactPreviewBlockKind::Heading6
+    )
 }
 
 fn markdown_block_width(content_width: f32) -> f32 {
@@ -541,6 +620,8 @@ mod tests {
         ArtifactPreviewBlock {
             kind,
             styled: slint::StyledText::from_plain_text(text),
+            list_marker: "".into(),
+            list_depth: 0,
             code_lines: ModelRc::default(),
             code_language: "".into(),
             plain_text: text.into(),
@@ -592,9 +673,104 @@ mod tests {
         );
         let mut bridge = MarkdownVirtualLayoutBridge::default();
 
-        let extent = bridge.block_extent(&quote, 520.0, ".AppleSystemUIFont", false, false);
+        let extent = bridge.block_extent(&quote, 520.0, ".AppleSystemUIFont", None, false, false);
 
         assert!(extent <= 100, "short quote reserved {extent}px");
+    }
+
+    #[test]
+    fn mixed_script_heading_reserves_glyph_safety_height() {
+        let heading = block(
+            ArtifactPreviewBlockKind::Heading2,
+            "从 Cargo.lock 变化推测 / Mixed glyph baseline",
+        );
+        let mut bridge = MarkdownVirtualLayoutBridge::default();
+
+        let extent = bridge.block_extent(&heading, 520.0, ".AppleSystemUIFont", None, false, false);
+
+        assert!(
+            extent >= 42,
+            "mixed-script heading reserved only {extent}px"
+        );
+    }
+
+    #[test]
+    fn fenced_code_extent_includes_compact_header_and_bottom_padding() {
+        let mut code = block(
+            ArtifactPreviewBlockKind::CodeBlock,
+            "cargo fmt --all\ncargo check --locked\ncargo test --lib --locked\ngit diff --check",
+        );
+        code.code_language = "sh".into();
+        let mut bridge = MarkdownVirtualLayoutBridge::default();
+
+        let extent = bridge.block_extent(
+            &code,
+            520.0,
+            ".AppleSystemUIFont",
+            Some(ArtifactPreviewBlockKind::Paragraph),
+            false,
+            false,
+        );
+
+        assert_eq!(extent, 4 * 19 + 32 + 10);
+    }
+
+    #[test]
+    fn virtual_spacing_mirrors_the_codex_preview_component_tokens() {
+        assert_eq!(
+            block_padding_top(
+                ArtifactPreviewBlockKind::Paragraph,
+                Some(ArtifactPreviewBlockKind::Paragraph),
+                false,
+                "",
+            ),
+            20.0
+        );
+        assert_eq!(
+            block_padding_top(
+                ArtifactPreviewBlockKind::ListItem,
+                Some(ArtifactPreviewBlockKind::Paragraph),
+                false,
+                "",
+            ),
+            10.0
+        );
+        assert_eq!(
+            block_padding_top(
+                ArtifactPreviewBlockKind::ListItem,
+                Some(ArtifactPreviewBlockKind::ListItem),
+                false,
+                "",
+            ),
+            0.0
+        );
+        assert_eq!(
+            block_padding_top(
+                ArtifactPreviewBlockKind::Paragraph,
+                Some(ArtifactPreviewBlockKind::ListItem),
+                false,
+                "",
+            ),
+            10.0
+        );
+        assert_eq!(
+            block_padding_top(
+                ArtifactPreviewBlockKind::CodeBlock,
+                Some(ArtifactPreviewBlockKind::Paragraph),
+                false,
+                "",
+            ),
+            10.0
+        );
+        assert_eq!(
+            block_padding_top(
+                ArtifactPreviewBlockKind::CodeBlock,
+                Some(ArtifactPreviewBlockKind::Paragraph),
+                false,
+                "rust",
+            ),
+            32.0
+        );
     }
 
     #[test]
@@ -619,9 +795,12 @@ mod tests {
 
         // A roughly 355px docked panel leaves a 323px Markdown block after
         // the narrow document padding used by the Slint surface.
-        let extent = bridge.block_extent(&quote, 323.0, ".AppleSystemUIFont", false, false);
+        let extent = bridge.block_extent(&quote, 323.0, ".AppleSystemUIFont", None, false, false);
 
-        assert!(extent <= 96, "narrow quote reserved {extent}px");
+        assert!(
+            (106..=110).contains(&extent),
+            "narrow quote must mirror the four-line 22px UI rhythm, got {extent}px"
+        );
     }
 
     #[test]
@@ -661,7 +840,9 @@ mod tests {
         );
         let first = bridge.layout(3, &blocks, 600.0, 400.0, 520.0, "sans-serif");
         let commits = bridge.projection_commits;
-        let second = bridge.layout(3, &blocks, 720.0, 400.0, 520.0, "sans-serif");
+        let (guard_start, guard_end) = bridge.projection_guard.expect("projection guard");
+        let inside_guard = guard_start.saturating_add(guard_end) / 2;
+        let second = bridge.layout(3, &blocks, inside_guard as f32, 400.0, 520.0, "sans-serif");
 
         assert_eq!(first.rows, second.rows);
         assert_eq!(bridge.projection_commits, commits);

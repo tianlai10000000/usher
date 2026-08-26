@@ -2,8 +2,11 @@ import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubScrollView } from "../../components/github_scroll_view.slint";
 import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
 import { GitHubCenteredLoadingState, GitHubSpinner } from "../../components/github_spinner.slint";
-import { GitHubAiReviewFindingRow } from "../../components/ai_review/github_ai_review_components.slint";
+import { GitHubAiReviewFindingRow, GitHubAiReviewUserMessage } from "../../components/ai_review/github_ai_review_components.slint";
 import { GitHubSegmentedControl, GitHubSegmentedControlDivider, GitHubSegmentedControlItem } from "../../components/github_segmented_control.slint";
+import { AgentResponseBlock, GitHubAgentResponse } from "../../components/agent_response/github_agent_response.slint";
+
+export { AgentResponseBlockKind, AgentResponseBlock } from "../../components/agent_response/github_agent_response.slint";
 
 export struct AiReviewTaskItem {
     id: string,
@@ -37,9 +40,17 @@ export struct AiReviewFindingItem {
 }
 
 export struct AiReviewConversationItem {
+    id: string,
     role: string,
     content: string,
     elapsed: string,
+    formatted: bool,
+    blocks: [AgentResponseBlock],
+    preview-title: string,
+    preview-available: bool,
+    truncated: bool,
+    projected-bytes: int,
+    repository-action-count: int,
 }
 
 // Route-independent review surface. The application mounts it only while the
@@ -66,12 +77,19 @@ export component GitHubAiReviewPanel inherits Rectangle {
     in property <bool> chat-sending: false;
     in property <string> chat-status: "";
     in-out property <int> chat-elapsed-seconds: 0;
+    in property <bool> layout-resizing: false;
+    in property <string> application-font-family: "sans-serif";
+    in property <string> code-font-family: "Menlo";
     callback close();
     callback cancel(string);
     callback cancel-message(string);
     callback re-review(string);
     callback send-message(string);
     callback select-finding(string, int);
+    callback open-response-artifact(string, string, string);
+    callback open-response-link(string);
+    callback response-wheel-consumed(length);
+    callback interaction-started();
 
     private property <bool> running: root.status == "queued" || root.status == "running";
     private property <bool> review-again-mode: false;
@@ -80,6 +98,15 @@ export component GitHubAiReviewPanel inherits Rectangle {
             || (!root.review-again-mode && root.chat-sending);
     private property <length> header-height: 64px;
     private property <length> composer-height: 136px;
+    private property <length> stable-response-content-width: message-scroll.visible_width;
+    private property <length> response-content-width:
+        root.layout-resizing
+            ? root.stable-response-content-width
+            : message-scroll.visible_width;
+    private property <length> response-horizontal-padding:
+        root.width < 460px ? 20px : 32px;
+    private property <length> response-message-width:
+        max(0px, root.response-content-width - root.response-horizontal-padding * 2);
     private property <int> elapsed-minutes: root.elapsed-seconds / 60;
     private property <int> elapsed-hours: root.elapsed-minutes / 60;
     private property <int> elapsed-minute-part: Math.mod(root.elapsed-minutes, 60);
@@ -121,6 +148,25 @@ export component GitHubAiReviewPanel inherits Rectangle {
     background: GitHubTheme.canvas-default;
     border-width: 0px;
     clip: true;
+
+    // Non-interactive header/composer space dismisses a popover owned by the
+    // adjacent PR workspace. Interactive descendants remain above this target.
+    panel-blank-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.interaction-started(); }
+    }
+
+    changed width => {
+        if !root.layout-resizing {
+            root.stable-response-content-width = message-scroll.visible_width;
+        }
+    }
+    changed layout-resizing => {
+        // Freeze the block column during continuous divider/native resize and
+        // commit the final wrapping width once the interaction settles.
+        root.stable-response-content-width = message-scroll.visible_width;
+    }
 
     header := Rectangle {
         z: 10;
@@ -206,17 +252,36 @@ export component GitHubAiReviewPanel inherits Rectangle {
         width: parent.width;
         height: max(0px, parent.height - root.header-height - root.composer-height);
         background: GitHubTheme.canvas-default;
-        VerticalLayout {
-            width: message-scroll.visible_width;
-            padding-top: 20px;
-            padding-left: 16px;
-            padding-right: 16px;
-            padding-bottom: 24px;
-            spacing: 16px;
-            alignment: start;
+        show-scrollbar: !root.layout-resizing;
+        report-pointer-interactions: true;
+        pointer-interaction-started => { root.interaction-started(); }
+        user-wheel-direction(movement) => {
+            root.response-wheel-consumed(movement);
+        }
+        message-content := Rectangle {
+            width: root.response-content-width;
+            height: message-layout.preferred-height;
+            background: transparent;
+
+            // The Flickable owns gestures in this region, so give its complete
+            // content a local blank-area target as well as the panel backdrop.
+            message-blank-touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                clicked => { root.interaction-started(); }
+            }
+
+            message-layout := VerticalLayout {
+                width: parent.width;
+                padding-top: 24px;
+                padding-left: root.response-horizontal-padding;
+                padding-right: root.response-horizontal-padding;
+                padding-bottom: 28px;
+                spacing: 16px;
+                alignment: start;
 
             if root.running: GitHubCenteredLoadingState {
-                width: parent.width - 32px;
+                width: root.response-message-width;
                 height: 112px;
                 label: root.status == "queued"
                     ? "AI review queued · " + root.elapsed-label
@@ -228,7 +293,7 @@ export component GitHubAiReviewPanel inherits Rectangle {
             }
 
             if root.status == "failed" || root.status == "cancelled": Rectangle {
-                width: parent.width - 32px;
+                width: root.response-message-width;
                 height: max(100px, error-message.preferred-height + 58px);
                 border-radius: GitHubMetrics.radius-medium;
                 border-width: GitHubMetrics.border-thin;
@@ -258,7 +323,7 @@ export component GitHubAiReviewPanel inherits Rectangle {
             }
 
             if root.status == "completed": VerticalLayout {
-                width: parent.width - 32px;
+                width: root.response-message-width;
                 spacing: 12px;
                 HorizontalLayout {
                     width: parent.width;
@@ -312,7 +377,7 @@ export component GitHubAiReviewPanel inherits Rectangle {
             }
 
             for finding[index] in root.findings: GitHubAiReviewFindingRow {
-                width: parent.width - 32px;
+                width: root.response-message-width;
                 severity: finding.severity;
                 file: finding.file;
                 line: finding.line;
@@ -323,71 +388,81 @@ export component GitHubAiReviewPanel inherits Rectangle {
             }
 
             if root.conversation.length > 0: Rectangle {
-                width: parent.width - 32px;
+                width: root.response-message-width;
                 height: GitHubMetrics.border-thin;
                 background: GitHubTheme.border-muted;
             }
 
             for message in root.conversation: VerticalLayout {
-                width: parent.width - 32px;
-                spacing: 8px;
-                HorizontalLayout {
+                width: root.response-message-width;
+                spacing: message.role == "user" ? 0px : GitHubMetrics.size-8;
+
+                if message.role == "user": GitHubAiReviewUserMessage {
                     width: parent.width;
-                    height: 24px;
-                    spacing: 8px;
-                    Rectangle {
-                        width: 24px;
-                        height: 24px;
-                        border-radius: 12px;
-                        background: GitHubTheme.canvas-subtle;
-                        if message.role == "user": Text {
-                            width: parent.width;
-                            height: parent.height;
-                            text: "Y";
-                            font-size: 11px;
-                            font-weight: 600;
-                            color: GitHubTheme.fg-muted;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        if message.role != "user": Image {
-                            x: 4px;
-                            y: 4px;
-                            width: 16px;
-                            height: 16px;
-                            source: @image-url("../../assets/icons/octicon-copilot-16.svg");
-                            colorize: GitHubTheme.fg-default;
-                        }
-                    }
+                    content: message.content;
+                }
+
+                if message.role != "user" && (!message.formatted
+                        || (message.blocks.length == 0 && !message.preview-available)): VerticalLayout {
+                    width: parent.width;
+                    spacing: GitHubMetrics.size-6;
+
                     Text {
-                        text: message.role == "user"
-                            ? "You"
-                            : (root.model-name == "" ? "AI Agent" : root.model-name);
+                        width: parent.width;
+                        height: self.preferred-height;
+                        text: message.content;
                         font-size: 13px;
-                        font-weight: 600;
                         color: GitHubTheme.fg-default;
-                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
+
+                    if message.role != "user" && message.preview-available: GitHubAgentResponse {
+                        width: parent.width;
+                        blocks: [];
+                        preview-title: message.preview-title;
+                        preview-available: true;
+                        truncated: message.truncated;
+                        body-font-family: root.application-font-family;
+                        code-font-family: root.code-font-family;
+                        open-full-response => {
+                            root.open-response-artifact(
+                                message.id,
+                                message.preview-title,
+                                message.content
+                            );
+                        }
                     }
                 }
-                Text {
+                if message.role != "user" && message.formatted
+                        && (message.blocks.length > 0 || message.preview-available): GitHubAgentResponse {
                     width: parent.width;
-                    height: self.preferred-height;
-                    text: message.content;
-                    font-size: 13px;
-                    color: GitHubTheme.fg-default;
-                    wrap: word-wrap;
+                    blocks: message.blocks;
+                    preview-title: message.preview-title;
+                    preview-available: message.preview-available;
+                    truncated: message.truncated;
+                    body-font-family: root.application-font-family;
+                    code-font-family: root.code-font-family;
+                    open-link(url) => { root.open-response-link(url); }
+                    open-full-response => {
+                        root.open-response-artifact(
+                            message.id,
+                            message.preview-title,
+                            message.content
+                        );
+                    }
                 }
                 if message.role != "user" && message.elapsed != "": Text {
                     width: parent.width;
-                    height: 16px;
+                    height: GitHubMetrics.size-20;
                     text: "Worked for " + message.elapsed;
-                    font-size: 11px;
+                    font-size: GitHubMetrics.text-small;
                     color: GitHubTheme.fg-muted;
+                    vertical-alignment: center;
                 }
             }
 
-            if root.chat-sending: VerticalLayout {
-                width: parent.width - 32px;
+                if root.chat-sending: VerticalLayout {
+                width: root.response-message-width;
                 spacing: 8px;
                 accessible-role: progress-indicator;
                 accessible-label: root.chat-status == "" ? "Thinking" : root.chat-status;
@@ -441,6 +516,7 @@ export component GitHubAiReviewPanel inherits Rectangle {
                         color: GitHubTheme.fg-muted;
                         vertical-alignment: center;
                     }
+                }
                 }
             }
         }
@@ -508,7 +584,7 @@ export component GitHubAiReviewPanel inherits Rectangle {
         composer-box := Rectangle {
             x: 16px;
             y: 44px;
-            width: parent.width - 32px;
+                width: root.response-message-width;
             height: 80px;
             border-radius: GitHubMetrics.radius-medium;
             border-width: GitHubMetrics.border-thin;

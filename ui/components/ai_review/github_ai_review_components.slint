@@ -1,4 +1,47 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubMarkdownMetrics } from "../markdown/github_markdown_typography.slint";
+
+// Codex-style user turn: compact content-sized prose aligned to the trailing
+// edge. Assistant identity and structured Markdown remain separate concerns.
+export component GitHubAiReviewUserMessage inherits Rectangle {
+    in property <string> content: "";
+
+    private property <length> maximum-bubble-width:
+        min(root.width, min(520px, root.width * 0.88));
+    private property <length> measured-bubble-width:
+        min(root.maximum-bubble-width, max(48px, user-text-measure.preferred-width + 24px));
+
+    height: user-bubble.height;
+    background: transparent;
+
+    user-text-measure := Text {
+        visible: false;
+        width: 0px;
+        height: 0px;
+        text: root.content;
+        font-size: GitHubMetrics.text-medium;
+    }
+
+    user-bubble := Rectangle {
+        x: parent.width - self.width;
+        width: root.measured-bubble-width;
+        height: user-message-text.height + GitHubMetrics.size-16;
+        border-radius: GitHubMetrics.radius-large;
+        background: GitHubTheme.control-transparent-subtle;
+
+        user-message-text := Text {
+            x: GitHubMetrics.size-12;
+            y: GitHubMetrics.size-8;
+            width: parent.width - GitHubMetrics.size-24;
+            height: self.preferred-height + GitHubMarkdownMetrics.glyph-safety-height;
+            text: root.content;
+            font-size: GitHubMetrics.text-medium;
+            color: GitHubTheme.fg-default;
+            wrap: word-wrap;
+            accessible-label: root.content;
+        }
+    }
+}
 
 // Copilot review comments expose High, Medium, and Low directly. Keep the
 // label mounted so severity changes do not move the finding title.

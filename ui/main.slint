@@ -7,7 +7,7 @@ import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.sl
 import { GitHubJobRunPage as JobRunPage } from "./views/job_run.slint";
 import { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 import { GitHubPullRequestReviewPage } from "@pr-review";
-import { GitHubAiReviewPanel, AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem } from "@ai-review";
+import { GitHubAiReviewPanel, AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AgentResponseBlockKind, AgentResponseBlock } from "@ai-review";
 import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit, GitHubHeaderActionStrip } from "./components/pr_review/shell.slint";
 import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 
@@ -52,7 +52,7 @@ export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, ChatSelectionRect, MessageRole, MessageStatus } from "./views/chat.slint";
 export { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 export { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
-export { AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem } from "@ai-review";
+export { AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AgentResponseBlockKind, AgentResponseBlock } from "@ai-review";
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 export { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewCodeToken, ArtifactPreviewCodeLine, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
 
@@ -107,9 +107,12 @@ export component MainWindow inherits Window {
     out property <length> chat-layout-window-width: self.width;
     out property <length> chat-layout-window-height: self.height;
     // Rust selects a clear CJK-capable family for each desktop platform.
+    // Codex desktop applies weight 445 at its document root; StyledText inherits
+    // that Window value because Slint 1.17 has no per-item default weight.
     // Terminal content plus PR diff code/file-tree content keep their own fonts.
     in property <string> application-font-family: ".AppleSystemUIFont";
     default-font-family: root.application-font-family;
+    default-font-weight: 445;
 
     // 路由状态 - 对外暴露
     in-out property <Route> current-route: Route.Home;
@@ -185,9 +188,16 @@ export component MainWindow inherits Window {
     private property <bool> sidebar-content-wide: true;
     private property <length> sidebar-content-width: root.width
         - (root.sidebar-content-wide ? 0px : GitHubMetrics.application-sidebar-width);
+    out property <bool> artifact-preview-pr-side-docked-visible:
+        root.artifact-preview-visible
+            && root.artifact-preview-pr-side-context
+            && AppState.artifact-preview-presentation-mode == 0
+            && root.current-route == Route.PrReview
+            && root.ai-review-panel-visible;
     private property <bool> artifact-preview-docked-visible:
         root.artifact-preview-visible
-            && AppState.artifact-preview-presentation-mode == 0;
+            && AppState.artifact-preview-presentation-mode == 0
+            && !root.artifact-preview-pr-side-docked-visible;
     private property <length> artifact-preview-available-width:
         max(0px, root.width - GitHubMetrics.application-sidebar-width * root.sidebar-layout-progress);
     private property <bool> artifact-preview-panel-overlays:
@@ -297,6 +307,9 @@ export component MainWindow inherits Window {
     pure callback advance-sidebar-motion(float, float, float, float) -> SidebarMotionStep;
     callback modal-overlay-visibility-changed(bool);
     callback dismiss-transient-overlays();
+    // Backend bridges report a post-target window click without knowing which
+    // reusable surface is mounted. The composition root owns region routing.
+    callback post-dispatch-pointer-pressed(length, length);
     // One root-window key boundary. Rust owns normalization, scope, conflict
     // detection, command lookup, and dispatch for application shortcuts.
     callback app-shortcut-key-pressed(string, bool, bool, bool, bool) -> bool;
@@ -417,6 +430,30 @@ export component MainWindow inherits Window {
                 )
             )
             : root.ai-review-panel-auto-width;
+    // The PR workspace and its contextual trailing surfaces share these
+    // width/visibility contracts. Keeping them observable makes resize and
+    // host-switch behavior verifiable without exposing internal components.
+    out property <bool> ai-review-content-visible:
+        root.current-route == Route.PrReview
+            && root.ai-review-panel-visible
+            && !root.artifact-preview-pr-side-docked-visible;
+    out property <length> pr-review-trailing-surface-width:
+        root.current-route == Route.PrReview && root.ai-review-panel-visible
+            ? root.ai-review-panel-width
+            : 0px;
+    out property <length> pr-review-main-content-width: max(
+        0px,
+        root.pr-content-width - root.pr-review-trailing-surface-width
+    );
+    out property <length> ai-review-content-x:
+        root.width - root.pr-review-trailing-surface-width;
+    out property <length> ai-review-content-y: root.native-titlebar-inset;
+    out property <length> ai-review-content-width: root.pr-review-trailing-surface-width;
+    private property <length> pr-review-content-height: max(
+        0px,
+        root.height - root.native-titlebar-inset - LayoutConstants.status-bar-height
+    );
+    out property <length> ai-review-content-height: root.pr-review-content-height;
     in property <[AiReviewRuleChoice]> ai-review-rule-options: [];
     in property <string> ai-review-project-rule-id: "";
     in property <string> ai-review-project-rule-name: "";
@@ -430,12 +467,16 @@ export component MainWindow inherits Window {
     callback ai-review-cancel-message(string);
     callback ai-review-rerun(string);
     callback ai-review-send-message(string);
+    callback ai-review-open-response-artifact(string, string, string);
+    callback ai-review-open-response-link(string);
+    callback ai-review-response-wheel-consumed(length);
     callback ai-review-route-visible-changed(bool);
     callback ai-review-refresh-pr-rows();
 
     // Application-level artifact preview. Providers prepare these values on a
     // worker; the root owns only one docked presentation host.
     in-out property <bool> artifact-preview-visible: false;
+    in-out property <bool> artifact-preview-pr-side-context: false;
     in-out property <bool> artifact-preview-loading: false;
     in-out property <string> artifact-preview-loading-message: "Preparing preview";
     in-out property <string> artifact-preview-title: "Preview";
@@ -645,6 +686,7 @@ export component MainWindow inherits Window {
     in property <int> workflow-pr-review-hunk-scroll-restore-revision: 0;
     in property <bool> workflow-pr-review-hunk-scroll-restore-pending: false;
     in property <string> workflow-pr-review-code-font-family: "Menlo";
+    in property <length> workflow-pr-review-code-font-size: 13px;
     in property <string> workflow-pr-review-tree-font-family: ".SF NS";
     in-out property <length> workflow-pr-review-file-list-width: 286px;
     in property <int> workflow-pr-review-selected-file-index: -1;
@@ -964,6 +1006,16 @@ export component MainWindow inherits Window {
 
     dismiss-transient-overlays => {
         TransientOverlayState.dismiss-all();
+    }
+
+    post-dispatch-pointer-pressed(x, y) => {
+        if root.ai-review-content-visible
+            && x >= root.ai-review-content-x
+            && x < root.ai-review-content-x + root.ai-review-content-width
+            && y >= root.ai-review-content-y
+            && y < root.ai-review-content-y + root.ai-review-content-height {
+            root.dismiss-transient-overlays();
+        }
     }
 
     restore-navigation-drawer-state(expanded) => {
@@ -1590,17 +1642,26 @@ export component MainWindow inherits Window {
     // transition after the feature-owned prepared session is released. Its
     // full-height hairline and top-aligned surface match the Codex document pane.
     artifact-preview-panel-host := Rectangle {
-        x: root.width - root.artifact-preview-visible-width;
-        y: 0px;
-        width: root.artifact-preview-visible-width;
-        height: root.height - LayoutConstants.status-bar-height;
+        x: root.width - (root.artifact-preview-pr-side-docked-visible
+            ? root.pr-review-trailing-surface-width
+            : root.artifact-preview-visible-width);
+        y: root.artifact-preview-pr-side-docked-visible
+            ? root.native-titlebar-inset
+            : 0px;
+        width: root.artifact-preview-pr-side-docked-visible
+            ? root.pr-review-trailing-surface-width
+            : root.artifact-preview-visible-width;
+        height: root.artifact-preview-pr-side-docked-visible
+            ? root.pr-review-content-height
+            : root.height - LayoutConstants.status-bar-height;
         background: GitHubTheme.canvas-default;
         clip: true;
-        visible: root.artifact-preview-panel-progress > 0.001;
+        visible: root.artifact-preview-pr-side-docked-visible
+            || root.artifact-preview-panel-progress > 0.001;
         // The docked document pane owns the trailing title-bar region while it
         // is open, so it must paint above the shell's ordinary settings action
         // (z:70). Root overlays and dialogs remain substantially higher.
-        z: 80;
+        z: 790;
 
         Rectangle {
             x: 0px;
@@ -1615,11 +1676,15 @@ export component MainWindow inherits Window {
             // Keep the complete pane right-anchored and reveal it through the
             // host clip. Header controls and Markdown layout no longer shrink
             // on every animation frame.
-            x: root.artifact-preview-performance-optimized
+            x: root.artifact-preview-pr-side-docked-visible
+                ? GitHubMetrics.border-thin
+                : root.artifact-preview-performance-optimized
                 ? parent.width - root.artifact-preview-panel-width
                     + GitHubMetrics.border-thin
                 : GitHubMetrics.border-thin;
-            width: root.artifact-preview-performance-optimized
+            width: root.artifact-preview-pr-side-docked-visible
+                ? max(0px, parent.width - GitHubMetrics.border-thin)
+                : root.artifact-preview-performance-optimized
                 ? max(
                     0px,
                     root.artifact-preview-panel-width - GitHubMetrics.border-thin
@@ -1637,16 +1702,20 @@ export component MainWindow inherits Window {
             can-copy: root.artifact-preview-can-copy;
             can-open-external: root.artifact-preview-can-open-external;
             copy-content: root.artifact-preview-copy-content;
-            layout-resizing: root.artifact-preview-panel-resizing
-                || root.artifact-preview-panel-transitioning;
+            layout-resizing: root.artifact-preview-pr-side-docked-visible
+                ? root.window-live-resizing || root.ai-review-panel-resizing
+                : root.artifact-preview-panel-resizing
+                    || root.artifact-preview-panel-transitioning;
             // FemtoVG replays the complete Markdown draw tree when an ancestor
             // clip moves. Keep the mounted model out of that render path while
             // the docked shell animates, then reveal it once at rest.
             content-suspended: root.artifact-preview-performance-optimized
-                && root.artifact-preview-panel-transitioning;
+                && root.artifact-preview-panel-transitioning
+                && !root.artifact-preview-pr-side-docked-visible;
             performance-optimized: root.artifact-preview-performance-optimized;
             markdown-layout-revision: root.artifact-preview-markdown-layout-revision;
             application-font-family: root.application-font-family;
+            code-font-family: root.workflow-pr-review-code-font-family;
             layout-markdown-window(
                 revision,
                 blocks,
@@ -1955,8 +2024,9 @@ export component MainWindow inherits Window {
     // Compact Primer utility status bar fixed to the bottom edge.
     // z must sit above GitHubPageScrollActions (500) so version/network popovers and
     // click-outside dismiss paint over the terminal / back-to-top IconButtons.
-    // Keep below full-page overlays (PrReview 800), Notify (900), and Toast (1000).
-    GitHubStatusBar {
+    // Routes reserve this bottom strip. Keep the bar just above ordinary route
+    // surfaces so its upward popups remain visible, and below Notify/Toast/Dialog.
+    status-bar := GitHubStatusBar {
         x: 0px;
         y: root.height - LayoutConstants.status-bar-height;
         width: root.width;
@@ -1971,7 +2041,10 @@ export component MainWindow inherits Window {
         unread-message-count: root.message-unread-count;
         messages-route-active: root.current-route == Route.Messages;
         open-messages => { root.navigate(Route.Messages); }
-        z: 600;
+        // The bar occupies the route-reserved bottom strip, so it can sit just
+        // above PR Review and let its anchored menus paint over route content.
+        // Dialog/input shields remain substantially higher at z:2999/3000.
+        z: 810;
     }
 
     if (root.current-route == Route.Workflow || root.current-route == Route.Project) && root.show-page-scroll-view: Rectangle {
@@ -2071,15 +2144,12 @@ export component MainWindow inherits Window {
         x: 0px;
         y: root.native-titlebar-inset;
         width: root.width;
-        height: root.height - root.native-titlebar-inset;
+        height: root.pr-review-content-height;
         z: 800;
         application-width: root.width;
         application-height: root.height;
         shell-leading-inset: root.pr-content-x;
-        shell-content-width: max(
-            0px,
-            root.pr-content-width - (root.ai-review-panel-visible ? root.ai-review-panel-width : 0px)
-        );
+        shell-content-width: root.pr-review-main-content-width;
         // Divider drags use the same bounded-cost projection as native live
         // resize and commit the expensive diff layout once on release.
         live-resizing: root.window-live-resizing || root.ai-review-panel-resizing;
@@ -2127,6 +2197,7 @@ export component MainWindow inherits Window {
         hunk-scroll-anchor-source-index: root.workflow-pr-review-hunk-scroll-anchor-source-index;
         hunk-scroll-restore-revision: root.workflow-pr-review-hunk-scroll-restore-revision;
         code-font-family: root.workflow-pr-review-code-font-family;
+        code-font-size: root.workflow-pr-review-code-font-size;
         tree-font-family: root.workflow-pr-review-tree-font-family;
         file-list-preferred-width <=> root.workflow-pr-review-file-list-width;
         selected-file-index: root.workflow-pr-review-selected-file-index;
@@ -2281,15 +2352,16 @@ export component MainWindow inherits Window {
     }
 
     if root.current-route == Route.PrReview && root.ai-review-panel-visible: GitHubAiReviewPanel {
-        x: root.width - root.ai-review-panel-width;
+        x: root.width - root.pr-review-trailing-surface-width;
         y: root.native-titlebar-inset;
-        width: root.ai-review-panel-width;
-        height: root.height - root.native-titlebar-inset;
+        width: root.pr-review-trailing-surface-width;
+        height: root.pr-review-content-height;
         // Keep this sibling below the PR route so its z:3000 Dialogs cover the
         // complete panel. The route's full-window FocusScope is pointer-
         // transparent outside its controls, so panel inputs still receive the
         // first press.
         z: 790;
+        visible: root.ai-review-content-visible;
         task-id: root.ai-review-current-task-id;
         project-name: root.ai-review-project-name;
         pull-request-number: root.ai-review-pull-request-number;
@@ -2310,18 +2382,29 @@ export component MainWindow inherits Window {
         chat-sending <=> root.ai-review-chat-sending;
         chat-status: root.ai-review-chat-status;
         chat-elapsed-seconds <=> root.ai-review-chat-elapsed-seconds;
+        layout-resizing: root.window-live-resizing || root.ai-review-panel-resizing;
+        application-font-family: root.application-font-family;
+        code-font-family: root.workflow-pr-review-code-font-family;
         close => { root.ai-review-close-panel(); }
         cancel(task-id) => { root.ai-review-cancel(task-id); }
         cancel-message(task-id) => { root.ai-review-cancel-message(task-id); }
         re-review(extra) => { root.ai-review-rerun(extra); }
         send-message(message) => { root.ai-review-send-message(message); }
         select-finding(file, line) => { root.ai-review-select-finding(file, line); }
+        open-response-artifact(id, title, markdown) => {
+            root.ai-review-open-response-artifact(id, title, markdown);
+        }
+        open-response-link(url) => { root.ai-review-open-response-link(url); }
+        response-wheel-consumed(movement) => {
+            root.ai-review-response-wheel-consumed(movement);
+        }
+        interaction-started => { root.dismiss-transient-overlays(); }
     }
 
     GitHubArtifactPreviewResizeHandle {
-        x: root.width - root.ai-review-panel-width - 4px;
+        x: root.width - root.pr-review-trailing-surface-width - 4px;
         y: root.native-titlebar-inset;
-        height: root.height - root.native-titlebar-inset;
+        height: root.pr-review-content-height;
         visible: root.current-route == Route.PrReview && root.ai-review-panel-visible;
         resize-enabled: self.visible
             && !root.window-live-resizing
@@ -2587,6 +2670,25 @@ export component MainWindow inherits Window {
         y: 0px;
         width: root.width;
         height: root.native-titlebar-inset;
+        background: GitHubTheme.backdrop;
+        z: 2999;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: default;
+        }
+    }
+
+    // PR Review reserves the persistent utility bar outside the route's dialog
+    // viewport. Continue the same backdrop through that final strip so the
+    // complete window reads as one modal surface and the bar cannot receive
+    // input while a dialog is open.
+    if root.pr-review-dialog-visible: pr-review-status-bar-backdrop := Rectangle {
+        x: 0px;
+        y: root.height - LayoutConstants.status-bar-height;
+        width: root.width;
+        height: LayoutConstants.status-bar-height;
         background: GitHubTheme.backdrop;
         z: 2999;
 

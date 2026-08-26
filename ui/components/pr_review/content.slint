@@ -283,6 +283,7 @@ export component GitHubSelectableDiffCode inherits Rectangle {
         text: "Ag";
         font-family: root.code-font-family;
         font-size: root.code-font-size;
+        font-weight: 400;
         overflow: clip;
         wrap: no-wrap;
     }
@@ -398,6 +399,7 @@ export component GitHubSelectableDiffCode inherits Rectangle {
             text: !root.wrap-content ? hit.prefix : "";
             font-family: root.code-font-family;
             font-size: root.code-font-size;
+            font-weight: 400;
             wrap: no-wrap;
         }
         inactive-match := Text {
@@ -407,6 +409,7 @@ export component GitHubSelectableDiffCode inherits Rectangle {
             text: hit.text;
             font-family: root.code-font-family;
             font-size: root.code-font-size;
+            font-weight: 400;
             wrap: no-wrap;
         }
     }
@@ -592,6 +595,7 @@ export component GitHubSelectableDiffCode inherits Rectangle {
         wrap: root.wrap-content ? word-wrap : no-wrap;
         font-family: root.code-font-family;
         font-size: root.code-font-size;
+        font-weight: 400;
         color: root.fg-default;
         selection-foreground-color: root.fg-default;
         selection-background-color: transparent;
@@ -730,6 +734,7 @@ export component GitHubSplitDiffSide inherits Rectangle {
                 vertical-alignment: center;
                 font-family: root.code-font-family;
                 font-size: root.code-font-size;
+                font-weight: 400;
                 color: root.kind == "addition" || root.kind == "deletion"
                     ? root.fg-default
                     : root.fg-muted;
@@ -754,6 +759,7 @@ export component GitHubSplitDiffSide inherits Rectangle {
                 vertical-alignment: center;
                 font-family: root.code-font-family;
                 font-size: root.code-font-size;
+                font-weight: 400;
                 color: root.fg-default;
             }
         }

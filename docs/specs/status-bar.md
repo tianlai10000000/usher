@@ -19,8 +19,10 @@ surface.
 - `ui/components/label/github_counter_label.slint` owns the shared Primer
   CounterLabel schemes, limit formatting, compact badge geometry, and
   hide-if-zero behavior used by the notification trigger.
-- `ui/main.slint` mounts one status bar at the root shell, below ordinary route
-  content and above route-local floating controls. Its transparent host remains
+- `ui/main.slint` mounts one status bar at the root shell in a bottom strip
+  reserved by ordinary routes. The bar and its upward popups paint above route
+  content and route-local floating controls, but below Dialog, Notification,
+  and Toast overlays. Its transparent host remains
   in window coordinates; only the painted surface and transient left lane follow
   the live main-content edge while the docked sidebar moves.
 - `src/shortcuts/` owns shortcut initialization stages, failure/readiness, and
@@ -40,8 +42,9 @@ surface.
   当前浮层选择及浮层锚点。
 - `ui/components/label/github_counter_label.slint` 持有通知入口复用的 Primer
   CounterLabel Scheme、上限格式、紧凑徽标几何与零值隐藏行为。
-- `ui/main.slint` 在根 Shell 只挂载一个状态栏；它位于普通路由内容之下、路由局部
-  浮动控件之上。透明宿主始终使用窗口坐标；固定侧栏移动时，只有可见表面与左侧
+- `ui/main.slint` 在根 Shell 的普通路由底部预留区只挂载一个状态栏；状态栏及其向上
+  浮层位于路由内容和路由局部浮动控件之上，但低于 Dialog、Notification 与 Toast。
+  透明宿主始终使用窗口坐标；固定侧栏移动时，只有可见表面与左侧
   临时状态区跟随主内容区实时左边缘。
 - `src/shortcuts/` 持有快捷键初始化阶段、失败/就绪状态，以及快捷键浮层显示的
   键位详情。
@@ -83,6 +86,11 @@ surface.
    the selected/pressed chrome is reserved for `Route.Messages` being current.
    The Tooltip retains the complete count, and activation navigates to
    `Route.Messages`. A persistent `Notifications N` label is not rendered.
+9. A PR Dialog backdrop extends through this complete 28 px strip and shields
+   every status item while the dialog is visible. This continuation uses the
+   same translucent backdrop as the rest of the Dialog so the real status-bar
+   surface and items remain consistently dimmed instead of becoming an opaque
+   replacement band.
 
 1. 28px 高的透明宿主覆盖窗口底边，始终保持 `x=0` 和窗口宽度，不得使用受侧栏
    影响的内容区宽度。
@@ -102,6 +110,9 @@ surface.
    更大值显示 `99+`，数量为 0 时不挂载徽标。未读只用强调色铃铛与数字徽标表达；
    选中/按下底色仅在当前路由为 `Route.Messages` 时出现。Tooltip 保留完整数量，
    激活后导航到 `Route.Messages`，不显示常驻 `Notifications N` 文字。
+9. PR Dialog 显示期间，其遮罩必须延伸覆盖完整 28px 状态栏区域并屏蔽所有状态项输入；
+   该延伸使用与 Dialog 其余区域相同的半透明遮罩，使真实状态栏表面和状态项被一致压暗，
+   不得用不透明替代色绘制成独立的底部色带。
 
 ## Status semantics / 状态语义
 
@@ -142,7 +153,8 @@ Tooltip 与浮层详情。
    twice.
 6. Popups open above the bottom anchor, scroll internally if needed, close on
    Escape, and close when the user clicks outside. Opening a popup must not
-   remove or cover the version item.
+   remove or cover the version item. The popup surface must remain above every
+   ordinary route, including the full-window PR Review route.
 
 1. 右侧常驻条目的 Tooltip 尾边与条目尾边对齐，并向左展开；在最小窗口宽度下也
    必须留在窗口内。
@@ -155,7 +167,8 @@ Tooltip 与浮层详情。
 5. 浮层 viewport 与条目 anchor 只在状态栏父坐标系中换算一次，禁止重复减去
    状态栏 x。
 6. 浮层从底部锚点向上打开，内容过高时内部滚动；支持 Escape 与外部点击关闭。
-   打开浮层不得移除或遮挡版本项。
+   打开浮层不得移除或遮挡版本项；浮层表面必须位于所有普通路由之上，包括全窗口
+   PR Review 路由。
 
 ## Failure behavior / 失败行为
 

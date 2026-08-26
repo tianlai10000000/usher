@@ -22,6 +22,7 @@ import { GitHubNotificationBanner } from "../notify/actions_notify.slint";
 import { DialogManager } from "../dialog/dialog_manager.slint";
 import { GitHubMessageListItem, MessageLevel } from "../messages/github_message_components.slint";
 import { GitHubAiReviewFindingRow, GitHubAiReviewSeverityLabel } from "../ai_review/github_ai_review_components.slint";
+import { GitHubAgentResponseShowcase } from "github_agent_response_showcase.slint";
 
 component GitHubShowcaseSection inherits Rectangle {
     in property <string> title;
@@ -1297,6 +1298,19 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                         GitHubAiReviewSeverityLabel { severity: "low"; }
                     }
                 }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "Agent response";
+            description: "Native compact Markdown blocks with in-place Preview and opaque link callback feedback.";
+            content-height: agent-response-showcase.height + GitHubMetrics.size-8;
+
+            agent-response-showcase := GitHubAgentResponseShowcase {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                open-preview => { root.open-artifact-preview-fixture("markdown"); }
             }
         }
 

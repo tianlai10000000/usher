@@ -24,6 +24,7 @@ static mut TITLEBAR_ACCESSORY_ANCHOR: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_CONTROLS_CONTAINER: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_MODAL_SHIELD: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_EVENT_MONITOR: *mut Object = std::ptr::null_mut();
+static mut ARTIFACT_PREVIEW_TITLEBAR_DELEGATE: *mut Object = std::ptr::null_mut();
 static mut TRAFFIC_LIGHT_BASE_X: [f64; 3] = [f64::NAN; 3];
 static mut TRAFFIC_LIGHT_BASE_Y: [f64; 3] = [f64::NAN; 3];
 /// Shift the AppKit traffic-light cluster right so the close button shares the
@@ -279,6 +280,19 @@ fn native_window(window: &MainWindow) -> Option<*mut Object> {
 thread_local! {
     static ARTIFACT_PREVIEW_RESIZE_WINDOWS: std::cell::RefCell<std::collections::HashSet<usize>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    static ARTIFACT_PREVIEW_TITLEBAR: std::cell::RefCell<Option<ArtifactPreviewTitlebar>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+struct ArtifactPreviewTitlebar {
+    native_window: usize,
+    window: slint::Weak<crate::ArtifactPreviewWindow>,
+    container: *mut Object,
+    copy_button: *mut Object,
+    external_button: *mut Object,
+    close_button: *mut Object,
+    can_copy: bool,
+    can_open_external: bool,
 }
 
 /// Bridge AppKit's exact live-resize lifecycle into the detached preview only.
@@ -357,6 +371,271 @@ pub(crate) fn install_artifact_preview_live_resize(window: &crate::ArtifactPrevi
         });
         log::warn!("[ArtifactPreview] Failed to install detached live-resize observers");
     }
+}
+
+fn with_artifact_preview_window(action: impl FnOnce(&crate::ArtifactPreviewWindow)) {
+    let window = ARTIFACT_PREVIEW_TITLEBAR
+        .with(|state| state.borrow().as_ref().map(|state| state.window.clone()));
+    if let Some(window) = window.and_then(|window| window.upgrade()) {
+        action(&window);
+    }
+}
+
+fn register_artifact_preview_titlebar_delegate_class() -> &'static Class {
+    static mut DELEGATE_CLASS: *const Class = std::ptr::null();
+    static REGISTER: Once = Once::new();
+
+    REGISTER.call_once(|| {
+        let superclass = Class::get("NSObject").expect("NSObject class not found");
+        let mut declaration = ClassDecl::new("UsherArtifactPreviewTitlebarDelegate", superclass)
+            .expect("failed to declare artifact preview title-bar delegate class");
+
+        extern "C" fn copy_preview(_this: &Object, _cmd: Sel, _sender: *mut Object) {
+            with_artifact_preview_window(|window| {
+                window.invoke_copy_requested(window.get_copy_content());
+            });
+        }
+
+        extern "C" fn open_external(_this: &Object, _cmd: Sel, _sender: *mut Object) {
+            with_artifact_preview_window(|window| {
+                window.invoke_open_external_requested();
+            });
+        }
+
+        extern "C" fn close_preview(_this: &Object, _cmd: Sel, _sender: *mut Object) {
+            with_artifact_preview_window(|window| {
+                window.invoke_dismiss_requested();
+            });
+        }
+
+        unsafe {
+            declaration.add_method(
+                sel!(usherCopyArtifactPreview:),
+                copy_preview as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            declaration.add_method(
+                sel!(usherOpenArtifactPreviewExternally:),
+                open_external as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            declaration.add_method(
+                sel!(usherCloseArtifactPreview:),
+                close_preview as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            DELEGATE_CLASS = declaration.register();
+        }
+    });
+
+    unsafe { &*DELEGATE_CLASS }
+}
+
+fn artifact_preview_titlebar_width(can_copy: bool, can_open_external: bool) -> f64 {
+    let action_count = artifact_preview_titlebar_actions(can_copy, can_open_external)
+        .into_iter()
+        .filter(|visible| *visible)
+        .count();
+    action_count as f64 * 28.0 + action_count.saturating_sub(1) as f64 * 4.0 + 8.0
+}
+
+fn artifact_preview_titlebar_actions(can_copy: bool, can_open_external: bool) -> [bool; 3] {
+    [can_copy, can_open_external, true]
+}
+
+unsafe fn layout_artifact_preview_titlebar(
+    state: &ArtifactPreviewTitlebar,
+    can_copy: bool,
+    can_open_external: bool,
+) {
+    let mut x = 0.0;
+    for (button, visible) in [state.copy_button, state.external_button, state.close_button]
+        .into_iter()
+        .zip(artifact_preview_titlebar_actions(
+            can_copy,
+            can_open_external,
+        ))
+    {
+        unsafe {
+            let _: () = msg_send![button, setHidden: !visible];
+        }
+        if !visible {
+            continue;
+        }
+        unsafe {
+            let _: () = msg_send![button, setFrameOrigin: NSPoint { x, y: 0.0 }];
+        }
+        x += 32.0;
+    }
+    unsafe {
+        let _: () = msg_send![
+            state.container,
+            setFrameSize: NSSize {
+                width: artifact_preview_titlebar_width(can_copy, can_open_external),
+                height: 28.0,
+            }
+        ];
+    }
+}
+
+/// Mount the detached Preview actions in the trailing native title bar. The
+/// same entry point also refreshes optional action visibility as payloads are
+/// replaced in the reusable window.
+pub(crate) fn install_artifact_preview_titlebar_actions(preview: &crate::ArtifactPreviewWindow) {
+    let Some(native_window) = native_window_for_slint_window(preview.window()) else {
+        return;
+    };
+    let key = native_window as usize;
+    let can_copy = preview.get_can_copy();
+    let can_open_external = preview.get_can_open_external();
+    let updated = ARTIFACT_PREVIEW_TITLEBAR.with(|state| {
+        let mut state = state.borrow_mut();
+        let Some(existing) = state.as_mut() else {
+            return false;
+        };
+        if existing.native_window != key || existing.window.upgrade().is_none() {
+            return false;
+        }
+        existing.window = preview.as_weak();
+        if existing.can_copy == can_copy && existing.can_open_external == can_open_external {
+            return true;
+        }
+        existing.can_copy = can_copy;
+        existing.can_open_external = can_open_external;
+        unsafe {
+            layout_artifact_preview_titlebar(existing, can_copy, can_open_external);
+        }
+        true
+    });
+    if updated {
+        return;
+    }
+
+    let Some(accessory_class) = Class::get("NSTitlebarAccessoryViewController") else {
+        return;
+    };
+    let accessory: *mut Object = unsafe { msg_send![accessory_class, alloc] };
+    let accessory: *mut Object = unsafe { msg_send![accessory, init] };
+    if accessory.is_null() {
+        return;
+    }
+    let width = artifact_preview_titlebar_width(can_copy, can_open_external);
+    let container = unsafe {
+        create_view(
+            "NSView",
+            NSRect {
+                origin: NSPoint { x: 0.0, y: 0.0 },
+                size: NSSize {
+                    width,
+                    height: 28.0,
+                },
+            },
+        )
+    };
+    let copy_button = unsafe {
+        create_view(
+            "NSButton",
+            NSRect {
+                origin: NSPoint { x: 0.0, y: 0.0 },
+                size: NSSize {
+                    width: 28.0,
+                    height: 28.0,
+                },
+            },
+        )
+    };
+    let external_button = unsafe {
+        create_view(
+            "NSButton",
+            NSRect {
+                origin: NSPoint { x: 0.0, y: 0.0 },
+                size: NSSize {
+                    width: 28.0,
+                    height: 28.0,
+                },
+            },
+        )
+    };
+    let close_button = unsafe {
+        create_view(
+            "NSButton",
+            NSRect {
+                origin: NSPoint { x: 0.0, y: 0.0 },
+                size: NSSize {
+                    width: 28.0,
+                    height: 28.0,
+                },
+            },
+        )
+    };
+    let (Some(container), Some(copy_button), Some(external_button), Some(close_button)) =
+        (container, copy_button, external_button, close_button)
+    else {
+        return;
+    };
+
+    let delegate = unsafe {
+        if ARTIFACT_PREVIEW_TITLEBAR_DELEGATE.is_null() {
+            let delegate_class = register_artifact_preview_titlebar_delegate_class();
+            let delegate: *mut Object = msg_send![delegate_class, alloc];
+            let delegate: *mut Object = msg_send![delegate, init];
+            if !delegate.is_null() {
+                let _: () = msg_send![delegate, retain];
+                ARTIFACT_PREVIEW_TITLEBAR_DELEGATE = delegate;
+            }
+        }
+        ARTIFACT_PREVIEW_TITLEBAR_DELEGATE
+    };
+    if delegate.is_null() {
+        return;
+    }
+    unsafe {
+        configure_icon_button(
+            copy_button,
+            &["symbol:doc.on.doc", "NSImageNameMultipleDocuments"],
+            "Copy",
+            "Copy preview",
+            delegate,
+            sel!(usherCopyArtifactPreview:),
+        );
+        configure_icon_button(
+            external_button,
+            &["symbol:arrow.up.forward.app", "NSImageNameShareTemplate"],
+            "Open",
+            "Open with system application",
+            delegate,
+            sel!(usherOpenArtifactPreviewExternally:),
+        );
+        configure_icon_button(
+            close_button,
+            &["symbol:xmark", "NSImageNameStopProgressTemplate"],
+            "Close",
+            "Close preview",
+            delegate,
+            sel!(usherCloseArtifactPreview:),
+        );
+        let _: () = msg_send![container, addSubview: copy_button];
+        let _: () = msg_send![container, addSubview: external_button];
+        let _: () = msg_send![container, addSubview: close_button];
+        let _: () = msg_send![accessory, setView: container];
+        // NSTitlebarAccessoryLayoutAttributeRight.
+        let _: () = msg_send![accessory, setLayoutAttribute: 2u64];
+        let _: () = msg_send![native_window, addTitlebarAccessoryViewController: accessory];
+    }
+
+    ARTIFACT_PREVIEW_TITLEBAR.with(|state| {
+        let titlebar = ArtifactPreviewTitlebar {
+            native_window: key,
+            window: preview.as_weak(),
+            container,
+            copy_button,
+            external_button,
+            close_button,
+            can_copy,
+            can_open_external,
+        };
+        unsafe {
+            layout_artifact_preview_titlebar(&titlebar, can_copy, can_open_external);
+        }
+        *state.borrow_mut() = Some(titlebar);
+    });
 }
 
 /// Point size for sidebar/back/forward SF Symbols inside the 28 pt accessory
@@ -827,14 +1106,20 @@ fn install_app_event_monitor(window: *mut Object) -> bool {
         }
         let location: NSPoint = unsafe { msg_send![event, locationInWindow] };
         let content_layout: NSRect = unsafe { msg_send![window, contentLayoutRect] };
+        let window_frame: NSRect = unsafe { msg_send![window, frame] };
         let titlebar_start = content_layout.origin.y + content_layout.size.height;
-        if location.y >= titlebar_start {
-            let _ = slint::invoke_from_event_loop(|| {
-                if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
+        let titlebar_clicked = location.y >= titlebar_start;
+        let click_x = location.x as f32;
+        let click_y = (window_frame.size.height - location.y) as f32;
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
+                if titlebar_clicked {
                     ui.invoke_dismiss_transient_overlays();
+                } else {
+                    ui.invoke_post_dispatch_pointer_pressed(click_x, click_y);
                 }
-            });
-        }
+            }
+        });
         event_ptr
     });
 
@@ -1626,9 +1911,9 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
 mod tests {
     use super::{
         NS_WINDOW_STYLE_MASK_FULLSCREEN, SIDEBAR_DARK_MODE, TITLEBAR_SYMBOL_POINT_SIZE,
-        macos_shortcut_key, sidebar_content_surface_components, sidebar_toggle_image_names,
-        sidebar_toggle_tooltip, style_mask_is_fullscreen, titlebar_controls_x, titlebar_controls_y,
-        traffic_light_origin,
+        artifact_preview_titlebar_actions, artifact_preview_titlebar_width, macos_shortcut_key,
+        sidebar_content_surface_components, sidebar_toggle_image_names, sidebar_toggle_tooltip,
+        style_mask_is_fullscreen, titlebar_controls_x, titlebar_controls_y, traffic_light_origin,
     };
 
     #[test]
@@ -1690,6 +1975,33 @@ mod tests {
     fn titlebar_symbol_point_size_stays_on_whole_points() {
         assert_eq!(TITLEBAR_SYMBOL_POINT_SIZE, 14.0);
         assert_eq!(TITLEBAR_SYMBOL_POINT_SIZE.fract(), 0.0);
+    }
+
+    #[test]
+    fn mock_preview_capabilities_compact_native_titlebar_actions() {
+        assert_eq!(
+            artifact_preview_titlebar_actions(false, false),
+            [false, false, true]
+        );
+        assert_eq!(artifact_preview_titlebar_width(false, false), 36.0);
+
+        assert_eq!(
+            artifact_preview_titlebar_actions(true, false),
+            [true, false, true]
+        );
+        assert_eq!(artifact_preview_titlebar_width(true, false), 68.0);
+
+        assert_eq!(
+            artifact_preview_titlebar_actions(false, true),
+            [false, true, true]
+        );
+        assert_eq!(artifact_preview_titlebar_width(false, true), 68.0);
+
+        assert_eq!(
+            artifact_preview_titlebar_actions(true, true),
+            [true, true, true]
+        );
+        assert_eq!(artifact_preview_titlebar_width(true, true), 100.0);
     }
 
     #[test]

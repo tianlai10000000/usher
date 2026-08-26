@@ -1,0 +1,126 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { AgentResponseBlockKind, GitHubAgentResponse } from "../agent_response/github_agent_response.slint";
+
+export component GitHubAgentResponseShowcase inherits Rectangle {
+    callback open-preview();
+
+    private property <string> action-feedback: "No response action activated yet.";
+    private property <length> content-inset: GitHubMetrics.size-16;
+
+    height: response.y + response.height + feedback-row.height + GitHubMetrics.size-12;
+    border-radius: GitHubMetrics.radius-medium;
+    border-width: GitHubMetrics.border-thin;
+    border-color: GitHubTheme.border-default;
+    background: GitHubTheme.canvas-subtle;
+
+    response := GitHubAgentResponse {
+        x: root.content-inset;
+        y: GitHubMetrics.size-8;
+        width: max(0px, parent.width - 2 * root.content-inset);
+        blocks: [
+            {
+                kind: AgentResponseBlockKind.Heading2,
+                styled: @markdown("Review response"),
+                plain-text: "Review response",
+                list-marker: "",
+                list-depth: 0,
+                code-language: "",
+                span-count: 1,
+                line-count: 1
+            },
+            {
+                kind: AgentResponseBlockKind.Paragraph,
+                styled: @markdown("Keep **structured context**, *clear emphasis*, and [repository guidance](usher-repo-file:showcase-agent-response) in one readable paragraph."),
+                plain-text: "Keep structured context, clear emphasis, and repository guidance in one readable paragraph.",
+                list-marker: "",
+                list-depth: 0,
+                code-language: "",
+                span-count: 5,
+                line-count: 1
+            },
+            {
+                kind: AgentResponseBlockKind.ListItem,
+                styled: @markdown("Bound compact projection work on the worker."),
+                plain-text: "Bound compact projection work on the worker.",
+                list-marker: "1.",
+                list-depth: 0,
+                code-language: "",
+                span-count: 1,
+                line-count: 1
+            },
+            {
+                kind: AgentResponseBlockKind.Quote,
+                styled: @markdown("Full Markdown remains available through Preview."),
+                plain-text: "Full Markdown remains available through Preview.",
+                list-marker: "",
+                list-depth: 0,
+                code-language: "",
+                span-count: 1,
+                line-count: 1
+            },
+            {
+                kind: AgentResponseBlockKind.CodeBlock,
+                styled: @markdown("cargo test --test ai_review_response_ui"),
+                plain-text: "cargo test --test ai_review_response_ui",
+                list-marker: "",
+                list-depth: 0,
+                code-language: "sh",
+                span-count: 0,
+                line-count: 1
+            },
+            {
+                kind: AgentResponseBlockKind.TableRow,
+                styled: @markdown("Projection | Bounded    Preview | Complete"),
+                plain-text: "Projection | Bounded    Preview | Complete",
+                list-marker: "",
+                list-depth: 0,
+                code-language: "",
+                span-count: 1,
+                line-count: 1
+            },
+            {
+                kind: AgentResponseBlockKind.Rule,
+                styled: @markdown("Rule"),
+                plain-text: "",
+                list-marker: "",
+                list-depth: 0,
+                code-language: "",
+                span-count: 0,
+                line-count: 1
+            }
+        ];
+        preview-title: "Review response";
+        preview-available: true;
+        open-full-response => {
+            root.action-feedback = "Preview action: Review response";
+            root.open-preview();
+        }
+        open-link(url) => {
+            root.action-feedback = "Link callback: " + url;
+        }
+    }
+
+    feedback-row := Rectangle {
+        x: root.content-inset;
+        y: response.y + response.height + GitHubMetrics.size-8;
+        width: max(0px, parent.width - 2 * root.content-inset);
+        height: GitHubMetrics.size-28;
+        border-width: GitHubMetrics.border-thin;
+        border-color: GitHubTheme.border-muted;
+        border-radius: GitHubMetrics.radius-small;
+        background: GitHubTheme.canvas-default;
+
+        Text {
+            x: GitHubMetrics.size-8;
+            width: max(0px, parent.width - GitHubMetrics.size-16);
+            height: parent.height;
+            text: root.action-feedback;
+            font-size: GitHubMetrics.text-small;
+            color: root.action-feedback == "No response action activated yet."
+                ? GitHubTheme.fg-muted
+                : GitHubTheme.success-fg;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}

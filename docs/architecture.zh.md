@@ -47,7 +47,7 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `crates/usher-search/` | 与框架无关的通用 Find 引擎：Unicode 安全的非重叠文本命中、首尾循环的相邻结果导航，以及 Chromium/Blink `CenterIfNeeded` 视口策略。Feature 只提供领域/model 与视觉换行适配。 |
 | `crates/usher-state-store/` | 与框架无关的跨页面 State 接口与内置引擎：强类型 reducer/action、不可变 revision 快照、selector、立即 hydration、自动单调订阅与 RAII 取消。Feature 门面隐藏具体引擎，未来可通过 adapter 替换社区 Store。 |
 | `crates/usher-virtual-list/` | 与框架无关的可变行高虚拟列表门面：精确 item extent、offset/index 映射、有界 overscan 窗口与精确 item reveal。私有 adapter 当前使用社区 `virtualizer` 引擎；Feature 与 Slint bridge 只依赖本地接口，底层可替换。 |
-| `crates/usher-preview/` | 与框架无关的 Artifact 描述、Provider/Registry 契约、运行时策略、准备后 payload，以及构建期可拆卸的 Markdown/图片/纯文本 Provider；不依赖 Chat、MainWindow 或 Slint。 |
+| `crates/usher-preview/` | 与框架无关的 Artifact 描述、Provider/Registry 契约、运行时策略、准备后 payload，以及构建期可拆卸的 Markdown/图片/纯文本 Provider；其纯结构 Markdown 入口保留 block 与行内语义，但不会初始化代码高亮资源；不依赖 Chat、MainWindow 或 Slint。 |
 | `crates/usher-ai-review/` | 可选且与框架无关的 AI Review 领域包：规则/配置 reducer、动态有界调度器、Review 输入/Session、diff 分块、Prompt 构造、响应解析和 finding 聚合；不依赖 MainWindow 或 Slint。 |
 | `src/app_runtime.rs` | 进程级 Tokio runtime，生产默认使用 2 个 worker；runtime 线程安装 tracing dispatch，并保留显式环境覆盖用于受控基准。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint 与生命周期高水位、启动/运行元数据、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
@@ -69,8 +69,9 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `src/workflow/` | 按项目隔离的 Branch、Tag、PR、CD 状态和命令执行；Tag 与 PR Review 通过稳定文件 façade 暴露内部 controller 和纯逻辑模块。 |
 | `src/terminal/` | PTY 生命周期、viewport 同步、渲染、选择和项目切换；纯输入映射、诊断与刷新节流使用独立模块。 |
 | `src/chat/` | AI/RAG 共用 Chat 展示和交互、按模式隔离的 Session/JSONL 历史、请求耗时管理、transport、宽度无关纯文本/Artifact 投影、有界渲染缓存、分页和纯有界虚拟布局；完整 Artifact 渲染归通用预览 Feature。 |
+| `src/agent_response/` | Agent Markdown 的宽度无关投影；负责 16 KiB/48 block 行内预算、128 项/近似记账 2 MiB 的内容身份缓存，以及不透明仓库 Markdown action token；不执行文件 I/O，也不拥有 Preview Host。 |
 | `src/ai_review/` | 可选 AI Review 配置门面和应用 controller；负责 State Store 订阅、自动持久化 Worker、动态任务调度、Review/Ask 耗时投影、按需加载 diff/规则、AI 调用、在途 Provider 取消、已完成 Review 与轻量 PR Chat Session 存储、通知和不依赖路由的 PR 结果投影。 |
-| `src/artifact_preview/` | 应用预览门面：Provider 策略、后台准备、过期结果取消、Slint model 适配、单活动 Session，以及固定面板与独立窗口之间的即时迁移。其 `test-fixtures` 适配器仅在开发构建存在，并让演练样例通过同一门面提交。 |
+| `src/artifact_preview/` | 应用预览门面：Provider 策略、后台准备、过期结果取消、Slint model 适配、单活动 Session、固定面板与独立窗口之间的即时迁移、向 Detached component tree 显式同步 effective theme，以及显式激活仓库 Markdown 时由 Worker 执行的 canonical containment 校验和读取。其 `test-fixtures` 适配器仅在开发构建存在，并让演练样例通过同一门面提交。 |
 | `src/update/` | Release 检查、流式下载、进度、取消、安装和重启。 |
 | `src/router/` | 路由映射、历史、可见性和可达性 transition；不执行 feature 清理。 |
 | `src/shortcuts/` | 应用命令 ID、声明式键位、平台归一化匹配、路由作用域、冲突校验、分发与展示标签。 |
@@ -104,6 +105,7 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `ui/features/ai_review/`、`ui/features/ai_review_settings/` | 可选编译包，提供完整实现和协议兼容 disabled 实现；完整 Review 包只暴露 PR 右侧面板，不拥有独立路由。 |
 | `ui/components/` | 所有应用视觉组件的统一归属目录，包括 Control、Row、Card、Menu、Tab、Panel、Dialog、Field、Feedback 和功能专用视觉积木；GitHub/Primer 实现统一使用 `GitHub*` 符号。 |
 | `ui/components/artifact_preview/` | 应用级通用预览外壳、基于 Primer token 的原生 Markdown/文本/图片 Surface、右侧固定面板与独立原生窗口；不承担解析或 I/O，也不引入 WebView。 |
+| `ui/components/agent_response/` | Agent 回复的紧凑原生 block renderer；只消费准备好的结构并上报 link/action callback，不承担 Markdown 解析、仓库路径解析或文件 I/O。 |
 | `ui/components/about/`、`ai_review/`、`chat/`、`project/`、`workflow/` | 从路由页面抽出的功能级 GitHub/Primer 视觉积木，不负责 I/O 或路由跳转。 |
 | `ui/components/showcase/` | GitHub/Primer 属性对比矩阵，以及把依赖业务 model 的组合组件链接到真实路由的登记表；可选 Preview 样例只发出 fixture id，不得绕过 Provider 或 Host；新增或实质变更的视觉组件必须同步登记。 |
 | `ui/components/button/github_icon_button.slint` | 图标按钮、浮动按钮、Terminal、项目卡片和复制操作共用的 `GitHubIconButton` 基础，统一键盘焦点、Tooltip、加载态和语义变体。 |
@@ -185,6 +187,11 @@ Preview resize 的几何契约与 Provider 渲染分离。拖动固定面板分�
 保持在拖动开始时的布局宽度。macOS 独立窗口 Live Resize 由按窗口对象过滤的 AppKit
 observer 提供同样的 Host 局部状态；有界的窗口局部 debounce 覆盖只发布宽度
 变化而不发布原生 begin/end 通知的 backend。两条路径都绝不复用主窗口 resize 标志。
+macOS 独立 Host 保留 AppKit 文档标题，并将 capability 驱动的复制、外部打开和关闭
+控件挂载到一个右侧原生标题栏 accessory；共享 Slint Panel 关闭原本会重复出现的内容
+Header。该 accessory 每个原生预览窗口只安装一次，并且仅在 prepared payload 的
+capability 变化时重新紧凑排列，不进入文档滚动、动画或 Live Resize 渲染路径。其他
+平台继续使用共享内容 Header 及其控件。
 两种手势松开后均只提交一次精确最终内容宽度；Markdown、图片和文本 Provider 不感知
 Host 形态与 resize 生命周期。
 原生 Markdown Surface 使用独立 `MarkdownParserLoader` 与语言解析器 Registry。
@@ -192,7 +199,11 @@ Host 形态与 resize 生命周期。
 Tree-sitter loader 负责，JavaScript 与通用语言 fallback 共享一份惰性初始化的
 `syntect`/`two-face` Repository。Loader 初始化与高亮都留在 Preview Worker；用于行内正文的
 Slint `StyledText`、直接绘制彩色代码 token 的原生 Slint `Text` 行，以及官方 Primer
-视觉 token。围栏代码块保留语言并携带准备好的亮色/暗色 token 投影，不再经过
+视觉 token，并复用紧凑 AI Review 回复的 Codex 文档节奏：14px 正文/22px 行盒、
+24/20/17/15px 标题、20px 段落间距、10px 正文/列表组间距，以及连续列表项零额外间距。
+H1-H6 不自动添加分隔线；引用缩进和低对比代码 Surface 共用一套 Slint typography token。
+对于正文，Parley bridge 同步稳定宽度、字体、字号、行内样式、固定正文节奏及字形安全
+余量；混合字体行不得裁切，也不得偏离虚拟 extent。围栏代码块保留语言并携带准备好的亮色/暗色 token 投影，不再经过
 Markdown/HTML 二次转换；主题切换不重复解析或高亮；不引入 WebView 或浏览器 runtime。
 冷解析器 cache miss 发布 `ParserLoading` 与 `ParserReady` 进度。应用门面通过 weak
 window 在 Slint event loop 上更新共享 spinner 文案，并在投递前后都检查 request
@@ -207,10 +218,41 @@ Preview 内容宽度冻结期间隐藏滚动条，
 稳定后在最终右边缘恢复；延伸到 macOS 全尺寸标题栏下方的根滚动区把可拖动 scrollbar
 track 放在原生标题栏 inset 下方，避免 AppKit 抢占拖动并移动窗口。
 
+同一 Markdown parser core 另行提供用于紧凑 Agent 回复的纯结构入口。该入口在 Worker
+执行，不构造也不查询 `CodeParserRegistry`；围栏 block 保留语言和源码，但高亮
+`code_spans` 始终为空。`src/agent_response/` 使用 Codex 桌面端的系统字体对话排版：
+14 px 正文/22 px 行盒、24/20/17/15 px 标题、精确的段落/列表组节奏，以及独立的
+24 px 悬挂列表 marker gutter。代码行使用平台注册的等宽字体，并由 Worker 投影行数
+来稳定最小高度。非围栏 block 在组装后清理 Markdown 标点前残留的一层模型转义；围栏源码和链接
+target 不变。随后在 event-loop adapter 创建 Slint model 之前应用与宽度无关的 16 KiB/48 block 投影预算，以及最多 128 项、投影 payload
+近似记账 2 MiB 的内容身份缓存（不含容器与 allocator 开销）；同一 Worker 还准备 Slint `StyledText`，event loop 只实例化并提交
+`ModelRc`。最近 32 条 Assistant 行保留完整结构，此前 96 条使用一个去标记纯文本投影
+并保留 Preview action，更早的行保持 raw；这些限制约束结构化投影/缓存工作，不限制持久化
+历史或 Slint 总行数。Assistant 行消费结构 block；User 行和同一二进制的基准模式继续使用
+原始文本路径。仓库 `.md` 或 `.markdown` 引用绝不会作为可信 action 目标交给 Slint：
+投影层把 link destination 替换为不透明 action token，并在 Rust 中保留 token 到相对
+路径的映射。
+
+AI Review 回复触发的 Preview 绑定到该 Review task 的仓库上下文。激活不透明仓库
+action 后，由 Worker 解析并读取文件：Unix 从一次打开的 canonical 根目录 descriptor
+逐 component 遍历并拒绝 link；Windows 比较已打开根目录和目标句柄的最终路径。验证后的
+普通文件句柄执行大小限制并只读取一次，之后才提交给共用 Preview Provider 管线。
+Docked 模式把唯一的应用 Preview host 移入 PR Shell 既有的右侧 trailing slot：Preview
+Surface 临时替换 AI Review Surface，既不重复预留宽度，也不清空 conversation；关闭
+Preview 后恢复完整对话。Detached 模式保持独立原生窗口，不卸载 AI Review 面板。
+PR Dialog 始终绘制在两种停靠 Surface 之上。
+
+关闭 AI Review 面板或离开 `Route.PrReview` 时，清空行内回复投影、不透明 action 映射
+和 task 仓库绑定；仅当当前 PR 上下文 Preview 处于 Docked 模式时，同时关闭该 Preview。
+已经 Detached 的 Preview 作为独立应用窗口继续存在。只关闭 Docked Preview 不触发
+AI Review 清理。关闭 AI 面板或离开 PR 路由会取消当前 Ask，避免迟到结果进入重开的
+mount；独立调度的 Review task 继续运行。
+
 `src/platform/` 在启动时按平台选择一套清晰且支持中日韩文字的应用字体：
 macOS 使用原生 `.AppleSystemUIFont`，Windows 使用 `Microsoft YaHei UI`，其他
-平台使用 `Noto Sans`。`ui/main.slint` 将该选择作为完整普通 UI 树的默认
-字体，页面和共享组件统一继承，不再自行选择其他字体。Terminal 内容完全
+平台使用 `Noto Sans`。`ui/main.slint` 将该选择与 Codex 桌面端的默认字重 445
+作为完整普通 UI 树的窗口默认值，页面、共享组件和 Slint `StyledText` 统一继承，
+不再自行选择其他字体。Terminal 内容完全
 保持独立，避免改变既有单元格和工具栏度量；PR Review 中仅 Diff 源码与
 文件树内容保留几何所需的平台专用字体，其余控件和正文继承应用字体。
 
@@ -313,7 +355,10 @@ workspace 根 `Cargo.toml` 中的 profile 统一负责构建产物策略。日�
 需要 LLDB 查看完整变量和类型时，显式使用 `dev-full` profile。它继承日常开发
 设置，但把完整 packed 调试信息写入独立 profile 目录；因此可以通过
 `cargo clean --profile dev-full` 单独移除，而不丢弃日常开发产物。Release 和
-dist profile 保持独立：Release 继续禁用调试信息和增量编译。
+dist profile 保持独立：Release 继续禁用调试信息和增量编译。隔离的
+`release-fast` profile 只用于日常优化构建；它继承 Release 运行时策略，但使用
+Thin LTO、8 个 codegen unit 和增量编译。发布自动化继续使用未改变的 `release`
+profile。
 
 workspace 全目标 IDE 后台诊断使用隔离的 `ide` profile：不生成调试信息，也不
 保留增量状态，避免后台分析重复制造数 GiB 的应用与生成 UI 缓存。VS
@@ -662,6 +707,21 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
    并在 event loop 中转换为 Slint model。
 5. 失败会作为 assistant 消息显示，因此该请求保持静默，避免重复 Toast。
 
+### AI Review 回复投影
+
+1. Worker 加载或完成 Review Session 时，把 Assistant Markdown 交给
+   `src/agent_response/`；User 内容继续保留原始文本，并由 AI Review Surface 显示为
+   内容自适应宽度、右对齐的中性气泡，不重复绘制身份栏。
+2. 纯结构 parser、有界缓存和 `StyledText` 准备都在 Worker 上生成宽度无关 block 与
+   不透明仓库 action token；event loop 只实例化 `ModelRc` 并执行最终 model commit。
+3. 点击回复标题会把原始 Markdown 提交给 Artifact Preview；点击仓库 token 时，先在
+   当前 task 投影中查表，再由 Worker 相对该 task 的本地仓库解析路径。
+4. 唯一的 Docked Preview host 复用 PR trailing slot，只临时隐藏而不清空 AI Review
+   Surface；关闭 Preview 后恢复。Detached Preview 不参与该替换。
+5. 关闭 AI 面板或离开 PR 路由时，清空回复投影、token 映射和仓库绑定；仅关闭 Docked
+   的 PR 上下文 Preview；已经 Detached 的 Preview 和后台 Review 工作继续独立存在，
+   当前 Ask 被取消，mount generation 会拒绝迟到 Worker commit。
+
 ### AI Agent 连通性测试
 
 1. 设置页独立保存 OpenAI-compatible Base URL、API Key 和模型名称。
@@ -689,7 +749,9 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 - `reject_http_errors` 默认开启，把非 2xx 响应转换为 `HttpError`，并保留受长度限制的响应正文摘要。
 - `feedback` 默认 `Silent`；用户操作可以选择 Toast、Notification 或两者。
 - `timeout` 默认 30 秒，可传入自定义时长；零表示无总截止时间，独立的 10 秒连接超时仍然生效。
-- `read_idle_timeout` 默认 30 秒，每收到一个响应体 chunk 后重新计时，可自定义；零表示关闭空闲检测。
+- `read_idle_timeout` 默认 30 秒，可自定义，零表示关闭空闲检测。请求级 body-progress
+  策略默认按任意响应体 chunk 重新计时；缓冲 JSON 调用方可改为要求非空白进度，避免传输
+  心跳延长截止时间。该策略描述响应表示语义，绝不按 Provider host 或模型名称分支。
 
 Interceptor 按注册顺序执行。Request hook 可修改 header；Response hook 可读取状态、header 和耗时；Error hook 接收统一错误。详见 [specs/http.md](specs/http.md)。
 

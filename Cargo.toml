@@ -51,6 +51,7 @@ name = "usher"
 #   SLINT_BACKEND=winit-skia cargo run --no-default-features --features renderer-skia
 #   SLINT_BACKEND=winit-femtovg-wgpu cargo run --no-default-features --features renderer-femtovg-wgpu
 slint = { version = "1.17.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "raw-window-handle-06", "unstable-fontique-010"] }
+i-slint-core = "=1.17.1"
 usher-ui = { path = "crates/usher-ui", default-features = false }
 usher-ui-settings = { path = "crates/usher-ui-settings", default-features = false }
 usher-messages = { path = "crates/usher-messages", default-features = false }
@@ -98,6 +99,12 @@ libc = "0.2"
 raw-window-handle = "0.6"
 objc = "0.2"
 block2 = "0.6.2"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.4", features = ["fs"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 # Native system-theme detection. On Linux this uses the XDG Desktop Portal,
@@ -185,6 +192,15 @@ codegen-units = 1  # Better optimization at cost of compile time
 panic = "abort"  # Reduce binary size by using abort instead of unwind
 debug = false  # No debug info in release builds
 incremental = false  # Disable incremental compilation for release
+
+# Optimized local builds keep the release runtime policy while trading some
+# whole-program optimization for shorter rebuilds. Final artifacts continue to
+# use `--release` and the profile above.
+[profile.release-fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 8
+incremental = true
 
 # The profile that 'dist' will build with
 [profile.dist]

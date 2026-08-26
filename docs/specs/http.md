@@ -19,8 +19,12 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
    one user agent and a 10-second connect timeout. `RequestOptions.timeout` owns the total
    request deadline: 30 seconds by default, any custom duration when supplied,
    and no total deadline when set to zero. `RequestOptions.read_idle_timeout`
-   independently limits the interval between response-body chunks: 30 seconds
-   by default, any custom duration when supplied, and disabled when set to zero.
+   independently limits the interval without body progress: 30 seconds by
+   default, any custom duration when supplied, and disabled when set to zero.
+   The request-scoped progress policy defaults to any received chunk. Buffered
+   JSON callers may require non-whitespace bytes, so blank transport heartbeats
+   do not keep a request alive. Policies describe response semantics and never
+   select behavior by provider host or model name.
 3. Every call has a non-empty operation label.
 4. Non-2xx responses fail by default and include only a bounded response-body excerpt.
 5. Request, response, and error interceptors execute in registration order.
@@ -32,12 +36,17 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
     excerpts, and streaming chunks must all be read through it so body-idle
     timeout and normalized errors cannot be bypassed. Streaming callers retain
     ownership of progress and cancellation.
+11. Detailed transfer diagnostics are request-scoped and opt-in. They may record
+    body sizes, safe response-framing headers, chunk timing, and whitespace/progress
+    classification, but never request/response content or authorization data.
 
 1. 应用代码不得在 `src/http/mod.rs` 外创建可复用 reqwest client。
 2. 所有应用自有请求使用模块内唯一的异步 client，并统一 User-Agent 与 10 秒连接超时。
    总请求截止时间由 `RequestOptions.timeout` 管理：默认 30 秒，可传入任意自定义时长，
-   传零则不设置总截止时间。`RequestOptions.read_idle_timeout` 独立限制两个响应体 chunk
-   之间的等待：默认 30 秒，可自定义，传零则关闭空闲检测。
+   传零则不设置总截止时间。`RequestOptions.read_idle_timeout` 独立限制未产生正文进度的
+   等待：默认 30 秒，可自定义，传零则关闭空闲检测。请求级进度策略默认把任意 chunk
+   视为进度；缓冲 JSON 调用方可要求非空白字节，避免空白传输心跳让请求续期。策略只描述
+   响应语义，禁止按 Provider host 或模型名称选择行为。
 3. 每个请求必须提供非空 operation 名称。
 4. 非 2xx 默认失败，响应正文只保留受限摘要。
 5. Request/Response/Error interceptor 按注册顺序执行。
@@ -47,6 +56,8 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
 9. 禁止记录 secret 和 authorization header。
 10. `send` 返回项目自有 `HttpResponse`；JSON、文本、字节、错误摘要和流式 chunk 都必须
     通过它读取，避免绕过响应体空闲超时和统一错误。流式调用方仍自行管理进度和取消。
+11. 详细传输诊断必须按请求显式启用；可以记录 body 大小、安全的响应 framing header、
+    chunk 时序及空白/进度分类，但绝不记录请求/响应内容或鉴权数据。
 
 ## Feedback policy / 反馈策略
 
@@ -89,16 +100,21 @@ Interceptor 必须线程安全、快速、确定性。鉴权拦截器必须按 h
 `HttpErrorKind` distinguishes build, timeout, connect, request, status, decode, and interceptor errors. Callers should match the kind/status when behavior differs; user messages must come from the normalized error rather than fragile substring matching.
 
 Response-body reading may fail or stop making progress after successful headers.
-Every body format uses the same chunk loop: the idle timer resets after each
-chunk, an idle interval becomes `Timeout`, transport errors retain reqwest's
-classification, and only invalid buffered JSON becomes `Decode`. A stalled
-non-2xx error body follows the same rule instead of hiding the timeout.
+Every buffered body format uses the same chunk loop and a request-scoped
+progress policy. The default resets the idle timer after each chunk; callers
+expecting JSON may require non-whitespace bytes. An idle interval becomes
+`Timeout`, transport errors retain reqwest's classification, and only invalid
+buffered JSON becomes `Decode`. A stalled non-2xx error body follows the same
+rule instead of hiding the timeout. Streaming callers retain the default
+chunk-progress semantics and own their higher-level protocol heartbeats.
 
 `HttpErrorKind` 区分构建、超时、连接、请求、状态码、解码和拦截器错误。业务分支应匹配 kind/status，不应继续依赖错误字符串包含关系。
 
-响应头成功后，读取 body 仍可能失败或停止前进。所有响应格式使用同一 chunk 循环：每个
-chunk 后重置空闲计时，空闲超限归类为 `Timeout`，transport 错误保留 reqwest 分类，只有
-缓冲后的 JSON 内容无效才归类为 `Decode`。非 2xx 的错误响应体卡住时也遵循同一规则。
+响应头成功后，读取 body 仍可能失败或停止前进。所有缓冲响应格式使用同一 chunk 循环和
+请求级进度策略：默认每个 chunk 后重置空闲计时，预期 JSON 的调用方可要求非空白字节。
+空闲超限归类为 `Timeout`，transport 错误保留 reqwest 分类，只有缓冲后的 JSON 内容无效
+才归类为 `Decode`。非 2xx 的错误响应体卡住时也遵循同一规则；流式调用保留默认 chunk
+进度语义，并自行负责更高层协议心跳。
 
 ## Migration status / 迁移状态
 
@@ -128,8 +144,11 @@ Only the shared HTTP module should contain client creation or raw execution.
 - Request timeout configuration maps the 30-second default and custom durations
   onto the reqwest request; zero maps to no total deadline without removing the
   connect timeout.
-- Body-idle timeout configuration defaults to 30 seconds, resets for every
-  received chunk, supports custom values, and treats zero as disabled.
+- Body-idle timeout configuration defaults to 30 seconds, uses any received
+  chunk as progress by default, supports a request-scoped non-whitespace mode,
+  supports custom values, and treats zero as disabled.
+- Whitespace-only heartbeats cannot extend a non-whitespace progress deadline;
+  ordinary and streaming requests retain the default any-chunk behavior.
 - A stalled JSON, text, bytes, streamed, or non-2xx error body becomes `Timeout`
   instead of waiting forever or being overwritten as `Decode`/`Status`.
 - Silent background calls do not create Toast/Notification.

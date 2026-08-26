@@ -1,3 +1,7 @@
+import { AgentResponseBlock } from "../../components/agent_response/github_agent_response.slint";
+
+export { AgentResponseBlockKind, AgentResponseBlock } from "../../components/agent_response/github_agent_response.slint";
+
 export struct AiReviewTaskItem {
     id: string,
     project-key: string,
@@ -30,12 +34,22 @@ export struct AiReviewFindingItem {
 }
 
 export struct AiReviewConversationItem {
+    id: string,
     role: string,
     content: string,
     elapsed: string,
+    formatted: bool,
+    blocks: [AgentResponseBlock],
+    preview-title: string,
+    preview-available: bool,
+    truncated: bool,
+    projected-bytes: int,
+    repository-action-count: int,
 }
 
 export component GitHubAiReviewPanel inherits Rectangle {
+    in property <string> application-font-family: "sans-serif";
+    in property <string> code-font-family: "Menlo";
     in property <string> task-id: "";
     in property <string> project-name: "";
     in property <string> pull-request-number: "";
@@ -56,11 +70,15 @@ export component GitHubAiReviewPanel inherits Rectangle {
     in property <bool> chat-sending: false;
     in property <string> chat-status: "";
     in-out property <int> chat-elapsed-seconds: 0;
+    in property <bool> layout-resizing: false;
     callback close();
     callback cancel(string);
     callback cancel-message(string);
     callback re-review(string);
     callback send-message(string);
     callback select-finding(string, int);
+    callback open-response-artifact(string, string, string);
+    callback open-response-link(string);
+    callback response-wheel-consumed(length);
     background: #ffffff;
 }

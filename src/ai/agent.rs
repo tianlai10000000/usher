@@ -9,6 +9,9 @@ use crate::settings::AiAgentSettings;
 use reqwest::{Method, Url};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "ai-code-review")]
+const REVIEW_READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 #[derive(Debug, Deserialize)]
 struct ModelsResponse {
     #[serde(default)]
@@ -54,6 +57,7 @@ struct CompletionRequest<'a> {
     model: &'a str,
     messages: &'a [CompletionMessage],
     temperature: f32,
+    stream: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,13 +160,16 @@ pub(crate) async fn complete_review(
     settings: &AiAgentSettings,
     messages: &[CompletionMessage],
     operation: &'static str,
+    diagnostic_context: impl Into<String>,
 ) -> Result<String, HttpError> {
     complete_with_options(
         settings,
         messages,
         RequestOptions::new(operation)
             .timeout(std::time::Duration::ZERO)
-            .read_idle_timeout(std::time::Duration::from_secs(90)),
+            .read_idle_timeout(REVIEW_READ_IDLE_TIMEOUT)
+            .require_non_whitespace_body_progress()
+            .body_diagnostics(diagnostic_context),
     )
     .await
 }
@@ -183,8 +190,45 @@ async fn complete_with_options(
         model: settings.model.trim(),
         messages,
         temperature: 0.1,
+        stream: false,
     };
     let operation = options.operation.clone();
+    if let Some(context) = options.body_diagnostic_context.as_deref() {
+        let system_messages = messages
+            .iter()
+            .filter(|message| message.role == "system")
+            .count();
+        let user_messages = messages
+            .iter()
+            .filter(|message| message.role == "user")
+            .count();
+        let assistant_messages = messages
+            .iter()
+            .filter(|message| message.role == "assistant")
+            .count();
+        let message_bytes = messages
+            .iter()
+            .map(|message| message.content.len())
+            .sum::<usize>();
+        let largest_message_bytes = messages
+            .iter()
+            .map(|message| message.content.len())
+            .max()
+            .unwrap_or(0);
+        let model = settings.model.trim().chars().take(128).collect::<String>();
+        log::debug!(
+            "[AI Agent][Completion] event=payload_prepared operation={} context={} model={:?} messages={} system_messages={} user_messages={} assistant_messages={} message_bytes={} largest_message_bytes={} temperature=0.1 stream=false",
+            operation,
+            context,
+            model,
+            messages.len(),
+            system_messages,
+            user_messages,
+            assistant_messages,
+            message_bytes,
+            largest_message_bytes
+        );
+    }
     let response = http::send_json::<CompletionResponse>(
         http::post(url)
             .bearer_auth(settings.api_key.trim())
@@ -225,6 +269,32 @@ mod tests {
                 .unwrap()
                 .as_str(),
             "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn completion_requests_explicitly_use_non_streaming_json_transport() {
+        let messages = [CompletionMessage::user("review this")];
+        let request = CompletionRequest {
+            model: "provider-model",
+            messages: &messages,
+            temperature: 0.1,
+            stream: false,
+        };
+        let value = serde_json::to_value(request).unwrap();
+
+        assert_eq!(
+            value.get("stream").and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+    }
+
+    #[cfg(feature = "ai-code-review")]
+    #[test]
+    fn review_completion_allows_five_minutes_without_body_progress() {
+        assert_eq!(
+            REVIEW_READ_IDLE_TIMEOUT,
+            std::time::Duration::from_secs(300)
         );
     }
 }

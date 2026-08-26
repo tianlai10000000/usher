@@ -70,6 +70,18 @@ unpacked 调试对象。这样既能让 panic backtrace 保留文件与行号，
 cargo build --profile dev-full
 ```
 
+日常需要优化构建时，使用隔离的快速 Release profile。它保留正式 Release 的 strip、
+体积优化和 abort 策略，但改用 Thin LTO、8 个 codegen unit 与增量编译，以缩短后续
+重建时间：
+
+```sh
+cargo build --profile release-fast --locked
+cargo bundle --profile release-fast
+```
+
+该 profile 的产物写入 `target/release-fast`，发布自动化不会使用它。最终分发产物仍由
+现有发布脚本通过 `--release` 构建。
+
 IDE 后台诊断使用紧凑、无增量缓存的独立 profile，避免 workspace 全目标检查
 重复制造日常开发缓存。VS Code/Cursor 已自动使用该配置；命令行等价检查为：
 

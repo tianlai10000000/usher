@@ -1,0 +1,373 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubLink } from "../github_link.slint";
+import { GitHubMarkdownMetrics } from "../markdown/github_markdown_typography.slint";
+
+export enum AgentResponseBlockKind {
+    Heading1,
+    Heading2,
+    Heading3,
+    Heading4,
+    Heading5,
+    Heading6,
+    Paragraph,
+    ListItem,
+    Quote,
+    CodeBlock,
+    Rule,
+    TableRow,
+}
+
+export struct AgentResponseBlock {
+    kind: AgentResponseBlockKind,
+    styled: styled-text,
+    plain-text: string,
+    list-marker: string,
+    list-depth: int,
+    code-language: string,
+    span-count: int,
+    line-count: int,
+}
+
+component GitHubAgentResponseBlock inherits Rectangle {
+    in property <AgentResponseBlock> block;
+    in property <bool> heading-preview-action: false;
+    in property <bool> first-block: false;
+    in property <bool> starts-list-group: false;
+    in property <bool> ends-list-group: false;
+    in property <bool> previous-is-heading: false;
+    in property <bool> previous-is-paragraph: false;
+    in property <bool> previous-is-list: false;
+    in property <bool> previous-is-quote: false;
+    in property <bool> previous-is-code: false;
+    in property <bool> previous-is-rule: false;
+    in property <string> body-font-family: "sans-serif";
+    in property <string> code-font-family: "Menlo";
+    callback open-link(string);
+    callback open-full-response();
+
+    private property <bool> is-heading:
+        root.block.kind == AgentResponseBlockKind.Heading1
+            || root.block.kind == AgentResponseBlockKind.Heading2
+            || root.block.kind == AgentResponseBlockKind.Heading3
+            || root.block.kind == AgentResponseBlockKind.Heading4
+            || root.block.kind == AgentResponseBlockKind.Heading5
+            || root.block.kind == AgentResponseBlockKind.Heading6;
+    private property <bool> is-code: root.block.kind == AgentResponseBlockKind.CodeBlock;
+    private property <bool> is-quote: root.block.kind == AgentResponseBlockKind.Quote;
+    private property <bool> is-table: root.block.kind == AgentResponseBlockKind.TableRow;
+    private property <bool> is-rule: root.block.kind == AgentResponseBlockKind.Rule;
+    private property <bool> is-list: root.block.kind == AgentResponseBlockKind.ListItem;
+    private property <length> list-level-inset: min(2, max(0, root.block.list-depth)) * 24px;
+    private property <length> list-marker-width: 24px;
+    private property <length> content-inset:
+        root.is-quote ? GitHubMetrics.size-24
+            : root.is-list ? root.list-level-inset + root.list-marker-width
+            : root.is-table ? GitHubMetrics.size-8
+            : 0px;
+    private property <length> code-content-top:
+        root.block.code-language == ""
+            ? 10px
+            : GitHubMarkdownMetrics.code-header-height + GitHubMetrics.size-8;
+    private property <length> block-padding-top:
+        root.is-heading ? 20px
+            : root.is-code ? root.code-content-top
+            : root.is-rule ? 28px
+            : root.is-quote ? 8px
+            : root.is-table ? 10px
+            : root.is-list
+                ? (root.starts-list-group
+                    ? (root.previous-is-paragraph || root.previous-is-heading ? 10px
+                        : root.previous-is-code ? 14px
+                        : root.previous-is-quote ? 8px
+                        : 0px)
+                    : 0px)
+            : root.first-block ? 0px
+            : root.previous-is-paragraph ? 20px
+            : root.previous-is-list || root.previous-is-heading ? 10px
+            : root.previous-is-code ? 14px
+            : root.previous-is-quote ? 8px
+            : root.previous-is-rule ? 0px
+            : 11px;
+    private property <length> block-padding-bottom:
+        root.is-code ? 10px
+            : root.is-quote ? 8px
+            : root.is-table ? 10px
+            : 0px;
+    private property <length> text-height:
+        root.is-heading ? heading-text.height
+            : root.is-code ? code-text.height
+            : body-text.height;
+    private property <length> text-glyph-safety:
+        root.is-heading || root.is-code
+            ? GitHubMarkdownMetrics.glyph-safety-height
+            : 0px;
+
+    height: root.is-rule
+        ? 57px
+        : max(
+            root.is-code ? GitHubMetrics.size-40
+                : root.is-list ? GitHubMarkdownMetrics.conversation-body-line-height
+                : 1px,
+            root.text-height
+                + root.text-glyph-safety
+                + root.block-padding-top
+                + root.block-padding-bottom
+        );
+    background: root.is-code ? GitHubTheme.canvas-subtle : transparent;
+    border-width: root.is-code ? GitHubMetrics.border-thin : 0px;
+    border-color: root.is-code ? GitHubTheme.border-subtle : transparent;
+    border-radius: root.is-code ? GitHubMetrics.radius-medium : 0px;
+    clip: root.is-code;
+
+    if root.is-quote: Rectangle {
+        x: 0px;
+        y: 8px;
+        width: 4px;
+        height: max(0px, parent.height - 16px);
+        background: GitHubTheme.border-strong;
+        border-radius: 2px;
+    }
+
+    if root.is-list: list-marker-text := Text {
+        x: root.list-level-inset;
+        y: root.block-padding-top;
+        width: root.list-marker-width - GitHubMetrics.size-6;
+        height: GitHubMarkdownMetrics.conversation-body-line-height;
+        text: root.block.list-marker;
+        color: GitHubTheme.fg-default;
+        font-size: GitHubMarkdownMetrics.conversation-body-font-size;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.is-table: Rectangle {
+        y: parent.height - GitHubMetrics.border-thin;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+
+    if root.is-rule: Rectangle {
+        y: (parent.height - GitHubMetrics.border-thin) / 2;
+        width: parent.width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+
+    heading-text := Text {
+        visible: root.is-heading;
+        x: root.content-inset;
+        y: root.block-padding-top;
+        width: max(0px, parent.width - self.x);
+        height: max(
+            root.block.kind == AgentResponseBlockKind.Heading1
+                    ? GitHubMarkdownMetrics.conversation-heading-1-line-height
+                : root.block.kind == AgentResponseBlockKind.Heading2
+                    ? GitHubMarkdownMetrics.conversation-heading-2-line-height
+                : root.block.kind == AgentResponseBlockKind.Heading3
+                    ? GitHubMarkdownMetrics.conversation-heading-3-line-height
+                : GitHubMarkdownMetrics.conversation-heading-compact-line-height,
+            self.preferred-height
+        );
+        text: root.block.plain-text;
+        color: root.heading-preview-action && heading-action-touch.has-hover
+            ? GitHubTheme.accent-fg
+            : GitHubTheme.fg-default;
+        font-size: root.block.kind == AgentResponseBlockKind.Heading1
+                ? GitHubMarkdownMetrics.conversation-heading-1-font-size
+            : root.block.kind == AgentResponseBlockKind.Heading2
+                ? GitHubMarkdownMetrics.conversation-heading-2-font-size
+            : root.block.kind == AgentResponseBlockKind.Heading3
+                ? GitHubMarkdownMetrics.conversation-heading-3-font-size
+            : GitHubMarkdownMetrics.conversation-heading-compact-font-size;
+        font-weight: 600;
+        wrap: word-wrap;
+    }
+
+    heading-action := FocusScope {
+        visible: root.is-heading && root.heading-preview-action;
+        x: heading-text.x;
+        y: heading-text.y;
+        width: heading-text.width;
+        height: heading-text.height;
+        accessible-role: button;
+        accessible-label: root.block.plain-text;
+        accessible-action-default => { root.open-full-response(); }
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.open-full-response();
+                return accept;
+            }
+            return reject;
+        }
+
+        if heading-action.has-focus: Rectangle {
+            x: -GitHubMetrics.size-2;
+            y: -GitHubMetrics.size-2;
+            width: parent.width + GitHubMetrics.size-4;
+            height: parent.height + GitHubMetrics.size-4;
+            border-radius: GitHubMetrics.radius-small;
+            border-width: GitHubMetrics.focus-outline-width;
+            border-color: GitHubTheme.focus-outline;
+            background: transparent;
+        }
+
+        heading-action-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                parent.focus();
+                root.open-full-response();
+            }
+        }
+    }
+
+    body-text := StyledText {
+        visible: !root.is-heading && !root.is-code && !root.is-rule;
+        x: root.content-inset;
+        y: root.block-padding-top;
+        width: max(0px, parent.width - self.x);
+        height: max(
+            GitHubMarkdownMetrics.conversation-body-line-height,
+            self.preferred-height + GitHubMarkdownMetrics.glyph-safety-height
+        );
+        text: root.block.styled;
+        default-font-family: root.body-font-family;
+        default-color: root.is-quote ? GitHubTheme.fg-muted : GitHubTheme.fg-default;
+        default-font-size: root.is-table
+            ? GitHubMetrics.text-small
+            : GitHubMarkdownMetrics.conversation-body-font-size;
+        link-color: GitHubTheme.accent-fg;
+        link-clicked(url) => { root.open-link(url); }
+    }
+
+    code-text := Text {
+        visible: root.is-code;
+        x: GitHubMetrics.size-12;
+        y: root.block-padding-top;
+        width: max(0px, parent.width - GitHubMetrics.size-24);
+        height: max(
+            max(1, root.block.line-count) * GitHubMarkdownMetrics.code-line-height,
+            self.preferred-height
+        );
+        text: root.block.plain-text;
+        color: GitHubTheme.fg-default;
+        font-family: root.code-font-family;
+        font-size: GitHubMarkdownMetrics.code-font-size;
+        font-weight: 400;
+        font-italic: false;
+        wrap: word-wrap;
+    }
+
+    if root.is-code && root.block.code-language != "": Text {
+        x: GitHubMetrics.size-12;
+        y: GitHubMetrics.size-4;
+        width: max(0px, parent.width - GitHubMetrics.size-24);
+        height: GitHubMetrics.size-16;
+        text: root.block.code-language;
+        color: GitHubTheme.fg-muted;
+        font-family: root.code-font-family;
+        font-size: GitHubMetrics.text-small;
+        font-weight: 400;
+        font-italic: false;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+export component GitHubAgentResponse inherits Rectangle {
+    in property <[AgentResponseBlock]> blocks: [];
+    in property <string> preview-title: "";
+    in property <bool> preview-available: false;
+    in property <bool> truncated: false;
+    in property <string> body-font-family: "sans-serif";
+    in property <string> code-font-family: "Menlo";
+    callback open-link(string);
+    callback open-full-response();
+
+    private property <bool> leading-heading-opens-preview:
+        root.preview-available
+            && root.blocks.length > 0
+            && (root.blocks[0].kind == AgentResponseBlockKind.Heading1
+                || root.blocks[0].kind == AgentResponseBlockKind.Heading2
+                || root.blocks[0].kind == AgentResponseBlockKind.Heading3
+                || root.blocks[0].kind == AgentResponseBlockKind.Heading4
+                || root.blocks[0].kind == AgentResponseBlockKind.Heading5
+                || root.blocks[0].kind == AgentResponseBlockKind.Heading6);
+    // Slint 1.17 StyledText packs the private macOS system-font alias too
+    // tightly when a line contains PingFang fallback glyphs. Markdown Preview
+    // already uses this explicit family to obtain the native fallback metrics;
+    // keep conversation paragraphs on the same shaping path.
+    private property <string> resolved-body-font-family:
+        root.body-font-family == ".AppleSystemUIFont"
+            ? "Gujarati MT"
+            : root.body-font-family;
+
+    height: response-column.preferred-height;
+    background: transparent;
+
+    response-column := VerticalLayout {
+        width: parent.width;
+        spacing: 0px;
+
+        for block[index] in root.blocks: GitHubAgentResponseBlock {
+            width: parent.width;
+            block: block;
+            first-block: index == 0;
+            starts-list-group: block.kind == AgentResponseBlockKind.ListItem
+                && (index == 0 || root.blocks[index - 1].kind != AgentResponseBlockKind.ListItem);
+            ends-list-group: block.kind == AgentResponseBlockKind.ListItem
+                && (index + 1 == root.blocks.length
+                    || root.blocks[index + 1].kind != AgentResponseBlockKind.ListItem);
+            previous-is-heading: index > 0
+                && (root.blocks[index - 1].kind == AgentResponseBlockKind.Heading1
+                    || root.blocks[index - 1].kind == AgentResponseBlockKind.Heading2
+                    || root.blocks[index - 1].kind == AgentResponseBlockKind.Heading3
+                    || root.blocks[index - 1].kind == AgentResponseBlockKind.Heading4
+                    || root.blocks[index - 1].kind == AgentResponseBlockKind.Heading5
+                    || root.blocks[index - 1].kind == AgentResponseBlockKind.Heading6);
+            previous-is-paragraph: index > 0
+                && root.blocks[index - 1].kind == AgentResponseBlockKind.Paragraph;
+            previous-is-list: index > 0
+                && root.blocks[index - 1].kind == AgentResponseBlockKind.ListItem;
+            previous-is-quote: index > 0
+                && root.blocks[index - 1].kind == AgentResponseBlockKind.Quote;
+            previous-is-code: index > 0
+                && root.blocks[index - 1].kind == AgentResponseBlockKind.CodeBlock;
+            previous-is-rule: index > 0
+                && root.blocks[index - 1].kind == AgentResponseBlockKind.Rule;
+            body-font-family: root.resolved-body-font-family;
+            code-font-family: root.code-font-family;
+            heading-preview-action: root.leading-heading-opens-preview && index == 0;
+            open-link(url) => { root.open-link(url); }
+            open-full-response => { root.open-full-response(); }
+        }
+
+        if root.preview-available && !root.leading-heading-opens-preview: Rectangle {
+            width: parent.width;
+            height: GitHubMetrics.size-28;
+            background: transparent;
+            clip: true;
+
+            Image {
+                x: 0px;
+                y: (parent.height - self.height) / 2;
+                width: GitHubMetrics.icon-medium;
+                height: GitHubMetrics.icon-medium;
+                source: @image-url("../../assets/icons/octicon-read-16.svg");
+                colorize: GitHubTheme.accent-fg;
+            }
+
+            GitHubLink {
+                x: GitHubMetrics.size-24;
+                y: (parent.height - self.height) / 2;
+                text-max-width: max(0px, parent.width - self.x);
+                text: root.preview-title == ""
+                    ? (root.truncated ? "Open full response" : "Open formatted response")
+                    : root.preview-title;
+                inline: true;
+                clicked => { root.open-full-response(); }
+            }
+        }
+    }
+}

@@ -7,8 +7,12 @@ use crate::MainWindow;
 
 const MARKDOWN_FIXTURE: &str = r#"# Artifact Preview
 
-This document exercises **strong text**, *emphasis*, `inline code`, and an
+This document exercises **strong text**, *emphasis*, ~~strikethrough~~,
+`inline code`, and an
 [HTTP link](https://github.com).
+
+The model-style path `docs/terminal\_viewport\_iteration\_notes.md` must not
+show residual escape characters in prose.
 
 ## Lists and tasks
 
@@ -19,6 +23,25 @@ This document exercises **strong text**, *emphasis*, `inline code`, and an
 
 > 注意：注册操作必须在调用其他企业微信功能（如 `share()`、`isInstalled()` 或
 > `startup()`）之前完成，否则可能导致功能调用失败。
+
+## Review response rhythm
+
+从 `Cargo.lock` 的变化可以推断 `Cargo.toml` 可能同步调整了依赖。这个段落故意包含
+足以在窄 Preview 中换成多行的中英文内容，用来核对 14 px 字号、22 px 行盒和段落之间
+的留白是否与 AI Review 消息保持一致。
+
+1. portable-pty** 是否被正确引入**
+2. `Cargo.toml` 与 `Cargo.lock` 的一致性
+3. 是否意外启用了不需要的 feature
+
+建议在合并前运行以下命令，并确认代码块的语言标签、顶部空间和底部空间都保持紧凑：
+
+```sh
+cargo fmt --all
+cargo check --locked
+cargo test --lib --locked
+git diff --check
+```
 
 ## Table
 
@@ -50,6 +73,18 @@ await WeCom.register({
     agentId: 'your-agent-id',  // 企业微信企业应用ID
 });
 ```
+
+#### Compact heading
+
+H4 stays clearly subordinate to the main document sections.
+
+##### Supporting heading
+
+H5 remains scannable without becoming oversized.
+
+###### Fine print heading
+
+H6 keeps heading weight at the body scale.
 
 ---
 

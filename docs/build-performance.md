@@ -19,6 +19,12 @@ incremental = true
 inherits = "dev"
 debug = "none"
 incremental = false
+
+[profile.release-fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 8
+incremental = true
 ```
 
 This preserves incremental compilation and source file/line information for
@@ -46,7 +52,12 @@ cargo ide-check
 
 Release behavior is unchanged. `profile.release` continues to disable debug
 information and incremental compilation, and release automation continues to
-invoke Cargo with `--release`.
+invoke Cargo with `--release`. Routine optimized local builds may instead use
+`cargo build --profile release-fast --locked`; the isolated profile retains the
+release runtime policy while using Thin LTO, eight codegen units, and incremental
+compilation. Its output under `target/release-fast` is not a final distributable
+artifact. `cargo bundle --profile release-fast` provides the matching local
+application bundle when needed.
 
 ## Controlled A/B result
 

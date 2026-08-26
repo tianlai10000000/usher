@@ -24,9 +24,8 @@ fn lock_file_name(namespace: Option<&str>) -> String {
 fn lock_file_path() -> PathBuf {
     let namespace = std::env::var("USHER_BENCHMARK_INSTANCE_NAMESPACE").ok();
     let file_name = lock_file_name(namespace.as_deref());
-    if let Some(proj_dirs) = directories::ProjectDirs::from("com", "usher", "app") {
-        let dir = proj_dirs.data_local_dir();
-        let _ = std::fs::create_dir_all(dir);
+    if let Some(dir) = crate::app_paths::data_local_dir() {
+        let _ = std::fs::create_dir_all(&dir);
         dir.join(file_name)
     } else {
         PathBuf::from(file_name)

@@ -286,6 +286,37 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
             .saturating_add(message.timestamp.len());
     }
 
+    let ai_review = ui.get_ai_review_conversation();
+    let mut ai_review_raw_text_bytes = 0usize;
+    let mut ai_review_projected_bytes = 0usize;
+    let mut ai_review_blocks = 0usize;
+    let mut ai_review_spans = 0usize;
+    let mut ai_review_repository_actions = 0usize;
+    let mut ai_review_previewable_rows = 0usize;
+    for index in 0..ai_review.row_count() {
+        let Some(message) = ai_review.row_data(index) else {
+            continue;
+        };
+        ai_review_raw_text_bytes = ai_review_raw_text_bytes
+            .saturating_add(message.id.len())
+            .saturating_add(message.role.len())
+            .saturating_add(message.content.len())
+            .saturating_add(message.elapsed.len())
+            .saturating_add(message.preview_title.len());
+        ai_review_projected_bytes =
+            ai_review_projected_bytes.saturating_add(message.projected_bytes.max(0) as usize);
+        ai_review_repository_actions = ai_review_repository_actions
+            .saturating_add(message.repository_action_count.max(0) as usize);
+        ai_review_previewable_rows =
+            ai_review_previewable_rows.saturating_add(usize::from(message.preview_available));
+        ai_review_blocks = ai_review_blocks.saturating_add(message.blocks.row_count());
+        for block_index in 0..message.blocks.row_count() {
+            if let Some(block) = message.blocks.row_data(block_index) {
+                ai_review_spans = ai_review_spans.saturating_add(block.span_count.max(0) as usize);
+            }
+        }
+    }
+
     let projects = ui.get_project_items();
     let mut project_text_bytes = 0usize;
     let mut project_tags = 0usize;
@@ -354,7 +385,7 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
         crate::chat::renderer::diagnostic_counts();
     let preview = crate::artifact_preview::diagnostic_state(ui);
     log::info!(
-        "[Memory][UI Models] route={:?} chat_rows={} chat_blocks={} chat_inline_lines={} chat_spans={} chat_text_bytes={} chat_model_commits={} chat_markdown_projections={} preview_host={} preview_kind={} preview_host_count={} preview_blocks={} preview_payload_bytes={} project_rows={} project_tags={} project_text_bytes={} pr_list_rows={} pr_list_text_bytes={} pr_review_files={} pr_review_tree_items={} pr_review_extension_filters={} pr_review_lines={} job_steps={} job_step_text_bytes={} terminal_lines={} terminal_spans={} terminal_text_bytes={} terminal_output_bytes={}",
+        "[Memory][UI Models] route={:?} chat_rows={} chat_blocks={} chat_inline_lines={} chat_spans={} chat_text_bytes={} chat_model_commits={} chat_markdown_projections={} ai_review_rows={} ai_review_blocks={} ai_review_spans={} ai_review_raw_text_bytes={} ai_review_projected_bytes={} ai_review_repository_actions={} ai_review_previewable_rows={} preview_host={} preview_kind={} preview_host_count={} preview_blocks={} preview_payload_bytes={} project_rows={} project_tags={} project_text_bytes={} pr_list_rows={} pr_list_text_bytes={} pr_review_files={} pr_review_tree_items={} pr_review_extension_filters={} pr_review_lines={} job_steps={} job_step_text_bytes={} terminal_lines={} terminal_spans={} terminal_text_bytes={} terminal_output_bytes={}",
         route,
         chat.row_count(),
         chat_blocks,
@@ -363,6 +394,13 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
         chat_text_bytes,
         chat_model_commits,
         chat_markdown_projections,
+        ai_review.row_count(),
+        ai_review_blocks,
+        ai_review_spans,
+        ai_review_raw_text_bytes,
+        ai_review_projected_bytes,
+        ai_review_repository_actions,
+        ai_review_previewable_rows,
         preview.host,
         preview.kind,
         preview.host_count,

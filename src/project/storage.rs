@@ -2,8 +2,6 @@
 
 use std::{fs, path::PathBuf};
 
-use directories::ProjectDirs;
-
 use super::logo::normalize_project_logo;
 use super::model::{ProjectConfig, ProjectRepositoryMetadata, normalize_project_tags};
 
@@ -60,8 +58,7 @@ pub(super) fn load_projects() -> Vec<ProjectConfig> {
 }
 
 fn projects_file_path() -> Option<PathBuf> {
-    let proj_dirs = ProjectDirs::from("com", "usher", "app")?;
-    let base_dir = proj_dirs.data_local_dir();
+    let base_dir = crate::app_paths::data_local_dir()?;
     let project_dir = base_dir.join("project");
     Some(project_dir.join("projects.json"))
 }

@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use config::{Config, File, FileFormat};
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use slint::{Global, Timer};
 
@@ -260,8 +259,7 @@ impl SettingsManager {
         // macOS: ~/Library/Application Support/com.usher.app/
         // Linux: ~/.config/usher/
         // Windows: C:\Users\<user>\AppData\Roaming\usher\
-        if let Some(proj_dirs) = ProjectDirs::from("com", "usher", "app") {
-            let config_dir = proj_dirs.config_dir();
+        if let Some(config_dir) = crate::app_paths::config_dir() {
             config_dir.join("settings.toml")
         } else {
             // Fallback to current directory

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -22,23 +22,31 @@ use usher_ai_review::{
 use usher_messages::{MessageCenter, MessageDraft, MessageSeverity, NativeDelivery};
 use usher_state_store::{LocalStateStore, StateStore, Subscription};
 
+use crate::agent_response::{
+    AgentResponseProjector, ProjectionCacheStats, REPOSITORY_FILE_LINK_PREFIX,
+};
 use crate::ai::agent::{self, CompletionMessage};
+use crate::artifact_preview::{ArtifactPreviewHandle, ArtifactSource};
 use crate::project::load_repository_metadata;
 use crate::settings::AiAgentSettings;
 use crate::{
-    AiReviewConversationItem, AiReviewFindingItem, AiReviewRuleChoice, AiReviewTaskItem,
-    MainWindow, Route, SettingsPageBridge, WorkflowPullRequestItem,
+    AiReviewFindingItem, AiReviewRuleChoice, AiReviewTaskItem, MainWindow, Route,
+    SettingsPageBridge, WorkflowPullRequestItem,
 };
 
 use super::config::{ReviewConfigFacade, default_session_dir};
+use super::response::{self, ResponseVariant};
 
 type TaskStore = dyn StateStore<ReviewTaskState, ReviewTaskAction, ReviewTaskActionResult>;
 
 const TASK_STATE_FILE: &str = "tasks.json";
 const FIXTURE_NAME: &str = "review-v1";
+const RESPONSE_FIXTURE_NAME: &str = "markdown-v1";
 const DEFAULT_FIXTURE_DELAY_MS: u64 = 90;
 const MAX_CHAT_DIFF_BYTES: usize = 48 * 1024;
 const MAX_CHAT_HISTORY_MESSAGES: usize = 20;
+const MAX_PROJECTED_ASSISTANT_ROWS: usize = 128;
+const MAX_STRUCTURED_ASSISTANT_ROWS: usize = 32;
 
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -125,42 +133,246 @@ struct ControllerInner {
     requests: Mutex<HashMap<ReviewTaskId, PendingReviewRequest>>,
     cancellations: Mutex<HashMap<ReviewTaskId, Arc<ReviewCancellation>>>,
     chat_cancellations: Mutex<HashMap<ReviewTaskId, Arc<ReviewCancellation>>>,
+    response_projector: Mutex<AgentResponseProjector>,
+    response_projection_suspended: AtomicBool,
+    response_projector_clear_requested: AtomicBool,
+    response_mount_generation: AtomicU64,
+    response_actions: Mutex<HashMap<String, BoundRepositoryFileAction>>,
+    response_variant: ResponseVariant,
+    artifact_preview: ArtifactPreviewHandle,
     session_dir: PathBuf,
     task_persistence: TaskPersistenceWorker,
     message_center: MessageCenter,
 }
 
 #[derive(Clone)]
+struct BoundRepositoryFileAction {
+    project_root: PathBuf,
+    relative_path: PathBuf,
+}
+
+#[derive(Clone)]
+struct ProjectedConversationMessage {
+    id: String,
+    role: ReviewConversationRole,
+    content: String,
+    elapsed_ms: Option<u64>,
+    response: Option<response::PreparedAgentResponse>,
+}
+
+#[derive(Clone)]
 struct SessionProjection {
+    mount_generation: u64,
     task: ReviewTaskSummary,
     result: Option<ReviewResult>,
-    conversation: Vec<ReviewConversationMessage>,
+    conversation: Vec<ProjectedConversationMessage>,
+    response_actions: HashMap<String, BoundRepositoryFileAction>,
 }
 
-impl From<&ReviewSession> for SessionProjection {
-    fn from(session: &ReviewSession) -> Self {
-        Self {
-            task: session.task.clone(),
-            result: Some(session.result.clone()),
-            conversation: session.conversation.clone(),
+impl SessionProjection {
+    fn from_review(
+        session: &ReviewSession,
+        inner: &ControllerInner,
+        mount_generation: u64,
+    ) -> Option<Self> {
+        Self::new(
+            session.task.clone(),
+            Some(session.result.clone()),
+            session.input.repository_context.local_repo.as_deref(),
+            session.conversation.as_slice(),
+            inner,
+            mount_generation,
+        )
+    }
+
+    fn from_chat(
+        session: &PullRequestChatSession,
+        inner: &ControllerInner,
+        mount_generation: u64,
+    ) -> Option<Self> {
+        Self::new(
+            session.task.clone(),
+            None,
+            session.input.repository_context.local_repo.as_deref(),
+            session.conversation.as_slice(),
+            inner,
+            mount_generation,
+        )
+    }
+
+    fn new(
+        task: ReviewTaskSummary,
+        result: Option<ReviewResult>,
+        project_root: Option<&Path>,
+        conversation: &[ReviewConversationMessage],
+        inner: &ControllerInner,
+        mount_generation: u64,
+    ) -> Option<Self> {
+        if !inner.response_mount_is_current(mount_generation) {
+            return None;
         }
+        let started = Instant::now();
+        let mut response_actions = HashMap::new();
+        let mut projected_block_count = 0usize;
+        let mut projected_span_count = 0usize;
+        let mut projected_text_bytes = 0usize;
+        let mut truncated_rows = 0usize;
+        let assistant_count = conversation
+            .iter()
+            .filter(|message| message.role == ReviewConversationRole::Assistant)
+            .count();
+        let projected_assistant_start =
+            assistant_count.saturating_sub(MAX_PROJECTED_ASSISTANT_ROWS);
+        let structured_assistant_start =
+            assistant_count.saturating_sub(MAX_STRUCTURED_ASSISTANT_ROWS);
+        let mut assistant_index = 0usize;
+        let mut projector = inner
+            .response_projector
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if inner
+            .response_projector_clear_requested
+            .swap(false, Ordering::AcqRel)
+        {
+            projector.clear();
+        }
+        let projected = conversation
+            .iter()
+            .enumerate()
+            .map(|(index, message)| {
+                let id = format!("{}:{}:{index}", task.id.0, message.created_at_unix_ms);
+                let assistant_row = message.role == ReviewConversationRole::Assistant;
+                let current_assistant_index = assistant_index;
+                let within_projection_window =
+                    !assistant_row || current_assistant_index >= projected_assistant_start;
+                let within_structured_window =
+                    !assistant_row || current_assistant_index >= structured_assistant_start;
+                if assistant_row {
+                    assistant_index = assistant_index.saturating_add(1);
+                }
+                let core_projection = (inner.response_variant.is_formatted()
+                    && assistant_row
+                    && within_projection_window
+                    && !inner.response_projection_suspended.load(Ordering::Acquire))
+                .then(|| projector.project(&id, &message.content, "AI review response"));
+                if let Some(core_projection) = core_projection.as_ref() {
+                    projected_block_count =
+                        projected_block_count.saturating_add(core_projection.blocks.len());
+                    projected_span_count = projected_span_count.saturating_add(
+                        core_projection
+                            .blocks
+                            .iter()
+                            .map(|block| block.spans.len())
+                            .sum::<usize>(),
+                    );
+                    projected_text_bytes =
+                        projected_text_bytes.saturating_add(core_projection.approximate_bytes);
+                    truncated_rows =
+                        truncated_rows.saturating_add(usize::from(core_projection.truncated));
+                    if let Some(project_root) = project_root {
+                        for action in &core_projection.repository_file_actions {
+                            response_actions.insert(
+                                action.token.clone(),
+                                BoundRepositoryFileAction {
+                                    project_root: project_root.to_path_buf(),
+                                    relative_path: action.relative_path.clone(),
+                                },
+                            );
+                        }
+                    }
+                }
+                let prepared_response = core_projection.as_deref().map(|projection| {
+                    if within_structured_window {
+                        response::prepare_projection(projection, project_root.is_some())
+                    } else {
+                        response::prepare_plain_projection(projection)
+                    }
+                });
+                ProjectedConversationMessage {
+                    id,
+                    role: message.role.clone(),
+                    content: message.content.clone(),
+                    elapsed_ms: message.elapsed_ms,
+                    response: prepared_response,
+                }
+            })
+            .collect::<Vec<_>>();
+        if inner.response_projection_suspended.load(Ordering::Acquire)
+            || inner
+                .response_projector_clear_requested
+                .swap(false, Ordering::AcqRel)
+        {
+            projector.clear();
+        }
+        let cache = projector.stats();
+        drop(projector);
+        if !inner.response_mount_is_current(mount_generation) {
+            return None;
+        }
+        log_response_projection(
+            &task,
+            inner.response_variant,
+            projected.as_slice(),
+            projected_block_count,
+            projected_span_count,
+            projected_text_bytes,
+            response_actions.len(),
+            truncated_rows,
+            cache,
+            started.elapsed(),
+        );
+        Some(Self {
+            mount_generation,
+            task,
+            result,
+            conversation: projected,
+            response_actions,
+        })
     }
 }
 
-impl From<&PullRequestChatSession> for SessionProjection {
-    fn from(session: &PullRequestChatSession) -> Self {
-        Self {
-            task: session.task.clone(),
-            result: None,
-            conversation: session.conversation.clone(),
-        }
-    }
+#[allow(clippy::too_many_arguments)]
+fn log_response_projection(
+    task: &ReviewTaskSummary,
+    variant: ResponseVariant,
+    messages: &[ProjectedConversationMessage],
+    blocks: usize,
+    spans: usize,
+    projected_bytes: usize,
+    repository_actions: usize,
+    truncated_rows: usize,
+    cache: ProjectionCacheStats,
+    elapsed: Duration,
+) {
+    let formatted_rows = messages
+        .iter()
+        .filter(|message| message.response.is_some())
+        .count();
+    log::info!(
+        "[AI Review][ResponseProjection] task={} variant={} rows={} formatted_rows={} blocks={} spans={} projected_bytes={} repository_actions={} truncated_rows={} elapsed_us={} cache_hits={} cache_misses={} cache_evictions={} cache_entries={} cache_bytes={}",
+        task.id.0,
+        variant.label(),
+        messages.len(),
+        formatted_rows,
+        blocks,
+        spans,
+        projected_bytes,
+        repository_actions,
+        truncated_rows,
+        elapsed.as_micros(),
+        cache.hits,
+        cache.misses,
+        cache.evictions,
+        cache.entries,
+        cache.bytes,
+    );
 }
 
 pub(crate) fn setup_ai_review(
     ui: &MainWindow,
     settings_page: &SettingsPageBridge,
     message_center: MessageCenter,
+    artifact_preview: ArtifactPreviewHandle,
 ) -> AiReviewController {
     let config = ReviewConfigFacade::open_default();
     settings_page.configure_ai_review(config.clone());
@@ -178,6 +390,11 @@ pub(crate) fn setup_ai_review(
         let _ = persistence_sender.send(Some(snapshot.state_arc()));
     }));
 
+    let response_variant = ResponseVariant::from_environment();
+    log::info!(
+        "[AI Review][Response] variant={} lightweight_parser=true",
+        response_variant.label()
+    );
     let inner = Arc::new(ControllerInner {
         window: ui.as_weak(),
         scheduler: Mutex::new(ReviewScheduler::new(
@@ -188,6 +405,13 @@ pub(crate) fn setup_ai_review(
         requests: Mutex::new(HashMap::new()),
         cancellations: Mutex::new(HashMap::new()),
         chat_cancellations: Mutex::new(HashMap::new()),
+        response_projector: Mutex::new(AgentResponseProjector::default()),
+        response_projection_suspended: AtomicBool::new(true),
+        response_projector_clear_requested: AtomicBool::new(false),
+        response_mount_generation: AtomicU64::new(0),
+        response_actions: Mutex::new(HashMap::new()),
+        response_variant,
+        artifact_preview,
         session_dir,
         task_persistence,
         message_center,
@@ -234,12 +458,121 @@ pub(crate) fn setup_ai_review(
         });
     }));
 
-    AiReviewController {
-        inner,
+    let controller = AiReviewController {
+        inner: inner.clone(),
         _task_subscription: Arc::new(task_subscription),
         _config_subscription: Arc::new(config_subscription),
     }
-    .with_persistence_subscription(persistence_subscription)
+    .with_persistence_subscription(persistence_subscription);
+    maybe_mount_response_fixture(ui, inner);
+    controller
+}
+
+fn maybe_mount_response_fixture(ui: &MainWindow, inner: Arc<ControllerInner>) {
+    if std::env::var("USHER_AI_REVIEW_RESPONSE_FIXTURE").as_deref() != Ok(RESPONSE_FIXTURE_NAME) {
+        return;
+    }
+    let message_count = response_fixture_message_count();
+    let bytes_per_response = response_fixture_bytes();
+    let mount_generation = inner.begin_response_mount();
+    let window = ui.as_weak();
+    crate::app_runtime::shared_runtime().spawn(async move {
+        let session = tokio::task::spawn_blocking(move || {
+            response_fixture_session(message_count, bytes_per_response)
+        })
+        .await
+        .expect("AI Review response fixture worker failed");
+        let Some(projection) = SessionProjection::from_chat(
+            &session,
+            inner.as_ref(),
+            mount_generation,
+        ) else {
+            return;
+        };
+        let task = session.task;
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = window.upgrade() else {
+                return;
+            };
+            if !inner.response_mount_is_current(mount_generation) {
+                return;
+            }
+            ui.set_workflow_pr_review_visible(true);
+            ui.set_workflow_pr_review_loading(false);
+            ui.set_workflow_pr_review_number(task.target.pull_request_number.clone().into());
+            ui.set_workflow_pr_review_title(task.target.pull_request_title.clone().into());
+            ui.set_workflow_pr_review_author(task.target.author.clone().into());
+            ui.set_workflow_pr_review_source_branch(task.target.source_branch.clone().into());
+            ui.set_workflow_pr_review_target_branch(task.target.target_branch.clone().into());
+            ui.set_workflow_pr_review_updated_at(task.target.updated_at.clone().into());
+            ui.invoke_navigate(Route::PrReview);
+            apply_task_header(&ui, &task);
+            ui.set_ai_review_summary(
+                "Deterministic Markdown fixture for response rendering and memory A/B.".into(),
+            );
+            ui.set_ai_review_findings(ModelRc::new(VecModel::default()));
+            ui.set_ai_review_chat_sending(false);
+            ui.set_ai_review_panel_visible(true);
+            apply_projection(&ui, projection, &inner.response_actions);
+
+            let window = ui.as_weak();
+            slint::Timer::single_shot(Duration::from_millis(700), move || {
+                let Some(ui) = window.upgrade() else {
+                    return;
+                };
+                let rows = ui.get_ai_review_conversation();
+                let mut assistant_rows = 0usize;
+                let mut assistant_bytes_total = 0usize;
+                let mut formatted_rows = 0usize;
+                let mut blocks = 0usize;
+                let mut raw_bytes = 0usize;
+                for index in 0..rows.row_count() {
+                    let Some(row) = rows.row_data(index) else {
+                        continue;
+                    };
+                    raw_bytes = raw_bytes.saturating_add(row.content.len());
+                    if row.role == "assistant" {
+                        assistant_rows = assistant_rows.saturating_add(1);
+                        assistant_bytes_total =
+                            assistant_bytes_total.saturating_add(row.content.len());
+                    }
+                    if row.formatted {
+                        formatted_rows = formatted_rows.saturating_add(1);
+                    }
+                    blocks = blocks.saturating_add(row.blocks.row_count());
+                }
+                let actions = inner
+                    .response_actions
+                    .lock()
+                    .map(|actions| actions.len())
+                    .unwrap_or_default();
+                let cache = inner
+                    .response_projector
+                    .lock()
+                    .map(|projector| projector.stats())
+                    .unwrap_or_default();
+                let settled_marker = format!(
+                    "[AI Review][ResponseFixture] settled fixture={} variant={} messages={} bytes_per_response={} assistant_bytes_total={} rows={} assistant_rows={} formatted_rows={} blocks={} actions={} raw_bytes={} cache_bytes={} fixture_persistence=false",
+                    RESPONSE_FIXTURE_NAME,
+                    inner.response_variant.label(),
+                    message_count,
+                    bytes_per_response,
+                    assistant_bytes_total,
+                    rows.row_count(),
+                    assistant_rows,
+                    formatted_rows,
+                    blocks,
+                    actions,
+                    raw_bytes,
+                    cache.bytes,
+                );
+                println!("{settled_marker}");
+                let _ = std::io::stdout().flush();
+                crate::memory_diagnostics::log_ui_models(&ui, Route::PrReview);
+                crate::memory_diagnostics::log_checkpoint("ai_review.response_fixture.settled");
+            });
+        });
+    });
 }
 
 impl AiReviewController {
@@ -293,7 +626,7 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
             inner_toggle.cancel_chat(&ReviewTaskId(
                 ui.get_ai_review_current_task_id().to_string(),
             ));
-            close_panel(&ui);
+            inner_toggle.close_panel(&ui);
             return;
         }
         let project = ProjectReviewKey(ui.get_workflow_project_id().to_string());
@@ -325,7 +658,7 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
             inner_close.cancel_chat(&ReviewTaskId(
                 ui.get_ai_review_current_task_id().to_string(),
             ));
-            close_panel(&ui);
+            inner_close.close_panel(&ui);
             inner_close.log_owned_bytes("panel.closed");
         }
     });
@@ -356,7 +689,7 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
         inner_rerun.cancel_chat(&ReviewTaskId(
             ui.get_ai_review_current_task_id().to_string(),
         ));
-        close_panel(&ui);
+        inner_rerun.close_panel(&ui);
         inner_rerun.clone().enqueue(request, true);
     });
 
@@ -371,7 +704,7 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
             inner_visible.cancel_chat(&ReviewTaskId(
                 ui.get_ai_review_current_task_id().to_string(),
             ));
-            close_panel(&ui);
+            inner_visible.close_panel(&ui);
             inner_visible.log_owned_bytes("panel.route_hidden");
         }
     });
@@ -405,9 +738,148 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
     ui.on_ai_review_select_finding(move |file, line| {
         reveal_finding(inner_finding.window.clone(), file.to_string(), line, 0);
     });
+
+    let inner_response_preview = inner.clone();
+    ui.on_ai_review_open_response_artifact(move |id, title, markdown| {
+        if markdown.trim().is_empty() {
+            return;
+        }
+        let title = if title.trim().is_empty() {
+            "AI review response".to_string()
+        } else {
+            title.to_string()
+        };
+        inner_response_preview
+            .artifact_preview
+            .open_pr_review_source(ArtifactSource::inline_markdown(
+                format!("ai-review-response:{id}"),
+                title,
+                markdown.to_string(),
+            ));
+    });
+
+    let inner_response_link = inner.clone();
+    ui.on_ai_review_open_response_link(move |url| {
+        inner_response_link.open_response_link(url.as_str());
+    });
+
+    let response_fixture_scroll_reported = Arc::new(AtomicBool::new(false));
+    let scroll_reported = response_fixture_scroll_reported.clone();
+    let response_variant = inner.response_variant;
+    ui.on_ai_review_response_wheel_consumed(move |movement| {
+        if std::env::var("USHER_AI_REVIEW_RESPONSE_FIXTURE").as_deref()
+            != Ok(RESPONSE_FIXTURE_NAME)
+            || movement.abs() <= 0.25
+            || scroll_reported.swap(true, Ordering::AcqRel)
+        {
+            return;
+        }
+        println!(
+            "[AI Review][ResponseFixture] scroll-consumed fixture={} variant={} movement_px={movement:.2}",
+            RESPONSE_FIXTURE_NAME,
+            response_variant.label(),
+        );
+        let _ = std::io::stdout().flush();
+    });
 }
 
 impl ControllerInner {
+    fn begin_response_mount(&self) -> u64 {
+        let generation = self
+            .response_mount_generation
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
+        self.response_projection_suspended
+            .store(false, Ordering::Release);
+        generation
+    }
+
+    fn response_mount_is_current(&self, generation: u64) -> bool {
+        !self.response_projection_suspended.load(Ordering::Acquire)
+            && self.response_mount_generation.load(Ordering::Acquire) == generation
+    }
+
+    fn close_panel(self: &Arc<Self>, ui: &MainWindow) {
+        let docked_contextual_preview = ui.get_artifact_preview_pr_side_context()
+            && crate::AppState::get(ui).get_artifact_preview_presentation_mode() == 0;
+        if docked_contextual_preview {
+            ui.invoke_artifact_preview_dismiss();
+        }
+        self.response_actions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+        self.response_projection_suspended
+            .store(true, Ordering::Release);
+        self.response_mount_generation
+            .fetch_add(1, Ordering::AcqRel);
+        self.response_projector_clear_requested
+            .store(true, Ordering::Release);
+        match self.response_projector.try_lock() {
+            Ok(mut projector) => {
+                projector.clear();
+                self.response_projector_clear_requested
+                    .store(false, Ordering::Release);
+            }
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+                poisoned.into_inner().clear();
+                self.response_projector_clear_requested
+                    .store(false, Ordering::Release);
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                let inner = self.clone();
+                crate::app_runtime::shared_runtime().spawn(async move {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let mut projector = inner
+                            .response_projector
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        if inner
+                            .response_projector_clear_requested
+                            .swap(false, Ordering::AcqRel)
+                        {
+                            projector.clear();
+                        }
+                    })
+                    .await;
+                });
+            }
+        }
+        clear_panel_ui(ui);
+    }
+
+    fn open_response_link(&self, url: &str) {
+        let url = url.trim();
+        if url
+            .get(..7)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+            || url
+                .get(..8)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+        {
+            if let Some(ui) = self.window.upgrade() {
+                ui.invoke_artifact_preview_open_link(url.into());
+            }
+            return;
+        }
+        let Some(token) = url.strip_prefix(REPOSITORY_FILE_LINK_PREFIX) else {
+            log::warn!("[AI Review][Response] Refused unknown response link scheme");
+            return;
+        };
+        let action = self
+            .response_actions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(token)
+            .cloned();
+        let Some(action) = action else {
+            log::warn!("[AI Review][Response] Ignored stale repository document action");
+            return;
+        };
+        self.artifact_preview
+            .open_project_markdown(action.project_root, action.relative_path);
+    }
+
     fn enqueue(self: Arc<Self>, request: PendingReviewRequest, open_panel: bool) {
         if request.number.trim().is_empty() {
             return;
@@ -506,6 +978,7 @@ impl ControllerInner {
     }
 
     async fn run_task(self: Arc<Self>, id: ReviewTaskId) {
+        let task_started = Instant::now();
         let request = self
             .requests
             .lock()
@@ -525,7 +998,9 @@ impl ControllerInner {
                         chat_session.conversation.as_slice(),
                     );
                 }
-                let projection = SessionProjection::from(&session);
+                let mount_generation = self.response_mount_generation.load(Ordering::Acquire);
+                let projection =
+                    SessionProjection::from_review(&session, self.as_ref(), mount_generation);
                 let finding_count = session.result.findings.len() as u32;
                 match persist_session(self.session_path(&id), session).await {
                     Ok(()) => {
@@ -534,7 +1009,9 @@ impl ControllerInner {
                             finding_count,
                             updated_at_unix_ms: unix_millis(),
                         });
-                        self.apply_projection_if_visible(projection);
+                        if let Some(projection) = projection {
+                            self.apply_projection_if_visible(projection);
+                        }
                         self.publish_terminal_message(&id, true, finding_count, "");
                     }
                     Err(error) => {
@@ -569,6 +1046,17 @@ impl ControllerInner {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .finish();
+        if let Some(task) = self.task_store.snapshot().state().tasks.get(&id) {
+            log::info!(
+                "[AI Review][Task] event=finished task={} status={:?} progress={} completed_chunks={} total_chunks={} elapsed_ms={}",
+                id.0,
+                task.status,
+                task.progress_percent,
+                task.completed_chunks,
+                task.total_chunks,
+                task_started.elapsed().as_millis()
+            );
+        }
         self.log_owned_bytes("task.finished");
         self.schedule_ready();
     }
@@ -584,7 +1072,15 @@ impl ControllerInner {
             validate_model_settings(&settings)?;
         }
 
+        let context_started = Instant::now();
+        log::info!("[AI Review][Task] event=context_loading task={}", id.0);
         let (target, unified_diff) = load_pull_request_context(&request, fixture).await?;
+        log::info!(
+            "[AI Review][Task] event=context_loaded task={} diff_bytes={} elapsed_ms={}",
+            id.0,
+            unified_diff.len(),
+            context_started.elapsed().as_millis()
+        );
 
         if self.is_cancelled(id) {
             return Err("Review cancelled".to_string());
@@ -632,6 +1128,16 @@ impl ControllerInner {
             }
             let count = chunks.len();
             let total_chunks = count.min(u32::MAX as usize) as u32;
+            log::info!(
+                "[AI Review][Task] event=chunks_planned task={} chunks={} diff_bytes={} rule_bytes={}",
+                id.0,
+                count,
+                input.unified_diff.len(),
+                input
+                    .base_rule
+                    .as_ref()
+                    .map_or(0, |rule| rule.content.len())
+            );
             self.task_store
                 .dispatch(ReviewTaskAction::SetChunkProgress {
                     id: id.clone(),
@@ -654,13 +1160,37 @@ impl ControllerInner {
                 let cancellation = self
                     .cancellation(id)
                     .ok_or_else(|| "Review cancelled".to_string())?;
+                let completion_started = Instant::now();
+                log::info!(
+                    "[AI Review][Task] event=completion_started task={} chunk={}/{} prompt_bytes={}",
+                    id.0,
+                    index + 1,
+                    count,
+                    messages
+                        .iter()
+                        .map(|message| message.content.len())
+                        .sum::<usize>()
+                );
                 let response = run_review_work_until_cancelled(
                     cancellation,
-                    agent::complete_review(&settings, &messages, "AI code review"),
+                    agent::complete_review(
+                        &settings,
+                        &messages,
+                        "AI code review",
+                        format!("task={} chunk={}/{}", id.0, index + 1, count),
+                    ),
                 )
                 .await
                 .map_err(|()| "Review cancelled".to_string())?
                 .map_err(|error| error.user_message().to_string())?;
+                log::info!(
+                    "[AI Review][Task] event=completion_received task={} chunk={}/{} response_bytes={} elapsed_ms={}",
+                    id.0,
+                    index + 1,
+                    count,
+                    response.len(),
+                    completion_started.elapsed().as_millis()
+                );
                 results.push(
                     parse_review_response(response.as_str())
                         .map_err(|error| format!("AI review returned invalid JSON: {error}"))?,
@@ -717,6 +1247,7 @@ impl ControllerInner {
         } else if ui.get_current_route() != Route::PrReview {
             return;
         }
+        let mount_generation = self.begin_response_mount();
         apply_task_header(&ui, &task);
         ui.set_ai_review_panel_visible(true);
         ui.set_ai_review_current_task_id(task.id.0.clone().into());
@@ -743,18 +1274,28 @@ impl ControllerInner {
                                 chat_session.conversation.as_slice(),
                             );
                         }
-                        Ok(Some(SessionProjection::from(&session)))
+                        Ok(SessionProjection::from_review(
+                            &session,
+                            inner.as_ref(),
+                            mount_generation,
+                        ))
                     }
                     Err(error) => match load_chat_session(chat_path).await {
-                        Ok(Some(session)) => Ok(Some(SessionProjection::from(&session))),
+                        Ok(Some(session)) => Ok(SessionProjection::from_chat(
+                            &session,
+                            inner.as_ref(),
+                            mount_generation,
+                        )),
                         Ok(None) => Err(error),
                         Err(chat_error) => Err(chat_error),
                     },
                 }
             } else {
-                load_chat_session(chat_path)
-                    .await
-                    .map(|session| session.as_ref().map(SessionProjection::from))
+                load_chat_session(chat_path).await.map(|session| {
+                    session.as_ref().and_then(|session| {
+                        SessionProjection::from_chat(session, inner.as_ref(), mount_generation)
+                    })
+                })
             };
             match projection {
                 Ok(Some(projection)) => inner.apply_projection_if_visible(projection),
@@ -766,7 +1307,9 @@ impl ControllerInner {
                         let Some(ui) = window.upgrade() else {
                             return;
                         };
-                        if ui.get_ai_review_current_task_id() == task_id {
+                        if inner.response_mount_is_current(mount_generation)
+                            && ui.get_ai_review_current_task_id() == task_id
+                        {
                             ui.set_ai_review_error(error.into());
                             ui.set_ai_review_status("failed".into());
                         }
@@ -776,22 +1319,40 @@ impl ControllerInner {
         });
     }
 
-    fn apply_projection_if_visible(&self, projection: SessionProjection) {
+    fn apply_projection_if_visible(self: &Arc<Self>, projection: SessionProjection) {
         let window = self.window.clone();
+        let inner = self.clone();
         let _ = slint::invoke_from_event_loop(move || {
             let Some(ui) = window.upgrade() else {
                 return;
             };
-            if !ui.get_ai_review_panel_visible()
+            if !inner.response_mount_is_current(projection.mount_generation)
+                || !ui.get_ai_review_panel_visible()
                 || ui.get_ai_review_current_task_id() != projection.task.id.0
             {
                 return;
             }
-            apply_projection(&ui, projection);
+            apply_projection(&ui, projection, &inner.response_actions);
         });
     }
 
     fn cancel(&self, id: &ReviewTaskId) {
+        let task = self.task_store.snapshot().state().tasks.get(id).cloned();
+        if let Some(task) = task.as_ref() {
+            log::info!(
+                "[AI Review][Task] event=cancel_requested source=ui task={} status={:?} progress={} completed_chunks={} total_chunks={}",
+                id.0,
+                task.status,
+                task.progress_percent,
+                task.completed_chunks,
+                task.total_chunks
+            );
+        } else {
+            log::info!(
+                "[AI Review][Task] event=cancel_requested source=ui task={} status=missing",
+                id.0
+            );
+        }
         if let Some(cancellation) = self.cancellation(id) {
             cancellation.cancel();
         }
@@ -902,6 +1463,10 @@ impl ControllerInner {
         let Some(task) = self.task_store.snapshot().state().tasks.get(&id).cloned() else {
             return;
         };
+        let mount_generation = self.response_mount_generation.load(Ordering::Acquire);
+        if !self.response_mount_is_current(mount_generation) {
+            return;
+        }
         let cancellation = Arc::new(ReviewCancellation::default());
         {
             let mut cancellations = self
@@ -954,6 +1519,7 @@ impl ControllerInner {
                         self.update_chat_status(&id, &work_cancellation, "Thinking...");
                         let answer = complete_chat(
                             &settings,
+                            &id,
                             &session.input,
                             Some(&session.result),
                             session.conversation.as_slice(),
@@ -964,7 +1530,11 @@ impl ControllerInner {
                             answer,
                             elapsed_millis(request_started.elapsed()),
                         ));
-                        let projection = SessionProjection::from(&session);
+                        let projection = SessionProjection::from_review(
+                            &session,
+                            self.as_ref(),
+                            mount_generation,
+                        );
                         persist_session(path, session).await?;
                         return Ok::<_, String>(projection);
                     }
@@ -981,6 +1551,7 @@ impl ControllerInner {
                     self.update_chat_status(&id, &work_cancellation, "Thinking...");
                     let answer = complete_chat(
                         &settings,
+                        &id,
                         &session.input,
                         None,
                         session.conversation.as_slice(),
@@ -991,7 +1562,8 @@ impl ControllerInner {
                         answer,
                         elapsed_millis(request_started.elapsed()),
                     ));
-                    let projection = SessionProjection::from(&session);
+                    let projection =
+                        SessionProjection::from_chat(&session, self.as_ref(), mount_generation);
                     persist_chat_session(chat_path, session).await?;
                     Ok(projection)
                 }
@@ -1005,22 +1577,25 @@ impl ControllerInner {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .remove(&id);
             let window = self.window.clone();
+            let inner_for_ui = self.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 let Some(ui) = window.upgrade() else {
                     return;
                 };
-                if ui.get_ai_review_current_task_id() != id.0 {
+                if !inner_for_ui.response_mount_is_current(mount_generation)
+                    || ui.get_ai_review_current_task_id() != id.0
+                {
                     return;
                 }
                 ui.set_ai_review_chat_sending(false);
                 ui.set_ai_review_chat_status("".into());
                 ui.set_ai_review_chat_elapsed_seconds(0);
                 match result {
-                    Ok(Ok(projection))
+                    Ok(Ok(Some(projection)))
                         if ui.get_ai_review_panel_visible()
                             && ui.get_ai_review_current_task_id() == projection.task.id.0 =>
                     {
-                        apply_projection(&ui, projection);
+                        apply_projection(&ui, projection, &inner_for_ui.response_actions);
                     }
                     Ok(Ok(_)) => {}
                     Ok(Err(error)) => {
@@ -1126,8 +1701,35 @@ impl ControllerInner {
         let task_state_bytes = serde_json::to_vec(self.task_store.snapshot().state())
             .map(|bytes| bytes.len())
             .unwrap_or(0);
+        let response_cache = match self.response_projector.try_lock() {
+            Ok(projector) => projector.stats(),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner().stats(),
+            Err(std::sync::TryLockError::WouldBlock) => ProjectionCacheStats::default(),
+        };
+        let (response_actions, response_action_bytes) = self
+            .response_actions
+            .lock()
+            .map(|actions| {
+                (
+                    actions.len(),
+                    actions
+                        .iter()
+                        .map(|(token, action)| {
+                            token
+                                .len()
+                                .saturating_add(action.project_root.as_os_str().len())
+                                .saturating_add(action.relative_path.as_os_str().len())
+                        })
+                        .sum::<usize>(),
+                )
+            })
+            .unwrap_or_default();
         log::info!(
-            "[AI Review][Memory] reason={reason} queued_metadata_bytes={queued_metadata_bytes} task_state_bytes={task_state_bytes} running={} queued={}",
+            "[AI Review][Memory] reason={reason} queued_metadata_bytes={queued_metadata_bytes} task_state_bytes={task_state_bytes} response_cache_entries={} response_cache_bytes={} response_actions={} response_action_bytes={} running={} queued={}",
+            response_cache.entries,
+            response_cache.bytes,
+            response_actions,
+            response_action_bytes,
             self.scheduler
                 .lock()
                 .map(|scheduler| scheduler.active())
@@ -1240,6 +1842,7 @@ async fn build_chat_input(
 
 async fn complete_chat(
     settings: &AiAgentSettings,
+    task_id: &ReviewTaskId,
     input: &ReviewInput,
     review_result: Option<&ReviewResult>,
     conversation: &[ReviewConversationMessage],
@@ -1247,12 +1850,17 @@ async fn complete_chat(
 ) -> Result<String, String> {
     if fixture {
         tokio::time::sleep(Duration::from_millis(fixture_delay_ms())).await;
-        return Ok("This pull request changes the fixture validation path. Check the error handling and cover the changed behavior with a regression test.".to_string());
+        return Ok(response_fixture_markdown(1, 1_500));
     }
     let messages = build_chat_messages(input, review_result, conversation)?;
-    agent::complete_review(settings, messages.as_slice(), "AI review conversation")
-        .await
-        .map_err(|error| error.user_message().to_string())
+    agent::complete_review(
+        settings,
+        messages.as_slice(),
+        "AI review conversation",
+        format!("task={} kind=chat", task_id.0),
+    )
+    .await
+    .map_err(|error| error.user_message().to_string())
 }
 
 fn build_chat_messages(
@@ -1469,9 +2077,20 @@ fn apply_task_header(ui: &MainWindow, task: &ReviewTaskSummary) {
     ui.set_ai_review_elapsed_seconds((elapsed_ms / 1_000).min(i32::MAX as u64) as i32);
 }
 
-fn apply_projection(ui: &MainWindow, projection: SessionProjection) {
-    if let Some(result) = projection.result {
-        apply_task_header(ui, &projection.task);
+fn apply_projection(
+    ui: &MainWindow,
+    projection: SessionProjection,
+    active_response_actions: &Mutex<HashMap<String, BoundRepositoryFileAction>>,
+) {
+    let SessionProjection {
+        mount_generation: _,
+        task,
+        result,
+        conversation,
+        response_actions,
+    } = projection;
+    if let Some(result) = result {
+        apply_task_header(ui, &task);
         ui.set_ai_review_summary(result.summary.into());
         ui.set_ai_review_findings(ModelRc::new(VecModel::from(
             result
@@ -1489,18 +2108,24 @@ fn apply_projection(ui: &MainWindow, projection: SessionProjection) {
         )));
     }
     if !ui.get_ai_review_chat_sending() {
+        *active_response_actions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = response_actions;
         ui.set_ai_review_conversation(ModelRc::new(VecModel::from(
-            projection
-                .conversation
+            conversation
                 .into_iter()
-                .map(|message| AiReviewConversationItem {
-                    role: message.role.as_str().into(),
-                    content: message.content.into(),
-                    elapsed: message
+                .map(|message| {
+                    let elapsed = message
                         .elapsed_ms
                         .map(format_elapsed_ms)
-                        .unwrap_or_default()
-                        .into(),
+                        .unwrap_or_default();
+                    response::conversation_item(
+                        &message.id,
+                        message.role.as_str(),
+                        &message.content,
+                        &elapsed,
+                        message.response,
+                    )
                 })
                 .collect::<Vec<_>>(),
         )));
@@ -1509,15 +2134,15 @@ fn apply_projection(ui: &MainWindow, projection: SessionProjection) {
 
 fn append_ui_conversation(ui: &MainWindow, role: &str, content: &str, elapsed_ms: Option<u64>) {
     let mut conversation = ui.get_ai_review_conversation().iter().collect::<Vec<_>>();
-    conversation.push(AiReviewConversationItem {
-        role: role.into(),
-        content: content.into(),
-        elapsed: elapsed_ms.map(format_elapsed_ms).unwrap_or_default().into(),
-    });
+    let id = format!("optimistic:{role}:{}", unix_millis());
+    let elapsed = elapsed_ms.map(format_elapsed_ms).unwrap_or_default();
+    conversation.push(response::plain_conversation_item(
+        &id, role, content, &elapsed,
+    ));
     ui.set_ai_review_conversation(ModelRc::new(VecModel::from(conversation)));
 }
 
-fn close_panel(ui: &MainWindow) {
+fn clear_panel_ui(ui: &MainWindow) {
     ui.set_ai_review_panel_visible(false);
     ui.set_ai_review_current_task_id("".into());
     ui.set_ai_review_summary("".into());
@@ -1662,6 +2287,191 @@ fn validate_model_settings(settings: &AiAgentSettings) -> Result<(), String> {
 
 fn fixture_enabled() -> bool {
     std::env::var("USHER_AI_REVIEW_FIXTURE").is_ok_and(|value| value == FIXTURE_NAME)
+}
+
+fn response_fixture_message_count() -> usize {
+    std::env::var("USHER_AI_REVIEW_RESPONSE_FIXTURE_MESSAGES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(12)
+        .clamp(1, 64)
+}
+
+fn response_fixture_bytes() -> usize {
+    std::env::var("USHER_AI_REVIEW_RESPONSE_FIXTURE_BYTES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(4 * 1024)
+        .clamp(512, 16 * 1024)
+}
+
+fn response_fixture_session(
+    message_count: usize,
+    bytes_per_response: usize,
+) -> PullRequestChatSession {
+    let task = ReviewTaskSummary {
+        id: ReviewTaskId("response-fixture-task".to_string()),
+        target: ReviewTarget {
+            project_key: ProjectReviewKey("response-fixture-project".to_string()),
+            project_name: "Usher".to_string(),
+            pull_request_number: "648".to_string(),
+            pull_request_title: "Render structured AI code review responses".to_string(),
+            base_sha: "fixture-base".to_string(),
+            head_sha: "fixture-head".to_string(),
+            author: "fixture-author".to_string(),
+            source_branch: "feature/agent-response".to_string(),
+            target_branch: "main".to_string(),
+            updated_at: "2026-08-23T09:30:00+08:00".to_string(),
+        },
+        rule_name: "Repository review".to_string(),
+        model_name: "fixture-agent".to_string(),
+        status: ReviewTaskStatus::Completed,
+        progress_percent: 100,
+        completed_chunks: 4,
+        total_chunks: 4,
+        finding_count: 0,
+        error: String::new(),
+        created_at_unix_ms: 1_777_088_600_000,
+        updated_at_unix_ms: 1_777_088_604_200,
+    };
+    let input = ReviewInput {
+        target: task.target.clone(),
+        model: AiModelRef {
+            provider: "fixture".to_string(),
+            base_url: "https://example.invalid/v1".to_string(),
+            model: task.model_name.clone(),
+        },
+        unified_diff: "diff --git a/src/ai_review/response.rs b/src/ai_review/response.rs\n"
+            .to_string(),
+        repository_context: RepositoryContext {
+            local_repo: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+            remote_repo: Some("https://example.invalid/usher.git".to_string()),
+        },
+        base_rule: None,
+        additional_rules: Vec::new(),
+        extra_requirements: String::new(),
+    };
+    let mut conversation = Vec::with_capacity(message_count.saturating_mul(2));
+    for index in 0..message_count {
+        let created_at = 1_777_088_600_000 + index as u64 * 2_000;
+        conversation.push(ReviewConversationMessage {
+            role: ReviewConversationRole::User,
+            content: if index == 0 {
+                "你这样改对消息块的性能有没有影响？".to_string()
+            } else {
+                format!("继续检查消息内容排版样例 {}。", index + 1)
+            },
+            created_at_unix_ms: created_at,
+            elapsed_ms: None,
+        });
+        conversation.push(ReviewConversationMessage {
+            role: ReviewConversationRole::Assistant,
+            content: response_fixture_markdown(index + 1, bytes_per_response),
+            created_at_unix_ms: created_at + 1_000,
+            elapsed_ms: Some(420 + index as u64 * 17),
+        });
+    }
+    PullRequestChatSession {
+        task,
+        input,
+        conversation,
+    }
+}
+
+fn response_fixture_markdown(index: usize, target_bytes: usize) -> String {
+    const CODEX_REFERENCE_SECTION: &str = r#"有轻微理论开销，但实测没有发现有意义的性能回退。
+
+- 新消息块多了一次隐藏文本的 `preferred-width` 测量，用于实现短消息自适应宽度、长消息限制为 88%。它只会在文本或布局约束变化时重新计算，不是逐帧执行。
+- 同时移除了原来的头像、`Y`、`You` 标题等节点，总节点数反而下降。
+- 滚动时不会重建消息模型，也没有增加回调、IO、定时器或后台任务。
+
+当前 A/B 测试包含连续滚动：
+
+- RSS：`+1.32% ~ +1.35%`
+- Physical footprint：`+4.48% ~ +4.52%`
+- 均通过 `≤5%` 且 `≤8 MiB` 的验收阈值
+- 与改消息气泡前的相邻 Release 测量相比，RSS 约 `+0.73 MiB / +0.57%`，footprint 约 `+0.51 MiB / +0.34%`，属于进程测量波动范围
+
+需要说明的是，完整 A/B 包含整个格式化消息方案，不能把全部增量归因于用户气泡。结论是：当前实现没有可测的消息滚动或内存性能退化，只有非常长的用户消息首次布局时会多一次线性文本宽度测量。测试报告在 `acceptance.md`。"#;
+    const COMPACT_SECTION: &str = "\n\n## Findings\n\nKeep **semantic emphasis**, `AGENTS.md`, [AI Review spec](docs/specs/ai-code-review.md), [architecture](docs/architecture.md), and [web report](https://example.invalid/report).\n\n- Parse on the worker.\n- Commit on the event loop.\n- Keep `../outside.md` inert.\n\n> 重要：完整响应保留，行内投影有界。\n\n### Patch\n\n```rust\nlet projection = projector.project(id, markdown, title);\n```\n\n| Check | Expected |\n| --- | --- |\n| Markdown | Preserved |";
+    const STYLE_SECTION: &str = r#"
+
+## 从 Cargo.lock 变化推测
+
+根据 PR 上下文，**需要重点确认 Cargo.toml 的改动**。行内代码 `Cargo.lock`、*强调文本*、~~废弃建议~~以及 [AI Review spec](docs/specs/ai-code-review.md) 应保持清晰。
+
+- Slint 相关 crate 从 1.15.0 升级到 1.17.1。
+- 路径 `docs/terminal\_viewport\_iteration\_notes.md` 不应显示反斜杠。
+- `i-slint-backend-\*` 与 `\[dev-dependencies\]` 应去除模型产生的二次转义。
+- Keep `../outside.md` inert and open [web report](https://example.invalid/report) externally.
+
+建议在合并前运行：
+
+```sh
+cargo fmt --all
+cargo check --locked
+cargo test --lib --locked
+git diff --check
+```
+
+另外检查依赖树：
+
+```sh
+cargo tree -d              # 查看重复依赖版本
+cargo tree -i portable-pty # 确认谁依赖了它
+cargo size --bin usher     # 检查二进制体积变化
+```
+
+### 兼容性与验证
+
+> 注意：完整响应保留在 Preview；对话消息只保留有界结构化投影，并且 CJK、Latin 与粗体基线都不能被裁切。
+
+- [x] Worker 解析完成
+- [ ] Light/Dark 与宽窄屏截图待核对
+
+| Check | Expected | Result |
+| --- | --- | --- |
+| Markdown | Codex rhythm | Pass |
+| Code | Monospace and bounded | Pass |
+
+#### Implementation detail
+
+H4 使用紧凑层级，不应抢过主要结论。
+
+##### Supporting note
+
+H5 保持可扫描但接近正文尺寸。
+
+###### Fine print
+
+H6 仍有标题权重，同时不会放大文档高度。
+
+---
+
+最后一段验证段落间距、链接、`inline code` 和长行换行。"#;
+    const FILLER: &str = " deterministic fixture";
+    let mut markdown = if index == 1 {
+        CODEX_REFERENCE_SECTION.to_string()
+    } else {
+        format!("消息排版回归样例 {index}。\n\n- 保持段落节奏。\n- 保持列表悬挂缩进。")
+    };
+    if markdown.len().saturating_add(STYLE_SECTION.len()) <= target_bytes {
+        markdown.push_str(STYLE_SECTION);
+    }
+    while markdown.len().saturating_add(COMPACT_SECTION.len()) <= target_bytes {
+        markdown.push_str(COMPACT_SECTION);
+    }
+    markdown.push_str("\n\nLoad padding:");
+    while markdown.len() < target_bytes {
+        let remaining = target_bytes - markdown.len();
+        markdown.push_str(&FILLER[..remaining.min(FILLER.len())]);
+    }
+    let safe_target = bounded_utf8_prefix(markdown.as_str(), target_bytes).len();
+    markdown.truncate(safe_target);
+    while markdown.len() < target_bytes {
+        markdown.push(' ');
+    }
+    markdown
 }
 
 fn fixture_delay_ms() -> u64 {
@@ -2040,7 +2850,9 @@ mod tests {
         window.set_ai_review_chat_sending(true);
         window.set_ai_review_chat_status("Thinking...".into());
         i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
-        let stop_position = LogicalPosition::new(1264.0, 868.0);
+        // PR Review reserves the bottom 28px for the application status bar,
+        // so the composer and its stop control end above that persistent row.
+        let stop_position = LogicalPosition::new(1264.0, 840.0);
         window.window().dispatch_event(WindowEvent::PointerMoved {
             position: stop_position,
         });
@@ -2128,6 +2940,66 @@ mod tests {
     fn review_elapsed_time_uses_compact_metadata_labels() {
         assert_eq!(format_elapsed_ms(842), "842ms");
         assert_eq!(format_elapsed_ms(125_000), "2m 05s");
+    }
+
+    #[test]
+    fn response_fixture_has_requested_shape_and_markdown_actions() {
+        let session = response_fixture_session(3, 512);
+
+        assert_eq!(session.conversation.len(), 6);
+        for (index, pair) in session.conversation.chunks_exact(2).enumerate() {
+            assert_eq!(pair[0].role, ReviewConversationRole::User);
+            assert_eq!(pair[1].role, ReviewConversationRole::Assistant);
+            if index == 0 {
+                assert_eq!(pair[0].content, "你这样改对消息块的性能有没有影响？");
+            } else {
+                assert!(pair[0].content.contains(&(index + 1).to_string()));
+            }
+            assert_eq!(pair[1].content.len(), 512);
+        }
+        assert_eq!(response_fixture_markdown(1, 4_096).len(), 4_096);
+        assert_eq!(response_fixture_markdown(1, 513).len(), 513);
+        assert_eq!(response_fixture_markdown(64, 16_384).len(), 16_384);
+
+        let assistant = response_fixture_markdown(1, 4_096);
+        let projection = crate::agent_response::project_agent_response(
+            "fixture:assistant:1",
+            assistant.as_str(),
+            "AI review response",
+            crate::agent_response::ProjectionLimits::default(),
+        );
+        assert!(projection.has_rich_markdown());
+        assert!(
+            projection
+                .blocks
+                .iter()
+                .any(|block| { block.kind == usher_preview::MarkdownBlockKind::TableRow })
+        );
+        assert!(
+            projection
+                .repository_file_actions
+                .iter()
+                .any(|action| { action.relative_path == PathBuf::from("AGENTS.md") })
+        );
+        assert!(projection.repository_file_actions.iter().any(|action| {
+            action.relative_path == PathBuf::from("docs/specs/ai-code-review.md")
+        }));
+        assert!(
+            projection
+                .blocks
+                .iter()
+                .flat_map(|block| &block.spans)
+                .any(|span| {
+                    span.kind == usher_preview::MarkdownInlineKind::Link
+                        && span.href == "https://example.invalid/report"
+                })
+        );
+        assert!(
+            !projection
+                .repository_file_actions
+                .iter()
+                .any(|action| { action.relative_path == PathBuf::from("../outside.md") })
+        );
     }
 
     #[test]
