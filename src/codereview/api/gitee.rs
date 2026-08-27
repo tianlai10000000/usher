@@ -6,6 +6,8 @@ pub(crate) const ENTERPRISE_CURRENT_USER_URL: &str = "{api_base_url}/user";
 pub(crate) const ENTERPRISE_USERS_URL: &str = "{api_base_url}/users";
 pub(crate) const ENTERPRISE_PROJECT_MEMBERS_URL: &str =
     "{api_base_url}/projects/{project_id}/members";
+pub(crate) const ENTERPRISE_PROJECT_EVENTS_URL: &str =
+    "{api_base_url}/projects/{project_id}/events";
 pub(crate) const ENTERPRISE_MERGE_REQUESTS_URL: &str =
     "{api_base_url}/projects/{project_id}/merge_requests";
 pub(crate) const ENTERPRISE_MERGE_REQUEST_DIFFS_URL: &str =

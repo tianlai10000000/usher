@@ -7,15 +7,30 @@ publish = false
 
 [features]
 default = ["markdown", "image", "plain-text"]
-markdown = ["dep:pulldown-cmark", "dep:syntect", "dep:tree-sitter-highlight", "dep:tree-sitter-javascript", "dep:tree-sitter-typescript", "dep:two-face"]
+markdown = [
+    "dep:pulldown-cmark",
+    "dep:tree-sitter",
+    "dep:tree-sitter-bash",
+    "dep:tree-sitter-go",
+    "dep:tree-sitter-highlight",
+    "dep:tree-sitter-javascript",
+    "dep:tree-sitter-json",
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-rust",
+    "dep:tree-sitter-typescript",
+]
 image = ["dep:image"]
 plain-text = []
 
 [dependencies]
 image = { version = "0.25", optional = true, default-features = true }
 pulldown-cmark = { version = "0.13", optional = true }
-syntect = { version = "5.3", optional = true, default-features = false, features = ["default-fancy"] }
+tree-sitter = { version = "0.26.12", optional = true }
+tree-sitter-bash = { version = "0.25.1", optional = true }
+tree-sitter-go = { version = "0.25.0", optional = true }
 tree-sitter-highlight = { version = "0.26.12", optional = true }
 tree-sitter-javascript = { version = "0.23.1", optional = true }
+tree-sitter-json = { version = "0.24.8", optional = true }
+tree-sitter-python = { version = "0.25.0", optional = true }
+tree-sitter-rust = { version = "0.24.2", optional = true }
 tree-sitter-typescript = { version = "0.23.2", optional = true }
-two-face = { version = "0.5", optional = true, default-features = false, features = ["syntect-fancy"] }

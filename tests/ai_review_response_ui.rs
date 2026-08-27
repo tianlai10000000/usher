@@ -9,7 +9,8 @@ use slint::platform::{PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, Global, LogicalPosition, LogicalSize, Model, ModelRc, VecModel};
 use usher_lib::{
     AgentResponseBlock as MainAgentResponseBlock,
-    AgentResponseBlockKind as MainAgentResponseBlockKind, AiReviewConversationItem, AppState,
+    AgentResponseBlockKind as MainAgentResponseBlockKind, AiReviewConversationItem,
+    AiReviewFindingItem, AiReviewResponseVisualRow, AppState,
     ArtifactPreviewKind as AppArtifactPreviewKind, MainWindow, Route,
     install_transient_input_bridge,
 };
@@ -156,19 +157,89 @@ fn configure_pr_review_window(width: f32) -> MainWindow {
 }
 
 fn one_message_conversation() -> ModelRc<AiReviewConversationItem> {
-    ModelRc::new(Rc::new(VecModel::from(vec![AiReviewConversationItem {
-        id: "message-1".into(),
-        role: "assistant".into(),
-        content: "## Review result\n\nConversation must survive Preview host changes.".into(),
-        elapsed: "1.2s".into(),
-        formatted: false,
-        blocks: ModelRc::default(),
-        preview_title: "Review result".into(),
-        preview_available: true,
-        truncated: false,
-        projected_bytes: 64,
-        repository_action_count: 1,
-    }])))
+    formatted_conversation(1)
+}
+
+fn formatted_conversation(block_count: usize) -> ModelRc<AiReviewConversationItem> {
+    formatted_assistant_conversation(1, block_count)
+}
+
+fn formatted_assistant_conversation(
+    message_count: usize,
+    blocks_per_message: usize,
+) -> ModelRc<AiReviewConversationItem> {
+    let messages = (0..message_count)
+        .map(|message_index| {
+            let blocks = (0..blocks_per_message)
+                .map(|block_index| {
+                    let text = format!(
+                        "Review {message_index} paragraph {block_index}: conversation and scroll state must survive Preview host changes."
+                    );
+                    MainAgentResponseBlock {
+                        kind: MainAgentResponseBlockKind::Paragraph,
+                        styled: slint::StyledText::from_plain_text(&text),
+                        plain_text: text.into(),
+                        list_marker: "".into(),
+                        list_depth: 0,
+                        code_language: "".into(),
+                        span_count: 1,
+                        line_count: 1,
+                    }
+                })
+                .collect::<Vec<_>>();
+            AiReviewConversationItem {
+                id: format!("message-{}", message_index + 1).into(),
+                role: "assistant".into(),
+                content: format!(
+                    "## Review result {}\n\nConversation must survive Preview host changes.",
+                    message_index + 1
+                )
+                .into(),
+                elapsed: "1.2s".into(),
+                formatted: true,
+                blocks: ModelRc::new(Rc::new(VecModel::from(blocks))),
+                preview_title: format!("Review result {}", message_index + 1).into(),
+                preview_available: true,
+                truncated: false,
+                projected_bytes: (blocks_per_message * 96) as i32,
+                repository_action_count: 1,
+            }
+        })
+        .collect::<Vec<_>>();
+    ModelRc::new(Rc::new(VecModel::from(messages)))
+}
+
+fn response_visual_rows(
+    conversation: &ModelRc<AiReviewConversationItem>,
+) -> ModelRc<AiReviewResponseVisualRow> {
+    let empty_finding = AiReviewFindingItem::default();
+    let empty_message = AiReviewConversationItem::default();
+    let mut rows = Vec::with_capacity(conversation.row_count() + 3);
+    rows.push(AiReviewResponseVisualRow {
+        kind: "review-state".into(),
+        finding: empty_finding.clone(),
+        message: empty_message.clone(),
+    });
+    rows.push(AiReviewResponseVisualRow {
+        kind: "separator".into(),
+        finding: empty_finding.clone(),
+        message: empty_message.clone(),
+    });
+    rows.extend(
+        conversation
+            .iter()
+            .map(|message| AiReviewResponseVisualRow {
+                kind: "message".into(),
+                finding: empty_finding.clone(),
+                message,
+            }),
+    );
+    rows.push(AiReviewResponseVisualRow {
+        kind: "chat-status".into(),
+        finding: empty_finding,
+        message: empty_message,
+    });
+    ModelRc::new(Rc::new(VecModel::from(rows)))
 }
 
 #[test]
@@ -764,11 +835,207 @@ fn ai_review_content_click_dismisses_the_adjacent_diff_settings_popover() {
 }
 
 #[test]
+fn retained_response_list_mounts_every_source_block_for_ab_baseline() {
+    i_slint_backend_testing::init_no_event_loop();
+    let window = configure_pr_review_window(1300.0);
+    let conversation = formatted_assistant_conversation(12, 48);
+    window.set_ai_review_response_virtualized(false);
+    window.set_ai_review_conversation(conversation.clone());
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+
+    let source_blocks = conversation
+        .iter()
+        .map(|message| message.blocks.row_count())
+        .sum::<usize>();
+    let traversable_blocks =
+        ElementHandle::find_by_element_id(&window, "GitHubAgentResponseBlock::body-text").count();
+
+    assert_eq!(conversation.row_count(), 12);
+    assert_eq!(source_blocks, 576);
+    assert_eq!(
+        window.get_ai_review_retained_created_message_rows() as usize,
+        conversation.row_count()
+    );
+    assert_eq!(
+        window.get_ai_review_retained_created_blocks() as usize,
+        source_blocks
+    );
+    assert!(traversable_blocks > 0);
+    assert_eq!(window.get_ai_review_response_rows().row_count(), 0);
+    assert_eq!(window.get_ai_review_virtual_created_rows(), 0);
+    assert_eq!(window.get_ai_review_virtual_created_message_rows(), 0);
+    assert_eq!(window.get_ai_review_virtual_created_blocks(), 0);
+}
+
+#[test]
+fn virtualized_response_list_bounds_created_blocks_and_preserves_source() {
+    i_slint_backend_testing::init_no_event_loop();
+    let window = configure_pr_review_window(1300.0);
+    let conversation = formatted_assistant_conversation(12, 48);
+    let visual_rows = response_visual_rows(&conversation);
+    window.set_ai_review_response_virtualized(true);
+    window.set_ai_review_conversation(conversation.clone());
+    window.set_ai_review_virtual_created_rows(0);
+    window.set_ai_review_virtual_created_message_rows(0);
+    window.set_ai_review_virtual_created_blocks(0);
+    window.set_ai_review_response_rows(visual_rows.clone());
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+
+    let source_blocks = conversation
+        .iter()
+        .map(|message| message.blocks.row_count())
+        .sum::<usize>();
+    let created_rows = window.get_ai_review_virtual_created_rows() as usize;
+    let created_message_rows = window.get_ai_review_virtual_created_message_rows() as usize;
+    let created_blocks = window.get_ai_review_virtual_created_blocks() as usize;
+    let traversable_blocks =
+        ElementHandle::find_by_element_id(&window, "GitHubAgentResponseBlock::body-text").count();
+
+    assert_eq!(window.get_ai_review_conversation(), conversation);
+    assert_eq!(window.get_ai_review_response_rows(), visual_rows);
+    assert_eq!(conversation.row_count(), 12);
+    assert_eq!(source_blocks, 576);
+    assert!(created_rows > 0 && created_rows < visual_rows.row_count());
+    assert!(created_message_rows > 0 && created_message_rows < conversation.row_count());
+    assert!(created_blocks > 0 && created_blocks < source_blocks);
+    assert!(traversable_blocks > 0 && traversable_blocks < source_blocks);
+
+    let movements = Rc::new(RefCell::new(Vec::new()));
+    let observed = movements.clone();
+    window.on_ai_review_response_wheel_consumed(move |movement| {
+        observed.borrow_mut().push(movement);
+    });
+    let initial_scroll_y = window.get_ai_review_response_scroll_y();
+    window
+        .window()
+        .dispatch_event(WindowEvent::PointerScrolled {
+            position: LogicalPosition::new(1100.0, 320.0),
+            delta_x: 0.0,
+            delta_y: -240.0,
+        });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(120));
+    assert_ne!(window.get_ai_review_response_scroll_y(), initial_scroll_y);
+    assert!(!movements.borrow().is_empty());
+    assert_eq!(window.get_ai_review_conversation(), conversation);
+}
+
+#[test]
+fn virtualized_response_list_forwards_preview_and_markdown_link_actions() {
+    i_slint_backend_testing::init_no_event_loop();
+    let window = configure_pr_review_window(1300.0);
+    window.set_ai_review_response_virtualized(true);
+
+    let preview_conversation = formatted_assistant_conversation(1, 1);
+    window.set_ai_review_conversation(preview_conversation.clone());
+    window.set_ai_review_response_rows(response_visual_rows(&preview_conversation));
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+
+    let opened_preview = Rc::new(RefCell::new(Vec::<String>::new()));
+    let observed_preview = opened_preview.clone();
+    window.on_ai_review_open_response_artifact(move |id, title, markdown| {
+        *observed_preview.borrow_mut() =
+            vec![id.to_string(), title.to_string(), markdown.to_string()];
+    });
+    let preview_action = ElementHandle::find_by_accessible_label(&window, "Review result 1")
+        .find(|element| element.accessible_role() == Some(AccessibleRole::Button))
+        .expect("virtualized response Preview action");
+    preview_action.invoke_accessible_default_action();
+    assert_eq!(opened_preview.borrow()[0], "message-1");
+    assert_eq!(opened_preview.borrow()[1], "Review result 1");
+
+    let target = "usher-repo-file:virtualized-token";
+    let link_conversation = ModelRc::new(Rc::new(VecModel::from(vec![AiReviewConversationItem {
+        id: "link-message".into(),
+        role: "assistant".into(),
+        content: "AGENTS.md".into(),
+        elapsed: "0.8s".into(),
+        formatted: true,
+        blocks: ModelRc::new(Rc::new(VecModel::from(vec![MainAgentResponseBlock {
+            kind: MainAgentResponseBlockKind::Paragraph,
+            styled: slint::StyledText::from_markdown(&format!("[AGENTS.md]({target})"))
+                .expect("virtualized response link"),
+            plain_text: "AGENTS.md".into(),
+            list_marker: "".into(),
+            list_depth: 0,
+            code_language: "".into(),
+            span_count: 1,
+            line_count: 1,
+        }]))),
+        preview_title: "".into(),
+        preview_available: false,
+        truncated: false,
+        projected_bytes: 32,
+        repository_action_count: 1,
+    }])));
+    window.set_ai_review_conversation(link_conversation.clone());
+    window.set_ai_review_response_rows(response_visual_rows(&link_conversation));
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+
+    let opened_link = Rc::new(RefCell::new(String::new()));
+    let observed_link = opened_link.clone();
+    window.on_ai_review_open_response_link(move |url| {
+        *observed_link.borrow_mut() = url.to_string();
+    });
+    let body = ElementHandle::find_by_element_id(&window, "GitHubAgentResponseBlock::body-text")
+        .next()
+        .expect("virtualized StyledText body");
+    let body_position = body.absolute_position();
+    let body_size = body.size();
+    click(
+        window.window(),
+        LogicalPosition::new(
+            body_position.x + 24.0,
+            body_position.y + body_size.height / 2.0,
+        ),
+    );
+    assert_eq!(opened_link.borrow().as_str(), target);
+}
+
+#[test]
 fn docked_preview_replaces_then_restores_ai_without_losing_conversation() {
     i_slint_backend_testing::init_no_event_loop();
     let window = configure_pr_review_window(1300.0);
-    let conversation = one_message_conversation();
+    window.set_ai_review_docked_content_unmount(true);
+    let conversation = formatted_conversation(36);
     window.set_ai_review_conversation(conversation.clone());
+    window.set_ai_review_message_input("preserved question".into());
+    window.set_ai_review_extra_requirements("preserved requirements".into());
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+    assert!(window.get_ai_review_response_delegates_mounted());
+    let review_again = ElementHandle::find_by_accessible_label(&window, "Review again")
+        .next()
+        .expect("Review again composer mode");
+    let review_again_position = review_again.absolute_position();
+    let review_again_size = review_again.size();
+    click(
+        window.window(),
+        LogicalPosition::new(
+            review_again_position.x + review_again_size.width / 2.0,
+            review_again_position.y + review_again_size.height / 2.0,
+        ),
+    );
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+    assert_eq!(review_again.accessible_checked(), Some(true));
+    let response_body =
+        ElementHandle::find_by_element_id(&window, "GitHubAgentResponseBlock::body-text")
+            .next()
+            .expect("formatted response delegates before opening Preview");
+
+    for _ in 0..3 {
+        window
+            .window()
+            .dispatch_event(WindowEvent::PointerScrolled {
+                position: LogicalPosition::new(1100.0, 320.0),
+                delta_x: 0.0,
+                delta_y: -240.0,
+            });
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(120));
+    }
+    let response_scroll_y = window.get_ai_review_response_scroll_y();
+    assert!(
+        response_scroll_y < -1.0,
+        "fixture must establish a non-zero response scroll offset, got {response_scroll_y}"
+    );
     let trailing_width = window.get_pr_review_trailing_surface_width();
     let main_width = window.get_pr_review_main_content_width();
 
@@ -782,12 +1049,37 @@ fn docked_preview_replaces_then_restores_ai_without_losing_conversation() {
 
     assert!(window.get_artifact_preview_pr_side_docked_visible());
     assert!(!window.get_ai_review_content_visible());
+    assert!(!window.get_ai_review_response_delegates_mounted());
+    assert!(
+        ElementHandle::find_by_element_id(&window, "GitHubAgentResponseBlock::body-text")
+            .next()
+            .is_none(),
+        "candidate response delegates must leave the traversable item tree"
+    );
+    assert!(
+        !response_body.is_valid(),
+        "candidate must destroy inactive formatted-response delegates"
+    );
     assert_close(
         window.get_pr_review_trailing_surface_width(),
         trailing_width,
     );
     assert_close(window.get_pr_review_main_content_width(), main_width);
     assert_eq!(window.get_ai_review_conversation(), conversation);
+    assert_eq!(
+        window.get_ai_review_message_input().as_str(),
+        "preserved question"
+    );
+    assert_eq!(
+        window.get_ai_review_extra_requirements().as_str(),
+        "preserved requirements"
+    );
+    assert!(
+        review_again.is_valid(),
+        "Docked Preview must retain the light composer tree"
+    );
+    assert_eq!(review_again.accessible_checked(), Some(true));
+    assert_close(window.get_ai_review_response_scroll_y(), response_scroll_y);
 
     let dismissed = Rc::new(Cell::new(false));
     let observed = dismissed.clone();
@@ -803,16 +1095,68 @@ fn docked_preview_replaces_then_restores_ai_without_losing_conversation() {
     // The PR-side Preview close control is a 32px action ending 8px from the
     // right window edge, centered in its 48px header.
     click(window.window(), LogicalPosition::new(1276.0, 24.0));
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
 
     assert!(dismissed.get());
     assert!(!window.get_artifact_preview_pr_side_docked_visible());
     assert!(window.get_ai_review_content_visible());
+    assert!(window.get_ai_review_response_delegates_mounted());
+    assert!(
+        ElementHandle::find_by_element_id(&window, "GitHubAgentResponseBlock::body-text")
+            .next()
+            .is_some(),
+        "formatted-response delegates must remount after Preview closes"
+    );
     assert_eq!(window.get_ai_review_conversation(), conversation);
+    assert_eq!(
+        window.get_ai_review_message_input().as_str(),
+        "preserved question"
+    );
+    assert_eq!(
+        window.get_ai_review_extra_requirements().as_str(),
+        "preserved requirements"
+    );
+    assert_eq!(
+        ElementHandle::find_by_accessible_label(&window, "Review again")
+            .next()
+            .expect("restored Review again composer mode")
+            .accessible_checked(),
+        Some(true)
+    );
+    assert_close(window.get_ai_review_response_scroll_y(), response_scroll_y);
     let restored = window
         .get_ai_review_conversation()
         .row_data(0)
         .expect("restored conversation message");
     assert_eq!(restored.id, "message-1");
+}
+
+#[test]
+fn docked_preview_retain_policy_keeps_response_delegates_for_same_binary_ab() {
+    i_slint_backend_testing::init_no_event_loop();
+    let window = configure_pr_review_window(1300.0);
+    window.set_ai_review_docked_content_unmount(false);
+    let conversation = one_message_conversation();
+    window.set_ai_review_conversation(conversation.clone());
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+    let response_body =
+        ElementHandle::find_by_element_id(&window, "GitHubAgentResponseBlock::body-text")
+            .next()
+            .expect("formatted response delegate before retained Preview");
+
+    AppState::get(&window).set_artifact_preview_presentation_mode(0);
+    window.set_artifact_preview_pr_side_context(true);
+    window.set_artifact_preview_visible(true);
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+
+    assert!(window.get_artifact_preview_pr_side_docked_visible());
+    assert!(!window.get_ai_review_content_visible());
+    assert!(window.get_ai_review_response_delegates_mounted());
+    assert!(
+        response_body.is_valid(),
+        "retain policy must preserve the old hidden-but-mounted response tree"
+    );
+    assert_eq!(window.get_ai_review_conversation(), conversation);
 }
 
 #[test]
@@ -854,6 +1198,7 @@ fn response_scroll_view_consumes_real_wheel_input() {
 fn detached_preview_coexists_with_ai_review_and_preserves_its_slot() {
     i_slint_backend_testing::init_no_event_loop();
     let window = configure_pr_review_window(1300.0);
+    window.set_ai_review_docked_content_unmount(true);
     let conversation = one_message_conversation();
     window.set_ai_review_conversation(conversation.clone());
     let trailing_width = window.get_pr_review_trailing_surface_width();
@@ -865,6 +1210,13 @@ fn detached_preview_coexists_with_ai_review_and_preserves_its_slot() {
 
     assert!(!window.get_artifact_preview_pr_side_docked_visible());
     assert!(window.get_ai_review_content_visible());
+    assert!(window.get_ai_review_response_delegates_mounted());
+    assert!(
+        ElementHandle::find_by_element_id(&window, "GitHubAgentResponseBlock::body-text")
+            .next()
+            .is_some(),
+        "Detached Preview is a negative control and must not unmount AI delegates"
+    );
     assert_close(
         window.get_pr_review_trailing_surface_width(),
         trailing_width,

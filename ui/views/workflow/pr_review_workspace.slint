@@ -3,7 +3,7 @@ import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { AppState } from "../../state/app_state.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
 import { GitHubDialog } from "../../components/dialog/github_dialog.slint";
-import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, WorkflowPrCommit, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
+import { WorkflowPrDiffFile, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, GitHubConversationAvatar, GitHubCommitIdentityAvatars, WorkflowPrCommit, GitHubCommentButton, GitHubPullRequestStateBadge, GitHubBranchLabel, GitHubRelativeTimestamp, GitHubPullRequestSummaryMetrics, GitHubPullRequestSummaryRow, GitHubCenteredErrorState, GitHubPullRequestTabButton, GitHubCommitRangeButton, GitHubMergeReadinessBadge, GitHubReviewChoice } from "../../components/pr_review/shell.slint";
 import { GitHubTreeIndentGuides, GitHubCommitMessageToggleButton, GitHubFileToolbarButton, GitHubCommitSummaryNavButton, GitHubFileChangeTypeIcon, GitHubSelectableDiffCode, GitHubSplitDiffSide, GitHubDiffViewPreview, GitHubDiffViewChoice, GitHubDiffSettingsPopover, GitHubFileTreeToggleButton, GitHubFileMenuButton, GitHubDiffStatSegment, GitHubDiffStatBar, GitHubFileDiffStat, GitHubCodeRenderingIndicator, GitHubLargeDiffPlaceholder, GitHubFileFilterField, GitHubFilterMenu, GitHubDiffFindBar } from "../../components/pr_review/content.slint";
 import { GitHubCopyButton } from "../../components/button/github_copy_button.slint";
 import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
@@ -1020,17 +1020,19 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         }
                     }
 
-                    if root.content-width >= 1100px: GitHubConversationAvatar {
+                    if root.content-width >= 1100px: GitHubCommitIdentityAvatars {
                         avatar-size: 22px;
-                        label-size: 9px;
-                        avatar: root.commits[root.commit-range-start].avatar;
-                        fallback-label: root.commits[root.commit-range-start].avatar-label;
+                        author-avatar: root.commits[root.commit-range-start].avatar;
+                        author-label: root.commits[root.commit-range-start].avatar-label;
+                        committer-avatar: root.commits[root.commit-range-start].committer-avatar;
+                        committer-label: root.commits[root.commit-range-start].committer-avatar-label;
+                        show-committer: root.commits[root.commit-range-start].show-committer;
                     }
                     if root.content-width >= 1100px: single-commit-author := Text {
                         width: min(190px, self.preferred-width);
                         height: parent.height;
-                        text: root.commits[root.commit-range-start].author
-                            + " committed "
+                        text: root.commits[root.commit-range-start].identity-action
+                            + " "
                             + root.commits[root.commit-range-start].short-date-label;
                         font-size: 11px;
                         color: root.github-fg-muted;
@@ -2250,16 +2252,17 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             height: 22px;
                             spacing: 4px;
                             cross-axis-alignment: center;
-                            Text {
-                                width: self.preferred-width;
-                                text: commit.author;
-                                font-size: 12px;
-                                color: root.github-fg-muted;
-                                vertical-alignment: center;
+                            GitHubCommitIdentityAvatars {
+                                avatar-size: 20px;
+                                author-avatar: commit.avatar;
+                                author-label: commit.avatar-label;
+                                committer-avatar: commit.committer-avatar;
+                                committer-label: commit.committer-avatar-label;
+                                show-committer: commit.show-committer;
                             }
                             Text {
                                 width: self.preferred-width;
-                                text: "committed";
+                                text: commit.identity-action;
                                 font-size: 12px;
                                 color: root.github-fg-muted;
                                 vertical-alignment: center;
@@ -2303,23 +2306,17 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             height: root.commit-tab-author-band;
                             spacing: 6px;
                             cross-axis-alignment: center;
-                            GitHubConversationAvatar {
+                            GitHubCommitIdentityAvatars {
                                 avatar-size: 20px;
-                                label-size: 9px;
-                                avatar: commit.avatar;
-                                fallback-label: commit.avatar-label;
+                                author-avatar: commit.avatar;
+                                author-label: commit.avatar-label;
+                                committer-avatar: commit.committer-avatar;
+                                committer-label: commit.committer-avatar-label;
+                                show-committer: commit.show-committer;
                             }
                             Text {
                                 width: self.preferred-width;
-                                text: commit.author;
-                                font-size: 12px;
-                                font-weight: 600;
-                                color: root.github-fg-default;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                width: self.preferred-width;
-                                text: "committed";
+                                text: commit.identity-action;
                                 font-size: 12px;
                                 color: root.github-fg-muted;
                                 vertical-alignment: center;
@@ -3990,7 +3987,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             y: commit-title.y + commit-title.height + 3px;
                             width: parent.width - 180px;
                             height: 20px;
-                            text: commit.author + " committed on " + commit.date-label;
+                            text: commit.identity-action + " on " + commit.date-label;
                             font-size: 12px;
                             color: root.github-fg-muted;
                             vertical-alignment: center;

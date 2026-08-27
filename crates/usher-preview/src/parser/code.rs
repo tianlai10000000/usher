@@ -1,9 +1,6 @@
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use syntect::easy::HighlightLines;
-use syntect::highlighting::{FontStyle, Theme, ThemeSet};
-use syntect::parsing::SyntaxSet;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
 use crate::{CancellationToken, MarkdownCodeSpan, PreviewError, PreviewPreparationProgress};
@@ -26,6 +23,9 @@ pub trait CodeParser: Send + Sync {
 pub trait CodeParserLoader: Send + Sync {
     fn id(&self) -> &'static str;
     fn supports(&self, language: &str) -> bool;
+    fn cache_key(&self, language: &str) -> String {
+        language.to_string()
+    }
     fn display_name(&self, language: &str) -> String;
     fn load(
         &self,
@@ -38,7 +38,7 @@ pub trait CodeParserLoader: Send + Sync {
 pub struct CodeParserRegistry {
     strategy: ParserLoadStrategy,
     loaders: Vec<Arc<dyn CodeParserLoader>>,
-    loaded: Mutex<HashMap<String, Arc<dyn CodeParser>>>,
+    loaded: Mutex<HashMap<(&'static str, String), Arc<dyn CodeParser>>>,
     preload_complete: Mutex<bool>,
 }
 
@@ -56,7 +56,42 @@ impl CodeParserRegistry {
         let mut registry = Self::new(strategy);
         registry.register(TsParserLoader::default());
         registry.register(JavaScriptParserLoader::default());
-        registry.register(SyntectParserLoader::default());
+        registry.register(static_tree_sitter_loader(
+            "rust",
+            &["rs", "rust"],
+            "Rust",
+            "fn main() { let ready = true; }\n",
+            build_rust_parser,
+        ));
+        registry.register(static_tree_sitter_loader(
+            "shell",
+            &["sh", "bash", "shell", "shellscript", "zsh"],
+            "Shell",
+            "set -euo pipefail\nprintf '%s\\n' ready\n",
+            build_shell_parser,
+        ));
+        registry.register(static_tree_sitter_loader(
+            "json",
+            &["json"],
+            "JSON",
+            "{\"ready\": true, \"count\": 1}\n",
+            build_json_parser,
+        ));
+        registry.register(static_tree_sitter_loader(
+            "python",
+            &["py", "python", "python3"],
+            "Python",
+            "def ready(value: int) -> bool:\n    return value > 0\n",
+            build_python_parser,
+        ));
+        registry.register(static_tree_sitter_loader(
+            "go",
+            &["go", "golang"],
+            "Go",
+            "func ready(value int) bool { return value > 0 }\n",
+            build_go_parser,
+        ));
+        registry.register(PlainTextParserLoader::default());
         registry
     }
 
@@ -99,20 +134,21 @@ impl CodeParserRegistry {
     ) -> Result<Vec<MarkdownCodeSpan>, PreviewError> {
         cancellation.check()?;
         let language = normalize_language(language);
+        let loader = self
+            .loaders
+            .iter()
+            .find(|loader| loader.supports(&language))
+            .ok_or_else(|| {
+                PreviewError::Decode(format!(
+                    "no code parser loader accepts language '{language}'"
+                ))
+            })?;
+        let cache_key = (loader.id(), loader.cache_key(&language));
         let parser = {
             let mut loaded = self.loaded.lock().expect("code parser cache lock poisoned");
-            if let Some(parser) = loaded.get(&language) {
+            if let Some(parser) = loaded.get(&cache_key) {
                 parser.clone()
             } else {
-                let loader = self
-                    .loaders
-                    .iter()
-                    .find(|loader| loader.supports(&language))
-                    .ok_or_else(|| {
-                        PreviewError::Decode(format!(
-                            "no code parser loader accepts language '{language}'"
-                        ))
-                    })?;
                 let loader_id = loader.id();
                 let display_name = loader.display_name(&language);
                 cancellation.report_progress(PreviewPreparationProgress::ParserLoading {
@@ -122,7 +158,7 @@ impl CodeParserRegistry {
                 });
                 let parser = loader.load(&language, cancellation)?;
                 cancellation.check()?;
-                loaded.insert(language.clone(), parser.clone());
+                loaded.insert(cache_key, parser.clone());
                 cancellation.report_progress(PreviewPreparationProgress::ParserReady {
                     language: language.clone(),
                     loader_id,
@@ -158,12 +194,15 @@ fn normalize_language(language: &str) -> String {
 fn language_display_name(language: &str) -> String {
     match language {
         "" => "Plain text".to_string(),
-        "js" | "javascript" => "JavaScript".to_string(),
+        "js" | "mjs" | "cjs" | "javascript" => "JavaScript".to_string(),
         "jsx" | "javascriptreact" => "JSX".to_string(),
         "ts" | "typescript" => "TypeScript".to_string(),
         "tsx" | "typescriptreact" => "TSX".to_string(),
         "rs" | "rust" => "Rust".to_string(),
+        "sh" | "bash" | "shell" | "shellscript" | "zsh" => "Shell".to_string(),
         "json" => "JSON".to_string(),
+        "py" | "python" | "python3" => "Python".to_string(),
+        "go" | "golang" => "Go".to_string(),
         "html" => "HTML".to_string(),
         "css" => "CSS".to_string(),
         other => {
@@ -176,92 +215,10 @@ fn language_display_name(language: &str) -> String {
     }
 }
 
-struct SyntectResources {
-    syntaxes: SyntaxSet,
-    light_theme: Theme,
-}
-
-#[derive(Default)]
-struct SyntectRepository {
-    resources: OnceLock<SyntectResources>,
-}
-
-impl SyntectRepository {
-    fn resources(
-        &self,
-        cancellation: &CancellationToken,
-    ) -> Result<&SyntectResources, PreviewError> {
-        cancellation.check()?;
-        let resources = self.resources.get_or_init(|| {
-            let mut themes = ThemeSet::load_defaults().themes;
-            SyntectResources {
-                syntaxes: two_face::syntax::extra_newlines(),
-                light_theme: themes
-                    .remove("InspiredGitHub")
-                    .expect("syntect must bundle the InspiredGitHub theme"),
-            }
-        });
-        cancellation.check()?;
-        Ok(resources)
-    }
-
-    fn parser(
-        self: &Arc<Self>,
-        language: &str,
-        cancellation: &CancellationToken,
-    ) -> Result<Arc<dyn CodeParser>, PreviewError> {
-        let resources = self.resources(cancellation)?;
-        let syntax = resolve_code_syntax(&resources.syntaxes, language);
-        Ok(Arc::new(SyntectCodeParser {
-            repository: self.clone(),
-            syntax_name: syntax.name.clone(),
-        }))
-    }
-
-    fn preload_all(self: &Arc<Self>, cancellation: &CancellationToken) -> Result<(), PreviewError> {
-        let syntax_names = self
-            .resources(cancellation)?
-            .syntaxes
-            .syntaxes()
-            .iter()
-            .map(|syntax| syntax.name.clone())
-            .collect::<Vec<_>>();
-        for syntax_name in syntax_names {
-            cancellation.check()?;
-            let parser = self.parser(&syntax_name, cancellation)?;
-            let _ = parser.highlight("\n", cancellation)?;
-        }
-        Ok(())
-    }
-}
-
-static SHARED_SYNTECT_REPOSITORY: LazyLock<Arc<SyntectRepository>> =
-    LazyLock::new(|| Arc::new(SyntectRepository::default()));
-
-struct SyntectCodeParser {
-    repository: Arc<SyntectRepository>,
-    syntax_name: String,
-}
-
-impl CodeParser for SyntectCodeParser {
-    fn highlight(
-        &self,
-        source: &str,
-        cancellation: &CancellationToken,
-    ) -> Result<Vec<MarkdownCodeSpan>, PreviewError> {
-        let resources = self.repository.resources(cancellation)?;
-        let syntax = resources
-            .syntaxes
-            .find_syntax_by_name(&self.syntax_name)
-            .unwrap_or_else(|| resources.syntaxes.find_syntax_plain_text());
-        highlight_source(source, syntax, resources, cancellation)
-    }
-}
-
 #[derive(Default)]
 pub struct TsParserLoader {
-    typescript: OnceLock<Arc<TreeSitterTypeScriptParser>>,
-    tsx: OnceLock<Arc<TreeSitterTypeScriptParser>>,
+    typescript: OnceLock<Arc<TreeSitterCodeParser>>,
+    tsx: OnceLock<Arc<TreeSitterCodeParser>>,
 }
 
 impl CodeParserLoader for TsParserLoader {
@@ -270,7 +227,16 @@ impl CodeParserLoader for TsParserLoader {
     }
 
     fn supports(&self, language: &str) -> bool {
-        matches!(language, "ts" | "tsx" | "typescript" | "typescriptreact")
+        matches!(language, "ts" | "typescript" | "tsx" | "typescriptreact")
+    }
+
+    fn cache_key(&self, language: &str) -> String {
+        if matches!(language, "tsx" | "typescriptreact") {
+            "tsx"
+        } else {
+            "typescript"
+        }
+        .to_string()
     }
 
     fn display_name(&self, language: &str) -> String {
@@ -282,22 +248,10 @@ impl CodeParserLoader for TsParserLoader {
         language: &str,
         cancellation: &CancellationToken,
     ) -> Result<Arc<dyn CodeParser>, PreviewError> {
-        cancellation.check()?;
         let tsx = matches!(language, "tsx" | "typescriptreact");
         let slot = if tsx { &self.tsx } else { &self.typescript };
-        if let Some(parser) = slot.get() {
-            return Ok(parser.clone());
-        }
-        let parser = Arc::new(TreeSitterTypeScriptParser::new(tsx)?);
-        cancellation.check()?;
-        if slot.set(parser.clone()).is_ok() {
-            Ok(parser)
-        } else {
-            Ok(slot
-                .get()
-                .expect("TypeScript parser initialized by another worker")
-                .clone())
-        }
+        let parser = load_tree_sitter_parser(slot, cancellation, || build_typescript_parser(tsx))?;
+        Ok(parser)
     }
 
     fn preload(&self, cancellation: &CancellationToken) -> Result<(), PreviewError> {
@@ -313,13 +267,27 @@ const TREE_SITTER_HIGHLIGHT_NAMES: &[&str] = &[
     "attribute",
     "boolean",
     "comment",
+    "comment.documentation",
     "constant",
     "constant.builtin",
     "constructor",
+    "constructor.builtin",
+    "embedded",
+    "error",
     "escape",
     "function",
     "function.builtin",
     "keyword",
+    "markup",
+    "markup.bold",
+    "markup.heading",
+    "markup.italic",
+    "markup.link",
+    "markup.link.url",
+    "markup.list",
+    "markup.quote",
+    "markup.raw",
+    "markup.strikethrough",
     "module",
     "number",
     "operator",
@@ -328,9 +296,11 @@ const TREE_SITTER_HIGHLIGHT_NAMES: &[&str] = &[
     "punctuation",
     "punctuation.bracket",
     "punctuation.delimiter",
+    "punctuation.special",
     "string",
     "string.escape",
     "string.regexp",
+    "string.special",
     "tag",
     "type",
     "type.builtin",
@@ -340,44 +310,18 @@ const TREE_SITTER_HIGHLIGHT_NAMES: &[&str] = &[
     "variable.parameter",
 ];
 
-struct TreeSitterTypeScriptParser {
+struct TreeSitterCodeParser {
     configuration: HighlightConfiguration,
 }
 
-impl TreeSitterTypeScriptParser {
-    fn new(tsx: bool) -> Result<Self, PreviewError> {
-        let language = if tsx {
-            tree_sitter_typescript::LANGUAGE_TSX.into()
-        } else {
-            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
-        };
-        let mut highlights_query = String::from(tree_sitter_javascript::HIGHLIGHT_QUERY);
-        if tsx {
-            highlights_query.push('\n');
-            highlights_query.push_str(tree_sitter_javascript::JSX_HIGHLIGHT_QUERY);
-        }
-        highlights_query.push('\n');
-        highlights_query.push_str(tree_sitter_typescript::HIGHLIGHTS_QUERY);
-
-        let locals_query = format!(
-            "{}\n{}",
-            tree_sitter_javascript::LOCALS_QUERY,
-            tree_sitter_typescript::LOCALS_QUERY
-        );
-        let mut configuration = HighlightConfiguration::new(
-            language,
-            if tsx { "tsx" } else { "typescript" },
-            &highlights_query,
-            "",
-            &locals_query,
-        )
-        .map_err(|error| PreviewError::Decode(format!("TypeScript parser load failed: {error}")))?;
+impl TreeSitterCodeParser {
+    fn new(mut configuration: HighlightConfiguration) -> Self {
         configuration.configure(TREE_SITTER_HIGHLIGHT_NAMES);
-        Ok(Self { configuration })
+        Self { configuration }
     }
 }
 
-impl CodeParser for TreeSitterTypeScriptParser {
+impl CodeParser for TreeSitterCodeParser {
     fn highlight(
         &self,
         source: &str,
@@ -409,7 +353,7 @@ impl CodeParser for TreeSitterTypeScriptParser {
                 HighlightEvent::Source { start, end } => {
                     let text = source.get(start..end).ok_or_else(|| {
                         PreviewError::Decode(
-                            "TypeScript parser returned an invalid UTF-8 range".to_string(),
+                            "Tree-sitter returned an invalid UTF-8 range".to_string(),
                         )
                     })?;
                     let highlight_name = active_highlights
@@ -429,7 +373,7 @@ fn tree_sitter_error(error: tree_sitter_highlight::Error) -> PreviewError {
     if error == tree_sitter_highlight::Error::Cancelled {
         PreviewError::Cancelled
     } else {
-        PreviewError::Decode(format!("TypeScript highlighting failed: {error}"))
+        PreviewError::Decode(format!("Tree-sitter highlighting failed: {error}"))
     }
 }
 
@@ -463,13 +407,13 @@ fn append_tree_sitter_span(
 
 fn tree_sitter_style(highlight_name: Option<&str>) -> ([u8; 4], bool, bool) {
     let color = match highlight_name.unwrap_or_default() {
-        "comment" => [0xff, 0x6a, 0x73, 0x7d],
+        "comment" | "comment.documentation" => [0xff, 0x6a, 0x73, 0x7d],
         "keyword" | "operator" => [0xff, 0xd7, 0x3a, 0x49],
-        "string" | "string.escape" | "string.regexp" => [0xff, 0x03, 0x2f, 0x62],
+        "string" | "string.escape" | "string.regexp" | "string.special" => [0xff, 0x03, 0x2f, 0x62],
         "number" | "boolean" | "constant" | "constant.builtin" | "escape" => {
             [0xff, 0x00, 0x5c, 0xc5]
         }
-        "type" | "type.builtin" | "constructor" => [0xff, 0x6f, 0x42, 0xc1],
+        "type" | "type.builtin" | "constructor" | "constructor.builtin" => [0xff, 0x6f, 0x42, 0xc1],
         "function" | "function.builtin" => [0xff, 0x6f, 0x42, 0xc1],
         "attribute" | "module" | "property" | "property.builtin" | "tag" => {
             [0xff, 0x00, 0x5c, 0xc5]
@@ -477,20 +421,17 @@ fn tree_sitter_style(highlight_name: Option<&str>) -> ([u8; 4], bool, bool) {
         "variable.builtin" => [0xff, 0xe3, 0x62, 0x09],
         _ => [0xff, 0x24, 0x29, 0x2f],
     };
-    (color, false, highlight_name == Some("comment"))
+    (
+        color,
+        false,
+        matches!(highlight_name, Some("comment" | "comment.documentation")),
+    )
 }
 
-#[derive(Clone)]
+#[derive(Default)]
 pub struct JavaScriptParserLoader {
-    repository: Arc<SyntectRepository>,
-}
-
-impl Default for JavaScriptParserLoader {
-    fn default() -> Self {
-        Self {
-            repository: SHARED_SYNTECT_REPOSITORY.clone(),
-        }
-    }
+    javascript: OnceLock<Arc<TreeSitterCodeParser>>,
+    jsx: OnceLock<Arc<TreeSitterCodeParser>>,
 }
 
 impl CodeParserLoader for JavaScriptParserLoader {
@@ -501,8 +442,17 @@ impl CodeParserLoader for JavaScriptParserLoader {
     fn supports(&self, language: &str) -> bool {
         matches!(
             language,
-            "js" | "jsx" | "mjs" | "cjs" | "javascript" | "javascriptreact"
+            "js" | "mjs" | "cjs" | "javascript" | "jsx" | "javascriptreact"
         )
+    }
+
+    fn cache_key(&self, language: &str) -> String {
+        if matches!(language, "jsx" | "javascriptreact") {
+            "jsx"
+        } else {
+            "javascript"
+        }
+        .to_string()
     }
 
     fn display_name(&self, language: &str) -> String {
@@ -514,12 +464,10 @@ impl CodeParserLoader for JavaScriptParserLoader {
         language: &str,
         cancellation: &CancellationToken,
     ) -> Result<Arc<dyn CodeParser>, PreviewError> {
-        let syntax = if matches!(language, "jsx" | "javascriptreact") {
-            "JavaScript (Babel)"
-        } else {
-            "JavaScript"
-        };
-        self.repository.parser(syntax, cancellation)
+        let jsx = matches!(language, "jsx" | "javascriptreact");
+        let slot = if jsx { &self.jsx } else { &self.javascript };
+        let parser = load_tree_sitter_parser(slot, cancellation, || build_javascript_parser(jsx))?;
+        Ok(parser)
     }
 
     fn preload(&self, cancellation: &CancellationToken) -> Result<(), PreviewError> {
@@ -531,26 +479,83 @@ impl CodeParserLoader for JavaScriptParserLoader {
     }
 }
 
-#[derive(Clone)]
-pub struct SyntectParserLoader {
-    repository: Arc<SyntectRepository>,
+type TreeSitterParserFactory = fn() -> Result<TreeSitterCodeParser, PreviewError>;
+
+struct StaticTreeSitterParserLoader {
+    id: &'static str,
+    languages: &'static [&'static str],
+    display_name: &'static str,
+    sample_source: &'static str,
+    build: TreeSitterParserFactory,
+    parser: OnceLock<Arc<TreeSitterCodeParser>>,
 }
 
-impl Default for SyntectParserLoader {
-    fn default() -> Self {
-        Self {
-            repository: SHARED_SYNTECT_REPOSITORY.clone(),
-        }
+fn static_tree_sitter_loader(
+    id: &'static str,
+    languages: &'static [&'static str],
+    display_name: &'static str,
+    sample_source: &'static str,
+    build: TreeSitterParserFactory,
+) -> StaticTreeSitterParserLoader {
+    StaticTreeSitterParserLoader {
+        id,
+        languages,
+        display_name,
+        sample_source,
+        build,
+        parser: OnceLock::new(),
     }
 }
 
-impl CodeParserLoader for SyntectParserLoader {
+impl CodeParserLoader for StaticTreeSitterParserLoader {
     fn id(&self) -> &'static str {
-        "syntect-language"
+        self.id
+    }
+
+    fn supports(&self, language: &str) -> bool {
+        self.languages.contains(&language)
+    }
+
+    fn cache_key(&self, _language: &str) -> String {
+        self.id.to_string()
+    }
+
+    fn display_name(&self, _language: &str) -> String {
+        self.display_name.to_string()
+    }
+
+    fn load(
+        &self,
+        _language: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<Arc<dyn CodeParser>, PreviewError> {
+        let parser = load_tree_sitter_parser(&self.parser, cancellation, self.build)?;
+        Ok(parser)
+    }
+
+    fn preload(&self, cancellation: &CancellationToken) -> Result<(), PreviewError> {
+        let parser = self.load(self.languages[0], cancellation)?;
+        let _ = parser.highlight(self.sample_source, cancellation)?;
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct PlainTextParserLoader {
+    parser: OnceLock<Arc<PlainTextCodeParser>>,
+}
+
+impl CodeParserLoader for PlainTextParserLoader {
+    fn id(&self) -> &'static str {
+        "plain-text"
     }
 
     fn supports(&self, _language: &str) -> bool {
         true
+    }
+
+    fn cache_key(&self, _language: &str) -> String {
+        self.id().to_string()
     }
 
     fn display_name(&self, language: &str) -> String {
@@ -559,82 +564,168 @@ impl CodeParserLoader for SyntectParserLoader {
 
     fn load(
         &self,
-        language: &str,
+        _language: &str,
         cancellation: &CancellationToken,
     ) -> Result<Arc<dyn CodeParser>, PreviewError> {
-        self.repository.parser(language, cancellation)
+        cancellation.check()?;
+        let parser = self
+            .parser
+            .get_or_init(|| Arc::new(PlainTextCodeParser))
+            .clone();
+        cancellation.check()?;
+        Ok(parser)
     }
 
     fn preload(&self, cancellation: &CancellationToken) -> Result<(), PreviewError> {
-        self.repository.preload_all(cancellation)
+        let _ = self.load("", cancellation)?;
+        Ok(())
     }
 }
 
-fn highlight_source(
-    source: &str,
-    syntax: &syntect::parsing::SyntaxReference,
-    resources: &SyntectResources,
+struct PlainTextCodeParser;
+
+impl CodeParser for PlainTextCodeParser {
+    fn highlight(
+        &self,
+        source: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<MarkdownCodeSpan>, PreviewError> {
+        cancellation.check()?;
+        if source.is_empty() {
+            return Ok(Vec::new());
+        }
+        let span = MarkdownCodeSpan {
+            text: source.to_string(),
+            light_color: [0xff, 0x32, 0x32, 0x32],
+            dark_color: [0xff, 0xc9, 0xd1, 0xd9],
+            bold: false,
+            italic: false,
+        };
+        cancellation.check()?;
+        Ok(vec![span])
+    }
+}
+
+fn load_tree_sitter_parser(
+    slot: &OnceLock<Arc<TreeSitterCodeParser>>,
     cancellation: &CancellationToken,
-) -> Result<Vec<MarkdownCodeSpan>, PreviewError> {
-    let mut highlighter = HighlightLines::new(syntax, &resources.light_theme);
-    let mut spans = Vec::<MarkdownCodeSpan>::new();
-    for (line_index, line) in source.split_inclusive('\n').enumerate() {
-        if line_index % 64 == 0 {
-            cancellation.check()?;
-        }
-        let ranges = highlighter
-            .highlight_line(line, &resources.syntaxes)
-            .unwrap_or_else(|_| vec![(syntect::highlighting::Style::default(), line)]);
-        for (style, text) in ranges {
-            let light_color = [
-                style.foreground.a,
-                style.foreground.r,
-                style.foreground.g,
-                style.foreground.b,
-            ];
-            let dark_color = github_dark_color(light_color);
-            let bold = style.font_style.contains(FontStyle::BOLD);
-            let italic = style.font_style.contains(FontStyle::ITALIC);
-            if let Some(previous) = spans.last_mut()
-                && previous.light_color == light_color
-                && previous.dark_color == dark_color
-                && previous.bold == bold
-                && previous.italic == italic
-            {
-                previous.text.push_str(text);
-            } else if !text.is_empty() {
-                spans.push(MarkdownCodeSpan {
-                    text: text.to_string(),
-                    light_color,
-                    dark_color,
-                    bold,
-                    italic,
-                });
-            }
-        }
+    build: impl FnOnce() -> Result<TreeSitterCodeParser, PreviewError>,
+) -> Result<Arc<TreeSitterCodeParser>, PreviewError> {
+    cancellation.check()?;
+    if let Some(parser) = slot.get() {
+        return Ok(parser.clone());
     }
-    Ok(spans)
+    let parser = Arc::new(build()?);
+    cancellation.check()?;
+    if slot.set(parser.clone()).is_ok() {
+        Ok(parser)
+    } else {
+        Ok(slot
+            .get()
+            .expect("Tree-sitter parser initialized by another worker")
+            .clone())
+    }
 }
 
-fn resolve_code_syntax<'a>(
-    syntaxes: &'a SyntaxSet,
-    language: &str,
-) -> &'a syntect::parsing::SyntaxReference {
-    let language = language.trim();
-    if language.is_empty() {
-        return syntaxes.find_syntax_plain_text();
+fn build_typescript_parser(tsx: bool) -> Result<TreeSitterCodeParser, PreviewError> {
+    let language = if tsx {
+        tree_sitter_typescript::LANGUAGE_TSX.into()
+    } else {
+        tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
+    };
+    let mut highlights_query = String::from(tree_sitter_javascript::HIGHLIGHT_QUERY);
+    if tsx {
+        highlights_query.push('\n');
+        highlights_query.push_str(tree_sitter_javascript::JSX_HIGHLIGHT_QUERY);
     }
+    highlights_query.push('\n');
+    highlights_query.push_str(tree_sitter_typescript::HIGHLIGHTS_QUERY);
+    let locals_query = format!(
+        "{}\n{}",
+        tree_sitter_javascript::LOCALS_QUERY,
+        tree_sitter_typescript::LOCALS_QUERY
+    );
+    let configuration = HighlightConfiguration::new(
+        language,
+        if tsx { "tsx" } else { "typescript" },
+        &highlights_query,
+        "",
+        &locals_query,
+    )
+    .map_err(|error| parser_load_error(if tsx { "TSX" } else { "TypeScript" }, error))?;
+    Ok(TreeSitterCodeParser::new(configuration))
+}
 
-    syntaxes
-        .find_syntax_by_token(language)
-        .or_else(|| syntaxes.find_syntax_by_extension(language))
-        .or_else(|| {
-            syntaxes
-                .syntaxes()
-                .iter()
-                .find(|syntax| syntax.name.eq_ignore_ascii_case(language))
-        })
-        .unwrap_or_else(|| syntaxes.find_syntax_plain_text())
+fn build_javascript_parser(jsx: bool) -> Result<TreeSitterCodeParser, PreviewError> {
+    let mut highlights_query = String::from(tree_sitter_javascript::HIGHLIGHT_QUERY);
+    if jsx {
+        highlights_query.push('\n');
+        highlights_query.push_str(tree_sitter_javascript::JSX_HIGHLIGHT_QUERY);
+    }
+    let configuration = HighlightConfiguration::new(
+        tree_sitter_javascript::LANGUAGE.into(),
+        if jsx { "jsx" } else { "javascript" },
+        &highlights_query,
+        "",
+        tree_sitter_javascript::LOCALS_QUERY,
+    )
+    .map_err(|error| parser_load_error(if jsx { "JSX" } else { "JavaScript" }, error))?;
+    Ok(TreeSitterCodeParser::new(configuration))
+}
+
+fn build_rust_parser() -> Result<TreeSitterCodeParser, PreviewError> {
+    build_static_tree_sitter_parser(
+        "Rust",
+        tree_sitter_rust::LANGUAGE.into(),
+        tree_sitter_rust::HIGHLIGHTS_QUERY,
+    )
+}
+
+fn build_shell_parser() -> Result<TreeSitterCodeParser, PreviewError> {
+    build_static_tree_sitter_parser(
+        "Shell",
+        tree_sitter_bash::LANGUAGE.into(),
+        tree_sitter_bash::HIGHLIGHT_QUERY,
+    )
+}
+
+fn build_json_parser() -> Result<TreeSitterCodeParser, PreviewError> {
+    build_static_tree_sitter_parser(
+        "JSON",
+        tree_sitter_json::LANGUAGE.into(),
+        tree_sitter_json::HIGHLIGHTS_QUERY,
+    )
+}
+
+fn build_python_parser() -> Result<TreeSitterCodeParser, PreviewError> {
+    build_static_tree_sitter_parser(
+        "Python",
+        tree_sitter_python::LANGUAGE.into(),
+        tree_sitter_python::HIGHLIGHTS_QUERY,
+    )
+}
+
+fn build_go_parser() -> Result<TreeSitterCodeParser, PreviewError> {
+    build_static_tree_sitter_parser(
+        "Go",
+        tree_sitter_go::LANGUAGE.into(),
+        tree_sitter_go::HIGHLIGHTS_QUERY,
+    )
+}
+
+fn build_static_tree_sitter_parser(
+    language_name: &str,
+    language: tree_sitter::Language,
+    highlights_query: &str,
+) -> Result<TreeSitterCodeParser, PreviewError> {
+    let configuration =
+        HighlightConfiguration::new(language, language_name, highlights_query, "", "")
+            .map_err(|error| parser_load_error(language_name, error))?;
+    Ok(TreeSitterCodeParser::new(configuration))
+}
+
+fn parser_load_error(language: &str, error: impl std::fmt::Display) -> PreviewError {
+    PreviewError::Decode(format!("{language} parser load failed: {error}"))
 }
 
 fn github_dark_color(color: [u8; 4]) -> [u8; 4] {
@@ -731,6 +822,64 @@ mod tests {
         }
     }
 
+    struct TaggedParser {
+        color: [u8; 4],
+    }
+
+    impl CodeParser for TaggedParser {
+        fn highlight(
+            &self,
+            source: &str,
+            cancellation: &CancellationToken,
+        ) -> Result<Vec<MarkdownCodeSpan>, PreviewError> {
+            cancellation.check()?;
+            Ok(vec![MarkdownCodeSpan {
+                text: source.to_string(),
+                light_color: self.color,
+                dark_color: self.color,
+                bold: false,
+                italic: false,
+            }])
+        }
+    }
+
+    struct CollidingCacheKeyLoader {
+        id: &'static str,
+        language: &'static str,
+        color: [u8; 4],
+    }
+
+    impl CodeParserLoader for CollidingCacheKeyLoader {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+
+        fn supports(&self, language: &str) -> bool {
+            language == self.language
+        }
+
+        fn cache_key(&self, _language: &str) -> String {
+            "shared".to_string()
+        }
+
+        fn display_name(&self, language: &str) -> String {
+            language_display_name(language)
+        }
+
+        fn load(
+            &self,
+            _language: &str,
+            cancellation: &CancellationToken,
+        ) -> Result<Arc<dyn CodeParser>, PreviewError> {
+            cancellation.check()?;
+            Ok(Arc::new(TaggedParser { color: self.color }))
+        }
+
+        fn preload(&self, cancellation: &CancellationToken) -> Result<(), PreviewError> {
+            cancellation.check()
+        }
+    }
+
     #[test]
     fn on_demand_initializes_only_the_selected_loader_and_caches_it() {
         let ts_loads = Arc::new(AtomicUsize::new(0));
@@ -762,6 +911,52 @@ mod tests {
         assert_eq!(ts_loads.load(Ordering::Relaxed), 1);
         assert_eq!(rust_loads.load(Ordering::Relaxed), 0);
         assert_eq!(registry.loaded_parser_count(), 1);
+    }
+
+    #[test]
+    fn custom_loaders_receive_trimmed_lowercase_language_without_builtin_alias_rewriting() {
+        let loads = Arc::new(AtomicUsize::new(0));
+        let mut registry = CodeParserRegistry::new(ParserLoadStrategy::OnDemand);
+        registry.register(CountingLoader {
+            id: "custom-ts",
+            language: "ts",
+            loads: loads.clone(),
+            preloads: Arc::new(AtomicUsize::new(0)),
+            cancel_during_load: false,
+        });
+
+        registry
+            .highlight("const value = 1;", " TS ", &CancellationToken::default())
+            .unwrap();
+
+        assert_eq!(loads.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn parser_cache_keys_are_namespaced_by_loader_id() {
+        let mut registry = CodeParserRegistry::new(ParserLoadStrategy::OnDemand);
+        registry.register(CollidingCacheKeyLoader {
+            id: "first",
+            language: "first-language",
+            color: [255, 1, 2, 3],
+        });
+        registry.register(CollidingCacheKeyLoader {
+            id: "second",
+            language: "second-language",
+            color: [255, 4, 5, 6],
+        });
+        let cancellation = CancellationToken::default();
+
+        let first = registry
+            .highlight("first", "first-language", &cancellation)
+            .unwrap();
+        let second = registry
+            .highlight("second", "second-language", &cancellation)
+            .unwrap();
+
+        assert_eq!(first[0].light_color, [255, 1, 2, 3]);
+        assert_eq!(second[0].light_color, [255, 4, 5, 6]);
+        assert_eq!(registry.loaded_parser_count(), 2);
     }
 
     #[test]
@@ -872,10 +1067,26 @@ mod tests {
     }
 
     #[test]
-    fn typescript_and_tsx_preserve_source_and_emit_multiple_token_styles() {
+    fn tree_sitter_languages_preserve_source_and_emit_multiple_token_styles() {
         let registry = CodeParserRegistry::with_builtins(ParserLoadStrategy::OnDemand);
         let cancellation = CancellationToken::default();
         for (language, source) in [
+            (
+                "rust",
+                "pub fn ready(name: &str) -> bool {\r\n    // UTF-8 stays intact.\r\n    name == \"世界\"\r\n}\r\n",
+            ),
+            (
+                "bash",
+                "set -euo pipefail\nname='Usher'\nprintf '%s\\n' \"$name\" # ready\n",
+            ),
+            (
+                "javascript",
+                "export const count = 42; // ready\nconst label = 'Usher';\n",
+            ),
+            (
+                "jsx",
+                "export const view = <main title=\"Usher\">{42}</main>;\n",
+            ),
             (
                 "typescript",
                 "export const count: number = 42; // ready\nconst label = 'Usher';\n",
@@ -883,6 +1094,18 @@ mod tests {
             (
                 "tsx",
                 "export const view = <main title=\"Usher\">{42}</main>;\n",
+            ),
+            (
+                "json",
+                "{\"ready\": true, \"count\": 42, \"value\": null}\n",
+            ),
+            (
+                "python",
+                "def ready(value: int) -> bool:\n    # Keep comments styled.\n    return value > 0\n",
+            ),
+            (
+                "go",
+                "package main\n\nfunc ready(value int) bool { return value > 0 }\n",
             ),
         ] {
             let spans = registry.highlight(source, language, &cancellation).unwrap();
@@ -906,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn typescript_and_javascript_aliases_route_to_dedicated_loaders() {
+    fn common_language_aliases_route_to_dedicated_tree_sitter_loaders() {
         let registry = CodeParserRegistry::with_builtins(ParserLoadStrategy::OnDemand);
 
         for alias in ["ts", "typescript", "tsx", "typescriptreact"] {
@@ -915,6 +1138,47 @@ mod tests {
         for alias in ["js", "javascript", "jsx", "mjs", "cjs"] {
             assert_eq!(registry.loader_id_for(alias), Some("javascript"));
         }
-        assert_eq!(registry.loader_id_for("rust"), Some("syntect-language"));
+        for alias in ["rs", "rust"] {
+            assert_eq!(registry.loader_id_for(alias), Some("rust"));
+        }
+        for alias in ["sh", "bash", "shell", "shellscript", "zsh"] {
+            assert_eq!(registry.loader_id_for(alias), Some("shell"));
+        }
+        for alias in ["py", "python", "python3"] {
+            assert_eq!(registry.loader_id_for(alias), Some("python"));
+        }
+        for alias in ["go", "golang"] {
+            assert_eq!(registry.loader_id_for(alias), Some("go"));
+        }
+        assert_eq!(registry.loader_id_for("json"), Some("json"));
+        for unsupported in ["", "toml", "slint", "usher-unknown"] {
+            assert_eq!(registry.loader_id_for(unsupported), Some("plain-text"));
+        }
+    }
+
+    #[test]
+    fn aliases_and_unsupported_languages_reuse_canonical_parsers() {
+        let registry = CodeParserRegistry::with_builtins(ParserLoadStrategy::OnDemand);
+        let cancellation = CancellationToken::default();
+
+        registry
+            .highlight("fn main() {}\n", "rust", &cancellation)
+            .unwrap();
+        registry
+            .highlight("fn alias() {}\n", "rs", &cancellation)
+            .unwrap();
+        assert_eq!(registry.loaded_parser_count(), 1);
+
+        for (language, source) in [
+            ("toml", "ready = true\n"),
+            ("usher-unknown", "alpha < beta\n"),
+        ] {
+            let spans = registry.highlight(source, language, &cancellation).unwrap();
+            assert_eq!(spans.len(), 1);
+            assert_eq!(spans[0].text, source);
+            assert_eq!(spans[0].light_color, [0xff, 0x32, 0x32, 0x32]);
+            assert_eq!(spans[0].dark_color, [0xff, 0xc9, 0xd1, 0xd9]);
+        }
+        assert_eq!(registry.loaded_parser_count(), 2);
     }
 }

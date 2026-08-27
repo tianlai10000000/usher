@@ -1,5 +1,6 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
-import { GitHubScrollView } from "../../components/github_scroll_view.slint";
+import { ListView } from "@material";
+import { GitHubScrollView, GitHubVirtualListScrollbar } from "../../components/github_scroll_view.slint";
 import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
 import { GitHubCenteredLoadingState, GitHubSpinner } from "../../components/github_spinner.slint";
 import { GitHubAiReviewFindingRow, GitHubAiReviewUserMessage } from "../../components/ai_review/github_ai_review_components.slint";
@@ -53,9 +54,331 @@ export struct AiReviewConversationItem {
     repository-action-count: int,
 }
 
-// Route-independent review surface. The application mounts it only while the
-// PR-side panel is open, so closing the panel destroys the visual tree and its
-// projected finding/conversation rows.
+// Candidate-only flattened projection for Slint's single-repeater ListView.
+// Nested models and strings are shared with the source conversation/finding
+// models; this row model does not own a second response payload.
+export struct AiReviewResponseVisualRow {
+    kind: string,
+    finding: AiReviewFindingItem,
+    message: AiReviewConversationItem,
+}
+
+component GitHubAiReviewVirtualResponseRow inherits Rectangle {
+    in property <AiReviewResponseVisualRow> visual-row;
+    in property <bool> first-row: false;
+    in property <length> response-message-width: 0px;
+    in property <string> status: "";
+    in property <bool> running: false;
+    in property <string> elapsed-label: "";
+    in property <string> review-progress-label: "";
+    in property <string> summary: "";
+    in property <string> error-text: "";
+    in property <int> finding-count: 0;
+    in property <bool> chat-sending: false;
+    in property <string> chat-status: "";
+    in property <string> chat-elapsed-label: "";
+    in property <string> model-name: "";
+    in property <string> application-font-family: "sans-serif";
+    in property <string> code-font-family: "Menlo";
+    callback select-finding(string, int);
+    callback open-response-artifact(string, string, string);
+    callback open-response-link(string);
+    callback interaction-started();
+    callback created(bool, int);
+
+    private property <length> leading-padding: root.first-row ? 24px : 0px;
+    private property <length> trailing-padding:
+        root.visual-row.kind == "chat-status" ? 28px : 16px;
+    private property <length> row-content-height:
+        root.visual-row.kind == "review-state" ? review-state-layout.preferred-height
+            : root.visual-row.kind == "finding" ? finding-layout.preferred-height
+            : root.visual-row.kind == "separator" ? GitHubMetrics.border-thin
+            : root.visual-row.kind == "message" ? message-layout.preferred-height
+            : root.visual-row.kind == "chat-status" && root.chat-sending
+                ? chat-status-layout.preferred-height
+            : 0px;
+
+    height: root.leading-padding + root.row-content-height + root.trailing-padding;
+    background: transparent;
+
+    init => {
+        root.created(
+            root.visual-row.kind == "message",
+            root.visual-row.kind == "message" ? root.visual-row.message.blocks.length : 0
+        );
+    }
+
+    row-blank-touch := TouchArea {
+        y: root.leading-padding;
+        width: parent.width;
+        height: root.row-content-height;
+        clicked => { root.interaction-started(); }
+    }
+
+    review-state-layout := VerticalLayout {
+        x: (parent.width - root.response-message-width) / 2;
+        y: root.leading-padding;
+        width: root.response-message-width;
+        spacing: 0px;
+
+        if root.visual-row.kind == "review-state" && root.running: GitHubCenteredLoadingState {
+            width: parent.width;
+            height: 112px;
+            label: root.review-progress-label;
+        }
+
+        if root.visual-row.kind == "review-state"
+                && (root.status == "failed" || root.status == "cancelled"): Rectangle {
+            width: parent.width;
+            height: max(100px, virtual-error-message.preferred-height + 58px);
+            border-radius: GitHubMetrics.radius-medium;
+            border-width: GitHubMetrics.border-thin;
+            border-color: root.status == "failed"
+                ? GitHubTheme.danger-emphasis
+                : GitHubTheme.border-default;
+            background: GitHubTheme.canvas-subtle;
+            virtual-error-message := Text {
+                x: 16px;
+                y: 16px;
+                width: parent.width - 32px;
+                height: self.preferred-height;
+                text: root.status == "cancelled" ? "Review cancelled." : root.error-text;
+                font-size: 13px;
+                color: GitHubTheme.fg-default;
+                wrap: word-wrap;
+            }
+            Text {
+                x: 16px;
+                y: virtual-error-message.y + virtual-error-message.height + 8px;
+                width: parent.width - 32px;
+                height: 16px;
+                text: "Elapsed " + root.elapsed-label;
+                font-size: 11px;
+                color: GitHubTheme.fg-muted;
+            }
+        }
+
+        if root.visual-row.kind == "review-state" && root.status == "completed": VerticalLayout {
+            width: parent.width;
+            spacing: 12px;
+            HorizontalLayout {
+                width: parent.width;
+                height: 24px;
+                spacing: 8px;
+                Rectangle {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 12px;
+                    background: GitHubTheme.canvas-subtle;
+                    Image {
+                        x: 4px;
+                        y: 4px;
+                        width: 16px;
+                        height: 16px;
+                        source: @image-url("../../assets/icons/octicon-copilot-16.svg");
+                        colorize: GitHubTheme.fg-default;
+                    }
+                }
+                Text {
+                    text: "Copilot review";
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: GitHubTheme.fg-default;
+                    vertical-alignment: center;
+                }
+            }
+            Text {
+                width: parent.width;
+                height: self.preferred-height;
+                text: root.finding-count == 0
+                    ? "No actionable findings · " + root.elapsed-label
+                    : "Review completed · " + root.elapsed-label + " · "
+                        + root.finding-count + " finding"
+                        + (root.finding-count == 1 ? "" : "s");
+                font-size: 14px;
+                font-weight: 600;
+                color: root.finding-count == 0
+                    ? GitHubTheme.success-fg
+                    : GitHubTheme.fg-default;
+                wrap: word-wrap;
+            }
+            if root.summary != "": Text {
+                width: parent.width;
+                height: self.preferred-height;
+                text: root.summary;
+                font-size: 13px;
+                color: GitHubTheme.fg-muted;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    finding-layout := VerticalLayout {
+        x: (parent.width - root.response-message-width) / 2;
+        y: root.leading-padding;
+        width: root.response-message-width;
+
+        if root.visual-row.kind == "finding": GitHubAiReviewFindingRow {
+            width: parent.width;
+            severity: root.visual-row.finding.severity;
+            file: root.visual-row.finding.file;
+            line: root.visual-row.finding.line;
+            title: root.visual-row.finding.title;
+            explanation: root.visual-row.finding.explanation;
+            suggestion: root.visual-row.finding.suggestion;
+            activated => {
+                root.select-finding(root.visual-row.finding.file, root.visual-row.finding.line);
+            }
+        }
+    }
+
+    if root.visual-row.kind == "separator": Rectangle {
+        x: (parent.width - root.response-message-width) / 2;
+        y: root.leading-padding;
+        width: root.response-message-width;
+        height: GitHubMetrics.border-thin;
+        background: GitHubTheme.border-muted;
+    }
+
+    message-layout := VerticalLayout {
+        visible: root.visual-row.kind == "message";
+        x: (parent.width - root.response-message-width) / 2;
+        y: root.leading-padding;
+        width: root.response-message-width;
+        spacing: root.visual-row.message.role == "user" ? 0px : GitHubMetrics.size-8;
+
+        if root.visual-row.kind == "message" && root.visual-row.message.role == "user": GitHubAiReviewUserMessage {
+            width: parent.width;
+            content: root.visual-row.message.content;
+        }
+
+        if root.visual-row.kind == "message" && root.visual-row.message.role != "user"
+                && (!root.visual-row.message.formatted
+                    || (root.visual-row.message.blocks.length == 0
+                        && !root.visual-row.message.preview-available)): VerticalLayout {
+            width: parent.width;
+            spacing: GitHubMetrics.size-6;
+            Text {
+                width: parent.width;
+                height: self.preferred-height;
+                text: root.visual-row.message.content;
+                font-size: 13px;
+                color: GitHubTheme.fg-default;
+                wrap: word-wrap;
+            }
+            if root.visual-row.message.preview-available: GitHubAgentResponse {
+                width: parent.width;
+                blocks: [];
+                preview-title: root.visual-row.message.preview-title;
+                preview-available: true;
+                truncated: root.visual-row.message.truncated;
+                body-font-family: root.application-font-family;
+                code-font-family: root.code-font-family;
+                open-full-response => {
+                    root.open-response-artifact(
+                        root.visual-row.message.id,
+                        root.visual-row.message.preview-title,
+                        root.visual-row.message.content
+                    );
+                }
+            }
+        }
+
+        if root.visual-row.kind == "message" && root.visual-row.message.role != "user"
+                && root.visual-row.message.formatted
+                && (root.visual-row.message.blocks.length > 0
+                    || root.visual-row.message.preview-available): GitHubAgentResponse {
+            width: parent.width;
+            blocks: root.visual-row.message.blocks;
+            preview-title: root.visual-row.message.preview-title;
+            preview-available: root.visual-row.message.preview-available;
+            truncated: root.visual-row.message.truncated;
+            body-font-family: root.application-font-family;
+            code-font-family: root.code-font-family;
+            open-link(url) => { root.open-response-link(url); }
+            open-full-response => {
+                root.open-response-artifact(
+                    root.visual-row.message.id,
+                    root.visual-row.message.preview-title,
+                    root.visual-row.message.content
+                );
+            }
+        }
+
+        if root.visual-row.kind == "message" && root.visual-row.message.role != "user"
+                && root.visual-row.message.elapsed != "": Text {
+            width: parent.width;
+            height: GitHubMetrics.size-20;
+            text: "Worked for " + root.visual-row.message.elapsed;
+            font-size: GitHubMetrics.text-small;
+            color: GitHubTheme.fg-muted;
+            vertical-alignment: center;
+        }
+    }
+
+    chat-status-layout := VerticalLayout {
+        visible: root.visual-row.kind == "chat-status" && root.chat-sending;
+        x: (parent.width - root.response-message-width) / 2;
+        y: root.leading-padding;
+        width: root.response-message-width;
+        spacing: 8px;
+        accessible-role: progress-indicator;
+        accessible-label: root.chat-status == "" ? "Thinking" : root.chat-status;
+        if root.visual-row.kind == "chat-status" && root.chat-sending: HorizontalLayout {
+            width: parent.width;
+            height: 24px;
+            spacing: 8px;
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 12px;
+                background: GitHubTheme.canvas-subtle;
+                Image {
+                    x: 4px;
+                    y: 4px;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/octicon-copilot-16.svg");
+                    colorize: GitHubTheme.fg-default;
+                }
+            }
+            Text {
+                text: root.model-name == "" ? "AI Agent" : root.model-name;
+                font-size: 13px;
+                font-weight: 600;
+                color: GitHubTheme.fg-default;
+                vertical-alignment: center;
+            }
+        }
+        if root.visual-row.kind == "chat-status" && root.chat-sending: HorizontalLayout {
+            width: parent.width;
+            height: 22px;
+            spacing: 8px;
+            cross-axis-alignment: center;
+            Rectangle {
+                width: 16px;
+                height: 22px;
+                background: transparent;
+                GitHubSpinner {
+                    y: 2px;
+                    spinner-size: 16px;
+                    foreground: GitHubTheme.fg-muted;
+                }
+            }
+            Text {
+                text: (root.chat-status == "" ? "Thinking" : root.chat-status)
+                    + " · " + root.chat-elapsed-label;
+                font-size: 13px;
+                color: GitHubTheme.fg-muted;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// Route-independent review surface. The application keeps the light panel
+// shell mounted while it owns PR-side state, but may unmount the response
+// delegates while a Docked contextual Preview occupies the same surface.
 export component GitHubAiReviewPanel inherits Rectangle {
     in property <string> task-id: "";
     in property <string> project-name: "";
@@ -72,12 +395,21 @@ export component GitHubAiReviewPanel inherits Rectangle {
     in property <string> error-text: "";
     in property <[AiReviewFindingItem]> findings: [];
     in property <[AiReviewConversationItem]> conversation: [];
+    in property <[AiReviewResponseVisualRow]> response-rows: [];
+    in property <bool> response-virtualized: false;
+    in-out property <int> retained-created-message-rows: 0;
+    in-out property <int> retained-created-blocks: 0;
+    in-out property <int> virtual-created-rows: 0;
+    in-out property <int> virtual-created-message-rows: 0;
+    in-out property <int> virtual-created-blocks: 0;
     in-out property <string> message-input: "";
     in-out property <string> extra-requirements: "";
     in property <bool> chat-sending: false;
     in property <string> chat-status: "";
     in-out property <int> chat-elapsed-seconds: 0;
     in property <bool> layout-resizing: false;
+    in property <bool> content-active: true;
+    in-out property <length> response-scroll-y: 0px;
     in property <string> application-font-family: "sans-serif";
     in property <string> code-font-family: "Menlo";
     callback close();
@@ -96,13 +428,42 @@ export component GitHubAiReviewPanel inherits Rectangle {
     private property <bool> composer-stopping:
         (root.review-again-mode && root.running)
             || (!root.review-again-mode && root.chat-sending);
+    private property <bool> response-scroll-restoring: false;
+    private property <bool> response-scroll-to-bottom-on-mount: false;
+    private property <length> retained-response-viewport-y: 0px;
+    private property <length> retained-response-visible-height: 0px;
+    private property <length> retained-response-content-height: 0px;
+    private property <length> retained-response-visible-width: 0px;
+    private property <length> virtual-response-viewport-y: 0px;
+    private property <length> virtual-response-visible-height: 0px;
+    private property <length> virtual-response-content-height: 0px;
+    private property <length> virtual-response-visible-width: 0px;
+    private property <[AiReviewResponseVisualRow]> active-response-rows:
+        root.content-active && root.response-virtualized ? root.response-rows : [];
+    private property <length> active-response-viewport-y:
+        root.response-virtualized
+            ? root.virtual-response-viewport-y
+            : root.retained-response-viewport-y;
+    private property <length> active-response-visible-height:
+        root.response-virtualized
+            ? root.virtual-response-visible-height
+            : root.retained-response-visible-height;
+    private property <length> active-response-content-height:
+        root.response-virtualized
+            ? root.virtual-response-content-height
+            : root.retained-response-content-height;
+    private property <length> active-response-visible-width:
+        root.response-virtualized
+            ? root.virtual-response-visible-width
+            : root.retained-response-visible-width;
+    private property <length> observed-response-scroll-y: root.active-response-viewport-y;
     private property <length> header-height: 64px;
     private property <length> composer-height: 136px;
-    private property <length> stable-response-content-width: message-scroll.visible_width;
+    private property <length> stable-response-content-width: root.active-response-visible-width;
     private property <length> response-content-width:
         root.layout-resizing
             ? root.stable-response-content-width
-            : message-scroll.visible_width;
+            : root.active-response-visible-width;
     private property <length> response-horizontal-padding:
         root.width < 460px ? 20px : 32px;
     private property <length> response-message-width:
@@ -117,6 +478,14 @@ export component GitHubAiReviewPanel inherits Rectangle {
                 ? root.completed-chunks + 1
                 : root.total-chunks)
             : 0;
+    private property <string> review-progress-label:
+        root.status == "queued"
+            ? "AI review queued · " + root.elapsed-label
+            : root.total-chunks > 0
+                ? "Processing chunk " + root.current-chunk + "/" + root.total-chunks
+                    + " · " + root.elapsed-label + " · " + root.progress-percent + "%"
+                : "Reviewing current changes · " + root.elapsed-label + " · "
+                    + root.progress-percent + "%";
     private property <string> elapsed-label:
         root.elapsed-hours > 0
             ? root.elapsed-hours + "h "
@@ -145,6 +514,28 @@ export component GitHubAiReviewPanel inherits Rectangle {
                     + (root.chat-elapsed-second-part < 10 ? "0" : "")
                     + root.chat-elapsed-second-part + "s"
                 : root.chat-elapsed-seconds + "s";
+
+    function set-response-viewport-y(value: length) {
+        if root.response-virtualized {
+            root.virtual-response-viewport-y = value;
+        } else {
+            root.retained-response-viewport-y = value;
+        }
+        root.response-scroll-y = value;
+    }
+
+    function response-bottom-y() -> length {
+        return min(
+            0px,
+            root.active-response-visible-height - root.active-response-content-height
+        );
+    }
+
+    function request-response-bottom() {
+        root.response-scroll-to-bottom-on-mount = true;
+        root.response-scroll-restoring = true;
+        response-scroll-restore.restart();
+    }
     background: GitHubTheme.canvas-default;
     border-width: 0px;
     clip: true;
@@ -159,13 +550,13 @@ export component GitHubAiReviewPanel inherits Rectangle {
 
     changed width => {
         if !root.layout-resizing {
-            root.stable-response-content-width = message-scroll.visible_width;
+            root.stable-response-content-width = root.active-response-visible-width;
         }
     }
     changed layout-resizing => {
         // Freeze the block column during continuous divider/native resize and
         // commit the final wrapping width once the interaction settles.
-        root.stable-response-content-width = message-scroll.visible_width;
+        root.stable-response-content-width = root.active-response-visible-width;
     }
 
     header := Rectangle {
@@ -246,7 +637,7 @@ export component GitHubAiReviewPanel inherits Rectangle {
         }
     }
 
-    message-scroll := GitHubScrollView {
+    if !root.response-virtualized: message-scroll := GitHubScrollView {
         x: 0px;
         y: root.header-height;
         width: parent.width;
@@ -254,11 +645,20 @@ export component GitHubAiReviewPanel inherits Rectangle {
         background: GitHubTheme.canvas-default;
         show-scrollbar: !root.layout-resizing;
         report-pointer-interactions: true;
+        viewport_y <=> root.retained-response-viewport-y;
+        changed visible_width => { root.retained-response-visible-width = self.visible_width; }
+        changed visible_height => { root.retained-response-visible-height = self.visible_height; }
+        changed content_height => { root.retained-response-content-height = self.content_height; }
+        init => {
+            root.retained-response-visible-width = self.visible_width;
+            root.retained-response-visible-height = self.visible_height;
+            root.retained-response-content-height = self.content_height;
+        }
         pointer-interaction-started => { root.interaction-started(); }
         user-wheel-direction(movement) => {
             root.response-wheel-consumed(movement);
         }
-        message-content := Rectangle {
+        if root.content-active: message-content := Rectangle {
             width: root.response-content-width;
             height: message-layout.preferred-height;
             background: transparent;
@@ -396,6 +796,10 @@ export component GitHubAiReviewPanel inherits Rectangle {
             for message in root.conversation: VerticalLayout {
                 width: root.response-message-width;
                 spacing: message.role == "user" ? 0px : GitHubMetrics.size-8;
+                init => {
+                    root.retained-created-message-rows += 1;
+                    root.retained-created-blocks += message.blocks.length;
+                }
 
                 if message.role == "user": GitHubAiReviewUserMessage {
                     width: parent.width;
@@ -522,23 +926,139 @@ export component GitHubAiReviewPanel inherits Rectangle {
         }
     }
 
+    if root.response-virtualized: virtual-response-host := Rectangle {
+        x: 0px;
+        y: root.header-height;
+        width: parent.width;
+        height: max(0px, parent.height - root.header-height - root.composer-height);
+        background: GitHubTheme.canvas-default;
+
+        virtual-response-list := ListView {
+            width: parent.width;
+            height: parent.height;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+            vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+            viewport-y <=> root.virtual-response-viewport-y;
+            changed visible-width => { root.virtual-response-visible-width = self.visible-width; }
+            changed visible-height => { root.virtual-response-visible-height = self.visible-height; }
+            changed viewport-height => { root.virtual-response-content-height = self.viewport-height; }
+            init => {
+                root.virtual-response-visible-width = self.visible-width;
+                root.virtual-response-visible-height = self.visible-height;
+                root.virtual-response-content-height = self.viewport-height;
+            }
+            scrolled => { root.interaction-started(); }
+
+            for row[index] in root.active-response-rows: GitHubAiReviewVirtualResponseRow {
+                width: virtual-response-list.visible-width;
+                visual-row: row;
+                first-row: index == 0;
+                response-message-width: root.response-message-width;
+                status: root.status;
+                running: root.running;
+                elapsed-label: root.elapsed-label;
+                review-progress-label: root.review-progress-label;
+                summary: root.summary;
+                error-text: root.error-text;
+                finding-count: root.findings.length;
+                chat-sending: root.chat-sending;
+                chat-status: root.chat-status;
+                chat-elapsed-label: root.chat-elapsed-label;
+                model-name: root.model-name;
+                application-font-family: root.application-font-family;
+                code-font-family: root.code-font-family;
+                select-finding(file, line) => { root.select-finding(file, line); }
+                open-response-artifact(id, title, markdown) => {
+                    root.open-response-artifact(id, title, markdown);
+                }
+                open-response-link(url) => { root.open-response-link(url); }
+                interaction-started => { root.interaction-started(); }
+                created(message-row, blocks) => {
+                    root.virtual-created-rows += 1;
+                    if message-row {
+                        root.virtual-created-message-rows += 1;
+                        root.virtual-created-blocks += blocks;
+                    }
+                }
+            }
+        }
+
+        GitHubVirtualListScrollbar {
+            x: parent.width - self.width;
+            width: GitHubMetrics.size-8;
+            height: parent.height;
+            viewport-y <=> virtual-response-list.viewport-y;
+            visible-height: virtual-response-list.visible-height;
+            content-height: virtual-response-list.viewport-height;
+            enabled: !root.layout-resizing;
+            z: 20;
+        }
+    }
+
+    changed observed-response-scroll-y => {
+        if root.content-active && !root.response-scroll-restoring {
+            let movement = root.observed-response-scroll-y - root.response-scroll-y;
+            if root.response-virtualized && Math.abs(movement / 1px) > 0.25 {
+                root.response-wheel-consumed(movement);
+            }
+            root.response-scroll-y = root.observed-response-scroll-y;
+        }
+    }
+
+    changed content-active => {
+        if root.content-active {
+            root.response-scroll-restoring = true;
+            response-scroll-restore.restart();
+        } else {
+            root.response-scroll-restoring = true;
+        }
+    }
+
+    response-scroll-restore := Timer {
+        interval: 0ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            if !root.content-active {
+                return;
+            }
+            let bottom = root.response-bottom-y();
+            let target = root.response-scroll-to-bottom-on-mount
+                ? bottom
+                : max(bottom, min(0px, root.response-scroll-y));
+            root.set-response-viewport-y(target);
+            root.response-scroll-to-bottom-on-mount = false;
+            root.response-scroll-restoring = false;
+        }
+    }
+
     changed conversation => {
-        message-scroll.viewport_y = min(
-            0px,
-            message-scroll.visible_height - message-scroll.content_height
-        );
+        if root.content-active {
+            if !root.response-virtualized {
+                root.set-response-viewport-y(root.response-bottom-y());
+            }
+        } else {
+            root.response-scroll-to-bottom-on-mount = true;
+        }
+    }
+    changed response-rows => {
+        if root.response-virtualized && root.content-active {
+            root.request-response-bottom();
+        }
     }
     changed chat-sending => {
-        message-scroll.viewport_y = min(
-            0px,
-            message-scroll.visible_height - message-scroll.content_height
-        );
+        if root.content-active {
+            root.request-response-bottom();
+        } else {
+            root.response-scroll-to-bottom-on-mount = true;
+        }
     }
     changed chat-status => {
-        message-scroll.viewport_y = min(
-            0px,
-            message-scroll.visible_height - message-scroll.content_height
-        );
+        if root.content-active {
+            root.request-response-bottom();
+        } else {
+            root.response-scroll-to-bottom-on-mount = true;
+        }
     }
 
     review-elapsed-timer := Timer {

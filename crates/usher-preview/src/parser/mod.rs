@@ -3,7 +3,7 @@ mod markdown;
 
 pub use code::{
     CodeParser, CodeParserLoader, CodeParserRegistry, JavaScriptParserLoader, ParserLoadStrategy,
-    SyntectParserLoader, TsParserLoader,
+    PlainTextParserLoader, TsParserLoader,
 };
 pub use markdown::{
     MarkdownParser, MarkdownParserLoader, parse_markdown, parse_markdown_structure,

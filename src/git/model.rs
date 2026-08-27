@@ -238,10 +238,6 @@ pub(crate) fn split_commit_message(message: &str) -> (String, String) {
 pub(crate) fn conversation_commit_batch_items(
     commits: &[PullRequestCommit],
 ) -> Vec<PullRequestConversationItem> {
-    if commits.is_empty() {
-        return Vec::new();
-    }
-    let count = commits.len();
     let author = commits
         .first()
         .map(|commit| commit.author.clone())
@@ -257,15 +253,75 @@ pub(crate) fn conversation_commit_batch_items(
         .find(|value| !value.trim().is_empty())
         .unwrap_or("")
         .to_string();
-    let mut items = Vec::with_capacity(count + 1);
+    conversation_commit_batch_items_for_actor(
+        commits,
+        author.as_str(),
+        avatar_url.as_str(),
+        created_at.as_str(),
+        commits.len(),
+        None,
+    )
+}
+
+/// Build a GitHub-style commit batch whose actor comes from provider activity.
+///
+/// GitLab system notes and Gitee push events identify the user who updated the
+/// source branch independently from each commit's Git author/committer. The
+/// declared count can exceed the included rows when a provider truncates the
+/// commit references in a large push event.
+pub(crate) fn conversation_commit_batch_items_for_actor(
+    commits: &[PullRequestCommit],
+    actor: &str,
+    actor_avatar_url: &str,
+    created_at: &str,
+    declared_count: usize,
+    event_id: Option<&str>,
+) -> Vec<PullRequestConversationItem> {
+    let count = declared_count.max(commits.len());
+    if count == 0 {
+        return Vec::new();
+    }
+    let author = if actor.trim().is_empty() {
+        commits
+            .first()
+            .map(|commit| commit.author.clone())
+            .unwrap_or_else(|| "Unknown author".to_string())
+    } else {
+        actor.to_string()
+    };
+    let avatar_url = if actor_avatar_url.trim().is_empty() {
+        commits
+            .first()
+            .map(|commit| commit.avatar_url.clone())
+            .unwrap_or_default()
+    } else {
+        actor_avatar_url.to_string()
+    };
+    let created_at = if created_at.trim().is_empty() {
+        commits
+            .iter()
+            .rev()
+            .map(|commit| commit.authored_at.as_str())
+            .find(|value| !value.trim().is_empty())
+            .unwrap_or("")
+            .to_string()
+    } else {
+        created_at.to_string()
+    };
+    let mut items = Vec::with_capacity(commits.len() + 1);
     items.push(PullRequestConversationItem {
-        id: format!(
-            "commits-{}",
-            commits
-                .first()
-                .map(|commit| commit.sha.as_str())
-                .unwrap_or("batch")
-        ),
+        id: event_id
+            .filter(|id| !id.trim().is_empty())
+            .map(|id| format!("commits-{id}"))
+            .unwrap_or_else(|| {
+                format!(
+                    "commits-{}",
+                    commits
+                        .first()
+                        .map(|commit| commit.sha.as_str())
+                        .unwrap_or("batch")
+                )
+            }),
         kind: "commits".to_string(),
         author,
         avatar_url,
@@ -550,6 +606,9 @@ pub(crate) struct PullRequestCommit {
     pub(crate) author: String,
     pub(crate) avatar_url: String,
     pub(crate) authored_at: String,
+    pub(crate) committer: String,
+    pub(crate) committer_avatar_url: String,
+    pub(crate) committed_at: String,
     pub(crate) verified: bool,
 }
 

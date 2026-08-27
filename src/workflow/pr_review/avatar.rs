@@ -35,10 +35,9 @@ pub(super) async fn load_commit_avatars(
     load_avatar_urls(
         commits
             .iter()
-            .filter_map(|commit| {
-                let url = commit.avatar_url.trim();
-                (!url.is_empty()).then(|| url.to_string())
-            })
+            .flat_map(|commit| [commit.avatar_url.trim(), commit.committer_avatar_url.trim()])
+            .filter(|url| !url.is_empty())
+            .map(str::to_string)
             .collect::<HashSet<_>>()
             .into_iter(),
     )

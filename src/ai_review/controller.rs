@@ -30,8 +30,8 @@ use crate::artifact_preview::{ArtifactPreviewHandle, ArtifactSource};
 use crate::project::load_repository_metadata;
 use crate::settings::AiAgentSettings;
 use crate::{
-    AiReviewFindingItem, AiReviewRuleChoice, AiReviewTaskItem, MainWindow, Route,
-    SettingsPageBridge, WorkflowPullRequestItem,
+    AiReviewFindingItem, AiReviewResponseVisualRow, AiReviewRuleChoice, AiReviewTaskItem,
+    MainWindow, Route, SettingsPageBridge, WorkflowPullRequestItem,
 };
 
 use super::config::{ReviewConfigFacade, default_session_dir};
@@ -42,6 +42,8 @@ type TaskStore = dyn StateStore<ReviewTaskState, ReviewTaskAction, ReviewTaskAct
 const TASK_STATE_FILE: &str = "tasks.json";
 const FIXTURE_NAME: &str = "review-v1";
 const RESPONSE_FIXTURE_NAME: &str = "markdown-v1";
+const DOCKED_LIFECYCLE_ENV: &str = "USHER_AI_REVIEW_DOCKED_LIFECYCLE";
+const RESPONSE_LIST_ENV: &str = "USHER_AI_REVIEW_RESPONSE_LIST";
 const DEFAULT_FIXTURE_DELAY_MS: u64 = 90;
 const MAX_CHAT_DIFF_BYTES: usize = 48 * 1024;
 const MAX_CHAT_HISTORY_MESSAGES: usize = 20;
@@ -49,6 +51,88 @@ const MAX_PROJECTED_ASSISTANT_ROWS: usize = 128;
 const MAX_STRUCTURED_ASSISTANT_ROWS: usize = 32;
 
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DockedContentLifecycle {
+    Retain,
+    Unmount,
+}
+
+impl DockedContentLifecycle {
+    fn from_environment() -> Self {
+        match std::env::var(DOCKED_LIFECYCLE_ENV).as_deref() {
+            Ok("retain") => Self::Retain,
+            Ok("unmount") => Self::Unmount,
+            Err(std::env::VarError::NotPresent) => Self::Retain,
+            Ok(value) => {
+                log::warn!(
+                    "[AI Review][DockedLifecycle] unsupported {}={value:?}; using retain",
+                    DOCKED_LIFECYCLE_ENV
+                );
+                Self::Retain
+            }
+            Err(std::env::VarError::NotUnicode(_)) => {
+                log::warn!(
+                    "[AI Review][DockedLifecycle] non-Unicode {} value; using retain",
+                    DOCKED_LIFECYCLE_ENV
+                );
+                Self::Retain
+            }
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Retain => "retain",
+            Self::Unmount => "unmount",
+        }
+    }
+
+    fn unmounts_response_delegates(self) -> bool {
+        self == Self::Unmount
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResponseListPolicy {
+    Retain,
+    Virtualized,
+}
+
+impl ResponseListPolicy {
+    fn from_environment() -> Self {
+        match std::env::var(RESPONSE_LIST_ENV).as_deref() {
+            Ok("retain") => Self::Retain,
+            Ok("virtualized") => Self::Virtualized,
+            Err(std::env::VarError::NotPresent) => Self::Retain,
+            Ok(value) => {
+                log::warn!(
+                    "[AI Review][ResponseList] unsupported {}={value:?}; using retain",
+                    RESPONSE_LIST_ENV
+                );
+                Self::Retain
+            }
+            Err(std::env::VarError::NotUnicode(_)) => {
+                log::warn!(
+                    "[AI Review][ResponseList] non-Unicode {} value; using retain",
+                    RESPONSE_LIST_ENV
+                );
+                Self::Retain
+            }
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Retain => "retain",
+            Self::Virtualized => "virtualized",
+        }
+    }
+
+    fn virtualizes(self) -> bool {
+        self == Self::Virtualized
+    }
+}
 
 #[derive(Debug, Clone)]
 struct PendingReviewRequest {
@@ -374,6 +458,21 @@ pub(crate) fn setup_ai_review(
     message_center: MessageCenter,
     artifact_preview: ArtifactPreviewHandle,
 ) -> AiReviewController {
+    let docked_lifecycle = DockedContentLifecycle::from_environment();
+    ui.set_ai_review_docked_content_unmount(docked_lifecycle.unmounts_response_delegates());
+    log::info!(
+        "[AI Review][DockedLifecycle] policy={} unmounts_response_delegates={}",
+        docked_lifecycle.label(),
+        docked_lifecycle.unmounts_response_delegates()
+    );
+    let response_list_policy = ResponseListPolicy::from_environment();
+    ui.set_ai_review_response_virtualized(response_list_policy.virtualizes());
+    log::info!(
+        "[AI Review][ResponseList] policy={} virtualized={}",
+        response_list_policy.label(),
+        response_list_policy.virtualizes()
+    );
+
     let config = ReviewConfigFacade::open_default();
     settings_page.configure_ai_review(config.clone());
 
@@ -567,11 +666,128 @@ fn maybe_mount_response_fixture(ui: &MainWindow, inner: Arc<ControllerInner>) {
                     cache.bytes,
                 );
                 println!("{settled_marker}");
+                println!(
+                    "[AI Review][ResponseListFixture] settled fixture={} policy={} source_rows={} source_blocks={} visual_rows={} retained_created_message_rows={} retained_created_blocks={} virtual_created_rows={} virtual_created_message_rows={} virtual_created_blocks={}",
+                    RESPONSE_FIXTURE_NAME,
+                    if ui.get_ai_review_response_virtualized() {
+                        "virtualized"
+                    } else {
+                        "retain"
+                    },
+                    rows.row_count(),
+                    blocks,
+                    ui.get_ai_review_response_rows().row_count(),
+                    ui.get_ai_review_retained_created_message_rows(),
+                    ui.get_ai_review_retained_created_blocks(),
+                    ui.get_ai_review_virtual_created_rows(),
+                    ui.get_ai_review_virtual_created_message_rows(),
+                    ui.get_ai_review_virtual_created_blocks(),
+                );
                 let _ = std::io::stdout().flush();
                 crate::memory_diagnostics::log_ui_models(&ui, Route::PrReview);
                 crate::memory_diagnostics::log_checkpoint("ai_review.response_fixture.settled");
+                schedule_response_preview_memory_fixture(&ui);
             });
         });
+    });
+}
+
+fn schedule_response_preview_memory_fixture(ui: &MainWindow) {
+    let scenario = std::env::var("USHER_MEMORY_SCENARIO").unwrap_or_default();
+    let (detached, close_after_settle, cycles) = match scenario.as_str() {
+        "pr-ai-preview-docked" => (false, false, 1),
+        "pr-ai-preview-detached" => (true, false, 1),
+        "pr-ai-preview-docked-after-close" => (false, true, 1),
+        "pr-ai-preview-detached-after-close" => (true, true, 1),
+        "pr-ai-preview-docked-two-cycles" => (false, true, 2),
+        _ => return,
+    };
+    schedule_response_preview_memory_fixture_cycle(ui, detached, close_after_settle, 1, cycles);
+}
+
+fn response_preview_checkpoint(stage: &str, cycle: u8, total_cycles: u8) -> String {
+    if total_cycles == 1 {
+        format!("ai_review.preview_fixture.{stage}")
+    } else {
+        format!("ai_review.preview_fixture.cycle_{cycle}.{stage}")
+    }
+}
+
+fn schedule_response_preview_memory_fixture_cycle(
+    ui: &MainWindow,
+    detached: bool,
+    close_after_settle: bool,
+    cycle: u8,
+    total_cycles: u8,
+) {
+    let conversation = ui.get_ai_review_conversation();
+    let Some(message) = (0..conversation.row_count()).rev().find_map(|index| {
+        conversation
+            .row_data(index)
+            .filter(|row| row.role == "assistant" && !row.content.trim().is_empty())
+    }) else {
+        log::warn!("[AI Review][MemoryFixture] no assistant response available for Preview");
+        return;
+    };
+
+    crate::artifact_preview::set_memory_benchmark_presentation_mode(ui, detached);
+    ui.invoke_ai_review_open_response_artifact(
+        message.id,
+        "AI review memory fixture".into(),
+        message.content,
+    );
+    crate::memory_diagnostics::log_ui_models(ui, Route::PrReview);
+    crate::memory_diagnostics::log_checkpoint(&response_preview_checkpoint(
+        "open_requested",
+        cycle,
+        total_cycles,
+    ));
+
+    let weak = ui.as_weak();
+    slint::Timer::single_shot(Duration::from_millis(900), move || {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        crate::memory_diagnostics::log_ui_models(&ui, Route::PrReview);
+        crate::memory_diagnostics::log_checkpoint(&response_preview_checkpoint(
+            "settled",
+            cycle,
+            total_cycles,
+        ));
+        log::info!(
+            "[AI Review][MemoryFixture] preview settled host={} cycle={cycle}/{total_cycles} close_after_settle={close_after_settle}",
+            if detached { "detached" } else { "docked" },
+        );
+        if close_after_settle {
+            let dismiss_started = Instant::now();
+            ui.invoke_artifact_preview_dismiss();
+            let weak = ui.as_weak();
+            slint::Timer::single_shot(Duration::from_millis(400), move || {
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                crate::memory_diagnostics::log_ui_models(&ui, Route::PrReview);
+                crate::memory_diagnostics::log_checkpoint(&response_preview_checkpoint(
+                    "closed_settled",
+                    cycle,
+                    total_cycles,
+                ));
+                log::info!(
+                    "[AI Review][MemoryFixture] preview close settled cycle={cycle}/{total_cycles} remount_elapsed_ms={} delegates_mounted={}",
+                    dismiss_started.elapsed().as_millis(),
+                    ui.get_ai_review_response_delegates_mounted(),
+                );
+                if cycle < total_cycles {
+                    schedule_response_preview_memory_fixture_cycle(
+                        &ui,
+                        detached,
+                        close_after_settle,
+                        cycle + 1,
+                        total_cycles,
+                    );
+                }
+            });
+        }
     });
 }
 
@@ -1254,6 +1470,7 @@ impl ControllerInner {
         ui.set_ai_review_summary("".into());
         ui.set_ai_review_findings(ModelRc::new(VecModel::default()));
         ui.set_ai_review_conversation(ModelRc::new(VecModel::default()));
+        rebuild_response_visual_rows(&ui);
         ui.set_ai_review_chat_sending(false);
         ui.set_ai_review_chat_status("".into());
         ui.set_ai_review_chat_elapsed_seconds(0);
@@ -2130,6 +2347,7 @@ fn apply_projection(
                 .collect::<Vec<_>>(),
         )));
     }
+    rebuild_response_visual_rows(ui);
 }
 
 fn append_ui_conversation(ui: &MainWindow, role: &str, content: &str, elapsed_ms: Option<u64>) {
@@ -2140,6 +2358,62 @@ fn append_ui_conversation(ui: &MainWindow, role: &str, content: &str, elapsed_ms
         &id, role, content, &elapsed,
     ));
     ui.set_ai_review_conversation(ModelRc::new(VecModel::from(conversation)));
+    rebuild_response_visual_rows(ui);
+}
+
+fn rebuild_response_visual_rows(ui: &MainWindow) {
+    ui.set_ai_review_retained_created_message_rows(0);
+    ui.set_ai_review_retained_created_blocks(0);
+    ui.set_ai_review_virtual_created_rows(0);
+    ui.set_ai_review_virtual_created_message_rows(0);
+    ui.set_ai_review_virtual_created_blocks(0);
+    if !ui.get_ai_review_response_virtualized() {
+        ui.set_ai_review_response_rows(ModelRc::new(VecModel::default()));
+        return;
+    }
+
+    let empty_finding = AiReviewFindingItem::default();
+    let empty_message = crate::AiReviewConversationItem::default();
+    let findings = ui.get_ai_review_findings();
+    let conversation = ui.get_ai_review_conversation();
+    let mut rows = Vec::with_capacity(
+        2usize
+            .saturating_add(findings.row_count())
+            .saturating_add(conversation.row_count())
+            .saturating_add(usize::from(conversation.row_count() > 0)),
+    );
+    rows.push(AiReviewResponseVisualRow {
+        kind: "review-state".into(),
+        finding: empty_finding.clone(),
+        message: empty_message.clone(),
+    });
+    for finding in findings.iter() {
+        rows.push(AiReviewResponseVisualRow {
+            kind: "finding".into(),
+            finding,
+            message: empty_message.clone(),
+        });
+    }
+    if conversation.row_count() > 0 {
+        rows.push(AiReviewResponseVisualRow {
+            kind: "separator".into(),
+            finding: empty_finding.clone(),
+            message: empty_message.clone(),
+        });
+    }
+    for message in conversation.iter() {
+        rows.push(AiReviewResponseVisualRow {
+            kind: "message".into(),
+            finding: empty_finding.clone(),
+            message,
+        });
+    }
+    rows.push(AiReviewResponseVisualRow {
+        kind: "chat-status".into(),
+        finding: empty_finding,
+        message: empty_message,
+    });
+    ui.set_ai_review_response_rows(ModelRc::new(VecModel::from(rows)));
 }
 
 fn clear_panel_ui(ui: &MainWindow) {
@@ -2157,6 +2431,7 @@ fn clear_panel_ui(ui: &MainWindow) {
     ui.set_ai_review_chat_elapsed_seconds(0);
     ui.set_ai_review_findings(ModelRc::new(VecModel::default()));
     ui.set_ai_review_conversation(ModelRc::new(VecModel::default()));
+    rebuild_response_visual_rows(ui);
 }
 
 fn latest_task_for_pr<'a>(

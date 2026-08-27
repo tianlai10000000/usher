@@ -195,9 +195,10 @@ capability 变化时重新紧凑排列，不进入文档滚动、动画或 Live 
 两种手势松开后均只提交一次精确最终内容宽度；Markdown、图片和文本 Provider 不感知
 Host 形态与 resize 生命周期。
 原生 Markdown Surface 使用独立 `MarkdownParserLoader` 与语言解析器 Registry。
-生产默认采用 `OnDemand`，`PreloadAll` 必须显式选择；TypeScript/TSX 由专用
-Tree-sitter loader 负责，JavaScript 与通用语言 fallback 共享一份惰性初始化的
-`syntect`/`two-face` Repository。Loader 初始化与高亮都留在 Preview Worker；用于行内正文的
+生产默认采用 `OnDemand`，`PreloadAll` 必须显式选择；Rust、Shell、JavaScript/JSX、
+TypeScript/TSX、JSON、Python 与 Go 分别使用仅在选中对应语言族时初始化并缓存的
+Tree-sitter 配置。未支持或未声明的围栏语言统一复用一个保留完整源码的纯文本 parser；
+Preview 路径不再包含完整语法 Repository fallback。Loader 初始化与高亮都留在 Preview Worker；用于行内正文的
 Slint `StyledText`、直接绘制彩色代码 token 的原生 Slint `Text` 行，以及官方 Primer
 视觉 token，并复用紧凑 AI Review 回复的 Codex 文档节奏：14px 正文/22px 行盒、
 24/20/17/15px 标题、20px 段落间距、10px 正文/列表组间距，以及连续列表项零额外间距。
@@ -394,7 +395,7 @@ unpacked 策略升级后，开发者应执行一次完整 `cargo clean`；后续
 Slint 窗口启动时不显示标准标题。macOS 等待原生标题栏附件时不挂载替代的 Slint
 控件；该区域只显示最终 AppKit 侧栏与历史控件。
 
-Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可在运行时关闭，Release 基准仍可通过 `USHER_MEMORY_DIAGNOSTICS=1` 强制启用。`[Memory][Diag]` 记录当前/峰值 RSS 与物理 footprint、相对上次/启动基线的增量、进程生命周期高水位、运行/场景标识，以及最近页面、逻辑/物理窗口尺寸、缩放和 Terminal 可见性；同时保留 VM 分类、region、Mach port、线程、fault 与 page-in。`[Memory][UI]` 关联稳定后的页面/窗口变化，`[Workflow][PR Review][Memory]` 等功能归属日志只记录有界 model/cache 的数量和容量，不得输出源码内容或凭据。采样任务复用共享 runtime，并由正常的 pre-shutdown 流程停止。`scripts/benchmark-memory.sh` 负责 macOS Release 测量协议并汇总外部 RSS/footprint 采样。仅在显式设置 `USHER_MEMORY_WINDOW_CONTROL=signal-file-v1` 时，基准专用信号 Worker 才读取每个 run 独立的命令文件，并把 AppKit resize/fullscreen 请求投递到 Slint event loop；pre-shutdown 会关闭其信号 handle。外部 Swift helper 只读取 CoreGraphics 窗口状态，用于确认每次切换并独立记录实际全屏尺寸。基准元数据记录应用变体与二进制哈希；比较器只允许渲染器、应用所有权或 Tokio worker 中的一个维度变化，其他 fixture/协议不匹配一律拒绝。
+Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可在运行时关闭，Release 基准仍可通过 `USHER_MEMORY_DIAGNOSTICS=1` 强制启用。`[Memory][Diag]` 记录当前/峰值 RSS 与物理 footprint、相对上次/启动基线的增量、进程生命周期高水位、运行/场景标识，以及最近页面、逻辑/物理窗口尺寸、缩放和 Terminal 可见性；同时保留 VM 分类、macOS 全部 malloc zone 汇总的在用/保留/slack 容量、region、Mach port、线程、fault 与 page-in。`[Memory][UI Models]` 区分 AI Review 源 rows/blocks 与 retained/virtual delegate 创建计数，区分已挂载内容与实际绘制内容，并关联 PR 上下文 Preview host；`[Memory][UI]` 关联稳定后的页面/窗口变化，`[Workflow][PR Review][Memory]` 等功能归属日志只记录有界 model/cache 的数量和容量，不得输出源码内容或凭据。采样任务复用共享 runtime，并由正常的 pre-shutdown 流程停止。`scripts/benchmark-memory.sh` 负责 macOS Release 测量协议并汇总外部 RSS/footprint 采样。仅在显式设置 `USHER_MEMORY_WINDOW_CONTROL=signal-file-v1` 时，基准专用信号 Worker 才读取每个 run 独立的命令文件，并把 AppKit resize/fullscreen 请求投递到 Slint event loop；pre-shutdown 会关闭其信号 handle。外部 Swift helper 只读取 CoreGraphics 窗口状态，用于确认每次切换并独立记录实际全屏尺寸。基准元数据记录应用变体与二进制哈希；比较器只允许渲染器、应用所有权或 Tokio worker 中的一个维度变化，其他 fixture/协议不匹配一律拒绝。
 
 ## 并发模型
 
@@ -538,13 +539,15 @@ PR 列表评审结论在 adapter 边界统一为“需要评审”“已批准�
 
 Gitee 企业版 Conversation 只使用 PAT 鉴权的 v8 API。detail/current-state URL 已在路径中携带 PR IID 时，不再把同一个 IID 重复作为 `pr_id`。只有 MR detail 的评审人字段明确返回 `approved` 或 `rejected` 才生成评审行。应用不调用依赖浏览器会话的 `/pull_requests/{iid}/activities`，也不保存、不转发、不记录浏览器 Cookie。Provider 原生话术不得进入 Slint。合并人从 `merged_by` 等专用详情字段取得；若这些字段只有邮箱/账号标签，则静默调用文档定义的项目成员接口做账号精确匹配，以成员资料的 `name` 与头像补全展示，用户目录作为静默 fallback。Merge commit 的 `committer_name` 只是更低优先级的 Git 身份。模糊目录结果必须拒绝，完整邮箱地址不得作为操作人标签，且绝不以 PR 作者作为合并人回退。GitLab 同样只使用 `merged_by` 并禁止 PR 作者回退；GitHub 保持原生 `actor.login` 展示。
 
+提交活动在 Provider API 可用时保留原生分支更新批次。GitHub 使用 issue timeline `committed` 批次；GitLab 使用 `added N commits` system note，并把其 SHA 引用与当前 MR commits 匹配；Gitee 公有版 v5 使用 operation-log push 记录；Gitee 企业版 v8 加载项目 push event，按 MR 源分支过滤，并把 `commit_from`/`commit_to` 映射到归一化 commit 顺序。push event actor 与每个 commit 的 Git author 是两个独立身份。活动数据缺失或无法使用时，退化为单个 Provider-neutral commit 批次，不虚构更新者。PR 详情停留期间不轮询；离开路由时清除其自有 Conversation、Commits、diff 和 commit-range 状态，因此从保留的列表重新打开 PR 会执行全新 Provider 请求。
+
 审核页头采用 GitHub 的两步命令模型。标题旁的 GitHub 风格就绪徽标使用 Primer 语义色渲染归一化类型/详情，但合并语义由各 adapter 独立负责：GitHub 映射 REST mergeability，Gitee 企业版映射 v8 `current_state` 条件，Gitee 公有版只映射 v5 字段，GitLab 映射 `detailed_merge_status` 并请求异步重算。共享 enum 只是展示边界，绝不能把一个 Provider 的判定条件套到另一个 Provider。`Review changes` 提交显式的 Provider-neutral Comment、Approve 或 Request changes；不受支持的选项保持可见但禁用。Conversation Tab 底部另有 GitHub 风格纯文本评论框（`Write` + 绿色 `Comment`），提交同一 Comment 动作。符合条件的 `review_summary` 行使用 GitHub 的逐条评审 kebab 与必填原因的 `Dismiss review` 弹窗；页头聚合状态只作展示。Provider-neutral 撤回门面在仓库权限允许时把选中的 review id 交给 GitHub dismissal endpoint；GitLab 先写入原因 note，再撤销当前 Token 用户的 approval；Gitee 企业版通过实际可用的 Web API 路由 `/api/code/api/{full_path}/-/pull_requests/{iid}/reviews` 撤回当前 Token 用户的评审，请求体严格为 `{"state":"initialized"}`。没有该 Web 路由的企业版部署会静默回退到文档规定的 v8 reviews 路由，成功后再以 best-effort MR note 记录必填原因；Gitee 公有版 v5 不具备撤回能力。Provider 成功后刷新远端状态，绝不自动开始合并。`Merge pull request` 只由最新的归一化 `PullRequestActionState` 启用，并且只展示 adapter 返回的策略。GitHub 支持仓库启用的 merge、squash、rebase；Gitee 企业 v8 映射评审状态，Approve 未填写 summary 时省略可选的 `comment` 字段，并按 `restrict_merge_type` 支持 merge、squash、rebase、fast-forward；Gitee 公有 v5 支持评论和 merge/squash，但没有 approve/request-changes endpoint。GitLab 支持评论、批准，以及携带 SHA 防护的 merge/squash 和显式删除来源分支；项目 `squash_option` 限制可选策略，稳定版 REST API 没有对应写命令，因此 Request changes 保持禁用。
 
 审核文件树使用 GitHub 的平台 UI 字体栈（macOS 使用 SF 系统 UI 字体，Windows 使用 Segoe UI），代码区使用平台等宽字体栈。文件树保留虚拟化 `ListView`；Diff 行改由 `usher-virtual-list` 精确行高门面计算，并在 `ScrollView` 中挂载稳定、有界的 Slint overscan model。宽度/model revision 只重建轻量行 extent，普通滚动则增量移除和追加可见行。分隔线实时调整面板宽度；移动手柄以当前宽度叠加剩余的局部指针位移，使分隔线贴合指针，同时避免重建完整文件树或 Diff。会话宽度限制为 220–520 px 且不超过审核区宽度的 45%，确保 Diff 仍是主要区域。可见性对齐 GitHub Primer `$width-md`（768px）：宽度越过临界值向下时自动折叠、向上时自动展开；工具栏开关在任意宽度下都可用，受限工作区自动收起后仍可手动打开。应用窗口最小宽度为 800px，因此普通桌面 Resize 不再到达该内部断点；响应式规则继续用于受限 Host 和直接工作区测试。
 
 审核工作区从 macOS 原生标题栏 inset 下方开始并复用 Shell 原生 Back。根渲染树固定在窗口 `x=0`，普通页头、Tab 和 Diff 内容通过内部左内缩跟随 Shell 弹簧，并在运动开始时只采用一次目标宽度。原生 Live Resize 时工作区保持上一次稳定内部几何直到拖拽结束，避免整棵已冻结/虚拟化审核树反复重排，同时 Dialog 使用全窗口坐标。Shell 先把 Back 交给审核控制器，真正离开时再使请求失效并由 Router 返回 Workflow。PR 操作位于标题栏；就绪 ActionMenu 在窗口根层渲染。文件筛选和文件操作菜单仍是互斥工作区 Popover，并支持第一次点击直接切换目标。
 
-Conversation adapter 归一化 GitHub、GitLab、Gitee 公有 v5 与 Gitee 企业 v8 的可选作者和 commit 作者头像 URL。控制器通过共享 HTTP pipeline 并发获取去重头像，整体超时 3 秒、单图上限 2 MiB，并限制解码尺寸；只有可跨线程发送的 RGBA 字节进入 event loop，再创建 Slint Image。头像缺失或加载失败时回退为作者首字母。时间线卡片和评论框共用 52 px 头像/内容网格。GitHub 风格活动使用一条贯穿头像中心的 Primer 时间线轨道（首尾按 clipSidebar 裁剪）。评论/描述卡片为 1px 边框盒子并随短正文收紧高度；commit 图标与紧凑作者头像落在同一轨道；所有活动行与卡片右边缘对齐。Rust 提供准确的行高总和。Conversation Tab 把时间线与评论框放在同一文档滚动里，Write 区域跟在最后一条事件之后，而不是钉在视口底部。
+Conversation 与 Commits adapter 归一化 GitHub、GitLab、Gitee 公有 v5 与 Gitee 企业 v8 的可选 Git author、committer 身份及头像 URL。GitHub 顶层独立的 `author` 与 `committer` 用户会完整保留。Gitee 企业版通过 repository commit detail 惰性补齐 Commits 行；user-directory 查询只接受邮箱精确匹配，并拒绝歧义结果。UI 遵循 GitHub 话术与头像几何：单一身份显示 `{author} authored`；不同身份显示 `{author} authored and {committer} committed`，并配合交叠双头像。控制器通过共享 HTTP pipeline 并发获取去重头像，整体超时 3 秒、单图上限 2 MiB，并限制解码尺寸；只有可跨线程发送的 RGBA 字节进入 event loop，再创建 Slint Image。头像缺失或加载失败时回退为作者首字母。时间线卡片和评论框共用 52 px 头像/内容网格。GitHub 风格活动使用一条贯穿头像中心的 Primer 时间线轨道（首尾按 clipSidebar 裁剪）。评论/描述卡片为 1px 边框盒子并随短正文收紧高度；commit 图标与紧凑作者头像落在同一轨道；所有活动行与卡片右边缘对齐。Rust 提供准确的行高总和。Conversation Tab 把时间线与评论框放在同一文档滚动里，Write 区域跟在最后一条事件之后，而不是钉在视口底部。
 
 Conversation 提交批次使用 Primer 官方 `repo-push` Octicon；相对时间紧跟 `added N commits`，共享的绝对时间 Tooltip 保留 Provider 的准确时间。GitHub Review 会展开为不可拆分的活动摘要与可选正文卡片；review state 决定话术，相对时间采用 GitHub 自动单位，merged 活动抑制冗余 closed 事件。连接线按事件语义边界分段，但连续 Review 对之间必须从前一张卡片到下一条 summary 标记保持连续轨道。Gitee 企业版普通评论使用 MR `/notes`，并固定发送 `noteable_type: PullRequest`；`/reviews` 只用于 Review 决策。commit 计数探测若没有 total 且响应恰好填满请求页，即使是裸数组也视为不确定，随后统计并丢弃文档约定的完整非分页集合，不挂载懒加载 Commits model。
 
@@ -714,11 +717,15 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
    内容自适应宽度、右对齐的中性气泡，不重复绘制身份栏。
 2. 纯结构 parser、有界缓存和 `StyledText` 准备都在 Worker 上生成宽度无关 block 与
    不透明仓库 action token；event loop 只实例化 `ModelRc` 并执行最终 model commit。
-3. 点击回复标题会把原始 Markdown 提交给 Artifact Preview；点击仓库 token 时，先在
+3. Controller 还可以为显式 `virtualized` 内存实验把 Review 状态、finding 与
+   conversation 投影为单一扁平 response-row model；视觉行只共享源 model handle，绝不
+   复制 Markdown payload。代表性 A/B 未通过采用门槛，因此生产继续使用完整 retained
+   list。
+4. 点击回复标题会把原始 Markdown 提交给 Artifact Preview；点击仓库 token 时，先在
    当前 task 投影中查表，再由 Worker 相对该 task 的本地仓库解析路径。
-4. 唯一的 Docked Preview host 复用 PR trailing slot，只临时隐藏而不清空 AI Review
+5. 唯一的 Docked Preview host 复用 PR trailing slot，只临时隐藏而不清空 AI Review
    Surface；关闭 Preview 后恢复。Detached Preview 不参与该替换。
-5. 关闭 AI 面板或离开 PR 路由时，清空回复投影、token 映射和仓库绑定；仅关闭 Docked
+6. 关闭 AI 面板或离开 PR 路由时，清空回复投影、token 映射和仓库绑定；仅关闭 Docked
    的 PR 上下文 Preview；已经 Detached 的 Preview 和后台 Review 工作继续独立存在，
    当前 Ask 被取消，mount generation 会拒绝迟到 Worker commit。
 

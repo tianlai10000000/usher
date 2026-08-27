@@ -59,6 +59,8 @@ Documents that are not specs:
   user-acceptance gate.
 - `bug-history.md`: append-only migration defect ledger.
 - `docs/terminal_viewport_iteration_notes.md`: historical terminal investigation log.
+- `docs/ai-review-response-timeout-investigation.md`: historical AI Review
+  non-streaming response-timeout evidence and threshold-adjustment playbook.
 - `docs/workflow-optimization-rollback.md`: rejected Workflow compile-boundary
   experiment, UI regression history, measurements, and rollback scope.
 

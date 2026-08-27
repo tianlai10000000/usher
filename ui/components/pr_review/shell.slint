@@ -197,6 +197,35 @@ export component GitHubConversationAvatar inherits Rectangle {
     }
 }
 
+export component GitHubCommitIdentityAvatars inherits Rectangle {
+    in property <length> avatar-size: 20px;
+    in property <image> author-avatar;
+    in property <string> author-label;
+    in property <image> committer-avatar;
+    in property <string> committer-label;
+    in property <bool> show-committer: false;
+
+    width: root.show-committer ? root.avatar-size + 14px : root.avatar-size;
+    height: root.avatar-size;
+    background: transparent;
+
+    GitHubConversationAvatar {
+        x: 0px;
+        avatar-size: root.avatar-size;
+        label-size: root.avatar-size <= 20px ? 9px : 10px;
+        avatar: root.author-avatar;
+        fallback-label: root.author-label;
+    }
+    if root.show-committer: GitHubConversationAvatar {
+        z: 1;
+        x: 14px;
+        avatar-size: root.avatar-size;
+        label-size: root.avatar-size <= 20px ? 9px : 10px;
+        avatar: root.committer-avatar;
+        fallback-label: root.committer-label;
+    }
+}
+
 export struct WorkflowPrCommit {
     sha: string,
     short-sha: string,
@@ -212,6 +241,12 @@ export struct WorkflowPrCommit {
     avatar: image,
     avatar-label: string,
     authored-at: string,
+    committer: string,
+    committer-avatar: image,
+    committer-avatar-label: string,
+    committed-at: string,
+    show-committer: bool,
+    identity-action: string,
     date-label: string,
     short-date-label: string,
     group-start: bool,

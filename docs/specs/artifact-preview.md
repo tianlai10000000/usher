@@ -253,12 +253,13 @@ Markdown remains native: `MarkdownParserLoader` owns a `pulldown-cmark` parser,
 while `CodeParserRegistry` owns independently registered language loaders.
 `ParserLoadStrategy::OnDemand` is the production default; explicit
 `PreloadAll` initializes every registered loader. A cold loader is initialized
-once and its parser is cached by normalized fence language. TypeScript/TSX uses
-the dedicated `TsParserLoader` backed by Tree-sitter; JavaScript has a dedicated
-loader and other languages use `SyntectParserLoader`. The latter two share one
-lazy `syntect` repository with `two-face`'s bat-curated syntax set, avoiding
-duplicate complete syntax repositories. Unknown or omitted languages fall back
-to plain monospace text. Slint 1.17 `StyledText` owns inline emphasis/link
+once and its parser is cached by canonical fence-language family. Dedicated
+Tree-sitter configurations cover Rust (`rs`/`rust`), Shell
+(`sh`/`bash`/`shell`/`shellscript`/`zsh`), JavaScript/JSX, TypeScript/TSX, JSON,
+Python (`py`/`python`/`python3`), and Go (`go`/`golang`). Unknown, omitted, and
+currently unsupported languages share one source-preserving plain monospace
+parser. The Preview Markdown path does not load a complete multi-language syntax
+repository. Slint 1.17 `StyledText` owns inline emphasis/link
 shaping. The shared Preview surface maps those semantics to the same Codex-style
 tokens used by compact AI Review responses: a 14 px body in a 22 px line box,
 24/20/17/15 px H1-H6 steps, 20 px between adjacent paragraphs, 10 px between
@@ -290,10 +291,11 @@ parsing remains independent from this replaceable visual theme.
 Markdown 保持原生实现：`MarkdownParserLoader` 持有 `pulldown-cmark` 解析器，
 `CodeParserRegistry` 持有彼此独立注册的语言 loader。生产默认使用
 `ParserLoadStrategy::OnDemand`，显式 `PreloadAll` 会初始化所有已注册 loader；冷 loader
-只初始化一次，并按规范化围栏语言缓存 parser。TypeScript/TSX 使用 Tree-sitter 支撑的
-专用 `TsParserLoader`；JavaScript 使用独立 loader，其他语言由
-`SyntectParserLoader` 处理。后两者共享一份惰性 `syntect` Repository 与 `two-face`
-维护的 bat 语法集合，避免重复完整语法库。未知或未声明语言自动回退为纯等宽文本。
+只初始化一次，并按规范化后的围栏语言族缓存 parser。Rust（`rs`/`rust`）、Shell
+（`sh`/`bash`/`shell`/`shellscript`/`zsh`）、JavaScript/JSX、TypeScript/TSX、JSON、
+Python（`py`/`python`/`python3`）与 Go（`go`/`golang`）分别使用 Tree-sitter 配置。
+未知、未声明及当前未支持的语言统一复用一个保留完整源码的纯等宽文本 parser；Preview
+Markdown 路径不再加载完整的多语言语法 Repository。
 Slint 1.17 `StyledText` 负责行内强调和链接排版。
 共享 Preview Surface 延续紧凑 AI Review 回复使用的 Codex 排版 token：14px 正文与
 22px 行盒、24/20/17/15px 的 H1-H6、相邻段落 20px、正文与列表组 10px、连续列表项
@@ -317,8 +319,8 @@ Provider 解析继续与可替换视觉主题解耦。
 
 The parser core also exposes a structure-only entry for inline agent response
 projection. It runs `pulldown-cmark` with the same block/inline semantics but
-does not construct, initialize, or query `CodeParserRegistry`, Tree-sitter,
-`syntect`, or `two-face`. Fenced blocks retain language and source text and
+does not construct, initialize, or query `CodeParserRegistry` or Tree-sitter.
+Fenced blocks retain language and source text and
 leave `code_spans` empty for the compact renderer. This entry never changes the
 full Markdown Provider: opening the original response in Preview still uses the
 configured loader strategy and produces prepared light/dark highlighting on a
@@ -333,8 +335,8 @@ Paired `**` runs that survive parsing as ordinary prose are treated as malformed
 model formatting residue and hidden; a single literal run remains visible.
 
 Parser core 另行提供行内 Agent 回复投影使用的纯结构入口。它以相同 block/inline
-语义运行 `pulldown-cmark`，但不构造、初始化或查询 `CodeParserRegistry`、Tree-sitter、
-`syntect` 或 `two-face`。围栏 block 保留语言和源码，紧凑 renderer 使用的
+语义运行 `pulldown-cmark`，但不构造、初始化或查询 `CodeParserRegistry` 或 Tree-sitter。
+围栏 block 保留语言和源码，紧凑 renderer 使用的
 `code_spans` 为空。该入口绝不改变完整 Markdown Provider：在 Preview 中打开原始
 回复时，仍按配置的 loader 策略在 Worker 生成准备好的亮/暗色高亮。
 

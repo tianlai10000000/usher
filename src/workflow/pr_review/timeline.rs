@@ -206,7 +206,7 @@ pub(super) fn commit_model(
     let display = commits.iter().rev().collect::<Vec<_>>();
     let date_labels = display
         .iter()
-        .map(|commit| format_commit_date(commit.authored_at.as_str()))
+        .map(|commit| format_commit_date(commit_display_timestamp(commit)))
         .collect::<Vec<_>>();
     ModelRc::new(VecModel::from(
         display
@@ -226,6 +226,9 @@ pub(super) fn commit_model(
                     0
                 };
                 let (_, message_body) = split_commit_message(commit.message.as_str());
+                let show_committer = commit_has_distinct_committer(commit);
+                let identity_action = commit_identity_action(commit, show_committer);
+                let display_timestamp = commit_display_timestamp(commit);
                 WorkflowPrCommit {
                     sha: commit.sha.clone().into(),
                     short_sha: commit.sha.chars().take(7).collect::<String>().into(),
@@ -240,13 +243,24 @@ pub(super) fn commit_model(
                     avatar_label: avatar_label(commit.author.as_str()).into(),
                     // Absolute local datetime for the relative-time tooltip.
                     authored_at: super::super::pr_list::format_github_absolute_tooltip(
-                        commit.authored_at.as_str(),
+                        display_timestamp,
                     )
                     .into(),
+                    committer: commit.committer.clone().into(),
+                    committer_avatar: avatar_image(
+                        avatars.get(commit.committer_avatar_url.as_str()),
+                    ),
+                    committer_avatar_label: avatar_label(commit.committer.as_str()).into(),
+                    committed_at: super::super::pr_list::format_github_absolute_tooltip(
+                        commit.committed_at.as_str(),
+                    )
+                    .into(),
+                    show_committer,
+                    identity_action: identity_action.into(),
                     date_label: date_label.clone().into(),
                     // GitHub Commits rows: Primer relative-time (P30D → `on Mar 19`).
                     short_date_label: super::super::pr_list::format_github_relative_time(
-                        commit.authored_at.as_str(),
+                        display_timestamp,
                     )
                     .into(),
                     group_start,
@@ -257,6 +271,42 @@ pub(super) fn commit_model(
             })
             .collect::<Vec<_>>(),
     ))
+}
+
+fn commit_has_distinct_committer(commit: &PullRequestCommit) -> bool {
+    let author = commit.author.trim();
+    let committer = commit.committer.trim();
+    let same_avatar = !commit.avatar_url.trim().is_empty()
+        && commit
+            .avatar_url
+            .eq_ignore_ascii_case(commit.committer_avatar_url.trim());
+    !author.is_empty()
+        && !committer.is_empty()
+        && !author.eq_ignore_ascii_case(committer)
+        && !same_avatar
+}
+
+fn commit_display_timestamp(commit: &PullRequestCommit) -> &str {
+    if !commit.committer.trim().is_empty() && !commit.committed_at.trim().is_empty() {
+        commit.committed_at.as_str()
+    } else {
+        commit.authored_at.as_str()
+    }
+}
+
+fn commit_identity_action(commit: &PullRequestCommit, show_committer: bool) -> String {
+    if show_committer {
+        format!(
+            "{} authored and {} committed",
+            commit.author, commit.committer
+        )
+    } else if !commit.author.trim().is_empty() {
+        format!("{} authored", commit.author)
+    } else if !commit.committer.trim().is_empty() {
+        format!("{} committed", commit.committer)
+    } else {
+        "Unknown author committed".to_string()
+    }
 }
 
 fn avatar_image(avatar: Option<&ConversationAvatarPixels>) -> Image {
@@ -344,10 +394,11 @@ fn format_commit_date(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        chrono_commit_index_to_display, commit_index_by_sha, commit_message_body_height,
-        commit_range_label, commit_tab_expand_layout_extra, conversation_card_row_height,
-        conversation_content_height, conversation_items_connect, display_commit_range_to_chrono,
-        range_covers_all_commits, refresh_commit_group_expand_extras,
+        chrono_commit_index_to_display, commit_has_distinct_committer, commit_identity_action,
+        commit_index_by_sha, commit_message_body_height, commit_range_label,
+        commit_tab_expand_layout_extra, conversation_card_row_height, conversation_content_height,
+        conversation_items_connect, display_commit_range_to_chrono, range_covers_all_commits,
+        refresh_commit_group_expand_extras,
     };
     use crate::WorkflowPrCommit;
     use crate::git::{PullRequestCommit, PullRequestConversationItem};
@@ -375,6 +426,9 @@ mod tests {
             author: String::new(),
             avatar_url: String::new(),
             authored_at: String::new(),
+            committer: String::new(),
+            committer_avatar_url: String::new(),
+            committed_at: String::new(),
             verified: false,
         }
     }
@@ -388,6 +442,22 @@ mod tests {
             height <= 90,
             "short body reserved {height}px; expected a compact GitHub-like band"
         );
+    }
+
+    #[test]
+    fn uses_github_author_and_committer_identity_copy_only_when_distinct() {
+        let mut commit = commit("abc");
+        commit.author = "Alice".to_string();
+        commit.committer = "Bob".to_string();
+        assert!(commit_has_distinct_committer(&commit));
+        assert_eq!(
+            commit_identity_action(&commit, true),
+            "Alice authored and Bob committed"
+        );
+
+        commit.committer = "alice".to_string();
+        assert!(!commit_has_distinct_committer(&commit));
+        assert_eq!(commit_identity_action(&commit, false), "Alice authored");
     }
 
     #[test]
@@ -407,6 +477,12 @@ mod tests {
                     avatar: Default::default(),
                     avatar_label: "A".into(),
                     authored_at: "".into(),
+                    committer: "".into(),
+                    committer_avatar: Default::default(),
+                    committer_avatar_label: "?".into(),
+                    committed_at: "".into(),
+                    show_committer: false,
+                    identity_action: "alice authored".into(),
                     date_label: "Jul 20, 2026".into(),
                     short_date_label: "2 days ago".into(),
                     group_start,

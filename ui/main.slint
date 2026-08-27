@@ -7,7 +7,7 @@ import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.sl
 import { GitHubJobRunPage as JobRunPage } from "./views/job_run.slint";
 import { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
 import { GitHubPullRequestReviewPage } from "@pr-review";
-import { GitHubAiReviewPanel, AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AgentResponseBlockKind, AgentResponseBlock } from "@ai-review";
+import { GitHubAiReviewPanel, AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AiReviewResponseVisualRow, AgentResponseBlockKind, AgentResponseBlock } from "@ai-review";
 import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit, GitHubHeaderActionStrip } from "./components/pr_review/shell.slint";
 import { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 
@@ -52,7 +52,7 @@ export { UpdateLogic } from "./components/update/update.slint";
 export { ChatMessage, ChatSelectionRect, MessageRole, MessageStatus } from "./views/chat.slint";
 export { JobLogLineItem, JobStepItem } from "./components/jobs/job.slint";
 export { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
-export { AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AgentResponseBlockKind, AgentResponseBlock } from "@ai-review";
+export { AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AiReviewResponseVisualRow, AgentResponseBlockKind, AgentResponseBlock } from "@ai-review";
 export { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffToken, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrConversationItem, WorkflowPrCommit } from "./components/pr_review/shell.slint";
 export { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind, ArtifactPreviewInlineSpan, ArtifactPreviewCodeToken, ArtifactPreviewCodeLine, ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow, ArtifactPreviewWindow } from "./components/artifact_preview/github_artifact_preview.slint";
 
@@ -396,12 +396,25 @@ export component MainWindow inherits Window {
     in property <string> ai-review-error: "";
     in property <[AiReviewFindingItem]> ai-review-findings: [];
     in property <[AiReviewConversationItem]> ai-review-conversation: [];
+    in property <[AiReviewResponseVisualRow]> ai-review-response-rows: [];
+    // Step-3 same-binary A/B candidate. Keep false until the Release memory and
+    // interaction gates accept the virtualized response list.
+    in property <bool> ai-review-response-virtualized: false;
+    in-out property <int> ai-review-retained-created-message-rows: 0;
+    in-out property <int> ai-review-retained-created-blocks: 0;
+    in-out property <int> ai-review-virtual-created-rows: 0;
+    in-out property <int> ai-review-virtual-created-message-rows: 0;
+    in-out property <int> ai-review-virtual-created-blocks: 0;
     in-out property <string> ai-review-message-input: "";
     in-out property <string> ai-review-extra-requirements: "";
     in-out property <bool> ai-review-chat-sending: false;
     in-out property <string> ai-review-chat-status: "";
     in-out property <int> ai-review-chat-elapsed-seconds: 0;
     in-out property <bool> ai-review-panel-visible: false;
+    // Benchmark-only lifecycle candidate. Production keeps the prior retained
+    // response tree because unmount/remount did not pass the RSS acceptance gate.
+    in property <bool> ai-review-docked-content-unmount: false;
+    in-out property <length> ai-review-response-scroll-y: 0px;
     private property <length> ai-review-panel-min-width: 360px;
     private property <length> ai-review-main-min-width: GitHubMetrics.overlay-width-medium;
     private property <length> ai-review-panel-max-width: max(
@@ -437,6 +450,10 @@ export component MainWindow inherits Window {
         root.current-route == Route.PrReview
             && root.ai-review-panel-visible
             && !root.artifact-preview-pr-side-docked-visible;
+    out property <bool> ai-review-response-delegates-mounted:
+        root.current-route == Route.PrReview
+            && root.ai-review-panel-visible
+            && (root.ai-review-content-visible || !root.ai-review-docked-content-unmount);
     out property <length> pr-review-trailing-surface-width:
         root.current-route == Route.PrReview && root.ai-review-panel-visible
             ? root.ai-review-panel-width
@@ -953,6 +970,9 @@ export component MainWindow inherits Window {
             root.current-route == Route.PrReview && root.ai-review-panel-visible
         );
         root.page-memory-diag-pending = true;
+        if root.current-route != Route.PrReview {
+            root.ai-review-response-scroll-y = 0px;
+        }
         root.sidebar-preview-visible = false;
         root.sidebar-preview-dismiss-pending = false;
         root.workflow-pr-readiness-popup-open = false;
@@ -970,6 +990,9 @@ export component MainWindow inherits Window {
         root.ai-review-route-visible-changed(
             root.current-route == Route.PrReview && root.ai-review-panel-visible
         );
+        if !root.ai-review-panel-visible {
+            root.ai-review-response-scroll-y = 0px;
+        }
     }
 
     changed workflow-pr-review-number => {
@@ -2352,7 +2375,14 @@ export component MainWindow inherits Window {
     }
 
     if root.current-route == Route.PrReview && root.ai-review-panel-visible: GitHubAiReviewPanel {
-        x: root.width - root.pr-review-trailing-surface-width;
+        // Keep the light shell lifecycle-active while Docked Preview replaces
+        // it. A `visible: false` ancestor lets Slint defer evaluation of the
+        // response Conditional, retaining its delegates until the panel paints
+        // again. Moving the shell outside the window makes the replacement
+        // non-interactive while still applying the unmount policy immediately.
+        x: root.ai-review-content-visible || !root.ai-review-docked-content-unmount
+            ? root.width - root.pr-review-trailing-surface-width
+            : root.width;
         y: root.native-titlebar-inset;
         width: root.pr-review-trailing-surface-width;
         height: root.pr-review-content-height;
@@ -2361,7 +2391,10 @@ export component MainWindow inherits Window {
         // transparent outside its controls, so panel inputs still receive the
         // first press.
         z: 790;
-        visible: root.ai-review-content-visible;
+        visible: root.ai-review-content-visible || root.ai-review-docked-content-unmount;
+        opacity: root.ai-review-content-visible ? 1 : 0;
+        content-active: root.ai-review-response-delegates-mounted;
+        response-scroll-y <=> root.ai-review-response-scroll-y;
         task-id: root.ai-review-current-task-id;
         project-name: root.ai-review-project-name;
         pull-request-number: root.ai-review-pull-request-number;
@@ -2377,6 +2410,13 @@ export component MainWindow inherits Window {
         error-text: root.ai-review-error;
         findings: root.ai-review-findings;
         conversation: root.ai-review-conversation;
+        response-rows: root.ai-review-response-rows;
+        response-virtualized: root.ai-review-response-virtualized;
+        retained-created-message-rows <=> root.ai-review-retained-created-message-rows;
+        retained-created-blocks <=> root.ai-review-retained-created-blocks;
+        virtual-created-rows <=> root.ai-review-virtual-created-rows;
+        virtual-created-message-rows <=> root.ai-review-virtual-created-message-rows;
+        virtual-created-blocks <=> root.ai-review-virtual-created-blocks;
         message-input <=> root.ai-review-message-input;
         extra-requirements <=> root.ai-review-extra-requirements;
         chat-sending <=> root.ai-review-chat-sending;

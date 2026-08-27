@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use super::super::{
     PullRequestCommit, PullRequestConversationItem, conversation_body_to_plain_text,
+    conversation_commit_batch_items, conversation_commit_batch_items_for_actor,
 };
 use super::{nested_string, string_field};
 
@@ -70,6 +71,199 @@ pub(super) fn decode_gitee_operate_log_activity(
             })
         })
         .collect()
+}
+
+pub(super) fn gitee_push_event_commit_activity(
+    values: &[Value],
+    source_branch: &str,
+    pull_request_created_at: &str,
+    commits: &[PullRequestCommit],
+) -> Vec<PullRequestConversationItem> {
+    let mut events = values
+        .iter()
+        .filter(|value| {
+            let event_ref = nested_string(value, "push_data", "ref")
+                .or_else(|| string_field(value, "ref"))
+                .unwrap_or_default();
+            refs_match(event_ref.as_str(), source_branch)
+                && event_created_at(value).is_none_or(|created_at| {
+                    pull_request_created_at.trim().is_empty()
+                        || created_at.as_str() >= pull_request_created_at
+                })
+        })
+        .collect::<Vec<_>>();
+    events.sort_by_key(|value| event_created_at(value).unwrap_or_default());
+
+    let mut assigned = vec![false; commits.len()];
+    let mut activity = Vec::new();
+    for event in events {
+        let commit_to = nested_string(event, "push_data", "commit_to")
+            .or_else(|| nested_string(event, "push_data", "commitTo"))
+            .unwrap_or_default();
+        let Some(end) = commit_index_for_reference(commits, commit_to.as_str()) else {
+            continue;
+        };
+        let commit_from = nested_string(event, "push_data", "commit_from")
+            .or_else(|| nested_string(event, "push_data", "commitFrom"))
+            .unwrap_or_default();
+        let declared_count = nested_usize(event, "push_data", "commit_count")
+            .or_else(|| nested_usize(event, "push_data", "commitCount"))
+            .unwrap_or(0);
+        let start = commit_index_for_reference(commits, commit_from.as_str())
+            .map(|index| index.saturating_add(1))
+            .unwrap_or_else(|| {
+                if declared_count == 0 {
+                    0
+                } else {
+                    end.saturating_add(1).saturating_sub(declared_count)
+                }
+            });
+        if start > end {
+            continue;
+        }
+        let indices = (start..=end)
+            .filter(|index| !assigned[*index])
+            .collect::<Vec<_>>();
+        if indices.is_empty() && declared_count == 0 {
+            continue;
+        }
+        for index in &indices {
+            assigned[*index] = true;
+        }
+        let batch = indices
+            .into_iter()
+            .filter_map(|index| commits.get(index).cloned())
+            .collect::<Vec<_>>();
+        let actor = nested_string(event, "author", "name")
+            .or_else(|| nested_string(event, "author", "username"))
+            .or_else(|| nested_string(event, "author", "login"))
+            .unwrap_or_else(|| "Unknown author".to_string());
+        let avatar_url = nested_string(event, "author", "avatar_url")
+            .or_else(|| nested_string(event, "author", "avatar"))
+            .unwrap_or_default();
+        let created_at = event_created_at(event).unwrap_or_default();
+        let event_id = string_field(event, "id").unwrap_or_else(|| created_at.clone());
+        activity.extend(conversation_commit_batch_items_for_actor(
+            &batch,
+            actor.as_str(),
+            avatar_url.as_str(),
+            created_at.as_str(),
+            declared_count,
+            Some(event_id.as_str()),
+        ));
+    }
+
+    append_unassigned_commits(&mut activity, commits, assigned);
+    activity
+}
+
+pub(super) fn gitee_operate_log_commit_activity(
+    values: &[Value],
+    commits: &[PullRequestCommit],
+) -> Vec<PullRequestConversationItem> {
+    let mut events = values
+        .iter()
+        .filter_map(|value| gitee_operate_log_commit_count(value).map(|count| (value, count)))
+        .collect::<Vec<_>>();
+    events.sort_by_key(|(value, _)| event_created_at(value).unwrap_or_default());
+    if events.is_empty() {
+        return Vec::new();
+    }
+
+    let total = events.iter().map(|(_, count)| *count).sum::<usize>();
+    let includes_creation = events.first().is_some_and(|(event, _)| {
+        let content = gitee_operate_log_content(event).to_ascii_lowercase();
+        content.contains("创建") || content.contains("created")
+    });
+    let mut cursor = if includes_creation {
+        0
+    } else {
+        commits.len().saturating_sub(total)
+    };
+    let mut assigned = vec![false; commits.len()];
+    let mut activity = Vec::new();
+    for (event, count) in events {
+        let end = cursor.saturating_add(count).min(commits.len());
+        let batch = commits[cursor..end].to_vec();
+        for assigned in &mut assigned[cursor..end] {
+            *assigned = true;
+        }
+        cursor = end;
+        let actor =
+            gitee_operate_log_user_name(event).unwrap_or_else(|| "Unknown author".to_string());
+        let avatar_url = gitee_operate_log_user_avatar(event).unwrap_or_default();
+        let created_at = event_created_at(event).unwrap_or_default();
+        let event_id = string_field(event, "id").unwrap_or_else(|| created_at.clone());
+        activity.extend(conversation_commit_batch_items_for_actor(
+            &batch,
+            actor.as_str(),
+            avatar_url.as_str(),
+            created_at.as_str(),
+            count,
+            Some(event_id.as_str()),
+        ));
+    }
+    append_unassigned_commits(&mut activity, commits, assigned);
+    activity
+}
+
+fn append_unassigned_commits(
+    activity: &mut Vec<PullRequestConversationItem>,
+    commits: &[PullRequestCommit],
+    assigned: Vec<bool>,
+) {
+    let remaining = commits
+        .iter()
+        .zip(assigned)
+        .filter_map(|(commit, assigned)| (!assigned).then_some(commit.clone()))
+        .collect::<Vec<_>>();
+    activity.extend(conversation_commit_batch_items(&remaining));
+}
+
+fn gitee_operate_log_commit_count(value: &Value) -> Option<usize> {
+    let action = gitee_operate_log_action(value);
+    let content = gitee_operate_log_content(value);
+    let normalized = format!("{action} {content}").to_ascii_lowercase();
+    if !(normalized.contains("commit") || normalized.contains("提交"))
+        || !(normalized.contains("push")
+            || normalized.contains("pushed")
+            || normalized.contains("推送")
+            || normalized.contains("pull request"))
+    {
+        return None;
+    }
+    normalized
+        .split(|character: char| !character.is_ascii_digit())
+        .find_map(|token| (!token.is_empty()).then(|| token.parse().ok()).flatten())
+}
+
+fn refs_match(event_ref: &str, source_branch: &str) -> bool {
+    let event_ref = event_ref.trim().trim_start_matches("refs/heads/");
+    let source_branch = source_branch.trim().trim_start_matches("refs/heads/");
+    !source_branch.is_empty() && event_ref == source_branch
+}
+
+fn event_created_at(value: &Value) -> Option<String> {
+    string_field(value, "created_at").or_else(|| string_field(value, "createdAt"))
+}
+
+fn commit_index_for_reference(commits: &[PullRequestCommit], reference: &str) -> Option<usize> {
+    let reference = reference.trim().to_ascii_lowercase();
+    if reference.is_empty() || reference.chars().all(|character| character == '0') {
+        return None;
+    }
+    commits.iter().position(|commit| {
+        let sha = commit.sha.trim().to_ascii_lowercase();
+        sha.starts_with(reference.as_str()) || reference.starts_with(sha.as_str())
+    })
+}
+
+fn nested_usize(value: &Value, object: &str, key: &str) -> Option<usize> {
+    let value = value.get(object)?.get(key)?;
+    value
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+        .or_else(|| value.as_str()?.trim().parse().ok())
 }
 
 pub(super) fn merge_gitee_review_summaries(
@@ -720,8 +914,6 @@ pub(super) fn decode_commit(value: &Value) -> PullRequestCommit {
             .unwrap_or_else(|| "Unknown author".to_string()),
         avatar_url: nested_string(value, "author", "avatar_url")
             .or_else(|| nested_string(value, "author", "avatar"))
-            .or_else(|| nested_string(value, "committer", "avatar_url"))
-            .or_else(|| nested_string(value, "committer", "avatar"))
             .unwrap_or_default(),
         // Internal enterprise MR commits document `created_at`; repository
         // commits still use authored_date/committed_date. Keep both profiles.
@@ -735,6 +927,29 @@ pub(super) fn decode_commit(value: &Value) -> PullRequestCommit {
                 value
                     .get("commit")
                     .and_then(|commit| nested_string(commit, "author", "date"))
+            })
+            .unwrap_or_default(),
+        committer: string_field(value, "committer_name")
+            .or_else(|| string_field(value, "committerName"))
+            .or_else(|| nested_string(value, "committer", "name"))
+            .or_else(|| nested_string(value, "committer", "login"))
+            .or_else(|| {
+                value
+                    .get("commit")
+                    .and_then(|commit| nested_string(commit, "committer", "name"))
+            })
+            .unwrap_or_default(),
+        committer_avatar_url: nested_string(value, "committer", "avatar_url")
+            .or_else(|| nested_string(value, "committer", "avatar"))
+            .unwrap_or_default(),
+        committed_at: string_field(value, "committed_date")
+            .or_else(|| string_field(value, "committedDate"))
+            .or_else(|| string_field(value, "created_at"))
+            .or_else(|| string_field(value, "createdAt"))
+            .or_else(|| {
+                value
+                    .get("commit")
+                    .and_then(|commit| nested_string(commit, "committer", "date"))
             })
             .unwrap_or_default(),
         verified: value

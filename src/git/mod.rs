@@ -650,6 +650,9 @@ mod tests {
                 author: "alice".into(),
                 avatar_url: "https://example.test/alice.png".into(),
                 authored_at: "2026-01-01T00:00:00Z".into(),
+                committer: "alice".into(),
+                committer_avatar_url: "https://example.test/alice.png".into(),
+                committed_at: "2026-01-01T00:00:00Z".into(),
                 verified: false,
             },
             PullRequestCommit {
@@ -659,6 +662,9 @@ mod tests {
                 author: "bob".into(),
                 avatar_url: "https://example.test/bob.png".into(),
                 authored_at: "2026-01-02T00:00:00Z".into(),
+                committer: "bob".into(),
+                committer_avatar_url: "https://example.test/bob.png".into(),
+                committed_at: "2026-01-02T00:00:00Z".into(),
                 verified: false,
             },
         ];
@@ -684,6 +690,9 @@ mod tests {
             author: "alice".into(),
             avatar_url: String::new(),
             authored_at: "2026-01-01T00:00:00Z".into(),
+            committer: "alice".into(),
+            committer_avatar_url: String::new(),
+            committed_at: "2026-01-01T00:00:00Z".into(),
             verified: false,
         }]);
         assert_eq!(with_body[1].body, "subject\n\n- detail one\n- detail two");

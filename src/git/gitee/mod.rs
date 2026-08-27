@@ -3,6 +3,7 @@
 //! `project_name` is always the repository name extracted from `remote_repo`
 //! (the final path segment before `.git`), never the editable project alias.
 
+use futures_util::{StreamExt, stream};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap};
 use serde_json::Value;
 
@@ -822,7 +823,7 @@ pub(super) async fn get_pull_request_conversation(
     pull_request_iid: &str,
 ) -> Result<Vec<PullRequestConversationItem>, String> {
     let profile = gitee_api_profile(locator);
-    let (detail_payload, notes, current_user, historical_activity) = match profile {
+    let (detail_payload, notes, current_user, historical_activity, push_events) = match profile {
         GiteeApiProfile::EnterpriseV8 => {
             let notes_endpoint = enterprise_pull_request_endpoint(
                 endpoints::ENTERPRISE_MERGE_REQUEST_NOTES_URL,
@@ -864,9 +865,34 @@ pub(super) async fn get_pull_request_conversation(
                 .await
                 .ok()
             };
-            let (detail, notes, current_user) =
-                tokio::join!(detail_future, notes_future, current_user_future);
-            (detail?, notes?, current_user, None)
+            let push_events_future = async {
+                let endpoint = enterprise_project_endpoint(
+                    endpoints::ENTERPRISE_PROJECT_EVENTS_URL,
+                    repo_project_id,
+                )
+                .ok()?;
+                http::send_json(
+                    enterprise_authenticated_builder(http::get(endpoint)).query(&[
+                        ("type", "push"),
+                        // Read the newest project events so a recently pushed PR
+                        // branch is not displaced by the project's older history.
+                        // The pure normalizer restores chronological display order.
+                        ("sort", "desc"),
+                        ("page", "1"),
+                        ("per_page", "100"),
+                    ]),
+                    RequestOptions::new("Load Gitee enterprise source branch push events"),
+                )
+                .await
+                .ok()
+            };
+            let (detail, notes, current_user, push_events) = tokio::join!(
+                detail_future,
+                notes_future,
+                current_user_future,
+                push_events_future
+            );
+            (detail?, notes?, current_user, None, push_events)
         }
         GiteeApiProfile::PublicV5 => {
             let detail_endpoint = public_repo_endpoint(
@@ -918,7 +944,7 @@ pub(super) async fn get_pull_request_conversation(
             };
             let (detail, notes, operate_logs) =
                 tokio::join!(detail_future, notes_future, operate_logs_future);
-            (detail?, notes?, None, operate_logs)
+            (detail?, notes?, None, operate_logs, None)
         }
     };
     let detail = if profile == GiteeApiProfile::EnterpriseV8 {
@@ -1020,7 +1046,7 @@ pub(super) async fn get_pull_request_conversation(
         }
     };
     let (commits, merge_commit, merge_actor_user) = tokio::join!(
-        get_pull_request_commits(locator, repo_project_id, pull_request_iid),
+        load_pull_request_commits(locator, repo_project_id, pull_request_iid, false),
         merge_commit_future,
         merge_actor_user_future,
     );
@@ -1028,7 +1054,32 @@ pub(super) async fn get_pull_request_conversation(
     // Structured commit/merge rows mirror GitHub Conversation activity for both
     // Gitee profiles. Failures stay silent so notes still render.
     if let Ok(commits) = commits {
-        items.extend(conversation_commit_batch_items(&commits));
+        let commit_activity = match profile {
+            GiteeApiProfile::EnterpriseV8 => push_events
+                .as_ref()
+                .and_then(pull_request_values)
+                .map(|events| {
+                    let source_branch = string_field(detail, "source_branch")
+                        .or_else(|| nested_string(detail, "head", "ref"))
+                        .unwrap_or_default();
+                    let created_at = string_field(detail, "created_at").unwrap_or_default();
+                    gitee_push_event_commit_activity(
+                        events,
+                        source_branch.as_str(),
+                        created_at.as_str(),
+                        &commits,
+                    )
+                })
+                .unwrap_or_default(),
+            GiteeApiProfile::PublicV5 => historical_activity_values
+                .map(|events| gitee_operate_log_commit_activity(events, &commits))
+                .unwrap_or_default(),
+        };
+        if commit_activity.is_empty() {
+            items.extend(conversation_commit_batch_items(&commits));
+        } else {
+            items.extend(commit_activity);
+        }
     }
     if let (Some(merged_at), Some(merge_sha)) = (merged_at, merge_sha) {
         let target_branch = string_field(detail, "target_branch")
@@ -1316,6 +1367,15 @@ pub(super) async fn get_pull_request_commits(
     repo_project_id: &str,
     pull_request_iid: &str,
 ) -> Result<Vec<PullRequestCommit>, String> {
+    load_pull_request_commits(locator, repo_project_id, pull_request_iid, true).await
+}
+
+async fn load_pull_request_commits(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    pull_request_iid: &str,
+    enrich_identities: bool,
+) -> Result<Vec<PullRequestCommit>, String> {
     let endpoint = match gitee_api_profile(locator) {
         GiteeApiProfile::EnterpriseV8 => enterprise_pull_request_endpoint(
             endpoints::ENTERPRISE_MERGE_REQUEST_COMMITS_URL,
@@ -1348,8 +1408,156 @@ pub(super) async fn get_pull_request_commits(
     let mut commits = values.iter().map(decode_commit).collect::<Vec<_>>();
     if gitee_api_profile(locator) == GiteeApiProfile::EnterpriseV8 {
         normalize_enterprise_commit_order(&mut commits);
+        if enrich_identities {
+            commits = enrich_enterprise_commit_identities(repo_project_id, commits).await;
+        }
     }
     Ok(commits)
+}
+
+async fn enrich_enterprise_commit_identities(
+    repo_project_id: &str,
+    commits: Vec<PullRequestCommit>,
+) -> Vec<PullRequestCommit> {
+    let mut enriched = stream::iter(commits.into_iter().enumerate())
+        .map(|(index, mut commit)| async move {
+            let Some(endpoint) = enterprise_repository_commit_endpoint(
+                endpoints::ENTERPRISE_REPOSITORY_COMMIT_URL,
+                repo_project_id,
+                commit.sha.as_str(),
+            )
+            .ok() else {
+                return (index, commit, String::new(), String::new());
+            };
+            let detail = http::send_json::<Value>(
+                enterprise_authenticated_builder(http::get(endpoint)),
+                RequestOptions::new("Load Gitee enterprise commit author and committer"),
+            )
+            .await
+            .ok();
+            let mut author_email = String::new();
+            let mut committer_email = String::new();
+            if let Some(detail) = detail.as_ref().map(enterprise_data_object) {
+                commit.author = string_field(detail, "author_name")
+                    .or_else(|| string_field(detail, "authorName"))
+                    .unwrap_or(commit.author);
+                commit.avatar_url = nested_string(detail, "author", "avatar_url")
+                    .or_else(|| nested_string(detail, "author", "avatar"))
+                    .unwrap_or(commit.avatar_url);
+                commit.authored_at = string_field(detail, "authored_date")
+                    .or_else(|| string_field(detail, "authoredDate"))
+                    .unwrap_or(commit.authored_at);
+                author_email = string_field(detail, "author_email")
+                    .or_else(|| string_field(detail, "authorEmail"))
+                    .unwrap_or_default();
+                commit.committer = string_field(detail, "committer_name")
+                    .or_else(|| string_field(detail, "committerName"))
+                    .or_else(|| nested_string(detail, "committer", "name"))
+                    .unwrap_or(commit.committer);
+                commit.committer_avatar_url = nested_string(detail, "committer", "avatar_url")
+                    .or_else(|| nested_string(detail, "committer", "avatar"))
+                    .unwrap_or(commit.committer_avatar_url);
+                commit.committed_at = string_field(detail, "committed_date")
+                    .or_else(|| string_field(detail, "committedDate"))
+                    .unwrap_or(commit.committed_at);
+                committer_email = string_field(detail, "committer_email")
+                    .or_else(|| string_field(detail, "committerEmail"))
+                    .unwrap_or_default();
+            }
+            (index, commit, author_email, committer_email)
+        })
+        .buffer_unordered(8)
+        .collect::<Vec<_>>()
+        .await;
+    enriched.sort_by_key(|(index, _, _, _)| *index);
+
+    let mut identities = std::collections::HashMap::<String, (String, String)>::new();
+    for (_, commit, author_email, committer_email) in &enriched {
+        for (name, email) in [
+            (commit.author.as_str(), author_email.as_str()),
+            (commit.committer.as_str(), committer_email.as_str()),
+        ] {
+            if !name.trim().is_empty() && !email.trim().is_empty() {
+                identities
+                    .entry(enterprise_commit_identity_key(name, email))
+                    .or_insert_with(|| (name.to_string(), email.to_string()));
+            }
+        }
+    }
+    let avatars = load_enterprise_commit_identity_avatars(identities).await;
+    enriched
+        .into_iter()
+        .map(|(_, mut commit, author_email, committer_email)| {
+            if commit.avatar_url.trim().is_empty() {
+                commit.avatar_url = avatars
+                    .get(&enterprise_commit_identity_key(
+                        commit.author.as_str(),
+                        author_email.as_str(),
+                    ))
+                    .cloned()
+                    .unwrap_or_default();
+            }
+            if commit.committer_avatar_url.trim().is_empty() {
+                commit.committer_avatar_url = avatars
+                    .get(&enterprise_commit_identity_key(
+                        commit.committer.as_str(),
+                        committer_email.as_str(),
+                    ))
+                    .cloned()
+                    .unwrap_or_default();
+            }
+            commit
+        })
+        .collect()
+}
+
+fn enterprise_commit_identity_key(name: &str, email: &str) -> String {
+    format!(
+        "{}\n{}",
+        name.trim().to_ascii_lowercase(),
+        email.trim().to_ascii_lowercase()
+    )
+}
+
+async fn load_enterprise_commit_identity_avatars(
+    identities: std::collections::HashMap<String, (String, String)>,
+) -> std::collections::HashMap<String, String> {
+    let Some(api_base_url) = enterprise_api_base_url().ok() else {
+        return std::collections::HashMap::new();
+    };
+    let endpoint = endpoints::ENTERPRISE_USERS_URL.replace("{api_base_url}", &api_base_url);
+    stream::iter(identities.into_iter())
+        .map(|(key, (name, email))| {
+            let endpoint = endpoint.clone();
+            async move {
+                let payload = http::send_json::<Value>(
+                    enterprise_authenticated_builder(http::get(endpoint))
+                        .query(&[("search", name.as_str())]),
+                    RequestOptions::new("Resolve Gitee enterprise commit identity avatar"),
+                )
+                .await
+                .ok()?;
+                let users = enterprise_user_values(&payload)?;
+                let mut exact = users.iter().filter(|user| {
+                    string_field(user, "email")
+                        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(email.as_str()))
+                });
+                let user = exact.next()?;
+                if exact.next().is_some() {
+                    return None;
+                }
+                let avatar = string_field(user, "avatar_url")
+                    .or_else(|| string_field(user, "avatar"))
+                    .or_else(|| string_field(user, "image_path"))
+                    .or_else(|| string_field(user, "imagePath"))
+                    .filter(|avatar| !avatar.trim().is_empty())?;
+                Some((key, avatar))
+            }
+        })
+        .buffer_unordered(6)
+        .filter_map(async move |avatar| avatar)
+        .collect()
+        .await
 }
 
 /// Commit range selection expects the provider-neutral list to run from the
@@ -2028,7 +2236,7 @@ fn pull_request_values(payload: &Value) -> Option<&Vec<Value>> {
         return Some(values);
     }
 
-    const COLLECTION_KEYS: [&str; 10] = [
+    const COLLECTION_KEYS: [&str; 11] = [
         "items",
         "list",
         "content",
@@ -2039,6 +2247,7 @@ fn pull_request_values(payload: &Value) -> Option<&Vec<Value>> {
         "merge_requests",
         "pull_requests",
         "records",
+        "events",
     ];
     if let Some(values) = payload.get("data").and_then(Value::as_array) {
         return Some(values);
@@ -2271,7 +2480,8 @@ mod tests {
         expand_enterprise_conversation_notes, gitee_enterprise_list_sort,
         gitee_enterprise_merge_readiness, gitee_enterprise_state_query, gitee_list_review_status,
         gitee_merge_actor_account, gitee_merge_event, gitee_merge_event_with_user,
-        gitee_public_list_sort, gitee_public_merge_readiness, merge_gitee_review_summaries,
+        gitee_operate_log_commit_activity, gitee_public_list_sort, gitee_public_merge_readiness,
+        gitee_push_event_commit_activity, merge_gitee_review_summaries,
         normalize_enterprise_commit_order, pull_request_values, select_enterprise_project_id,
         select_enterprise_user, trusted_enterprise_commit_count,
     };
@@ -2295,6 +2505,77 @@ mod tests {
             gitee_list_review_status(&json!({ "review_state": "review_rejected" })),
             PullRequestReviewStatus::ChangesRequested
         );
+    }
+
+    #[test]
+    fn builds_enterprise_commit_batch_from_matching_source_branch_push_event() {
+        let commits = vec![
+            decode_commit(&json!({
+                "id": "aaaaaaa111111111",
+                "message": "initial",
+                "author_name": "Initial Author",
+                "created_at": "2026-01-01T01:00:00Z"
+            })),
+            decode_commit(&json!({
+                "id": "bbbbbbb222222222",
+                "message": "update",
+                "author_name": "Commit Author",
+                "created_at": "2026-01-02T01:00:00Z"
+            })),
+        ];
+        let events = vec![json!({
+            "id": 8,
+            "created_at": "2026-01-02T02:00:00Z",
+            "author": {
+                "name": "Branch Updater",
+                "avatar_url": "https://example.test/updater.png"
+            },
+            "push_data": {
+                "ref": "refs/heads/feature/pr-1",
+                "commit_count": 1,
+                "commit_from": "aaaaaaa111111111",
+                "commit_to": "bbbbbbb222222222"
+            }
+        })];
+
+        let activity = gitee_push_event_commit_activity(
+            &events,
+            "feature/pr-1",
+            "2026-01-01T00:00:00Z",
+            &commits,
+        );
+
+        assert_eq!(activity.len(), 4);
+        assert_eq!(activity[0].author, "Branch Updater");
+        assert_eq!(activity[1].state, "bbbbbbb");
+        assert_eq!(activity[2].author, "Initial Author");
+        assert_eq!(activity[3].state, "aaaaaaa");
+    }
+
+    #[test]
+    fn builds_public_commit_batch_from_chinese_push_log() {
+        let commits = vec![decode_commit(&json!({
+            "sha": "bbbbbbb222222222",
+            "message": "update",
+            "author": { "name": "Commit Author" },
+            "created_at": "2026-01-02T01:00:00Z"
+        }))];
+        let logs = vec![json!({
+            "id": 9,
+            "created_at": "2026-01-02T02:00:00Z",
+            "content": "推送了 1 个提交",
+            "user": {
+                "name": "Branch Updater",
+                "avatar_url": "https://example.test/updater.png"
+            }
+        })];
+
+        let activity = gitee_operate_log_commit_activity(&logs, &commits);
+
+        assert_eq!(activity.len(), 2);
+        assert_eq!(activity[0].author, "Branch Updater");
+        assert_eq!(activity[0].body, "added 1 commit");
+        assert_eq!(activity[1].state, "bbbbbbb");
     }
 
     #[test]
@@ -2940,9 +3221,14 @@ mod tests {
                 "login": "public-author",
                 "avatar_url": "https://gitee.example.test/public.png"
             },
+            "committer": {
+                "login": "public-committer",
+                "avatar_url": "https://gitee.example.test/committer.png"
+            },
             "commit": {
                 "message": "Public title\nbody",
-                "author": { "name": "Public Author", "date": "2026-07-20T01:00:00Z" }
+                "author": { "name": "Public Author", "date": "2026-07-20T01:00:00Z" },
+                "committer": { "name": "Public Committer", "date": "2026-07-20T01:01:00Z" }
             }
         }));
         let enterprise = decode_commit(&json!({
@@ -2959,6 +3245,11 @@ mod tests {
         assert_eq!(public.title, "Public title");
         assert_eq!(public.author, "public-author");
         assert_eq!(public.avatar_url, "https://gitee.example.test/public.png");
+        assert_eq!(public.committer, "public-committer");
+        assert_eq!(
+            public.committer_avatar_url,
+            "https://gitee.example.test/committer.png"
+        );
         assert_eq!(enterprise.sha, "enterprise-sha");
         assert_eq!(enterprise.author, "Enterprise Author");
         assert_eq!(

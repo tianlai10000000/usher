@@ -1,10 +1,12 @@
 # Artifact Preview Performance Report / 文件预览性能报告
 
-Date: 2026-08-12; memory-lifecycle addendum: 2026-08-19. This report measures the implementation defined by
+Date: 2026-08-12; memory-lifecycle addendum: 2026-08-19; syntax-fallback and
+AI-response lifecycle addenda: 2026-08-27. This report measures the implementation defined by
 [`docs/specs/artifact-preview.md`](specs/artifact-preview.md). All latency and
 memory claims below use Release builds; Debug runs were used only for visual QA.
 
-日期：2026-08-12；内存生命周期补测：2026-08-19。本文量化
+日期：2026-08-12；内存生命周期补测：2026-08-19；完整语法 fallback 与 AI response
+生命周期补测：2026-08-27。本文量化
 [`docs/specs/artifact-preview.md`](specs/artifact-preview.md) 对应实现。延迟和内存
 结论全部来自 Release 构建；Debug 仅用于视觉验收。
 
@@ -481,3 +483,342 @@ Chat width after the transition, and the detached native window. Benchmark-only
 fixtures are activated only when `USHER_MEMORY_DIAGNOSTICS=1` and an exact
 preview scenario name is present; they do not persist presentation mode or
 provider settings.
+
+## 2026-08-27 Complete syntax fallback removal A/B / 完整语法 fallback 移除 A/B
+
+The first parser-memory optimization removed the Preview crate's complete
+`syntect`/`two-face` fallback. Under the production `OnDemand` strategy, Rust,
+Shell, JavaScript/JSX, TypeScript/TSX, JSON, Python, and Go now build and retain
+only their selected Tree-sitter highlight configuration. Unsupported and
+omitted fence languages share one source-preserving plain-text parser. The PR
+Files-changed highlighter remains an independent root-application Syntect user
+and was outside this A/B.
+
+第一步 parser 内存优化移除了 Preview crate 的完整 `syntect`/`two-face` fallback。
+在生产 `OnDemand` 策略下，Rust、Shell、JavaScript/JSX、TypeScript/TSX、JSON、Python
+与 Go 只在选中对应语言时构建并持有 Tree-sitter 高亮配置；未支持或未声明的围栏语言
+共享一个保留源码的纯文本 parser。PR Files changed 高亮仍是根应用内独立的 Syntect
+使用方，不属于本次 A/B。
+
+The baseline and candidate were fixed before measurement. Both cells used five
+fresh Release processes per fixture on the same arm64 Mac14,9 running macOS
+26.6.2. Full-application cells used the FemtoVG backend, an 800x600 logical
+window at scale 2.00, and the same non-persistent 12-response fixture. Values
+below are `median [min, max]` unless stated otherwise.
+
+The full-application A/B targets the default docked Preview on the PR detail
+route reported in this investigation. It does not claim a detached-window cell
+or replace the broader Artifact Preview acceptance matrix.
+
+- Baseline app SHA: `b5fb3cbb95e64a2bde55b89d0275e099793b69285f4ac49f2fc79badeff7d2a0`
+- Candidate app SHA: `cd3902d182bbcbc401ba161e865891268efde76161d61645d2c587ca15db3f8e`
+- Baseline parser probe SHA: `bdcc9b968fda79df4380d2995dd1d69f35efb7ad15835f830d607e360baad3e2`
+- Candidate parser probe SHA: `64805deff16fcb1384c5b4a37561a482198d2c2f2d06ebb67b2c5cf4591297b2`
+- Baseline size: 25,258,688 bytes; candidate: 27,802,432 bytes
+- Size regression: **+2,543,744 bytes / +2.43 MiB / +10.07%**
+
+基线和候选在测量前固定；每个 cell 都使用 5 个全新 Release 进程。完整应用固定使用
+FemtoVG、800x600 逻辑窗口、2.00 缩放，以及同一份不持久化的 12-response fixture。
+完整应用 A/B 仅覆盖本次问题对应的 PR 详情默认 docked Preview，不把结果外推为
+detached window cell，也不替代 Artifact Preview 的完整验收矩阵。
+
+### Isolated parser processes / 隔离 parser 进程
+
+Each row used five fresh processes with a 700ms hold and macOS
+`/usr/bin/time -l`. TypeScript is the negative control because it already used
+Tree-sitter in the baseline.
+
+| Fixture | Baseline peak RSS | Candidate peak RSS | RSS delta | Baseline parse | Candidate parse |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Plain Markdown | 2.77 [2.77, 2.78] MiB | 2.77 [2.77, 2.81] MiB | 0.00 MiB | 0.099 [0.070, 0.175] ms | 0.078 [0.064, 0.092] ms |
+| JavaScript | 21.91 [21.64, 21.94] MiB | **5.11 [5.09, 5.98] MiB** | **-16.80 MiB (-76.7%)** | 88.025 [85.361, 89.314] ms | **13.490 [12.781, 14.213] ms** |
+| Rust | 13.00 [12.97, 13.16] MiB | **8.80 [7.02, 8.80] MiB** | **-4.20 MiB (-32.3%)** | 41.585 [40.146, 42.360] ms | **32.721 [31.576, 33.848] ms** |
+| TypeScript control | 8.78 [8.75, 8.91] MiB | 8.72 [8.70, 8.78] MiB | -0.06 MiB (-0.7%) | 36.852 [35.800, 37.411] ms | 37.490 [36.267, 38.770] ms |
+
+Peak physical footprint changed in the same direction: JavaScript
+`19.06 -> 3.05 MiB` (-84.0%), Rust `10.14 -> 6.05 MiB` (-40.4%), and plain
+`1.39 -> 1.38 MiB`. The TypeScript control moved `5.61 -> 5.67 MiB` (+1.1%)
+and parse time +1.7%, both within the observed five-process variation. After
+subtracting each build's plain fixture, language-specific RSS fell
+`19.141 -> 2.344 MiB` for JavaScript (**-87.8%**) and `10.234 -> 6.031 MiB`
+for Rust (**-41.1%**).
+
+Physical footprint 同方向下降：JavaScript 为 `19.06 -> 3.05 MiB`（-84.0%），
+Rust 为 `10.14 -> 6.05 MiB`（-40.4%）。分别扣除各自 plain fixture 后，
+JavaScript 专属 RSS 从 `19.141` 降至 `2.344 MiB`（**-87.8%**），Rust 从
+`10.234` 降至 `6.031 MiB`（**-41.1%**）。TypeScript 负控制的 footprint
+与耗时分别变化 +1.1% 和 +1.7%，均在 5 个进程的观测波动内。
+
+| Candidate-only fixture | Peak RSS | Peak footprint | Parse time |
+| --- | ---: | ---: | ---: |
+| Bash | 8.55 [8.55, 8.55] MiB | 5.69 [5.69, 5.70] MiB | 8.744 [8.111, 10.668] ms |
+| JSON | 3.00 [2.97, 3.03] MiB | 1.44 [1.41, 1.48] MiB | 0.222 [0.189, 0.268] ms |
+| Python | 7.27 [5.81, 7.28] MiB | 5.09 [3.67, 5.13] MiB | 11.225 [10.999, 11.780] ms |
+| Go | 5.14 [4.45, 5.20] MiB | 3.25 [2.59, 3.33] MiB | 3.918 [3.514, 3.998] ms |
+| Unsupported fence | 2.81 [2.80, 2.83] MiB | 1.39 [1.39, 1.42] MiB | 0.076 [0.074, 0.159] ms |
+
+Unsupported RSS is only 0.05 MiB above candidate plain, and its one emitted
+token preserves the complete source. This is direct process-level evidence that
+unknown fences no longer initialize a syntax repository.
+
+未支持语言只比 candidate plain 高 0.05 MiB，且单个纯文本 token 完整保留源码；这从
+进程级证明未知围栏不再初始化语法 Repository。
+
+### Full application checkpoints / 完整应用检查点
+
+All 20 full-application runs contained the expected fixture marker and ordered
+checkpoints. Each run had 12 assistant responses at 4096 bytes each, 24 AI rows,
+576 AI blocks, 1,132 AI spans, and one docked 79-block Markdown Preview. Deltas
+are calculated within each process before taking the five-run median.
+
+| Checkpoint window | Metric | Baseline | Candidate | Candidate delta |
+| --- | --- | ---: | ---: | ---: |
+| Open requested -> provider prepared | RSS | 21.16 [20.68, 22.02] MiB | 8.66 [8.46, 10.12] MiB | **-12.50 MiB (-59.1%)** |
+|  | Physical footprint | 19.74 [19.24, 20.53] MiB | 5.95 [5.77, 7.44] MiB | **-13.79 MiB (-69.9%)** |
+|  | malloc in-use | +19.02 [19.01, 19.08] MiB | -0.14 [-0.21, -0.13] MiB | **-19.16 MiB** |
+|  | Elapsed | 108 [106, 113] ms | 39 [34, 43] ms | **-69 ms (-63.9%)** |
+| Response settled -> Preview settled | RSS | 23.72 [23.30, 24.56] MiB | 11.19 [11.01, 12.64] MiB | **-12.53 MiB (-52.8%)** |
+|  | Physical footprint | 20.73 [17.56, 21.64] MiB | 7.30 [7.10, 8.74] MiB | **-13.43 MiB (-64.8%)** |
+|  | malloc in-use | +19.64 [19.63, 19.64] MiB | +0.48 [0.47, 0.48] MiB | **-19.16 MiB (-97.6%)** |
+| Response settled -> closed settled | RSS | 22.86 [22.32, 23.40] MiB | 10.51 [10.38, 10.56] MiB | **-12.35 MiB (-54.0%)** |
+|  | Physical footprint | 11.75 [8.50, 20.44] MiB | 5.42 [-9.86, 7.19] MiB | -6.33 MiB (directional) |
+|  | malloc in-use | +19.67 [19.67, 19.67] MiB | +0.46 [0.45, 0.46] MiB | **-19.21 MiB (-97.7%)** |
+
+The candidate's negative provider-stage malloc delta is not a negative
+allocation. It is consistent with the painted AI delegate cleanup releasing
+slightly more in-use memory than the selected Tree-sitter configurations
+allocate; the checkpoint alone does not prove that attribution. Malloc block
+deltas corroborate the net ownership reduction: open-to-provider changed from
++27,040 to -11,971 blocks, and response-to-closed from +41,286 to +2,302 blocks.
+
+候选 provider 阶段的负 malloc delta 不代表“负分配”；它与隐藏后清理已绘制 AI
+delegate 所释放的在用内存略多于按需 Tree-sitter 配置新增内存这一时序一致，但单个
+checkpoint 不能独立证明该归因。malloc block 证明净所有权同方向减少：open-to-provider
+从 +27,040 变为 -11,971，response-to-closed 从 +41,286 变为 +2,302。
+
+| External settled state | Baseline RSS / footprint | Candidate RSS / footprint | Candidate delta |
+| --- | ---: | ---: | ---: |
+| Preview open, cycle 1 | 149.05 / 112.20 MiB | 134.09 / 95.70 MiB | **-14.95 MiB (-10.0%) / -16.50 MiB (-14.7%)** |
+| Preview open, cycle 2 | 148.98 / 112.14 MiB | 134.08 / 95.69 MiB | **-14.91 MiB (-10.0%) / -16.45 MiB (-14.7%)** |
+| After close, cycle 1 | 145.34 / 108.45 MiB | 133.17 / 94.89 MiB | **-12.17 MiB (-8.4%) / -13.56 MiB (-12.5%)** |
+| After close, cycle 2 | 145.23 / 108.38 MiB | 133.17 / 94.83 MiB | **-12.06 MiB (-8.3%) / -13.55 MiB (-12.5%)** |
+
+Closing cleared both variants to `preview_host=none`, zero hosts, zero blocks,
+and zero payload bytes. The close transition itself released only about 0.62 MiB
+baseline RSS and 0.64 MiB candidate RSS; allocator and renderer high-water pages
+still do not return immediately to the OS. The footprint-delta ranges from
+Preview-settled to closed-settled overlap substantially and are not used as a
+stable claim. The improvement comes from avoiding the complete syntax repository
+allocation, not from forcing RSS reclamation on close.
+
+关闭后两组均为 Preview host、block、payload 全零。关闭动作本身只让 baseline 与
+candidate RSS 分别下降约 0.62 和 0.64 MiB；allocator/renderer 的高水位页仍不会立即
+归还操作系统。Preview 稳定态到关闭稳定态的 footprint 变化区间高度重叠，不作为稳定
+结论。本次收益来自避免创建完整语法 Repository，而非关闭时强制回收 RSS。
+
+The source fixture and 79-block shape were identical. The candidate's diagnostic
+payload estimate was 17,772 bytes versus 17,364 bytes baseline, a disclosed
+**+408 bytes / +2.35%** token-span-shape regression that is negligible beside
+the 19.21 MiB retained-malloc reduction.
+
+源码 fixture 与 79-block 形状一致；candidate 的诊断 payload 估算为 17,772 bytes，
+baseline 为 17,364 bytes。Tree-sitter token span 形状带来明确记录的 **+408 bytes /
++2.35%** 回退，相对 19.21 MiB 的 retained-malloc 降幅很小。
+
+### Raw evidence and reproduction / 原始证据与复现
+
+The ignored local result root preserves both fixed binaries, parser raw rows,
+full application logs, metadata, external raw samples, and summaries:
+
+`memory-benchmark-results/highlight-fallback-ab/20260827T042221Z-syntect-fallback-removal/`
+
+- Parser rows: `parser/raw.tsv`
+- Open A/B: `full-app/open-baseline/`, `full-app/open-candidate/`
+- Close A/B: `full-app/close-baseline/`, `full-app/close-candidate/`
+- Fixed binaries and probes: `binaries/`
+
+Parser cells can be repeated with the archived probes; each invocation is a new
+process:
+
+```sh
+result_root=memory-benchmark-results/highlight-fallback-ab/20260827T042221Z-syntect-fallback-removal
+for fixture in plain javascript rust typescript; do
+  for run in 1 2 3 4 5; do
+    /usr/bin/time -l env \
+      USHER_PREVIEW_PARSER_FIXTURE="$fixture" \
+      USHER_PREVIEW_PARSER_HOLD_MS=700 \
+      "$result_root/binaries/usher-preview-probe-baseline" \
+      --exact tests::markdown_parser_rss_probe --ignored --nocapture
+  done
+done
+
+for fixture in plain javascript rust typescript bash json python go unsupported; do
+  for run in 1 2 3 4 5; do
+    /usr/bin/time -l env \
+      USHER_PREVIEW_PARSER_FIXTURE="$fixture" \
+      USHER_PREVIEW_PARSER_HOLD_MS=700 \
+      "$result_root/binaries/usher-preview-probe-candidate" \
+      --exact tests::markdown_parser_rss_probe --ignored --nocapture
+  done
+done
+```
+
+The full-application command below reproduces one candidate open cell; change
+the archived binary, application variant, scenario, state root, and output root
+for the other three cells.
+
+```sh
+result_root=memory-benchmark-results/highlight-fallback-ab/20260827T042221Z-syntect-fallback-removal
+env \
+  USHER_AI_REVIEW_RESPONSE_FIXTURE=markdown-v1 \
+  USHER_AI_REVIEW_RESPONSE_VARIANT=formatted \
+  USHER_AI_REVIEW_RESPONSE_FIXTURE_MESSAGES=12 \
+  USHER_AI_REVIEW_RESPONSE_FIXTURE_BYTES=4096 \
+  USHER_BENCHMARK_OFFLINE=1 \
+  USHER_BENCHMARK_STATE_ROOT=/tmp/usher-preview-highlight-candidate-state \
+  USHER_BENCHMARK_INSTANCE_NAMESPACE=preview-highlight-candidate \
+  RUST_LOG=info \
+  scripts/benchmark-memory.sh \
+    --runs 5 --scenarios pr-ai-preview-docked \
+    --protocol static --route PrReview \
+    --fixture ai-review-response-preview-rust-shell-v1 \
+    --samples 5 --interval 0.3 --startup-timeout 30 \
+    --application-variant preview-highlight-candidate \
+    --binary "$result_root/binaries/usher-candidate" --no-build \
+    --output /tmp/usher-preview-highlight-candidate-results
+```
+
+## 2026-08-27 AI response delegate lifecycle A/B / AI response delegate 生命周期 A/B
+
+The second candidate targeted the overlap between AI Review and a Docked
+Preview. It retained the panel shell, composer, timers, Rust/Slint source
+models, and interaction state, while `unmount` conditionally destroyed only the
+formatted response/finding/conversation delegates hidden behind Preview.
+`retain` reproduced the existing hidden-but-mounted tree.
+
+第二步候选针对 AI Review 与 Docked Preview 的重叠占用：panel shell、composer、
+Timer、Rust/Slint 源 model 与交互状态继续挂载，`unmount` 仅条件销毁 Preview 后方不可见
+的 formatted response、finding 与 conversation delegate；`retain` 精确复现原有的
+hidden-but-mounted 行为。
+
+Both variants used the same 27,869,008-byte Release/FemtoVG binary, selected by
+`USHER_AI_REVIEW_DOCKED_LIFECYCLE=retain|unmount`. Its SHA-256 was
+`be5d5c0d2632469f404c997a5ba5a46b2c74ce54b1bf76a9e3828fe196e6bb99`.
+The representative and close cells used five isolated processes per variant;
+the cycle, Detached negative-control, and stress cells used three. Every run
+used an 800x600 logical window at scale 2.00 on the same arm64 Mac14,9/macOS
+26.6.2 host.
+
+两组使用同一个固定 Release/FemtoVG 二进制，只由环境变量切换 lifecycle。代表性与
+关闭 cell 各运行 5 个隔离进程；双循环、Detached 负控制和 stress cell 各运行 3 个。
+所有 run 均固定为 800x600@2.00，并运行在同一台 arm64 Mac14,9/macOS 26.6.2 主机。
+
+The representative 12x4096 fixture had 24 rows, 576 blocks, 1,132 spans, 49
+repository actions, and a 79-block/17,772-byte Preview. The stress fixture used
+64x8192 responses, producing 128 rows, 1,568 blocks, and 3,008 spans. UI tests
+and every Docked candidate log verified `mounted_rows=0` and
+`mounted_blocks=0` while preserving the unchanged source models; Detached kept
+the delegates mounted.
+
+| External settled cell | Runs/variant | RSS candidate − baseline | Footprint candidate − baseline |
+| --- | ---: | ---: | ---: |
+| Representative Docked open | 5 | -0.72 MiB (-0.5%) | -6.34 MiB (-5.6%) |
+| Docked after close | 5 | -0.56 MiB (-0.4%) | +6.33 MiB (+6.2%) |
+| Two Docked open/close cycles | 3 | +0.83 MiB (+0.6%) | -6.34 MiB (-5.8%) |
+| Detached negative control | 3 | +0.19 MiB (+0.1%) | +0.28 MiB (+0.2%) |
+| 64x8192 Docked stress | 3 | -3.33 MiB (-2.1%) | -13.75 MiB (-11.0%) |
+
+Absolute footprint differed materially between separately launched batches, so
+the paired protocol also compared ordered checkpoints within each process before
+taking the run median:
+
+| In-process checkpoint window | Metric | Retain | Unmount | Candidate delta |
+| --- | --- | ---: | ---: | ---: |
+| Representative response → Preview | RSS | +11.32 MiB | +11.51 MiB | **+0.19 MiB** |
+|  | Footprint | +11.59 MiB | +12.99 MiB | **+1.40 MiB** |
+|  | Malloc in-use | +0.93 MiB | -5.23 MiB | **-6.16 MiB** |
+|  | Malloc blocks | +6,305 | -95,368 | **-101,673** |
+| Representative response → closed | RSS | +10.97 MiB | +10.40 MiB | -0.57 MiB |
+|  | Footprint | +6.14 MiB | +2.48 MiB | -3.66 MiB |
+|  | Malloc in-use | +0.49 MiB | +0.49 MiB | approximately 0 MiB |
+| Stress response → Preview | RSS | +10.39 MiB | +6.67 MiB | -3.72 MiB |
+|  | Footprint | +12.14 MiB | -2.80 MiB | -14.94 MiB |
+|  | Malloc in-use | +0.92 MiB | -16.49 MiB | -17.41 MiB |
+
+The delegate subtree therefore owned substantial live allocations, but the
+allocator/macOS did not convert their release into a representative RSS reduction. The
+main in-process RSS and footprint moved in the wrong direction, and even the
+stress-only RSS result remained below the 10 MiB/5% adoption threshold. The
+candidate is **rejected** for production; unset or invalid lifecycle values use
+`retain`. `unmount` remains an explicit experiment for reproducing these data,
+not a claimed memory optimization.
+
+delegate 子树确实持有大量 live allocation，但 jemalloc/macOS 没有把释放量转化为
+代表性 RSS 降低：主场景进程内 RSS 与 footprint 方向都变差，stress 专用场景的 RSS
+也没有达到 10 MiB/5% 门槛。因此生产环境**拒绝**该候选；未设置或非法 lifecycle
+值均回退 `retain`，`unmount` 只保留为显式复现实验，不能描述为已采用的内存优化。
+
+Raw logs, metadata, comparisons, fixed binary, and a result index are under the
+ignored local root:
+
+`memory-benchmark-results/ai-review-docked-unmount-ab/20260827T064258Z-step2-response-delegate-unmount/`
+
+## 2026-08-27 AI response visible-window virtualization A/B / AI response 可见窗口虚拟化 A/B
+
+The third candidate replaced the fully mounted AI response layout with one
+flattened `ListView` projection selected by
+`USHER_AI_REVIEW_RESPONSE_LIST=retain|virtualized`. It did not copy Markdown
+payloads: visual rows shared the source finding/message handles, and visible
+assistant rows reused `GitHubAgentResponse`. The MEM-15 lifecycle was fixed at
+`retain` in both cells. All formal cells used the same Release/FemtoVG binary,
+SHA-256
+`bdb15f0efbd18632f8ef5f397c2e1f735eb0e7283b5b1982a0a32c624256f629`,
+on the same arm64 Mac14,9/macOS 26.6.2 host.
+
+第三步候选通过 `USHER_AI_REVIEW_RESPONSE_LIST=retain|virtualized` 在完整挂载布局与单一
+扁平 `ListView` 投影之间切换。视觉行共享源 finding/message handle，不复制 Markdown
+payload；可见 assistant 行继续复用 `GitHubAgentResponse`。两组均把 MEM-15 lifecycle
+固定为 `retain`。所有正式 cell 使用同一个固定 Release/FemtoVG 二进制和同一台机器。
+
+The representative 12x4096 fixture used five processes per variant. After the
+same 1280x860 balanced-scroll preparation, retain had created all 24 message
+rows/576 blocks; virtualized retained the same source model while using a
+four-row pool with two message rows/48 block references.
+
+代表性 12x4096 fixture 每组 5 个进程。相同 1280x860 往返滚动后，retain 已创建全部
+24 个 message rows/576 blocks；virtualized 保留同一源 model，但 delegate pool 只有
+4 行，其中 2 个 message rows/48 个 block reference。
+
+| Cell | Runs/variant | RSS candidate - baseline | Footprint candidate - baseline |
+| --- | ---: | ---: | ---: |
+| Representative 12x4096 | 5 | -4.86 MiB (-3.7%) | -7.27 MiB (-4.8%) |
+| Stress 64x8192 | 3 | -18.05 MiB (-12.1%) | -18.45 MiB (-11.1%) |
+| Home, no AI content | 3 | +0.53 MiB (+0.5%) | -0.08 MiB (-0.1%) |
+
+At the fixture checkpoint, representative median malloc in-use fell from 30.80
+to 25.21 MiB and live blocks from 182,080 to 89,358. Stress malloc in-use fell
+by 17.21 MiB and live blocks by 286,659. Both external two-cycle slopes were
+zero for the response fixtures; the Home slopes matched at `-0.33 MiB`.
+
+Fixture checkpoint 中，代表性 malloc in-use 中位数从 30.80 降至 25.21 MiB，live
+blocks 从 182,080 降至 89,358；stress malloc in-use 下降 17.21 MiB，live blocks
+下降 286,659。两组 response fixture 的外部双周期斜率均为 0；Home 两组斜率同为
+`-0.33 MiB`。
+
+The candidate is **not the production default**. Its stress result is material,
+but the representative RSS result misses the predeclared 10 MiB/5% adoption
+threshold. Production therefore remains `retain`; `virtualized` remains an
+explicit experiment with source/delegate diagnostics and headless interaction
+coverage for scrolling, Preview actions, Markdown links, and Docked restore.
+
+候选**不设为生产默认**：stress 收益显著，但代表性 RSS 没有达到预先声明的
+10 MiB/5% 门槛。生产继续使用 `retain`；`virtualized` 仅作为显式实验保留，并有源
+model/delegate 诊断以及滚动、Preview action、Markdown link、Docked restore 的无头交互
+覆盖。
+
+Formal raw samples, logs, generated comparisons, and the read-only binary are
+under the ignored result root below. The separate `representative/` directory is
+pilot evidence excluded from formal aggregation because its metadata did not
+satisfy the comparison tool's release-path/candidate-dimension contract.
+
+`memory-benchmark-results/ai-review-response-list-ab/20260827T105430Z-step3-visible-window-virtualization/`

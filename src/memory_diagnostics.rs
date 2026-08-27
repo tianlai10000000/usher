@@ -17,6 +17,9 @@ pub(crate) struct ProcessMemorySnapshot {
     pub external_bytes: u64,
     pub reusable_bytes: u64,
     pub compressed_bytes: u64,
+    pub malloc_blocks_in_use: u64,
+    pub malloc_size_in_use_bytes: u64,
+    pub malloc_size_allocated_bytes: u64,
     pub region_count: u64,
     pub mach_port_count: u64,
     pub thread_count: u64,
@@ -384,8 +387,66 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
     let (chat_model_commits, chat_markdown_projections) =
         crate::chat::renderer::diagnostic_counts();
     let preview = crate::artifact_preview::diagnostic_state(ui);
+    let ai_review_panel_mounted = route == Route::PrReview && ui.get_ai_review_panel_visible();
+    let ai_review_response_delegates_mounted =
+        ai_review_panel_mounted && ui.get_ai_review_response_delegates_mounted();
+    let ai_review_content_painted = ai_review_panel_mounted && ui.get_ai_review_content_visible();
+    let ai_review_response_virtualized = ui.get_ai_review_response_virtualized();
+    let ai_review_response_visual_rows = ui.get_ai_review_response_rows().row_count();
+    let ai_review_retained_created_message_rows =
+        ui.get_ai_review_retained_created_message_rows().max(0) as usize;
+    let ai_review_retained_created_blocks =
+        ui.get_ai_review_retained_created_blocks().max(0) as usize;
+    let ai_review_virtual_created_rows = ui.get_ai_review_virtual_created_rows().max(0) as usize;
+    let ai_review_virtual_created_message_rows =
+        ui.get_ai_review_virtual_created_message_rows().max(0) as usize;
+    let ai_review_virtual_created_blocks =
+        ui.get_ai_review_virtual_created_blocks().max(0) as usize;
+    let ai_review_mounted_rows = if ai_review_response_delegates_mounted {
+        if ai_review_response_virtualized {
+            ai_review_virtual_created_message_rows
+        } else {
+            ai_review.row_count()
+        }
+    } else {
+        0
+    };
+    let ai_review_mounted_blocks = if ai_review_response_delegates_mounted {
+        if ai_review_response_virtualized {
+            ai_review_virtual_created_blocks
+        } else {
+            ai_review_blocks
+        }
+    } else {
+        0
+    };
+    let ai_review_mounted_spans = if ai_review_response_delegates_mounted {
+        if ai_review_response_virtualized {
+            0
+        } else {
+            ai_review_spans
+        }
+    } else {
+        0
+    };
+    let ai_review_mounted_findings = if ai_review_response_delegates_mounted {
+        ui.get_ai_review_findings().row_count()
+    } else {
+        0
+    };
+    let ai_review_docked_lifecycle = if ui.get_ai_review_docked_content_unmount() {
+        "unmount"
+    } else {
+        "retain"
+    };
+    let ai_review_response_list = if ai_review_response_virtualized {
+        "virtualized"
+    } else {
+        "retain"
+    };
+    let preview_pr_side_docked_visible = ui.get_artifact_preview_pr_side_docked_visible();
     log::info!(
-        "[Memory][UI Models] route={:?} chat_rows={} chat_blocks={} chat_inline_lines={} chat_spans={} chat_text_bytes={} chat_model_commits={} chat_markdown_projections={} ai_review_rows={} ai_review_blocks={} ai_review_spans={} ai_review_raw_text_bytes={} ai_review_projected_bytes={} ai_review_repository_actions={} ai_review_previewable_rows={} preview_host={} preview_kind={} preview_host_count={} preview_blocks={} preview_payload_bytes={} project_rows={} project_tags={} project_text_bytes={} pr_list_rows={} pr_list_text_bytes={} pr_review_files={} pr_review_tree_items={} pr_review_extension_filters={} pr_review_lines={} job_steps={} job_step_text_bytes={} terminal_lines={} terminal_spans={} terminal_text_bytes={} terminal_output_bytes={}",
+        "[Memory][UI Models] route={:?} chat_rows={} chat_blocks={} chat_inline_lines={} chat_spans={} chat_text_bytes={} chat_model_commits={} chat_markdown_projections={} ai_review_docked_lifecycle={} ai_review_response_list={} ai_review_panel_mounted={} ai_review_response_delegates_mounted={} ai_review_content_painted={} ai_review_response_visual_rows={} ai_review_retained_created_message_rows={} ai_review_retained_created_blocks={} ai_review_virtual_created_rows={} ai_review_virtual_created_message_rows={} ai_review_virtual_created_blocks={} ai_review_mounted_findings={} ai_review_mounted_rows={} ai_review_mounted_blocks={} ai_review_mounted_spans={} ai_review_rows={} ai_review_blocks={} ai_review_spans={} ai_review_raw_text_bytes={} ai_review_projected_bytes={} ai_review_repository_actions={} ai_review_previewable_rows={} preview_pr_side_docked_visible={} preview_host={} preview_kind={} preview_host_count={} preview_blocks={} preview_payload_bytes={} project_rows={} project_tags={} project_text_bytes={} pr_list_rows={} pr_list_text_bytes={} pr_review_files={} pr_review_tree_items={} pr_review_extension_filters={} pr_review_lines={} job_steps={} job_step_text_bytes={} terminal_lines={} terminal_spans={} terminal_text_bytes={} terminal_output_bytes={}",
         route,
         chat.row_count(),
         chat_blocks,
@@ -394,6 +455,21 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
         chat_text_bytes,
         chat_model_commits,
         chat_markdown_projections,
+        ai_review_docked_lifecycle,
+        ai_review_response_list,
+        ai_review_panel_mounted,
+        ai_review_response_delegates_mounted,
+        ai_review_content_painted,
+        ai_review_response_visual_rows,
+        ai_review_retained_created_message_rows,
+        ai_review_retained_created_blocks,
+        ai_review_virtual_created_rows,
+        ai_review_virtual_created_message_rows,
+        ai_review_virtual_created_blocks,
+        ai_review_mounted_findings,
+        ai_review_mounted_rows,
+        ai_review_mounted_blocks,
+        ai_review_mounted_spans,
         ai_review.row_count(),
         ai_review_blocks,
         ai_review_spans,
@@ -401,6 +477,7 @@ pub(crate) fn log_ui_models(ui: &MainWindow, route: Route) {
         ai_review_projected_bytes,
         ai_review_repository_actions,
         ai_review_previewable_rows,
+        preview_pr_side_docked_visible,
         preview.host,
         preview.kind,
         preview.host_count,
@@ -435,8 +512,11 @@ fn log_snapshot(reason: &str, snapshot: ProcessMemorySnapshot) {
     };
     let sequence = SAMPLE_SEQUENCE.fetch_add(1, Ordering::Relaxed) + 1;
     let metadata = run_metadata();
+    let malloc_slack_bytes = snapshot
+        .malloc_size_allocated_bytes
+        .saturating_sub(snapshot.malloc_size_in_use_bytes);
     log::info!(
-        "[Memory][Diag] pid={} run_id={} scenario={} benchmark_run={} seq={} reason={} elapsed_ms={} route={} logical_width={} logical_height={} scale_factor={:.2} physical_width={:.0} physical_height={:.0} terminal_visible={} rss_mib={:.2} rss_delta_last_mib={:+.2} rss_delta_baseline_mib={:+.2} rss_peak_mib={:.2} rss_lifetime_peak_mib={:.2} rss_new_highwater={} phys_footprint_mib={:.2} phys_footprint_delta_last_mib={:+.2} phys_footprint_delta_baseline_mib={:+.2} phys_footprint_peak_mib={:.2} phys_footprint_new_highwater={} virtual_mib={:.2} internal_mib={:.2} external_mib={:.2} reusable_mib={:.2} compressed_mib={:.2} regions={} mach_ports={} threads={} running_threads={} faults={} pageins={}",
+        "[Memory][Diag] pid={} run_id={} scenario={} benchmark_run={} seq={} reason={} elapsed_ms={} route={} logical_width={} logical_height={} scale_factor={:.2} physical_width={:.0} physical_height={:.0} terminal_visible={} rss_mib={:.2} rss_delta_last_mib={:+.2} rss_delta_baseline_mib={:+.2} rss_peak_mib={:.2} rss_lifetime_peak_mib={:.2} rss_new_highwater={} phys_footprint_mib={:.2} phys_footprint_delta_last_mib={:+.2} phys_footprint_delta_baseline_mib={:+.2} phys_footprint_peak_mib={:.2} phys_footprint_new_highwater={} virtual_mib={:.2} internal_mib={:.2} external_mib={:.2} reusable_mib={:.2} compressed_mib={:.2} malloc_blocks={} malloc_in_use_mib={:.2} malloc_allocated_mib={:.2} malloc_slack_mib={:.2} regions={} mach_ports={} threads={} running_threads={} faults={} pageins={}",
         metadata.pid,
         metadata.run_id,
         metadata.scenario,
@@ -467,6 +547,10 @@ fn log_snapshot(reason: &str, snapshot: ProcessMemorySnapshot) {
         mib(snapshot.external_bytes),
         mib(snapshot.reusable_bytes),
         mib(snapshot.compressed_bytes),
+        snapshot.malloc_blocks_in_use,
+        mib(snapshot.malloc_size_in_use_bytes),
+        mib(snapshot.malloc_size_allocated_bytes),
+        mib(malloc_slack_bytes),
         snapshot.region_count,
         snapshot.mach_port_count,
         snapshot.thread_count,
@@ -602,6 +686,15 @@ fn macos_process_memory_snapshot() -> ProcessMemorySnapshot {
         priority: i32,
     }
 
+    #[repr(C)]
+    #[derive(Default)]
+    struct MallocStatistics {
+        blocks_in_use: u32,
+        size_in_use: usize,
+        max_size_in_use: usize,
+        size_allocated: usize,
+    }
+
     unsafe extern "C" {
         fn mach_task_self() -> u32;
         fn task_info(
@@ -625,6 +718,7 @@ fn macos_process_memory_snapshot() -> ProcessMemorySnapshot {
             types_count: *mut u32,
         ) -> i32;
         fn vm_deallocate(target_task: u32, address: usize, size: usize) -> i32;
+        fn malloc_zone_statistics(zone: *mut c_void, stats: *mut MallocStatistics);
     }
 
     const TASK_VM_INFO: i32 = 22;
@@ -632,6 +726,14 @@ fn macos_process_memory_snapshot() -> ProcessMemorySnapshot {
     const KERN_SUCCESS: i32 = 0;
 
     let mut snapshot = ProcessMemorySnapshot::default();
+    let mut malloc = MallocStatistics::default();
+    unsafe {
+        // Passing null requests the aggregate across every process malloc zone.
+        malloc_zone_statistics(std::ptr::null_mut(), &mut malloc);
+    }
+    snapshot.malloc_blocks_in_use = u64::from(malloc.blocks_in_use);
+    snapshot.malloc_size_in_use_bytes = malloc.size_in_use as u64;
+    snapshot.malloc_size_allocated_bytes = malloc.size_allocated as u64;
     let mut vm_info = std::mem::MaybeUninit::<TaskVmInfo>::uninit();
     let mut count = (std::mem::size_of::<TaskVmInfo>() / std::mem::size_of::<i32>()) as u32;
     let task_result = unsafe {

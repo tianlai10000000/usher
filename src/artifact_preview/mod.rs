@@ -244,9 +244,11 @@ impl ArtifactPreviewHandle {
             let prepared = tokio::task::spawn_blocking(move || {
                 let source = resolve()?;
                 let prepared = registry.prepare(source, &cancellation)?;
+                crate::memory_diagnostics::log_checkpoint("artifact_preview.provider_prepared");
                 adapt_prepared_worker(prepared, &cancellation)
             })
             .await;
+            crate::memory_diagnostics::log_checkpoint("artifact_preview.worker_prepared");
 
             let result = match prepared {
                 Ok(result) => result,
@@ -265,6 +267,7 @@ impl ArtifactPreviewHandle {
                     Ok(prepared) => prepared.into_ui_payload(),
                     Err(error) => UiPayload::error(title, user_safe_error(&error)),
                 };
+                crate::memory_diagnostics::log_checkpoint("artifact_preview.ui_payload_converted");
                 show_payload(&ui, payload);
             });
         });
@@ -1158,6 +1161,19 @@ fn switch_mode(ui: &MainWindow, mode: PresentationMode) {
         runtime.mode = mode;
         present_runtime(ui, &mut runtime);
     });
+}
+
+pub(crate) fn set_memory_benchmark_presentation_mode(ui: &MainWindow, detached: bool) {
+    if !crate::memory_diagnostics::diagnostics_enabled() {
+        return;
+    }
+    let mode = if detached {
+        PresentationMode::Detached
+    } else {
+        PresentationMode::Docked
+    };
+    AppState::get(ui).set_artifact_preview_presentation_mode(i32::from(detached));
+    switch_mode(ui, mode);
 }
 
 fn present_runtime(ui: &MainWindow, runtime: &mut PreviewUiRuntime) {

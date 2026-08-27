@@ -7035,6 +7035,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-bash"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e5ec769279cc91b561d3df0d8a5deb26b0ad40d183127f409494d6d8fc53062"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-go"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8560a4d2f835cc0d4d2c2e03cbd0dde2f6114b43bc491164238d333e28b16ea"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-highlight"
 version = "0.26.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7057,10 +7077,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-json"
+version = "0.24.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d727acca406c0020cffc6cf35516764f36c8e3dc4408e5ebe2cb35a947ec471"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-language"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
+name = "tree-sitter-python"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bf85fd39652e740bf60f46f4cda9492c3a9ad75880575bf14960f775cb74a1c"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-rust"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "439e577dbe07423ec2582ac62c7531120dbfccfa6e5f92406f93dd271a120e45"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "tree-sitter-typescript"
@@ -7085,17 +7135,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
-]
-
-[[package]]
-name = "two-face"
-version = "0.5.2+bat-0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "915be7adc2ff6f4338acbf71f3eda0a146f46003b992a1669c674308610efdac"
-dependencies = [
- "serde",
- "serde_derive",
- "syntect",
 ]
 
 [[package]]
@@ -7366,11 +7405,15 @@ version = "0.0.8-alpha.1"
 dependencies = [
  "image",
  "pulldown-cmark",
- "syntect",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-go",
  "tree-sitter-highlight",
  "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-python",
+ "tree-sitter-rust",
  "tree-sitter-typescript",
- "two-face",
 ]
 
 [[package]]

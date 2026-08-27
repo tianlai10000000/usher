@@ -47,6 +47,12 @@ export struct AiReviewConversationItem {
     repository-action-count: int,
 }
 
+export struct AiReviewResponseVisualRow {
+    kind: string,
+    finding: AiReviewFindingItem,
+    message: AiReviewConversationItem,
+}
+
 export component GitHubAiReviewPanel inherits Rectangle {
     in property <string> application-font-family: "sans-serif";
     in property <string> code-font-family: "Menlo";
@@ -65,12 +71,21 @@ export component GitHubAiReviewPanel inherits Rectangle {
     in property <string> error-text: "AI Code Review is not included in this build.";
     in property <[AiReviewFindingItem]> findings: [];
     in property <[AiReviewConversationItem]> conversation: [];
+    in property <[AiReviewResponseVisualRow]> response-rows: [];
+    in property <bool> response-virtualized: false;
+    in-out property <int> retained-created-message-rows: 0;
+    in-out property <int> retained-created-blocks: 0;
+    in-out property <int> virtual-created-rows: 0;
+    in-out property <int> virtual-created-message-rows: 0;
+    in-out property <int> virtual-created-blocks: 0;
     in-out property <string> message-input: "";
     in-out property <string> extra-requirements: "";
     in property <bool> chat-sending: false;
     in property <string> chat-status: "";
     in-out property <int> chat-elapsed-seconds: 0;
     in property <bool> layout-resizing: false;
+    in property <bool> content-active: true;
+    in-out property <length> response-scroll-y: 0px;
     callback close();
     callback cancel(string);
     callback cancel-message(string);
@@ -80,5 +95,6 @@ export component GitHubAiReviewPanel inherits Rectangle {
     callback open-response-artifact(string, string, string);
     callback open-response-link(string);
     callback response-wheel-consumed(length);
+    callback interaction-started();
     background: #ffffff;
 }

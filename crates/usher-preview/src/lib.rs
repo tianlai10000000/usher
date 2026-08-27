@@ -6,8 +6,8 @@ pub mod parser;
 #[cfg(feature = "markdown")]
 pub use parser::{
     CodeParser, CodeParserLoader, CodeParserRegistry, JavaScriptParserLoader, MarkdownParser,
-    MarkdownParserLoader, ParserLoadStrategy, SyntectParserLoader, TsParserLoader, parse_markdown,
-    parse_markdown_structure, parse_markdown_structure_with_cancellation,
+    MarkdownParserLoader, ParserLoadStrategy, PlainTextParserLoader, TsParserLoader,
+    parse_markdown, parse_markdown_structure, parse_markdown_structure_with_cancellation,
 };
 
 use std::collections::HashMap;
@@ -985,11 +985,16 @@ mod tests {
             std::env::var("USHER_PREVIEW_PARSER_FIXTURE").unwrap_or_else(|_| "plain".to_string());
         let markdown = match fixture.as_str() {
             "plain" => "# Parser probe\n\nNo fenced code in this fixture.\n",
+            "bash" => "```bash\nset -euo pipefail\nprintf '%s\\n' ready\n```\n",
+            "go" => "```go\npackage main\nfunc ready() bool { return true }\n```\n",
             "javascript" => "```javascript\nconst count = 42; // ready\n```\n",
+            "json" => "```json\n{\"ready\": true, \"count\": 42}\n```\n",
+            "python" => "```python\ndef ready(value: int) -> bool:\n    return value > 0\n```\n",
             "rust" => "```rust\nlet preview = registry.prepare(source, &cancellation)?;\n```\n",
             "typescript" => {
                 "```typescript\nimport { WeCom } from '@picc/jsbridge';\nawait WeCom.register({ appId: 'your-app-id' });\n```\n"
             }
+            "unsupported" => "```usher-unknown\nalpha < beta && gamma > delta\n```\n",
             other => panic!("unknown parser fixture: {other}"),
         };
 

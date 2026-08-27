@@ -748,6 +748,14 @@ fn decode_github_timeline_activity(
                     authored_at: nested_string(event, "author", "date")
                         .or_else(|| nested_string(event, "committer", "date"))
                         .unwrap_or_default(),
+                    committer: nested_string(event, "committer", "name")
+                        .or_else(|| nested_string(event, "author", "name"))
+                        .unwrap_or_else(|| "Unknown committer".to_string()),
+                    committer_avatar_url: nested_string(event, "committer", "avatar_url")
+                        .unwrap_or_default(),
+                    committed_at: nested_string(event, "committer", "date")
+                        .or_else(|| nested_string(event, "author", "date"))
+                        .unwrap_or_default(),
                     verified: event
                         .get("verification")
                         .and_then(|verification| verification.get("verified"))
@@ -959,12 +967,22 @@ fn decode_commit(value: &Value) -> PullRequestCommit {
                     .and_then(|commit| nested_string(commit, "author", "name"))
             })
             .unwrap_or_else(|| "Unknown author".to_string()),
-        avatar_url: nested_string(value, "author", "avatar_url")
-            .or_else(|| nested_string(value, "committer", "avatar_url"))
-            .unwrap_or_default(),
+        avatar_url: nested_string(value, "author", "avatar_url").unwrap_or_default(),
         authored_at: value
             .get("commit")
             .and_then(|commit| nested_string(commit, "author", "date"))
+            .unwrap_or_default(),
+        committer: nested_string(value, "committer", "login")
+            .or_else(|| {
+                value
+                    .get("commit")
+                    .and_then(|commit| nested_string(commit, "committer", "name"))
+            })
+            .unwrap_or_default(),
+        committer_avatar_url: nested_string(value, "committer", "avatar_url").unwrap_or_default(),
+        committed_at: value
+            .get("commit")
+            .and_then(|commit| nested_string(commit, "committer", "date"))
             .unwrap_or_default(),
         verified: value
             .get("commit")
@@ -1639,9 +1657,14 @@ mod tests {
                 "login": "octocat",
                 "avatar_url": "https://avatars.example.test/octocat"
             },
+            "committer": {
+                "login": "web-flow",
+                "avatar_url": "https://avatars.example.test/web-flow"
+            },
             "commit": {
                 "message": "Improve PR navigation\n\nKeep list state.",
                 "author": { "name": "Octo Cat", "date": "2026-07-20T10:00:00Z" },
+                "committer": { "name": "GitHub", "date": "2026-07-20T10:01:00Z" },
                 "verification": { "verified": true }
             }
         }));
@@ -1649,6 +1672,12 @@ mod tests {
         assert_eq!(commit.title, "Improve PR navigation");
         assert_eq!(commit.author, "octocat");
         assert_eq!(commit.avatar_url, "https://avatars.example.test/octocat");
+        assert_eq!(commit.committer, "web-flow");
+        assert_eq!(
+            commit.committer_avatar_url,
+            "https://avatars.example.test/web-flow"
+        );
+        assert_eq!(commit.committed_at, "2026-07-20T10:01:00Z");
         assert!(commit.verified);
     }
 

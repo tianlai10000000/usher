@@ -13,7 +13,8 @@ use super::{
     PullRequestDiffFile, PullRequestFilters, PullRequestItem, PullRequestMergeMethod,
     PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestReviewAction,
     PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
-    configured_api_base_url, configured_token, conversation_commit_batch_items,
+    configured_api_base_url, configured_token, conversation_body_to_plain_text,
+    conversation_commit_batch_items, conversation_commit_batch_items_for_actor,
     conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
     is_configured_enterprise_host, is_redundant_commit_system_note, is_redundant_merge_system_note,
     parse_unified_diff, percent_encode_path, unavailable_diff_file,
@@ -767,7 +768,7 @@ pub(super) async fn get_pull_request_conversation(
         .unwrap_or_default();
     let has_approval_snapshot = approvals.is_some();
     let mut activity = notes
-        .into_iter()
+        .iter()
         .filter_map(|value| {
             let body = string_field(&value, "body").unwrap_or_default();
             let is_system = value
@@ -822,6 +823,13 @@ pub(super) async fn get_pull_request_conversation(
                 authored_at: string_field(&value, "authored_date")
                     .or_else(|| string_field(&value, "created_at"))
                     .unwrap_or_default(),
+                committer: string_field(&value, "committer_name").unwrap_or_default(),
+                committer_avatar_url: string_field(&value, "committer_avatar_url")
+                    .or_else(|| nested_string(&value, "committer", "avatar_url"))
+                    .unwrap_or_default(),
+                committed_at: string_field(&value, "committed_date")
+                    .or_else(|| string_field(&value, "created_at"))
+                    .unwrap_or_default(),
                 verified: false,
             }
         })
@@ -833,7 +841,7 @@ pub(super) async fn get_pull_request_conversation(
         commits.reverse();
         commits
     };
-    activity.extend(conversation_commit_batch_items(&commits));
+    activity.extend(gitlab_commit_batch_activity(&notes, &commits));
 
     if let Some(merged_at) =
         string_field(&detail, "merged_at").filter(|value| !value.trim().is_empty())
@@ -856,6 +864,121 @@ pub(super) async fn get_pull_request_conversation(
     }
 
     Ok(finalize_conversation_timeline(description, activity))
+}
+
+fn gitlab_commit_batch_activity(
+    notes: &[Value],
+    commits: &[PullRequestCommit],
+) -> Vec<PullRequestConversationItem> {
+    let mut commit_notes = notes
+        .iter()
+        .filter_map(|note| {
+            let is_system = note.get("system").and_then(Value::as_bool).unwrap_or(false);
+            let body = string_field(note, "body").unwrap_or_default();
+            let count = is_system.then(|| commit_count_from_system_note(body.as_str()))??;
+            Some((note, body, count))
+        })
+        .collect::<Vec<_>>();
+    commit_notes.sort_by_key(|(note, _, _)| string_field(note, "created_at").unwrap_or_default());
+
+    if commit_notes.is_empty() {
+        return conversation_commit_batch_items(commits);
+    }
+
+    let mut assigned = vec![false; commits.len()];
+    let mut activity = Vec::new();
+    for (note, body, count) in commit_notes {
+        let references = commit_sha_references(body.as_str());
+        let mut batch_indices = commits
+            .iter()
+            .enumerate()
+            .filter(|(index, commit)| {
+                !assigned[*index]
+                    && references.iter().any(|reference| {
+                        commit.sha.starts_with(reference) || reference.starts_with(&commit.sha)
+                    })
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+
+        // Older/self-managed GitLab versions can return only `added N commits`
+        // without the rendered SHA list. Preserve the native batch boundary by
+        // consuming the next unassigned commits in chronological order.
+        if batch_indices.is_empty() {
+            batch_indices.extend(
+                assigned
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, assigned)| (!*assigned).then_some(index))
+                    .take(count),
+            );
+        }
+        for index in &batch_indices {
+            assigned[*index] = true;
+        }
+        let batch = batch_indices
+            .into_iter()
+            .filter_map(|index| commits.get(index).cloned())
+            .collect::<Vec<_>>();
+        let actor = nested_string(note, "author", "name")
+            .or_else(|| nested_string(note, "author", "username"))
+            .unwrap_or_else(|| "Unknown author".to_string());
+        let avatar_url = nested_string(note, "author", "avatar_url").unwrap_or_default();
+        let created_at = string_field(note, "created_at").unwrap_or_default();
+        let event_id = string_field(note, "id").unwrap_or_else(|| created_at.clone());
+        activity.extend(conversation_commit_batch_items_for_actor(
+            &batch,
+            actor.as_str(),
+            avatar_url.as_str(),
+            created_at.as_str(),
+            count,
+            Some(event_id.as_str()),
+        ));
+    }
+
+    let remaining = commits
+        .iter()
+        .zip(assigned)
+        .filter_map(|(commit, assigned)| (!assigned).then_some(commit.clone()))
+        .collect::<Vec<_>>();
+    activity.extend(conversation_commit_batch_items(&remaining));
+    activity
+}
+
+fn commit_count_from_system_note(body: &str) -> Option<usize> {
+    let normalized = conversation_body_to_plain_text(body);
+    let lower = normalized.trim().to_ascii_lowercase();
+    if !lower.starts_with("added ") || !lower.contains("commit") {
+        return None;
+    }
+    lower.split_whitespace().find_map(|token| {
+        token
+            .trim_matches(|character: char| !character.is_ascii_digit())
+            .parse()
+            .ok()
+    })
+}
+
+fn commit_sha_references(body: &str) -> Vec<String> {
+    let mut references = Vec::new();
+    let mut candidate = String::new();
+    let flush = |candidate: &mut String, references: &mut Vec<String>| {
+        if (7..=40).contains(&candidate.len()) {
+            references.push(candidate.to_ascii_lowercase());
+        }
+        candidate.clear();
+    };
+    for character in body.chars() {
+        if character.is_ascii_hexdigit() {
+            candidate.push(character.to_ascii_lowercase());
+        } else {
+            flush(&mut candidate, &mut references);
+        }
+    }
+    flush(&mut candidate, &mut references);
+    references.sort();
+    references.dedup();
+    references
 }
 
 fn gitlab_merge_actor(detail: &Value) -> String {
@@ -997,6 +1120,13 @@ pub(super) async fn get_pull_request_commits(
                     .or_else(|| nested_string(&value, "author", "avatar_url"))
                     .unwrap_or_default(),
                 authored_at: string_field(&value, "authored_date")
+                    .or_else(|| string_field(&value, "created_at"))
+                    .unwrap_or_default(),
+                committer: string_field(&value, "committer_name").unwrap_or_default(),
+                committer_avatar_url: string_field(&value, "committer_avatar_url")
+                    .or_else(|| nested_string(&value, "committer", "avatar_url"))
+                    .unwrap_or_default(),
+                committed_at: string_field(&value, "committed_date")
                     .or_else(|| string_field(&value, "created_at"))
                     .unwrap_or_default(),
                 verified: false,
@@ -1468,13 +1598,29 @@ mod tests {
 
     use super::{
         gitlab_action_state, gitlab_approval_review_status, gitlab_approval_summaries,
-        gitlab_list_review_status, gitlab_list_sort, gitlab_merge_actor, gitlab_merge_methods,
-        gitlab_merge_payload, gitlab_merge_readiness, is_gitlab_review_system_note,
-        sort_gitlab_items,
+        gitlab_commit_batch_activity, gitlab_list_review_status, gitlab_list_sort,
+        gitlab_merge_actor, gitlab_merge_methods, gitlab_merge_payload, gitlab_merge_readiness,
+        is_gitlab_review_system_note, sort_gitlab_items,
     };
     use crate::git::{
-        PullRequestItem, PullRequestMergeMethod, PullRequestReadinessKind, PullRequestReviewStatus,
+        PullRequestCommit, PullRequestItem, PullRequestMergeMethod, PullRequestReadinessKind,
+        PullRequestReviewStatus,
     };
+
+    fn commit(sha: &str, author: &str, authored_at: &str) -> PullRequestCommit {
+        PullRequestCommit {
+            sha: sha.to_string(),
+            title: sha.to_string(),
+            message: sha.to_string(),
+            author: author.to_string(),
+            avatar_url: String::new(),
+            authored_at: authored_at.to_string(),
+            committer: author.to_string(),
+            committer_avatar_url: String::new(),
+            committed_at: authored_at.to_string(),
+            verified: false,
+        }
+    }
 
     fn list_item(number: &str, created_at: &str, updated_at: &str) -> PullRequestItem {
         PullRequestItem {
@@ -1490,6 +1636,47 @@ mod tests {
             updated_at: updated_at.to_string(),
             web_url: String::new(),
         }
+    }
+
+    #[test]
+    fn builds_gitlab_commit_batches_from_system_note_actors() {
+        let commits = vec![
+            commit(
+                "aaaaaaa111111111",
+                "Commit Author A",
+                "2026-01-01T01:00:00Z",
+            ),
+            commit(
+                "bbbbbbb222222222",
+                "Commit Author B",
+                "2026-01-02T01:00:00Z",
+            ),
+        ];
+        let notes = vec![
+            json!({
+                "id": 2,
+                "system": true,
+                "body": "added 1 commit\n<ul><li>bbbbbbb2 - second</li></ul>",
+                "created_at": "2026-01-02T02:00:00Z",
+                "author": { "name": "Branch Updater B", "avatar_url": "b.png" }
+            }),
+            json!({
+                "id": 1,
+                "system": true,
+                "body": "added 1 commit\n<ul><li>aaaaaaa1 - first</li></ul>",
+                "created_at": "2026-01-01T02:00:00Z",
+                "author": { "name": "Branch Updater A", "avatar_url": "a.png" }
+            }),
+        ];
+
+        let activity = gitlab_commit_batch_activity(&notes, &commits);
+
+        assert_eq!(activity.len(), 4);
+        assert_eq!(activity[0].kind, "commits");
+        assert_eq!(activity[0].author, "Branch Updater A");
+        assert_eq!(activity[1].state, "aaaaaaa");
+        assert_eq!(activity[2].author, "Branch Updater B");
+        assert_eq!(activity[3].state, "bbbbbbb");
     }
 
     #[test]

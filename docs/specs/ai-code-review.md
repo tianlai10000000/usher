@@ -381,6 +381,20 @@ not write review/session persistence.
 结构形状，以及 formatted 的非零 block/action/cache；第二个 marker 必须证明回复滚动区
 实际消费了滚轮输入。Fixture 不得写入 Review/Session 持久化。
 
+`USHER_AI_REVIEW_RESPONSE_LIST=retain|virtualized` selects the response-list
+lifecycle for same-binary memory experiments. Missing, invalid, or non-Unicode
+values resolve to `retain`, which remains the production default because the
+representative Release cell did not pass the declared adoption threshold. The
+virtualized projection shares source message/block handles and must not copy
+response payloads. Its settled marker reports source rows/blocks, flattened
+visual rows, and retained/virtual delegate creation counts separately.
+
+`USHER_AI_REVIEW_RESPONSE_LIST=retain|virtualized` 用于同二进制 response list 内存
+实验；未设置、非法或非 Unicode 值必须回退 `retain`。代表性 Release cell 未通过声明的
+采用门槛，因此生产默认继续为 `retain`。Virtualized 投影共享源 message/block handle，
+不得复制 response payload；settled marker 必须分别报告源 rows/blocks、扁平视觉行以及
+retain/virtual delegate 创建计数。
+
 The macOS RSS protocol runs at least three isolated processes per variant from
 that same binary, fixes the native window at 1280x860, waits for the fixture,
 applies the same balanced wheel-scroll cycle, then samples settled RSS, process
@@ -463,6 +477,9 @@ stage, chunk index, completion message counts and byte totals, serialized reques
 body size, response framing, elapsed time, and bounded response-body chunk sizes,
 arrival intervals, and progress classification. They never record authorization
 data, prompt/rule/source content, or provider response content.
+The measured reason for the current 300-second threshold and the adjustment
+playbook are preserved in the historical
+[response-timeout investigation](../ai-review-response-timeout-investigation.md).
 
 `ai-code-review` 包含核心包和完整 UI/Settings bridge；默认产品 feature 会启用它，
 可通过 `--no-default-features --features renderer-femtovg` 排除。关闭时使用协议兼容的
@@ -479,6 +496,8 @@ completion 继续使用共享的 30 秒总时限和响应体空闲时限。普�
 chunk 序号、completion 消息数量与字节总量、序列化请求体大小、响应 framing、耗时，以及
 有界的响应体 chunk 大小、到达间隔和进度分类；绝不记录鉴权数据、Prompt/规则/源码内容
 或 Provider 响应正文。
+当前 300 秒阈值的实测依据和后续调参流程保留在历史
+[响应超时排查记录](../ai-review-response-timeout-investigation.md) 中。
 
 ## Regression checklist / 回归检查
 
