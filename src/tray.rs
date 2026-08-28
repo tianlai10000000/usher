@@ -123,12 +123,12 @@ mod macos {
         }
 
         // 2. Executable directory
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                let exe_dir_logo = exe_dir.join("logo.png");
-                if exe_dir_logo.exists() {
-                    return Some(exe_dir_logo);
-                }
+        if let Ok(exe_path) = std::env::current_exe()
+            && let Some(exe_dir) = exe_path.parent()
+        {
+            let exe_dir_logo = exe_dir.join("logo.png");
+            if exe_dir_logo.exists() {
+                return Some(exe_dir_logo);
             }
         }
 
@@ -244,14 +244,14 @@ mod macos {
     unsafe fn show_main_window() {
         unsafe {
             // Prefer Slint API to keep internal visibility state in sync.
-            if let Some(ui_weak) = UI_WEAK.get() {
-                if let Some(ui) = ui_weak.upgrade() {
-                    use slint::ComponentHandle;
-                    if let Err(e) = ui.show() {
-                        log::error!("[Tray] Failed to show window via Slint API: {}", e);
-                    } else {
-                        log::info!("[Tray] Window shown via Slint API");
-                    }
+            if let Some(ui_weak) = UI_WEAK.get()
+                && let Some(ui) = ui_weak.upgrade()
+            {
+                use slint::ComponentHandle;
+                if let Err(e) = ui.show() {
+                    log::error!("[Tray] Failed to show window via Slint API: {}", e);
+                } else {
+                    log::info!("[Tray] Window shown via Slint API");
                 }
             }
 

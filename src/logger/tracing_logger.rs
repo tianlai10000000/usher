@@ -86,7 +86,7 @@ impl Write for ActiveFileWriter {
         let mut file = self
             .file
             .lock()
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to lock log file"))?;
+            .map_err(|_| io::Error::other("failed to lock log file"))?;
         file.write(buf)
     }
 
@@ -97,7 +97,7 @@ impl Write for ActiveFileWriter {
         let mut file = self
             .file
             .lock()
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "failed to lock log file"))?;
+            .map_err(|_| io::Error::other("failed to lock log file"))?;
         file.flush()
     }
 }
@@ -305,9 +305,6 @@ pub fn get_default_log_path(log_per_day: bool) -> PathBuf {
 /// Note: call this after the logging system is initialized.
 pub fn setup_global_panic_hook() {
     panic::set_hook(Box::new(|panic_info| {
-        if !is_tracing_active() {
-            return;
-        }
         let location = panic_info
             .location()
             .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
@@ -334,24 +331,38 @@ pub fn setup_global_panic_hook() {
         };
         let note = "Unhandled panic captured by global panic hook; this indicates an upstream runtime failure, not a tracing logger write failure.";
 
-        error!(
-            source          = "global_panic_hook",
-            panic_location = %location,
-            panic_payload  = %payload_str,
-            backtrace_status = backtrace_status,
-            backtrace      = ?backtrace,
-            note = note,
-            "Unhandled panic captured"
-        );
+        let path = TRACING_LOG_PATH
+            .get()
+            .cloned()
+            .unwrap_or_else(|| get_default_log_path(true));
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+            let record = serde_json::json!({
+                "level": "ERROR",
+                "event": "panic",
+                "source": "global_panic_hook",
+                "location": location,
+                "payload": payload_str,
+                "backtrace_status": backtrace_status,
+                "note": note,
+                "backtrace": format!("{backtrace:?}"),
+            });
+            let _ = writeln!(file, "{record}");
+            let _ = file.flush();
+        }
 
-        if let Some(path) = TRACING_LOG_PATH.get() {
-            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-                let _ = writeln!(
-                    file,
-                    "{{\"level\":\"ERROR\",\"event\":\"panic\",\"source\":\"global_panic_hook\",\"location\":\"{}\",\"payload\":\"{}\",\"backtrace_status\":\"{}\",\"note\":\"{}\",\"backtrace\":\"{:?}\"}}",
-                    location, payload_str, backtrace_status, note, backtrace
-                );
-            }
+        if is_tracing_active() {
+            error!(
+                source          = "global_panic_hook",
+                panic_location = %location,
+                panic_payload  = %payload_str,
+                backtrace_status = backtrace_status,
+                backtrace      = ?backtrace,
+                note = note,
+                "Unhandled panic captured"
+            );
         }
 
         crate::shutdown::request_shutdown("panic-hook");

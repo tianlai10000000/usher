@@ -104,15 +104,15 @@ pub(super) fn diff_find_intra_item_offset(
         return 0.0;
     }
     let target_index = target_line.clamp(0, row_count.saturating_sub(1) as i32) as usize;
-    let match_intra_row_y = estimate_diff_match_intra_row_y(
+
+    estimate_diff_match_intra_row_y(
         lines,
         target_index,
         start_char,
         code_width,
         cell_width,
         side,
-    );
-    match_intra_row_y
+    )
 }
 
 fn estimate_diff_match_intra_row_y(

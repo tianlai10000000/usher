@@ -60,16 +60,16 @@ lazy_static::lazy_static! {
 // Helper function: get embedded default icon
 fn get_default_icon(notification_type: NotificationType) -> slint::Image {
     // Try to get embedded icon from Slint global
-    if let Some(ui_weak) = UI_WEAK.read().ok().and_then(|guard| guard.clone()) {
-        if let Some(ui) = ui_weak.upgrade() {
-            let icons = NotificationIcons::get(&ui);
-            return match notification_type {
-                NotificationType::Info => icons.get_info(),
-                NotificationType::Success => icons.get_success(),
-                NotificationType::Warning => icons.get_warning(),
-                NotificationType::Error => icons.get_error(),
-            };
-        }
+    if let Some(ui_weak) = UI_WEAK.read().ok().and_then(|guard| guard.clone())
+        && let Some(ui) = ui_weak.upgrade()
+    {
+        let icons = NotificationIcons::get(&ui);
+        return match notification_type {
+            NotificationType::Info => icons.get_info(),
+            NotificationType::Success => icons.get_success(),
+            NotificationType::Warning => icons.get_warning(),
+            NotificationType::Error => icons.get_error(),
+        };
     }
 
     // If unable to get embedded icon, try loading from file system (fallback for development mode)
@@ -259,14 +259,14 @@ fn push_notification(
     manager.set_queue(ModelRc::new(new_vec));
 
     // Optional: update shared queue (same cap)
-    if let Some(queue) = shared_queue {
-        if let Ok(mut q) = queue.write() {
-            let mut next = SharedVector::default();
-            for item in &items {
-                next.push(item.clone());
-            }
-            q.0 = next;
+    if let Some(queue) = shared_queue
+        && let Ok(mut q) = queue.write()
+    {
+        let mut next = SharedVector::default();
+        for item in &items {
+            next.push(item.clone());
         }
+        q.0 = next;
     }
 }
 
@@ -396,17 +396,17 @@ fn remove_notification_by_id(
     manager.set_queue(ModelRc::new(new_vec));
 
     // Optional: update shared queue
-    if let Some(queue) = shared_queue {
-        if let Ok(mut q) = queue.write() {
-            let mut new_vec = SharedVector::default();
-            for i in 0..q.0.len() {
-                let item = &q.0[i];
-                if item.id != target_id {
-                    new_vec.push(item.clone());
-                }
+    if let Some(queue) = shared_queue
+        && let Ok(mut q) = queue.write()
+    {
+        let mut new_vec = SharedVector::default();
+        for i in 0..q.0.len() {
+            let item = &q.0[i];
+            if item.id != target_id {
+                new_vec.push(item.clone());
             }
-            q.0 = new_vec;
         }
+        q.0 = new_vec;
     }
 }
 
@@ -469,10 +469,10 @@ fn notification_exists(manager: &NotificationManager, target_id: i32) -> bool {
     let queue_model: ModelRc<Notification> = manager.get_queue();
     let row_count = queue_model.row_count();
     for i in 0..row_count {
-        if let Some(item) = queue_model.row_data(i) {
-            if item.id == target_id {
-                return true;
-            }
+        if let Some(item) = queue_model.row_data(i)
+            && item.id == target_id
+        {
+            return true;
         }
     }
     false
@@ -483,10 +483,10 @@ fn get_notification_duration(manager: &NotificationManager, target_id: i32) -> O
     let queue_model: ModelRc<Notification> = manager.get_queue();
     let row_count = queue_model.row_count();
     for i in 0..row_count {
-        if let Some(item) = queue_model.row_data(i) {
-            if item.id == target_id {
-                return Some(item.duration);
-            }
+        if let Some(item) = queue_model.row_data(i)
+            && item.id == target_id
+        {
+            return Some(item.duration);
         }
     }
     None
@@ -813,10 +813,10 @@ pub fn setup_notifications(
                 let queue_model: ModelRc<Notification> = manager.get_queue();
                 let row_count = queue_model.row_count();
                 for i in 0..row_count {
-                    if i != index as usize {
-                        if let Some(item) = queue_model.row_data(i) {
-                            items.push(item);
-                        }
+                    if i != index as usize
+                        && let Some(item) = queue_model.row_data(i)
+                    {
+                        items.push(item);
                     }
                 }
             } // queue_model is dropped here, releasing all borrows
@@ -828,20 +828,20 @@ pub fn setup_notifications(
             manager.set_queue(ModelRc::new(new_vec));
 
             // Optional: sync shared queue
-            if let Some(queue) = &shared_queue_clone {
-                if let Ok(mut q) = queue.write() {
-                    if index >= 0 && (index as usize) < q.0.len() {
-                        // SharedVector doesn't have remove method, need to create new vector
-                        let mut new_vec = SharedVector::default();
-                        for i in 0..q.0.len() {
-                            if i != index as usize {
-                                // Use index to access SharedVector elements
-                                new_vec.push(q.0[i].clone());
-                            }
-                        }
-                        q.0 = new_vec;
+            if let Some(queue) = &shared_queue_clone
+                && let Ok(mut q) = queue.write()
+                && index >= 0
+                && (index as usize) < q.0.len()
+            {
+                // SharedVector doesn't have remove method, need to create new vector
+                let mut new_vec = SharedVector::default();
+                for i in 0..q.0.len() {
+                    if i != index as usize {
+                        // Use index to access SharedVector elements
+                        new_vec.push(q.0[i].clone());
                     }
                 }
+                q.0 = new_vec;
             }
         }
     });
@@ -895,17 +895,16 @@ pub fn setup_notifications(
             set_notification_hovered_by_id(&manager, id, hovered, &shared_queue_clone);
 
             // If hover ends (changed from true to false), restart full duration timer
-            if !hovered {
-                if let Some(dur) = duration {
-                    if dur > 0 {
-                        start_auto_close_timer(
-                            ui_weak_set_hovered.clone(),
-                            id,
-                            Duration::from_millis(dur as u64),
-                            shared_queue_clone.clone(),
-                        );
-                    }
-                }
+            if !hovered
+                && let Some(dur) = duration
+                && dur > 0
+            {
+                start_auto_close_timer(
+                    ui_weak_set_hovered.clone(),
+                    id,
+                    Duration::from_millis(dur as u64),
+                    shared_queue_clone.clone(),
+                );
             }
         }
     });
@@ -949,16 +948,16 @@ pub fn setup_notifications(
             let mut action_text = String::new();
             let mut tag = String::new();
             for i in 0..queue_model.row_count() {
-                if let Some(notification) = queue_model.row_data(i) {
-                    if notification.id == notification_id {
-                        // Get action text from actions array
-                        if let Some(text) = notification.actions.row_data(action_index as usize) {
-                            action_text = text.to_string();
-                        }
-                        // Get tag for callback identification
-                        tag = notification.tag.to_string();
-                        break;
+                if let Some(notification) = queue_model.row_data(i)
+                    && notification.id == notification_id
+                {
+                    // Get action text from actions array
+                    if let Some(text) = notification.actions.row_data(action_index as usize) {
+                        action_text = text.to_string();
                     }
+                    // Get tag for callback identification
+                    tag = notification.tag.to_string();
+                    break;
                 }
             }
 

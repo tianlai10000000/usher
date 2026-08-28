@@ -306,7 +306,7 @@ pub(super) fn gitee_merge_event_with_user(
             resolved_user
                 .into_iter()
                 .chain(gitee_operate_log_users(event))
-                .chain(merger.into_iter()),
+                .chain(merger),
         );
         return GiteeMergeEvent {
             author: best_gitee_labels(
@@ -334,7 +334,7 @@ pub(super) fn gitee_merge_event_with_user(
             resolved_user
                 .and_then(gitee_user_label)
                 .into_iter()
-                .chain(merger.and_then(gitee_user_label).into_iter())
+                .chain(merger.and_then(gitee_user_label))
                 .chain(merge_commit.and_then(gitee_commit_committer_label)),
         )
         .map(|label| label.text)
@@ -726,17 +726,17 @@ pub(super) fn expand_enterprise_conversation_notes(
 }
 
 pub(super) fn collect_enterprise_note_nodes<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
-    if let Some(notes) = value.get("notes").and_then(Value::as_array) {
-        if !notes.is_empty() {
-            for note in notes {
-                out.push(note);
-                // Enterprise comments are two levels: root + children replies.
-                if let Some(children) = note.get("children").and_then(Value::as_array) {
-                    out.extend(children.iter());
-                }
+    if let Some(notes) = value.get("notes").and_then(Value::as_array)
+        && !notes.is_empty()
+    {
+        for note in notes {
+            out.push(note);
+            // Enterprise comments are two levels: root + children replies.
+            if let Some(children) = note.get("children").and_then(Value::as_array) {
+                out.extend(children.iter());
             }
-            return;
         }
+        return;
     }
     // Theme / ordinary comments may appear as a flat `note` on the data item.
     // Skip thread shells that only carry diff-context `content` and no body.
@@ -887,7 +887,6 @@ pub(super) fn normalize_enterprise_commit_order(commits: &mut [PullRequestCommit
 /// Bounded commit probe for the Commits tab badge. Never loads/caches the full list.
 ///
 /// Enterprise v8 defaults `with_page=false` and returns every commit as a bare
-
 pub(super) fn decode_commit(value: &Value) -> PullRequestCommit {
     let message = string_field(value, "message")
         .or_else(|| {

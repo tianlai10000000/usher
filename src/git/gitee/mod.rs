@@ -11,15 +11,15 @@ use crate::codereview::api::gitee as endpoints;
 use crate::http::{self, RequestOptions};
 
 use super::{
-    GiteeApiProfile, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
-    PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters, PullRequestItem,
-    PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
-    PullRequestRevertResult, PullRequestReviewAction, PullRequestReviewStatus, PullRequestState,
-    RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url,
-    configured_enterprise, configured_gitee_token, conversation_commit_batch_items,
-    conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
-    gitee_api_profile, is_redundant_commit_system_note, is_redundant_merge_system_note,
-    percent_encode_path,
+    GiteeApiProfile, PageCollector, PullRequestActionState, PullRequestCommit,
+    PullRequestConversationItem, PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters,
+    PullRequestItem, PullRequestMergeMethod, PullRequestPage, PullRequestReadiness,
+    PullRequestReadinessKind, PullRequestRevertResult, PullRequestReviewAction,
+    PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
+    configured_api_base_url, configured_enterprise, configured_gitee_token,
+    conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
+    finalize_conversation_timeline, gitee_api_profile, is_redundant_commit_system_note,
+    is_redundant_merge_system_note, percent_encode_path,
 };
 
 mod conversation;
@@ -312,12 +312,18 @@ pub(super) async fn get_pull_request_diff(
             enterprise_review_summaries(enterprise_data_object(detail), None).len() as u32
         })
         .unwrap_or(0);
-    let note_count = detail
+    // `Option::or` would evaluate (and await) the probe unconditionally, so the
+    // fallback request must stay behind an explicit miss check.
+    let note_count = match detail
         .as_ref()
         .ok()
         .and_then(conversation_count_from_detail)
-        .or(count_pull_request_comments(locator, pull_request_iid, Some(repo_project_id)).await)
-        .unwrap_or(0);
+    {
+        Some(count) => count,
+        None => count_pull_request_comments(locator, pull_request_iid, Some(repo_project_id))
+            .await
+            .unwrap_or(0),
+    };
     decoded.conversation_count = Some(note_count.saturating_add(active_review_count));
     // Some Enterprise deployments advertise zero in MR detail/diffs until the
     // commits collection is requested. Only a positive summary is authoritative;
@@ -354,12 +360,22 @@ async fn get_public_pull_request_diff(
         Some(pull_request_iid),
         None,
     );
-    let values: Vec<Value> = http::send_json(
-        public_authenticated_request(files_endpoint).query(&[("per_page", "100")]),
-        RequestOptions::new("Load Gitee pull request files"),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
+    let mut pages = PageCollector::new(100, 30);
+    loop {
+        let batch: Vec<Value> = http::send_json(
+            public_authenticated_request(files_endpoint.clone()).query(&[
+                ("page", pages.page().to_string()),
+                ("per_page", "100".to_string()),
+            ]),
+            RequestOptions::new("Load Gitee pull request files"),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        if !pages.append(batch) {
+            break;
+        }
+    }
+    let (values, files_truncated) = pages.into_parts();
     let files = values
         .iter()
         .map(|value| {
@@ -403,22 +419,31 @@ async fn get_public_pull_request_diff(
             }
         })
         .collect::<Vec<_>>();
+    // Public v5 PR detail often omits commit totals; probe a bounded page only
+    // when the detail payload misses the count. `Option::or` would await the
+    // probe unconditionally, so both fallbacks stay behind explicit miss checks.
+    let commit_count = match commit_count_from_detail(&detail) {
+        Some(count) => count,
+        None => count_pull_request_commits(locator, pull_request_iid, None)
+            .await
+            .unwrap_or(0),
+    };
+    let conversation_count = match conversation_count_from_detail(&detail) {
+        Some(count) => count,
+        None => count_pull_request_comments(locator, pull_request_iid, None)
+            .await
+            .unwrap_or(0),
+    };
     Ok(PullRequestDiffDetail {
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
-        // Public v5 PR detail often omits commit totals; probe a bounded page.
-        commit_count: commit_count_from_detail(&detail)
-            .or(count_pull_request_commits(locator, pull_request_iid, None).await)
-            .unwrap_or(0),
-        conversation_count: Some(
-            conversation_count_from_detail(&detail)
-                .or(count_pull_request_comments(locator, pull_request_iid, None).await)
-                .unwrap_or(0),
-        ),
+        commit_count,
+        conversation_count: Some(conversation_count),
         base_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
         head_sha: nested_string(&detail, "head", "sha").unwrap_or_default(),
         start_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
         too_many_commits: false,
+        files_truncated,
         files,
     })
 }
@@ -485,6 +510,10 @@ pub(super) async fn get_commit_range_diff(
         head_sha: head_sha.to_string(),
         start_sha: base_sha.to_string(),
         too_many_commits: payload
+            .get("compare_timeout")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        files_truncated: payload
             .get("compare_timeout")
             .and_then(Value::as_bool)
             .unwrap_or(false),
@@ -1526,7 +1555,7 @@ async fn load_enterprise_commit_identity_avatars(
         return std::collections::HashMap::new();
     };
     let endpoint = endpoints::ENTERPRISE_USERS_URL.replace("{api_base_url}", &api_base_url);
-    stream::iter(identities.into_iter())
+    stream::iter(identities)
         .map(|(key, (name, email))| {
             let endpoint = endpoint.clone();
             async move {

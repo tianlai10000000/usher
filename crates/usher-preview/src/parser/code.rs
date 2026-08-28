@@ -35,10 +35,12 @@ pub trait CodeParserLoader: Send + Sync {
     fn preload(&self, cancellation: &CancellationToken) -> Result<(), PreviewError>;
 }
 
+type ParserCache = HashMap<(&'static str, String), Arc<dyn CodeParser>>;
+
 pub struct CodeParserRegistry {
     strategy: ParserLoadStrategy,
     loaders: Vec<Arc<dyn CodeParserLoader>>,
-    loaded: Mutex<HashMap<(&'static str, String), Arc<dyn CodeParser>>>,
+    loaded: Mutex<ParserCache>,
     preload_complete: Mutex<bool>,
 }
 

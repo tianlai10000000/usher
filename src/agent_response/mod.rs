@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::mem;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use usher_preview::{
@@ -501,7 +501,7 @@ fn normalize_repository_markdown_path(value: &str) -> Option<PathBuf> {
 fn repository_action_token(
     message_id: &str,
     content_identity: ContentIdentity,
-    relative_path: &PathBuf,
+    relative_path: &Path,
 ) -> String {
     let content_first = content_identity.first.to_le_bytes();
     let content_second = content_identity.second.to_le_bytes();

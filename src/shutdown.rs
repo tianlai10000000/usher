@@ -49,17 +49,17 @@ struct CleanupRegistry {
 
 #[derive(Copy, Clone)]
 enum ShutdownStage {
-    PreShutdown,
-    UiShutdown,
-    PostShutdown,
+    Pre,
+    Ui,
+    Post,
 }
 
 impl ShutdownStage {
     fn as_str(self) -> &'static str {
         match self {
-            ShutdownStage::PreShutdown => "pre_shutdown",
-            ShutdownStage::UiShutdown => "ui_shutdown",
-            ShutdownStage::PostShutdown => "post_shutdown",
+            ShutdownStage::Pre => "pre_shutdown",
+            ShutdownStage::Ui => "ui_shutdown",
+            ShutdownStage::Post => "post_shutdown",
         }
     }
 }
@@ -86,11 +86,13 @@ fn register_task(
     priority: i32,
     callback: impl Fn() + Send + Sync + 'static,
 ) {
-    let mut registry = cleanup_registry().lock().unwrap();
+    let mut registry = cleanup_registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let stage_tasks = match stage {
-        ShutdownStage::PreShutdown => &mut registry.pre_shutdown,
-        ShutdownStage::UiShutdown => &mut registry.ui_shutdown,
-        ShutdownStage::PostShutdown => &mut registry.post_shutdown,
+        ShutdownStage::Pre => &mut registry.pre_shutdown,
+        ShutdownStage::Ui => &mut registry.ui_shutdown,
+        ShutdownStage::Post => &mut registry.post_shutdown,
     };
 
     stage_tasks.push(CleanupTask {
@@ -111,7 +113,7 @@ fn register_task(
 /// Register a task executed before UI shutdown work starts.
 #[allow(dead_code)]
 pub fn register_pre_shutdown_task(name: &'static str, callback: impl Fn() + Send + Sync + 'static) {
-    register_task(ShutdownStage::PreShutdown, name, PRIORITY_NORMAL, callback);
+    register_task(ShutdownStage::Pre, name, PRIORITY_NORMAL, callback);
 }
 
 /// Register a pre-shutdown task with custom priority.
@@ -120,13 +122,13 @@ pub fn register_pre_shutdown_task_with_priority(
     priority: i32,
     callback: impl Fn() + Send + Sync + 'static,
 ) {
-    register_task(ShutdownStage::PreShutdown, name, priority, callback);
+    register_task(ShutdownStage::Pre, name, priority, callback);
 }
 
 /// Register a task executed during UI shutdown.
 #[allow(dead_code)]
 pub fn register_ui_shutdown_task(name: &'static str, callback: impl Fn() + Send + Sync + 'static) {
-    register_task(ShutdownStage::UiShutdown, name, PRIORITY_NORMAL, callback);
+    register_task(ShutdownStage::Ui, name, PRIORITY_NORMAL, callback);
 }
 
 /// Register a ui-shutdown task with custom priority.
@@ -135,7 +137,7 @@ pub fn register_ui_shutdown_task_with_priority(
     priority: i32,
     callback: impl Fn() + Send + Sync + 'static,
 ) {
-    register_task(ShutdownStage::UiShutdown, name, priority, callback);
+    register_task(ShutdownStage::Ui, name, priority, callback);
 }
 
 /// Register a task executed after UI shutdown work.
@@ -144,7 +146,7 @@ pub fn register_post_shutdown_task(
     name: &'static str,
     callback: impl Fn() + Send + Sync + 'static,
 ) {
-    register_task(ShutdownStage::PostShutdown, name, PRIORITY_NORMAL, callback);
+    register_task(ShutdownStage::Post, name, PRIORITY_NORMAL, callback);
 }
 
 /// Register a post-shutdown task with custom priority.
@@ -154,7 +156,7 @@ pub fn register_post_shutdown_task_with_priority(
     priority: i32,
     callback: impl Fn() + Send + Sync + 'static,
 ) {
-    register_task(ShutdownStage::PostShutdown, name, priority, callback);
+    register_task(ShutdownStage::Post, name, priority, callback);
 }
 
 /// Install signal handlers for graceful shutdown.
@@ -180,10 +182,9 @@ pub fn init_signal_handlers() {
         };
 
         log::info!("[Shutdown] Signal handlers are active");
-        for signal in signals.forever() {
+        if let Some(signal) = signals.forever().next() {
             log::warn!("[Shutdown] Received OS signal: {}", signal);
             request_shutdown(&format!("signal({})", signal));
-            break;
         }
     });
 
@@ -205,13 +206,15 @@ pub fn run_cleanup_once(trigger: &str) {
     log::info!("[Shutdown] Cleanup pipeline started (trigger: {})", trigger);
 
     let mut registry = {
-        let mut guard = cleanup_registry().lock().unwrap();
+        let mut guard = cleanup_registry()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         std::mem::take(&mut *guard)
     };
 
-    run_stage_tasks(ShutdownStage::PreShutdown, &mut registry.pre_shutdown);
-    run_stage_tasks(ShutdownStage::UiShutdown, &mut registry.ui_shutdown);
-    run_stage_tasks(ShutdownStage::PostShutdown, &mut registry.post_shutdown);
+    run_stage_tasks(ShutdownStage::Pre, &mut registry.pre_shutdown);
+    run_stage_tasks(ShutdownStage::Ui, &mut registry.ui_shutdown);
+    run_stage_tasks(ShutdownStage::Post, &mut registry.post_shutdown);
 
     #[cfg(target_os = "macos")]
     cleanup_associated_helpers();

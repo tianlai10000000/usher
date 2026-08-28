@@ -70,17 +70,17 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `src/terminal/` | PTY 生命周期、viewport 同步、渲染、选择和项目切换；纯输入映射、诊断与刷新节流使用独立模块。 |
 | `src/chat/` | AI/RAG 共用 Chat 展示和交互、按模式隔离的 Session/JSONL 历史、请求耗时管理、transport、宽度无关纯文本/Artifact 投影、有界渲染缓存、分页和纯有界虚拟布局；完整 Artifact 渲染归通用预览 Feature。 |
 | `src/agent_response/` | Agent Markdown 的宽度无关投影；负责 16 KiB/48 block 行内预算、128 项/近似记账 2 MiB 的内容身份缓存，以及不透明仓库 Markdown action token；不执行文件 I/O，也不拥有 Preview Host。 |
-| `src/ai_review/` | 可选 AI Review 配置门面和应用 controller；负责 State Store 订阅、自动持久化 Worker、动态任务调度、Review/Ask 耗时投影、按需加载 diff/规则、AI 调用、在途 Provider 取消、已完成 Review 与轻量 PR Chat Session 存储、通知和不依赖路由的 PR 结果投影。 |
+| `src/ai_review/` | 可选 AI Review 配置门面、保留损坏 JSON 的统一存储边界和应用 controller；负责 State Store 订阅、自动持久化 Worker、动态任务调度、Review/Ask 耗时投影、按需加载 diff/规则、AI 调用、在途 Provider 取消、已完成 Review 与轻量 PR Chat Session 存储、通知和不依赖路由的 PR 结果投影。 |
 | `src/artifact_preview/` | 应用预览门面：Provider 策略、后台准备、过期结果取消、Slint model 适配、单活动 Session、固定面板与独立窗口之间的即时迁移、向 Detached component tree 显式同步 effective theme，以及显式激活仓库 Markdown 时由 Worker 执行的 canonical containment 校验和读取。其 `test-fixtures` 适配器仅在开发构建存在，并让演练样例通过同一门面提交。 |
-| `src/update/` | Release 检查、流式下载、进度、取消、安装和重启。 |
+| `src/update/` | Release 检查、流式下载、进度、取消、安装和重启；重启时先释放进程单实例锁，再拉起替换进程。 |
 | `src/router/` | 路由映射、历史、可见性和可达性 transition；不执行 feature 清理。 |
 | `src/shortcuts/` | 应用命令 ID、声明式键位、平台归一化匹配、路由作用域、冲突校验、分发与展示标签。 |
 | `src/app_lifecycle.rs` | composition 层 route lifecycle hook，在 transition 后协调跨 feature 清理。 |
-| `src/settings.rs` | TOML 设置模型和持久化，包含 AI Agent 凭据。 |
+| `src/settings.rs` | TOML 设置模型与串行原子持久化，包含 AI Agent 凭据和可配置 RAG endpoint。 |
 | `src/ai/` | 共用 OpenAI-compatible AI Agent transport；`agent.rs` 负责连通性测试，以及 AI Chat/AI Code Review 使用的 chat completion；不负责 RAG transport 或 Feature 状态。 |
 | `src/network.rs` | 后台网络探测和 `AppState.network-online`。 |
 | `src/http/mod.rs` | 唯一共享 reqwest client、单请求总超时/响应体空闲超时策略、统一响应体读取、拦截器、统一错误和可选 UI 反馈。 |
-| `src/logger/` | Debug 日志、tracing 和 panic/error 支持。 |
+| `src/logger/` | Debug 日志、tracing 和 panic/error 支持；panic hook 自有直接 JSON 兜底写入，即使普通 tracing 已关闭仍保持生效。 |
 | `src/toast.rs` | 单条短时 Toast 管理器绑定。 |
 | `src/notification.rs` | 通知队列、计时器、Hover 暂停、操作按钮和图标。 |
 | `src/message_center.rs` | 主窗口与 `usher-messages` 之间的薄桥接层；同步主题/视口、下发 All/Unread/Read 计数，并把不可变快照转换为独立页面 Slint model。 |
@@ -380,7 +380,7 @@ unpacked 策略升级后，开发者应执行一次完整 `cargo clean`；后续
 3. 应用设置并配置 updater 状态。
 4. 绑定主题、路由、导航、应用快捷键和窗口 callback。
 5. 打开持久消息中心并安装独立页面桥接，再初始化 Notification 和 Toast manager；排队 Banner 会镜像到消息中心。
-6. 将统一 HTTP 模块绑定到 UI 错误反馈，然后启动网络监测。
+6. 将统一 HTTP 模块绑定到 UI 错误反馈，然后以乐观初值启动网络监测，首次探测在 Worker 上执行。
 7. 初始化 Dialog、Project、Chat、Terminal 和 Workflow。
 8. 在 macOS 上，若原生窗口句柄已可用，则在 `show()` 前安装标题栏附件与 Menu Vibrancy；否则在 `show()` 后重试。winit 窗口在事件循环启动后才创建，因此由首帧渲染钩子在与首帧同一事务内隐藏窗口并安装原生 Chrome；随后短轮询持续重试安装，确认就绪后再等若干 settle tick，让 Effect 第一次（未模糊的）Behind-Window 采样提交、并把 AppKit 挂载附件后的标题栏布局重置重新校正，最后同步校正交通灯位置才显示窗口；兜底时限保证窗口一定出现。因此首个可见帧就是最终 Shell，而不是分阶段过渡。
 9. 安装托盘并进入 Slint event loop。
@@ -409,7 +409,7 @@ Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可�
 
 ### 设置
 
-`AppSettings` 以 TOML 保存到平台配置目录，包括主题、自动更新、相互独立的 Console/`usher.log`/`usher_tracing.log` 输出目标、Terminal verbose 与内存诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称，以及位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置。Logger 输出目标通过运行时原子过滤控制；`usher.log` 在首次启用写入时按需打开，Settings 使用 GitHub 风格的 `Enable all` / `Disable all` 批量操作，同时保留每项独立状态。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
+`AppSettings` 以 TOML 保存到平台配置目录，包括主题、自动更新、相互独立的 Console/`usher.log`/`usher_tracing.log` 输出目标、Terminal verbose 与内存诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称、位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置，以及位于 `[ai.chat]` 的可选 HTTPS RAG endpoint（环境变量回退为 `USHER_RAG_API_URL`）。保存操作由写锁串行化，先写入并同步同目录唯一临时文件，再原子替换目标；解析失败时必须先把原文件保留为 `settings.toml.corrupt-*`，若保留失败，则本进程禁止继续写 Settings。Logger 输出目标通过运行时原子过滤控制；`usher.log` 在首次启用写入时按需打开，Settings 使用 GitHub 风格的 `Enable all` / `Disable all` 批量操作，同时保留每项独立状态。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
 
 手工保存凭据、代码托管 Endpoint 与 AI Agent 配置时，文件持久化必须在
 Slint event loop 之外执行。完成结果回到 event loop 后，只有持久化成功
@@ -572,6 +572,8 @@ ListView/ScrollView 可以为大型时间线、文件树和 diff 提供虚拟化
 排版、配色、焦点状态或控件外观；这些能力全部由项目自有 GitHub 组件负责。
 空白/错误状态复用 `GitHubBlankslate`，图标操作复用 `GitHubIconButton`。
 
+PR Review 为 diff、高亮、展开、action state、Conversation 与 Commits 使用统一请求代际边界。切换 PR、手动 Reload 与 ignore-whitespace 变更都会使六类代际全部失效；强刷绕过 diff 缓存、清空惰性 Tab model，并重新加载当前 Tab。Provider changed-file 分页共用一个有界收集器；最后一页仍满时把归一化 detail 标记为 `files_truncated`，Files changed 明确展示该限制。Conversation block 按解析后的 RFC3339 时刻而不是 Provider 原始字符串比较。Merge 能力采用 fail-closed：必需的 Review/approval 状态读取失败时，action-state bridge 清空全部写能力并发布不可用 readiness。
+
 ### Pull Request 子系统边界
 
 PR 功能由五个可替换层组成。这是后续迁移到其他技术栈时应保持的边界：
@@ -704,7 +706,7 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 ### Chat 请求
 
 1. `chat/interactive.rs` 追加并持久化用户消息。
-2. 共享 runtime 使用既有 RAG endpoint 和请求格式调用 `chat/chat.rs`。
+2. 共享 runtime 使用配置的 HTTPS RAG endpoint（`[ai.chat].rag_api_url`，其次为 `USHER_RAG_API_URL`）和稳定请求格式调用 `chat/chat.rs`。
 3. `src/http/mod.rs` 依次执行请求拦截、reqwest 请求、状态校验、响应/错误拦截和 RAG JSON 解码。
 4. 按模式保存的单调起始时刻驱动一个可见页面计时器；结果持久化实测毫秒耗时，
    并在 event loop 中转换为 Slint model。

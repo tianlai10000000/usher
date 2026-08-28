@@ -335,6 +335,8 @@ pub(crate) struct ResponseContext<'a> {
 
 /// Axios-style lifecycle hook. Implementors must remain fast and non-blocking.
 pub(crate) trait HttpInterceptor: Send + Sync {
+    // Keep the concrete shared error type across the interceptor contract.
+    #[allow(clippy::result_large_err)]
     fn on_request(&self, _request: &mut RequestContext<'_>) -> HttpResult<()> {
         Ok(())
     }
@@ -474,10 +476,12 @@ fn truncate_body(body: String) -> String {
         return body;
     }
     let mut result = body.chars().take(MAX_ERROR_BODY_CHARS).collect::<String>();
-    result.push_str("…");
+    result.push('…');
     result
 }
 
+// Interceptors intentionally share the public HTTP error contract.
+#[allow(clippy::result_large_err)]
 fn run_request_interceptors(
     method: &Method,
     url: &Url,

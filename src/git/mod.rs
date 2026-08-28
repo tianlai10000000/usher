@@ -488,12 +488,28 @@ fn validated_repository_context(
 #[cfg(test)]
 mod tests {
     use super::{
-        PullRequestCommit, PullRequestState, RepoType, commit_count_from_detail,
+        PageCollector, PullRequestCommit, PullRequestState, RepoType, commit_count_from_detail,
         conversation_body_to_plain_text, conversation_commit_batch_items,
         conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
         is_redundant_commit_system_note, is_redundant_merge_system_note, parse_repo_locator,
         parse_unified_diff, percent_encode_path, split_commit_message, supports_ignore_whitespace,
     };
+
+    #[test]
+    fn page_collector_marks_a_full_final_page_as_truncated() {
+        let mut collector = PageCollector::new(2, 2);
+        assert!(collector.append(vec![1, 2]));
+        assert_eq!(collector.page(), 2);
+        assert!(!collector.append(vec![3, 4]));
+        let (values, truncated) = collector.into_parts();
+        assert_eq!(values, vec![1, 2, 3, 4]);
+        assert!(truncated);
+
+        let mut complete = PageCollector::new(2, 2);
+        assert!(complete.append(vec![1, 2]));
+        assert!(!complete.append(vec![3]));
+        assert!(!complete.into_parts().1);
+    }
 
     #[test]
     fn reads_badge_counts_for_github_gitlab_and_gitee_detail_shapes() {
@@ -590,6 +606,79 @@ mod tests {
         assert_eq!(timeline[0].kind, "description");
         assert_eq!(timeline[0].body, "Shared description");
         assert_eq!(timeline[1].body, "Shared comment");
+    }
+
+    #[test]
+    fn sorts_conversation_timestamps_by_instant_and_keeps_unknown_times_last() {
+        let item = |id: &str, kind: &str, created_at: &str| super::PullRequestConversationItem {
+            id: id.into(),
+            kind: kind.into(),
+            author: "alice".into(),
+            avatar_url: String::new(),
+            author_association: String::new(),
+            body: id.into(),
+            created_at: created_at.into(),
+            state: String::new(),
+            review_id: String::new(),
+            can_dismiss: false,
+        };
+        let timeline = finalize_conversation_timeline(
+            item("description", "description", "2026-08-10T00:00:00Z"),
+            vec![
+                item("later", "comment", "2026-08-10T08:30:00+08:00"),
+                item("same-a", "comment", "2026-08-10T00:00:00Z"),
+                item("same-b", "comment", "2026-08-10T08:00:00+08:00"),
+                item("invalid", "comment", "not-a-timestamp"),
+                item("empty", "comment", ""),
+            ],
+        );
+
+        assert_eq!(
+            timeline
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "description",
+                "same-a",
+                "same-b",
+                "later",
+                "invalid",
+                "empty"
+            ]
+        );
+    }
+
+    #[test]
+    fn sorts_review_block_by_review_time_when_summary_time_is_missing() {
+        let item = |id: &str, kind: &str, created_at: &str| super::PullRequestConversationItem {
+            id: id.into(),
+            kind: kind.into(),
+            author: "alice".into(),
+            avatar_url: String::new(),
+            author_association: String::new(),
+            body: id.into(),
+            created_at: created_at.into(),
+            state: String::new(),
+            review_id: String::new(),
+            can_dismiss: false,
+        };
+        let timeline = finalize_conversation_timeline(
+            item("description", "description", "2026-08-10T00:00:00Z"),
+            vec![
+                item("middle", "comment", "2026-08-10T00:02:00Z"),
+                item("summary", "review_summary", ""),
+                item("review", "review", "2026-08-10T00:01:00Z"),
+            ],
+        );
+
+        assert_eq!(
+            timeline
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["description", "summary", "review", "middle"]
+        );
     }
 
     #[test]

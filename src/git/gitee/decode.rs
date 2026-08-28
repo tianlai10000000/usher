@@ -46,6 +46,12 @@ pub(super) fn decode_pull_request_diff(payload: &Value) -> Result<PullRequestDif
             .get("too_more_commits")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        files_truncated: value_u32(payload, "count")
+            .is_some_and(|count| count as usize > files.len())
+            || payload
+                .get("diffs_truncated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         files,
     })
 }

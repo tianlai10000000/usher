@@ -823,30 +823,29 @@ fn prefetch_project_pr_overview(
             )
             .await;
 
-            if let Ok(mut guard) = state_task.lock() {
-                if let Some(item) = guard
+            if let Ok(mut guard) = state_task.lock()
+                && let Some(item) = guard
                     .iter_mut()
                     .find(|item| item.project_alias == task.project_alias)
-                {
-                    item.pr_overview.loading = false;
-                    match result {
-                        Ok(counts) => {
-                            item.pr_overview.failed = false;
-                            item.pr_overview.fat_display = counts.fat.to_string();
-                            item.pr_overview.uat_display = counts.uat.to_string();
-                            item.pr_overview.prod_display = counts.prod.to_string();
-                        }
-                        Err(error) => {
-                            log::warn!(
-                                "[Project] Failed to load PR overview for '{}': {}",
-                                task.project_alias,
-                                error
-                            );
-                            item.pr_overview.failed = true;
-                            item.pr_overview.fat_display.clear();
-                            item.pr_overview.uat_display.clear();
-                            item.pr_overview.prod_display.clear();
-                        }
+            {
+                item.pr_overview.loading = false;
+                match result {
+                    Ok(counts) => {
+                        item.pr_overview.failed = false;
+                        item.pr_overview.fat_display = counts.fat.to_string();
+                        item.pr_overview.uat_display = counts.uat.to_string();
+                        item.pr_overview.prod_display = counts.prod.to_string();
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "[Project] Failed to load PR overview for '{}': {}",
+                            task.project_alias,
+                            error
+                        );
+                        item.pr_overview.failed = true;
+                        item.pr_overview.fat_display.clear();
+                        item.pr_overview.uat_display.clear();
+                        item.pr_overview.prod_display.clear();
                     }
                 }
             }

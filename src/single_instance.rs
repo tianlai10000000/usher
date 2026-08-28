@@ -1,11 +1,15 @@
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
 
-static INSTANCE_LOCK_FILE: OnceLock<File> = OnceLock::new();
+static INSTANCE_LOCK_FILE: OnceLock<Mutex<Option<File>>> = OnceLock::new();
+
+fn instance_lock_file() -> &'static Mutex<Option<File>> {
+    INSTANCE_LOCK_FILE.get_or_init(|| Mutex::new(None))
+}
 
 fn lock_file_name(namespace: Option<&str>) -> String {
     let namespace = namespace.filter(|value| {
@@ -35,9 +39,17 @@ fn lock_file_path() -> PathBuf {
 /// Acquire global process lock.
 /// Returns false when another instance is already running.
 pub fn acquire_instance_lock() -> Result<bool> {
+    let mut lock_file = instance_lock_file()
+        .lock()
+        .map_err(|error| anyhow::anyhow!("Instance lock state is poisoned: {error}"))?;
+    if lock_file.is_some() {
+        return Ok(true);
+    }
+
     let path = lock_file_path();
     let file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&path)
@@ -45,11 +57,28 @@ pub fn acquire_instance_lock() -> Result<bool> {
 
     match file.try_lock_exclusive() {
         Ok(()) => {
-            let _ = INSTANCE_LOCK_FILE.set(file);
+            *lock_file = Some(file);
             Ok(true)
         }
         Err(_) => Ok(false),
     }
+}
+
+/// Release the process lock before handing an update restart to a new process.
+/// Dropping the file remains a fallback if the explicit unlock reports an OS
+/// error. Closing the descriptor releases the OS lock, so that failure is
+/// logged but does not leave the current process running without a tracked lock.
+pub fn release_instance_lock() -> Result<()> {
+    let mut lock_file = instance_lock_file()
+        .lock()
+        .map_err(|error| anyhow::anyhow!("Instance lock state is poisoned: {error}"))?;
+    let Some(file) = lock_file.take() else {
+        return Ok(());
+    };
+    if let Err(error) = fs2::FileExt::unlock(&file) {
+        log::warn!("Explicit instance unlock failed; closing the lock file as fallback: {error}");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

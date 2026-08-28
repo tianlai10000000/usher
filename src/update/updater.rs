@@ -125,7 +125,9 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
     let (is_up_to_date, version) = result;
 
     if !is_up_to_date {
-        let mut s = state_clone.lock().unwrap();
+        let mut s = state_clone
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         s.available = true;
         s.version = version;
     }
@@ -148,7 +150,9 @@ pub async fn perform_update_with_progress(
 
     // Set download status
     {
-        let mut s = state.lock().unwrap();
+        let mut s = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         s.is_downloading = true;
         s.download_progress = 0.0;
         s.download_status = "Preparing...".to_string();
@@ -331,7 +335,9 @@ pub async fn perform_update_with_progress(
 
         // Update state
         {
-            let mut s = state_clone.lock().unwrap();
+            let mut s = state_clone
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             s.download_progress = progress;
             s.downloaded_bytes = downloaded;
             s.total_bytes = total_size;
@@ -420,15 +426,15 @@ pub async fn perform_update_with_progress(
             .entries()
             .context("Failed to read archive entries")?
         {
-            if let Ok(entry) = entry_result {
-                if let Ok(path) = entry.path() {
-                    let path_str = path.to_string_lossy().to_string();
-                    log::debug!("   - {}", path_str);
-                    // Check if it's the usher file (may have path prefix)
-                    if path_str == "usher" || path_str.ends_with("/usher") {
-                        found_usher = true;
-                        usher_path_in_archive = path_str;
-                    }
+            if let Ok(entry) = entry_result
+                && let Ok(path) = entry.path()
+            {
+                let path_str = path.to_string_lossy().to_string();
+                log::debug!("   - {}", path_str);
+                // Check if it's the usher file (may have path prefix)
+                if path_str == "usher" || path_str.ends_with("/usher") {
+                    found_usher = true;
+                    usher_path_in_archive = path_str;
                 }
             }
         }
@@ -462,10 +468,10 @@ pub async fn perform_update_with_progress(
                         if path.is_file() && path.file_name().map(|n| n == "usher").unwrap_or(false)
                         {
                             return Some(path);
-                        } else if path.is_dir() {
-                            if let Some(found) = find_usher_recursive(&path) {
-                                return Some(found);
-                            }
+                        } else if path.is_dir()
+                            && let Some(found) = find_usher_recursive(&path)
+                        {
+                            return Some(found);
                         }
                     }
                 }
@@ -482,10 +488,8 @@ pub async fn perform_update_with_progress(
                 // List extracted files for debugging
                 log::debug!(" Extracted file list:");
                 if let Ok(entries) = std::fs::read_dir(&extract_path) {
-                    for entry in entries {
-                        if let Ok(entry) = entry {
-                            log::debug!("   - {:?}", entry.path());
-                        }
+                    for entry in entries.flatten() {
+                        log::debug!("   - {:?}", entry.path());
                     }
                 }
                 return Err(anyhow::anyhow!(
@@ -523,7 +527,9 @@ pub async fn perform_update_with_progress(
 
         // Update state
         {
-            let mut s = state_for_install.lock().unwrap();
+            let mut s = state_for_install
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             s.download_progress = 1.0;
             s.download_status = "Update complete! Restarting...".to_string();
         }
@@ -538,7 +544,7 @@ pub async fn perform_update_with_progress(
         progress_callback_for_install(1.0, downloaded, total_size, "Restarting application...");
 
         // Restart application
-        restart_application();
+        restart_application()?;
 
         Ok(())
     })
@@ -550,7 +556,9 @@ pub async fn perform_update_with_progress(
 
     // Reset download status
     {
-        let mut s = state.lock().unwrap();
+        let mut s = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         s.is_downloading = false;
     }
 
@@ -566,7 +574,7 @@ pub async fn perform_update(_state: &Arc<Mutex<UpdateState>>) -> Result<()> {
         updater.update()?;
 
         // Restart program after update completes
-        restart_application();
+        restart_application()?;
 
         Ok(())
     })
@@ -578,24 +586,30 @@ pub async fn perform_update(_state: &Arc<Mutex<UpdateState>>) -> Result<()> {
 }
 
 /// Restart application
-fn restart_application() {
+fn restart_application() -> Result<()> {
     log::debug!(" Preparing to restart application...");
 
     // Get current executable file path
-    if let Ok(current_exe) = std::env::current_exe() {
-        log::debug!(" Current executable file: {:?}", current_exe);
+    let current_exe = std::env::current_exe().context("Failed to resolve current executable")?;
+    log::debug!(" Current executable file: {:?}", current_exe);
 
-        // Get command line arguments (excluding first argument, which is program name)
-        let args: Vec<String> = std::env::args().skip(1).collect();
+    // Get command line arguments (excluding first argument, which is program name)
+    let args: Vec<String> = std::env::args().skip(1).collect();
 
+    // The replacement process performs the same single-instance check during
+    // startup. Release our lock before spawning it, otherwise it exits before
+    // this process reaches graceful shutdown.
+    crate::single_instance::release_instance_lock()
+        .context("Failed to release the single-instance lock for restart")?;
+
+    let spawn_result = (|| -> std::io::Result<()> {
         #[cfg(target_os = "windows")]
         {
             use std::process::Command;
-            // Windows: Use cmd /c start to launch new process
-            let _ = Command::new("cmd")
+            Command::new("cmd")
                 .args(["/c", "start", "", &current_exe.to_string_lossy()])
                 .args(&args)
-                .spawn();
+                .spawn()?;
         }
 
         #[cfg(target_os = "macos")]
@@ -609,12 +623,12 @@ fn restart_application() {
                 if let Some(app_pos) = exe_path.find(".app/") {
                     let app_path = &exe_path[..app_pos + 4];
                     log::debug!(" Restarting macOS app: {}", app_path);
-                    let _ = Command::new("open").arg("-n").arg(app_path).spawn();
+                    Command::new("open").arg("-n").arg(app_path).spawn()?;
                 }
             } else {
                 // Directly run executable file
                 log::debug!(" Directly running executable file: {}", exe_path);
-                let _ = Command::new(&*exe_path).args(&args).spawn();
+                Command::new(&*exe_path).args(&args).spawn()?;
             }
         }
 
@@ -622,18 +636,44 @@ fn restart_application() {
         {
             use std::process::Command;
             // Linux: Directly launch new process
-            let _ = Command::new(&current_exe).args(&args).spawn();
+            Command::new(&current_exe).args(&args).spawn()?;
         }
+
+        Ok(())
+    })();
+
+    if let Err(error) = spawn_result {
+        // Keep the current process protected if launching the replacement
+        // failed. A failed reacquire is logged separately, while the original
+        // spawn error remains the user-facing failure.
+        match crate::single_instance::acquire_instance_lock() {
+            Ok(true) => {}
+            Ok(false) => {
+                log::error!(
+                    " Another process acquired the instance lock after restart failure; shutting down this instance"
+                );
+                crate::shutdown::request_shutdown("update-restart-lock-lost");
+            }
+            Err(lock_error) => {
+                log::error!(
+                    " Failed to reacquire instance lock after restart failure: {lock_error}"
+                );
+            }
+        }
+        return Err(error).context("Failed to launch replacement process");
     }
 
     // Gracefully stop current process to allow cleanup hooks to run.
     log::debug!(" Requesting graceful shutdown for restart");
     crate::shutdown::request_shutdown("update-restart");
+    Ok(())
 }
 
 /// Reset update state
 pub fn reset_update_state(state: &Arc<Mutex<UpdateState>>) {
-    let mut s = state.lock().unwrap();
+    let mut s = state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     s.is_downloading = false;
     s.download_progress = 0.0;
     s.download_status = String::new();
@@ -691,7 +731,9 @@ pub fn setup_updater(
             log::debug!(" Starting update check...");
             // Reset state
             {
-                let mut s = state.lock().unwrap();
+                let mut s = state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 s.available = false;
                 s.version.clear();
                 s.error.clear();
@@ -708,7 +750,9 @@ pub fn setup_updater(
                 match &result {
                     Ok(up_to_date) => {
                         let v = if !*up_to_date {
-                            let s = state.lock().unwrap();
+                            let s = state
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
                             s.version.clone()
                         } else {
                             String::new()

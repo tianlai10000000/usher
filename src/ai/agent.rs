@@ -94,6 +94,8 @@ fn configuration_error(message: impl Into<String>) -> HttpError {
     }
 }
 
+// Preserve the shared HTTP error contract used by all provider operations.
+#[allow(clippy::result_large_err)]
 fn validate_settings(settings: &AiAgentSettings) -> Result<(), HttpError> {
     if settings.base_url.trim().is_empty() {
         return Err(configuration_error("OpenAI Base URL is required"));
@@ -107,6 +109,7 @@ fn validate_settings(settings: &AiAgentSettings) -> Result<(), HttpError> {
     Ok(())
 }
 
+#[allow(clippy::result_large_err)]
 fn endpoint_url(base_url: &str, resource: &str) -> Result<Url, HttpError> {
     let base_url = base_url.trim().trim_end_matches('/');
     let base_url = base_url

@@ -494,12 +494,11 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     let router_for_nav_index = router.clone();
     let app_for_nav_index = app.as_weak();
     app.on_navigate_from_nav_index(move |item_index| {
-        if let Some(route) = route_for_navigation_index(item_index) {
-            if let Some(state) = router_for_nav_index.navigate(route) {
-                if let Some(ui) = app_for_nav_index.upgrade() {
-                    ui.invoke_chat_route_visible_changed(state.chat_route_visible);
-                }
-            }
+        if let Some(route) = route_for_navigation_index(item_index)
+            && let Some(state) = router_for_nav_index.navigate(route)
+            && let Some(ui) = app_for_nav_index.upgrade()
+        {
+            ui.invoke_chat_route_visible_changed(state.chat_route_visible);
         }
     });
 
@@ -509,32 +508,32 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     let app_for_ai_agent_provider = app.as_weak();
     let settings_page_for_navigation = settings_page.clone();
     app.on_navigate(move |route| {
-        if let Some(state) = router_clone.navigate(route) {
-            if let Some(ui) = app_for_chat_route.upgrade() {
-                ui.invoke_chat_route_visible_changed(state.chat_route_visible);
-            }
+        if let Some(state) = router_clone.navigate(route)
+            && let Some(ui) = app_for_chat_route.upgrade()
+        {
+            ui.invoke_chat_route_visible_changed(state.chat_route_visible);
         }
 
-        if route == Route::Settings {
-            if let Some(ui) = app_for_ai_agent_provider.upgrade() {
-                let index = match AppState::get(&ui).get_ai_agent_provider().as_str() {
-                    "deepseek" => 1,
-                    "openai" => 2,
-                    _ => 0,
-                };
-                // SettingsPage is conditionally created by the route. Force a
-                // transition after it exists so the native dropdown populates.
-                ui.set_settings_ai_agent_provider_index(-1);
-                settings_page_for_navigation.set_ai_agent_provider_index(-1);
-                let ui_weak = ui.as_weak();
-                let settings_page = settings_page_for_navigation.clone();
-                Timer::single_shot(std::time::Duration::from_millis(1), move || {
-                    if let Some(ui) = ui_weak.upgrade() {
-                        ui.set_settings_ai_agent_provider_index(index);
-                        settings_page.set_ai_agent_provider_index(index);
-                    }
-                });
-            }
+        if route == Route::Settings
+            && let Some(ui) = app_for_ai_agent_provider.upgrade()
+        {
+            let index = match AppState::get(&ui).get_ai_agent_provider().as_str() {
+                "deepseek" => 1,
+                "openai" => 2,
+                _ => 0,
+            };
+            // SettingsPage is conditionally created by the route. Force a
+            // transition after it exists so the native dropdown populates.
+            ui.set_settings_ai_agent_provider_index(-1);
+            settings_page_for_navigation.set_ai_agent_provider_index(-1);
+            let ui_weak = ui.as_weak();
+            let settings_page = settings_page_for_navigation.clone();
+            Timer::single_shot(std::time::Duration::from_millis(1), move || {
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_settings_ai_agent_provider_index(index);
+                    settings_page.set_ai_agent_provider_index(index);
+                }
+            });
         }
     });
 
@@ -558,10 +557,10 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     let router_for_feature_back = router.clone();
     let app_for_feature_back = app.as_weak();
     app.on_router_back(move || {
-        if let Some(state) = router_for_feature_back.back() {
-            if let Some(ui) = app_for_feature_back.upgrade() {
-                ui.invoke_chat_route_visible_changed(state.chat_route_visible);
-            }
+        if let Some(state) = router_for_feature_back.back()
+            && let Some(ui) = app_for_feature_back.upgrade()
+        {
+            ui.invoke_chat_route_visible_changed(state.chat_route_visible);
         }
     });
 

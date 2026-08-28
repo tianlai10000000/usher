@@ -272,8 +272,7 @@ impl MarkdownVirtualLayoutBridge {
         &self,
         blocks: &ModelRc<ArtifactPreviewBlock>,
     ) -> Vec<ArtifactPreviewVirtualRow> {
-        let rows = self
-            .window
+        self.window
             .items
             .iter()
             .filter_map(|item| {
@@ -284,8 +283,7 @@ impl MarkdownVirtualLayoutBridge {
                     block: blocks.row_data(item.index)?,
                 })
             })
-            .collect::<Vec<_>>();
-        rows
+            .collect::<Vec<_>>()
     }
 
     fn update_rows_incrementally(

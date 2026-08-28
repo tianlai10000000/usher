@@ -735,6 +735,14 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::time::Instant;
 
+    #[cfg(debug_assertions)]
+    fn require_release_build() {
+        panic!("run this benchmark with --release");
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn require_release_build() {}
+
     struct FailingProvider {
         id: &'static str,
         score: u16,
@@ -980,7 +988,7 @@ mod tests {
     #[test]
     #[ignore = "release-only quantitative benchmark"]
     fn markdown_parser_rss_probe() {
-        assert!(!cfg!(debug_assertions), "run this benchmark with --release");
+        require_release_build();
         let fixture =
             std::env::var("USHER_PREVIEW_PARSER_FIXTURE").unwrap_or_else(|_| "plain".to_string());
         let markdown = match fixture.as_str() {
@@ -1026,7 +1034,7 @@ mod tests {
     #[test]
     #[ignore = "release-only quantitative benchmark"]
     fn markdown_prepare_release_benchmark() {
-        assert!(!cfg!(debug_assertions), "run this benchmark with --release");
+        require_release_build();
         let section = "## Result\n\n- **Passed**: `cargo test --lib --locked`\n- [Report](https://example.invalid/report)\n\n> Provider preparation is width-independent.\n\n";
         let markdown = format!("# Build report\n\n{}", section.repeat(7_200));
         let source_bytes = markdown.len();

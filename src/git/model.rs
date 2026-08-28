@@ -125,6 +125,50 @@ pub(crate) struct PullRequestDiffDetail {
     pub(crate) head_sha: String,
     pub(crate) start_sha: String,
     pub(crate) too_many_commits: bool,
+    pub(crate) files_truncated: bool,
+}
+
+pub(crate) struct PageCollector<T> {
+    values: Vec<T>,
+    page: u32,
+    per_page: usize,
+    max_pages: u32,
+    truncated: bool,
+}
+
+impl<T> PageCollector<T> {
+    pub(crate) fn new(per_page: usize, max_pages: u32) -> Self {
+        Self {
+            values: Vec::new(),
+            page: 1,
+            per_page: per_page.max(1),
+            max_pages: max_pages.max(1),
+            truncated: false,
+        }
+    }
+
+    pub(crate) fn page(&self) -> u32 {
+        self.page
+    }
+
+    /// Returns whether another page should be requested.
+    pub(crate) fn append(&mut self, batch: Vec<T>) -> bool {
+        let page_was_full = batch.len() >= self.per_page;
+        self.values.extend(batch);
+        if !page_was_full {
+            return false;
+        }
+        if self.page >= self.max_pages {
+            self.truncated = true;
+            return false;
+        }
+        self.page += 1;
+        true
+    }
+
+    pub(crate) fn into_parts(self) -> (Vec<T>, bool) {
+        (self.values, self.truncated)
+    }
 }
 
 /// Read the Conversation-tab badge summary from a provider PR/MR detail payload.
@@ -418,7 +462,7 @@ pub(crate) fn finalize_conversation_timeline(
     // one atomic timeline block. Sorting every row independently separates the
     // "added N commits" record from commits whose authored dates differ. This
     // block normalization is shared by GitHub, GitLab, and both Gitee profiles.
-    let mut blocks = Vec::<(String, Vec<PullRequestConversationItem>)>::new();
+    let mut blocks = Vec::<(Option<i64>, usize, Vec<PullRequestConversationItem>)>::new();
     let mut activity = activity
         .into_iter()
         .map(|mut item| {
@@ -427,7 +471,7 @@ pub(crate) fn finalize_conversation_timeline(
         })
         .peekable();
     while let Some(item) = activity.next() {
-        let sort_at = item.created_at.clone();
+        let mut sort_at = normalized_conversation_timestamp(item.created_at.as_str());
         let mut block = vec![item];
         if block[0].kind == "commits" {
             while activity.peek().is_some_and(|next| next.kind == "commit") {
@@ -437,19 +481,39 @@ pub(crate) fn finalize_conversation_timeline(
             }
         } else if block[0].kind == "review_summary"
             && activity.peek().is_some_and(|next| next.kind == "review")
+            && let Some(review) = activity.next()
         {
-            if let Some(review) = activity.next() {
-                block.push(review);
+            if sort_at.is_none() {
+                sort_at = normalized_conversation_timestamp(review.created_at.as_str());
             }
+            block.push(review);
         }
-        blocks.push((sort_at, block));
+        let original_index = blocks.len();
+        blocks.push((sort_at, original_index, block));
     }
-    blocks.sort_by(|left, right| left.0.cmp(&right.0));
+    blocks.sort_by(|left, right| match (left.0, right.0) {
+        (Some(left_time), Some(right_time)) => {
+            left_time.cmp(&right_time).then(left.1.cmp(&right.1))
+        }
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => left.1.cmp(&right.1),
+    });
 
     let mut items = Vec::new();
     items.push(description);
-    items.extend(blocks.into_iter().flat_map(|(_, block)| block.into_iter()));
+    items.extend(
+        blocks
+            .into_iter()
+            .flat_map(|(_, _, block)| block.into_iter()),
+    );
     items
+}
+
+fn normalized_conversation_timestamp(value: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(value.trim())
+        .ok()
+        .map(|timestamp| timestamp.timestamp_millis())
 }
 
 /// Convert provider-specific Markdown/HTML bodies into the one plain-text

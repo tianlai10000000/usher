@@ -1202,11 +1202,9 @@ unsafe fn configure_icon_button(
             break;
         }
     }
-    if !image_set {
-        if let Some(fallback) = nsstring(fallback) {
-            unsafe {
-                let _: () = msg_send![button, setTitle: fallback];
-            }
+    if !image_set && let Some(fallback) = nsstring(fallback) {
+        unsafe {
+            let _: () = msg_send![button, setTitle: fallback];
         }
     }
 
@@ -1907,118 +1905,6 @@ pub(crate) fn update_titlebar_navigation_controls(window: &MainWindow) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        NS_WINDOW_STYLE_MASK_FULLSCREEN, SIDEBAR_DARK_MODE, TITLEBAR_SYMBOL_POINT_SIZE,
-        artifact_preview_titlebar_actions, artifact_preview_titlebar_width, macos_shortcut_key,
-        sidebar_content_surface_components, sidebar_toggle_image_names, sidebar_toggle_tooltip,
-        style_mask_is_fullscreen, titlebar_controls_x, titlebar_controls_y, traffic_light_origin,
-    };
-
-    #[test]
-    fn physical_shortcut_keys_are_input_method_independent() {
-        assert_eq!(macos_shortcut_key(11), Some("b"));
-        assert_eq!(macos_shortcut_key(38), Some("j"));
-        assert_eq!(macos_shortcut_key(33), Some("["));
-        assert_eq!(macos_shortcut_key(30), Some("]"));
-        assert_eq!(macos_shortcut_key(43), Some(","));
-        assert_eq!(macos_shortcut_key(0), None);
-    }
-
-    #[test]
-    fn sidebar_toggle_uses_distinct_open_and_closed_symbols() {
-        assert_eq!(sidebar_toggle_image_names(false)[0], "symbol:sidebar.left");
-        assert_eq!(
-            sidebar_toggle_image_names(true)[0],
-            "symbol:rectangle.leftthird.inset.filled"
-        );
-        assert_ne!(
-            sidebar_toggle_image_names(false)[0],
-            sidebar_toggle_image_names(true)[0]
-        );
-        assert_eq!(sidebar_toggle_tooltip(false), "Show sidebar (⌘B)");
-        assert_eq!(sidebar_toggle_tooltip(true), "Hide sidebar (⌘B)");
-    }
-
-    #[test]
-    fn titlebar_controls_stay_beyond_traffic_lights_when_fullscreen_resets_anchor() {
-        assert_eq!(titlebar_controls_x(7.0, 69.0), 77.0);
-        assert_eq!(titlebar_controls_x(82.0, 69.0), 82.0);
-    }
-
-    #[test]
-    fn native_fullscreen_style_mask_is_classified_without_other_bits() {
-        assert!(!style_mask_is_fullscreen(0));
-        assert!(style_mask_is_fullscreen(NS_WINDOW_STYLE_MASK_FULLSCREEN));
-        assert!(style_mask_is_fullscreen(
-            NS_WINDOW_STYLE_MASK_FULLSCREEN | 1u64
-        ));
-    }
-
-    #[test]
-    fn titlebar_controls_compensate_for_native_button_image_baseline() {
-        assert_eq!(titlebar_controls_y(10.0, 14.0, true), 10.0);
-        assert_eq!(titlebar_controls_y(10.0, 14.0, false), 3.0);
-    }
-
-    #[test]
-    fn traffic_lights_shift_right_onto_sidebar_icon_centerline() {
-        // Default AppKit close origin x=9 (center 16). After +8, center is 24,
-        // matching GitHubMetrics.sidebar-nav-icon-center-x.
-        let origin = traffic_light_origin(9.0, 16.0);
-        assert_eq!(origin.x, 17.0);
-        assert_eq!(origin.y, 9.0);
-    }
-
-    #[test]
-    fn titlebar_symbol_point_size_stays_on_whole_points() {
-        assert_eq!(TITLEBAR_SYMBOL_POINT_SIZE, 14.0);
-        assert_eq!(TITLEBAR_SYMBOL_POINT_SIZE.fract(), 0.0);
-    }
-
-    #[test]
-    fn mock_preview_capabilities_compact_native_titlebar_actions() {
-        assert_eq!(
-            artifact_preview_titlebar_actions(false, false),
-            [false, false, true]
-        );
-        assert_eq!(artifact_preview_titlebar_width(false, false), 36.0);
-
-        assert_eq!(
-            artifact_preview_titlebar_actions(true, false),
-            [true, false, true]
-        );
-        assert_eq!(artifact_preview_titlebar_width(true, false), 68.0);
-
-        assert_eq!(
-            artifact_preview_titlebar_actions(false, true),
-            [false, true, true]
-        );
-        assert_eq!(artifact_preview_titlebar_width(false, true), 68.0);
-
-        assert_eq!(
-            artifact_preview_titlebar_actions(true, true),
-            [true, true, true]
-        );
-        assert_eq!(artifact_preview_titlebar_width(true, true), 100.0);
-    }
-
-    #[test]
-    fn content_surface_components_follow_sidebar_theme() {
-        unsafe {
-            SIDEBAR_DARK_MODE = false;
-            assert_eq!(sidebar_content_surface_components(), (1.0, 1.0, 1.0));
-            SIDEBAR_DARK_MODE = true;
-            assert_eq!(
-                sidebar_content_surface_components(),
-                (12.0 / 255.0, 14.0 / 255.0, 19.0 / 255.0)
-            );
-            SIDEBAR_DARK_MODE = false;
-        }
-    }
-}
-
 /// Register GitHub's macOS UI and monospace faces without bundling Apple fonts.
 pub(crate) fn setup_pr_review_fonts(app: &MainWindow) {
     use slint::fontique_010::fontique;
@@ -2146,5 +2032,117 @@ pub(crate) fn play_ui_click() {
     let played: bool = unsafe { msg_send![sound, play] };
     if !played {
         log::debug!("[Sound] NSSound play returned false for Tink");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        NS_WINDOW_STYLE_MASK_FULLSCREEN, SIDEBAR_DARK_MODE, TITLEBAR_SYMBOL_POINT_SIZE,
+        artifact_preview_titlebar_actions, artifact_preview_titlebar_width, macos_shortcut_key,
+        sidebar_content_surface_components, sidebar_toggle_image_names, sidebar_toggle_tooltip,
+        style_mask_is_fullscreen, titlebar_controls_x, titlebar_controls_y, traffic_light_origin,
+    };
+
+    #[test]
+    fn physical_shortcut_keys_are_input_method_independent() {
+        assert_eq!(macos_shortcut_key(11), Some("b"));
+        assert_eq!(macos_shortcut_key(38), Some("j"));
+        assert_eq!(macos_shortcut_key(33), Some("["));
+        assert_eq!(macos_shortcut_key(30), Some("]"));
+        assert_eq!(macos_shortcut_key(43), Some(","));
+        assert_eq!(macos_shortcut_key(0), None);
+    }
+
+    #[test]
+    fn sidebar_toggle_uses_distinct_open_and_closed_symbols() {
+        assert_eq!(sidebar_toggle_image_names(false)[0], "symbol:sidebar.left");
+        assert_eq!(
+            sidebar_toggle_image_names(true)[0],
+            "symbol:rectangle.leftthird.inset.filled"
+        );
+        assert_ne!(
+            sidebar_toggle_image_names(false)[0],
+            sidebar_toggle_image_names(true)[0]
+        );
+        assert_eq!(sidebar_toggle_tooltip(false), "Show sidebar (⌘B)");
+        assert_eq!(sidebar_toggle_tooltip(true), "Hide sidebar (⌘B)");
+    }
+
+    #[test]
+    fn titlebar_controls_stay_beyond_traffic_lights_when_fullscreen_resets_anchor() {
+        assert_eq!(titlebar_controls_x(7.0, 69.0), 77.0);
+        assert_eq!(titlebar_controls_x(82.0, 69.0), 82.0);
+    }
+
+    #[test]
+    fn native_fullscreen_style_mask_is_classified_without_other_bits() {
+        assert!(!style_mask_is_fullscreen(0));
+        assert!(style_mask_is_fullscreen(NS_WINDOW_STYLE_MASK_FULLSCREEN));
+        assert!(style_mask_is_fullscreen(
+            NS_WINDOW_STYLE_MASK_FULLSCREEN | 1u64
+        ));
+    }
+
+    #[test]
+    fn titlebar_controls_compensate_for_native_button_image_baseline() {
+        assert_eq!(titlebar_controls_y(10.0, 14.0, true), 10.0);
+        assert_eq!(titlebar_controls_y(10.0, 14.0, false), 3.0);
+    }
+
+    #[test]
+    fn traffic_lights_shift_right_onto_sidebar_icon_centerline() {
+        // Default AppKit close origin x=9 (center 16). After +8, center is 24,
+        // matching GitHubMetrics.sidebar-nav-icon-center-x.
+        let origin = traffic_light_origin(9.0, 16.0);
+        assert_eq!(origin.x, 17.0);
+        assert_eq!(origin.y, 9.0);
+    }
+
+    #[test]
+    fn titlebar_symbol_point_size_stays_on_whole_points() {
+        assert_eq!(TITLEBAR_SYMBOL_POINT_SIZE, 14.0);
+        assert_eq!(TITLEBAR_SYMBOL_POINT_SIZE.fract(), 0.0);
+    }
+
+    #[test]
+    fn mock_preview_capabilities_compact_native_titlebar_actions() {
+        assert_eq!(
+            artifact_preview_titlebar_actions(false, false),
+            [false, false, true]
+        );
+        assert_eq!(artifact_preview_titlebar_width(false, false), 36.0);
+
+        assert_eq!(
+            artifact_preview_titlebar_actions(true, false),
+            [true, false, true]
+        );
+        assert_eq!(artifact_preview_titlebar_width(true, false), 68.0);
+
+        assert_eq!(
+            artifact_preview_titlebar_actions(false, true),
+            [false, true, true]
+        );
+        assert_eq!(artifact_preview_titlebar_width(false, true), 68.0);
+
+        assert_eq!(
+            artifact_preview_titlebar_actions(true, true),
+            [true, true, true]
+        );
+        assert_eq!(artifact_preview_titlebar_width(true, true), 100.0);
+    }
+
+    #[test]
+    fn content_surface_components_follow_sidebar_theme() {
+        unsafe {
+            SIDEBAR_DARK_MODE = false;
+            assert_eq!(sidebar_content_surface_components(), (1.0, 1.0, 1.0));
+            SIDEBAR_DARK_MODE = true;
+            assert_eq!(
+                sidebar_content_surface_components(),
+                (12.0 / 255.0, 14.0 / 255.0, 19.0 / 255.0)
+            );
+            SIDEBAR_DARK_MODE = false;
+        }
     }
 }

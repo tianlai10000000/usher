@@ -674,6 +674,7 @@ export component MainWindow inherits Window {
     in property <string> workflow-pr-review-base-sha: "";
     in property <string> workflow-pr-review-head-sha: "";
     in property <bool> workflow-pr-review-too-many-commits: false;
+    in property <bool> workflow-pr-review-files-truncated: false;
     in-out property <int> workflow-pr-review-tab: 2;
     in property <[WorkflowPrConversationItem]> workflow-pr-review-conversation-items: [];
     in property <int> workflow-pr-review-conversation-content-height: 0;
@@ -2192,6 +2193,7 @@ export component MainWindow inherits Window {
         base-sha: root.workflow-pr-review-base-sha;
         head-sha: root.workflow-pr-review-head-sha;
         too-many-commits: root.workflow-pr-review-too-many-commits;
+        files-truncated: root.workflow-pr-review-files-truncated;
         selected-tab <=> root.workflow-pr-review-tab;
         conversation-items: root.workflow-pr-review-conversation-items;
         conversation-content-height: root.workflow-pr-review-conversation-content-height;

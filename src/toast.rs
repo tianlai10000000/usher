@@ -36,14 +36,14 @@ fn parse_width(width_str: &str) -> (bool, f32, f32) {
         return (true, 0.0, 0.0);
     }
 
-    if width_str.ends_with("px") {
-        if let Ok(value) = width_str[..width_str.len() - 2].trim().parse::<f32>() {
+    if let Some(width) = width_str.strip_suffix("px") {
+        if let Ok(value) = width.trim().parse::<f32>() {
             return (false, value, 0.0);
         }
-    } else if width_str.ends_with("%") {
-        if let Ok(percent) = width_str[..width_str.len() - 1].trim().parse::<f32>() {
-            return (false, 0.0, percent);
-        }
+    } else if let Some(width) = width_str.strip_suffix('%')
+        && let Ok(percent) = width.trim().parse::<f32>()
+    {
+        return (false, 0.0, percent);
     }
 
     // Default value: GitHub Primer content-sized toast.
@@ -122,6 +122,8 @@ fn create_toast_with_defaults(
 }
 
 // Helper function: apply Toast configuration to UI
+// This mirrors the application-owned Slint ToastOptions fields.
+#[allow(clippy::too_many_arguments)]
 fn apply_toast(
     manager: &ToastManager,
     message: String,
@@ -153,7 +155,9 @@ fn apply_toast(
     // If duration > 0, set auto-close timer
     if duration > 0 {
         let ui_weak = {
-            let guard = UI_WEAK.lock().unwrap();
+            let guard = UI_WEAK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             guard.clone()
         };
 
@@ -171,7 +175,9 @@ fn apply_toast(
 // Toast manager initialization and callback binding function
 pub fn setup_toast(ui: &MainWindow) {
     let ui_weak = ui.as_weak();
-    *UI_WEAK.lock().unwrap() = Some(ui_weak.clone());
+    *UI_WEAK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ui_weak.clone());
 
     let manager = ToastManager::get(ui);
 

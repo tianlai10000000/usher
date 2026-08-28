@@ -19,7 +19,7 @@ lazy_static::lazy_static! {
         );
         builder
             .enable_all()
-            .on_thread_start(|| crate::logger::tracing_logger::install_thread_dispatch())
+            .on_thread_start(crate::logger::tracing_logger::install_thread_dispatch)
             .build()
             .expect("Failed to create shared Tokio runtime")
     });

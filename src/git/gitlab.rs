@@ -9,15 +9,16 @@ use crate::codereview::api::gitlab as endpoints;
 use crate::http::{self, RequestOptions};
 
 use super::{
-    PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
-    PullRequestDiffFile, PullRequestFilters, PullRequestItem, PullRequestMergeMethod,
-    PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestReviewAction,
-    PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
-    configured_api_base_url, configured_token, conversation_body_to_plain_text,
-    conversation_commit_batch_items, conversation_commit_batch_items_for_actor,
-    conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
-    is_configured_enterprise_host, is_redundant_commit_system_note, is_redundant_merge_system_note,
-    parse_unified_diff, percent_encode_path, unavailable_diff_file,
+    PageCollector, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
+    PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters, PullRequestItem,
+    PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
+    PullRequestReviewAction, PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType,
+    commit_count_from_detail, configured_api_base_url, configured_token,
+    conversation_body_to_plain_text, conversation_commit_batch_items,
+    conversation_commit_batch_items_for_actor, conversation_count_from_detail,
+    conversation_merged_item, finalize_conversation_timeline, is_configured_enterprise_host,
+    is_redundant_commit_system_note, is_redundant_merge_system_note, parse_unified_diff,
+    percent_encode_path, unavailable_diff_file,
 };
 
 #[derive(Deserialize)]
@@ -364,12 +365,14 @@ pub(super) async fn get_pull_request_diff(
         .replace("{api_base_url}", api_base_url(locator).as_str())
         .replace("{project_id}", project_id.as_str())
         .replace("{merge_request_iid}", merge_request_iid.as_str());
-    let mut page = 1u32;
-    let mut values = Vec::new();
+    let mut pages = PageCollector::new(100, 30);
     loop {
         let mut request = http::get(endpoint.as_str())
             .header(ACCEPT, "application/json")
-            .query(&[("page", page.to_string()), ("per_page", "100".to_string())]);
+            .query(&[
+                ("page", pages.page().to_string()),
+                ("per_page", "100".to_string()),
+            ]);
         if ignore_whitespace_change {
             // Standard GitLab does not currently expose a whitespace query on
             // this endpoint. Keep the option provider-neutral without sending
@@ -387,16 +390,11 @@ pub(super) async fn get_pull_request_diff(
         )
         .await
         .map_err(|error| error.to_string())?;
-        let batch_len = batch.len();
-        values.extend(batch);
-        if batch_len < 100 {
-            break;
-        }
-        page = page.saturating_add(1);
-        if page > 30 {
+        if !pages.append(batch) {
             break;
         }
     }
+    let (values, files_truncated) = pages.into_parts();
 
     let files = values.iter().map(decode_diff_file).collect::<Vec<_>>();
     let refs = detail.get("diff_refs").unwrap_or(&Value::Null);
@@ -428,6 +426,7 @@ pub(super) async fn get_pull_request_diff(
                     .and_then(Value::as_bool)
                     .unwrap_or(false)
         }),
+        files_truncated,
         files,
     })
 }
@@ -473,6 +472,11 @@ pub(super) async fn get_commit_range_diff(
             .get("compare_timeout")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        files_truncated: payload
+            .get("overflow")
+            .or_else(|| payload.get("compare_timeout"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         files,
     })
 }
@@ -504,10 +508,10 @@ pub(super) async fn get_pull_request_action_state(
     )
     .await
     .map_err(|error| error.to_string())?;
-    let project = load_project_settings(locator, repo_project_id).await;
+    let project = load_project_settings(locator, repo_project_id).await?;
     Ok(gitlab_action_state(
         &detail,
-        project.as_ref(),
+        Some(&project),
         configured_token(RepoType::GitLab).is_some(),
     ))
 }
@@ -770,7 +774,7 @@ pub(super) async fn get_pull_request_conversation(
     let mut activity = notes
         .iter()
         .filter_map(|value| {
-            let body = string_field(&value, "body").unwrap_or_default();
+            let body = string_field(value, "body").unwrap_or_default();
             let is_system = value
                 .get("system")
                 .and_then(Value::as_bool)
@@ -783,19 +787,19 @@ pub(super) async fn get_pull_request_conversation(
                 return None;
             }
             Some(PullRequestConversationItem {
-                id: string_field(&value, "id").unwrap_or_default(),
+                id: string_field(value, "id").unwrap_or_default(),
                 kind: if is_system {
                     "event".to_string()
                 } else {
                     "comment".to_string()
                 },
-                author: nested_string(&value, "author", "name")
-                    .or_else(|| nested_string(&value, "author", "username"))
+                author: nested_string(value, "author", "name")
+                    .or_else(|| nested_string(value, "author", "username"))
                     .unwrap_or_else(|| "Unknown author".to_string()),
-                avatar_url: nested_string(&value, "author", "avatar_url").unwrap_or_default(),
+                avatar_url: nested_string(value, "author", "avatar_url").unwrap_or_default(),
                 author_association: String::new(),
                 body,
-                created_at: string_field(&value, "created_at").unwrap_or_default(),
+                created_at: string_field(value, "created_at").unwrap_or_default(),
                 state: String::new(),
                 review_id: String::new(),
                 can_dismiss: false,
@@ -1175,7 +1179,10 @@ async fn load_merge_request_detail(
     .map_err(|error| error.to_string())
 }
 
-async fn load_project_settings(locator: &RepoLocator, repo_project_id: &str) -> Option<Value> {
+async fn load_project_settings(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+) -> Result<Value, String> {
     let endpoint = endpoints::PROJECT_URL
         .replace("{api_base_url}", api_base_url(locator).as_str())
         .replace(
@@ -1187,10 +1194,7 @@ async fn load_project_settings(locator: &RepoLocator, repo_project_id: &str) -> 
         RequestOptions::new("Load GitLab project merge settings"),
     )
     .await
-    .map_err(|error| {
-        log::debug!("[CodeReview][GitLab] Project merge settings unavailable: {error}");
-    })
-    .ok()
+    .map_err(|error| error.to_string())
 }
 
 async fn post_merge_request_note(
@@ -1510,10 +1514,10 @@ pub(super) async fn get_repository_file_text(
 }
 
 fn api_base_url(locator: &RepoLocator) -> String {
-    if is_configured_enterprise_host(RepoType::GitLab, locator.host.as_str()) {
-        if let Some(api_base_url) = configured_api_base_url(RepoType::GitLab) {
-            return with_default_api_version(api_base_url, endpoints::API_VERSION_PATH);
-        }
+    if is_configured_enterprise_host(RepoType::GitLab, locator.host.as_str())
+        && let Some(api_base_url) = configured_api_base_url(RepoType::GitLab)
+    {
+        return with_default_api_version(api_base_url, endpoints::API_VERSION_PATH);
     }
     format!(
         "{}://{}{}",

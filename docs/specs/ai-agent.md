@@ -23,12 +23,12 @@ Values are stored in the local platform `settings.toml` under `[ai.agent]`, incl
 ## Request behavior / 请求行为
 
 - `src/ai/agent.rs` owns the AI Agent provider connection, normalizes `/models` and `/chat/completions` against a configured URL that may already include `/v1`, and executes both through shared HTTP.
-- AI Chat and AI Code Review explicitly load this configuration. RAG continues to use `src/chat/chat.rs` and its existing endpoint.
+- AI Chat and AI Code Review explicitly load this configuration. RAG continues to use `src/chat/chat.rs` and its independently configured HTTPS endpoint.
 - The Settings-page test uses `/models` through the same shared HTTP module. It verifies URL reachability and credentials without creating a billable completion. A provider may not list every model; this is reported as a non-fatal result.
 - The user-triggered connection test owns one bottom Toast for every terminal result. Request feedback stays silent in the shared HTTP layer so failures are not duplicated.
 
 - `src/ai/agent.rs` 负责 AI Agent Provider 连接，针对可包含 `/v1` 的配置地址规范化 `/models` 和 `/chat/completions`，并统一通过共享 HTTP 执行。
-- AI Chat 和 AI Code Review 显式读取本配置；RAG 继续使用 `src/chat/chat.rs` 及既有 endpoint。
+- AI Chat 和 AI Code Review 显式读取本配置；RAG 继续使用 `src/chat/chat.rs` 及其独立配置的 HTTPS endpoint。
 - 设置页测试通过同一 HTTP 模块调用 `/models`，验证地址可达和凭据有效，不产生生成费用。Provider 不列出全部模型时只作提示，不视为连接失败。
 - Chat 的失败仍显示为内联 assistant 消息；用户主动测试时由 AI Agent 功能层对成功或失败统一显示一个底部 Toast，共享 HTTP 层保持静默以避免重复提示。
 
@@ -54,7 +54,7 @@ Values are stored in the local platform `settings.toml` under `[ai.agent]`, incl
 - Cycle `Custom -> DeepSeek -> OpenAI -> DeepSeek`. The selected segment, Base URL, and Model must always describe the same provider: DeepSeek uses `https://api.deepseek.com` / `deepseek-v4-flash`, while OpenAI uses `https://api.openai.com/v1` / `gpt-4o-mini`. Editing Base URL or Model must select Custom.
 - Navigate away from Settings so its route-conditional factory product is destroyed, reopen it, and repeat the provider cycle. The saved preset must be restored without stale segment or field bindings; do not retain the hidden Settings tree to pass this check.
 - Test a valid provider/key and confirm a bottom success Toast; test invalid credentials and confirm one bottom error Toast.
-- Verify a RAG Chat message still reaches the original RAG endpoint after AI Agent settings are saved.
+- Verify a RAG Chat message still reaches its configured RAG endpoint after AI Agent settings are saved.
 - Switch Chat between AI Chat and RAG; verify AI uses the configured model and each mode retains a separate history.
 - Verify no logs contain the API key and no new direct reqwest client exists outside `src/http/mod.rs`.
 
@@ -62,6 +62,6 @@ Values are stored in the local platform `settings.toml` under `[ai.agent]`, incl
 - 按 `Custom -> DeepSeek -> OpenAI -> DeepSeek` 循环切换；选中项、Base URL 和 Model 必须始终属于同一 Provider。DeepSeek 对应 `https://api.deepseek.com` / `deepseek-v4-flash`，OpenAI 对应 `https://api.openai.com/v1` / `gpt-4o-mini`；手工编辑 Base URL 或 Model 后必须切到 Custom。
 - 离开 Settings 使按路由创建的 factory 产品销毁，重新进入后再次循环切换。已保存预设必须正确恢复，不能残留旧选中态或字段绑定；禁止通过常驻隐藏 Settings 树来通过此检查。
 - 使用有效 Provider/Key 测试时确认底部只出现一个成功 Toast；无效凭据只出现一个错误 Toast。
-- 保存 AI Agent 设置后，确认 RAG Chat 仍请求原有 RAG endpoint。
+- 保存 AI Agent 设置后，确认 RAG Chat 仍请求其独立配置的 RAG endpoint。
 - 在 Chat 中切换 AI Chat 与 RAG，确认 AI 使用配置模型且两种模式保留独立历史。
 - 确认日志不包含 API Key，并且 `src/http/mod.rs` 之外没有新增直接 reqwest client。

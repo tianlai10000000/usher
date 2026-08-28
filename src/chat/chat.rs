@@ -1,4 +1,3 @@
-use crate::constants::chat::RAG_API_URL;
 use crate::http::{self, HttpError, HttpErrorKind, RequestOptions};
 use serde::Deserialize;
 use serde_json::json;
@@ -28,10 +27,19 @@ pub struct ChatResponse {
 /// * `Ok(String)` - 服务器返回的消息内容
 /// * `Err(HttpError)` - 统一 HTTP 错误
 pub(crate) async fn send_message_to_server(user_message: &str) -> Result<String, HttpError> {
-    log::debug!("[Chat] Sending message to server: {}", user_message);
+    let Some(rag_api_url) = crate::settings::load_chat_rag_api_url() else {
+        return Err(chat_endpoint_error("chat RAG endpoint is not configured"));
+    };
+    let rag_api_url = validate_rag_api_url(&rag_api_url).map_err(chat_endpoint_error)?;
+    // Never log message content: chat input is user data and the log files are
+    // long-lived plain text.
+    log::debug!(
+        "[Chat] Sending message to server ({} chars)",
+        user_message.chars().count()
+    );
 
     let result = http::send_json::<ChatResponse>(
-        http::post(RAG_API_URL).json(&json!({
+        http::post(rag_api_url).json(&json!({
             "query": user_message,
             "mode": "hybrid",
             "include_references": true,
@@ -60,6 +68,9 @@ pub(crate) fn handle_api_error(error: &HttpError) -> String {
     log::error!("[Chat] API error: {}", error);
 
     match (error.kind, error.status.map(|status| status.as_u16())) {
+        (HttpErrorKind::Build, _) => {
+            "Chat service needs a valid HTTPS endpoint. Set ai.chat.rag_api_url in the settings file or USHER_RAG_API_URL.".to_string()
+        }
         (HttpErrorKind::Timeout | HttpErrorKind::Connect, _) => {
             "Network connection failed. Check your network settings and try again.".to_string()
         }
@@ -72,5 +83,50 @@ pub(crate) fn handle_api_error(error: &HttpError) -> String {
         }
         (HttpErrorKind::Decode, _) => "The service returned an unreadable response.".to_string(),
         _ => "The message could not be sent. Try again.".to_string(),
+    }
+}
+
+fn validate_rag_api_url(value: &str) -> Result<reqwest::Url, &'static str> {
+    let url = reqwest::Url::parse(value).map_err(|_| "chat RAG endpoint is not a valid URL")?;
+    if url.scheme() != "https" {
+        return Err("chat RAG endpoint must use HTTPS");
+    }
+    if url.host_str().is_none() {
+        return Err("chat RAG endpoint must include a host");
+    }
+    Ok(url)
+}
+
+fn chat_endpoint_error(message: impl Into<String>) -> HttpError {
+    HttpError {
+        kind: HttpErrorKind::Build,
+        operation: "Send chat message".to_string(),
+        method: None,
+        url: None,
+        status: None,
+        message: message.into(),
+        response_body: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_rag_api_url;
+
+    #[test]
+    fn rag_endpoint_requires_https() {
+        assert!(validate_rag_api_url("https://rag.example.com/query").is_ok());
+        assert_eq!(
+            validate_rag_api_url("http://10.0.0.5/query").unwrap_err(),
+            "chat RAG endpoint must use HTTPS"
+        );
+    }
+
+    #[test]
+    fn rag_endpoint_rejects_invalid_urls() {
+        assert_eq!(
+            validate_rag_api_url("not a url").unwrap_err(),
+            "chat RAG endpoint is not a valid URL"
+        );
     }
 }

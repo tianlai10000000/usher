@@ -34,7 +34,7 @@ pub fn setup_debug_logger(app: &MainWindow, console_output: bool, file_output: b
         log_file_path: None,
         log_per_day: true,
     })
-    .map_err(|e| anyhow::Error::msg(e))?;
+    .map_err(anyhow::Error::msg)?;
 
     // Bind Slint log callbacks
     DebugLogger::get(app).on_log_error(|msg| {

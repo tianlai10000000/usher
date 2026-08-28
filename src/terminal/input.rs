@@ -2,7 +2,7 @@ pub(super) fn map_key_to_bytes(
     text: &str,
     ctrl: bool,
     alt: bool,
-    shift: bool,
+    _shift: bool,
     meta: bool,
 ) -> Option<Vec<u8>> {
     if text.is_empty() && !ctrl {
@@ -46,8 +46,6 @@ pub(super) fn map_key_to_bytes(
                 let mut seq = vec![0x1b];
                 seq.extend_from_slice(text.as_bytes());
                 seq
-            } else if shift {
-                text.as_bytes().to_vec()
             } else {
                 text.as_bytes().to_vec()
             }

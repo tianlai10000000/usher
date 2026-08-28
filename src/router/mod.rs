@@ -69,7 +69,7 @@ pub struct Router {
     window: Weak<MainWindow>,
     history: Arc<Mutex<NavigationHistory>>,
     workflow_reachable_ab: Option<Arc<Mutex<bool>>>,
-    lifecycle_hook: Rc<dyn Fn(&MainWindow, RouteLifecycleEvent)>,
+    lifecycle_hook: RouteLifecycleHook,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -78,6 +78,8 @@ pub(crate) struct RouteLifecycleEvent {
     pub(crate) current: Route,
     pub(crate) workflow_became_unreachable: bool,
 }
+
+type RouteLifecycleHook = Rc<dyn Fn(&MainWindow, RouteLifecycleEvent)>;
 
 #[derive(Debug, Default)]
 struct NavigationHistory {
@@ -149,10 +151,7 @@ impl NavigationHistory {
 }
 
 impl Router {
-    pub fn new(
-        window: Weak<MainWindow>,
-        lifecycle_hook: Rc<dyn Fn(&MainWindow, RouteLifecycleEvent)>,
-    ) -> Self {
+    pub fn new(window: Weak<MainWindow>, lifecycle_hook: RouteLifecycleHook) -> Self {
         Self {
             window,
             history: Arc::new(Mutex::new(NavigationHistory::default())),
@@ -178,10 +177,10 @@ impl Router {
         self.window.upgrade().map(|win| {
             let route = available_route(route);
             let previous = win.get_current_route();
-            if previous != route {
-                if let Ok(mut history) = self.history.lock() {
-                    history.record_navigation(previous, route);
-                }
+            if previous != route
+                && let Ok(mut history) = self.history.lock()
+            {
+                history.record_navigation(previous, route);
             }
             self.apply_transition(&win, previous, route)
         })

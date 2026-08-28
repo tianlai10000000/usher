@@ -38,8 +38,10 @@ fn check_online() -> bool {
 }
 
 pub fn setup_network_monitor(app: &MainWindow) {
-    let initial = check_online();
-    AppState::get(app).set_network_online(initial);
+    // Optimistic initial value: the serial probe takes up to 9s offline, and it
+    // used to run on the main thread before `ui.show()`. The monitor thread's
+    // first iteration corrects the state within one probe round instead.
+    AppState::get(app).set_network_online(true);
 
     let ui_weak: Weak<MainWindow> = app.as_weak();
 

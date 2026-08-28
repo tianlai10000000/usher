@@ -168,11 +168,11 @@ pub fn reduce_configuration(
             id,
             replacement_default,
         } => {
-            if !next.rules.iter().any(|rule| rule.id == id) {
-                Err(ReviewConfigError::UnknownRule)
-            } else if replacement_default.as_ref().is_some_and(|replacement| {
+            let rule_is_missing = !next.rules.iter().any(|rule| rule.id == id);
+            let replacement_is_invalid = replacement_default.as_ref().is_some_and(|replacement| {
                 replacement == &id || !next.rules.iter().any(|rule| &rule.id == replacement)
-            }) {
+            });
+            if rule_is_missing || replacement_is_invalid {
                 Err(ReviewConfigError::UnknownRule)
             } else {
                 next.rules.retain(|rule| rule.id != id);

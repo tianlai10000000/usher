@@ -70,21 +70,20 @@ fn install_cancel_token(token: Arc<AtomicBool>) {
 }
 
 fn clear_cancel_token(token: &Arc<AtomicBool>) {
-    if let Ok(mut slot) = cancel_slot().lock() {
-        if let Some(current) = slot.as_ref() {
-            if Arc::ptr_eq(current, token) {
-                *slot = None;
-            }
-        }
+    if let Ok(mut slot) = cancel_slot().lock()
+        && let Some(current) = slot.as_ref()
+        && Arc::ptr_eq(current, token)
+    {
+        *slot = None;
     }
 }
 
 fn request_tag_cancel() -> bool {
-    if let Ok(slot) = cancel_slot().lock() {
-        if let Some(token) = slot.as_ref() {
-            token.store(true, Ordering::SeqCst);
-            return true;
-        }
+    if let Ok(slot) = cancel_slot().lock()
+        && let Some(token) = slot.as_ref()
+    {
+        token.store(true, Ordering::SeqCst);
+        return true;
     }
     false
 }
@@ -178,7 +177,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 if !view.tag_running {
                     view.reset_tag_job(default_tag_steps());
                     view.tag_result = if view.tag_mode == TAG_MODE_REMOTE {
-                        "Remote mode is TODO in this iteration.".to_string()
+                        "Remote mode is not available yet.".to_string()
                     } else {
                         format!(
                             "Local mode ready. Current latest tag is '{}', next {} version prepared.",
@@ -260,7 +259,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 guard.upsert_current(|view| {
                     view.tag_selected_tab = 0;
                     view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
-                    view.tag_result = "Remote mode is TODO in this iteration.".to_string();
+                    view.tag_result = "Remote mode is not available yet.".to_string();
                     view.tag_add_initializing = false;
                     view.tag_add_ready = false;
                     view.reset_tag_job(default_tag_steps());
@@ -411,10 +410,10 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 guard.upsert_current(|view| {
                     view.tag_selected_tab = 1;
                     view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-                    view.tag_result = "Remote mode is TODO in this iteration.".to_string();
+                    view.tag_result = "Remote mode is not available yet.".to_string();
                     view.tag_remove_initializing = false;
                     view.tag_remove_ready = false;
-                    view.tag_remove_target = "TODO".to_string();
+                    view.tag_remove_target = "Unavailable".to_string();
                     view.reset_tag_job(default_remove_tag_steps());
                 });
             }
@@ -485,8 +484,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                     first.detail = format!(
                                         "Latest remote tag resolved for removal: '{}'.",
                                         latest_tag
-                                    )
-                                    .into();
+                                    );
                                     set_step_log(first, lookup_log);
                                 }
                             }
@@ -575,7 +573,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             log::warn!("[Workflow][Tag] Run rejected: remote mode not implemented");
             if let Ok(mut guard) = state_run.lock() {
                 guard.upsert_current(|view| {
-                    view.tag_result = "Remote mode is TODO in this iteration.".to_string();
+                    view.tag_result = "Remote mode is not available yet.".to_string();
                     view.tag_running = false;
                     view.tag_add_ready = false;
                     view.tag_remove_ready = false;
@@ -584,7 +582,9 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     view.reset_tag_job(default_tag_steps());
                 });
             } else {
-                log::warn!("[Workflow][Tag] Failed to acquire state lock while handling remote TODO");
+                log::warn!(
+                    "[Workflow][Tag] Failed to acquire state lock while handling unavailable remote mode"
+                );
             }
             initialize_current_ui(&ui, &state_run);
             show_error(&ui, "Remote mode is not implemented yet.");
@@ -839,7 +839,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
         if mode == TAG_MODE_REMOTE {
             if let Ok(mut guard) = state_remove.lock() {
                 guard.upsert_current(|view| {
-                    view.tag_result = "Remote mode is TODO in this iteration.".to_string();
+                    view.tag_result = "Remote mode is not available yet.".to_string();
                     view.tag_running = false;
                     view.tag_add_initializing = false;
                     view.tag_remove_initializing = false;
@@ -1124,11 +1124,11 @@ pub(crate) fn refresh_tag_context(
             view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
             view.reset_tag_job(default_tag_steps());
             if mode == TAG_MODE_REMOTE {
-                log::info!("[Workflow][Tag] Refresh context -> remote TODO state");
-                view.tag_current_version = "TODO".to_string();
-                view.tag_next_version = "TODO".to_string();
-                view.tag_remove_target = "TODO".to_string();
-                view.tag_result = "Remote mode is TODO in this iteration.".to_string();
+                log::info!("[Workflow][Tag] Refresh context -> remote mode unavailable");
+                view.tag_current_version = "Unavailable".to_string();
+                view.tag_next_version = "Unavailable".to_string();
+                view.tag_remove_target = "Unavailable".to_string();
+                view.tag_result = "Remote mode is not available yet.".to_string();
                 return;
             }
 
@@ -1281,7 +1281,7 @@ async fn run_local_tag_flow(
         steps[index].status = JobStepStatus::InProgress;
         steps[index].conclusion = None;
         steps[index].duration = "…".into();
-        steps[index].detail = detail.clone().into();
+        steps[index].detail = detail.clone();
         if let Some(progress) = on_progress.as_ref() {
             progress(
                 steps.clone(),
@@ -1307,7 +1307,7 @@ async fn run_local_tag_flow(
             }
         })
         .await;
-        steps[index].duration = format_duration(step_started.elapsed()).into();
+        steps[index].duration = format_duration(step_started.elapsed());
         match result {
             Ok(log) => {
                 steps[index].status = JobStepStatus::Completed;
@@ -1488,7 +1488,7 @@ async fn run_local_remove_tag_flow(
             }
         })
         .await;
-        steps[index].duration = format_duration(step_started.elapsed()).into();
+        steps[index].duration = format_duration(step_started.elapsed());
         match result {
             Ok(log) => {
                 steps[index].status = JobStepStatus::Completed;
@@ -1616,7 +1616,7 @@ async fn run_local_remove_tag_flow(
                 JobConclusion::Failure
             });
             steps[refresh_index].default_expanded = true;
-            steps[refresh_index].duration = format_duration(refresh_started.elapsed()).into();
+            steps[refresh_index].duration = format_duration(refresh_started.elapsed());
             steps[refresh_index].detail = if cancel_token.load(Ordering::SeqCst) {
                 "Cancelled by user. Workflow paused.".into()
             } else {
@@ -1639,9 +1639,8 @@ async fn run_local_remove_tag_flow(
     };
     steps[refresh_index].status = JobStepStatus::Completed;
     steps[refresh_index].conclusion = Some(JobConclusion::Success);
-    steps[refresh_index].duration = format_duration(refresh_started.elapsed()).into();
-    steps[refresh_index].detail =
-        format!("Latest remote semantic tag is now '{}'.", latest_tag).into();
+    steps[refresh_index].duration = format_duration(refresh_started.elapsed());
+    steps[refresh_index].detail = format!("Latest remote semantic tag is now '{}'.", latest_tag);
     set_step_log(&mut steps[refresh_index], refresh_log);
     if let Some(progress) = on_progress.as_ref() {
         progress(
@@ -1660,8 +1659,7 @@ async fn run_local_remove_tag_flow(
     steps[complete_index].detail = format!(
         "Local remove workflow finished successfully. Input updated to '{}'.",
         latest_tag
-    )
-    .into();
+    );
     set_step_log(
         &mut steps[complete_index],
         format!(
@@ -1733,7 +1731,7 @@ where
         "--tags".to_string(),
         "--force".to_string(),
     ];
-    let fetch_log = run_command(fetch_command, cancel_token, |log| on_log(log)).await?;
+    let fetch_log = run_command(fetch_command, cancel_token, &mut on_log).await?;
 
     let list_command = vec![
         "git".to_string(),

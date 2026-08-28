@@ -144,6 +144,7 @@ never claim to expose hidden model reasoning. The composer action becomes the
 same compact Stop control used by Review cancellation. Activating it aborts
 context loading or the in-flight Agent completion without cancelling the AI
 Review task, then marks the visible response as stopped.
+The same user message is committed to the review or lightweight chat session before model validation, PR-context loading, or any Agent request starts. The assistant response is committed in a second write. Configuration, task, review-session, and chat-history JSON loads preserve invalid input as a `.corrupt-*` sibling before falling back or reporting an error; if preservation fails, automatic writes for that store remain disabled so defaults cannot overwrite the original file.
 The review status and every pending Ask response show one compact live elapsed
 timer. Review duration starts when the task is enqueued and freezes on
 completion, failure, or cancellation. Ask duration starts on submission;
@@ -198,6 +199,7 @@ Approval 或其他写操作。
 上下文”“正在思考”等有界运行阶段；这些阶段不得声称展示模型隐藏推理。Composer
 主操作切换为与 Review 取消一致的紧凑 Stop 控件；点击后中止上下文读取或在途 Agent
 completion，但不取消 AI Review 任务，并在当前对话中标记回复已停止。
+同一条用户消息必须在模型配置校验、PR 上下文加载或任何 Agent 请求开始前提交到 Review Session 或轻量 Chat Session；assistant 回复通过第二次写入提交。配置、任务、Review Session 和 Chat 历史 JSON 解析失败时，必须先把原始内容保留为同目录 `.corrupt-*` 文件，再回退或报错；如果保留失败，对应 Store 的自动写入保持禁用，默认值不得覆盖原文件。
 Review 状态和每条等待中的 Ask 回复都显示一个紧凑的实时耗时。Review 从任务入队开始
 计时，并在完成、失败或取消时冻结；Ask 从提交开始计时，成功的 assistant 消息会持久化
 最终毫秒耗时，停止或失败的可见回复立即冻结实测耗时。

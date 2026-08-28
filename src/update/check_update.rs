@@ -55,7 +55,9 @@ fn perform_startup_check(
             Ok(is_up_to_date) => {
                 if !is_up_to_date {
                     // New version available - show update dialog
-                    let s = state.lock().unwrap();
+                    let s = state
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     let new_version = s.version.clone();
                     drop(s);
 
@@ -173,7 +175,9 @@ pub fn start_auto_update(
                     Ok(is_up_to_date) => {
                         // Notify UI when update is available
                         if !is_up_to_date {
-                            let s = state.lock().unwrap();
+                            let s = state
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
                             let new_version = s.version.clone();
                             drop(s);
 
@@ -199,7 +203,9 @@ pub fn start_auto_update(
 
                         // Store error in state
                         {
-                            let mut s = state.lock().unwrap();
+                            let mut s = state
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
                             s.error = error_msg.clone();
                         }
 

@@ -65,7 +65,9 @@ fn parse_size(size_str: &str) -> (f32, f32, bool) {
 // Dialog manager initialization and callback binding function
 pub fn setup_dialog(ui: &MainWindow) {
     let ui_weak = ui.as_weak();
-    *UI_WEAK.lock().unwrap() = Some(ui_weak.clone());
+    *UI_WEAK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ui_weak.clone());
 
     let manager = DialogManager::get(ui);
 

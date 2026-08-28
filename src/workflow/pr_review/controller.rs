@@ -337,6 +337,7 @@ pub(crate) fn bind_pr_review(
                     updated_at: updated_at.to_string(),
                     ignore_whitespace: false,
                 },
+                false,
             );
             if initial_tab != 2 {
                 ui.invoke_workflow_pr_review_select_tab(initial_tab);
@@ -360,10 +361,10 @@ pub(crate) fn bind_pr_review(
         };
         let tab = tab.clamp(0, 2);
         ui.set_workflow_pr_review_tab(tab);
-        if tab != 2 {
-            if let Ok(mut return_tab) = tab_controller.commit_detail_return_tab.lock() {
-                *return_tab = None;
-            }
+        if tab != 2
+            && let Ok(mut return_tab) = tab_controller.commit_detail_return_tab.lock()
+        {
+            *return_tab = None;
         }
         tab_controller.load_tab(&ui, tab);
     });
@@ -427,7 +428,7 @@ pub(crate) fn bind_pr_review(
             ui.set_workflow_pr_review_commit_range_start(-1);
             ui.set_workflow_pr_review_commit_range_end(-1);
             ui.set_workflow_pr_review_commit_range_label("All commits".into());
-            reload_controller.open(&ui, request);
+            reload_controller.open(&ui, request, true);
         }
     });
 
@@ -460,7 +461,7 @@ pub(crate) fn bind_pr_review(
                 ui.set_workflow_pr_review_commit_range_start(-1);
                 ui.set_workflow_pr_review_commit_range_end(-1);
                 ui.set_workflow_pr_review_commit_range_label("All commits".into());
-                diff_settings_controller.open(&ui, request);
+                diff_settings_controller.open(&ui, request, true);
             }
         } else {
             let selected = ui.get_workflow_pr_review_selected_file_index();
@@ -1048,18 +1049,27 @@ impl WorkflowPrReviewController {
     }
 
     fn clear_owned_state(&self, ui: &MainWindow) {
-        self.request_sequence.fetch_add(1, Ordering::SeqCst);
-        self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
-        self.expand_sequence.fetch_add(1, Ordering::SeqCst);
-        self.action_sequence.fetch_add(1, Ordering::SeqCst);
-        self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
-        self.commits_sequence.fetch_add(1, Ordering::SeqCst);
+        self.invalidate_pending_requests();
         if let Ok(mut request) = self.active_request.lock() {
             *request = None;
         }
         if let Ok(mut cache) = self.cache.lock() {
             *cache = None;
         }
+        self.reset_request_scoped_state(ui, true);
+        reset_review_ui(ui);
+    }
+
+    fn invalidate_pending_requests(&self) {
+        self.request_sequence.fetch_add(1, Ordering::SeqCst);
+        self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
+        self.expand_sequence.fetch_add(1, Ordering::SeqCst);
+        self.action_sequence.fetch_add(1, Ordering::SeqCst);
+        self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
+        self.commits_sequence.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn reset_request_scoped_state(&self, ui: &MainWindow, reset_tab: bool) {
         if let Ok(mut filter) = self.file_filter.lock() {
             filter.clear();
         }
@@ -1099,7 +1109,24 @@ impl WorkflowPrReviewController {
         if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
             *return_tab = None;
         }
-        reset_review_ui(ui);
+        if reset_tab {
+            ui.set_workflow_pr_review_tab(2);
+        }
+        ui.set_workflow_pr_review_conversation_count(0);
+        ui.set_workflow_pr_review_commit_count(0);
+        ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
+        ui.set_workflow_pr_review_conversation_content_height(0);
+        ui.set_workflow_pr_review_expanded_commit_body_height(0);
+        ui.set_workflow_pr_review_commits(empty_commit_model());
+        ui.set_workflow_pr_review_conversation_loading(false);
+        ui.set_workflow_pr_review_commits_loading(false);
+        ui.set_workflow_pr_review_conversation_error("".into());
+        ui.set_workflow_pr_review_commits_error("".into());
+        ui.set_workflow_pr_review_commit_range_start(-1);
+        ui.set_workflow_pr_review_commit_range_end(-1);
+        ui.set_workflow_pr_review_commit_range_label("All commits".into());
+        ui.set_workflow_pr_review_file_filter("".into());
+        reset_action_ui(ui);
     }
 
     pub(crate) fn release_unreachable(&self, ui: &MainWindow) {
@@ -1143,7 +1170,7 @@ impl WorkflowPrReviewController {
         self.log_memory_diagnostics("project_switch.after_clear");
     }
 
-    fn open(&self, ui: &MainWindow, request: ReviewRequest) {
+    fn open(&self, ui: &MainWindow, request: ReviewRequest, force_refresh: bool) {
         let project_alias = self
             .project_alias
             .lock()
@@ -1167,54 +1194,13 @@ impl WorkflowPrReviewController {
                     .map(|active| active.number != request.number)
             })
             .unwrap_or(true);
-        if is_new_pull_request {
+        if is_new_pull_request || force_refresh {
             self.log_memory_diagnostics("new_review.before_cache_clear");
-            if let Ok(mut filter) = self.file_filter.lock() {
-                filter.clear();
+            self.invalidate_pending_requests();
+            if let Ok(mut cache) = self.cache.lock() {
+                *cache = None;
             }
-            if let Ok(mut folders) = self.collapsed_folders.lock() {
-                folders.clear();
-            }
-            if let Ok(mut resources) = self.highlight_resources.lock() {
-                *resources = None;
-            }
-            if let Ok(mut highlighted) = self.highlighted_files.lock() {
-                highlighted.clear();
-            }
-            if let Ok(mut sources) = self.source_files.lock() {
-                sources.clear();
-            }
-            self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
-            self.commits_sequence.fetch_add(1, Ordering::SeqCst);
-            if let Ok(mut loaded) = self.conversation_loaded.lock() {
-                *loaded = false;
-            }
-            if let Ok(mut loaded) = self.commits_loaded.lock() {
-                *loaded = false;
-            }
-            if let Ok(mut commits) = self.commits.lock() {
-                commits.clear();
-            }
-            if let Ok(mut pending) = self.pending_open_commit.lock() {
-                *pending = None;
-            }
-            if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
-                *return_tab = None;
-            }
-            ui.set_workflow_pr_review_tab(2);
-            ui.set_workflow_pr_review_conversation_count(0);
-            ui.set_workflow_pr_review_commit_count(0);
-            ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
-            ui.set_workflow_pr_review_conversation_content_height(0);
-            ui.set_workflow_pr_review_expanded_commit_body_height(0);
-            ui.set_workflow_pr_review_commits(empty_commit_model());
-            ui.set_workflow_pr_review_conversation_error("".into());
-            ui.set_workflow_pr_review_commits_error("".into());
-            ui.set_workflow_pr_review_commit_range_start(-1);
-            ui.set_workflow_pr_review_commit_range_end(-1);
-            ui.set_workflow_pr_review_commit_range_label("All commits".into());
-            ui.set_workflow_pr_review_file_filter("".into());
-            reset_action_ui(ui);
+            self.reset_request_scoped_state(ui, is_new_pull_request);
             self.log_memory_diagnostics("new_review.after_cache_clear");
         }
 
@@ -1225,12 +1211,18 @@ impl WorkflowPrReviewController {
         if let Ok(mut active_request) = self.active_request.lock() {
             *active_request = Some(request.clone());
         }
-        let cached = self.cache.lock().ok().and_then(|guard| {
-            guard
-                .as_ref()
-                .filter(|cache| cache.project_alias == project_alias && cache.request == request)
-                .map(|cache| cache.base_detail.clone())
-        });
+        let cached = if force_refresh {
+            None
+        } else {
+            self.cache.lock().ok().and_then(|guard| {
+                guard
+                    .as_ref()
+                    .filter(|cache| {
+                        cache.project_alias == project_alias && cache.request == request
+                    })
+                    .map(|cache| cache.base_detail.clone())
+            })
+        };
         if let Some(detail) = cached {
             ui.set_workflow_pr_review_loading(false);
             self.apply_detail(ui, &detail);
@@ -1364,6 +1356,9 @@ impl WorkflowPrReviewController {
                 }
             });
         });
+        if force_refresh {
+            self.load_tab(ui, ui.get_workflow_pr_review_tab());
+        }
     }
 
     fn load_tab(&self, ui: &MainWindow, tab: i32) {
@@ -1583,10 +1578,10 @@ impl WorkflowPrReviewController {
             return;
         }
         let source_tab = ui.get_workflow_pr_review_tab();
-        if let Some(source_tab) = commit_detail_source_tab(source_tab) {
-            if let Ok(mut return_tab) = self.commit_detail_return_tab.lock() {
-                *return_tab = Some(source_tab);
-            }
+        if let Some(source_tab) = commit_detail_source_tab(source_tab)
+            && let Ok(mut return_tab) = self.commit_detail_return_tab.lock()
+        {
+            *return_tab = Some(source_tab);
         }
         ui.set_workflow_pr_review_tab(2);
         let commit_index = self.commits.lock().ok().and_then(|commits| {
@@ -2234,10 +2229,10 @@ impl WorkflowPrReviewController {
     }
 
     fn toggle_extension_filter(&self, ui: &MainWindow, extension: String) {
-        if let Ok(mut selected) = self.selected_extensions.lock() {
-            if !selected.insert(extension.clone()) {
-                selected.remove(extension.as_str());
-            }
+        if let Ok(mut selected) = self.selected_extensions.lock()
+            && !selected.insert(extension.clone())
+        {
+            selected.remove(extension.as_str());
         }
         self.refresh_tree(ui);
     }
@@ -2246,10 +2241,10 @@ impl WorkflowPrReviewController {
         if path.is_empty() {
             return;
         }
-        if let Ok(mut folders) = self.collapsed_folders.lock() {
-            if !folders.insert(path.clone()) {
-                folders.remove(path.as_str());
-            }
+        if let Ok(mut folders) = self.collapsed_folders.lock()
+            && !folders.insert(path.clone())
+        {
+            folders.remove(path.as_str());
         }
         self.refresh_tree(ui);
     }
@@ -3012,6 +3007,7 @@ fn ai_review_fixture_diff_detail() -> PullRequestDiffDetail {
         head_sha: "fixture-head".to_string(),
         start_sha: "fixture-base".to_string(),
         too_many_commits: false,
+        files_truncated: false,
     }
 }
 
@@ -3069,6 +3065,7 @@ fn memory_benchmark_diff_detail(seed: usize) -> PullRequestDiffDetail {
         head_sha: format!("head-fixture-{seed}"),
         start_sha: format!("start-fixture-{seed}"),
         too_many_commits: false,
+        files_truncated: false,
     }
 }
 
@@ -3107,6 +3104,7 @@ fn apply_detail_summary(ui: &MainWindow, detail: &SharedDiffDetail) {
     ui.set_workflow_pr_review_base_sha(detail.base_sha.clone().into());
     ui.set_workflow_pr_review_head_sha(detail.head_sha.clone().into());
     ui.set_workflow_pr_review_too_many_commits(detail.too_many_commits);
+    ui.set_workflow_pr_review_files_truncated(detail.files_truncated);
     ui.set_workflow_pr_review_error("".into());
 }
 
@@ -3379,6 +3377,7 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_base_sha("".into());
     ui.set_workflow_pr_review_head_sha("".into());
     ui.set_workflow_pr_review_too_many_commits(false);
+    ui.set_workflow_pr_review_files_truncated(false);
     ui.set_workflow_pr_review_tab(2);
     ui.set_workflow_pr_review_conversation_items(empty_conversation_model());
     ui.set_workflow_pr_review_conversation_content_height(0);
@@ -3484,6 +3483,7 @@ mod tests {
             head_sha: "head".to_string(),
             start_sha: "start".to_string(),
             too_many_commits: false,
+            files_truncated: false,
         }));
         let mut cache = ReviewCache {
             project_alias: "usher".to_string(),
@@ -3546,6 +3546,7 @@ mod tests {
             head_sha: "head".to_string(),
             start_sha: "start".to_string(),
             too_many_commits: false,
+            files_truncated: false,
         }));
         let range_detail = Arc::new(SharedDiffDetail::from(PullRequestDiffDetail {
             files: vec![file("src/range.rs")],
@@ -3557,6 +3558,7 @@ mod tests {
             head_sha: "range-head".to_string(),
             start_sha: String::new(),
             too_many_commits: false,
+            files_truncated: false,
         }));
         let mut cache = ReviewCache {
             project_alias: "usher".to_string(),
@@ -3721,6 +3723,7 @@ mod tests {
             head_sha: "head-fixture".to_string(),
             start_sha: "start-fixture".to_string(),
             too_many_commits: false,
+            files_truncated: false,
         }
     }
 

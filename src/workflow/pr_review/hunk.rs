@@ -408,15 +408,12 @@ pub(super) fn expand_hunk_context(
 #[cfg(test)]
 pub(super) fn expand_all_hunk_context(file: &mut PullRequestDiffFile, source: &str) -> usize {
     let initial_len = file.lines.len();
-    loop {
-        let Some(index) = file
-            .lines
-            .iter()
-            .enumerate()
-            .find_map(|(index, _)| hunk_is_expandable(file, index).then_some(index))
-        else {
-            break;
-        };
+    while let Some(index) = file
+        .lines
+        .iter()
+        .enumerate()
+        .find_map(|(index, _)| hunk_is_expandable(file, index).then_some(index))
+    {
         if !expand_hunk_context(
             file,
             index,
@@ -437,15 +434,12 @@ pub(super) fn expand_all_hunk_context_from_sources(
 ) -> usize {
     let initial_len = file.lines.len();
     let mut changed = false;
-    loop {
-        let Some(index) = file
-            .lines
-            .iter()
-            .enumerate()
-            .find_map(|(index, _)| hunk_is_expandable(file, index).then_some(index))
-        else {
-            break;
-        };
+    while let Some(index) = file
+        .lines
+        .iter()
+        .enumerate()
+        .find_map(|(index, _)| hunk_is_expandable(file, index).then_some(index))
+    {
         let bounds_before = hunk_hidden_bounds(file, index);
         if !expand_hunk_context_from_sources(
             file,

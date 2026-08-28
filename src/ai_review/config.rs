@@ -10,6 +10,8 @@ use usher_ai_review::{
 };
 use usher_state_store::{LocalStateStore, StateStore, StoreSnapshot, Subscription};
 
+use super::storage::{JsonLoad, load_json_preserving_corrupt};
+
 type ConfigStore =
     dyn StateStore<ReviewConfigurationState, ReviewConfigAction, Result<(), ReviewConfigError>>;
 
@@ -77,9 +79,9 @@ pub(crate) struct ReviewConfigFacade {
 impl ReviewConfigFacade {
     pub(crate) fn open_default() -> Self {
         let path = default_config_path();
-        let initial = load_configuration(&path);
+        let (initial, writes_allowed) = load_configuration(&path);
         let store: Arc<ConfigStore> = Arc::new(LocalStateStore::new(initial, reduce_configuration));
-        let worker = Arc::new(PersistenceWorker::start(path));
+        let worker = Arc::new(PersistenceWorker::start(path, writes_allowed));
         let sender = worker.sender.clone();
         let subscription = store.observe_commits(Arc::new(move |snapshot| {
             let _ = sender.send(Some(snapshot.state_arc()));
@@ -175,7 +177,7 @@ struct PersistenceWorker {
 }
 
 impl PersistenceWorker {
-    fn start(path: PathBuf) -> Self {
+    fn start(path: PathBuf, writes_allowed: bool) -> Self {
         let (sender, receiver) = mpsc::channel::<Option<Arc<ReviewConfigurationState>>>();
         let handle = std::thread::Builder::new()
             .name("ai-review-config".into())
@@ -186,6 +188,9 @@ impl PersistenceWorker {
                     };
                     while let Ok(Some(newer)) = receiver.try_recv() {
                         latest = newer;
+                    }
+                    if !writes_allowed {
+                        continue;
                     }
                     if let Err(error) = persist_configuration(&path, &latest) {
                         log::error!("[AI Review][Config] Persistence failed: {error}");
@@ -219,12 +224,22 @@ pub(crate) fn default_session_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("ai-review/sessions"))
 }
 
-fn load_configuration(path: &Path) -> ReviewConfigurationState {
-    fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<ReviewConfigurationState>(&bytes).ok())
-        .unwrap_or_default()
-        .normalize()
+fn load_configuration(path: &Path) -> (ReviewConfigurationState, bool) {
+    match load_json_preserving_corrupt::<ReviewConfigurationState>(path) {
+        Ok(JsonLoad::Loaded(state)) => (state.normalize(), true),
+        Ok(JsonLoad::Missing) => (ReviewConfigurationState::default().normalize(), true),
+        Ok(JsonLoad::CorruptPreserved { backup, error }) => {
+            log::error!(
+                "[AI Review][Config] Invalid configuration preserved at {}: {error}",
+                backup.display()
+            );
+            (ReviewConfigurationState::default().normalize(), true)
+        }
+        Err(error) => {
+            log::error!("[AI Review][Config] {error}");
+            (ReviewConfigurationState::default().normalize(), false)
+        }
+    }
 }
 
 fn persist_configuration(path: &Path, state: &ReviewConfigurationState) -> Result<(), String> {
@@ -264,9 +279,36 @@ mod tests {
             ..Default::default()
         };
         persist_configuration(&path, &state).unwrap();
-        assert_eq!(load_configuration(&path).max_concurrent_tasks, 8);
+        assert_eq!(load_configuration(&path).0.max_concurrent_tasks, 8);
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn invalid_configuration_is_preserved_before_defaults_are_loaded() {
+        let dir = unique_test_dir("corrupt-config");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        fs::write(&path, b"{invalid").unwrap();
+
+        let (state, writes_allowed) = load_configuration(&path);
+        assert_eq!(state, ReviewConfigurationState::default().normalize());
+        assert!(writes_allowed);
+        assert!(!path.exists());
+        let backup = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|candidate| {
+                candidate
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("config.json.corrupt-"))
+            })
+            .expect("corrupt configuration backup");
+        assert_eq!(fs::read(&backup).unwrap(), b"{invalid");
+
+        fs::remove_file(backup).unwrap();
+        fs::remove_dir(dir).unwrap();
     }
 
     #[test]

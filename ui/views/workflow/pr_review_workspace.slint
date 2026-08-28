@@ -1109,7 +1109,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
         }
 
-        if root.selected-tab == 2 && root.too-many-commits: Rectangle {
+        if root.selected-tab == 2 && (root.too-many-commits || root.files-truncated): Rectangle {
             width: parent.width;
             height: 32px;
             background: GitHubTheme.done-muted;
@@ -1117,7 +1117,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 x: 18px;
                 width: parent.width - 36px;
                 height: parent.height;
-                text: "This pull request exceeds the server commit limit; the displayed diff may be partial.";
+                text: root.files-truncated
+                    ? "The provider returned only part of the changed-file list; this diff is incomplete."
+                    : "This pull request exceeds the server commit limit; the displayed diff may be partial.";
                 vertical-alignment: center;
                 font-size: 11px;
                 color: GitHubTheme.done-fg;

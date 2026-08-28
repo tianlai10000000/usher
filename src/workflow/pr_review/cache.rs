@@ -90,6 +90,7 @@ pub(super) struct SharedDiffDetail {
     pub(super) base_sha: String,
     pub(super) head_sha: String,
     pub(super) too_many_commits: bool,
+    pub(super) files_truncated: bool,
 }
 
 impl From<PullRequestDiffDetail> for SharedDiffDetail {
@@ -103,6 +104,7 @@ impl From<PullRequestDiffDetail> for SharedDiffDetail {
             base_sha: detail.base_sha,
             head_sha: detail.head_sha,
             too_many_commits: detail.too_many_commits,
+            files_truncated: detail.files_truncated,
         }
     }
 }

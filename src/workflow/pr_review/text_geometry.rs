@@ -54,6 +54,8 @@ impl ParleyTextGeometry {
         }
     }
 
+    // Parameters form the cache key for one shaped-text layout.
+    #[allow(clippy::too_many_arguments)]
     fn with_layout<R>(
         &mut self,
         text: &str,

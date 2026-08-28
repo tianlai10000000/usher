@@ -936,10 +936,10 @@ fn log_terminal_diagnostics(
 
     if !force {
         let now = Instant::now();
-        if let Some(last) = guard.last_diagnostics_log {
-            if now.duration_since(last) < Duration::from_millis(500) {
-                return;
-            }
+        if let Some(last) = guard.last_diagnostics_log
+            && now.duration_since(last) < Duration::from_millis(500)
+        {
+            return;
         }
         guard.last_diagnostics_log = Some(now);
     } else {
@@ -982,12 +982,12 @@ fn log_terminal_output_chunk(guard: &mut TerminalDrawerState, bytes: &[u8]) {
     }
 
     let now = Instant::now();
-    if let Some(last) = guard.last_pty_output_log {
-        if now.duration_since(last) < Duration::from_millis(500) {
-            guard.suppressed_pty_output_chunks += 1;
-            guard.suppressed_pty_output_bytes += bytes.len();
-            return;
-        }
+    if let Some(last) = guard.last_pty_output_log
+        && now.duration_since(last) < Duration::from_millis(500)
+    {
+        guard.suppressed_pty_output_chunks += 1;
+        guard.suppressed_pty_output_bytes += bytes.len();
+        return;
     }
 
     if guard.suppressed_pty_output_chunks > 0 {

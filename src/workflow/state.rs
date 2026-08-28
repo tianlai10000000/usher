@@ -305,9 +305,11 @@ mod tests {
 
     #[test]
     fn route_cleanup_preserves_tag_execution_history() {
-        let mut view = WorkflowViewState::default();
-        view.tag_selected_tab = 1;
-        view.tag_result = "Tag workflow failed at step 2.".to_string();
+        let mut view = WorkflowViewState {
+            tag_selected_tab: 1,
+            tag_result: "Tag workflow failed at step 2.".to_string(),
+            ..WorkflowViewState::default()
+        };
         view.tag_job.steps[0].status = JobStepStatus::Completed;
         view.tag_job.steps[0].conclusion = Some(JobConclusion::Success);
         view.tag_job.steps[0].log = "preserved log".into();

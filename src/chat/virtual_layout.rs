@@ -9,7 +9,7 @@ const MESSAGE_SPACING_PX: f32 = 8.0;
 
 thread_local! {
     static ADAPTIVE_ROW_HEIGHT_PX: Cell<f32> = const { Cell::new(VIRTUAL_ROW_ESTIMATED_HEIGHT_PX) };
-    static VIRTUAL_LAYOUT_CACHE: RefCell<VirtualLayoutCache> = RefCell::new(VirtualLayoutCache::new());
+    static VIRTUAL_LAYOUT_CACHE: RefCell<VirtualLayoutCache> = const { RefCell::new(VirtualLayoutCache::new()) };
 }
 
 #[derive(Debug, Clone, Copy)]

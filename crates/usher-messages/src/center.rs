@@ -87,7 +87,7 @@ struct Worker {
 
 enum WorkerCommand {
     Persist(Vec<Message>),
-    Notify(Message),
+    Notify(Box<Message>),
     Flush(mpsc::Sender<()>),
     Shutdown(mpsc::Sender<()>),
 }
@@ -95,7 +95,7 @@ enum WorkerCommand {
 /// Closed set of domain mutations accepted by the message store. Public
 /// methods below are typed action creators; only `dispatch` mutates state.
 enum MessageAction {
-    Publish(Message),
+    Publish(Box<Message>),
     SetRead { id: String, read: bool },
     MarkAllRead,
     Remove { id: String },
@@ -103,7 +103,10 @@ enum MessageAction {
 }
 
 enum MessageActionResult {
-    Publish { message: Message, inserted: bool },
+    Publish {
+        message: Box<Message>,
+        inserted: bool,
+    },
     Changed(bool),
     Count(usize),
 }
@@ -134,7 +137,7 @@ impl MessageCenter {
             }
             Err(error) => return Err(error.into()),
         };
-        messages.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        messages.sort_by_key(|message| std::cmp::Reverse(message.created_at));
         messages.truncate(MAX_STORED_MESSAGES);
         let worker = Worker::start(path, notifier)?;
         let store: Arc<MessageStore> = Arc::new(LocalStateStore::new(
@@ -221,7 +224,10 @@ impl MessageCenter {
             metadata: bounded_metadata(draft.metadata),
         };
 
-        let dispatch = self.inner.store.dispatch(MessageAction::Publish(message));
+        let dispatch = self
+            .inner
+            .store
+            .dispatch(MessageAction::Publish(Box::new(message)));
         let snapshot = dispatch.snapshot.state().clone();
         let result = dispatch.output;
         let MessageActionResult::Publish { message, inserted } = result else {
@@ -238,7 +244,7 @@ impl MessageCenter {
                 snapshot.unread_count,
                 snapshot.messages.iter().filter(|item| item.read).count()
             );
-            return Ok(message);
+            return Ok(*message);
         }
         let read_flags = snapshot.messages.iter().filter(|item| item.read).count();
         log::info!(
@@ -259,7 +265,7 @@ impl MessageCenter {
         if native_delivery.should_deliver(self.application_active()) {
             self.send_worker(WorkerCommand::Notify(message.clone()))?;
         }
-        Ok(message)
+        Ok(*message)
     }
 
     pub fn set_read(&self, id: &str, read: bool) -> Result<bool, MessageCenterError> {
@@ -375,13 +381,13 @@ fn reduce_messages(
             {
                 return (
                     MessageActionResult::Publish {
-                        message: existing.clone(),
+                        message: Box::new(existing.clone()),
                         inserted: false,
                     },
                     false,
                 );
             }
-            messages.insert(0, message.clone());
+            messages.insert(0, (*message).clone());
             messages.truncate(MAX_STORED_MESSAGES);
             (
                 MessageActionResult::Publish {

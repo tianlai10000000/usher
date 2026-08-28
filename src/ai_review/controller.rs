@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -36,6 +36,7 @@ use crate::{
 
 use super::config::{ReviewConfigFacade, default_session_dir};
 use super::response::{self, ResponseVariant};
+use super::storage::{JsonLoad, load_json_preserving_corrupt};
 
 type TaskStore = dyn StateStore<ReviewTaskState, ReviewTaskAction, ReviewTaskActionResult>;
 
@@ -481,9 +482,9 @@ pub(crate) fn setup_ai_review(
         .parent()
         .unwrap_or(session_dir.as_path())
         .join(TASK_STATE_FILE);
-    let initial_tasks = load_task_state(&task_state_path);
+    let (initial_tasks, task_writes_allowed) = load_task_state(&task_state_path);
     let task_store: Arc<TaskStore> = Arc::new(LocalStateStore::new(initial_tasks, reduce_tasks));
-    let task_persistence = TaskPersistenceWorker::start(task_state_path);
+    let task_persistence = TaskPersistenceWorker::start(task_state_path, task_writes_allowed);
     let persistence_sender = task_persistence.sender.clone();
     let persistence_subscription = task_store.observe_commits(Arc::new(move |snapshot| {
         let _ = persistence_sender.send(Some(snapshot.state_arc()));
@@ -1714,17 +1715,13 @@ impl ControllerInner {
         crate::app_runtime::shared_runtime().spawn(async move {
             let work_cancellation = cancellation.clone();
             let result = run_review_work_until_cancelled(cancellation.clone(), async {
-                let result = async {
+                async {
                     let fixture = fixture_enabled();
                     let settings = crate::settings::load_settings().ai.agent;
-                    if !fixture {
-                        validate_model_settings(&settings)?;
-                    }
 
-                    if task.status == ReviewTaskStatus::Completed
-                        && let Ok(mut session) = load_session(path.clone()).await
-                    {
-                        if let Ok(Some(chat_session)) = load_chat_session(chat_path.clone()).await {
+                    if task.status == ReviewTaskStatus::Completed {
+                        let mut session = load_session(path.clone()).await?;
+                        if let Some(chat_session) = load_chat_session(chat_path.clone()).await? {
                             merge_conversations(
                                 &mut session.conversation,
                                 chat_session.conversation.as_slice(),
@@ -1733,6 +1730,10 @@ impl ControllerInner {
                         session
                             .conversation
                             .push(user_chat_message(message.clone()));
+                        persist_session(path.clone(), session.clone()).await?;
+                        if !fixture {
+                            validate_model_settings(&settings)?;
+                        }
                         self.update_chat_status(&id, &work_cancellation, "Thinking...");
                         let answer = complete_chat(
                             &settings,
@@ -1756,15 +1757,28 @@ impl ControllerInner {
                         return Ok::<_, String>(projection);
                     }
 
-                    let mut session = match load_chat_session(chat_path.clone()).await? {
-                        Some(session) => session,
-                        None => PullRequestChatSession {
-                            task,
-                            input: build_chat_input(&request, &settings, fixture).await?,
-                            conversation: Vec::new(),
-                        },
+                    let (mut session, needs_context) = match load_chat_session(chat_path.clone())
+                        .await?
+                    {
+                        Some(session) => (session, false),
+                        None => (
+                            PullRequestChatSession {
+                                input: provisional_chat_input(&request, &settings, &task.target),
+                                task,
+                                conversation: Vec::new(),
+                            },
+                            true,
+                        ),
                     };
                     session.conversation.push(user_chat_message(message));
+                    persist_chat_session(chat_path.clone(), session.clone()).await?;
+                    if !fixture {
+                        validate_model_settings(&settings)?;
+                    }
+                    if needs_context {
+                        session.input = build_chat_input(&request, &settings, fixture).await?;
+                        persist_chat_session(chat_path.clone(), session.clone()).await?;
+                    }
                     self.update_chat_status(&id, &work_cancellation, "Thinking...");
                     let answer = complete_chat(
                         &settings,
@@ -1784,8 +1798,7 @@ impl ControllerInner {
                     persist_chat_session(chat_path, session).await?;
                     Ok(projection)
                 }
-                .await;
-                result
+                .await
             })
             .await;
             let elapsed_ms = elapsed_millis(request_started.elapsed());
@@ -2055,6 +2068,31 @@ async fn build_chat_input(
         additional_rules: Vec::new(),
         extra_requirements: String::new(),
     })
+}
+
+fn provisional_chat_input(
+    request: &PendingReviewRequest,
+    settings: &AiAgentSettings,
+    target: &ReviewTarget,
+) -> ReviewInput {
+    ReviewInput {
+        target: target.clone(),
+        model: AiModelRef {
+            provider: settings.provider.clone(),
+            base_url: settings.base_url.clone(),
+            model: settings.model.clone(),
+        },
+        unified_diff: String::new(),
+        repository_context: RepositoryContext {
+            local_repo: (!request.local_repo.trim().is_empty())
+                .then(|| PathBuf::from(request.local_repo.clone())),
+            remote_repo: (!request.remote_repo.trim().is_empty())
+                .then(|| request.remote_repo.clone()),
+        },
+        base_rule: None,
+        additional_rules: Vec::new(),
+        extra_requirements: String::new(),
+    }
 }
 
 async fn complete_chat(
@@ -2825,9 +2863,16 @@ async fn persist_session(path: PathBuf, session: ReviewSession) -> Result<(), St
 }
 
 async fn load_session(path: PathBuf) -> Result<ReviewSession, String> {
-    tokio::task::spawn_blocking(move || {
-        let file = fs::File::open(path).map_err(|error| error.to_string())?;
-        serde_json::from_reader(BufReader::new(file)).map_err(|error| error.to_string())
+    tokio::task::spawn_blocking(move || match load_json_preserving_corrupt(&path)? {
+        JsonLoad::Loaded(session) => Ok(session),
+        JsonLoad::Missing => Err(format!(
+            "AI review session {} does not exist.",
+            path.display()
+        )),
+        JsonLoad::CorruptPreserved { backup, error } => Err(format!(
+            "AI review session was invalid ({error}) and was preserved at {}.",
+            backup.display()
+        )),
     })
     .await
     .map_err(|error| format!("AI review session loader failed: {error}"))?
@@ -2852,15 +2897,13 @@ async fn persist_chat_session(
 }
 
 async fn load_chat_session(path: PathBuf) -> Result<Option<PullRequestChatSession>, String> {
-    tokio::task::spawn_blocking(move || {
-        let file = match fs::File::open(path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.to_string()),
-        };
-        serde_json::from_reader(BufReader::new(file))
-            .map(Some)
-            .map_err(|error| error.to_string())
+    tokio::task::spawn_blocking(move || match load_json_preserving_corrupt(&path)? {
+        JsonLoad::Loaded(session) => Ok(Some(session)),
+        JsonLoad::Missing => Ok(None),
+        JsonLoad::CorruptPreserved { backup, error } => Err(format!(
+            "AI review chat history was invalid ({error}) and was preserved at {}.",
+            backup.display()
+        )),
     })
     .await
     .map_err(|error| format!("AI review chat session loader failed: {error}"))?
@@ -2941,11 +2984,22 @@ fn format_elapsed_ms(elapsed_ms: u64) -> String {
     format!("{hours}h {remaining_minutes:02}m {remaining_seconds:02}s")
 }
 
-fn load_task_state(path: &Path) -> ReviewTaskState {
-    let mut state = fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<ReviewTaskState>(&bytes).ok())
-        .unwrap_or_default();
+fn load_task_state(path: &Path) -> (ReviewTaskState, bool) {
+    let (mut state, writes_allowed) = match load_json_preserving_corrupt::<ReviewTaskState>(path) {
+        Ok(JsonLoad::Loaded(state)) => (state, true),
+        Ok(JsonLoad::Missing) => (ReviewTaskState::default(), true),
+        Ok(JsonLoad::CorruptPreserved { backup, error }) => {
+            log::error!(
+                "[AI Review][Task Store] Invalid state preserved at {}: {error}",
+                backup.display()
+            );
+            (ReviewTaskState::default(), true)
+        }
+        Err(error) => {
+            log::error!("[AI Review][Task Store] {error}");
+            (ReviewTaskState::default(), false)
+        }
+    };
     for task in state.tasks.values_mut() {
         if task.status.is_active() {
             task.status = ReviewTaskStatus::Failed;
@@ -2953,7 +3007,7 @@ fn load_task_state(path: &Path) -> ReviewTaskState {
             task.updated_at_unix_ms = unix_millis();
         }
     }
-    state
+    (state, writes_allowed)
 }
 
 struct TaskPersistenceWorker {
@@ -2963,7 +3017,7 @@ struct TaskPersistenceWorker {
 }
 
 impl TaskPersistenceWorker {
-    fn start(path: PathBuf) -> Self {
+    fn start(path: PathBuf, writes_allowed: bool) -> Self {
         let (sender, receiver) = mpsc::channel::<Option<Arc<ReviewTaskState>>>();
         let handle = std::thread::Builder::new()
             .name("ai-review-tasks".into())
@@ -2974,6 +3028,9 @@ impl TaskPersistenceWorker {
                     };
                     while let Ok(Some(newer)) = receiver.try_recv() {
                         latest = newer;
+                    }
+                    if !writes_allowed {
+                        continue;
                     }
                     if let Err(error) = persist_task_state(&path, &latest) {
                         log::error!("[AI Review][Task Store] Persistence failed: {error}");
@@ -3070,6 +3127,36 @@ mod tests {
             .expect("cancelled review work should finish promptly")
             .expect("review work task should not panic");
         assert_eq!(result, Err(()));
+    }
+
+    #[tokio::test]
+    async fn invalid_chat_history_is_preserved_instead_of_overwritten() {
+        let dir = std::env::temp_dir().join(format!(
+            "usher-ai-review-corrupt-chat-{}-{}",
+            std::process::id(),
+            NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("review.chat.json");
+        fs::write(&path, b"{invalid").unwrap();
+
+        let error = load_chat_session(path.clone()).await.unwrap_err();
+        assert!(error.contains("was preserved"));
+        assert!(!path.exists());
+        let backup = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|candidate| {
+                candidate
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("review.chat.json.corrupt-"))
+            })
+            .expect("corrupt chat backup");
+        assert_eq!(fs::read(&backup).unwrap(), b"{invalid");
+
+        fs::remove_file(backup).unwrap();
+        fs::remove_dir(dir).unwrap();
     }
 
     #[test]
@@ -3254,11 +3341,14 @@ mod tests {
             projection
                 .repository_file_actions
                 .iter()
-                .any(|action| { action.relative_path == PathBuf::from("AGENTS.md") })
+                .any(|action| { action.relative_path == *"AGENTS.md" })
         );
-        assert!(projection.repository_file_actions.iter().any(|action| {
-            action.relative_path == PathBuf::from("docs/specs/ai-code-review.md")
-        }));
+        assert!(
+            projection
+                .repository_file_actions
+                .iter()
+                .any(|action| { action.relative_path == *"docs/specs/ai-code-review.md" })
+        );
         assert!(
             projection
                 .blocks
@@ -3273,7 +3363,7 @@ mod tests {
             !projection
                 .repository_file_actions
                 .iter()
-                .any(|action| { action.relative_path == PathBuf::from("../outside.md") })
+                .any(|action| { action.relative_path == *"../outside.md" })
         );
     }
 
@@ -3310,6 +3400,7 @@ mod tests {
             head_sha: "head".to_string(),
             start_sha: "base".to_string(),
             too_many_commits: false,
+            files_truncated: false,
         };
         let normalized = unified_diff_from_detail(&detail);
         assert!(normalized.contains("diff --git a/src/lib.rs b/src/lib.rs"));

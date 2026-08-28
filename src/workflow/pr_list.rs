@@ -433,7 +433,7 @@ impl WorkflowPrListController {
         ui.set_workflow_pr_list_loading(false);
         ui.set_workflow_pr_list_error("".into());
         ui.set_workflow_pr_list_state(state.as_str().into());
-        apply_page_to_ui(&ui, requested_page, visible_items, page_count, true);
+        apply_page_to_ui(ui, requested_page, visible_items, page_count, true);
         ui.set_workflow_pr_list_total(total as i32);
         set_state_total(ui, state, total);
     }
@@ -583,6 +583,8 @@ fn filtered_review_status_fixture(
     }
 }
 
+// Arguments correspond to the remote-page response and its pagination metadata.
+#[allow(clippy::too_many_arguments)]
 fn render_remote_page(
     ui: &MainWindow,
     visited_pages: &Arc<Mutex<HashMap<u32, Vec<PullRequestItem>>>>,

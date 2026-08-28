@@ -133,7 +133,8 @@ pub(super) fn setup(ui: &MainWindow) {
         let scale_factor = ui_weak
             .upgrade()
             .map_or(1.0, |ui| ui.window().scale_factor());
-        let hit = hit_test(
+
+        hit_test(
             text.as_str(),
             x,
             y,
@@ -142,8 +143,7 @@ pub(super) fn setup(ui: &MainWindow) {
             family.as_str(),
             font_size,
             scale_factor,
-        );
-        hit
+        )
     });
 
     let ui_weak = ui.as_weak();

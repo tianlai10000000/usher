@@ -161,8 +161,7 @@ pub(super) fn logo_image_cache_key(normalized: &str) -> String {
 }
 
 pub(super) fn load_default_logo_image() -> slint::Image {
-    load_image_from_bytes(include_bytes!("../../logo.png"), "png")
-        .unwrap_or_else(slint::Image::default)
+    load_image_from_bytes(include_bytes!("../../logo.png"), "png").unwrap_or_default()
 }
 
 pub(super) fn load_project_logo_path(path: &Path) -> Option<slint::Image> {

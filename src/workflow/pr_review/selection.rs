@@ -16,6 +16,7 @@ use crate::{
 /// Resolve a drag position from the grabbed delegate into an exact logical
 /// diff row and character index. Unlike a fixed-height approximation,
 /// this accounts for every crossed row's own wrap count.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_diff_selection_hit<F, G>(
     lines: &ModelRc<WorkflowPrDiffLine>,
     start_line: i32,
@@ -122,44 +123,44 @@ where
         let forward = target > start || (target == start && pointer_y >= start_height * 0.5);
         if forward {
             for index in (target + 1)..row_count {
-                if let Some(candidate) = lines.row_data(index) {
-                    if is_copyable_diff_line(&candidate) {
-                        return WorkflowPrDiffSelectionHit {
-                            line: index as i32,
-                            column: 0,
-                        };
-                    }
+                if let Some(candidate) = lines.row_data(index)
+                    && is_copyable_diff_line(&candidate)
+                {
+                    return WorkflowPrDiffSelectionHit {
+                        line: index as i32,
+                        column: 0,
+                    };
                 }
             }
             for index in (0..target).rev() {
-                if let Some(candidate) = lines.row_data(index) {
-                    if is_copyable_diff_line(&candidate) {
-                        return WorkflowPrDiffSelectionHit {
-                            line: index as i32,
-                            column: side_char_count(&candidate, side),
-                        };
-                    }
+                if let Some(candidate) = lines.row_data(index)
+                    && is_copyable_diff_line(&candidate)
+                {
+                    return WorkflowPrDiffSelectionHit {
+                        line: index as i32,
+                        column: side_char_count(&candidate, side),
+                    };
                 }
             }
         } else {
             for index in (0..target).rev() {
-                if let Some(candidate) = lines.row_data(index) {
-                    if is_copyable_diff_line(&candidate) {
-                        return WorkflowPrDiffSelectionHit {
-                            line: index as i32,
-                            column: side_char_count(&candidate, side),
-                        };
-                    }
+                if let Some(candidate) = lines.row_data(index)
+                    && is_copyable_diff_line(&candidate)
+                {
+                    return WorkflowPrDiffSelectionHit {
+                        line: index as i32,
+                        column: side_char_count(&candidate, side),
+                    };
                 }
             }
             for index in (target + 1)..row_count {
-                if let Some(candidate) = lines.row_data(index) {
-                    if is_copyable_diff_line(&candidate) {
-                        return WorkflowPrDiffSelectionHit {
-                            line: index as i32,
-                            column: 0,
-                        };
-                    }
+                if let Some(candidate) = lines.row_data(index)
+                    && is_copyable_diff_line(&candidate)
+                {
+                    return WorkflowPrDiffSelectionHit {
+                        line: index as i32,
+                        column: 0,
+                    };
                 }
             }
         }

@@ -1,3 +1,5 @@
+// `chat::chat` is the established transport module path used throughout the app.
+#[allow(clippy::module_inception)]
 pub mod chat;
 pub mod interactive;
 pub mod markdown;

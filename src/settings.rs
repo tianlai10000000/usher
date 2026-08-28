@@ -1,9 +1,12 @@
 // Settings module - Responsible for configuration read/write
-use std::fs;
-use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::ffi::OsString;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
-use config::{Config, File, FileFormat};
+use config::{Config, File as ConfigFile, FileFormat};
 use serde::{Deserialize, Serialize};
 use slint::{Global, Timer};
 
@@ -103,6 +106,17 @@ impl Default for PreviewProviderSettings {
 pub struct AiSettings {
     #[serde(default)]
     pub agent: AiAgentSettings,
+    #[serde(default)]
+    pub chat: AiChatSettings,
+}
+
+/// Chat/RAG backend connection. There is intentionally no compiled-in default
+/// endpoint: a hardcoded address would leak deployment topology into release
+/// binaries and cannot be corrected without shipping a new build.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiChatSettings {
+    #[serde(default)]
+    pub rag_api_url: String,
 }
 
 /// Connection settings shared by OpenAI-compatible providers such as DeepSeek.
@@ -239,17 +253,38 @@ impl Default for AppSettings {
 pub struct SettingsManager {
     settings: Arc<RwLock<AppSettings>>,
     config_path: PathBuf,
+    /// Serializes writers: `save()` is reachable from the UI timer, several
+    /// `spawn_blocking` tasks, and shutdown at the same time, and concurrent
+    /// `fs::write` calls to one path interleave into invalid TOML.
+    write_lock: Mutex<()>,
+    /// A corrupt source must be preserved before defaults can be persisted. If
+    /// the backup rename fails, block writes for this process rather than
+    /// truncating the only copy of the user's credentials.
+    writes_blocked: bool,
 }
+
+struct SettingsLoad {
+    settings: AppSettings,
+    writes_blocked: bool,
+}
+
+static SETTINGS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 impl SettingsManager {
     /// Create a new settings manager and load settings from file
     pub fn new() -> Self {
         let config_path = Self::get_config_path();
-        let settings = Self::load_from_file(&config_path);
+        Self::with_config_path(config_path)
+    }
+
+    fn with_config_path(config_path: PathBuf) -> Self {
+        let loaded = Self::load_from_file(&config_path);
 
         Self {
-            settings: Arc::new(RwLock::new(settings)),
+            settings: Arc::new(RwLock::new(loaded.settings)),
             config_path,
+            write_lock: Mutex::new(()),
+            writes_blocked: loaded.writes_blocked,
         }
     }
 
@@ -268,67 +303,79 @@ impl SettingsManager {
     }
 
     /// Load settings from configuration file
-    fn load_from_file(config_path: &PathBuf) -> AppSettings {
+    fn load_from_file(config_path: &Path) -> SettingsLoad {
         // Ensure config directory exists
-        if let Some(parent) = config_path.parent() {
-            if !parent.exists() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    log::error!("[Settings] Failed to create config directory: {}", e);
-                    return AppSettings::default();
-                }
-            }
+        let parent = parent_directory(config_path);
+        if !parent.exists()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            log::error!("[Settings] Failed to create config directory: {}", e);
+            return SettingsLoad {
+                settings: AppSettings::default(),
+                writes_blocked: true,
+            };
         }
 
         // If config file doesn't exist, return default settings
         if !config_path.exists() {
             log::info!("[Settings] Config file not found, using defaults");
-            return AppSettings::default();
+            return SettingsLoad {
+                settings: AppSettings::default(),
+                writes_blocked: false,
+            };
         }
 
         // Use config crate to load settings
         match Config::builder()
-            .add_source(File::from(config_path.as_path()).format(FileFormat::Toml))
+            .add_source(ConfigFile::from(config_path).format(FileFormat::Toml))
             .build()
         {
             Ok(config) => match config.try_deserialize::<AppSettings>() {
                 Ok(mut settings) => {
                     migrate_legacy_gitee_token(&mut settings);
                     log::debug!("[Settings] Loaded settings from {:?}", config_path);
-                    settings
+                    SettingsLoad {
+                        settings,
+                        writes_blocked: false,
+                    }
                 }
-                Err(e) => {
-                    log::error!("[Settings] Failed to deserialize settings: {}", e);
-                    AppSettings::default()
-                }
+                Err(_) => preserve_corrupt_settings(config_path, "deserialization"),
             },
-            Err(e) => {
-                log::error!("[Settings] Failed to load config: {}", e);
-                AppSettings::default()
-            }
+            Err(_) => preserve_corrupt_settings(config_path, "parsing"),
         }
     }
 
     /// Save current settings to configuration file
     pub fn save(&self) -> Result<(), String> {
+        let _write_guard = self
+            .write_lock
+            .lock()
+            .map_err(|e| format!("Failed to acquire settings write lock: {e}"))?;
+        if self.writes_blocked {
+            return Err(
+                "Settings writes are disabled because the corrupt source file could not be preserved"
+                    .to_string(),
+            );
+        }
+
         let settings = self
             .settings
             .read()
-            .map_err(|e| format!("Failed to acquire read lock: {}", e))?;
+            .map_err(|e| format!("Failed to acquire read lock: {e}"))?
+            .clone();
 
         // Ensure config directory exists
-        if let Some(parent) = self.config_path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create config directory: {}", e))?;
-            }
+        let parent = parent_directory(&self.config_path);
+        if !parent.exists() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config directory: {}", e))?;
         }
 
         // Serialize to TOML
-        let toml_content = toml::to_string_pretty(&*settings)
-            .map_err(|e| format!("Failed to serialize: {}", e))?;
+        let toml_content =
+            toml::to_string_pretty(&settings).map_err(|e| format!("Failed to serialize: {}", e))?;
 
-        // Write to file
-        fs::write(&self.config_path, toml_content)
+        atomic_write(&self.config_path, toml_content.as_bytes())
             .map_err(|e| format!("Failed to write config file: {}", e))?;
 
         log::info!("[Settings] Saved settings to {:?}", self.config_path);
@@ -420,7 +467,7 @@ impl SettingsManager {
                 usher_preview::PLAIN_TEXT_PROVIDER_ID => {
                     settings.preview.providers.plain_text = enabled
                 }
-                _ => return,
+                _ => (),
             }
         }
     }
@@ -477,6 +524,136 @@ impl SettingsManager {
             settings.ai.agent.api_key = api_key.trim().to_string();
             settings.ai.agent.model = model.trim().to_string();
         }
+    }
+}
+
+fn preserve_corrupt_settings(config_path: &Path, failure_stage: &str) -> SettingsLoad {
+    let file_name = config_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "settings.toml".to_string());
+    let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%3fZ");
+    let backup_path = config_path.with_file_name(format!(
+        "{file_name}.corrupt-{timestamp}-{}",
+        std::process::id()
+    ));
+
+    let writes_blocked = match fs::rename(config_path, &backup_path) {
+        Ok(()) => {
+            log::error!(
+                "[Settings] Settings {} failed; the invalid file was preserved at {:?}",
+                failure_stage,
+                backup_path,
+            );
+            false
+        }
+        Err(rename_error) => {
+            log::error!(
+                "[Settings] Settings {} failed and the invalid file could not be preserved; writes are disabled for this process (backup: {})",
+                failure_stage,
+                rename_error
+            );
+            true
+        }
+    };
+
+    SettingsLoad {
+        settings: AppSettings::default(),
+        writes_blocked,
+    }
+}
+
+fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let parent = parent_directory(path);
+
+    let (temporary_path, mut temporary_file) = create_temporary_file(path)?;
+    let write_result: io::Result<()> = (|| {
+        temporary_file.write_all(contents)?;
+        temporary_file.sync_all()?;
+        drop(temporary_file);
+        replace_file(&temporary_path, path)?;
+
+        #[cfg(unix)]
+        File::open(parent)?.sync_all()?;
+
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    write_result
+}
+
+fn parent_directory(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn create_temporary_file(path: &Path) -> io::Result<(PathBuf, File)> {
+    let Some(file_name) = path.file_name() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "settings path has no file name",
+        ));
+    };
+
+    for _ in 0..16 {
+        let sequence = SETTINGS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut temporary_name = OsString::from(file_name);
+        temporary_name.push(format!(".tmp-{}-{sequence}", std::process::id()));
+        let temporary_path = path.with_file_name(temporary_name);
+        match OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => return Ok((temporary_path, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate a unique settings temporary file",
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 
@@ -650,6 +827,20 @@ pub fn load_git_platform_tokens() -> GitPlatformTokens {
             .trim()
             .to_string(),
     }
+}
+
+/// Resolve the chat RAG endpoint: settings first, then the `USHER_RAG_API_URL`
+/// environment variable. Returns `None` when neither is configured.
+pub fn load_chat_rag_api_url() -> Option<String> {
+    let configured = get_settings_manager().get().ai.chat.rag_api_url;
+    let trimmed = configured.trim();
+    if !trimmed.is_empty() {
+        return Some(trimmed.to_string());
+    }
+    std::env::var("USHER_RAG_API_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 pub fn load_git_hosted_repository_config(provider: &str) -> GitHostedRepositoryConfig {
@@ -863,6 +1054,7 @@ auto_update = false
                     api_key: "secret".into(),
                     model: "example-model".into(),
                 },
+                chat: AiChatSettings::default(),
             },
             ..Default::default()
         };
@@ -908,5 +1100,59 @@ auto_update = false
 
         assert_eq!(settings.git.platform.gitee.token, "public-token");
         assert!(settings.git.platform.gitee.enterprise_token.is_empty());
+    }
+
+    #[test]
+    fn invalid_settings_are_preserved_before_defaults_can_be_saved() {
+        let test_dir = unique_test_directory("corrupt");
+        fs::create_dir_all(&test_dir).unwrap();
+        let config_path = test_dir.join("settings.toml");
+        fs::write(&config_path, b"[git\ninvalid =").unwrap();
+
+        let manager = SettingsManager::with_config_path(config_path.clone());
+        assert!(!manager.writes_blocked);
+        assert!(!config_path.exists());
+        let preserved = fs::read_dir(&test_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .find(|name| name.starts_with("settings.toml.corrupt-"));
+        assert!(preserved.is_some());
+
+        manager.set_theme_mode(2);
+        manager.save().unwrap();
+        let restored: AppSettings =
+            toml::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(restored.theme_mode, 2);
+
+        fs::remove_dir_all(test_dir).unwrap();
+    }
+
+    #[test]
+    fn settings_save_replaces_the_file_without_leaving_temporary_files() {
+        let test_dir = unique_test_directory("atomic");
+        fs::create_dir_all(&test_dir).unwrap();
+        let config_path = test_dir.join("settings.toml");
+        let manager = SettingsManager::with_config_path(config_path.clone());
+
+        manager.set_theme_mode(1);
+        manager.save().unwrap();
+        manager.set_theme_mode(2);
+        manager.save().unwrap();
+
+        let saved: AppSettings =
+            toml::from_str(&fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(saved.theme_mode, 2);
+        assert_eq!(fs::read_dir(&test_dir).unwrap().count(), 1);
+
+        fs::remove_dir_all(test_dir).unwrap();
+    }
+
+    fn unique_test_directory(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "usher-settings-{label}-{}-{}",
+            std::process::id(),
+            SETTINGS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ))
     }
 }

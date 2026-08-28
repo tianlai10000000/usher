@@ -68,21 +68,21 @@ pub(super) fn highlight_diff_lines(
             continue;
         }
 
-        if extension == "vue" {
-            if let Some(next_syntax) = vue_tag_next_syntax(syntax_set, expanded.trim()) {
-                let mut tag_highlighter =
-                    HighlightLines::new(syntax_by_name(syntax_set, "HTML"), github_theme);
-                let highlighted_input = format!("{expanded}\n");
-                highlighted.push(
-                    tag_highlighter
-                        .highlight_line(highlighted_input.as_str(), syntax_set)
-                        .map(styled_line)
-                        .unwrap_or_else(|_| plain_line(expanded, [0xff, 0x24, 0x29, 0x2f])),
-                );
-                syntax = next_syntax;
-                highlighter = HighlightLines::new(syntax, github_theme);
-                continue;
-            }
+        if extension == "vue"
+            && let Some(next_syntax) = vue_tag_next_syntax(syntax_set, expanded.trim())
+        {
+            let mut tag_highlighter =
+                HighlightLines::new(syntax_by_name(syntax_set, "HTML"), github_theme);
+            let highlighted_input = format!("{expanded}\n");
+            highlighted.push(
+                tag_highlighter
+                    .highlight_line(highlighted_input.as_str(), syntax_set)
+                    .map(styled_line)
+                    .unwrap_or_else(|_| plain_line(expanded, [0xff, 0x24, 0x29, 0x2f])),
+            );
+            syntax = next_syntax;
+            highlighter = HighlightLines::new(syntax, github_theme);
+            continue;
         }
 
         let highlighted_input = format!("{expanded}\n");

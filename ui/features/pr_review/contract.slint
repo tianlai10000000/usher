@@ -25,6 +25,7 @@ export component PullRequestReviewPageContract inherits FocusScope {
     in property <string> base-sha;
     in property <string> head-sha;
     in property <bool> too-many-commits: false;
+    in property <bool> files-truncated: false;
     in-out property <int> selected-tab: 2;
     in property <[WorkflowPrConversationItem]> conversation-items: [];
     in property <int> conversation-content-height: 0;

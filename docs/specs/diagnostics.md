@@ -31,6 +31,7 @@ This specification defines user-controlled application log destinations and opti
 5. Logger filtering is thread-safe and never performs reducer, persistence, or filesystem work on the Slint event loop except the existing deferred Settings save trigger.
 6. `USHER_MEMORY_DIAGNOSTICS=1` may force memory diagnostics for controlled benchmarks even when the UI preference is off.
 7. Pre-logger startup failures and explicit environment-controlled benchmark tools may write directly to the process console; these are not normal application logging destinations.
+8. The global panic hook always appends one valid JSON panic record to the configured tracing path, or its default path when tracing was never initialized, even when structured tracing is disabled. It then requests shutdown; ordinary tracing emission still respects the runtime switch.
 
 1. 关闭 Console 与两个文件输出后，普通应用日志立即停止，无需重启。
 2. 关闭全部控制项后，不再产生普通 `log`/`tracing` 输出，也不再产生 Terminal 或内存诊断记录。
@@ -39,6 +40,7 @@ This specification defines user-controlled application log destinations and opti
 5. Logger 过滤必须线程安全；除既有延迟 Settings 保存触发外，不得在 Slint event loop 执行 reducer、持久化或文件系统工作。
 6. 受控基准可通过 `USHER_MEMORY_DIAGNOSTICS=1` 强制启用内存诊断，即使 UI 偏好已关闭。
 7. Logger 初始化前的启动失败与显式环境变量控制的基准工具可以直接写进程控制台；它们不属于普通应用日志输出目标。
+8. 全局 panic hook 无论 structured tracing 是否关闭，都必须向已配置 tracing 路径追加一条有效 JSON panic 记录；tracing 尚未初始化时使用默认路径。落盘后请求关闭；普通 tracing 事件仍遵循运行时开关。
 
 ## Troubleshooting workflow / 问题排查流程
 

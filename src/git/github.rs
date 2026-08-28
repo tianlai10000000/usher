@@ -11,11 +11,11 @@ use crate::codereview::api::github as endpoints;
 use crate::http::{self, RequestOptions};
 
 use super::{
-    PullRequestActionState, PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail,
-    PullRequestDiffFile, PullRequestFilters, PullRequestItem, PullRequestMergeMethod,
-    PullRequestPage, PullRequestReadiness, PullRequestReadinessKind, PullRequestRevertResult,
-    PullRequestReviewAction, PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType,
-    commit_count_from_detail, configured_api_base_url, configured_token,
+    PageCollector, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
+    PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters, PullRequestItem,
+    PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
+    PullRequestRevertResult, PullRequestReviewAction, PullRequestReviewStatus, PullRequestState,
+    RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url, configured_token,
     conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
     conversation_system_event_item, finalize_conversation_timeline, is_configured_enterprise_host,
     parse_unified_diff, percent_encode_path, unavailable_diff_file,
@@ -283,27 +283,23 @@ pub(super) async fn get_pull_request_diff(
         Some(pull_request_number),
         None,
     );
-    let mut page = 1u32;
-    let mut values = Vec::new();
+    let mut pages = PageCollector::new(100, 30);
     loop {
-        let request = authenticated_request(locator, files_endpoint.clone())
-            .query(&[("page", page.to_string()), ("per_page", "100".to_string())]);
+        let request = authenticated_request(locator, files_endpoint.clone()).query(&[
+            ("page", pages.page().to_string()),
+            ("per_page", "100".to_string()),
+        ]);
         let batch: Vec<Value> = http::send_json(
             request,
             RequestOptions::new("Load GitHub pull request files"),
         )
         .await
         .map_err(|error| error.to_string())?;
-        let batch_len = batch.len();
-        values.extend(batch);
-        if batch_len < 100 {
-            break;
-        }
-        page = page.saturating_add(1);
-        if page > 30 {
+        if !pages.append(batch) {
             break;
         }
     }
+    let (values, files_truncated) = pages.into_parts();
     let files = values.iter().map(decode_diff_file).collect::<Vec<_>>();
     let commit_count = match commit_count_from_detail(&detail) {
         Some(count) => count,
@@ -330,7 +326,8 @@ pub(super) async fn get_pull_request_diff(
         base_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
         head_sha: nested_string(&detail, "head", "sha").unwrap_or_default(),
         start_sha: nested_string(&detail, "base", "sha").unwrap_or_default(),
-        too_many_commits: values.len() >= 3000,
+        too_many_commits: false,
+        files_truncated,
         files,
     })
 }
@@ -363,7 +360,8 @@ pub(super) async fn get_commit_range_diff(
         base_sha: base_sha.to_string(),
         head_sha: head_sha.to_string(),
         start_sha: base_sha.to_string(),
-        too_many_commits: values.len() >= 300,
+        too_many_commits: false,
+        files_truncated: values.len() >= 300,
         files,
     })
 }
@@ -451,12 +449,19 @@ pub(super) async fn get_pull_request_action_state(
         Some(pull_request_number),
         None,
     );
-    let reviews = http::send_json::<Vec<Value>>(
-        authenticated_request(locator, reviews_endpoint).query(&[("per_page", "100")]),
-        RequestOptions::new("Load GitHub pull request reviews"),
+    let reviews = load_github_pages(
+        locator,
+        reviews_endpoint,
+        "Load GitHub pull request reviews",
     )
     .await
-    .unwrap_or_default();
+    .map_err(|error| error.to_string())?;
+    if reviews.len() >= 3_000 {
+        return Err(
+            "GitHub review history reached the safe pagination limit; merge remains disabled until the complete review state can be confirmed."
+                .to_string(),
+        );
+    }
 
     let has_token = configured_token(RepoType::GitHub).is_some();
     let review_state = aggregate_review_state(reviews.as_slice());
@@ -1326,10 +1331,10 @@ fn value_u32(value: &Value, key: &str) -> Option<u32> {
 }
 
 fn api_base_url(locator: &RepoLocator) -> String {
-    if is_configured_enterprise_host(RepoType::GitHub, locator.host.as_str()) {
-        if let Some(api_base_url) = configured_api_base_url(RepoType::GitHub) {
-            return with_default_api_version(api_base_url, endpoints::ENTERPRISE_API_VERSION_PATH);
-        }
+    if is_configured_enterprise_host(RepoType::GitHub, locator.host.as_str())
+        && let Some(api_base_url) = configured_api_base_url(RepoType::GitHub)
+    {
+        return with_default_api_version(api_base_url, endpoints::ENTERPRISE_API_VERSION_PATH);
     }
     endpoints::PUBLIC_API_BASE_URL.to_string()
 }
