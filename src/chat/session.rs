@@ -75,6 +75,22 @@ pub struct ChatSessionService {
     page_size: usize,
 }
 
+#[derive(Debug)]
+pub(crate) struct PendingChatMessage {
+    store: JsonlHistoryStore,
+    message: StoredChatMessage,
+}
+
+impl PendingChatMessage {
+    pub(crate) fn message(&self) -> &StoredChatMessage {
+        &self.message
+    }
+
+    pub(crate) fn persist(&self) -> io::Result<()> {
+        self.store.append(&self.message)
+    }
+}
+
 impl ChatSessionService {
     pub fn bootstrap_default() -> io::Result<Self> {
         let store = JsonlHistoryStore::new_default()?;
@@ -137,6 +153,7 @@ impl ChatSessionService {
         Ok(loaded_count)
     }
 
+    #[cfg(test)]
     pub fn append_user_message(&mut self, content: String) -> io::Result<StoredChatMessage> {
         self.append_message(
             StoredMessageRole::User,
@@ -146,6 +163,7 @@ impl ChatSessionService {
         )
     }
 
+    #[cfg(test)]
     pub fn append_assistant_message(
         &mut self,
         content: String,
@@ -154,19 +172,6 @@ impl ChatSessionService {
         self.append_message(
             StoredMessageRole::Assistant,
             StoredMessageStatus::Normal,
-            content,
-            Some(elapsed_ms),
-        )
-    }
-
-    pub fn append_assistant_error(
-        &mut self,
-        content: String,
-        elapsed_ms: u64,
-    ) -> io::Result<StoredChatMessage> {
-        self.append_message(
-            StoredMessageRole::Assistant,
-            StoredMessageStatus::Error,
             content,
             Some(elapsed_ms),
         )
@@ -229,6 +234,7 @@ impl ChatSessionService {
         );
     }
 
+    #[cfg(test)]
     fn append_message(
         &mut self,
         role: StoredMessageRole,
@@ -236,19 +242,40 @@ impl ChatSessionService {
         content: String,
         elapsed_ms: Option<u64>,
     ) -> io::Result<StoredChatMessage> {
-        let message = StoredChatMessage {
-            id: self.next_id,
-            role,
-            status,
-            content,
-            timestamp: current_timestamp(),
-            elapsed_ms,
-        };
-        self.next_id = self.next_id.saturating_add(1);
+        let pending = self.prepare_message(role, status, content, elapsed_ms);
+        pending.persist()?;
+        self.commit_message(pending)
+    }
 
-        self.store.append(&message)?;
-        self.loaded_messages.push(message.clone());
-        Ok(message)
+    fn prepare_message(
+        &self,
+        role: StoredMessageRole,
+        status: StoredMessageStatus,
+        content: String,
+        elapsed_ms: Option<u64>,
+    ) -> PendingChatMessage {
+        PendingChatMessage {
+            store: self.store.clone(),
+            message: StoredChatMessage {
+                id: self.next_id,
+                role,
+                status,
+                content,
+                timestamp: current_timestamp(),
+                elapsed_ms,
+            },
+        }
+    }
+
+    fn commit_message(&mut self, pending: PendingChatMessage) -> io::Result<StoredChatMessage> {
+        if pending.message.id != self.next_id {
+            return Err(io::Error::other(
+                "chat append sequence changed before commit",
+            ));
+        }
+        self.next_id = self.next_id.saturating_add(1);
+        self.loaded_messages.push(pending.message.clone());
+        Ok(pending.message)
     }
 }
 
@@ -296,6 +323,7 @@ impl ChatSessions {
         self.session_mut(mode).load_more_history()
     }
 
+    #[cfg(test)]
     pub(crate) fn append_user_message_for(
         &mut self,
         mode: ChatMode,
@@ -304,6 +332,43 @@ impl ChatSessions {
         self.session_mut(mode).append_user_message(content)
     }
 
+    pub(crate) fn prepare_user_message_for(
+        &self,
+        mode: ChatMode,
+        content: String,
+    ) -> PendingChatMessage {
+        self.session(mode).prepare_message(
+            StoredMessageRole::User,
+            StoredMessageStatus::Normal,
+            content,
+            None,
+        )
+    }
+
+    pub(crate) fn prepare_assistant_message_for(
+        &self,
+        mode: ChatMode,
+        content: String,
+        status: StoredMessageStatus,
+        elapsed_ms: u64,
+    ) -> PendingChatMessage {
+        self.session(mode).prepare_message(
+            StoredMessageRole::Assistant,
+            status,
+            content,
+            Some(elapsed_ms),
+        )
+    }
+
+    pub(crate) fn commit_message_for(
+        &mut self,
+        mode: ChatMode,
+        pending: PendingChatMessage,
+    ) -> io::Result<StoredChatMessage> {
+        self.session_mut(mode).commit_message(pending)
+    }
+
+    #[cfg(test)]
     pub(crate) fn append_assistant_message_for(
         &mut self,
         mode: ChatMode,
@@ -312,16 +377,6 @@ impl ChatSessions {
     ) -> io::Result<StoredChatMessage> {
         self.session_mut(mode)
             .append_assistant_message(content, elapsed_ms)
-    }
-
-    pub(crate) fn append_assistant_error_for(
-        &mut self,
-        mode: ChatMode,
-        content: String,
-        elapsed_ms: u64,
-    ) -> io::Result<StoredChatMessage> {
-        self.session_mut(mode)
-            .append_assistant_error(content, elapsed_ms)
     }
 
     pub(crate) fn install_performance_fixture(&mut self) {
@@ -422,6 +477,44 @@ mod tests {
                 .unwrap()
                 .contains("AI question")
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_persistence_does_not_commit_or_advance_a_message() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "usher-chat-persist-failure-test-{}-{nonce}",
+            std::process::id()
+        ));
+        let path = dir.join("history.jsonl");
+        let store = JsonlHistoryStore::open_test_path(path).unwrap();
+        let mut session = ChatSessionService::bootstrap(store, 20, 10).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+
+        let pending = session.prepare_message(
+            crate::chat::persistence::StoredMessageRole::User,
+            crate::chat::persistence::StoredMessageStatus::Normal,
+            "keep this draft".into(),
+            None,
+        );
+        assert!(pending.persist().is_err());
+        assert!(session.loaded_messages().is_empty());
+
+        fs::create_dir_all(&dir).unwrap();
+        let replacement = session.prepare_message(
+            crate::chat::persistence::StoredMessageRole::User,
+            crate::chat::persistence::StoredMessageStatus::Normal,
+            "retry".into(),
+            None,
+        );
+        assert_eq!(replacement.message().id, 1);
+        replacement.persist().unwrap();
+        session.commit_message(replacement).unwrap();
+        assert_eq!(session.loaded_messages().len(), 1);
         fs::remove_dir_all(dir).unwrap();
     }
 }

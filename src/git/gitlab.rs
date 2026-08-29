@@ -87,6 +87,11 @@ impl PrefixCache {
         self.entries.insert(key, entry);
     }
 
+    fn remove(&mut self, key: &PrefixCacheKey) {
+        self.entries.remove(key);
+        self.order.retain(|candidate| candidate != key);
+    }
+
     fn invalidate_project(&mut self, api_base_url: &str, project_id: &str) {
         self.entries
             .retain(|key, _| key.api_base_url != api_base_url || key.project_id != project_id);
@@ -283,6 +288,7 @@ async fn get_gitlab_closed_pull_requests(
         filters,
         prefix_len,
         per_page,
+        requested_page == 1,
     );
     let merged_future = load_gitlab_state_prefix(
         locator,
@@ -291,6 +297,7 @@ async fn get_gitlab_closed_pull_requests(
         filters,
         prefix_len,
         per_page,
+        requested_page == 1,
     );
     let (closed_result, merged_result) = tokio::join!(closed_future, merged_future);
     let (mut closed, closed_total, closed_exact) = closed_result?;
@@ -331,13 +338,21 @@ async fn load_gitlab_state_prefix(
     filters: &PullRequestFilters,
     prefix_len: u32,
     page_size: u32,
+    force_refresh: bool,
 ) -> Result<(Vec<PullRequestItem>, u32, bool), String> {
     let page_size = page_size.clamp(1, 100);
     let key = prefix_cache_key(locator, repo_project_id, state, filters, page_size);
-    let cached = prefix_cache()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(&key, Instant::now());
+    let cached = {
+        let mut cache = prefix_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if force_refresh {
+            cache.remove(&key);
+            None
+        } else {
+            cache.get(&key, Instant::now())
+        }
+    };
     let mut entry = cached.unwrap_or_else(|| PrefixCacheEntry {
         items: Vec::new(),
         total: 0,
@@ -366,12 +381,12 @@ async fn load_gitlab_state_prefix(
             false,
         )
         .await?;
-        if page == 1 {
+        if result.total_exact || !entry.total_exact {
             entry.total = result.total;
             entry.total_exact = result.total_exact;
         }
         let batch_len = result.items.len();
-        entry.items.extend(result.items);
+        merge_gitlab_prefix_items(&mut entry.items, result.items);
         if batch_len < page_size as usize {
             entry.exhausted = true;
             break;
@@ -384,6 +399,20 @@ async fn load_gitlab_state_prefix(
         .insert(key, entry.clone());
     entry.items.truncate(prefix_len as usize);
     Ok((entry.items, entry.total, entry.total_exact))
+}
+
+fn merge_gitlab_prefix_items(existing: &mut Vec<PullRequestItem>, incoming: Vec<PullRequestItem>) {
+    for item in incoming {
+        if item.number != "—"
+            && let Some(index) = existing
+                .iter()
+                .position(|candidate| candidate.number == item.number)
+        {
+            existing[index] = item;
+        } else {
+            existing.push(item);
+        }
+    }
 }
 
 fn sort_gitlab_items(items: &mut [PullRequestItem], sort: &str) {
@@ -1757,7 +1786,7 @@ mod tests {
         gitlab_action_state, gitlab_approval_review_status, gitlab_approval_summaries,
         gitlab_commit_batch_activity, gitlab_list_review_status, gitlab_list_sort,
         gitlab_merge_actor, gitlab_merge_methods, gitlab_merge_payload, gitlab_merge_readiness,
-        is_gitlab_review_system_note, sort_gitlab_items,
+        is_gitlab_review_system_note, merge_gitlab_prefix_items, sort_gitlab_items,
     };
     use crate::git::{
         PullRequestCommit, PullRequestItem, PullRequestMergeMethod, PullRequestReadinessKind,
@@ -1835,6 +1864,29 @@ mod tests {
         cache.insert(newest.clone(), prefix_entry(now));
         assert_eq!(cache.entries.len(), PREFIX_CACHE_CAPACITY);
         assert_eq!(cache.order.back(), Some(&newest));
+    }
+
+    #[test]
+    fn gitlab_prefix_merge_replaces_duplicate_iids_without_reordering() {
+        let mut items = vec![
+            list_item("3", "2026-01-03", "old"),
+            list_item("2", "2026-01-02", "old"),
+        ];
+        merge_gitlab_prefix_items(
+            &mut items,
+            vec![
+                list_item("2", "2026-01-02", "new"),
+                list_item("1", "2026-01-01", "new"),
+            ],
+        );
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.number.as_str())
+                .collect::<Vec<_>>(),
+            ["3", "2", "1"]
+        );
+        assert_eq!(items[1].updated_at, "new");
     }
 
     #[test]

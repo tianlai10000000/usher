@@ -60,8 +60,8 @@ use super::text_geometry;
 use super::timeline::{
     chrono_commit_index_to_display, commit_index_by_sha, commit_model, commit_range_label,
     conversation_content_height, conversation_model, display_commit_range_to_chrono,
-    empty_commit_model, empty_conversation_model, range_covers_all_commits,
-    refresh_commit_group_expand_extras,
+    empty_commit_model, empty_conversation_model, patch_commit_avatars, patch_conversation_avatars,
+    range_covers_all_commits, refresh_commit_group_expand_extras,
 };
 use super::virtual_list::PrDiffVirtualListBridge;
 
@@ -1433,41 +1433,67 @@ impl WorkflowPrReviewController {
                 }
                 Err(error) => Err(error),
             };
-            // Each avatar download carries its own timeout, so slow hosts only
-            // drop their own entry instead of the whole decoded batch.
-            let avatars = match &result {
-                Ok(items) => load_conversation_avatars(items).await,
-                Err(_) => HashMap::new(),
-            };
-            let _ = slint::invoke_from_event_loop(move || {
-                if controller.conversation_sequence.load(Ordering::SeqCst) != sequence {
-                    return;
-                }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
-                ui.set_workflow_pr_review_conversation_loading(false);
-                match result {
-                    Ok(items) => {
+            match result {
+                Ok(items) => {
+                    let initial_items = items.clone();
+                    let initial_controller = controller.clone();
+                    let initial_ui_weak = ui_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if initial_controller
+                            .conversation_sequence
+                            .load(Ordering::SeqCst)
+                            != sequence
+                        {
+                            return;
+                        }
+                        let Some(ui) = initial_ui_weak.upgrade() else {
+                            return;
+                        };
+                        ui.set_workflow_pr_review_conversation_loading(false);
                         ui.set_workflow_pr_review_conversation_content_height(
-                            conversation_content_height(&items),
+                            conversation_content_height(&initial_items),
                         );
                         ui.set_workflow_pr_review_expanded_commit_body_height(0);
                         ui.set_workflow_pr_review_conversation_items(conversation_model(
-                            &items, &avatars,
+                            &initial_items,
+                            &HashMap::new(),
                         ));
-                        if let Ok(mut loaded) = controller.conversation_loaded.lock() {
+                        if let Ok(mut loaded) = initial_controller.conversation_loaded.lock() {
                             *loaded = true;
                         }
+                    });
+
+                    let avatars = load_conversation_avatars(&items).await;
+                    if avatars.is_empty() {
+                        return;
                     }
-                    Err(error) => {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if controller.conversation_sequence.load(Ordering::SeqCst) != sequence {
+                            return;
+                        }
+                        let Some(ui) = ui_weak.upgrade() else {
+                            return;
+                        };
+                        let model = ui.get_workflow_pr_review_conversation_items();
+                        patch_conversation_avatars(&model, &items, &avatars);
+                    });
+                }
+                Err(error) => {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if controller.conversation_sequence.load(Ordering::SeqCst) != sequence {
+                            return;
+                        }
+                        let Some(ui) = ui_weak.upgrade() else {
+                            return;
+                        };
+                        ui.set_workflow_pr_review_conversation_loading(false);
                         log::warn!("[Workflow][PR Review] Failed to load conversation: {error}");
                         ui.set_workflow_pr_review_conversation_error(
                             "The provider could not load this pull request conversation.".into(),
                         );
-                    }
+                    });
                 }
-            });
+            }
         });
     }
 
@@ -1527,45 +1553,70 @@ impl WorkflowPrReviewController {
                 }
                 Err(error) => Err(error),
             };
-            let commits_and_avatars = match result {
+            match result {
                 Ok(commits) => {
-                    let avatars = load_commit_avatars(&commits).await;
-                    Ok((commits, avatars))
-                }
-                Err(error) => Err(error),
-            };
-            let _ = slint::invoke_from_event_loop(move || {
-                if controller.commits_sequence.load(Ordering::SeqCst) != sequence {
-                    return;
-                }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
-                ui.set_workflow_pr_review_commits_loading(false);
-                match commits_and_avatars {
-                    Ok((commits, avatars)) => {
+                    let initial_commits = commits.clone();
+                    let initial_controller = controller.clone();
+                    let initial_ui_weak = ui_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if initial_controller.commits_sequence.load(Ordering::SeqCst) != sequence {
+                            return;
+                        }
+                        let Some(ui) = initial_ui_weak.upgrade() else {
+                            return;
+                        };
+                        ui.set_workflow_pr_review_commits_loading(false);
                         // Provider summaries normally populate the badge before
                         // activation. Keep the successfully loaded list as a
                         // final compatibility fallback for older enterprise APIs.
                         let current = ui.get_workflow_pr_review_commit_count();
-                        ui.set_workflow_pr_review_commit_count(current.max(commits.len() as i32));
-                        ui.set_workflow_pr_review_commits(commit_model(&commits, &avatars));
-                        if let Ok(mut stored) = controller.commits.lock() {
-                            *stored = commits;
+                        ui.set_workflow_pr_review_commit_count(
+                            current.max(initial_commits.len() as i32),
+                        );
+                        ui.set_workflow_pr_review_commits(commit_model(
+                            &initial_commits,
+                            &HashMap::new(),
+                        ));
+                        if let Ok(mut stored) = initial_controller.commits.lock() {
+                            *stored = initial_commits;
                         }
-                        if let Ok(mut loaded) = controller.commits_loaded.lock() {
+                        if let Ok(mut loaded) = initial_controller.commits_loaded.lock() {
                             *loaded = true;
                         }
-                        let pending_sha = controller
+                        let pending_sha = initial_controller
                             .pending_open_commit
                             .lock()
                             .ok()
                             .and_then(|mut pending| pending.take());
                         if let Some(sha) = pending_sha {
-                            controller.open_commit(&ui, sha.as_str());
+                            initial_controller.open_commit(&ui, sha.as_str());
                         }
+                    });
+
+                    let avatars = load_commit_avatars(&commits).await;
+                    if avatars.is_empty() {
+                        return;
                     }
-                    Err(error) => {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if controller.commits_sequence.load(Ordering::SeqCst) != sequence {
+                            return;
+                        }
+                        let Some(ui) = ui_weak.upgrade() else {
+                            return;
+                        };
+                        let model = ui.get_workflow_pr_review_commits();
+                        patch_commit_avatars(&model, &commits, &avatars);
+                    });
+                }
+                Err(error) => {
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if controller.commits_sequence.load(Ordering::SeqCst) != sequence {
+                            return;
+                        }
+                        let Some(ui) = ui_weak.upgrade() else {
+                            return;
+                        };
+                        ui.set_workflow_pr_review_commits_loading(false);
                         let was_opening_commit = controller
                             .pending_open_commit
                             .lock()
@@ -1578,9 +1629,9 @@ impl WorkflowPrReviewController {
                         if was_opening_commit {
                             show_error(&ui, "The selected commit details could not be loaded.");
                         }
-                    }
+                    });
                 }
-            });
+            }
         });
     }
 

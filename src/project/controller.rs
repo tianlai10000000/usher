@@ -17,7 +17,7 @@ use super::model::{
     parse_project_tags,
 };
 use super::overview::{ProjectPrOverviewTask, collect_pr_overview_tasks};
-use super::storage::{load_projects, write_projects};
+use super::storage::{load_projects, write_projects_from_state};
 
 thread_local! {
     static PROJECT_VIEW_DIAG_CACHE: RefCell<Option<ProjectViewDiagSnapshot>> =
@@ -238,7 +238,12 @@ pub fn setup_project(ui: &MainWindow) {
 
         guard.remove(index);
         drop(guard);
-        persist_projects_in_background(state_delete.clone(), ui.as_weak(), "delete");
+        persist_projects_in_background(
+            state_delete.clone(),
+            ui.as_weak(),
+            "delete",
+            "Project deleted.",
+        );
         let query = ui.get_project_search_query();
         refresh_project_items(
             &ui,
@@ -247,7 +252,6 @@ pub fn setup_project(ui: &MainWindow) {
             &pending_pr_overview_delete,
             &query,
         );
-        show_success(&ui, "Project deleted.");
     });
 
     let ui_weak = ui.as_weak();
@@ -423,7 +427,12 @@ fn start_project_save(
                         Err("Project alias already exists.".to_string())
                     } else {
                         projects.push(config);
-                        persist_projects_in_background(state.clone(), ui.as_weak(), "add");
+                        persist_projects_in_background(
+                            state.clone(),
+                            ui.as_weak(),
+                            "add",
+                            "Project added.",
+                        );
                         Ok("Project added.")
                     }
                 }
@@ -443,7 +452,12 @@ fn start_project_save(
                         Err("Project alias already exists.".to_string())
                     } else {
                         projects[index] = config;
-                        persist_projects_in_background(state.clone(), ui.as_weak(), "update");
+                        persist_projects_in_background(
+                            state.clone(),
+                            ui.as_weak(),
+                            "update",
+                            "Project updated.",
+                        );
                         Ok("Project updated.")
                     }
                 }
@@ -465,7 +479,7 @@ fn start_project_save(
                 &pending_pr_overview,
                 query.as_str(),
             );
-            show_success(&ui, message);
+            let _ = message;
         });
     });
 }
@@ -477,26 +491,27 @@ fn persist_projects_in_background(
     state: Arc<Mutex<Vec<ProjectConfig>>>,
     ui_weak: slint::Weak<MainWindow>,
     context: &'static str,
+    success_message: &'static str,
 ) {
     crate::app_runtime::shared_runtime().spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
-            let snapshot = state
-                .lock()
-                .map_err(|_| std::io::Error::other("project registry lock poisoned"))?
-                .clone();
-            write_projects(&snapshot)
-        })
-        .await;
+        let result = tokio::task::spawn_blocking(move || write_projects_from_state(&state)).await;
 
         let failure = match result {
-            Ok(Ok(())) => return,
-            Ok(Err(error)) => error.to_string(),
-            Err(error) => error.to_string(),
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(error.to_string()),
+            Err(error) => Some(error.to_string()),
         };
-        log::error!("[Project] Failed to persist projects after {context}: {failure}");
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(ui) = ui_weak.upgrade() {
-                show_error(&ui, &format!("Failed to save project: {failure}"));
+                match failure {
+                    None => show_success(&ui, success_message),
+                    Some(failure) => {
+                        log::error!(
+                            "[Project] Failed to persist projects after {context}: {failure}"
+                        );
+                        show_error(&ui, &format!("Failed to save project: {failure}"));
+                    }
+                }
             }
         });
     });

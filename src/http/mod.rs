@@ -28,6 +28,8 @@ const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_ERROR_BODY_CHARS: usize = 2_000;
 const RETRY_BASE_DELAY: Duration = Duration::from_millis(500);
 const RETRY_MAX_DELAY: Duration = Duration::from_secs(10);
+const DEFAULT_READ_ATTEMPTS: u32 = 3;
+const RETRY_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Warn once a provider reports fewer than this many rate-limit tokens left.
 const RATE_LIMIT_WARN_THRESHOLD: i64 = 3;
 
@@ -118,6 +120,18 @@ impl HttpError {
                 "response body made no progress for {} ms",
                 timeout.as_millis()
             ),
+            response_body: None,
+        }
+    }
+
+    fn operation_timeout(operation: &str, method: Method, url: Url, timeout: Duration) -> Self {
+        Self {
+            kind: HttpErrorKind::Timeout,
+            operation: operation.to_string(),
+            method: Some(method),
+            url: Some(url),
+            status: None,
+            message: format!("operation exceeded its {} ms budget", timeout.as_millis()),
             response_body: None,
         }
     }
@@ -241,7 +255,7 @@ impl RetryPolicy {
         jitter: f64,
     ) -> Duration {
         if let Some(retry_after) = retry_after {
-            return retry_after.min(self.max_delay);
+            return retry_after;
         }
         let exponent = attempt.saturating_sub(1).min(16);
         let base = self
@@ -253,10 +267,8 @@ impl RetryPolicy {
     }
 }
 
-fn should_retry_response(status: StatusCode, headers: &HeaderMap) -> bool {
-    status == StatusCode::TOO_MANY_REQUESTS
-        || status.is_server_error()
-        || (status == StatusCode::FORBIDDEN && rate_limit_remaining(headers) == Some(0))
+fn should_retry_response(status: StatusCode, _headers: &HeaderMap) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }
 
 fn is_transient_transport_error(error: &HttpError) -> bool {
@@ -366,6 +378,7 @@ pub(crate) struct RequestOptions {
     pub body_diagnostic_context: Option<String>,
     body_progress_policy: BodyProgressPolicy,
     retry: Option<RetryPolicy>,
+    retry_disabled: bool,
 }
 
 impl RequestOptions {
@@ -379,6 +392,7 @@ impl RequestOptions {
             body_diagnostic_context: None,
             body_progress_policy: BodyProgressPolicy::AnyChunk,
             retry: None,
+            retry_disabled: false,
         }
     }
 
@@ -429,6 +443,15 @@ impl RequestOptions {
     /// without this option keep the existing single-attempt behavior.
     pub(crate) fn retry_transient(mut self, max_attempts: u32) -> Self {
         self.retry = Some(RetryPolicy::transient(max_attempts));
+        self.retry_disabled = false;
+        self
+    }
+
+    /// Disable the bounded GET/HEAD retry default when the caller owns retry timing.
+    #[allow(dead_code)]
+    pub(crate) fn no_retry(mut self) -> Self {
+        self.retry = None;
+        self.retry_disabled = true;
         self
     }
 
@@ -436,8 +459,30 @@ impl RequestOptions {
     #[allow(dead_code)]
     pub(crate) fn retry(mut self, policy: RetryPolicy) -> Self {
         self.retry = Some(policy);
+        self.retry_disabled = false;
         self
     }
+}
+
+fn retry_policy_for(method: &Method, options: &RequestOptions) -> Option<RetryPolicy> {
+    if options.retry_disabled {
+        return None;
+    }
+    options
+        .retry
+        .or_else(|| {
+            matches!(*method, Method::GET | Method::HEAD)
+                .then(|| RetryPolicy::transient(DEFAULT_READ_ATTEMPTS))
+        })
+        .filter(|policy| policy.applies_to(method))
+}
+
+fn remaining_operation_budget(deadline: Option<Instant>) -> Option<Duration> {
+    deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()))
+}
+
+fn retry_delay_fits_budget(delay: Duration, deadline: Option<Instant>) -> bool {
+    remaining_operation_budget(deadline).is_none_or(|remaining| delay < remaining)
 }
 
 /// Mutable metadata exposed before a request is sent.
@@ -667,6 +712,7 @@ fn handle_error(error: HttpError, feedback: ErrorFeedback) -> HttpError {
     error
 }
 
+#[cfg(test)]
 fn request_total_timeout(timeout: Duration) -> Option<Duration> {
     (!timeout.is_zero()).then_some(timeout)
 }
@@ -984,13 +1030,27 @@ pub(crate) async fn send(
             options.feedback,
         )
     })?;
-    *request.timeout_mut() = request_total_timeout(options.timeout);
-    let retry = options
-        .retry
-        .filter(|policy| policy.applies_to(request.method()));
+    let operation_deadline = (!options.timeout.is_zero()).then(|| Instant::now() + options.timeout);
+    let retry = retry_policy_for(request.method(), &options);
     let max_attempts = retry.map(|policy| policy.max_attempts).unwrap_or(1);
     let mut attempt = 1_u32;
     loop {
+        let remaining = remaining_operation_budget(operation_deadline);
+        if remaining.is_some_and(|remaining| remaining.is_zero()) {
+            return Err(handle_error(
+                HttpError::operation_timeout(
+                    &options.operation,
+                    request.method().clone(),
+                    request.url().clone(),
+                    options.timeout,
+                ),
+                options.feedback,
+            ));
+        }
+        *request.timeout_mut() = match (retry, remaining) {
+            (Some(_), Some(remaining)) => Some(remaining.min(RETRY_ATTEMPT_TIMEOUT)),
+            (_, remaining) => remaining,
+        };
         // A streaming request body cannot be cloned; without a clone this
         // attempt is final regardless of the configured policy.
         let retry_request = (attempt < max_attempts)
@@ -999,15 +1059,43 @@ pub(crate) async fn send(
         match send_attempt(request, &options).await {
             Ok(response) => {
                 let status = response.status();
-                if should_retry_response(status, response.headers())
+                let exhausted_primary_quota = status == StatusCode::FORBIDDEN
+                    && rate_limit_remaining(response.headers()) == Some(0);
+                if (should_retry_response(status, response.headers()) || exhausted_primary_quota)
                     && let Some(policy) = retry
                     && let Some(next_request) = retry_request
                 {
-                    let delay = policy.delay_before_retry(
-                        attempt,
-                        retry_after_hint(response.headers()),
-                        rand::random::<f64>(),
-                    );
+                    let retry_after = retry_after_hint(response.headers());
+                    if exhausted_primary_quota && retry_after.is_none() {
+                        let method = response.method.clone();
+                        let url = response.url.clone();
+                        return Err(handle_error(
+                            HttpError::status(
+                                &options.operation,
+                                method,
+                                url,
+                                status,
+                                String::new(),
+                            ),
+                            options.feedback,
+                        ));
+                    }
+                    let delay =
+                        policy.delay_before_retry(attempt, retry_after, rand::random::<f64>());
+                    if !retry_delay_fits_budget(delay, operation_deadline) {
+                        let method = response.method.clone();
+                        let url = response.url.clone();
+                        return Err(handle_error(
+                            HttpError::status(
+                                &options.operation,
+                                method,
+                                url,
+                                status,
+                                String::new(),
+                            ),
+                            options.feedback,
+                        ));
+                    }
                     log::warn!(
                         "[HTTP][Retry] operation={} status={} attempt={}/{} delay_ms={}",
                         options.operation,
@@ -1048,6 +1136,9 @@ pub(crate) async fn send(
                     && let Some(next_request) = retry_request
                 {
                     let delay = policy.delay_before_retry(attempt, None, rand::random::<f64>());
+                    if !retry_delay_fits_budget(delay, operation_deadline) {
+                        return Err(handle_error(error, options.feedback));
+                    }
                     log::warn!(
                         "[HTTP][Retry] operation={} error_kind={:?} attempt={}/{} delay_ms={}",
                         options.operation,
@@ -1160,6 +1251,24 @@ mod tests {
         assert_eq!(options.body_diagnostic_context, None);
         assert_eq!(options.body_progress_policy, BodyProgressPolicy::AnyChunk);
         assert_eq!(options.retry, None);
+        assert!(!options.retry_disabled);
+    }
+
+    #[test]
+    fn read_methods_retry_by_default_and_can_explicitly_opt_out() {
+        let defaults = RequestOptions::new("Load list");
+        assert_eq!(
+            retry_policy_for(&Method::GET, &defaults),
+            Some(RetryPolicy::transient(DEFAULT_READ_ATTEMPTS))
+        );
+        assert_eq!(
+            retry_policy_for(&Method::HEAD, &defaults),
+            Some(RetryPolicy::transient(DEFAULT_READ_ATTEMPTS))
+        );
+        assert_eq!(retry_policy_for(&Method::POST, &defaults), None);
+
+        let disabled = RequestOptions::new("Long poll").no_retry();
+        assert_eq!(retry_policy_for(&Method::GET, &disabled), None);
     }
 
     #[test]
@@ -1218,7 +1327,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_after_header_overrides_backoff_but_stays_capped() {
+    fn retry_after_header_overrides_backoff_without_shortening_server_delay() {
         let policy = RetryPolicy::transient(3);
         assert_eq!(
             policy.delay_before_retry(1, Some(Duration::from_secs(2)), 1.0),
@@ -1226,7 +1335,7 @@ mod tests {
         );
         assert_eq!(
             policy.delay_before_retry(1, Some(Duration::from_secs(600)), 0.0),
-            RETRY_MAX_DELAY
+            Duration::from_secs(600)
         );
     }
 
@@ -1274,10 +1383,22 @@ mod tests {
         assert!(!should_retry_response(StatusCode::FORBIDDEN, &empty));
         let mut exhausted = HeaderMap::new();
         exhausted.insert("x-ratelimit-remaining", HeaderValue::from_static("0"));
-        assert!(should_retry_response(StatusCode::FORBIDDEN, &exhausted));
+        assert!(!should_retry_response(StatusCode::FORBIDDEN, &exhausted));
         assert!(!should_retry_response(StatusCode::OK, &empty));
         assert!(!should_retry_response(StatusCode::NOT_FOUND, &empty));
         assert!(!should_retry_response(StatusCode::UNAUTHORIZED, &empty));
+    }
+
+    #[test]
+    fn retry_delays_must_fit_the_shared_operation_budget() {
+        assert!(retry_delay_fits_budget(
+            Duration::from_millis(10),
+            Some(Instant::now() + Duration::from_secs(1))
+        ));
+        assert!(!retry_delay_fits_budget(
+            Duration::from_secs(2),
+            Some(Instant::now() + Duration::from_millis(10))
+        ));
     }
 
     #[test]

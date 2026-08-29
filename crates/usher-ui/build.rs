@@ -21,15 +21,19 @@ fn main() {
     } else {
         repository_root.join("ui/features/ai_review/disabled.slint")
     };
-    let config = slint_build::CompilerConfiguration::new().with_library_paths(HashMap::from([
-        (
-            "material".to_string(),
-            repository_root.join("material-1.7.1-fixed/material.slint"),
-        ),
-        ("ui-components".to_string(), ui_components_library),
-        ("pr-review".to_string(), pr_review_library),
-        ("ai-review".to_string(), ai_review_library),
-    ]));
+    let emit_debug_info = std::env::var_os("SLINT_EMIT_DEBUG_INFO").is_some()
+        || std::env::var("PROFILE").is_ok_and(|profile| profile == "debug");
+    let config = slint_build::CompilerConfiguration::new()
+        .with_debug_info(emit_debug_info)
+        .with_library_paths(HashMap::from([
+            (
+                "material".to_string(),
+                repository_root.join("material-1.7.1-fixed/material.slint"),
+            ),
+            ("ui-components".to_string(), ui_components_library),
+            ("pr-review".to_string(), pr_review_library),
+            ("ai-review".to_string(), ai_review_library),
+        ]));
 
     slint_build::compile_with_config(repository_root.join("ui/main.slint"), config).unwrap();
 }

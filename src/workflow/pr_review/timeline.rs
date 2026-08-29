@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
 use super::avatar::ConversationAvatarPixels;
 use super::cache::BoundedCache;
@@ -181,6 +181,20 @@ pub(super) fn conversation_model(
     ))
 }
 
+pub(super) fn patch_conversation_avatars(
+    model: &ModelRc<WorkflowPrConversationItem>,
+    items: &[PullRequestConversationItem],
+    avatars: &HashMap<String, Arc<ConversationAvatarPixels>>,
+) {
+    for (index, item) in items.iter().enumerate() {
+        let Some(mut row) = model.row_data(index) else {
+            continue;
+        };
+        row.avatar = cached_avatar_image(avatars, item.avatar_url.as_str());
+        model.set_row_data(index, row);
+    }
+}
+
 fn conversation_items_connect(
     before: Option<&PullRequestConversationItem>,
     after: Option<&PullRequestConversationItem>,
@@ -275,6 +289,21 @@ pub(super) fn commit_model(
             })
             .collect::<Vec<_>>(),
     ))
+}
+
+pub(super) fn patch_commit_avatars(
+    model: &ModelRc<WorkflowPrCommit>,
+    commits: &[PullRequestCommit],
+    avatars: &HashMap<String, Arc<ConversationAvatarPixels>>,
+) {
+    for (index, commit) in commits.iter().rev().enumerate() {
+        let Some(mut row) = model.row_data(index) else {
+            continue;
+        };
+        row.avatar = cached_avatar_image(avatars, commit.avatar_url.as_str());
+        row.committer_avatar = cached_avatar_image(avatars, commit.committer_avatar_url.as_str());
+        model.set_row_data(index, row);
+    }
 }
 
 fn commit_has_distinct_committer(commit: &PullRequestCommit) -> bool {
@@ -422,13 +451,16 @@ fn format_commit_date(value: &str) -> String {
 mod tests {
     use super::{
         chrono_commit_index_to_display, commit_has_distinct_committer, commit_identity_action,
-        commit_index_by_sha, commit_message_body_height, commit_range_label,
+        commit_index_by_sha, commit_message_body_height, commit_model, commit_range_label,
         commit_tab_expand_layout_extra, conversation_card_row_height, conversation_content_height,
-        conversation_items_connect, display_commit_range_to_chrono, range_covers_all_commits,
+        conversation_items_connect, conversation_model, display_commit_range_to_chrono,
+        patch_commit_avatars, patch_conversation_avatars, range_covers_all_commits,
         refresh_commit_group_expand_extras,
     };
     use crate::WorkflowPrCommit;
     use crate::git::{PullRequestCommit, PullRequestConversationItem};
+    use slint::Model;
+    use std::collections::HashMap;
 
     fn conversation_item(kind: &str, body: &str) -> PullRequestConversationItem {
         PullRequestConversationItem {
@@ -485,6 +517,28 @@ mod tests {
         commit.committer = "alice".to_string();
         assert!(!commit_has_distinct_committer(&commit));
         assert_eq!(commit_identity_action(&commit, false), "Alice authored");
+    }
+
+    #[test]
+    fn avatar_patches_preserve_existing_row_interaction_state() {
+        let conversation = vec![conversation_item("commit", "title\nbody")];
+        let conversation_model = conversation_model(&conversation, &HashMap::new());
+        let mut conversation_row = conversation_model.row_data(0).unwrap();
+        conversation_row.message_expanded = true;
+        conversation_model.set_row_data(0, conversation_row);
+        patch_conversation_avatars(&conversation_model, &conversation, &HashMap::new());
+        assert!(conversation_model.row_data(0).unwrap().message_expanded);
+
+        let commits = vec![commit("abc")];
+        let commit_model = commit_model(&commits, &HashMap::new());
+        let mut commit_row = commit_model.row_data(0).unwrap();
+        commit_row.message_expanded = true;
+        commit_row.group_expand_extra = 42;
+        commit_model.set_row_data(0, commit_row);
+        patch_commit_avatars(&commit_model, &commits, &HashMap::new());
+        let patched = commit_model.row_data(0).unwrap();
+        assert!(patched.message_expanded);
+        assert_eq!(patched.group_expand_extra, 42);
     }
 
     #[test]

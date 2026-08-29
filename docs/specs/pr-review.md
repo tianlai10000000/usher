@@ -423,7 +423,9 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
 - Avatar downloads have an independent three-second timeout and a 2 MiB size
   limit. A process-level bounded cache retains send-safe RGBA pixels; the Slint
   event loop separately reuses up to 128 `slint::Image` values across
-  Conversation and Commits model rebuilds.
+  Conversation and Commits model rebuilds. Conversation and Commits text is
+  committed immediately after provider data arrives; avatar completion may
+  only patch the already-visible model and never owns loading/error state.
 - Hidden per-row wrapped `TextInput` delegates are conditionally mounted only
   for their active presentation path. Artifact Preview and AI Review hidden
   heavy subtrees follow the same conditional-mount rule; opacity alone must not
@@ -433,7 +435,8 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
   180 ms 去抖，并由查询级 row table 为已挂载行提供绘制 model，禁止逐行重复全量扫描。
 - 头像下载各自使用三秒超时与 2 MiB 上限；进程级有界缓存保存可跨线程的 RGBA 像素，
   Slint event loop 另复用最多 128 个 `slint::Image`，供 Conversation/Commits model
-  重建共同使用。
+  重建共同使用。Provider 数据到达后必须立即提交 Conversation/Commits 正文；头像完成
+  只能补丁已显示的 model，不得控制正文的 loading/error 状态。
 - 每行隐藏的换行 `TextInput` 只在对应展示路径活跃时条件挂载。Artifact Preview 与
   AI Review 的隐藏重型子树遵循同一规则，不得只靠 opacity 保留组件树。
 

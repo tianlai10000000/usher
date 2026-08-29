@@ -72,12 +72,15 @@ This specification covers provider metadata resolved on the Project page and the
     backgrounds remain fixed across themes: GitHub `#24292E`, GitLab
     `#FC6D26`, and Gitee `#C71D23`, with white provider artwork and text.
 18. Project-registry reads and writes run off the Slint event loop. Writers are
-    serialized and replace `projects.json` through a temporary sibling rename,
-    so concurrent background saves cannot expose partial JSON to readers.
+    serialized across both snapshot acquisition and the temporary-sibling
+    rename, so a queued older writer cannot overwrite newer in-memory state and
+    readers cannot observe partial JSON. Success feedback is emitted only after
+    the write completes.
 19. GitLab Closed logical pages merge provider-sorted closed and merged
     prefixes. Complete provider pages are cached incrementally for 30 seconds,
-    bounded to 32 repository/filter/state/page-size keys, and invalidated after
-    a successful merge.
+    bounded to 32 repository/filter/state/page-size keys, deduplicated by IID,
+    and invalidated after a successful merge. Explicit page-one refresh bypasses
+    the cached prefix and refreshes provider totals.
 
 1. `remote_repo` 决定 Provider，支持 `gitee`、`gitlab`、`github`。
 2. 支持 HTTPS 或 SSH Git URL，且必须包含 owner/group 与仓库路径。
@@ -109,9 +112,11 @@ This specification covers provider metadata resolved on the Project page and the
     先缩小，不能挤压项目身份或路径。品牌底色在明暗主题下保持固定：GitHub
     `#24292E`、GitLab `#FC6D26`、Gitee `#C71D23`，Provider 图形与文字统一使用白色。
 18. 项目注册表读写必须离开 Slint event loop；写入方串行执行，并通过同目录临时文件
-    rename 替换 `projects.json`，并发后台保存不得让读取方看到部分 JSON。
+    rename 替换 `projects.json`。串行范围必须同时覆盖快照获取与落盘，排队中的旧 Writer
+    不得覆盖更新状态；只有真实落盘完成后才提示成功。
 19. GitLab Closed 逻辑页按 Provider 排序合并 closed/merged 前缀；完整 Provider 页按
-    30 秒 TTL 增量缓存，最多保留 32 个仓库/筛选/状态/页大小 key，并在合并成功后失效。
+    30 秒 TTL 增量缓存，最多保留 32 个仓库/筛选/状态/页大小 key，按 IID 去重，并在
+    合并成功后失效。显式刷新第 1 页必须绕过旧前缀并刷新 Provider total。
 
 ## Deferred enhancement / 后续优化
 

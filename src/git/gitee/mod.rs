@@ -71,6 +71,23 @@ impl IdentityAvatarCache {
     }
 }
 
+fn cache_identity_avatar_resolution(
+    cache: &mut IdentityAvatarCache,
+    key: String,
+    resolution: Result<Option<String>, String>,
+) -> Option<String> {
+    match resolution {
+        Ok(avatar) => {
+            cache.insert(key, avatar.clone());
+            avatar
+        }
+        Err(error) => {
+            log::warn!("[Gitee] Commit identity avatar lookup failed: {error}");
+            None
+        }
+    }
+}
+
 fn identity_avatar_cache() -> &'static Mutex<IdentityAvatarCache> {
     static CACHE: OnceLock<Mutex<IdentityAvatarCache>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(IdentityAvatarCache::default()))
@@ -1630,16 +1647,15 @@ async fn load_enterprise_commit_identity_avatars(
         .map(|(key, cache_key, name, email)| {
             let endpoint = endpoint.clone();
             async move {
-                let payload = http::send_json::<Value>(
+                let resolution = http::send_json::<Value>(
                     enterprise_authenticated_builder(http::get(endpoint))
                         .query(&[("search", name.as_str())]),
                     RequestOptions::new("Resolve Gitee enterprise commit identity avatar")
                         .retry_transient(3),
                 )
                 .await
-                .ok();
-                let avatar = payload.as_ref().and_then(|payload| {
-                    let users = enterprise_user_values(payload)?;
+                .map(|payload| {
+                    let users = enterprise_user_values(&payload)?;
                     let mut exact = users.iter().filter(|user| {
                         string_field(user, "email")
                             .is_some_and(|candidate| candidate.eq_ignore_ascii_case(email.as_str()))
@@ -1653,8 +1669,9 @@ async fn load_enterprise_commit_identity_avatars(
                         .or_else(|| string_field(user, "image_path"))
                         .or_else(|| string_field(user, "imagePath"))
                         .filter(|avatar| !avatar.trim().is_empty())
-                });
-                (key, cache_key, avatar)
+                })
+                .map_err(|error| error.to_string());
+                (key, cache_key, resolution)
             }
         })
         .buffer_unordered(6)
@@ -1663,9 +1680,8 @@ async fn load_enterprise_commit_identity_avatars(
     let mut cache = identity_avatar_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    for (key, cache_key, avatar) in downloaded {
-        cache.insert(cache_key, avatar.clone());
-        if let Some(avatar) = avatar {
+    for (key, cache_key, resolution) in downloaded {
+        if let Some(avatar) = cache_identity_avatar_resolution(&mut cache, cache_key, resolution) {
             resolved.insert(key, avatar);
         }
     }
@@ -2588,9 +2604,10 @@ mod tests {
 
     use super::{
         IDENTITY_AVATAR_CACHE_CAPACITY, IdentityAvatarCache, bounded_list_total,
-        commit_count_from_diff_payload, complete_collection_total, decode_commit,
-        decode_conversation_comment, decode_conversation_review, decode_gitee_operate_log_activity,
-        decode_pull_request_diff, enterprise_commit_probe_total, enterprise_commit_refs_can_revert,
+        cache_identity_avatar_resolution, commit_count_from_diff_payload,
+        complete_collection_total, decode_commit, decode_conversation_comment,
+        decode_conversation_review, decode_gitee_operate_log_activity, decode_pull_request_diff,
+        enterprise_commit_probe_total, enterprise_commit_refs_can_revert,
         enterprise_compare_diff_payload, enterprise_data_object, enterprise_note_payload,
         enterprise_pull_request_get, enterprise_review_belongs_to_current_user,
         enterprise_review_dismissal_payload, enterprise_review_payload,
@@ -2639,6 +2656,23 @@ mod tests {
             cache.get(format!("identity-{IDENTITY_AVATAR_CACHE_CAPACITY}").as_str()),
             Some(Some(format!("avatar-{IDENTITY_AVATAR_CACHE_CAPACITY}")))
         );
+    }
+
+    #[test]
+    fn identity_avatar_cache_does_not_remember_transient_failures() {
+        let mut cache = IdentityAvatarCache::default();
+        assert_eq!(
+            cache_identity_avatar_resolution(
+                &mut cache,
+                "temporary".to_string(),
+                Err("timeout".to_string()),
+            ),
+            None
+        );
+        assert_eq!(cache.get("temporary"), None);
+
+        cache_identity_avatar_resolution(&mut cache, "confirmed".to_string(), Ok(None));
+        assert_eq!(cache.get("confirmed"), Some(None));
     }
 
     #[test]

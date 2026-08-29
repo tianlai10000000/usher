@@ -1,7 +1,7 @@
 use crate::ai::agent::{self, CompletionMessage};
 use crate::app_runtime::shared_runtime;
 use crate::chat::chat::{handle_api_error, send_message_to_server};
-use crate::chat::persistence::StoredMessageRole;
+use crate::chat::persistence::{StoredMessageRole, StoredMessageStatus};
 use crate::chat::renderer::{clear_render_cache, record_model_commit, render_for_ui};
 use crate::chat::session::{ChatMode, ChatRequestState, ChatSessions};
 use crate::chat::virtual_layout::{
@@ -10,8 +10,8 @@ use crate::chat::virtual_layout::{
     get_adaptive_row_height_px, smooth_adaptive_row_height_px,
 };
 use crate::settings::load_settings;
-use crate::{MainWindow, Route};
-use slint::{ComponentHandle, Model, ModelRc, VecModel};
+use crate::{MainWindow, Route, ToastManager, ToastOptions};
+use slint::{ComponentHandle, Global, Model, ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -96,6 +96,36 @@ fn should_shift_near_estimated_edge(
     } else {
         scroll_offset_px - 1.0 <= mounted_top
     }
+}
+
+fn should_shift_near_virtual_edge(
+    ui: &MainWindow,
+    geometries: &HashMap<i32, MessageGeometry>,
+    scroll_offset_px: f32,
+    viewport_height_px: f32,
+    moving_down: bool,
+    has_more_in_direction: bool,
+) -> (bool, bool) {
+    if !crate::chat::performance::virtualization_enabled() {
+        return (false, false);
+    }
+    let near_mounted = should_shift_near_mounted_edge(
+        geometries,
+        scroll_offset_px,
+        viewport_height_px,
+        moving_down,
+        has_more_in_direction,
+    );
+    let near_estimated = should_shift_near_estimated_edge(
+        ui.get_chat_virtual_top_spacer(),
+        ui.get_chat_virtual_bottom_spacer(),
+        current_virtual_document_height_px(),
+        scroll_offset_px,
+        viewport_height_px,
+        moving_down,
+        has_more_in_direction,
+    );
+    (near_mounted, near_mounted || near_estimated)
 }
 
 fn estimated_window_covers_viewport(
@@ -700,25 +730,26 @@ fn apply_chat_state_to_ui_with_policy(
                     end,
                     MAX_NEW_ROWS_PER_SCROLL_COMMIT,
                 );
-                if limited != (start, end) {
-                    if let Some((limited_top, limited_bottom, _)) = compute_spacers_for_fixed_window(
+                if limited != (start, end)
+                    && let Some((limited_top, limited_bottom, _)) = compute_spacers_for_fixed_window(
                         all_messages,
                         limited.0,
                         limited.1,
                         wrap_width_px,
                         true,
-                    ) && estimated_window_covers_viewport(
+                    )
+                    && estimated_window_covers_viewport(
                         limited_top,
                         limited_bottom,
                         current_virtual_document_height_px(),
                         scroll_offset_px,
                         viewport_height_px,
-                    ) {
-                        start = limited.0;
-                        end = limited.1;
-                        top_px = limited_top;
-                        bottom_px = limited_bottom;
-                    }
+                    )
+                {
+                    start = limited.0;
+                    end = limited.1;
+                    top_px = limited_top;
+                    bottom_px = limited_bottom;
                 }
             }
             smooth_adaptive_row_height_px(sampled_avg_height_px);
@@ -949,6 +980,19 @@ fn stop_loading_phase_animation(
 
 fn scroll_chat_to_bottom(ui: &MainWindow) {
     ui.set_chat_scroll_to_bottom_revision(ui.get_chat_scroll_to_bottom_revision().wrapping_add(1));
+}
+
+fn show_chat_storage_error(ui: &MainWindow) {
+    ToastManager::get(ui).invoke_error(ToastOptions {
+        message: "Message could not be saved. Your draft was restored.".into(),
+        duration: 3_500,
+        position: "middle".into(),
+        icon: "".into(),
+        overlay: false,
+        close_on_click: true,
+        loading_type: "".into(),
+        width: "auto".into(),
+    });
 }
 
 fn chat_mode_from_ui(ui: &MainWindow) -> ChatMode {
@@ -1382,20 +1426,33 @@ pub fn setup_interactive(ui: &MainWindow) {
                 let session = session_response.clone();
                 let content = text_str.clone();
                 move || {
+                    let (pending, ai_history) = {
+                        let guard = session
+                            .lock()
+                            .map_err(|e| format!("session lock poisoned: {e}"))?;
+                        let sessions = guard
+                            .as_ref()
+                            .ok_or_else(|| "chat history is still loading".to_string())?;
+                        let pending = sessions.prepare_user_message_for(mode, content);
+                        let ai_history = if mode == ChatMode::Ai {
+                            let mut history = sessions.messages_for(mode).to_vec();
+                            history.push(pending.message().clone());
+                            ai_completion_messages(&history)
+                        } else {
+                            Vec::new()
+                        };
+                        (pending, ai_history)
+                    };
+                    pending.persist().map_err(|e| e.to_string())?;
                     let mut guard = session
                         .lock()
                         .map_err(|e| format!("session lock poisoned: {e}"))?;
-                    let sessions = guard
+                    guard
                         .as_mut()
-                        .ok_or_else(|| "chat history is still loading".to_string())?;
-                    sessions
-                        .append_user_message_for(mode, content)
+                        .ok_or_else(|| "chat history is still loading".to_string())?
+                        .commit_message_for(mode, pending)
                         .map_err(|e| e.to_string())?;
-                    Ok::<_, String>(if mode == ChatMode::Ai {
-                        ai_completion_messages(sessions.messages_for(mode))
-                    } else {
-                        Vec::new()
-                    })
+                    Ok::<_, String>(ai_history)
                 }
             })
             .await
@@ -1418,9 +1475,11 @@ pub fn setup_interactive(ui: &MainWindow) {
                         };
                         if chat_mode_from_ui(&ui) == mode {
                             loading_phase_failed.store(false, Ordering::Relaxed);
+                            ui.set_chat_input_text(text_str.into());
                             ui.set_chat_is_sending(false);
                             ui.set_chat_loading_phase(0);
                             ui.set_chat_request_elapsed_seconds(0);
+                            show_chat_storage_error(&ui);
                         }
                     });
                     return;
@@ -1458,24 +1517,41 @@ pub fn setup_interactive(ui: &MainWindow) {
             let persisted = tokio::task::spawn_blocking({
                 let session = session_response.clone();
                 move || {
+                    let pending = {
+                        let guard = session
+                            .lock()
+                            .map_err(|e| format!("session lock poisoned: {e}"))?;
+                        let sessions = guard
+                            .as_ref()
+                            .ok_or_else(|| "chat session unavailable".to_string())?;
+                        match result {
+                            Ok(response) => sessions.prepare_assistant_message_for(
+                                mode,
+                                response,
+                                StoredMessageStatus::Normal,
+                                elapsed_ms,
+                            ),
+                            Err(err) => {
+                                let friendly = handle_api_error(&err);
+                                sessions.prepare_assistant_message_for(
+                                    mode,
+                                    friendly,
+                                    StoredMessageStatus::Error,
+                                    elapsed_ms,
+                                )
+                            }
+                        }
+                    };
+                    pending.persist().map_err(|e| e.to_string())?;
                     let mut guard = session
                         .lock()
                         .map_err(|e| format!("session lock poisoned: {e}"))?;
-                    let sessions = guard
+                    guard
                         .as_mut()
-                        .ok_or_else(|| "chat session unavailable".to_string())?;
-                    match result {
-                        Ok(response) => sessions
-                            .append_assistant_message_for(mode, response, elapsed_ms)
-                            .map_err(|e| e.to_string()),
-                        Err(err) => {
-                            let friendly = handle_api_error(&err);
-                            sessions
-                                .append_assistant_error_for(mode, friendly, elapsed_ms)
-                                .map_err(|e| e.to_string())
-                        }
-                    }
-                    .map(|_| ())
+                        .ok_or_else(|| "chat session unavailable".to_string())?
+                        .commit_message_for(mode, pending)
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
                 }
             })
             .await
@@ -1569,28 +1645,17 @@ pub fn setup_interactive(ui: &MainWindow) {
         }
         let moving_down = scroll_bucket > applied;
         let viewport_height = (ui.get_chat_layout_window_height() - 180.0).clamp(360.0, 1400.0);
-        let near_mounted_edge = crate::chat::performance::variant().is_optimized()
-            && MESSAGE_GEOMETRIES.with(|geometries| {
-                should_shift_near_mounted_edge(
-                    &geometries.borrow(),
-                    scroll_offset_px,
-                    viewport_height,
-                    moving_down,
-                    virtual_window_has_more(moving_down),
-                )
-            });
-        let near_estimated_edge = crate::chat::performance::variant().is_optimized()
-            && should_shift_near_estimated_edge(
-                ui.get_chat_virtual_top_spacer(),
-                ui.get_chat_virtual_bottom_spacer(),
-                current_virtual_document_height_px(),
+        let (_, near_virtual_edge) = MESSAGE_GEOMETRIES.with(|geometries| {
+            should_shift_near_virtual_edge(
+                &ui,
+                &geometries.borrow(),
                 scroll_offset_px,
                 viewport_height,
                 moving_down,
                 virtual_window_has_more(moving_down),
-            );
-        if !near_mounted_edge
-            && !near_estimated_edge
+            )
+        });
+        if !near_virtual_edge
             && !should_shift_virtual_window(applied, scroll_bucket, scroll_update_bucket_step())
         {
             return;
@@ -1629,28 +1694,17 @@ pub fn setup_interactive(ui: &MainWindow) {
             }
             let moving_down = scroll_bucket > applied;
             let viewport_height = (ui.get_chat_layout_window_height() - 180.0).clamp(360.0, 1400.0);
-            let near_mounted_edge = crate::chat::performance::variant().is_optimized()
-                && MESSAGE_GEOMETRIES.with(|geometries| {
-                    should_shift_near_mounted_edge(
-                        &geometries.borrow(),
-                        scroll_offset_px,
-                        viewport_height,
-                        moving_down,
-                        virtual_window_has_more(moving_down),
-                    )
-                });
-            let near_estimated_edge = crate::chat::performance::variant().is_optimized()
-                && should_shift_near_estimated_edge(
-                    ui.get_chat_virtual_top_spacer(),
-                    ui.get_chat_virtual_bottom_spacer(),
-                    current_virtual_document_height_px(),
+            let (near_mounted_edge, near_virtual_edge) = MESSAGE_GEOMETRIES.with(|geometries| {
+                should_shift_near_virtual_edge(
+                    &ui,
+                    &geometries.borrow(),
                     scroll_offset_px,
                     viewport_height,
                     moving_down,
                     virtual_window_has_more(moving_down),
-                );
-            if !near_mounted_edge
-                && !near_estimated_edge
+                )
+            });
+            if !near_virtual_edge
                 && !should_shift_virtual_window(applied, scroll_bucket, scroll_update_bucket_step())
             {
                 return;

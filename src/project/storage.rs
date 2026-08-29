@@ -71,17 +71,36 @@ fn projects_file_path() -> Option<PathBuf> {
 /// with a newer one.
 static PROJECTS_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
-pub(super) fn write_projects(projects: &[ProjectConfig]) -> std::io::Result<()> {
+pub(super) fn write_projects_from_state(state: &Mutex<Vec<ProjectConfig>>) -> std::io::Result<()> {
     let Some(path) = projects_file_path() else {
         return Ok(());
     };
-    write_projects_to(&path, projects)
+    write_projects_from_state_to(&path, state)
 }
 
+#[cfg(test)]
 fn write_projects_to(path: &Path, projects: &[ProjectConfig]) -> std::io::Result<()> {
     let _guard = PROJECTS_WRITE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    write_projects_to_locked(path, projects)
+}
+
+fn write_projects_from_state_to(
+    path: &Path,
+    state: &Mutex<Vec<ProjectConfig>>,
+) -> std::io::Result<()> {
+    let _guard = PROJECTS_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let snapshot = state
+        .lock()
+        .map_err(|_| std::io::Error::other("project registry lock poisoned"))?
+        .clone();
+    write_projects_to_locked(path, &snapshot)
+}
+
+fn write_projects_to_locked(path: &Path, projects: &[ProjectConfig]) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -101,8 +120,11 @@ fn write_projects_to(path: &Path, projects: &[ProjectConfig]) -> std::io::Result
 #[cfg(test)]
 mod tests {
     use super::super::model::ProjectPrOverview;
-    use super::{ProjectConfig, write_projects_to};
+    use super::{
+        PROJECTS_WRITE_LOCK, ProjectConfig, write_projects_from_state_to, write_projects_to,
+    };
     use std::fs;
+    use std::sync::{Arc, Mutex};
 
     fn sample_project(alias: &str) -> ProjectConfig {
         ProjectConfig {
@@ -141,6 +163,48 @@ mod tests {
         assert!(
             !path.with_extension("json.tmp").exists(),
             "temporary file must be renamed away"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn queued_writers_cannot_overwrite_a_newer_project_snapshot() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "usher-project-order-test-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("projects.json");
+        let state = Arc::new(Mutex::new(vec![sample_project("alpha")]));
+
+        let write_gate = PROJECTS_WRITE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let first_state = state.clone();
+        let first_path = path.clone();
+        let first =
+            std::thread::spawn(move || write_projects_from_state_to(&first_path, &first_state));
+        state.lock().unwrap().push(sample_project("beta"));
+        let second_state = state.clone();
+        let second_path = path.clone();
+        let second =
+            std::thread::spawn(move || write_projects_from_state_to(&second_path, &second_state));
+        drop(write_gate);
+
+        first.join().unwrap().unwrap();
+        second.join().unwrap().unwrap();
+        let parsed: Vec<ProjectConfig> =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            parsed
+                .iter()
+                .map(|item| item.project_alias.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "beta"]
         );
         fs::remove_dir_all(dir).unwrap();
     }

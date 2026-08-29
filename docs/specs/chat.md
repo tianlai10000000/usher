@@ -162,6 +162,10 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 36. RAG requests resolve their endpoint from `[ai.chat].rag_api_url`, then
     `USHER_RAG_API_URL`. The endpoint must be HTTPS; no deployment address is
     compiled into the application, and logs record only message length, never content.
+37. Sending prepares the next message while holding the session lock, appends
+    JSONL without that lock, then commits the in-memory message. A persistence
+    failure must not advance the message ID or send the network request; the UI
+    restores the user's draft and exposes a retryable error.
 
 1. Chat 历史继续使用 JSONL；缺少 `status` 字段的旧记录按普通消息兼容读取。
 2. 应用生成的错误/成功状态与正文分开保存，并使用矢量图标展示；禁止重新加入会触发彩色字体回退的固定 Emoji 前缀。
@@ -260,6 +264,8 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 36. RAG 请求先从 `[ai.chat].rag_api_url` 解析 endpoint，再回退到
     `USHER_RAG_API_URL`。Endpoint 必须使用 HTTPS；应用不得编译内置部署地址，日志只记录
     消息长度，禁止记录消息正文。
+37. 发送消息时只在 Session 锁内准备下一条记录，释放锁后追加 JSONL，再回锁提交内存状态。
+    持久化失败不得推进消息 ID 或发起网络请求；UI 必须恢复用户草稿并显示可重试错误。
 
 ## Regression checklist / 回归检查
 
@@ -308,6 +314,8 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 - Send successful and failing messages in both modes. Verify the pending timer
   advances, the final duration freezes, survives restart, and does not leak
   between concurrent AI/RAG requests.
+- Make the history path unwritable and verify Send restores the draft, does not
+  issue the network request, and reuses the same next message ID after recovery.
 - Verify an unset or non-HTTPS RAG endpoint fails inline without a network
   request, while a configured HTTPS endpoint preserves the existing payload.
 - Run `scripts/benchmark-chat-interaction.sh --runs 3` against one release binary;
