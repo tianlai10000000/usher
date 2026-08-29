@@ -1662,10 +1662,16 @@ export component MainWindow inherits Window {
         }
     }
 
-    // The light host and its visual ModelRc stay mounted for the bounded exit
-    // transition after the feature-owned prepared session is released. Its
-    // full-height hairline and top-aligned surface match the Codex document pane.
-    artifact-preview-panel-host := Rectangle {
+    // The host stays instantiated through the bounded exit transition (the
+    // root-owned progress animation keeps the condition true until the pane
+    // has fully retracted), then the whole 800+ element pane tree is dropped
+    // instead of idling hidden. All panel state lives in root properties, so
+    // re-instantiation on the next open rehydrates from the current snapshot.
+    // Its full-height hairline and top-aligned surface match the Codex
+    // document pane.
+    if root.artifact-preview-pr-side-docked-visible
+        || root.artifact-preview-docked-visible
+        || root.artifact-preview-panel-progress > 0.001: artifact-preview-panel-host := Rectangle {
         x: root.width - (root.artifact-preview-pr-side-docked-visible
             ? root.pr-review-trailing-surface-width
             : root.artifact-preview-visible-width);
@@ -1680,8 +1686,6 @@ export component MainWindow inherits Window {
             : root.height - LayoutConstants.status-bar-height;
         background: GitHubTheme.canvas-default;
         clip: true;
-        visible: root.artifact-preview-pr-side-docked-visible
-            || root.artifact-preview-panel-progress > 0.001;
         // The docked document pane owns the trailing title-bar region while it
         // is open, so it must paint above the shell's ordinary settings action
         // (z:70). Root overlays and dialogs remain substantially higher.
@@ -2393,8 +2397,11 @@ export component MainWindow inherits Window {
         // transparent outside its controls, so panel inputs still receive the
         // first press.
         z: 790;
+        // No opacity binding: a non-1 opacity would allocate a FemtoVG
+        // offscreen layer for the whole panel. The off-window `x` above
+        // already hides the retained shell whenever content is not visible,
+        // and `visible: false` covers the fully unmounted state.
         visible: root.ai-review-content-visible || root.ai-review-docked-content-unmount;
-        opacity: root.ai-review-content-visible ? 1 : 0;
         content-active: root.ai-review-response-delegates-mounted;
         response-scroll-y <=> root.ai-review-response-scroll-y;
         task-id: root.ai-review-current-task-id;
@@ -2563,13 +2570,15 @@ export component MainWindow inherits Window {
     // clicks are owned by the PR workspace (under its chrome) plus
     // TransientOverlayState for title-bar/shell chrome — not a root scrim above
     // the page, which would consume the switching click on Diff/file menus.
-    pr-readiness-overlay := Rectangle {
+    // Instantiated only on macOS while PR Review is the active route; on
+    // other platforms and routes the measure Texts and ActionMenu tree do
+    // not exist at all instead of idling hidden.
+    if root.platform-is-macos && root.current-route == Route.PrReview: pr-readiness-overlay := Rectangle {
         x: 0px;
         y: 0px;
         width: root.width;
         height: root.height;
         background: transparent;
-        visible: root.platform-is-macos && root.current-route == Route.PrReview;
         z: 860;
 
         private property <color> state-color:
@@ -2606,7 +2615,7 @@ export component MainWindow inherits Window {
         popup-title-measure := Text {
             width: 0px;
             height: 0px;
-            opacity: 0;
+            visible: false;
             text: root.workflow-pr-merge-readiness-label;
             font-size: 14px;
             font-weight: 600;
@@ -2614,7 +2623,7 @@ export component MainWindow inherits Window {
         popup-detail-measure := Text {
             width: 0px;
             height: 0px;
-            opacity: 0;
+            visible: false;
             text: root.workflow-pr-merge-readiness-detail;
             font-size: 12px;
         }
@@ -2628,7 +2637,7 @@ export component MainWindow inherits Window {
         popup-detail-wrapped-measure := Text {
             width: pr-readiness-overlay.popup-width - 32px;
             height: self.preferred-height;
-            opacity: 0;
+            visible: false;
             text: root.workflow-pr-merge-readiness-detail;
             wrap: word-wrap;
             font-size: 12px;
@@ -2637,7 +2646,9 @@ export component MainWindow inherits Window {
             16px + 28px + 8px + max(20px, popup-detail-wrapped-measure.preferred-height) + 16px;
 
         GitHubActionMenu {
-            open: pr-readiness-overlay.visible && root.workflow-pr-readiness-popup-open;
+            // The overlay itself is now `if`-gated on macOS + PR Review, so
+            // existence already implies the old `visible` precondition.
+            open: root.workflow-pr-readiness-popup-open;
             viewport-x: 0px;
             viewport-y: 0px;
             viewport-width: root.width;

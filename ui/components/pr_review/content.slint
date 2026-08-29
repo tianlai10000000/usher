@@ -581,8 +581,7 @@ export component GitHubSelectableDiffCode inherits Rectangle {
     }
     // Keep Slint auto-wrap for text painting. Selection uses the shared Parley
     // facade above so adjacent translucent visual-line rectangles never overlap.
-    code-input := TextInput {
-        visible: !root.show-tokens;
+    if !root.show-tokens: code-input := TextInput {
         x: 0px;
         y: 0px;
         width: parent.width;
@@ -601,8 +600,7 @@ export component GitHubSelectableDiffCode inherits Rectangle {
         selection-background-color: transparent;
     }
 
-    TouchArea {
-        enabled: !root.show-tokens;
+    if !root.show-tokens: TouchArea {
         mouse-cursor: text;
         pointer-event(event) => {
             if (event.kind == PointerEventKind.down) {

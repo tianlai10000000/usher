@@ -115,6 +115,9 @@ pub(super) fn compute_virtual_window_with_estimates(
         let visible_rows = ((viewport_height_px / row_estimate_px.max(72.0)).ceil() as usize)
             .max(policy.min_visible_rows)
             .min(policy.max_window_rows);
+        let visible_start = item_at_offset(prefix, scroll_offset_px.max(0.0));
+        let visible_end =
+            (item_at_offset(prefix, scroll_offset_px + viewport_height_px) + 1).min(total);
         let target_start = (scroll_offset_px - policy.overscan_px).max(0.0);
         let target_end = scroll_offset_px + viewport_height_px + policy.overscan_px;
         let mut start = item_at_offset(prefix, target_start);
@@ -125,15 +128,36 @@ pub(super) fn compute_virtual_window_with_estimates(
         } else {
             visible_rows
         };
-        expand_window(
-            &mut start,
-            &mut end,
-            desired_rows,
-            total,
-            policy.prefer_rows_before,
-        );
         if end.saturating_sub(start) > policy.max_window_rows {
-            end = (start + policy.max_window_rows).min(total);
+            // Pixel overscan can span far more than the row cap when history
+            // contains many short messages. Trim around the visible range,
+            // never from the overscan start, or all mounted rows can end above
+            // the viewport and expose the virtual bottom spacer.
+            start = visible_start;
+            end = visible_end;
+            if end.saturating_sub(start) > policy.max_window_rows {
+                if policy.prefer_rows_before {
+                    start = end.saturating_sub(policy.max_window_rows);
+                } else {
+                    end = (start + policy.max_window_rows).min(total);
+                }
+            } else {
+                expand_window(
+                    &mut start,
+                    &mut end,
+                    policy.max_window_rows,
+                    total,
+                    policy.prefer_rows_before,
+                );
+            }
+        } else {
+            expand_window(
+                &mut start,
+                &mut end,
+                desired_rows,
+                total,
+                policy.prefer_rows_before,
+            );
         }
 
         let top_spacer = prefix[start];
@@ -443,6 +467,46 @@ mod tests {
     }
 
     #[test]
+    fn production_enabled_history_window_stays_bounded_on_the_real_scroll_path() {
+        // Virtualization is now enabled by default in production (no fixture
+        // data involved): the enabled path must return the same bounded window
+        // as the virtual computation instead of mounting the full history.
+        let messages = (0..200)
+            .map(|id| message(id, format!("message {id}")))
+            .collect::<Vec<_>>();
+
+        clear_virtual_layout_cache();
+        let expected = compute_virtual_window_with_estimates(
+            &messages,
+            6_000.0,
+            720.0,
+            640,
+            108.0,
+            VirtualWindowPolicy::optimized(),
+        );
+
+        clear_virtual_layout_cache();
+        let actual = compute_history_window(
+            &messages,
+            true,
+            6_000.0,
+            720.0,
+            640,
+            108.0,
+            VirtualWindowPolicy::optimized(),
+        );
+
+        assert_eq!(actual, expected);
+        let (start, end, top_spacer, bottom_spacer, _) = actual;
+        assert!(start > 0, "scrolled window must not start at the top");
+        assert!(end - start <= 32, "window must stay bounded");
+        assert!(end < messages.len(), "window must not mount the full tail");
+        assert!(top_spacer > 0.0);
+        assert!(bottom_spacer > 0.0);
+        assert!(current_virtual_document_height_px() > top_spacer + bottom_spacer);
+    }
+
+    #[test]
     fn optimized_history_keeps_the_render_window_bounded() {
         clear_virtual_layout_cache();
         let messages = (0..200)
@@ -460,6 +524,29 @@ mod tests {
         assert!(end - start <= 32);
         assert!(top > 0.0);
         assert!(bottom >= 0.0);
+    }
+
+    #[test]
+    fn optimized_row_cap_keeps_the_estimated_viewport_mounted() {
+        clear_virtual_layout_cache();
+        let messages = (0..200)
+            .map(|id| message(id, "short row"))
+            .collect::<Vec<_>>();
+        let scroll_offset = 6_000.0;
+        let viewport_height = 720.0;
+        let (start, end, top, bottom, _) = compute_virtual_window_with_estimates(
+            &messages,
+            scroll_offset,
+            viewport_height,
+            640,
+            108.0,
+            VirtualWindowPolicy::optimized(),
+        );
+        let document_height = current_virtual_document_height_px();
+
+        assert!(end - start <= 32);
+        assert!(top <= scroll_offset);
+        assert!(document_height - bottom >= scroll_offset + viewport_height);
     }
 
     #[test]
@@ -531,5 +618,18 @@ mod tests {
         assert!(top > 0.0);
         assert!(bottom > 0.0);
         assert!(current_virtual_document_height_px() > top + bottom);
+    }
+
+    #[test]
+    fn final_window_has_no_virtual_bottom_extent() {
+        clear_virtual_layout_cache();
+        let messages = (0..20)
+            .map(|id| message(id, "message body"))
+            .collect::<Vec<_>>();
+        let (top, bottom, _) =
+            compute_spacers_for_fixed_window(&messages, 12, messages.len(), 640, true).unwrap();
+
+        assert!(top > 0.0);
+        assert_eq!(bottom, 0.0);
     }
 }

@@ -1,7 +1,7 @@
 //! GitHub repository operations.
 
 use base64::Engine as _;
-use futures_util::future::join_all;
+use futures_util::{StreamExt, stream};
 use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde::Deserialize;
@@ -44,10 +44,12 @@ pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, Str
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
 
-    let response: GitHubRepository =
-        http::send_json(request, RequestOptions::new("Load GitHub project details"))
-            .await
-            .map_err(|error| error.to_string())?;
+    let response: GitHubRepository = http::send_json(
+        request,
+        RequestOptions::new("Load GitHub project details").retry_transient(3),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     value_to_id(&response.id, "GitHub")
 }
 
@@ -104,9 +106,12 @@ pub(super) async fn get_pull_requests(
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
 
-    let payload: Value = http::send_json(request, RequestOptions::new("Load GitHub pull requests"))
-        .await
-        .map_err(|error| error.to_string())?;
+    let payload: Value = http::send_json(
+        request,
+        RequestOptions::new("Load GitHub pull requests").retry_transient(3),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     let total = payload
         .get("total_count")
         .and_then(Value::as_u64)
@@ -173,7 +178,7 @@ pub(super) async fn get_open_pull_request_count(
 
     let payload: Value = http::send_json(
         request,
-        RequestOptions::new("Load GitHub pull request overview"),
+        RequestOptions::new("Load GitHub pull request overview").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -200,12 +205,23 @@ async fn hydrate_pull_request_branches(
     locator: &RepoLocator,
     mut items: Vec<PullRequestItem>,
 ) -> Vec<PullRequestItem> {
-    let requests = items.iter().enumerate().map(|(index, item)| async move {
-        let summary = load_pull_request_summary(locator, item.number.as_str()).await;
-        (index, summary)
-    });
-
-    for (index, summary) in join_all(requests).await {
+    let numbers = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| (index, item.number.clone()))
+        .collect::<Vec<_>>();
+    // GitHub's secondary rate limit is sensitive to request bursts, so cap
+    // hydration at a conservative four concurrent detail lookups instead of
+    // firing the whole page at once.
+    let summaries = stream::iter(numbers)
+        .map(|(index, number)| async move {
+            let summary = load_pull_request_summary(locator, number.as_str()).await;
+            (index, summary)
+        })
+        .buffer_unordered(4)
+        .collect::<Vec<_>>()
+        .await;
+    for (index, summary) in summaries {
         if let Some((source_branch, target_branch, review_status, conversation_count)) = summary {
             items[index].source_branch = source_branch;
             items[index].target_branch = target_branch;
@@ -235,11 +251,11 @@ async fn load_pull_request_summary(
     );
     let detail_future = http::send_json(
         authenticated_request(locator, detail_endpoint),
-        RequestOptions::new("Load GitHub pull request list summary"),
+        RequestOptions::new("Load GitHub pull request list summary").retry_transient(3),
     );
     let reviews_future = http::send_json::<Vec<Value>>(
         authenticated_request(locator, reviews_endpoint).query(&[("per_page", "100")]),
-        RequestOptions::new("Load GitHub pull request list reviews"),
+        RequestOptions::new("Load GitHub pull request list reviews").retry_transient(3),
     );
     let (detail, reviews) = tokio::join!(detail_future, reviews_future);
     let detail: Value = detail.ok()?;
@@ -267,7 +283,7 @@ pub(super) async fn get_pull_request_diff(
     );
     let detail: Value = http::send_json(
         authenticated_request(locator, detail_endpoint),
-        RequestOptions::new("Load GitHub pull request details"),
+        RequestOptions::new("Load GitHub pull request details").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -291,7 +307,7 @@ pub(super) async fn get_pull_request_diff(
         ]);
         let batch: Vec<Value> = http::send_json(
             request,
-            RequestOptions::new("Load GitHub pull request files"),
+            RequestOptions::new("Load GitHub pull request files").retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -301,23 +317,25 @@ pub(super) async fn get_pull_request_diff(
     }
     let (values, files_truncated) = pages.into_parts();
     let files = values.iter().map(decode_diff_file).collect::<Vec<_>>();
-    let commit_count = match commit_count_from_detail(&detail) {
-        Some(count) => count,
-        None => count_pull_request_commits(locator, pull_request_number)
-            .await
-            .unwrap_or(0),
+    // Both badge probes are independent GET requests; run them concurrently.
+    // The commit probe still fires only when the detail lacks an exact count.
+    let commit_count_future = async {
+        match commit_count_from_detail(&detail) {
+            Some(count) => count,
+            None => count_pull_request_commits(locator, pull_request_number)
+                .await
+                .unwrap_or(0),
+        }
     };
     // GitHub's PR `comments` field counts issue comments but excludes reviews
     // submitted through `/pulls/{number}/reviews` (including COMMENT reviews).
     // Count that collection with one item per page so both kinds contribute to
     // the Conversation badge without loading the full timeline.
+    let review_count_future = count_pull_request_reviews(locator, pull_request_number);
+    let (commit_count, review_count) = tokio::join!(commit_count_future, review_count_future);
     let conversation_count = conversation_count_from_detail(&detail)
         .unwrap_or(0)
-        .saturating_add(
-            count_pull_request_reviews(locator, pull_request_number)
-                .await
-                .unwrap_or(0),
-        );
+        .saturating_add(review_count.unwrap_or(0));
     Ok(PullRequestDiffDetail {
         added_lines: files.iter().map(|file| file.added_lines).sum(),
         removed_lines: files.iter().map(|file| file.removed_lines).sum(),
@@ -343,7 +361,7 @@ pub(super) async fn get_commit_range_diff(
         .replace("{head}", percent_encode_path(head_sha.trim()).as_str());
     let payload: Value = http::send_json(
         authenticated_request(locator, endpoint),
-        RequestOptions::new("Compare GitHub pull request commits"),
+        RequestOptions::new("Compare GitHub pull request commits").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -411,7 +429,7 @@ pub(super) async fn get_repository_file_text(
         repository_endpoint(endpoints::REPOSITORY_CONTENT_URL, locator, None, Some(path));
     let payload: Value = http::send_json(
         authenticated_request(locator, endpoint).query(&[("ref", reference)]),
-        RequestOptions::new("Load GitHub repository file"),
+        RequestOptions::new("Load GitHub repository file").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -428,34 +446,33 @@ pub(super) async fn get_pull_request_action_state(
         Some(pull_request_number),
         None,
     );
-    let detail: Value = http::send_json(
-        authenticated_request(locator, detail_endpoint),
-        RequestOptions::new("Load GitHub pull request merge state"),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-
     let repository_url = repository_endpoint(endpoints::REPOSITORY_URL, locator, None, None);
-    let repository: Value = http::send_json(
-        authenticated_request(locator, repository_url),
-        RequestOptions::new("Load GitHub repository merge settings"),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-
     let reviews_endpoint = repository_endpoint(
         endpoints::PULL_REQUEST_REVIEWS_URL,
         locator,
         Some(pull_request_number),
         None,
     );
-    let reviews = load_github_pages(
+    // The three reads are independent; fetch them concurrently and keep each
+    // one's error semantics unchanged.
+    let detail_future = http::send_json::<Value>(
+        authenticated_request(locator, detail_endpoint),
+        RequestOptions::new("Load GitHub pull request merge state").retry_transient(3),
+    );
+    let repository_future = http::send_json::<Value>(
+        authenticated_request(locator, repository_url),
+        RequestOptions::new("Load GitHub repository merge settings").retry_transient(3),
+    );
+    let reviews_future = load_github_pages(
         locator,
         reviews_endpoint,
         "Load GitHub pull request reviews",
-    )
-    .await
-    .map_err(|error| error.to_string())?;
+    );
+    let (detail, repository, reviews) =
+        tokio::join!(detail_future, repository_future, reviews_future);
+    let detail = detail.map_err(|error| error.to_string())?;
+    let repository = repository.map_err(|error| error.to_string())?;
+    let reviews = reviews.map_err(|error| error.to_string())?;
     if reviews.len() >= 3_000 {
         return Err(
             "GitHub review history reached the safe pagination limit; merge remains disabled until the complete review state can be confirmed."
@@ -568,7 +585,7 @@ pub(super) async fn get_pull_request_conversation(
     let detail_future = async {
         http::send_json(
             authenticated_request(locator, detail_endpoint),
-            RequestOptions::new("Load GitHub pull request conversation header"),
+            RequestOptions::new("Load GitHub pull request conversation header").retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())
@@ -610,7 +627,7 @@ pub(super) async fn get_pull_request_conversation(
         Ok::<Option<Value>, String>(
             http::send_json(
                 authenticated_request(locator, repository_endpoint),
-                RequestOptions::new("Load GitHub repository review permissions"),
+                RequestOptions::new("Load GitHub repository review permissions").retry_transient(3),
             )
             .await
             .ok(),
@@ -895,7 +912,7 @@ async fn count_pull_request_commits(
     );
     let response = http::send(
         authenticated_request(locator, endpoint).query(&[("page", "1"), ("per_page", "1")]),
-        RequestOptions::new("Count GitHub pull request commits"),
+        RequestOptions::new("Count GitHub pull request commits").retry_transient(3),
     )
     .await
     .ok()?;
@@ -918,7 +935,7 @@ async fn count_pull_request_reviews(
     );
     let response = http::send(
         authenticated_request(locator, endpoint).query(&[("page", "1"), ("per_page", "1")]),
-        RequestOptions::new("Count GitHub pull request reviews"),
+        RequestOptions::new("Count GitHub pull request reviews").retry_transient(3),
     )
     .await
     .ok()?;
@@ -1008,7 +1025,7 @@ async fn load_github_pages(
         let batch: Vec<Value> = http::send_json(
             authenticated_request(locator, endpoint.clone())
                 .query(&[("page", page.to_string()), ("per_page", "100".to_string())]),
-            RequestOptions::new(operation),
+            RequestOptions::new(operation).retry_transient(3),
         )
         .await?;
         let complete = batch.len() < 100;
@@ -1180,7 +1197,7 @@ pub(super) async fn revert_pull_request(
     );
     let detail: Value = http::send_json(
         authenticated_request(locator, detail_endpoint),
-        RequestOptions::new("Load GitHub pull request before revert"),
+        RequestOptions::new("Load GitHub pull request before revert").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;

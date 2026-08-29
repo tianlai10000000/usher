@@ -12,6 +12,15 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "ai-code-review")]
 const REVIEW_READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// Total wall-clock budget AI Review callers wrap around one
+/// [`complete_review`] call. Twice the idle timeout: a stalled provider trips
+/// the 300s idle guard first, while this ceiling additionally bounds
+/// responses that keep trickling bytes without ever finishing, so a task
+/// fails instead of hanging forever.
+#[cfg(feature = "ai-code-review")]
+pub(crate) const REVIEW_CHUNK_TOTAL_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(600);
+
 #[derive(Debug, Deserialize)]
 struct ModelsResponse {
     #[serde(default)]
@@ -157,7 +166,8 @@ pub(crate) async fn complete(
 }
 
 /// Execute an explicitly cancellable AI Review completion without a total
-/// request deadline. The shared connect timeout still applies.
+/// request deadline of its own. The shared connect timeout still applies, and
+/// callers bound the overall duration with [`REVIEW_CHUNK_TOTAL_TIMEOUT`].
 #[cfg(feature = "ai-code-review")]
 pub(crate) async fn complete_review(
     settings: &AiAgentSettings,
@@ -299,5 +309,11 @@ mod tests {
             REVIEW_READ_IDLE_TIMEOUT,
             std::time::Duration::from_secs(300)
         );
+    }
+
+    #[cfg(feature = "ai-code-review")]
+    #[test]
+    fn review_chunk_total_budget_doubles_the_idle_timeout() {
+        assert_eq!(REVIEW_CHUNK_TOTAL_TIMEOUT, REVIEW_READ_IDLE_TIMEOUT * 2);
     }
 }

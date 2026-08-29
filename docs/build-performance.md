@@ -119,6 +119,33 @@ These figures are directional, not a promise for every machine. The main
 invariant is independently verifiable: normal dev/test builds must not leave
 loose `.rcgu.o` files in `target/debug/deps` on macOS.
 
+### 2026-08-28 dev build-override A/B
+
+P2 tested `[profile.dev.build-override] opt-level = 2` on the same Apple M2 Pro
+(10 cores, 32 GiB) using rustc/Cargo 1.97.1 and source revision `b6f6d85` plus
+the current P2 worktree. Each side ran `cargo check --locked` in a separate,
+fresh target directory; the only B-side change was
+`CARGO_PROFILE_DEV_BUILD_OVERRIDE_OPT_LEVEL=2`.
+
+| Candidate | Cold wall time | Change |
+| --- | ---: | ---: |
+| Existing dev profile (A) | 128.67 s | baseline |
+| Build override `opt-level=2` (B) | 180.23 s | 40.1% slower |
+
+The candidate was rejected and is intentionally absent from `Cargo.toml`.
+Optimizing every build script and procedural macro increased the cold critical
+path substantially on the current dependency graph; the earlier estimated
+Slint code-generation gain did not offset that cost. No nightly `-Z threads`
+setting enters the stable build chain.
+
+P2 于 2026-08-28 在同一台 Apple M2 Pro（10 核、32 GiB）、rustc/Cargo
+1.97.1、`b6f6d85` 加当前 P2 工作树上验证了
+`[profile.dev.build-override] opt-level = 2`。A/B 分别使用全新且独立的 target
+目录，B 侧唯一变量为 `CARGO_PROFILE_DEV_BUILD_OVERRIDE_OPT_LEVEL=2`。A 为
+128.67 秒，B 为 180.23 秒，回退 40.1%，因此不写入 `Cargo.toml`。当前依赖图中，
+统一优化 build script 与 proc-macro 的冷编译代价超过了预期的 Slint 代码生成收益；
+nightly `-Z threads` 也不进入 stable 交付链。
+
 ## 2026-08-03 regression baseline
 
 The UI compile graph has grown enough that the previous profile optimization is

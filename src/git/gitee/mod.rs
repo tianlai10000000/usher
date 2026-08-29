@@ -3,6 +3,9 @@
 //! `project_name` is always the repository name extracted from `remote_repo`
 //! (the final path segment before `.git`), never the editable project alias.
 
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, OnceLock};
+
 use futures_util::{StreamExt, stream};
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap};
 use serde_json::Value;
@@ -40,6 +43,39 @@ use transport::{
     public_repo_endpoint,
 };
 
+const IDENTITY_AVATAR_CACHE_CAPACITY: usize = 256;
+
+#[derive(Default)]
+struct IdentityAvatarCache {
+    entries: HashMap<String, Option<String>>,
+    order: VecDeque<String>,
+}
+
+impl IdentityAvatarCache {
+    fn get(&mut self, key: &str) -> Option<Option<String>> {
+        let value = self.entries.get(key)?.clone();
+        self.order.retain(|candidate| candidate != key);
+        self.order.push_back(key.to_string());
+        Some(value)
+    }
+
+    fn insert(&mut self, key: String, value: Option<String>) {
+        self.entries.insert(key.clone(), value);
+        self.order.retain(|candidate| candidate != &key);
+        self.order.push_back(key);
+        while self.entries.len() > IDENTITY_AVATAR_CACHE_CAPACITY {
+            if let Some(evicted) = self.order.pop_front() {
+                self.entries.remove(evicted.as_str());
+            }
+        }
+    }
+}
+
+fn identity_avatar_cache() -> &'static Mutex<IdentityAvatarCache> {
+    static CACHE: OnceLock<Mutex<IdentityAvatarCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(IdentityAvatarCache::default()))
+}
+
 /// Fetch the stable provider project id for a remote repository.
 pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, String> {
     if gitee_api_profile(locator) == GiteeApiProfile::EnterpriseV8 {
@@ -63,10 +99,12 @@ async fn get_enterprise_repo_detail(locator: &RepoLocator) -> Result<String, Str
         request = request.header("PRIVATE-TOKEN", token);
     }
 
-    let payload: Value =
-        http::send_json(request, RequestOptions::new("Load Gitee project details"))
-            .await
-            .map_err(|error| error.to_string())?;
+    let payload: Value = http::send_json(
+        request,
+        RequestOptions::new("Load Gitee project details").retry_transient(3),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     select_enterprise_project_id(&payload, locator)
 }
 
@@ -87,10 +125,12 @@ async fn get_public_gitee_repo_detail(locator: &RepoLocator) -> Result<String, S
         request = request.header("Authorization", format!("token {token}"));
     }
 
-    let payload: Value =
-        http::send_json(request, RequestOptions::new("Load Gitee project details"))
-            .await
-            .map_err(|error| error.to_string())?;
+    let payload: Value = http::send_json(
+        request,
+        RequestOptions::new("Load Gitee project details").retry_transient(3),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     value_to_id(payload.get("id"), "Gitee")
 }
 
@@ -273,7 +313,7 @@ pub(super) async fn get_pull_request_diff(
     let diffs_future = async {
         http::send_json(
             diffs_request,
-            RequestOptions::new("Load Gitee pull request diff"),
+            RequestOptions::new("Load Gitee pull request diff").retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())
@@ -288,7 +328,8 @@ pub(super) async fn get_pull_request_diff(
         )?;
         let detail: Value = http::send_json(
             enterprise_pull_request_get(detail_endpoint),
-            RequestOptions::new("Load Gitee enterprise pull request detail summary"),
+            RequestOptions::new("Load Gitee enterprise pull request detail summary")
+                .retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -350,7 +391,7 @@ async fn get_public_pull_request_diff(
     );
     let detail: Value = http::send_json(
         public_authenticated_request(detail_endpoint),
-        RequestOptions::new("Load Gitee pull request details"),
+        RequestOptions::new("Load Gitee pull request details").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -367,7 +408,7 @@ async fn get_public_pull_request_diff(
                 ("page", pages.page().to_string()),
                 ("per_page", "100".to_string()),
             ]),
-            RequestOptions::new("Load Gitee pull request files"),
+            RequestOptions::new("Load Gitee pull request files").retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -468,7 +509,7 @@ pub(super) async fn get_commit_range_diff(
             .replace("{head}", percent_encode_path(head_sha.trim()).as_str());
             http::send_json(
                 public_authenticated_request(endpoint),
-                RequestOptions::new("Compare Gitee pull request commits"),
+                RequestOptions::new("Compare Gitee pull request commits").retry_transient(3),
             )
             .await
             .map_err(|error| error.to_string())?
@@ -485,7 +526,8 @@ pub(super) async fn get_commit_range_diff(
             );
             http::send_json(
                 request,
-                RequestOptions::new("Compare Gitee Enterprise pull request commits"),
+                RequestOptions::new("Compare Gitee Enterprise pull request commits")
+                    .retry_transient(3),
             )
             .await
             .map_err(|error| error.to_string())?
@@ -638,10 +680,12 @@ pub(super) async fn get_repository_file_text(
         );
         public_authenticated_request(endpoint).query(&[("ref", reference)])
     };
-    let payload: Value =
-        http::send_json(request, RequestOptions::new("Load Gitee repository file"))
-            .await
-            .map_err(|error| error.to_string())?;
+    let payload: Value = http::send_json(
+        request,
+        RequestOptions::new("Load Gitee repository file").retry_transient(3),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     decode_base64_content(&payload)
 }
 
@@ -694,24 +738,24 @@ async fn get_enterprise_pull_request_action_state(
         repo_project_id,
         pull_request_iid,
     )?;
-    let current: Value = http::send_json(
-        enterprise_pull_request_get(current_endpoint),
-        RequestOptions::new("Load Gitee enterprise merge state"),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-
     let detail_endpoint = enterprise_pull_request_endpoint(
         endpoints::ENTERPRISE_MERGE_REQUEST_URL,
         repo_project_id,
         pull_request_iid,
     )?;
-    let detail: Value = http::send_json(
+    // The current merge state and the pull request detail are independent
+    // reads; fetch them concurrently and keep each error path intact.
+    let current_future = http::send_json::<Value>(
+        enterprise_pull_request_get(current_endpoint),
+        RequestOptions::new("Load Gitee enterprise merge state").retry_transient(3),
+    );
+    let detail_future = http::send_json::<Value>(
         enterprise_pull_request_get(detail_endpoint),
-        RequestOptions::new("Load Gitee enterprise pull request details"),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
+        RequestOptions::new("Load Gitee enterprise pull request details").retry_transient(3),
+    );
+    let (current, detail) = tokio::join!(current_future, detail_future);
+    let current = current.map_err(|error| error.to_string())?;
+    let detail = detail.map_err(|error| error.to_string())?;
     log_enterprise_pull_request_detail_shape("action-state", &detail);
 
     let has_token = configured_gitee_token(GiteeApiProfile::EnterpriseV8).is_some();
@@ -810,7 +854,7 @@ async fn get_public_pull_request_action_state(
     );
     let detail: Value = http::send_json(
         public_authenticated_request(endpoint),
-        RequestOptions::new("Load Gitee public pull request merge state"),
+        RequestOptions::new("Load Gitee public pull request merge state").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -870,7 +914,8 @@ pub(super) async fn get_pull_request_conversation(
                 )?;
                 let detail: Value = http::send_json(
                     enterprise_pull_request_get(detail_endpoint),
-                    RequestOptions::new("Load Gitee enterprise merge request conversation header"),
+                    RequestOptions::new("Load Gitee enterprise merge request conversation header")
+                        .retry_transient(3),
                 )
                 .await
                 .map_err(|error| error.to_string())?;
@@ -881,7 +926,8 @@ pub(super) async fn get_pull_request_conversation(
                 http::send_json(
                     enterprise_authenticated_builder(http::get(notes_endpoint))
                         .query(&[("per_page", "100")]),
-                    RequestOptions::new("Load Gitee enterprise merge request notes"),
+                    RequestOptions::new("Load Gitee enterprise merge request notes")
+                        .retry_transient(3),
                 )
                 .await
                 .map_err(|error| error.to_string())
@@ -889,7 +935,8 @@ pub(super) async fn get_pull_request_conversation(
             let current_user_future = async {
                 http::send_json(
                     enterprise_authenticated_builder(http::get(current_user_endpoint)),
-                    RequestOptions::new("Load Gitee enterprise current review user"),
+                    RequestOptions::new("Load Gitee enterprise current review user")
+                        .retry_transient(3),
                 )
                 .await
                 .ok()
@@ -910,7 +957,8 @@ pub(super) async fn get_pull_request_conversation(
                         ("page", "1"),
                         ("per_page", "100"),
                     ]),
-                    RequestOptions::new("Load Gitee enterprise source branch push events"),
+                    RequestOptions::new("Load Gitee enterprise source branch push events")
+                        .retry_transient(3),
                 )
                 .await
                 .ok()
@@ -945,7 +993,8 @@ pub(super) async fn get_pull_request_conversation(
             let detail_future = async {
                 http::send_json(
                     public_authenticated_request(detail_endpoint),
-                    RequestOptions::new("Load Gitee public pull request conversation header"),
+                    RequestOptions::new("Load Gitee public pull request conversation header")
+                        .retry_transient(3),
                 )
                 .await
                 .map_err(|error| error.to_string())
@@ -954,7 +1003,8 @@ pub(super) async fn get_pull_request_conversation(
                 http::send_json(
                     public_authenticated_request(comments_endpoint)
                         .query(&[("page", "1"), ("per_page", "100")]),
-                    RequestOptions::new("Load Gitee public pull request comments"),
+                    RequestOptions::new("Load Gitee public pull request comments")
+                        .retry_transient(3),
                 )
                 .await
                 .map_err(|error| error.to_string())
@@ -966,7 +1016,8 @@ pub(super) async fn get_pull_request_conversation(
                         ("page", "1"),
                         ("per_page", "100"),
                     ]),
-                    RequestOptions::new("Load Gitee public pull request operation logs"),
+                    RequestOptions::new("Load Gitee public pull request operation logs")
+                        .retry_transient(3),
                 )
                 .await
                 .ok()
@@ -1254,7 +1305,7 @@ async fn load_enterprise_merge_commit(
     .ok()?;
     let payload: Value = http::send_json(
         enterprise_authenticated_builder(http::get(endpoint)),
-        RequestOptions::new("Load Gitee enterprise merge commit actor"),
+        RequestOptions::new("Load Gitee enterprise merge commit actor").retry_transient(3),
     )
     .await
     .ok()?;
@@ -1405,7 +1456,8 @@ async fn load_pull_request_commits(
     pull_request_iid: &str,
     enrich_identities: bool,
 ) -> Result<Vec<PullRequestCommit>, String> {
-    let endpoint = match gitee_api_profile(locator) {
+    let profile = gitee_api_profile(locator);
+    let endpoint = match profile {
         GiteeApiProfile::EnterpriseV8 => enterprise_pull_request_endpoint(
             endpoints::ENTERPRISE_MERGE_REQUEST_COMMITS_URL,
             repo_project_id,
@@ -1418,7 +1470,7 @@ async fn load_pull_request_commits(
             None,
         ),
     };
-    let request = match gitee_api_profile(locator) {
+    let request = match profile {
         GiteeApiProfile::EnterpriseV8 => {
             enterprise_authenticated_builder(http::get(endpoint)).query(&[("per_page", "100")])
         }
@@ -1428,14 +1480,14 @@ async fn load_pull_request_commits(
     };
     let payload: Value = http::send_json(
         request,
-        RequestOptions::new("Load Gitee pull request commits"),
+        RequestOptions::new("Load Gitee pull request commits").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
     let values = pull_request_values(&payload)
         .ok_or_else(|| "Gitee pull request commit response is not a list.".to_string())?;
     let mut commits = values.iter().map(decode_commit).collect::<Vec<_>>();
-    if gitee_api_profile(locator) == GiteeApiProfile::EnterpriseV8 {
+    if profile == GiteeApiProfile::EnterpriseV8 {
         normalize_enterprise_commit_order(&mut commits);
         if enrich_identities {
             commits = enrich_enterprise_commit_identities(repo_project_id, commits).await;
@@ -1460,7 +1512,8 @@ async fn enrich_enterprise_commit_identities(
             };
             let detail = http::send_json::<Value>(
                 enterprise_authenticated_builder(http::get(endpoint)),
-                RequestOptions::new("Load Gitee enterprise commit author and committer"),
+                RequestOptions::new("Load Gitee enterprise commit author and committer")
+                    .retry_transient(3),
             )
             .await
             .ok();
@@ -1555,38 +1608,68 @@ async fn load_enterprise_commit_identity_avatars(
         return std::collections::HashMap::new();
     };
     let endpoint = endpoints::ENTERPRISE_USERS_URL.replace("{api_base_url}", &api_base_url);
-    stream::iter(identities)
-        .map(|(key, (name, email))| {
+    let mut resolved = HashMap::new();
+    let mut pending = Vec::new();
+    {
+        let mut cache = identity_avatar_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for (key, (name, email)) in identities {
+            let cache_key = format!("{api_base_url}\n{key}");
+            match cache.get(cache_key.as_str()) {
+                Some(Some(avatar)) => {
+                    resolved.insert(key, avatar);
+                }
+                Some(None) => {}
+                None => pending.push((key, cache_key, name, email)),
+            }
+        }
+    }
+
+    let downloaded = stream::iter(pending)
+        .map(|(key, cache_key, name, email)| {
             let endpoint = endpoint.clone();
             async move {
                 let payload = http::send_json::<Value>(
                     enterprise_authenticated_builder(http::get(endpoint))
                         .query(&[("search", name.as_str())]),
-                    RequestOptions::new("Resolve Gitee enterprise commit identity avatar"),
+                    RequestOptions::new("Resolve Gitee enterprise commit identity avatar")
+                        .retry_transient(3),
                 )
                 .await
-                .ok()?;
-                let users = enterprise_user_values(&payload)?;
-                let mut exact = users.iter().filter(|user| {
-                    string_field(user, "email")
-                        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(email.as_str()))
+                .ok();
+                let avatar = payload.as_ref().and_then(|payload| {
+                    let users = enterprise_user_values(payload)?;
+                    let mut exact = users.iter().filter(|user| {
+                        string_field(user, "email")
+                            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(email.as_str()))
+                    });
+                    let user = exact.next()?;
+                    if exact.next().is_some() {
+                        return None;
+                    }
+                    string_field(user, "avatar_url")
+                        .or_else(|| string_field(user, "avatar"))
+                        .or_else(|| string_field(user, "image_path"))
+                        .or_else(|| string_field(user, "imagePath"))
+                        .filter(|avatar| !avatar.trim().is_empty())
                 });
-                let user = exact.next()?;
-                if exact.next().is_some() {
-                    return None;
-                }
-                let avatar = string_field(user, "avatar_url")
-                    .or_else(|| string_field(user, "avatar"))
-                    .or_else(|| string_field(user, "image_path"))
-                    .or_else(|| string_field(user, "imagePath"))
-                    .filter(|avatar| !avatar.trim().is_empty())?;
-                Some((key, avatar))
+                (key, cache_key, avatar)
             }
         })
         .buffer_unordered(6)
-        .filter_map(async move |avatar| avatar)
-        .collect()
-        .await
+        .collect::<Vec<_>>()
+        .await;
+    let mut cache = identity_avatar_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for (key, cache_key, avatar) in downloaded {
+        cache.insert(cache_key, avatar.clone());
+        if let Some(avatar) = avatar {
+            resolved.insert(key, avatar);
+        }
+    }
+    resolved
 }
 
 /// Commit range selection expects the provider-neutral list to run from the
@@ -1599,7 +1682,8 @@ async fn count_pull_request_commits(
     repo_project_id: Option<&str>,
 ) -> Option<u32> {
     const PUBLIC_PROBE_PER_PAGE: u32 = 100;
-    let endpoint = match gitee_api_profile(locator) {
+    let profile = gitee_api_profile(locator);
+    let endpoint = match profile {
         GiteeApiProfile::EnterpriseV8 => enterprise_pull_request_endpoint(
             endpoints::ENTERPRISE_MERGE_REQUEST_COMMITS_URL,
             repo_project_id?,
@@ -1613,7 +1697,7 @@ async fn count_pull_request_commits(
             None,
         ),
     };
-    let (request, per_page) = match gitee_api_profile(locator) {
+    let (request, per_page) = match profile {
         GiteeApiProfile::EnterpriseV8 => (
             enterprise_authenticated_builder(http::get(endpoint)).query(&[
                 ("with_page", "true"),
@@ -1629,13 +1713,13 @@ async fn count_pull_request_commits(
     };
     let response = http::send(
         request,
-        RequestOptions::new("Count Gitee pull request commits"),
+        RequestOptions::new("Count Gitee pull request commits").retry_transient(3),
     )
     .await
     .ok()?;
     let headers = response.headers().clone();
     let payload: Value = response.json().await.ok()?;
-    match gitee_api_profile(locator) {
+    match profile {
         GiteeApiProfile::EnterpriseV8 => {
             if let Some(total) = enterprise_commit_probe_total(&headers, &payload, per_page) {
                 return Some(total);
@@ -1654,7 +1738,8 @@ async fn count_pull_request_commits(
             let payload: Value = http::send_json(
                 enterprise_authenticated_builder(http::get(endpoint))
                     .query(&[("with_page", "false")]),
-                RequestOptions::new("Count Gitee enterprise pull request commits fallback"),
+                RequestOptions::new("Count Gitee enterprise pull request commits fallback")
+                    .retry_transient(3),
             )
             .await
             .ok()?;
@@ -1671,7 +1756,8 @@ async fn count_pull_request_comments(
     repo_project_id: Option<&str>,
 ) -> Option<u32> {
     const PUBLIC_PROBE_PER_PAGE: u32 = 100;
-    let endpoint = match gitee_api_profile(locator) {
+    let profile = gitee_api_profile(locator);
+    let endpoint = match profile {
         GiteeApiProfile::EnterpriseV8 => enterprise_pull_request_endpoint(
             endpoints::ENTERPRISE_MERGE_REQUEST_NOTES_URL,
             repo_project_id?,
@@ -1685,7 +1771,7 @@ async fn count_pull_request_comments(
             None,
         ),
     };
-    let (request, per_page) = match gitee_api_profile(locator) {
+    let (request, per_page) = match profile {
         GiteeApiProfile::EnterpriseV8 => (
             enterprise_authenticated_builder(http::get(endpoint)).query(&[
                 ("with_page", "true"),
@@ -1701,7 +1787,7 @@ async fn count_pull_request_comments(
     };
     let response = http::send(
         request,
-        RequestOptions::new("Count Gitee pull request comments"),
+        RequestOptions::new("Count Gitee pull request comments").retry_transient(3),
     )
     .await
     .ok()?;
@@ -2220,9 +2306,12 @@ async fn decode_pull_request_page(
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
-    let response = http::send(request, RequestOptions::new("Load Gitee merge requests"))
-        .await
-        .map_err(|error| error.to_string())?;
+    let response = http::send(
+        request,
+        RequestOptions::new("Load Gitee merge requests").retry_transient(3),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     let headers = response.headers().clone();
     let content_type = headers
         .get(CONTENT_TYPE)
@@ -2498,21 +2587,21 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        bounded_list_total, commit_count_from_diff_payload, complete_collection_total,
-        decode_commit, decode_conversation_comment, decode_conversation_review,
-        decode_gitee_operate_log_activity, decode_pull_request_diff, enterprise_commit_probe_total,
-        enterprise_commit_refs_can_revert, enterprise_compare_diff_payload, enterprise_data_object,
-        enterprise_note_payload, enterprise_pull_request_get,
-        enterprise_review_belongs_to_current_user, enterprise_review_dismissal_payload,
-        enterprise_review_payload, enterprise_review_summaries,
-        enterprise_user_has_distinct_display_name, enterprise_web_pull_request_review_endpoint,
-        expand_enterprise_conversation_notes, gitee_enterprise_list_sort,
-        gitee_enterprise_merge_readiness, gitee_enterprise_state_query, gitee_list_review_status,
-        gitee_merge_actor_account, gitee_merge_event, gitee_merge_event_with_user,
-        gitee_operate_log_commit_activity, gitee_public_list_sort, gitee_public_merge_readiness,
-        gitee_push_event_commit_activity, merge_gitee_review_summaries,
-        normalize_enterprise_commit_order, pull_request_values, select_enterprise_project_id,
-        select_enterprise_user, trusted_enterprise_commit_count,
+        IDENTITY_AVATAR_CACHE_CAPACITY, IdentityAvatarCache, bounded_list_total,
+        commit_count_from_diff_payload, complete_collection_total, decode_commit,
+        decode_conversation_comment, decode_conversation_review, decode_gitee_operate_log_activity,
+        decode_pull_request_diff, enterprise_commit_probe_total, enterprise_commit_refs_can_revert,
+        enterprise_compare_diff_payload, enterprise_data_object, enterprise_note_payload,
+        enterprise_pull_request_get, enterprise_review_belongs_to_current_user,
+        enterprise_review_dismissal_payload, enterprise_review_payload,
+        enterprise_review_summaries, enterprise_user_has_distinct_display_name,
+        enterprise_web_pull_request_review_endpoint, expand_enterprise_conversation_notes,
+        gitee_enterprise_list_sort, gitee_enterprise_merge_readiness, gitee_enterprise_state_query,
+        gitee_list_review_status, gitee_merge_actor_account, gitee_merge_event,
+        gitee_merge_event_with_user, gitee_operate_log_commit_activity, gitee_public_list_sort,
+        gitee_public_merge_readiness, gitee_push_event_commit_activity,
+        merge_gitee_review_summaries, normalize_enterprise_commit_order, pull_request_values,
+        select_enterprise_project_id, select_enterprise_user, trusted_enterprise_commit_count,
     };
     use crate::codereview::api::gitee as endpoints;
     use crate::git::{
@@ -2533,6 +2622,22 @@ mod tests {
         assert_eq!(
             gitee_list_review_status(&json!({ "review_state": "review_rejected" })),
             PullRequestReviewStatus::ChangesRequested
+        );
+    }
+
+    #[test]
+    fn identity_avatar_cache_is_bounded_and_remembers_negative_results() {
+        let mut cache = IdentityAvatarCache::default();
+        cache.insert("missing".to_string(), None);
+        assert_eq!(cache.get("missing"), Some(None));
+        for index in 0..=IDENTITY_AVATAR_CACHE_CAPACITY {
+            cache.insert(format!("identity-{index}"), Some(format!("avatar-{index}")));
+        }
+        assert!(cache.entries.len() <= IDENTITY_AVATAR_CACHE_CAPACITY);
+        assert_eq!(cache.get("identity-0"), None);
+        assert_eq!(
+            cache.get(format!("identity-{IDENTITY_AVATAR_CACHE_CAPACITY}").as_str()),
+            Some(Some(format!("avatar-{IDENTITY_AVATAR_CACHE_CAPACITY}")))
         );
     }
 

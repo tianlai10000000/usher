@@ -32,6 +32,10 @@ This specification defines user-controlled application log destinations and opti
 6. `USHER_MEMORY_DIAGNOSTICS=1` may force memory diagnostics for controlled benchmarks even when the UI preference is off.
 7. Pre-logger startup failures and explicit environment-controlled benchmark tools may write directly to the process console; these are not normal application logging destinations.
 8. The global panic hook always appends one valid JSON panic record to the configured tracing path, or its default path when tracing was never initialized, even when structured tracing is disabled. It then requests shutdown; ordinary tracing emission still respects the runtime switch.
+9. The application file sink uses a 64 KiB `BufWriter`. Warn/error records flush
+   immediately; ordinary write activity flushes at least once per second, and
+   registered shutdown flushes the remaining buffer. No long-lived background
+   flush thread is created.
 
 1. 关闭 Console 与两个文件输出后，普通应用日志立即停止，无需重启。
 2. 关闭全部控制项后，不再产生普通 `log`/`tracing` 输出，也不再产生 Terminal 或内存诊断记录。
@@ -41,6 +45,8 @@ This specification defines user-controlled application log destinations and opti
 6. 受控基准可通过 `USHER_MEMORY_DIAGNOSTICS=1` 强制启用内存诊断，即使 UI 偏好已关闭。
 7. Logger 初始化前的启动失败与显式环境变量控制的基准工具可以直接写进程控制台；它们不属于普通应用日志输出目标。
 8. 全局 panic hook 无论 structured tracing 是否关闭，都必须向已配置 tracing 路径追加一条有效 JSON panic 记录；tracing 尚未初始化时使用默认路径。落盘后请求关闭；普通 tracing 事件仍遵循运行时开关。
+9. 应用文件 sink 使用 64 KiB `BufWriter`；warn/error 立即 flush，普通写入活动至少每秒
+   flush 一次，注册的 shutdown 任务负责冲刷剩余缓冲。不得为此新增常驻 flush 线程。
 
 ## Troubleshooting workflow / 问题排查流程
 
@@ -77,6 +83,8 @@ Record the reproduction start time, actions, affected project/route, and expecte
 - Restart and verify all five values restore from `settings.toml`.
 - Load a legacy settings file without the five granular fields and verify defaults.
 - Confirm Settings works in both regular and compact layouts.
+- Write ordinary, warn, and error records; verify urgent records are flushed
+  immediately and shutdown leaves no buffered tail behind.
 
 - 分别切换每个输出目标，确认只有对应 sink 变化。
 - 先单独开启部分行，再使用 `Disable all`；确认所有开关都显示为关闭、批量操作变为 `Enable all`，并且 Console、`usher.log`、`usher_tracing.log`、Terminal verbose 与周期内存记录停止。

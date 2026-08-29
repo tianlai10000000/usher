@@ -99,6 +99,16 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
    when its current host is Docked. An already Detached Preview remains open as
    an independent application window. Closing only the Docked Preview restores
    the intact AI conversation and does not execute panel cleanup.
+9. Task UI subscriptions use separate selectors: task rows include progress,
+   while PR-list badges exclude per-chunk progress. Existing Slint rows are
+   updated in place with `set_row_data`; progress commits must not rebuild or
+   rescan the PR list. Application shutdown cancels every running review before
+   joining persistence workers.
+10. Oversized diffs split on file/line boundaries. Every continuation repeats
+    the file header and a numeric synthetic hunk header for the next old/new
+    line positions, remains within the byte budget, and preserves the original
+    payload exactly when continuation headers are removed. `@@` text outside a
+    real hunk header must not be treated as a hunk.
 
 1. 从 PR 列表启动时只入队元数据并留在列表；从 PR 详情启动时可立即打开右侧面板。
 2. 调度器最多启动 Settings 配置的任务数；调高后立即调度队列，调低不打断运行任务，
@@ -118,6 +128,12 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
 8. 关闭面板或离开 PR 路由时，仅在当前 PR 上下文 Preview 处于 Docked Host 时同时将其
    关闭；已经 Detached 的 Preview 作为独立应用窗口继续存在。只关闭 Docked Preview
    会恢复完整 AI 对话，不执行面板清理。
+9. Task UI 订阅使用两个独立 selector：任务行包含进度，PR 列表徽标排除逐 chunk 进度；
+   既有 Slint 行使用 `set_row_data` 原地更新，进度 commit 不得重建或重扫 PR 列表。
+   应用 shutdown 必须先取消全部运行中 Review，再 join 持久化 Worker。
+10. 超大 diff 按文件/行边界切分；每个续块重复文件头与指向下一旧/新行位置的数字 hunk
+    头，保持在字节预算内，去除续块头后必须精确还原原 payload。真实 hunk header 之外的
+    `@@` 文本不得被误判为 hunk。
 
 ## Presentation / 展示
 
@@ -465,9 +481,10 @@ the root Slint contract compilable without the task engine.
 Network, invalid model configuration, unreadable rule files, empty diffs, and
 invalid provider JSON fail only the affected task. User-facing task errors are
 bounded and credentials, complete prompts, source payloads, and rule contents
-must never be logged. Explicitly cancellable AI Review and review-scoped Ask
-completions have no total request deadline; the shared 10-second connect timeout
-and a 300-second response-body idle timeout still apply. Every received body
+must never be logged. Review-scoped Ask completions have no total request
+deadline. Each AI Review diff chunk additionally has a 600-second wall-clock
+deadline; both paths retain the shared 10-second connect timeout and a
+300-second response-body idle timeout. Every received body
 chunk resets that idle timer by default. Non-streaming JSON Review/Ask requests
 select a request-scoped semantic policy under which whitespace-only provider
 heartbeats do not count as body progress; the first non-whitespace byte and
@@ -488,9 +505,9 @@ playbook are preserved in the historical
 UI stub，根 Slint 仍可编译。
 
 网络、模型配置、规则文件、空 diff 或 Provider JSON 错误只影响对应任务。用户可见错误
-必须有界，日志不得包含凭据、完整 Prompt、源码 payload 或规则正文。可显式取消的
-AI Review 与 Review 专属 Ask completion 不设置请求总时限，但仍受共享的 10 秒连接
-超时和 300 秒响应体空闲超时约束。普通请求默认按任意 body chunk 重置空闲计时；
+必须有界，日志不得包含凭据、完整 Prompt、源码 payload 或规则正文。Review 专属 Ask
+completion 不设置请求总时限；每个 AI Review diff chunk 另有 600 秒墙钟总时限。
+两者仍受共享的 10 秒连接超时和 300 秒响应体空闲超时约束。普通请求默认按任意 body chunk 重置空闲计时；
 非流式 JSON Review/Ask 请求会选择
 请求级语义策略，Provider 仅发送空白心跳时不算正文进度，首个及后续非空白字节才重置
 同一截止时间。该策略依据预期响应表示，不依据 Provider host 或模型名称。其他 AI
@@ -520,6 +537,10 @@ chunk 序号、completion 消息数量与字节总量、序列化请求体大小
 - While a multi-chunk review runs, verify the panel identifies the current and
   total chunk. Stall a successful response body and verify the task fails after
   300 seconds of no body progress rather than remaining at one percentage.
+- Keep non-whitespace bytes trickling beyond the idle threshold and verify one
+  review chunk still fails at the 600-second wall-clock deadline.
+- Shut down with queued and running reviews; verify queued work does not start
+  and all in-flight completions cancel before persistence workers join.
 - Cancel or fail a review before a session is created, then focus Ask and send
   a question. Verify the configured Agent answers using PR context and that no
   hosting-provider write request is issued.
@@ -566,6 +587,8 @@ chunk 序号、completion 消息数量与字节总量、序列化请求体大小
   实时耗时持续增长，Send 操作切换为 Stop，且 Stop 只终止该次回复并冻结耗时。
 - 让 Review 运行超过 300 秒，确认 Provider 完成或用户取消前任务继续运行；同时确认普通
   AI Chat 仍在共享的 30 秒截止时间触发超时。
+- 让非空白字节持续零散到达并越过空闲阈值，确认单个 Review chunk 仍在 600 秒墙钟
+  上限失败；带排队/运行任务关闭应用时，确认在持久化 Worker join 前全部取消。
 - 多 chunk Review 运行时确认面板显示当前 chunk 与总数；让成功响应的 body 停止产生
   进度，确认任务在 300 秒后失败，而不是永久停在百分之一。
 - 在 Session 创建前取消 Review 或让其失败，再聚焦 Ask 并发送问题；确认配置的 Agent

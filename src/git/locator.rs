@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
 use super::{GiteeApiProfile, RepoType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,22 +122,58 @@ pub(super) fn configured_enterprise(repo_type: RepoType) -> Option<String> {
     (!value.trim().is_empty()).then_some(value)
 }
 
+/// Host and scheme facts extracted from one `api_base_url` value.
+#[derive(Debug, Clone)]
+struct ApiBaseFacts {
+    scheme: String,
+    host: String,
+    /// `host[:port]`, matching Git remote authorities.
+    authority: String,
+}
+
+/// Memoized `Url::parse` of configured API base URLs, keyed by the exact
+/// input string: when the setting changes, the new value simply misses the
+/// cache, so no invalidation hook is needed. Failed parses are cached too.
+fn api_base_facts(api_base_url: &str) -> Option<ApiBaseFacts> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<ApiBaseFacts>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(entries) = cache.lock()
+        && let Some(hit) = entries.get(api_base_url)
+    {
+        return hit.clone();
+    }
+    let parsed = reqwest::Url::parse(api_base_url).ok().map(|url| {
+        let host = url.host_str().unwrap_or_default().to_string();
+        ApiBaseFacts {
+            scheme: url.scheme().to_string(),
+            authority: match url.port() {
+                Some(port) => format!("{host}:{port}"),
+                None => host.clone(),
+            },
+            host,
+        }
+    });
+    if let Ok(mut entries) = cache.lock() {
+        // Only a handful of distinct base URLs ever exist per run; guard
+        // against pathological growth instead of implementing eviction.
+        if entries.len() >= 32 {
+            entries.clear();
+        }
+        entries.insert(api_base_url.to_string(), parsed.clone());
+    }
+    parsed
+}
+
 pub(super) fn is_configured_enterprise_host(repo_type: RepoType, host: &str) -> bool {
     let Some(api_base_url) = configured_api_base_url(repo_type) else {
         return false;
     };
-    let Ok(url) = reqwest::Url::parse(api_base_url.as_str()) else {
+    let Some(facts) = api_base_facts(api_base_url.as_str()) else {
         return false;
     };
-    let configured_host = match url.port() {
-        Some(port) => format!("{}:{port}", url.host_str().unwrap_or_default()),
-        None => url.host_str().unwrap_or_default().to_string(),
-    };
-    host.trim_end_matches('/')
-        .eq_ignore_ascii_case(configured_host.as_str())
-        || host
-            .trim_end_matches('/')
-            .eq_ignore_ascii_case(url.host_str().unwrap_or_default())
+    let host = host.trim_end_matches('/');
+    host.eq_ignore_ascii_case(facts.authority.as_str())
+        || host.eq_ignore_ascii_case(facts.host.as_str())
 }
 
 pub(super) fn configured_api_scheme(repo_type: RepoType, host: &str) -> Option<&'static str> {
@@ -142,7 +181,7 @@ pub(super) fn configured_api_scheme(repo_type: RepoType, host: &str) -> Option<&
         return None;
     }
     let api_base_url = configured_api_base_url(repo_type)?;
-    match reqwest::Url::parse(api_base_url.as_str()).ok()?.scheme() {
+    match api_base_facts(api_base_url.as_str())?.scheme.as_str() {
         "http" => Some("http"),
         "https" => Some("https"),
         _ => None,
@@ -162,13 +201,15 @@ pub(super) fn percent_encode_path(value: &str) -> String {
 }
 
 pub(super) fn configured_token(repo_type: RepoType) -> Option<String> {
-    let tokens = crate::settings::load_git_platform_tokens();
-    let token = match repo_type {
-        RepoType::Gitee => tokens.gitee,
-        RepoType::GitLab => tokens.gitlab,
-        RepoType::GitHub => tokens.github,
-    };
-    (!token.trim().is_empty()).then(|| token.trim().to_string())
+    crate::settings::get_settings_manager().with_git(|git| {
+        let token = match repo_type {
+            RepoType::Gitee => git.platform.gitee.token.as_str(),
+            RepoType::GitLab => git.platform.gitlab.token.as_str(),
+            RepoType::GitHub => git.platform.github.token.as_str(),
+        };
+        let token = token.trim();
+        (!token.is_empty()).then(|| token.to_string())
+    })
 }
 
 pub(super) fn gitee_api_profile(locator: &RepoLocator) -> GiteeApiProfile {
@@ -180,10 +221,12 @@ pub(super) fn gitee_api_profile(locator: &RepoLocator) -> GiteeApiProfile {
 }
 
 pub(super) fn configured_gitee_token(profile: GiteeApiProfile) -> Option<String> {
-    let tokens = crate::settings::load_git_platform_tokens();
-    let token = match profile {
-        GiteeApiProfile::PublicV5 => tokens.gitee,
-        GiteeApiProfile::EnterpriseV8 => tokens.gitee_enterprise,
-    };
-    (!token.trim().is_empty()).then(|| token.trim().to_string())
+    crate::settings::get_settings_manager().with_git(|git| {
+        let token = match profile {
+            GiteeApiProfile::PublicV5 => git.platform.gitee.token.as_str(),
+            GiteeApiProfile::EnterpriseV8 => git.platform.gitee.enterprise_token.as_str(),
+        };
+        let token = token.trim();
+        (!token.is_empty()).then(|| token.to_string())
+    })
 }

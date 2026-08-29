@@ -105,6 +105,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     private property <bool> diff-find-open: false;
     private property <bool> diff-find-focus-pending: false;
     private property <string> diff-find-query: "";
+    // Query of the last computed result set. Row bindings key off this instead
+    // of the live input so mounted rows only re-resolve when results refresh.
+    private property <string> diff-find-effective-query: "";
     private property <[WorkflowPrDiffFindMatch]> diff-find-matches: [];
     private property <int> diff-find-index: -1;
     // Snapshot the selected row instead of binding every field through
@@ -360,9 +363,11 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     }
 
     function close-diff-find() {
+        diff-find-debounce.stop();
         root.diff-find-open = false;
         root.diff-find-focus-pending = false;
         root.diff-find-query = "";
+        root.diff-find-effective-query = "";
         root.diff-find-matches = [];
         root.diff-find-index = -1;
         root.sync-diff-find-current();
@@ -388,9 +393,11 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     }
 
     function refresh-diff-find-matches() {
+        diff-find-debounce.stop();
         if (!root.diff-find-open) {
             return;
         }
+        root.diff-find-effective-query = root.diff-find-query;
         root.diff-find-matches = root.find-diff-matches(
             root.diff-find-query,
             root.diff-view == "split"
@@ -407,6 +414,11 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     }
 
     function step-diff-find(backward: bool) {
+        // Enter / next / previous resolve a pending debounced refresh first so
+        // stepping always walks the results of the visible query.
+        if (diff-find-debounce.running) {
+            root.refresh-diff-find-matches();
+        }
         if !root.diff-find-input-focused
             || root.diff-find-matches.length == 0 {
             return;
@@ -471,10 +483,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         root.refresh-diff-find-matches();
     }
     changed diff-find-query => {
-        // Typing selects the first result from the new result set immediately,
-        // but does not increment the command-only scroll revision.
+        // Typing selects the first result from the new result set once the
+        // debounced refresh lands, and does not increment the command-only
+        // scroll revision. The debounce keeps full-file scans off every
+        // keystroke; Enter and the next/previous arrows flush it immediately.
         root.diff-find-index = -1;
-        root.refresh-diff-find-matches();
+        if (root.diff-find-open) {
+            diff-find-debounce.restart();
+        }
     }
     changed review-dialog-open => {
         if (root.review-dialog-open) {
@@ -562,6 +578,17 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             return accept;
         }
         return reject;
+    }
+
+    // Debounce for find-as-you-type: each keystroke restarts the window so the
+    // full-file scan runs once per pause instead of on every character.
+    diff-find-debounce := Timer {
+        interval: 180ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.refresh-diff-find-matches();
+        }
     }
 
     Rectangle {
@@ -3289,7 +3316,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                             find-prefix: root.diff-find-cur-prefix;
                                             find-text: root.diff-find-cur-text;
                                             find-matches: root.diff-find-open
-                                                ? root.find-diff-row-matches(line-index, "", root.diff-find-query)
+                                                ? root.find-diff-row-matches(line-index, "", root.diff-find-effective-query)
                                                 : [];
                                             find-match-background: root.diff-find-match-background;
                                             find-background: root.diff-find-current-background;
@@ -3362,7 +3389,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         find-prefix: root.diff-find-cur-prefix;
                                         find-text: root.diff-find-cur-text;
                                         find-matches: root.diff-find-open
-                                            ? root.find-diff-row-matches(line-index, "left", root.diff-find-query)
+                                            ? root.find-diff-row-matches(line-index, "left", root.diff-find-effective-query)
                                             : [];
                                         find-match-background: root.diff-find-match-background;
                                         find-background: root.diff-find-current-background;
@@ -3435,7 +3462,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         find-prefix: root.diff-find-cur-prefix;
                                         find-text: root.diff-find-cur-text;
                                         find-matches: root.diff-find-open
-                                            ? root.find-diff-row-matches(line-index, "right", root.diff-find-query)
+                                            ? root.find-diff-row-matches(line-index, "right", root.diff-find-effective-query)
                                             : [];
                                         find-match-background: root.diff-find-match-background;
                                         find-background: root.diff-find-current-background;
@@ -3525,7 +3552,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         find-prefix: root.diff-find-cur-prefix;
                                         find-text: root.diff-find-cur-text;
                                         find-matches: root.diff-find-open
-                                            ? root.find-diff-row-matches(line-index, "", root.diff-find-query)
+                                            ? root.find-diff-row-matches(line-index, "", root.diff-find-effective-query)
                                             : [];
                                         find-match-background: root.diff-find-match-background;
                                         find-background: root.diff-find-current-background;

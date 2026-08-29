@@ -296,9 +296,12 @@ impl ChatSessions {
         self.session_mut(mode).load_more_history()
     }
 
-    pub(crate) fn append_user_message(&mut self, content: String) -> io::Result<StoredChatMessage> {
-        self.session_mut(self.active_mode)
-            .append_user_message(content)
+    pub(crate) fn append_user_message_for(
+        &mut self,
+        mode: ChatMode,
+        content: String,
+    ) -> io::Result<StoredChatMessage> {
+        self.session_mut(mode).append_user_message(content)
     }
 
     pub(crate) fn append_assistant_message_for(
@@ -396,12 +399,16 @@ mod tests {
             rag: ChatSessionService::bootstrap(rag_store, 20, 10).unwrap(),
         };
 
-        sessions.append_user_message("AI question".into()).unwrap();
+        sessions
+            .append_user_message_for(ChatMode::Ai, "AI question".into())
+            .unwrap();
         sessions
             .append_assistant_message_for(ChatMode::Ai, "AI answer".into(), 1_250)
             .unwrap();
         sessions.set_active_mode(ChatMode::Rag);
-        sessions.append_user_message("RAG question".into()).unwrap();
+        sessions
+            .append_user_message_for(ChatMode::Rag, "RAG question".into())
+            .unwrap();
 
         assert_eq!(sessions.messages_for(ChatMode::Ai).len(), 2);
         assert_eq!(sessions.messages_for(ChatMode::Rag).len(), 1);

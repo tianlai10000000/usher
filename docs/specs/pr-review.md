@@ -415,6 +415,28 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
     状态作为离散左内缩。原生 Live Resize 不得平移整棵已冻结/虚拟化的审核树。PR 内容
     不得布局到侧栏动画的中间位置，也不得透过 macOS 透明侧栏显示。
 
+### P2 performance invariants / P2 性能不变量
+
+- Diff Find scans the immutable raw diff projection rather than materialized
+  Slint rows. Query changes debounce for 180 ms, and one query-scoped row table
+  supplies mounted-row paint models without rescanning the complete diff.
+- Avatar downloads have an independent three-second timeout and a 2 MiB size
+  limit. A process-level bounded cache retains send-safe RGBA pixels; the Slint
+  event loop separately reuses up to 128 `slint::Image` values across
+  Conversation and Commits model rebuilds.
+- Hidden per-row wrapped `TextInput` delegates are conditionally mounted only
+  for their active presentation path. Artifact Preview and AI Review hidden
+  heavy subtrees follow the same conditional-mount rule; opacity alone must not
+  retain those trees.
+
+- Diff Find 直接扫描不可变的原始 diff 投影，不扫描已物化的 Slint 行；查询变化使用
+  180 ms 去抖，并由查询级 row table 为已挂载行提供绘制 model，禁止逐行重复全量扫描。
+- 头像下载各自使用三秒超时与 2 MiB 上限；进程级有界缓存保存可跨线程的 RGBA 像素，
+  Slint event loop 另复用最多 128 个 `slint::Image`，供 Conversation/Commits model
+  重建共同使用。
+- 每行隐藏的换行 `TextInput` 只在对应展示路径活跃时条件挂载。Artifact Preview 与
+  AI Review 的隐藏重型子树遵循同一规则，不得只靠 opacity 保留组件树。
+
 ## Rewrite checklist / 重写清单
 
 - Keep repository configuration (`provider type`, `provider project id`, `remote URL`) persistent and project-scoped; keep the list/review cache session-scoped and disposable.

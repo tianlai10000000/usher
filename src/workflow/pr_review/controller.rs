@@ -40,7 +40,8 @@ use super::diff_model::{LazyPrDiffLineModel, to_slint_file};
 use super::diff_projection::hunk_scroll_anchor_source_index;
 use super::file_tree::{build_tree_items, extension_counts};
 use super::find::{
-    collect_diff_find_matches, collect_diff_find_row_matches, diff_find_intra_item_offset,
+    DiffFindRowTable, collect_diff_find_matches, collect_diff_find_row_matches,
+    diff_find_intra_item_offset,
 };
 use super::hunk::{
     HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection, expand_all_hunk_context_from_sources,
@@ -858,16 +859,33 @@ pub(crate) fn bind_pr_review(
         )
     });
 
+    // Full-refresh results grouped per (row, pane) so mounted-row bindings do
+    // an O(1) lookup instead of rescanning their line on every evaluation.
+    let find_row_table = Rc::new(RefCell::new(DiffFindRowTable::new()));
+
     let ui_weak = ui.as_weak();
+    let row_table = find_row_table.clone();
     ui.on_workflow_pr_review_find_diff_matches(move |query, split| {
         let Some(ui) = ui_weak.upgrade() else {
             return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
         };
-        collect_diff_find_matches(&ui.get_workflow_pr_review_lines(), query.as_str(), split)
+        let matches =
+            collect_diff_find_matches(&ui.get_workflow_pr_review_lines(), query.as_str(), split);
+        row_table.borrow_mut().rebuild(query.as_str(), &matches);
+        ModelRc::new(VecModel::from(matches))
     });
 
     let ui_weak = ui.as_weak();
+    let row_table = find_row_table.clone();
     ui.on_workflow_pr_review_find_diff_row_matches(move |line, side, query| {
+        if let Some(row_matches) = row_table
+            .borrow()
+            .lookup(line, side.as_str(), query.as_str())
+        {
+            return row_matches;
+        }
+        // The table lags the query only transiently (e.g. a row binding fires
+        // before the debounced refresh); resolve just this row from scratch.
         let Some(ui) = ui_weak.upgrade() else {
             return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
         };
@@ -1415,12 +1433,10 @@ impl WorkflowPrReviewController {
                 }
                 Err(error) => Err(error),
             };
+            // Each avatar download carries its own timeout, so slow hosts only
+            // drop their own entry instead of the whole decoded batch.
             let avatars = match &result {
-                Ok(items) => {
-                    tokio::time::timeout(Duration::from_secs(3), load_conversation_avatars(items))
-                        .await
-                        .unwrap_or_default()
-                }
+                Ok(items) => load_conversation_avatars(items).await,
                 Err(_) => HashMap::new(),
             };
             let _ = slint::invoke_from_event_loop(move || {
@@ -1513,11 +1529,7 @@ impl WorkflowPrReviewController {
             };
             let commits_and_avatars = match result {
                 Ok(commits) => {
-                    let avatars =
-                        tokio::time::timeout(Duration::from_secs(3), load_commit_avatars(&commits))
-                            .await
-                            .ok()
-                            .unwrap_or_default();
+                    let avatars = load_commit_avatars(&commits).await;
                     Ok((commits, avatars))
                 }
                 Err(error) => Err(error),

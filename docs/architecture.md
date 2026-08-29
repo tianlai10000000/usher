@@ -505,6 +505,11 @@ Manual credential, hosting-endpoint, and AI Agent saves run off the Slint event
 loop. Their completion returns through the event loop, updates the transient
 Saved label only after persistence succeeds, and emits one bottom Toast for the
 terminal result.
+All delayed preference saves use the same shared-runtime `spawn_blocking` path;
+the 100 ms Slint timer only coalesces/schedules work and never writes TOML.
+Read-heavy provider helpers use fine-grained `with_settings`/`with_git` access
+instead of cloning the complete settings tree. Parsed API-base facts are cached
+by exact configured value with a bounded process cache.
 
 Settings and About route files are composition-only. Reusable navigation,
 fields, toggles, sections, and detail rows live under
@@ -550,6 +555,9 @@ current implementation.
 User-triggered project-registry reloads isolate blocking storage reads on the
 shared runtime, prevent duplicate activation while loading, and return model
 or recoverable error state through the Slint event loop.
+Project-registry writers are serialized and atomically rename a temporary
+sibling over `projects.json`, so concurrent background saves cannot expose a
+partial document.
 `ui/views/project.slint` is route composition only; reusable project cards,
 toolbar controls, and dialogs live in `ui/components/project/`.
 Home/Search/Detail/Project route states share `GitHubPageHeader` and
@@ -568,6 +576,10 @@ validation plan, while CD exposes the existing staged deployment and rollback
 controller instead of rendering unavailable placeholders. Branch and CD
 fields/actions/results live in `ui/components/workflow/`, adapt at compact
 widths, and use application-owned GitHub controls.
+Local Tag refresh resolves Git state on a blocking worker and commits only when
+its project ID and request sequence still match. GitLab Closed pagination keeps
+a short, bounded cache of complete closed/merged prefixes and extends only the
+missing provider pages.
 
 `WorkflowStore` keeps a current project plus per-project `WorkflowViewState`. Switching projects must rebind UI state and prevent logs, steps, or running flags from leaking between projects. `Route.Workflow` and `Route.PrReview` form one lifecycle domain: moving between them retains the Workflow list/model state, and a temporary route outside the domain retains it while either workflow route remains reachable through Back.
 
@@ -721,13 +733,13 @@ Presentation does not receive provider JSON or credentials. Provider adapters do
 
 Chat history is append-only JSONL at `im/chat_history.jsonl`. New records persist a complete RFC 3339 instant with the local offset; terminal assistant rows also persist measured `elapsed_ms`. The Rust presentation projection converts timestamps into calendar-aware local labels (time today, yesterday, the day before yesterday, weekday within six days, month/day within the year, and full date across years) and durations into compact metadata, while legacy rows remain readable unchanged. A pending turn uses one page-level real-time tick and a mode-owned monotonic start instant; switching modes or remounting Chat restores the actual elapsed value instead of starting over. Startup loads a recent tail into the Rust session, but the Chat component and bounded Slint message model are mounted only on the Chat route. Leaving Chat destroys its UI tree and clears the Slint model/projection cache; re-entry reconstructs the visible window from the session. Assistant messages retain a width-independent readable text projection; projections longer than 1,200 Unicode scalar values are bounded inline and expose the complete response through the existing title action. Formatted blocks are prepared by `usher-preview` and shown by the application-level preview host. Late history or assistant responses continue updating persistence/session without repopulating a hidden UI.
 
-Production mounts every currently loaded row in one stable `VecModel`, instantiates only each
-row's active role subtree, and keeps both virtual spacers at zero. This removes estimated-height
-spacer geometry from user-facing scrolling because mixed short, error, and large messages can
-otherwise place the complete bounded window outside the real viewport. Startup loads 20 recent
-messages and explicit or automatic history pagination adds 10 at a time. The bounded virtual-window
-implementation remains isolated behind the `chat-performance` fixture for continued measurement;
-it is not a production rendering path. In that benchmark, viewport-position changes commit a new bounded
+Production enables the bounded virtual window by default. One stable `VecModel`
+contains at most 32 mounted rows, instantiates only each row's active role
+subtree, and uses estimated top/bottom spacers from the width-keyed prefix.
+Startup loads 20 recent messages and explicit or automatic history pagination
+adds 10 at a time. The `chat-performance` fixture and
+`USHER_CHAT_PERF_VARIANT=baseline` retain a non-virtualized comparison path;
+normal launches use the optimized virtual path. In production, viewport-position changes commit a new bounded
 window before the viewport consumes the configured pixel overscan and does not
 pad a window of large rows merely to reach the row cap; it never rebuilds
 the complete history, and no delayed idle work mutates the model after scrolling
@@ -916,6 +928,11 @@ Every request supplies `RequestOptions`:
   require non-whitespace progress so transport heartbeats cannot extend the
   deadline. The policy describes representation semantics and never branches
   on a provider host or model name.
+- `retry_transient(3)` opts idempotent provider reads into capped exponential
+  backoff with jitter for connect/timeout, 429, 5xx, and exhausted-rate-limit
+  403 responses. It honors bounded `Retry-After`/provider reset hints and keeps
+  intermediate attempts silent. Independent reads use `join!`; item hydration
+  uses bounded unordered streams.
 
 Interceptors execute in registration order. Request hooks may mutate headers; response hooks observe status/headers/timing; error hooks receive normalized failures. See [specs/http.md](specs/http.md).
 

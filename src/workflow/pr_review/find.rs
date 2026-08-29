@@ -5,24 +5,36 @@
 //! find bar in the selected-file toolbar and resolves matches against the
 //! current projected line model.
 
+use std::collections::HashMap;
+
 use slint::{Model, ModelRc, SharedString, VecModel};
 use usher_search::{MatchCase, find_non_overlapping};
 
 use crate::workflow::syntax_highlight::character_columns;
 use crate::{WorkflowPrDiffFindMatch, WorkflowPrDiffLine};
 
+use super::diff_model::LazyPrDiffLineModel;
+use super::diff_projection::DiffRowProjection;
+use super::hunk::sanitize_diff_content;
 use super::selection::soft_wrap_visual_line_index;
 
 /// Case-insensitive substring matches over copyable code columns.
 /// Split mode searches both panes and tags each hit with `left` / `right`.
+///
+/// Lazy diff models are scanned through their raw provider lines so a
+/// full-file search never materializes converted rows (tokens, shared strings)
+/// or churns the bounded visible-row cache.
 pub(super) fn collect_diff_find_matches(
     lines: &ModelRc<WorkflowPrDiffLine>,
     query: &str,
     split: bool,
-) -> ModelRc<WorkflowPrDiffFindMatch> {
+) -> Vec<WorkflowPrDiffFindMatch> {
     let needle = query.trim();
     if needle.is_empty() {
-        return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
+        return Vec::new();
+    }
+    if let Some(model) = lines.as_any().downcast_ref::<LazyPrDiffLineModel>() {
+        return collect_source_find_matches(model, needle, split);
     }
     let mut matches = Vec::new();
 
@@ -59,7 +71,145 @@ pub(super) fn collect_diff_find_matches(
         }
     }
 
-    ModelRc::new(VecModel::from(matches))
+    matches
+}
+
+/// Source-side scan mirroring the materialized-row semantics exactly: unified
+/// queries only see unified projections (split rows expose empty `content`),
+/// split queries only see split pane content, spanning rows surface `hunk` /
+/// `meta` kinds and are never copyable.
+fn collect_source_find_matches(
+    model: &LazyPrDiffLineModel,
+    needle: &str,
+    split: bool,
+) -> Vec<WorkflowPrDiffFindMatch> {
+    let file = model.source_file();
+    let mut matches = Vec::new();
+    for (row, projection) in model.source_projection().iter().enumerate() {
+        match *projection {
+            DiffRowProjection::Unified(source_index) => {
+                if split {
+                    continue;
+                }
+                let Some(line) = file.lines.get(source_index) else {
+                    continue;
+                };
+                if matches!(line.kind.as_str(), "hunk" | "meta") {
+                    continue;
+                }
+                push_source_matches(&mut matches, row as i32, line.content.as_str(), needle, "");
+            }
+            DiffRowProjection::Split {
+                left,
+                right,
+                spanning,
+                ..
+            } => {
+                if !split || spanning {
+                    continue;
+                }
+                if let Some(line) = left.and_then(|index| file.lines.get(index)) {
+                    push_source_matches(
+                        &mut matches,
+                        row as i32,
+                        line.content.as_str(),
+                        needle,
+                        "left",
+                    );
+                }
+                if let Some(line) = right.and_then(|index| file.lines.get(index)) {
+                    push_source_matches(
+                        &mut matches,
+                        row as i32,
+                        line.content.as_str(),
+                        needle,
+                        "right",
+                    );
+                }
+            }
+        }
+    }
+    matches
+}
+
+/// Materialized rows carry sanitized content (tabs expanded, newlines
+/// stripped); sanitize raw provider text only when it would differ.
+fn push_source_matches(
+    out: &mut Vec<WorkflowPrDiffFindMatch>,
+    line: i32,
+    raw_content: &str,
+    needle: &str,
+    side: &str,
+) {
+    if raw_content.contains(['\t', '\r', '\n']) {
+        let sanitized = sanitize_diff_content(raw_content);
+        push_content_matches(out, line, sanitized.as_str(), needle, side);
+    } else {
+        push_content_matches(out, line, raw_content, needle, side);
+    }
+}
+
+/// O(1) per-row lookup over the most recent full find refresh. Rows without
+/// matches share one empty model, so mounted-row bindings allocate nothing.
+pub(super) struct DiffFindRowTable {
+    query: String,
+    rows: HashMap<(i32, u8), ModelRc<WorkflowPrDiffFindMatch>>,
+    empty: ModelRc<WorkflowPrDiffFindMatch>,
+}
+
+impl DiffFindRowTable {
+    pub(super) fn new() -> Self {
+        Self {
+            query: String::new(),
+            rows: HashMap::new(),
+            empty: ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new())),
+        }
+    }
+
+    pub(super) fn rebuild(&mut self, query: &str, matches: &[WorkflowPrDiffFindMatch]) {
+        self.query = query.trim().to_string();
+        let mut grouped: HashMap<(i32, u8), Vec<WorkflowPrDiffFindMatch>> = HashMap::new();
+        for hit in matches {
+            grouped
+                .entry((hit.line, side_key(hit.side.as_str())))
+                .or_default()
+                .push(hit.clone());
+        }
+        self.rows = grouped
+            .into_iter()
+            .map(|(key, row_matches)| (key, ModelRc::new(VecModel::from(row_matches))))
+            .collect();
+    }
+
+    /// `None` when the table was built for a different query; callers fall back
+    /// to a single-row scan so paint stays correct during transient states.
+    pub(super) fn lookup(
+        &self,
+        line: i32,
+        side: &str,
+        query: &str,
+    ) -> Option<ModelRc<WorkflowPrDiffFindMatch>> {
+        if query.trim() != self.query {
+            return None;
+        }
+        if self.query.is_empty() {
+            return Some(self.empty.clone());
+        }
+        Some(
+            self.rows
+                .get(&(line, side_key(side)))
+                .cloned()
+                .unwrap_or_else(|| self.empty.clone()),
+        )
+    }
+}
+
+fn side_key(side: &str) -> u8 {
+    match side {
+        "left" => 1,
+        "right" => 2,
+        _ => 0,
+    }
 }
 
 /// Matches for one mounted row and pane, derived solely from this invocation's
@@ -195,11 +345,18 @@ fn display_column_at_byte(value: &str, byte: usize) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+    use std::sync::Arc;
+
     use slint::{Model, ModelRc, VecModel};
 
+    use super::super::diff_model::LazyPrDiffLineModel;
     use super::{
-        collect_diff_find_matches, collect_diff_find_row_matches, diff_find_intra_item_offset,
+        DiffFindRowTable, collect_diff_find_matches, collect_diff_find_row_matches,
+        diff_find_intra_item_offset,
     };
+    use crate::git::{PullRequestDiffFile, PullRequestDiffLine};
+    use crate::workflow::syntax_highlight::HighlightedLine;
     use crate::{WorkflowPrDiffLine, WorkflowPrDiffToken};
 
     fn line(content: &str, left: &str, right: &str) -> WorkflowPrDiffLine {
@@ -239,8 +396,8 @@ mod tests {
         ]));
 
         let matches = collect_diff_find_matches(&lines, "ALP", false);
-        assert_eq!(matches.row_count(), 2);
-        let first = matches.row_data(0).expect("first match");
+        assert_eq!(matches.len(), 2);
+        let first = &matches[0];
         assert_eq!(first.line, 0);
         assert_eq!(first.start_column, 0);
         assert_eq!(first.end_column, 3);
@@ -249,7 +406,7 @@ mod tests {
         assert_eq!(first.prefix.as_str(), "");
         assert_eq!(first.text.as_str(), "Alp");
         assert_eq!(first.side.as_str(), "");
-        assert_eq!(matches.row_data(1).map(|item| item.line), Some(2));
+        assert_eq!(matches[1].line, 2);
     }
 
     #[test]
@@ -257,8 +414,8 @@ mod tests {
         let content = "确保开发者和 coding agent";
         let lines = ModelRc::new(VecModel::from(vec![line(content, content, content)]));
         let matches = collect_diff_find_matches(&lines, "保开发者", false);
-        assert_eq!(matches.row_count(), 1);
-        let hit = matches.row_data(0).expect("cjk match");
+        assert_eq!(matches.len(), 1);
+        let hit = &matches[0];
         assert_eq!(hit.prefix.as_str(), "确");
         assert_eq!(hit.text.as_str(), "保开发者");
         assert_eq!(hit.start_char, 1);
@@ -276,21 +433,9 @@ mod tests {
             "right-needle-extra",
         )]));
         let matches = collect_diff_find_matches(&lines, "needle", true);
-        assert_eq!(matches.row_count(), 2);
-        assert_eq!(
-            matches
-                .row_data(0)
-                .map(|item| item.side.to_string())
-                .as_deref(),
-            Some("left")
-        );
-        assert_eq!(
-            matches
-                .row_data(1)
-                .map(|item| item.side.to_string())
-                .as_deref(),
-            Some("right")
-        );
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].side.as_str(), "left");
+        assert_eq!(matches[1].side.as_str(), "right");
     }
 
     #[test]
@@ -301,10 +446,10 @@ mod tests {
             "find find find",
         )]));
         let matches = collect_diff_find_matches(&lines, "find", false);
-        assert_eq!(matches.row_count(), 3);
-        assert_eq!(matches.row_data(0).map(|hit| hit.start_char), Some(0));
-        assert_eq!(matches.row_data(1).map(|hit| hit.start_char), Some(5));
-        assert_eq!(matches.row_data(2).map(|hit| hit.start_char), Some(10));
+        assert_eq!(matches.len(), 3);
+        assert_eq!(matches[0].start_char, 0);
+        assert_eq!(matches[1].start_char, 5);
+        assert_eq!(matches[2].start_char, 10);
     }
 
     #[test]
@@ -333,5 +478,129 @@ mod tests {
         let lines = ModelRc::new(VecModel::from(vec![line(content, content, content)]));
         let viewport_y = diff_find_intra_item_offset(&lines, 0, 23, 72.0, 7.2, "");
         assert!(viewport_y > 0.0);
+    }
+
+    fn source_line(old_line: i32, new_line: i32, kind: &str, content: &str) -> PullRequestDiffLine {
+        PullRequestDiffLine {
+            old_line,
+            new_line,
+            kind: kind.to_string(),
+            content: content.to_string(),
+        }
+    }
+
+    fn lazy_model(split: bool) -> ModelRc<WorkflowPrDiffLine> {
+        let lines = vec![
+            source_line(0, 0, "hunk", "@@ -1,3 +1,4 @@"),
+            source_line(1, 1, "context", "shared Alpha context"),
+            source_line(2, 0, "deletion", "\told alpha value"),
+            source_line(3, 0, "deletion", "old two"),
+            source_line(0, 2, "addition", "new ALPHA 确保开发者 value"),
+        ];
+        let highlighted = lines
+            .iter()
+            .map(|line| HighlightedLine {
+                tokens: Vec::new(),
+                columns: line.content.chars().count() as u32,
+            })
+            .collect::<Vec<_>>();
+        let file = PullRequestDiffFile {
+            path: "src/lib.rs".to_string(),
+            old_path: "src/lib.rs".to_string(),
+            change_type: "edit_file".to_string(),
+            added_lines: 1,
+            removed_lines: 2,
+            viewed: false,
+            lines,
+        };
+        ModelRc::from(Rc::new(LazyPrDiffLineModel::new(
+            Arc::new(file),
+            Arc::new(highlighted),
+            split,
+        )))
+    }
+
+    fn materialized_copy(lines: &ModelRc<WorkflowPrDiffLine>) -> ModelRc<WorkflowPrDiffLine> {
+        ModelRc::new(VecModel::from(
+            (0..lines.row_count())
+                .filter_map(|index| lines.row_data(index))
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    #[track_caller]
+    fn assert_same_matches(lines: &ModelRc<WorkflowPrDiffLine>, query: &str, split: bool) {
+        let flatten = |matches: Vec<crate::WorkflowPrDiffFindMatch>| {
+            matches
+                .into_iter()
+                .map(|hit| {
+                    (
+                        hit.line,
+                        hit.start_column,
+                        hit.end_column,
+                        hit.start_char,
+                        hit.end_char,
+                        hit.side.to_string(),
+                        hit.prefix.to_string(),
+                        hit.text.to_string(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let source_scan = flatten(collect_diff_find_matches(lines, query, split));
+        let row_scan = flatten(collect_diff_find_matches(
+            &materialized_copy(lines),
+            query,
+            split,
+        ));
+        assert_eq!(source_scan, row_scan, "query {query:?} split {split}");
+        assert!(
+            !source_scan.is_empty(),
+            "query {query:?} split {split} should produce matches"
+        );
+    }
+
+    #[test]
+    fn source_scan_matches_materialized_rows_in_unified_mode() {
+        let lines = lazy_model(false);
+        assert_same_matches(&lines, "alpha", false);
+        assert_same_matches(&lines, "确保", false);
+        // Tab-expanded content keeps materialized display columns.
+        assert_same_matches(&lines, "old alpha", false);
+        // Hunk rows never match even when the query hits the marker text.
+        assert!(collect_diff_find_matches(&lines, "@@ -1,3", false).is_empty());
+        // A unified model exposes empty split panes.
+        assert!(collect_diff_find_matches(&lines, "alpha", true).is_empty());
+    }
+
+    #[test]
+    fn source_scan_matches_materialized_rows_in_split_mode() {
+        let lines = lazy_model(true);
+        assert_same_matches(&lines, "alpha", true);
+        assert_same_matches(&lines, "value", true);
+        // A split model exposes empty unified content.
+        assert!(collect_diff_find_matches(&lines, "alpha", false).is_empty());
+    }
+
+    #[test]
+    fn row_table_shares_one_empty_model_and_falls_back_on_stale_queries() {
+        let lines = lazy_model(false);
+        let matches = collect_diff_find_matches(&lines, "alpha", false);
+        let mut table = DiffFindRowTable::new();
+        table.rebuild("alpha", &matches);
+
+        let hit_row = table.lookup(1, "", "alpha").expect("current query");
+        assert_eq!(hit_row.row_count(), 1);
+        let empty_first = table.lookup(0, "", "alpha").expect("hunk row is empty");
+        let empty_second = table.lookup(3, "", "alpha").expect("no-match row");
+        assert_eq!(empty_first.row_count(), 0);
+        assert!(std::ptr::eq(
+            empty_first.as_any() as *const _ as *const u8,
+            empty_second.as_any() as *const _ as *const u8,
+        ));
+
+        assert!(table.lookup(1, "", "beta").is_none());
+        // Whitespace-only differences hit the same trimmed query.
+        assert!(table.lookup(1, "", " alpha ").is_some());
     }
 }

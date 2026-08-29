@@ -48,6 +48,20 @@ pub(crate) fn fixture_enabled() -> bool {
         && std::env::var("USHER_MEMORY_SCENARIO").as_deref() == Ok("chat-performance")
 }
 
+/// Whether the bounded history window replaces full-history rendering.
+///
+/// Virtualization is on by default in production. It is only disabled by the
+/// explicit `USHER_CHAT_PERF_VARIANT=baseline` opt-out, unless the memory
+/// diagnostics fixture scenario is active (which always measures the
+/// virtualized path). Fixture data injection stays behind `fixture_enabled()`.
+pub(crate) fn virtualization_enabled() -> bool {
+    virtualization_enabled_for(variant(), fixture_enabled())
+}
+
+fn virtualization_enabled_for(variant: PerformanceVariant, fixture_active: bool) -> bool {
+    variant.is_optimized() || fixture_active
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TracePhase {
     Idle,
@@ -296,4 +310,29 @@ fn write_trace(
         )?;
     }
     writer.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PerformanceVariant, virtualization_enabled_for};
+
+    #[test]
+    fn virtualization_defaults_on_and_only_baseline_without_fixture_disables_it() {
+        assert!(virtualization_enabled_for(
+            PerformanceVariant::Optimized,
+            false
+        ));
+        assert!(virtualization_enabled_for(
+            PerformanceVariant::Optimized,
+            true
+        ));
+        assert!(virtualization_enabled_for(
+            PerformanceVariant::Baseline,
+            true
+        ));
+        assert!(!virtualization_enabled_for(
+            PerformanceVariant::Baseline,
+            false
+        ));
+    }
 }

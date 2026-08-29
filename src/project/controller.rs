@@ -237,12 +237,8 @@ pub fn setup_project(ui: &MainWindow) {
         };
 
         guard.remove(index);
-        if let Err(err) = write_projects(&guard) {
-            show_error(&ui, &format!("Failed to save project: {err}"));
-            return;
-        }
-
         drop(guard);
+        persist_projects_in_background(state_delete.clone(), ui.as_weak(), "delete");
         let query = ui.get_project_search_query();
         refresh_project_items(
             &ui,
@@ -427,12 +423,8 @@ fn start_project_save(
                         Err("Project alias already exists.".to_string())
                     } else {
                         projects.push(config);
-                        if let Err(error) = write_projects(&projects) {
-                            projects.pop();
-                            Err(format!("Failed to save project: {error}"))
-                        } else {
-                            Ok("Project added.")
-                        }
+                        persist_projects_in_background(state.clone(), ui.as_weak(), "add");
+                        Ok("Project added.")
                     }
                 }
                 ProjectSaveAction::Update { original_alias } => {
@@ -450,13 +442,9 @@ fn start_project_save(
                     {
                         Err("Project alias already exists.".to_string())
                     } else {
-                        let previous = std::mem::replace(&mut projects[index], config);
-                        if let Err(error) = write_projects(&projects) {
-                            projects[index] = previous;
-                            Err(format!("Failed to save project: {error}"))
-                        } else {
-                            Ok("Project updated.")
-                        }
+                        projects[index] = config;
+                        persist_projects_in_background(state.clone(), ui.as_weak(), "update");
+                        Ok("Project updated.")
                     }
                 }
             };
@@ -478,6 +466,38 @@ fn start_project_save(
                 query.as_str(),
             );
             show_success(&ui, message);
+        });
+    });
+}
+
+/// Persists the current in-memory registry on a blocking worker so project
+/// mutations never run file IO on the UI thread. The snapshot is taken at
+/// write time, so queued writers always land the latest state.
+fn persist_projects_in_background(
+    state: Arc<Mutex<Vec<ProjectConfig>>>,
+    ui_weak: slint::Weak<MainWindow>,
+    context: &'static str,
+) {
+    crate::app_runtime::shared_runtime().spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            let snapshot = state
+                .lock()
+                .map_err(|_| std::io::Error::other("project registry lock poisoned"))?
+                .clone();
+            write_projects(&snapshot)
+        })
+        .await;
+
+        let failure = match result {
+            Ok(Ok(())) => return,
+            Ok(Err(error)) => error.to_string(),
+            Err(error) => error.to_string(),
+        };
+        log::error!("[Project] Failed to persist projects after {context}: {failure}");
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                show_error(&ui, &format!("Failed to save project: {failure}"));
+            }
         });
     });
 }

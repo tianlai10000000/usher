@@ -1,6 +1,10 @@
 //! GitLab repository operations.
 
-use futures_util::future::join_all;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+use futures_util::{StreamExt, stream};
 use reqwest::header::{ACCEPT, HeaderMap};
 use serde::Deserialize;
 use serde_json::Value;
@@ -26,6 +30,102 @@ struct GitLabProject {
     id: serde_json::Value,
 }
 
+const PREFIX_CACHE_CAPACITY: usize = 32;
+const PREFIX_CACHE_TTL: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct PrefixCacheKey {
+    api_base_url: String,
+    project_id: String,
+    state: String,
+    query: String,
+    reviews: String,
+    assignee: String,
+    sort: String,
+    page_size: u32,
+}
+
+#[derive(Clone)]
+struct PrefixCacheEntry {
+    items: Vec<PullRequestItem>,
+    total: u32,
+    total_exact: bool,
+    exhausted: bool,
+    updated_at: Instant,
+}
+
+#[derive(Default)]
+struct PrefixCache {
+    entries: HashMap<PrefixCacheKey, PrefixCacheEntry>,
+    order: VecDeque<PrefixCacheKey>,
+}
+
+impl PrefixCache {
+    fn get(&mut self, key: &PrefixCacheKey, now: Instant) -> Option<PrefixCacheEntry> {
+        let entry = self.entries.get(key)?.clone();
+        if now.duration_since(entry.updated_at) > PREFIX_CACHE_TTL {
+            self.entries.remove(key);
+            self.order.retain(|candidate| candidate != key);
+            return None;
+        }
+        self.order.retain(|candidate| candidate != key);
+        self.order.push_back(key.clone());
+        Some(entry)
+    }
+
+    fn insert(&mut self, key: PrefixCacheKey, entry: PrefixCacheEntry) {
+        self.order.retain(|candidate| candidate != &key);
+        self.entries.remove(&key);
+        while self.entries.len() >= PREFIX_CACHE_CAPACITY {
+            let Some(oldest) = self.order.pop_front() else {
+                self.entries.clear();
+                break;
+            };
+            self.entries.remove(&oldest);
+        }
+        self.order.push_back(key.clone());
+        self.entries.insert(key, entry);
+    }
+
+    fn invalidate_project(&mut self, api_base_url: &str, project_id: &str) {
+        self.entries
+            .retain(|key, _| key.api_base_url != api_base_url || key.project_id != project_id);
+        self.order
+            .retain(|key| key.api_base_url != api_base_url || key.project_id != project_id);
+    }
+}
+
+fn prefix_cache() -> &'static Mutex<PrefixCache> {
+    static CACHE: OnceLock<Mutex<PrefixCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(PrefixCache::default()))
+}
+
+fn prefix_cache_key(
+    locator: &RepoLocator,
+    repo_project_id: &str,
+    state: PullRequestState,
+    filters: &PullRequestFilters,
+    page_size: u32,
+) -> PrefixCacheKey {
+    PrefixCacheKey {
+        api_base_url: api_base_url(locator),
+        project_id: repo_project_id.trim().to_string(),
+        state: state.as_str().to_string(),
+        query: filters.query.trim().to_string(),
+        reviews: filters.reviews.clone(),
+        assignee: filters.assignee.clone(),
+        sort: filters.sort.clone(),
+        page_size,
+    }
+}
+
+fn invalidate_prefix_cache(locator: &RepoLocator, repo_project_id: &str) {
+    prefix_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .invalidate_project(api_base_url(locator).as_str(), repo_project_id.trim());
+}
+
 pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, String> {
     let full_path = format!("{}/{}", locator.namespace, locator.repo);
     let endpoint = endpoints::PROJECT_URL
@@ -39,10 +139,12 @@ pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, Str
         request = request.header("PRIVATE-TOKEN", token);
     }
 
-    let response: GitLabProject =
-        http::send_json(request, RequestOptions::new("Load GitLab project details"))
-            .await
-            .map_err(|error| error.to_string())?;
+    let response: GitLabProject = http::send_json(
+        request,
+        RequestOptions::new("Load GitLab project details").retry_transient(3),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     value_to_id(&response.id, "GitLab")
 }
 
@@ -119,9 +221,12 @@ async fn get_gitlab_pull_request_server_page(
         request = request.header("PRIVATE-TOKEN", token);
     }
 
-    let response = http::send(request, RequestOptions::new("Load GitLab merge requests"))
-        .await
-        .map_err(|error| error.to_string())?;
+    let response = http::send(
+        request,
+        RequestOptions::new("Load GitLab merge requests").retry_transient(3),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     let headers = response.headers().clone();
     let payload: Vec<Value> = response
         .json()
@@ -177,6 +282,7 @@ async fn get_gitlab_closed_pull_requests(
         PullRequestState::Closed,
         filters,
         prefix_len,
+        per_page,
     );
     let merged_future = load_gitlab_state_prefix(
         locator,
@@ -184,6 +290,7 @@ async fn get_gitlab_closed_pull_requests(
         PullRequestState::Merged,
         filters,
         prefix_len,
+        per_page,
     );
     let (closed_result, merged_result) = tokio::join!(closed_future, merged_future);
     let (mut closed, closed_total, closed_exact) = closed_result?;
@@ -223,36 +330,60 @@ async fn load_gitlab_state_prefix(
     state: PullRequestState,
     filters: &PullRequestFilters,
     prefix_len: u32,
+    page_size: u32,
 ) -> Result<(Vec<PullRequestItem>, u32, bool), String> {
-    let per_page = prefix_len.clamp(1, 100);
-    let page_limit = prefix_len.div_ceil(per_page).max(1);
-    let mut items = Vec::new();
-    let mut total = 0;
-    let mut total_exact = false;
+    let page_size = page_size.clamp(1, 100);
+    let key = prefix_cache_key(locator, repo_project_id, state, filters, page_size);
+    let cached = prefix_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&key, Instant::now());
+    let mut entry = cached.unwrap_or_else(|| PrefixCacheEntry {
+        items: Vec::new(),
+        total: 0,
+        total_exact: false,
+        exhausted: false,
+        updated_at: Instant::now(),
+    });
+    if entry.items.len() >= prefix_len as usize || entry.exhausted {
+        entry.items.truncate(prefix_len as usize);
+        return Ok((entry.items, entry.total, entry.total_exact));
+    }
 
-    for page in 1..=page_limit {
+    let first_missing_page = (entry.items.len() as u32)
+        .div_ceil(page_size)
+        .saturating_add(1);
+    let page_limit = prefix_len.div_ceil(page_size).max(1);
+
+    for page in first_missing_page..=page_limit {
         let result = get_gitlab_pull_request_server_page(
             locator,
             repo_project_id,
             Some(state),
             filters,
             page,
-            per_page,
+            page_size,
             false,
         )
         .await?;
         if page == 1 {
-            total = result.total;
-            total_exact = result.total_exact;
+            entry.total = result.total;
+            entry.total_exact = result.total_exact;
         }
         let batch_len = result.items.len();
-        items.extend(result.items);
-        if batch_len < per_page as usize || items.len() >= prefix_len as usize {
+        entry.items.extend(result.items);
+        if batch_len < page_size as usize {
+            entry.exhausted = true;
             break;
         }
     }
-    items.truncate(prefix_len as usize);
-    Ok((items, total, total_exact))
+    entry.updated_at = Instant::now();
+    prefix_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(key, entry.clone());
+    entry.items.truncate(prefix_len as usize);
+    Ok((entry.items, entry.total, entry.total_exact))
 }
 
 fn sort_gitlab_items(items: &mut [PullRequestItem], sort: &str) {
@@ -272,22 +403,33 @@ async fn hydrate_gitlab_review_statuses(
     repo_project_id: &str,
     mut items: Vec<PullRequestItem>,
 ) -> Vec<PullRequestItem> {
-    let requests = items.iter().enumerate().map(|(index, item)| async move {
-        let endpoint = merge_request_endpoint(
-            endpoints::MERGE_REQUEST_APPROVALS_URL,
-            locator,
-            repo_project_id,
-            item.number.as_str(),
-        );
-        let approvals = http::send_json::<Value>(
-            gitlab_request(endpoint),
-            RequestOptions::new("Load GitLab merge request list approvals"),
-        )
-        .await
-        .ok();
-        (index, approvals)
-    });
-    for (index, approvals) in join_all(requests).await {
+    let numbers = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| (index, item.number.clone()))
+        .collect::<Vec<_>>();
+    // Keep approval hydration to a small number of in-flight requests; large
+    // pages otherwise burst-hit the provider and trip abuse/rate limits.
+    let approvals_by_index = stream::iter(numbers)
+        .map(|(index, number)| async move {
+            let endpoint = merge_request_endpoint(
+                endpoints::MERGE_REQUEST_APPROVALS_URL,
+                locator,
+                repo_project_id,
+                number.as_str(),
+            );
+            let approvals = http::send_json::<Value>(
+                gitlab_request(endpoint),
+                RequestOptions::new("Load GitLab merge request list approvals").retry_transient(3),
+            )
+            .await
+            .ok();
+            (index, approvals)
+        })
+        .buffer_unordered(4)
+        .collect::<Vec<_>>()
+        .await;
+    for (index, approvals) in approvals_by_index {
         if let Some(approvals) = approvals {
             items[index].review_status =
                 gitlab_approval_review_status(&approvals, items[index].review_status);
@@ -356,7 +498,7 @@ pub(super) async fn get_pull_request_diff(
     }
     let detail: Value = http::send_json(
         detail_request,
-        RequestOptions::new("Load GitLab merge request details"),
+        RequestOptions::new("Load GitLab merge request details").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -386,7 +528,7 @@ pub(super) async fn get_pull_request_diff(
         }
         let batch: Vec<Value> = http::send_json(
             request,
-            RequestOptions::new("Load GitLab merge request diffs"),
+            RequestOptions::new("Load GitLab merge request diffs").retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -451,7 +593,7 @@ pub(super) async fn get_commit_range_diff(
             ("straight", "true"),
             ("unidiff", "true"),
         ]),
-        RequestOptions::new("Compare GitLab merge request commits"),
+        RequestOptions::new("Compare GitLab merge request commits").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -502,13 +644,16 @@ pub(super) async fn get_pull_request_action_state(
     if let Some(token) = configured_token(RepoType::GitLab) {
         request = request.header("PRIVATE-TOKEN", token);
     }
-    let detail: Value = http::send_json(
+    // The merge-request detail and the project merge settings are independent
+    // reads; fetch them concurrently while keeping each error path intact.
+    let detail_future = http::send_json::<Value>(
         request,
-        RequestOptions::new("Load GitLab merge request readiness"),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    let project = load_project_settings(locator, repo_project_id).await?;
+        RequestOptions::new("Load GitLab merge request readiness").retry_transient(3),
+    );
+    let project_future = load_project_settings(locator, repo_project_id);
+    let (detail, project) = tokio::join!(detail_future, project_future);
+    let detail = detail.map_err(|error| error.to_string())?;
+    let project = project?;
     Ok(gitlab_action_state(
         &detail,
         Some(&project),
@@ -659,6 +804,7 @@ pub(super) async fn merge_pull_request(
             .filter(|message| !message.trim().is_empty())
             .unwrap_or_else(|| "GitLab did not merge this merge request.".to_string()));
     }
+    invalidate_prefix_cache(locator, repo_project_id);
     Ok(())
 }
 
@@ -696,7 +842,7 @@ pub(super) async fn get_pull_request_conversation(
     let detail_future = async {
         http::send_json(
             gitlab_request(detail_endpoint),
-            RequestOptions::new("Load GitLab merge request conversation header"),
+            RequestOptions::new("Load GitLab merge request conversation header").retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())
@@ -704,7 +850,7 @@ pub(super) async fn get_pull_request_conversation(
     let notes_future = async {
         http::send_json(
             gitlab_request(notes_endpoint).query(&[("per_page", "100")]),
-            RequestOptions::new("Load GitLab merge request notes"),
+            RequestOptions::new("Load GitLab merge request notes").retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())
@@ -712,7 +858,8 @@ pub(super) async fn get_pull_request_conversation(
     let commits_future = async {
         http::send_json(
             gitlab_request(commits_endpoint).query(&[("per_page", "100")]),
-            RequestOptions::new("Load GitLab merge request conversation commits"),
+            RequestOptions::new("Load GitLab merge request conversation commits")
+                .retry_transient(3),
         )
         .await
         .map_err(|error| error.to_string())
@@ -721,7 +868,7 @@ pub(super) async fn get_pull_request_conversation(
         Ok::<Option<Value>, String>(
             http::send_json(
                 gitlab_request(approvals_endpoint),
-                RequestOptions::new("Load GitLab merge request approvals"),
+                RequestOptions::new("Load GitLab merge request approvals").retry_transient(3),
             )
             .await
             .ok(),
@@ -731,7 +878,7 @@ pub(super) async fn get_pull_request_conversation(
         Ok::<Option<Value>, String>(
             http::send_json(
                 gitlab_request(current_user_endpoint),
-                RequestOptions::new("Load GitLab current review user"),
+                RequestOptions::new("Load GitLab current review user").retry_transient(3),
             )
             .await
             .ok(),
@@ -1103,7 +1250,7 @@ pub(super) async fn get_pull_request_commits(
     );
     let values: Vec<Value> = http::send_json(
         gitlab_request(endpoint).query(&[("per_page", "100")]),
-        RequestOptions::new("Load GitLab merge request commits"),
+        RequestOptions::new("Load GitLab merge request commits").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -1152,7 +1299,7 @@ async fn count_merge_request_commits(
     );
     let response = http::send(
         gitlab_request(endpoint).query(&[("page", "1"), ("per_page", "1")]),
-        RequestOptions::new("Count GitLab merge request commits"),
+        RequestOptions::new("Count GitLab merge request commits").retry_transient(3),
     )
     .await
     .ok()?;
@@ -1191,7 +1338,7 @@ async fn load_project_settings(
         );
     http::send_json(
         gitlab_request(endpoint),
-        RequestOptions::new("Load GitLab project merge settings"),
+        RequestOptions::new("Load GitLab project merge settings").retry_transient(3),
     )
     .await
     .map_err(|error| error.to_string())
@@ -1504,9 +1651,12 @@ pub(super) async fn get_repository_file_text(
     if let Some(token) = configured_token(RepoType::GitLab) {
         request = request.header("PRIVATE-TOKEN", token);
     }
-    let response = http::send(request, RequestOptions::new("Load GitLab repository file"))
-        .await
-        .map_err(|error| error.to_string())?;
+    let response = http::send(
+        request,
+        RequestOptions::new("Load GitLab repository file").retry_transient(3),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     response
         .text()
         .await
@@ -1598,9 +1748,12 @@ fn fallback_total(page: u32, per_page: u32, item_count: usize) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use serde_json::json;
 
     use super::{
+        PREFIX_CACHE_CAPACITY, PREFIX_CACHE_TTL, PrefixCache, PrefixCacheEntry, PrefixCacheKey,
         gitlab_action_state, gitlab_approval_review_status, gitlab_approval_summaries,
         gitlab_commit_batch_activity, gitlab_list_review_status, gitlab_list_sort,
         gitlab_merge_actor, gitlab_merge_methods, gitlab_merge_payload, gitlab_merge_readiness,
@@ -1640,6 +1793,66 @@ mod tests {
             updated_at: updated_at.to_string(),
             web_url: String::new(),
         }
+    }
+
+    fn prefix_key(project_id: &str) -> PrefixCacheKey {
+        PrefixCacheKey {
+            api_base_url: "https://gitlab.example/api/v4".to_string(),
+            project_id: project_id.to_string(),
+            state: "closed".to_string(),
+            query: String::new(),
+            reviews: "all".to_string(),
+            assignee: "any".to_string(),
+            sort: "newest".to_string(),
+            page_size: 20,
+        }
+    }
+
+    fn prefix_entry(updated_at: Instant) -> PrefixCacheEntry {
+        PrefixCacheEntry {
+            items: Vec::new(),
+            total: 0,
+            total_exact: true,
+            exhausted: false,
+            updated_at,
+        }
+    }
+
+    #[test]
+    fn gitlab_prefix_cache_is_bounded_and_refreshes_existing_keys() {
+        let now = Instant::now();
+        let mut cache = PrefixCache::default();
+        for index in 0..=PREFIX_CACHE_CAPACITY {
+            cache.insert(
+                prefix_key(format!("project-{index}").as_str()),
+                prefix_entry(now),
+            );
+        }
+        assert_eq!(cache.entries.len(), PREFIX_CACHE_CAPACITY);
+        assert!(!cache.entries.contains_key(&prefix_key("project-0")));
+
+        let newest = prefix_key(format!("project-{PREFIX_CACHE_CAPACITY}").as_str());
+        cache.insert(newest.clone(), prefix_entry(now));
+        assert_eq!(cache.entries.len(), PREFIX_CACHE_CAPACITY);
+        assert_eq!(cache.order.back(), Some(&newest));
+    }
+
+    #[test]
+    fn gitlab_prefix_cache_expires_and_invalidates_one_project() {
+        let now = Instant::now();
+        let mut cache = PrefixCache::default();
+        let expired = prefix_key("expired");
+        cache.insert(
+            expired.clone(),
+            prefix_entry(now - PREFIX_CACHE_TTL - Duration::from_secs(1)),
+        );
+        assert!(cache.get(&expired, now).is_none());
+
+        cache.insert(prefix_key("one"), prefix_entry(now));
+        cache.insert(prefix_key("two"), prefix_entry(now));
+        cache.invalidate_project("https://gitlab.example/api/v4", "one");
+        assert!(!cache.entries.contains_key(&prefix_key("one")));
+        assert!(cache.entries.contains_key(&prefix_key("two")));
     }
 
     #[test]

@@ -44,7 +44,7 @@ pub struct HistoryPage {
 
 #[cfg(test)]
 mod tests {
-    use super::{StoredChatMessage, StoredMessageStatus};
+    use super::{JsonlHistoryStore, StoredChatMessage, StoredMessageRole, StoredMessageStatus};
 
     #[test]
     fn old_history_without_status_defaults_to_normal() {
@@ -55,6 +55,54 @@ mod tests {
 
         assert_eq!(message.status, StoredMessageStatus::Normal);
         assert_eq!(message.elapsed_ms, None);
+    }
+
+    fn stored_message(id: i64) -> StoredChatMessage {
+        StoredChatMessage {
+            id,
+            role: StoredMessageRole::User,
+            status: StoredMessageStatus::Normal,
+            content: format!("message {id}"),
+            timestamp: "12:00".to_string(),
+            elapsed_ms: None,
+        }
+    }
+
+    fn temp_store(name: &str) -> JsonlHistoryStore {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir()
+            .join(format!("usher-persistence-{}-{nonce}", std::process::id()))
+            .join(name);
+        JsonlHistoryStore::open_test_path(path).unwrap()
+    }
+
+    #[test]
+    fn has_older_than_decides_from_the_oldest_record_only() {
+        let store = temp_store("has-older.jsonl");
+        for id in 3..=6 {
+            store.append(&stored_message(id)).unwrap();
+        }
+
+        assert!(store.has_older_than(4).unwrap());
+        assert!(!store.has_older_than(3).unwrap());
+        assert!(!store.has_older_than(1).unwrap());
+        std::fs::remove_file(store.file_path()).unwrap();
+    }
+
+    #[test]
+    fn has_older_than_skips_leading_garbage_and_handles_empty_files() {
+        let store = temp_store("has-older-garbage.jsonl");
+        assert!(!store.has_older_than(10).unwrap());
+
+        std::fs::write(store.file_path(), "not json\n\n").unwrap();
+        assert!(!store.has_older_than(10).unwrap());
+
+        store.append(&stored_message(5)).unwrap();
+        assert!(store.has_older_than(10).unwrap());
+        std::fs::remove_file(store.file_path()).unwrap();
     }
 }
 
@@ -163,6 +211,9 @@ impl JsonlHistoryStore {
     }
 
     pub fn has_older_than(&self, id: i64) -> io::Result<bool> {
+        // The history file is append-only with monotonically increasing ids,
+        // so the first parseable record is the oldest one and is enough to
+        // decide without scanning the whole file.
         let file = OpenOptions::new().read(true).open(&self.file_path)?;
         let reader = BufReader::new(file);
         for line_result in reader.lines() {
@@ -173,9 +224,7 @@ impl JsonlHistoryStore {
             let Some(msg) = Self::parse_line(&line) else {
                 continue;
             };
-            if msg.id < id {
-                return Ok(true);
-            }
+            return Ok(msg.id < id);
         }
         Ok(false)
     }

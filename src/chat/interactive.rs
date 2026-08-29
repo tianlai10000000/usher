@@ -38,6 +38,10 @@ const MAX_NEW_ROWS_PER_SCROLL_COMMIT: usize = 2;
 const STICK_TO_BOTTOM_THRESHOLD_PX: f32 = 96.0;
 const MAX_AI_CONTEXT_MESSAGES: usize = 20;
 
+/// Chat sessions bootstrap on a blocking worker; `None` marks the loading
+/// window between startup and the event-loop backfill.
+type SharedChatSessions = Arc<Mutex<Option<ChatSessions>>>;
+
 fn virtual_scroll_bucket(scroll_offset_px: f32) -> i32 {
     (scroll_offset_px.max(0.0) / VIRTUAL_SCROLL_BUCKET_HEIGHT_PX).floor() as i32
 }
@@ -69,6 +73,42 @@ fn should_shift_near_mounted_edge(
     } else {
         scroll_offset - MOUNTED_EDGE_GUARD_PX <= mounted_top
     }
+}
+
+fn should_shift_near_estimated_edge(
+    top_spacer_px: f32,
+    bottom_spacer_px: f32,
+    document_height_px: f32,
+    scroll_offset_px: f32,
+    viewport_height_px: f32,
+    moving_down: bool,
+    has_more_in_direction: bool,
+) -> bool {
+    if !has_more_in_direction || document_height_px <= 0.0 {
+        return false;
+    }
+    let mounted_top = top_spacer_px.max(0.0);
+    let mounted_bottom = (document_height_px - bottom_spacer_px).max(mounted_top);
+    // This is the geometry-callback fallback, not a second overscan guard.
+    // Trigger only at the estimated boundary so it cannot multiply commits.
+    if moving_down {
+        scroll_offset_px + viewport_height_px + 1.0 >= mounted_bottom
+    } else {
+        scroll_offset_px - 1.0 <= mounted_top
+    }
+}
+
+fn estimated_window_covers_viewport(
+    top_spacer_px: f32,
+    bottom_spacer_px: f32,
+    document_height_px: f32,
+    scroll_offset_px: f32,
+    viewport_height_px: f32,
+) -> bool {
+    const COVERAGE_TOLERANCE_PX: f32 = 1.0;
+    let mounted_bottom = (document_height_px - bottom_spacer_px).max(top_spacer_px);
+    top_spacer_px <= scroll_offset_px + COVERAGE_TOLERANCE_PX
+        && mounted_bottom + COVERAGE_TOLERANCE_PX >= scroll_offset_px + viewport_height_px
 }
 
 fn limit_incremental_virtual_shift(
@@ -534,7 +574,7 @@ fn compute_wrap_width_for_chat_width(chat_width: f32) -> i32 {
 
 fn apply_chat_state_to_ui(
     ui: &MainWindow,
-    session: &Arc<Mutex<ChatSessions>>,
+    session: &SharedChatSessions,
     mode: ChatMode,
     include_loading_placeholder: bool,
     wrap_width_override_px: Option<i32>,
@@ -553,7 +593,7 @@ fn apply_chat_state_to_ui(
 
 fn apply_chat_state_to_ui_for_scrollbar_drag(
     ui: &MainWindow,
-    session: &Arc<Mutex<ChatSessions>>,
+    session: &SharedChatSessions,
     mode: ChatMode,
     include_loading_placeholder: bool,
     wrap_width_override_px: Option<i32>,
@@ -577,7 +617,7 @@ fn apply_chat_state_to_ui_for_scrollbar_drag(
 
 fn apply_chat_state_to_ui_with_policy(
     ui: &MainWindow,
-    session: &Arc<Mutex<ChatSessions>>,
+    session: &SharedChatSessions,
     mode: ChatMode,
     include_loading_placeholder: bool,
     wrap_width_override_px: Option<i32>,
@@ -598,6 +638,11 @@ fn apply_chat_state_to_ui_with_policy(
                 log::error!("[Chat::Session] Lock poisoned: {}", e);
                 return;
             }
+        };
+        let Some(guard) = guard.as_ref() else {
+            // Bootstrap has not backfilled the sessions yet; keep the
+            // loading/empty state until the completion handler remounts.
+            return;
         };
 
         let all_messages = guard.messages_for(mode);
@@ -623,7 +668,7 @@ fn apply_chat_state_to_ui_with_policy(
                 (ui.get_chat_layout_window_height() - 180.0).clamp(360.0, 1400.0);
             let wrap_width_px = wrap_width_override_px.unwrap_or_else(|| compute_wrap_width_px(ui));
             ACTIVE_VIRTUAL_WRAP_WIDTH_PX.with(|width| width.set(wrap_width_px));
-            let virtualization_enabled = crate::chat::performance::fixture_enabled();
+            let virtualization_enabled = crate::chat::performance::virtualization_enabled();
             let row_estimate_px = get_adaptive_row_height_px();
             let window_policy = window_policy_override.unwrap_or_else(|| {
                 if crate::chat::performance::variant().is_optimized() {
@@ -656,15 +701,21 @@ fn apply_chat_state_to_ui_with_policy(
                     MAX_NEW_ROWS_PER_SCROLL_COMMIT,
                 );
                 if limited != (start, end) {
-                    start = limited.0;
-                    end = limited.1;
                     if let Some((limited_top, limited_bottom, _)) = compute_spacers_for_fixed_window(
                         all_messages,
-                        start,
-                        end,
+                        limited.0,
+                        limited.1,
                         wrap_width_px,
                         true,
+                    ) && estimated_window_covers_viewport(
+                        limited_top,
+                        limited_bottom,
+                        current_virtual_document_height_px(),
+                        scroll_offset_px,
+                        viewport_height_px,
                     ) {
+                        start = limited.0;
+                        end = limited.1;
                         top_px = limited_top;
                         bottom_px = limited_bottom;
                     }
@@ -762,7 +813,7 @@ fn clear_chat_ui_state(ui: &MainWindow) {
 
 fn schedule_chat_ui_mount(
     ui_weak: slint::Weak<MainWindow>,
-    session: Arc<Mutex<ChatSessions>>,
+    session: SharedChatSessions,
     mode: ChatMode,
     revision: u64,
     current_revision: Rc<Cell<u64>>,
@@ -780,6 +831,12 @@ fn schedule_chat_ui_mount(
                 current_revision.get(),
             )
         {
+            return;
+        }
+        let session_ready = session.lock().map(|guard| guard.is_some()).unwrap_or(false);
+        if !session_ready {
+            // Keep the restoring indicator; the bootstrap completion handler
+            // remounts through the route callback once history is available.
             return;
         }
 
@@ -804,10 +861,15 @@ fn schedule_chat_ui_mount(
     });
 }
 
-fn begin_chat_ui_mount(ui: &MainWindow, session: &Arc<Mutex<ChatSessions>>, mode: ChatMode) {
+fn begin_chat_ui_mount(ui: &MainWindow, session: &SharedChatSessions, mode: ChatMode) {
     let has_history = session
         .lock()
-        .map(|guard| !guard.messages_for(mode).is_empty())
+        .map(|guard| {
+            guard
+                .as_ref()
+                // While bootstrap is still loading, show the restoring state.
+                .is_none_or(|sessions| !sessions.messages_for(mode).is_empty())
+        })
         .unwrap_or_else(|error| {
             log::error!("[Chat::Session] Lock poisoned while mounting Chat: {error}");
             false
@@ -931,34 +993,72 @@ pub fn setup_interactive(ui: &MainWindow) {
     log::info!("[Chat::Interactive] Setting up interactive callbacks...");
     let runtime = shared_runtime();
 
-    let mut session = match ChatSessions::bootstrap_default() {
-        Ok(s) => s,
-        Err(e) => {
-            log::error!("[Chat::Storage] Failed to initialize chat storage: {}", e);
-            return;
-        }
-    };
-    session.install_performance_fixture();
-    let session = Arc::new(Mutex::new(session));
+    // Sessions bootstrap on a blocking worker and are backfilled on the event
+    // loop; the UI starts from the empty/loading state until then.
+    let session: SharedChatSessions = Arc::new(Mutex::new(None));
     let request_state = Arc::new(Mutex::new(ChatRequestState::default()));
     ui.set_chat_ai_mode(true);
     ui.set_chat_ai_model_name(load_settings().ai.agent.model.into());
+    let performance_variant = crate::chat::performance::variant();
+    ui.set_chat_performance_optimized(performance_variant.is_optimized());
+    log::info!(
+        "[Chat::Performance] variant={}",
+        performance_variant.label()
+    );
     let model_bridge = Rc::new(ChatMessageModelBridge::new(
-        crate::chat::performance::variant().is_optimized(),
+        performance_variant.is_optimized(),
     ));
     model_bridge.bind(ui);
     CHAT_MESSAGE_MODEL.with(|slot| *slot.borrow_mut() = Some(model_bridge));
 
-    {
-        if let Ok(guard) = session.lock() {
-            guard.log_storage_paths();
+    let ui_weak_bootstrap = ui.as_weak();
+    let session_bootstrap = session.clone();
+    runtime.spawn(async move {
+        let bootstrapped = tokio::task::spawn_blocking(|| {
+            ChatSessions::bootstrap_default().map(|mut sessions| {
+                sessions.install_performance_fixture();
+                sessions
+            })
+        })
+        .await;
+
+        let _ = slint::invoke_from_event_loop(move || {
+            let sessions = match bootstrapped {
+                Ok(Ok(sessions)) => sessions,
+                Ok(Err(e)) => {
+                    log::error!("[Chat::Storage] Failed to initialize chat storage: {}", e);
+                    if let Some(ui) = ui_weak_bootstrap.upgrade() {
+                        ui.set_chat_history_restoring(false);
+                    }
+                    return;
+                }
+                Err(e) => {
+                    log::error!("[Chat::Storage] Bootstrap task join failed: {}", e);
+                    if let Some(ui) = ui_weak_bootstrap.upgrade() {
+                        ui.set_chat_history_restoring(false);
+                    }
+                    return;
+                }
+            };
+            sessions.log_storage_paths();
             log::info!(
                 "[Chat::History] bootstrap loaded_messages={} can_load_more={}",
-                guard.loaded_messages().len(),
-                guard.can_load_more()
+                sessions.loaded_messages().len(),
+                sessions.can_load_more()
             );
-        }
-    }
+            if let Ok(mut slot) = session_bootstrap.lock() {
+                *slot = Some(sessions);
+            }
+            let Some(ui) = ui_weak_bootstrap.upgrade() else {
+                return;
+            };
+            if ui.get_current_route() == Route::Chat {
+                // Remount through the route callback so revision tracking and
+                // first-entry scrolling behave exactly like a fresh entry.
+                ui.invoke_chat_route_visible_changed(true);
+            }
+        });
+    });
 
     let ui_weak = ui.as_weak();
     let has_entered_chat_once = Rc::new(Cell::new(false));
@@ -987,7 +1087,11 @@ pub fn setup_interactive(ui: &MainWindow) {
             return;
         }
         if let Ok(mut sessions) = session_mode.lock() {
-            sessions.set_active_mode(mode);
+            // A still-loading session syncs its active mode from the UI once
+            // the bootstrap completion handler remounts.
+            if let Some(sessions) = sessions.as_mut() {
+                sessions.set_active_mode(mode);
+            }
         } else {
             log::error!("[Chat::Session] Lock poisoned while switching mode");
             return;
@@ -1142,19 +1246,11 @@ pub fn setup_interactive(ui: &MainWindow) {
 
     // Chat's Slint tree and model are route-scoped. The Rust session remains the
     // source of truth and reconstructs the bounded UI model when Chat is entered.
+    // At setup time the session is still bootstrapping, so only surface the
+    // loading state here; the bootstrap completion handler performs the first
+    // mount through the route callback.
     if ui.get_current_route() == Route::Chat {
-        has_entered_chat_once.set(true);
-        let mode = chat_mode_from_ui(ui);
-        let revision = next_chat_ui_mount_revision(&chat_ui_mount_revision);
-        begin_chat_ui_mount(ui, &session, mode);
-        schedule_chat_ui_mount(
-            ui.as_weak(),
-            session.clone(),
-            mode,
-            revision,
-            chat_ui_mount_revision.clone(),
-            true,
-        );
+        ui.set_chat_history_restoring(true);
     } else {
         clear_chat_ui_state(ui);
     }
@@ -1180,7 +1276,10 @@ pub fn setup_interactive(ui: &MainWindow) {
                     let mut guard = session_for_task
                         .lock()
                         .map_err(|e| format!("session lock poisoned: {e}"))?;
-                    guard
+                    let sessions = guard
+                        .as_mut()
+                        .ok_or_else(|| "chat history is still loading".to_string())?;
+                    sessions
                         .load_more_history_for(mode)
                         .map_err(|e| format!("load history failed: {e}"))
                 })
@@ -1253,25 +1352,12 @@ pub fn setup_interactive(ui: &MainWindow) {
         }
 
         let mode = chat_mode_from_ui(&ui);
-        let (append_result, ai_history) = {
-            let mut guard = match session_send.lock() {
-                Ok(g) => g,
-                Err(e) => {
-                    log::error!("[Chat::Session] Lock poisoned: {}", e);
-                    return;
-                }
-            };
-            let result = guard.append_user_message(text_str.clone());
-            let history = if result.is_ok() && mode == ChatMode::Ai {
-                ai_completion_messages(guard.messages_for(mode))
-            } else {
-                Vec::new()
-            };
-            (result, history)
-        };
-
-        if let Err(e) = append_result {
-            log::error!("[Chat::Storage] Failed to persist user message: {}", e);
+        let session_ready = session_send
+            .lock()
+            .map(|guard| guard.is_some())
+            .unwrap_or(false);
+        if !session_ready {
+            log::warn!("[Chat::Storage] Ignoring send while chat history is still loading");
             return;
         }
 
@@ -1285,65 +1371,127 @@ pub fn setup_interactive(ui: &MainWindow) {
 
         start_loading_phase_animation(ui.as_weak(), loading_phase_active_send.clone());
 
-        apply_chat_state_to_ui(
-            &ui,
-            &session_send,
-            mode,
-            true,
-            Some(active_wrap_width_px(&ui)),
-            false,
-        );
-        scroll_chat_to_bottom(&ui);
-
-        // 异步发送消息到服务器并处理响应
+        // 用户消息落盘、请求发送与助手消息落盘都在后台执行，保持 UI 线程无文件 IO。
+        // 顺序保证：助手消息只有在用户消息落盘完成并收到响应后才会写入。
         let ui_weak_clone = ui_weak.clone();
         let session_response = session_send.clone();
         let request_state_response = request_state_send.clone();
         let loading_phase_active_response = loading_phase_active_send.clone();
         runtime_send.spawn(async move {
+            let appended = tokio::task::spawn_blocking({
+                let session = session_response.clone();
+                let content = text_str.clone();
+                move || {
+                    let mut guard = session
+                        .lock()
+                        .map_err(|e| format!("session lock poisoned: {e}"))?;
+                    let sessions = guard
+                        .as_mut()
+                        .ok_or_else(|| "chat history is still loading".to_string())?;
+                    sessions
+                        .append_user_message_for(mode, content)
+                        .map_err(|e| e.to_string())?;
+                    Ok::<_, String>(if mode == ChatMode::Ai {
+                        ai_completion_messages(sessions.messages_for(mode))
+                    } else {
+                        Vec::new()
+                    })
+                }
+            })
+            .await
+            .map_err(|e| format!("persist task join failed: {e}"))
+            .and_then(|result| result);
+
+            let ai_history = match appended {
+                Ok(history) => history,
+                Err(e) => {
+                    log::error!("[Chat::Storage] Failed to persist user message: {}", e);
+                    let ui_weak_failed = ui_weak_clone.clone();
+                    let request_state_failed = request_state_response.clone();
+                    let loading_phase_failed = loading_phase_active_response.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Ok(mut state) = request_state_failed.lock() {
+                            state.finish(mode);
+                        }
+                        let Some(ui) = ui_weak_failed.upgrade() else {
+                            return;
+                        };
+                        if chat_mode_from_ui(&ui) == mode {
+                            loading_phase_failed.store(false, Ordering::Relaxed);
+                            ui.set_chat_is_sending(false);
+                            ui.set_chat_loading_phase(0);
+                            ui.set_chat_request_elapsed_seconds(0);
+                        }
+                    });
+                    return;
+                }
+            };
+
+            // 用户消息已持久化，先在 UI 上呈现。
+            {
+                let ui_weak_render = ui_weak_clone.clone();
+                let session_render = session_response.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = ui_weak_render.upgrade() else {
+                        return;
+                    };
+                    if ui.get_current_route() == Route::Chat && chat_mode_from_ui(&ui) == mode {
+                        apply_chat_state_to_ui(
+                            &ui,
+                            &session_render,
+                            mode,
+                            true,
+                            Some(active_wrap_width_px(&ui)),
+                            false,
+                        );
+                        scroll_chat_to_bottom(&ui);
+                    }
+                });
+            }
+
             let result = send_chat_message(mode, &text_str, ai_history).await;
             let elapsed_ms = request_started
                 .elapsed()
                 .as_millis()
                 .min(u128::from(u64::MAX)) as u64;
 
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(ui) = ui_weak_clone.upgrade() else {
-                    return;
-                };
-
-                let mut guard = match session_response.lock() {
-                    Ok(g) => g,
-                    Err(e) => {
-                        log::error!("[Chat::Session] Lock poisoned: {}", e);
-                        return;
-                    }
-                };
-
-                match result {
-                    Ok(response) => {
-                        if let Err(e) =
-                            guard.append_assistant_message_for(mode, response, elapsed_ms)
-                        {
-                            log::error!(
-                                "[Chat::Storage] Failed to persist assistant message: {}",
-                                e
-                            );
+            let persisted = tokio::task::spawn_blocking({
+                let session = session_response.clone();
+                move || {
+                    let mut guard = session
+                        .lock()
+                        .map_err(|e| format!("session lock poisoned: {e}"))?;
+                    let sessions = guard
+                        .as_mut()
+                        .ok_or_else(|| "chat session unavailable".to_string())?;
+                    match result {
+                        Ok(response) => sessions
+                            .append_assistant_message_for(mode, response, elapsed_ms)
+                            .map_err(|e| e.to_string()),
+                        Err(err) => {
+                            let friendly = handle_api_error(&err);
+                            sessions
+                                .append_assistant_error_for(mode, friendly, elapsed_ms)
+                                .map_err(|e| e.to_string())
                         }
                     }
-                    Err(err) => {
-                        let friendly = handle_api_error(&err);
-                        if let Err(e) = guard.append_assistant_error_for(mode, friendly, elapsed_ms)
-                        {
-                            log::error!("[Chat::Storage] Failed to persist error message: {}", e);
-                        }
-                    }
+                    .map(|_| ())
                 }
-                drop(guard);
+            })
+            .await
+            .map_err(|e| format!("persist task join failed: {e}"))
+            .and_then(|result| result);
+            if let Err(e) = persisted {
+                log::error!("[Chat::Storage] Failed to persist assistant message: {}", e);
+            }
 
+            let _ = slint::invoke_from_event_loop(move || {
                 if let Ok(mut state) = request_state_response.lock() {
                     state.finish(mode);
                 }
+                let Some(ui) = ui_weak_clone.upgrade() else {
+                    return;
+                };
                 if chat_mode_from_ui(&ui) == mode {
                     loading_phase_active_response.store(false, Ordering::Relaxed);
                     ui.set_chat_is_sending(false);
@@ -1431,7 +1579,18 @@ pub fn setup_interactive(ui: &MainWindow) {
                     virtual_window_has_more(moving_down),
                 )
             });
+        let near_estimated_edge = crate::chat::performance::variant().is_optimized()
+            && should_shift_near_estimated_edge(
+                ui.get_chat_virtual_top_spacer(),
+                ui.get_chat_virtual_bottom_spacer(),
+                current_virtual_document_height_px(),
+                scroll_offset_px,
+                viewport_height,
+                moving_down,
+                virtual_window_has_more(moving_down),
+            );
         if !near_mounted_edge
+            && !near_estimated_edge
             && !should_shift_virtual_window(applied, scroll_bucket, scroll_update_bucket_step())
         {
             return;
@@ -1480,7 +1639,18 @@ pub fn setup_interactive(ui: &MainWindow) {
                         virtual_window_has_more(moving_down),
                     )
                 });
+            let near_estimated_edge = crate::chat::performance::variant().is_optimized()
+                && should_shift_near_estimated_edge(
+                    ui.get_chat_virtual_top_spacer(),
+                    ui.get_chat_virtual_bottom_spacer(),
+                    current_virtual_document_height_px(),
+                    scroll_offset_px,
+                    viewport_height,
+                    moving_down,
+                    virtual_window_has_more(moving_down),
+                );
             if !near_mounted_edge
+                && !near_estimated_edge
                 && !should_shift_virtual_window(applied, scroll_bucket, scroll_update_bucket_step())
             {
                 return;
@@ -1511,7 +1681,10 @@ pub fn setup_interactive(ui: &MainWindow) {
                     chat_mode_from_ui(&ui),
                     ui.get_chat_is_sending(),
                     Some(active_wrap_width_px(&ui)),
-                    true,
+                    // Estimated heights may be taller than the real mounted
+                    // rows. Once the real edge guard fires, converge directly
+                    // instead of leaving a two-row partial window in view.
+                    !near_mounted_edge,
                 );
             }
             // Model assignment can synchronously emit geometry callbacks, so
@@ -1536,7 +1709,9 @@ pub fn setup_interactive(ui: &MainWindow) {
             let first_entry = !has_entered_chat_once_route.replace(true);
             if let Some(ui) = ui_weak_route.upgrade() {
                 let mode = chat_mode_from_ui(&ui);
-                if let Ok(mut sessions) = session_route.lock() {
+                if let Ok(mut sessions) = session_route.lock()
+                    && let Some(sessions) = sessions.as_mut()
+                {
                     sessions.set_active_mode(mode);
                 }
                 let (sending, elapsed_seconds) = request_state_route
@@ -1704,6 +1879,26 @@ mod tests {
             limit_incremental_virtual_shift(render_signature(10, 23), 30, 38, 2),
             (30, 38)
         );
+    }
+
+    #[test]
+    fn estimated_window_guard_does_not_depend_on_mounted_geometry_callbacks() {
+        assert!(should_shift_near_estimated_edge(
+            4_000.0, 10_000.0, 20_000.0, 9_280.0, 720.0, true, true,
+        ));
+        assert!(!should_shift_near_estimated_edge(
+            4_000.0, 10_000.0, 20_000.0, 9_278.0, 720.0, true, true,
+        ));
+    }
+
+    #[test]
+    fn incremental_window_must_cover_a_fast_scroll_destination() {
+        assert!(estimated_window_covers_viewport(
+            4_000.0, 10_000.0, 20_000.0, 6_000.0, 720.0,
+        ));
+        assert!(!estimated_window_covers_viewport(
+            4_000.0, 10_000.0, 20_000.0, 9_600.0, 720.0,
+        ));
     }
 
     #[test]

@@ -1086,12 +1086,13 @@ pub(crate) fn refresh_tag_context(
         "[Workflow][Tag] Refresh context start (announce_remote_todo={})",
         announce_remote_todo
     );
-    let (mode, local_repo, bump_mode) = shared_state
+    let (project_id, mode, local_repo, bump_mode) = shared_state
         .lock()
         .ok()
         .map(|guard| {
             guard.with_current(|ctx, view| {
                 (
+                    ctx.id.clone(),
                     view.tag_mode.clone(),
                     ctx.local_repo.clone(),
                     view.tag_version_mode.clone(),
@@ -1100,6 +1101,7 @@ pub(crate) fn refresh_tag_context(
         })
         .unwrap_or_else(|| {
             (
+                "default".to_string(),
                 TAG_MODE_LOCAL.to_string(),
                 String::new(),
                 TAG_BUMP_PATCH.to_string(),
@@ -1112,66 +1114,129 @@ pub(crate) fn refresh_tag_context(
         local_repo
     );
 
-    let mut maybe_error = None;
-    if let Ok(mut guard) = shared_state.lock() {
-        guard.upsert_current(|view| {
-            view.tag_running = false;
-            view.tag_add_initializing = false;
-            view.tag_remove_initializing = false;
-            view.tag_add_ready = false;
-            view.tag_remove_ready = false;
-            view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
-            view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-            view.reset_tag_job(default_tag_steps());
-            if mode == TAG_MODE_REMOTE {
-                log::info!("[Workflow][Tag] Refresh context -> remote mode unavailable");
+    if mode == TAG_MODE_REMOTE {
+        log::info!("[Workflow][Tag] Refresh context -> remote mode unavailable");
+        if let Ok(mut guard) = shared_state.lock() {
+            guard.upsert_current(|view| {
+                view.tag_running = false;
+                view.tag_add_initializing = false;
+                view.tag_remove_initializing = false;
+                view.tag_add_ready = false;
+                view.tag_remove_ready = false;
+                view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+                view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
+                view.reset_tag_job(default_tag_steps());
                 view.tag_current_version = "Unavailable".to_string();
                 view.tag_next_version = "Unavailable".to_string();
                 view.tag_remove_target = "Unavailable".to_string();
                 view.tag_result = "Remote mode is not available yet.".to_string();
-                return;
-            }
+            });
+        } else {
+            log::warn!("[Workflow][Tag] Refresh context failed: cannot acquire state lock");
+        }
+        initialize_current_ui(ui, shared_state);
+        if announce_remote_todo {
+            show_error(ui, "Remote mode is not implemented yet.");
+        }
+        log::info!("[Workflow][Tag] Refresh context finished");
+        return;
+    }
 
-            match read_latest_local_tag(&local_repo) {
-                Ok(current_tag) => {
-                    log::info!(
-                        "[Workflow][Tag] Refresh context resolved current tag '{}'",
-                        current_tag
-                    );
-                    view.tag_current_version = current_tag.clone();
-                    view.tag_next_version = next_semver_for_mode(&current_tag, &bump_mode);
-                    view.tag_remove_target = current_tag.clone();
-                    view.tag_add_ready = true;
-                    view.tag_result = if local_repo.trim().is_empty() {
-                        "Select a project to load the local repository context.".to_string()
-                    } else {
-                        format!(
-                            "Local mode ready. Current latest tag is '{}', next {} version prepared.",
-                            current_tag, bump_mode
-                        )
-                    };
-                }
-                Err(error) => {
-                    log::warn!("[Workflow][Tag] Refresh context failed to read tags: {}", error);
-                    maybe_error = Some(error.clone());
-                    view.tag_current_version = "v0.0.0".to_string();
-                    view.tag_next_version = next_semver_for_mode("v0.0.0", &bump_mode);
-                    view.tag_remove_target = "v0.0.0".to_string();
-                    view.tag_add_ready = false;
-                    view.tag_result = error;
-                }
-            }
+    // Write the loading state first and release the lock, then resolve the
+    // latest local tag on a blocking worker. The request sequence rejects
+    // stale completions, mirroring the Add tab initialization flow.
+    let request_seq = if let Ok(mut guard) = shared_state.lock() {
+        let mut request_seq = 0;
+        guard.upsert_current(|view| {
+            view.tag_running = false;
+            view.tag_add_initializing = true;
+            view.tag_remove_initializing = false;
+            view.tag_add_ready = false;
+            view.tag_remove_ready = false;
+            view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
+            request_seq = view.tag_add_request_seq;
+            view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
+            view.reset_tag_job(default_tag_steps());
+            view.tag_result = "Loading latest local tag for the tag workflow.".to_string();
         });
+        request_seq
     } else {
         log::warn!("[Workflow][Tag] Refresh context failed: cannot acquire state lock");
-    }
+        0
+    };
     initialize_current_ui(ui, shared_state);
-    if announce_remote_todo && mode == TAG_MODE_REMOTE {
-        show_error(ui, "Remote mode is not implemented yet.");
-    } else if let Some(error) = maybe_error {
-        show_error(ui, &error);
-    }
-    log::info!("[Workflow][Tag] Refresh context finished");
+
+    let ui_weak_task = ui.as_weak();
+    let state_task = shared_state.clone();
+    shared_runtime().spawn(async move {
+        let resolved = tokio::task::spawn_blocking({
+            let local_repo = local_repo.clone();
+            move || read_latest_local_tag(&local_repo)
+        })
+        .await
+        .map_err(|error| format!("Failed to join latest local tag task: {}", error))
+        .and_then(|result| result);
+
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = ui_weak_task.upgrade() else {
+                return;
+            };
+            let mut maybe_error = None;
+            if let Ok(mut guard) = state_task.lock() {
+                let current_project_id = guard.current_project.id.clone();
+                let entry = guard.projects.entry(project_id.clone()).or_default();
+                if entry.tag_add_request_seq != request_seq {
+                    return;
+                }
+                match resolved {
+                    Ok(current_tag) => {
+                        log::info!(
+                            "[Workflow][Tag] Refresh context resolved current tag '{}'",
+                            current_tag
+                        );
+                        entry.tag_current_version = current_tag.clone();
+                        entry.tag_next_version = next_semver_for_mode(&current_tag, &bump_mode);
+                        entry.tag_remove_target = current_tag.clone();
+                        entry.tag_add_initializing = false;
+                        entry.tag_add_ready = true;
+                        entry.tag_result = if local_repo.trim().is_empty() {
+                            "Select a project to load the local repository context.".to_string()
+                        } else {
+                            format!(
+                                "Local mode ready. Current latest tag is '{}', next {} version prepared.",
+                                current_tag, bump_mode
+                            )
+                        };
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "[Workflow][Tag] Refresh context failed to read tags: {}",
+                            error
+                        );
+                        maybe_error = Some(error.clone());
+                        entry.tag_current_version = "v0.0.0".to_string();
+                        entry.tag_next_version = next_semver_for_mode("v0.0.0", &bump_mode);
+                        entry.tag_remove_target = "v0.0.0".to_string();
+                        entry.tag_add_initializing = false;
+                        entry.tag_add_ready = false;
+                        entry.tag_result = error;
+                    }
+                }
+                if current_project_id != project_id {
+                    return;
+                }
+            } else {
+                log::warn!(
+                    "[Workflow][Tag] Refresh context completion failed: cannot acquire state lock"
+                );
+            }
+            initialize_current_ui(&ui, &state_task);
+            if let Some(error) = maybe_error {
+                show_error(&ui, &error);
+            }
+            log::info!("[Workflow][Tag] Refresh context finished");
+        });
+    });
 }
 
 struct TagRunSuccess {
@@ -1969,17 +2034,10 @@ fn inspect_latest_remote_tag(local_repo: &str) -> Result<(String, String), Strin
         "--refs".to_string(),
         "origin".to_string(),
     ];
-    run_command_blocking(list_cmd.clone())?;
+    // Run `ls-remote` once and reuse its stdout for parsing instead of
+    // spawning the same network command a second time.
+    let (_, stdout) = run_command_blocking(list_cmd)?;
 
-    let output = StdCommand::new(&list_cmd[0])
-        .args(list_cmd.iter().skip(1))
-        .output()
-        .map_err(|error| format!("Failed to inspect remote tags: {}", error))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut latest: Option<(String, (u64, u64, u64))> = None;
     for line in stdout.lines() {
         let Some(tag_ref) = line.split_whitespace().nth(1) else {
@@ -2011,7 +2069,9 @@ fn inspect_latest_remote_tag(local_repo: &str) -> Result<(String, String), Strin
     Ok((latest_tag, combined_log))
 }
 
-fn run_command_blocking(command: Vec<String>) -> Result<String, String> {
+/// Runs a command to completion, returning `(formatted_log, stdout)` so
+/// callers can parse the output without re-executing the command.
+fn run_command_blocking(command: Vec<String>) -> Result<(String, String), String> {
     if command.is_empty() {
         return Err("Command vector is empty.".to_string());
     }
@@ -2027,7 +2087,7 @@ fn run_command_blocking(command: Vec<String>) -> Result<String, String> {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let log = format_command_log(&rendered, &stdout, &stderr);
     if output.status.success() {
-        Ok(log)
+        Ok((log, stdout.into_owned()))
     } else {
         Err(log)
     }

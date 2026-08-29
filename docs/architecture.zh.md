@@ -414,6 +414,9 @@ Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可�
 手工保存凭据、代码托管 Endpoint 与 AI Agent 配置时，文件持久化必须在
 Slint event loop 之外执行。完成结果回到 event loop 后，只有持久化成功
 才更新临时 Saved 标签，并为最终结果显示一个底部 Toast。
+所有延迟偏好保存共用 shared-runtime `spawn_blocking` 路径；100 ms Slint timer 只负责
+合并/调度，绝不写 TOML。Provider 高频读取通过细粒度 `with_settings`/`with_git` 访问，
+不再 clone 整棵 Settings；API base 解析事实按精确配置值进入有界进程缓存。
 
 Settings 与 About 路由文件只负责组合；可复用导航、字段、Toggle、Section 和
 详情行分别位于 `ui/components/settings/` 与 `ui/components/about/`，视觉组件
@@ -448,6 +451,8 @@ Webhook HTTP Listener 或任何提供方专属 Schema。
 
 用户主动刷新项目注册表时，会把阻塞式存储读取隔离到共享 runtime；加载期间
 阻止重复触发，并通过 Slint event loop 回写 model 或可恢复错误状态。
+项目注册表写入方串行执行，并以同目录临时文件原子 rename 替换 `projects.json`，
+并发后台保存不得暴露部分文档。
 `ui/views/project.slint` 只负责路由编排；可复用的项目卡片、工具栏控件和对话框统一位于
 `ui/components/project/`。Home、Search、Detail、Project 路由状态统一复用
 `GitHubPageHeader` 与 `GitHubBlankslate`，不再维护页面局部占位模式。
@@ -457,6 +462,10 @@ Webhook HTTP Listener 或任何提供方专属 Schema。
 Workflow 在所有支持的宽度下统一使用 GitHub 仓库页的 UnderlineNav 交互；低于 720px 时，仓库路径与操作从身份页头移入尾部 kebab 浮层。PR 列表严格复刻 GitHub 查询与响应式筛选交互：卡片上方放置 Search 风格查询框，Open/Closed 与筛选保持在卡片页头同一行；低于 620px 时直接保留 Assignee，把 Reviews 与 Sort 合并进一个分组 kebab ActionMenu。所有菜单互斥，第一次点击即可切换。Closed 使用 GitHub 语义，包含 merged 与关闭未合并。`is:merged` 和 `is:closed is:unmerged` 分别筛选两个精确子集；与 GitHub 一致，任何非标准查询都会把 Open/Closed 替换为“清除查询”入口与 Total 汇总。PR 行在 Slint 中测量标题换行后的实际高度，由纵向布局累加每行自然高度；Workflow Shell 直接消费组件最终高度，不再自行预测固定行高。Controller 解析可移植的状态/Review/Assignee qualifier，使查询框与工具栏切换保持同步，并在查询变化后重置分页。Provider adapter 负责翻译归一化查询：GitHub 使用原生 Search qualifier，Gitee 企业版使用文档规定的状态/search 参数，GitLab 为 Closed 合并按 Provider 顺序排列的 closed/merged 前缀，Gitee 公有 v5 无法精确服务端筛选时执行有界客户端扫描。项目或筛选条件变化时独立获取 Open 与 Closed 总数，页头不再复用当前选中分页的临时数量。总数仍在加载或计数请求失败时，页头按 Primer 降级体验隐藏数字并保留当前汇总标签，而不是长期停留在加载占位。列表时间使用相对时间，并提供东八区绝对时间 Tooltip。
 
 PR 行把绝对时间 Tooltip 的命中区限制在时间文字本身，并预留响应式尾部操作组。长标题在操作组之前自动换行；目标/源分支对在宽布局同行展示，在窄布局移到续行。Provider 列表/详情字段可提供 Conversation 数量。Conversation 会直接在 Tab 0 打开审核路由；AI Review 打开既有 Files changed 审核工作区。
+
+本地 Tag 刷新在 blocking worker 解析 Git 状态，并且只有项目 ID 与请求序号仍匹配时才
+提交结果。GitLab Closed 分页保留短时有界的完整 closed/merged 前缀缓存，只补拉缺失的
+Provider 页。
 
 Workflow 顶层 PR/Tag/Branch/CD 导航和 Tag Add/Remove 导航统一复用
 `GitHubUnderlineNavItem`；Tag Scope 与语义版本选项统一复用
@@ -601,11 +610,11 @@ Provider adapters
 
 聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。新记录持久化带本地时区偏移的完整 RFC 3339 时间，终态 assistant 行同时保存实测 `elapsed_ms`。Rust 展示投影按本地自然日转换时间标签，并把耗时转换为紧凑元数据；旧版记录继续兼容原样显示。等待中的对话只使用一个页面级实时 tick 和按模式保存的单调起始时刻；切换模式或重新挂载 Chat 时恢复实际耗时而不重新计时。启动时最近一段只加载到 Rust session；Chat 组件及有界 Slint 消息 model 仅在 Chat 路由挂载。离开 Chat 会销毁 UI 树并清空 Slint model/投影缓存，重新进入时从 session 重建可见窗口。Assistant 消息保留宽度无关的可读文本投影；超过 1,200 个 Unicode scalar value 的投影在 Chat 内有界展示，并通过现有标题入口打开完整回复。格式化 block 由 `usher-preview` 后台准备并交给应用级预览 Host 展示。迟到的历史分页或 assistant 响应继续更新持久化/session，但不得填充隐藏 UI。
 
-生产路径在一个稳定 `VecModel` 中挂载当前已加载的全部消息，每行只实例化当前角色对应的子树，
-并将上下虚拟 spacer 固定为零。这样移除了用户滚动中的估算行高 spacer，因为短消息、错误消息
-与大消息混合时，估算坐标会把整个有界窗口放到真实 viewport 之外。启动加载最近 20 条，显式或
-自动历史分页每次增加 10 条。现有有界虚拟窗口仅保留在隔离的 `chat-performance` fixture 中继续
-量测，不再是生产渲染路径。该基准中的 viewport 位置变化必须在 viewport 消耗既定像素 overscan 前提交新的有界窗口；连续大行不得仅为凑满行数上限而
+生产路径默认启用有界虚拟窗口：一个稳定 `VecModel` 最多挂载 32 行，每行只实例化
+当前角色子树，并使用 width-keyed prefix 估算的上下 spacer。启动加载最近 20 条，显式或
+自动历史分页每次增加 10 条。`chat-performance` fixture 与
+`USHER_CHAT_PERF_VARIANT=baseline` 保留非虚拟化对照路径；普通启动使用 optimized
+虚拟路径。生产路径中的 viewport 位置变化必须在 viewport 消耗既定像素 overscan 前提交新的有界窗口；连续大行不得仅为凑满行数上限而
 扩大挂载窗口，且不得重建完整历史。滚动停止后不得有延迟任务修改 model；路由自有的
 `VecModel` 在整个挂载期保持同一身份，窗口移动只增删非重叠的头尾行，稳定消息 ID 重叠区的
 delegate 保持不变。同一 event-loop 周期内的窗口请求会合并，并按最新 viewport 位置提交；
@@ -761,6 +770,9 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 - `read_idle_timeout` 默认 30 秒，可自定义，零表示关闭空闲检测。请求级 body-progress
   策略默认按任意响应体 chunk 重新计时；缓冲 JSON 调用方可改为要求非空白进度，避免传输
   心跳延长截止时间。该策略描述响应表示语义，绝不按 Provider host 或模型名称分支。
+- `retry_transient(3)` 为幂等 Provider 读取启用带 jitter 的有上限指数退避，覆盖连接/
+  超时、429、5xx 及 rate-limit 耗尽的 403；识别有界 `Retry-After`/Provider reset 提示，
+  中间尝试保持静默。独立读取使用 `join!`，逐项补全使用限并发 unordered stream。
 
 Interceptor 按注册顺序执行。Request hook 可修改 header；Response hook 可读取状态、header 和耗时；Error hook 接收统一错误。详见 [specs/http.md](specs/http.md)。
 

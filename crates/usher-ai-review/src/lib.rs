@@ -705,18 +705,137 @@ pub fn chunk_diff(diff: &str, max_bytes: usize) -> Vec<String> {
             current.push_str(section);
             continue;
         }
-        for line in section.lines() {
-            if !current.is_empty() && current.len().saturating_add(line.len() + 1) > max_bytes {
-                chunks.push(std::mem::take(&mut current));
+        // Oversized file section: split on line boundaries and re-emit the
+        // file headers plus a synthetic hunk marker on every continuation
+        // chunk so each chunk stays a parseable unified diff on its own.
+        // `current` is always empty here because the flush above triggers
+        // whenever it is non-empty and the section exceeds `max_bytes`.
+        let file_header = section_file_header(section);
+        let mut position = None;
+        let mut section_continued = false;
+        let mut remainder = section;
+        while !remainder.is_empty() {
+            let split_at = remainder
+                .find('\n')
+                .map_or(remainder.len(), |index| index + 1);
+            let (line_with_newline, rest) = remainder.split_at(split_at);
+            remainder = rest;
+            let logical_line = line_with_newline.trim_end_matches(['\r', '\n']);
+            if let Some(next) = parse_hunk_position(logical_line) {
+                position = Some(next);
             }
-            current.push_str(line);
-            current.push('\n');
+            let mut line = line_with_newline;
+            if !current.is_empty() && current.len().saturating_add(line.len()) > max_bytes {
+                chunks.push(std::mem::take(&mut current));
+                section_continued = true;
+            }
+            while !line.is_empty() {
+                if current.is_empty() && section_continued {
+                    current.push_str(continuation_header(&file_header, position).as_str());
+                }
+                let budget = max_bytes.saturating_sub(current.len());
+                if line.len() <= budget {
+                    current.push_str(line);
+                    break;
+                }
+                // One line larger than the remaining budget is cut at a char
+                // boundary; taking at least one char guarantees progress.
+                let piece = match floor_char_boundary(line, budget) {
+                    0 => line.chars().next().map_or(line.len(), char::len_utf8),
+                    boundary => boundary,
+                };
+                current.push_str(&line[..piece]);
+                line = &line[piece..];
+                chunks.push(std::mem::take(&mut current));
+                section_continued = true;
+            }
+            advance_diff_position(&mut position, logical_line);
         }
     }
     if !current.is_empty() {
         chunks.push(current);
     }
     chunks
+}
+
+/// Header prepended to every continuation chunk of one oversized file section
+/// so downstream consumers can attribute lines to the right file and treat
+/// the cut point as a fresh, position-less hunk.
+fn section_file_header(section: &str) -> String {
+    let mut header = String::new();
+    for line in section.lines().take(8) {
+        if line.starts_with("@@") {
+            break;
+        }
+        if line.starts_with("diff --git ") || line.starts_with("--- ") || line.starts_with("+++ ") {
+            header.push_str(line);
+            header.push('\n');
+        }
+    }
+    header
+}
+
+#[derive(Clone, Copy)]
+struct DiffPosition {
+    old_line: u64,
+    new_line: u64,
+}
+
+fn parse_hunk_position(line: &str) -> Option<DiffPosition> {
+    let mut parts = line.split_whitespace();
+    (parts.next()? == "@@").then_some(())?;
+    let old_line = parts
+        .next()?
+        .strip_prefix('-')?
+        .split(',')
+        .next()?
+        .parse()
+        .ok()?;
+    let new_line = parts
+        .next()?
+        .strip_prefix('+')?
+        .split(',')
+        .next()?
+        .parse()
+        .ok()?;
+    Some(DiffPosition { old_line, new_line })
+}
+
+fn continuation_header(file_header: &str, position: Option<DiffPosition>) -> String {
+    let position = position.unwrap_or(DiffPosition {
+        old_line: 0,
+        new_line: 0,
+    });
+    format!(
+        "{file_header}@@ -{},0 +{},0 @@ (continued)\n",
+        position.old_line, position.new_line
+    )
+}
+
+fn advance_diff_position(position: &mut Option<DiffPosition>, line: &str) {
+    let Some(position) = position.as_mut() else {
+        return;
+    };
+    match line.as_bytes().first().copied() {
+        Some(b' ') => {
+            position.old_line = position.old_line.saturating_add(1);
+            position.new_line = position.new_line.saturating_add(1);
+        }
+        Some(b'-') => position.old_line = position.old_line.saturating_add(1),
+        Some(b'+') => position.new_line = position.new_line.saturating_add(1),
+        _ => {}
+    }
+}
+
+fn floor_char_boundary(text: &str, index: usize) -> usize {
+    if index >= text.len() {
+        return text.len();
+    }
+    let mut index = index;
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
 }
 
 fn split_diff_sections(diff: &str) -> Vec<&str> {
@@ -794,6 +913,15 @@ mod tests {
         }
     }
 
+    fn continuation_payload(chunk: &str) -> &str {
+        let marker = "(continued)\n";
+        let payload_start = chunk
+            .find(marker)
+            .map(|index| index + marker.len())
+            .expect("continuation chunk should include a synthetic hunk header");
+        &chunk[payload_start..]
+    }
+
     #[test]
     fn deleting_a_rule_repairs_default_and_project_bindings() {
         let project = ProjectReviewKey("github:42".into());
@@ -833,14 +961,84 @@ mod tests {
 
     #[test]
     fn diff_chunks_preserve_all_content() {
+        // Each section fits in one chunk, so splitting happens only on
+        // section boundaries and concatenation restores the exact input.
         let diff = format!(
             "diff --git a/a b/a\n{}diff --git a/b b/b\n{}",
-            "+one\n".repeat(220),
-            "+two\n".repeat(220)
+            "+one\n".repeat(150),
+            "+two\n".repeat(150)
         );
         let chunks = chunk_diff(&diff, 1024);
         assert_eq!(chunks.concat(), diff);
         assert!(chunks.len() >= 2);
+    }
+
+    #[test]
+    fn oversized_file_chunks_repeat_file_headers_on_continuations() {
+        let diff = format!(
+            "diff --git a/big b/big\n--- a/big\n+++ b/big\n@@ -1,0 +1,400 @@\n{}",
+            "+line\n".repeat(400)
+        );
+        let chunks = chunk_diff(&diff, 1024);
+        assert!(chunks.len() >= 2);
+        assert!(chunks.iter().all(|chunk| chunk.len() <= 1024));
+        let mut restored = chunks[0].clone();
+        for chunk in &chunks[1..] {
+            assert!(chunk.starts_with("diff --git a/big b/big\n--- a/big\n+++ b/big\n@@ -"));
+            restored.push_str(continuation_payload(chunk));
+        }
+        assert_eq!(restored, diff);
+    }
+
+    #[test]
+    fn oversized_single_line_is_cut_without_exceeding_chunk_budget() {
+        let diff = format!("diff --git a/a b/a\n@@ -0,0 +1 @@\n+{}\n", "x".repeat(3000));
+        let chunks = chunk_diff(&diff, 1024);
+        assert!(chunks.len() >= 2);
+        assert!(chunks.iter().all(|chunk| chunk.len() <= 1024));
+        let mut restored = chunks[0].clone();
+        for chunk in &chunks[1..] {
+            assert!(chunk.starts_with("diff --git a/a b/a\n@@ -"));
+            restored.push_str(continuation_payload(chunk));
+        }
+        assert_eq!(restored, diff);
+    }
+
+    #[test]
+    fn chunking_preserves_missing_trailing_newline() {
+        let diff = format!(
+            "diff --git a/a b/a\n@@ -0,0 +1,221 @@\n{}+tail",
+            "+pad\n".repeat(220)
+        );
+        let chunks = chunk_diff(&diff, 1024);
+        assert!(chunks.len() >= 2);
+        assert!(chunks.last().is_some_and(|chunk| chunk.ends_with("+tail")));
+        let mut restored = chunks[0].clone();
+        for chunk in &chunks[1..] {
+            assert!(chunk.starts_with("diff --git a/a b/a\n@@ -"));
+            restored.push_str(continuation_payload(chunk));
+        }
+        assert_eq!(restored, diff);
+    }
+
+    #[test]
+    fn continuation_headers_track_the_next_diff_line() {
+        let diff = format!(
+            "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -10,300 +20,300 @@\n{}",
+            " context\n-old\n+new\n".repeat(150)
+        );
+        let chunks = chunk_diff(&diff, 1024);
+        assert!(chunks.len() >= 2);
+        assert!(chunks[1..].iter().all(|chunk| {
+            chunk
+                .lines()
+                .any(|line| line.starts_with("@@ -") && line.contains(" +"))
+        }));
+        assert!(
+            chunks[1..]
+                .iter()
+                .any(|chunk| !chunk.contains("@@ -10,0 +20,0 @@ (continued)"))
+        );
     }
 
     #[test]

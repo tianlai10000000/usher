@@ -10,6 +10,7 @@ use std::future::Future;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Method, StatusCode, Url};
@@ -25,6 +26,10 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_READ_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_ERROR_BODY_CHARS: usize = 2_000;
+const RETRY_BASE_DELAY: Duration = Duration::from_millis(500);
+const RETRY_MAX_DELAY: Duration = Duration::from_secs(10);
+/// Warn once a provider reports fewer than this many rate-limit tokens left.
+const RATE_LIMIT_WARN_THRESHOLD: i64 = 3;
 
 lazy_static! {
     static ref HTTP: HttpClient =
@@ -188,6 +193,110 @@ pub(crate) enum ErrorFeedback {
     ToastAndNotification,
 }
 
+/// Retry policy for transient failures: HTTP 429, 5xx, and connection errors.
+///
+/// By default only idempotent methods (GET/HEAD) are retried; a mutating
+/// request must opt in through [`RetryPolicy::including_non_idempotent`].
+/// Requests whose body cannot be cloned (streaming bodies) are never retried.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RetryPolicy {
+    max_attempts: u32,
+    base_delay: Duration,
+    max_delay: Duration,
+    retry_non_idempotent: bool,
+}
+
+impl RetryPolicy {
+    /// Retry transient failures up to `max_attempts` total attempts (the
+    /// first request counts as attempt one).
+    pub(crate) fn transient(max_attempts: u32) -> Self {
+        Self {
+            max_attempts: max_attempts.max(1),
+            base_delay: RETRY_BASE_DELAY,
+            max_delay: RETRY_MAX_DELAY,
+            retry_non_idempotent: false,
+        }
+    }
+
+    /// Also retry non-idempotent methods (POST/PUT/...). The caller must
+    /// guarantee the request is safe to repeat.
+    #[allow(dead_code)]
+    pub(crate) fn including_non_idempotent(mut self) -> Self {
+        self.retry_non_idempotent = true;
+        self
+    }
+
+    fn applies_to(&self, method: &Method) -> bool {
+        self.retry_non_idempotent || matches!(*method, Method::GET | Method::HEAD)
+    }
+
+    /// Delay before the retry that follows failed attempt `attempt`
+    /// (1-based): exponential backoff with jitter, where a server-provided
+    /// `Retry-After` takes precedence. Every path is capped by `max_delay`.
+    /// `jitter` must be in `[0, 1)` and scales up to half an extra step.
+    fn delay_before_retry(
+        &self,
+        attempt: u32,
+        retry_after: Option<Duration>,
+        jitter: f64,
+    ) -> Duration {
+        if let Some(retry_after) = retry_after {
+            return retry_after.min(self.max_delay);
+        }
+        let exponent = attempt.saturating_sub(1).min(16);
+        let base = self
+            .base_delay
+            .saturating_mul(1_u32 << exponent)
+            .min(self.max_delay);
+        let jittered = base + base.mul_f64(jitter.clamp(0.0, 1.0) * 0.5);
+        jittered.min(self.max_delay)
+    }
+}
+
+fn should_retry_response(status: StatusCode, headers: &HeaderMap) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
+        || (status == StatusCode::FORBIDDEN && rate_limit_remaining(headers) == Some(0))
+}
+
+fn is_transient_transport_error(error: &HttpError) -> bool {
+    matches!(error.kind, HttpErrorKind::Connect | HttpErrorKind::Timeout)
+}
+
+fn retry_after_hint(headers: &HeaderMap) -> Option<Duration> {
+    retry_after_hint_at(headers, Utc::now())
+}
+
+fn retry_after_hint_at(headers: &HeaderMap, now: DateTime<Utc>) -> Option<Duration> {
+    if let Some(value) = diagnostic_header_value(headers, "retry-after") {
+        let value = value.trim();
+        if let Ok(seconds) = value.parse::<u64>() {
+            return Some(Duration::from_secs(seconds));
+        }
+        if let Ok(deadline) = DateTime::parse_from_rfc2822(value) {
+            return deadline
+                .with_timezone(&Utc)
+                .signed_duration_since(now)
+                .to_std()
+                .ok();
+        }
+    }
+    // GitHub commonly returns a Unix reset instant instead of Retry-After.
+    diagnostic_header_value(headers, "x-ratelimit-reset")?
+        .trim()
+        .parse::<i64>()
+        .ok()
+        .and_then(|deadline| u64::try_from(deadline.saturating_sub(now.timestamp())).ok())
+        .map(Duration::from_secs)
+}
+
+fn rate_limit_remaining(headers: &HeaderMap) -> Option<i64> {
+    ["x-ratelimit-remaining", "ratelimit-remaining"]
+        .into_iter()
+        .find_map(|name| diagnostic_header_value(headers, name))
+        .and_then(|value| value.trim().parse::<i64>().ok())
+}
+
 /// Defines which response-body chunks reset a request's idle deadline.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(not(feature = "ai-code-review"), allow(dead_code))]
@@ -256,6 +365,7 @@ pub(crate) struct RequestOptions {
     pub read_idle_timeout: Duration,
     pub body_diagnostic_context: Option<String>,
     body_progress_policy: BodyProgressPolicy,
+    retry: Option<RetryPolicy>,
 }
 
 impl RequestOptions {
@@ -268,6 +378,7 @@ impl RequestOptions {
             read_idle_timeout: DEFAULT_READ_IDLE_TIMEOUT,
             body_diagnostic_context: None,
             body_progress_policy: BodyProgressPolicy::AnyChunk,
+            retry: None,
         }
     }
 
@@ -309,6 +420,22 @@ impl RequestOptions {
 
     pub(crate) fn allow_http_errors(mut self) -> Self {
         self.reject_http_errors = false;
+        self
+    }
+
+    /// Retry transient failures (HTTP 429/5xx and connection errors) up to
+    /// `max_attempts` total attempts with exponential backoff and jitter.
+    /// Only GET/HEAD requests are retried under this shorthand; requests
+    /// without this option keep the existing single-attempt behavior.
+    pub(crate) fn retry_transient(mut self, max_attempts: u32) -> Self {
+        self.retry = Some(RetryPolicy::transient(max_attempts));
+        self
+    }
+
+    /// Attach a fully customized retry policy.
+    #[allow(dead_code)]
+    pub(crate) fn retry(mut self, policy: RetryPolicy) -> Self {
+        self.retry = Some(policy);
         self
     }
 }
@@ -760,21 +887,36 @@ impl HttpResponse {
     }
 }
 
-pub(crate) async fn send(
-    builder: reqwest::RequestBuilder,
-    options: RequestOptions,
+/// Passive rate-limit observability: surface (near-)exhaustion in the log so
+/// bursts can be diagnosed. Global throttling is deliberately out of scope.
+fn observe_rate_limit_headers(operation: &str, url: &Url, status: StatusCode, headers: &HeaderMap) {
+    if is_silent_log_operation(operation) {
+        return;
+    }
+    let remaining = rate_limit_remaining(headers);
+    let nearly_exhausted = remaining.is_some_and(|value| value < RATE_LIMIT_WARN_THRESHOLD);
+    if status == StatusCode::TOO_MANY_REQUESTS || nearly_exhausted {
+        log::warn!(
+            "[HTTP][RateLimit] operation={} url={} status={} remaining={:?} retry_after={:?}",
+            operation,
+            redacted_url(url),
+            status.as_u16(),
+            remaining,
+            diagnostic_header_value(headers, "retry-after")
+        );
+    }
+}
+
+/// One network attempt: request interceptors, dispatch, response interceptors.
+/// Errors are returned raw; the retry loop in [`send`] decides when to run
+/// error interceptors and UI feedback so retried attempts stay quiet.
+async fn send_attempt(
+    mut request: reqwest::Request,
+    options: &RequestOptions,
 ) -> HttpResult<HttpResponse> {
-    let mut request = builder.build().map_err(|error| {
-        handle_error(
-            HttpError::from_reqwest(error, &options.operation),
-            options.feedback,
-        )
-    })?;
-    *request.timeout_mut() = request_total_timeout(options.timeout);
     let method = request.method().clone();
     let url = request.url().clone();
-    run_request_interceptors(&method, &url, request.headers_mut(), &options)
-        .map_err(|error| handle_error(error, options.feedback))?;
+    run_request_interceptors(&method, &url, request.headers_mut(), options)?;
     let request_body_bytes = request
         .body()
         .and_then(|body| body.as_bytes())
@@ -790,12 +932,11 @@ pub(crate) async fn send(
         );
     }
     let started = Instant::now();
-    let response = HTTP.asynchronous.execute(request).await.map_err(|error| {
-        handle_error(
-            HttpError::from_reqwest(error, &options.operation),
-            options.feedback,
-        )
-    })?;
+    let response = HTTP
+        .asynchronous
+        .execute(request)
+        .await
+        .map_err(|error| HttpError::from_reqwest(error, &options.operation))?;
     if let Some(context) = options.body_diagnostic_context.as_deref() {
         log::debug!(
             "[HTTP][Transfer] event=response_headers_received operation={} context={} status={} request_body_bytes={:?} response_http_version={:?} content_type={:?} content_length={:?} transfer_encoding={:?} content_encoding={:?} elapsed_ms={}",
@@ -817,26 +958,113 @@ pub(crate) async fn send(
         response.status(),
         response.headers(),
         started.elapsed(),
-        &options,
+        options,
     );
-    let response = HttpResponse {
+    observe_rate_limit_headers(
+        &options.operation,
+        &url,
+        response.status(),
+        response.headers(),
+    );
+    Ok(HttpResponse {
         inner: response,
-        method: method.clone(),
-        url: url.clone(),
+        method,
+        url,
         options: options.clone(),
-    };
-    if options.reject_http_errors && !response.status().is_success() {
-        let status = response.status();
-        let body = response
-            .text_raw()
-            .await
-            .map_err(|error| handle_error(error, options.feedback))?;
-        return Err(handle_error(
-            HttpError::status(&options.operation, method, url, status, truncate_body(body)),
+    })
+}
+
+pub(crate) async fn send(
+    builder: reqwest::RequestBuilder,
+    options: RequestOptions,
+) -> HttpResult<HttpResponse> {
+    let mut request = builder.build().map_err(|error| {
+        handle_error(
+            HttpError::from_reqwest(error, &options.operation),
             options.feedback,
-        ));
+        )
+    })?;
+    *request.timeout_mut() = request_total_timeout(options.timeout);
+    let retry = options
+        .retry
+        .filter(|policy| policy.applies_to(request.method()));
+    let max_attempts = retry.map(|policy| policy.max_attempts).unwrap_or(1);
+    let mut attempt = 1_u32;
+    loop {
+        // A streaming request body cannot be cloned; without a clone this
+        // attempt is final regardless of the configured policy.
+        let retry_request = (attempt < max_attempts)
+            .then(|| request.try_clone())
+            .flatten();
+        match send_attempt(request, &options).await {
+            Ok(response) => {
+                let status = response.status();
+                if should_retry_response(status, response.headers())
+                    && let Some(policy) = retry
+                    && let Some(next_request) = retry_request
+                {
+                    let delay = policy.delay_before_retry(
+                        attempt,
+                        retry_after_hint(response.headers()),
+                        rand::random::<f64>(),
+                    );
+                    log::warn!(
+                        "[HTTP][Retry] operation={} status={} attempt={}/{} delay_ms={}",
+                        options.operation,
+                        status.as_u16(),
+                        attempt,
+                        max_attempts,
+                        delay.as_millis()
+                    );
+                    drop(response);
+                    tokio::time::sleep(delay).await;
+                    request = next_request;
+                    attempt += 1;
+                    continue;
+                }
+                if options.reject_http_errors && !status.is_success() {
+                    let method = response.method.clone();
+                    let url = response.url.clone();
+                    let body = response
+                        .text_raw()
+                        .await
+                        .map_err(|error| handle_error(error, options.feedback))?;
+                    return Err(handle_error(
+                        HttpError::status(
+                            &options.operation,
+                            method,
+                            url,
+                            status,
+                            truncate_body(body),
+                        ),
+                        options.feedback,
+                    ));
+                }
+                return Ok(response);
+            }
+            Err(error) => {
+                if is_transient_transport_error(&error)
+                    && let Some(policy) = retry
+                    && let Some(next_request) = retry_request
+                {
+                    let delay = policy.delay_before_retry(attempt, None, rand::random::<f64>());
+                    log::warn!(
+                        "[HTTP][Retry] operation={} error_kind={:?} attempt={}/{} delay_ms={}",
+                        options.operation,
+                        error.kind,
+                        attempt,
+                        max_attempts,
+                        delay.as_millis()
+                    );
+                    tokio::time::sleep(delay).await;
+                    request = next_request;
+                    attempt += 1;
+                    continue;
+                }
+                return Err(handle_error(error, options.feedback));
+            }
+        }
     }
-    Ok(response)
 }
 
 pub(crate) async fn send_json<T: DeserializeOwned>(
@@ -931,6 +1159,144 @@ mod tests {
         assert_eq!(options.read_idle_timeout, DEFAULT_READ_IDLE_TIMEOUT);
         assert_eq!(options.body_diagnostic_context, None);
         assert_eq!(options.body_progress_policy, BodyProgressPolicy::AnyChunk);
+        assert_eq!(options.retry, None);
+    }
+
+    #[test]
+    fn retry_policy_defaults_to_idempotent_methods_only() {
+        let policy = RetryPolicy::transient(3);
+        assert!(policy.applies_to(&Method::GET));
+        assert!(policy.applies_to(&Method::HEAD));
+        assert!(!policy.applies_to(&Method::POST));
+        assert!(!policy.applies_to(&Method::PUT));
+        assert!(!policy.applies_to(&Method::DELETE));
+
+        let opted_in = RetryPolicy::transient(3).including_non_idempotent();
+        assert!(opted_in.applies_to(&Method::POST));
+    }
+
+    #[test]
+    fn retry_transient_normalizes_attempt_counts() {
+        assert_eq!(RetryPolicy::transient(0).max_attempts, 1);
+        assert_eq!(RetryPolicy::transient(3).max_attempts, 3);
+        let options = RequestOptions::new("Load list").retry_transient(3);
+        assert_eq!(options.retry, Some(RetryPolicy::transient(3)));
+    }
+
+    #[test]
+    fn backoff_grows_exponentially_and_is_capped() {
+        let policy = RetryPolicy::transient(5);
+        assert_eq!(
+            policy.delay_before_retry(1, None, 0.0),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            policy.delay_before_retry(2, None, 0.0),
+            Duration::from_millis(1_000)
+        );
+        assert_eq!(
+            policy.delay_before_retry(3, None, 0.0),
+            Duration::from_millis(2_000)
+        );
+        // Deterministic cap regardless of the attempt counter.
+        assert_eq!(policy.delay_before_retry(30, None, 0.0), RETRY_MAX_DELAY);
+    }
+
+    #[test]
+    fn backoff_jitter_adds_at_most_half_a_step_within_the_cap() {
+        let policy = RetryPolicy::transient(5);
+        assert_eq!(
+            policy.delay_before_retry(1, None, 1.0),
+            Duration::from_millis(750)
+        );
+        // Out-of-range jitter inputs are clamped instead of panicking.
+        assert_eq!(
+            policy.delay_before_retry(1, None, -3.0),
+            Duration::from_millis(500)
+        );
+        assert!(policy.delay_before_retry(30, None, 1.0) <= RETRY_MAX_DELAY);
+    }
+
+    #[test]
+    fn retry_after_header_overrides_backoff_but_stays_capped() {
+        let policy = RetryPolicy::transient(3);
+        assert_eq!(
+            policy.delay_before_retry(1, Some(Duration::from_secs(2)), 1.0),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            policy.delay_before_retry(1, Some(Duration::from_secs(600)), 0.0),
+            RETRY_MAX_DELAY
+        );
+    }
+
+    #[test]
+    fn retry_after_hint_parses_seconds_dates_and_provider_reset_instants() {
+        let now = DateTime::parse_from_rfc3339("2026-10-21T07:28:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut headers = HeaderMap::new();
+        headers.insert("retry-after", HeaderValue::from_static("7"));
+        assert_eq!(
+            retry_after_hint_at(&headers, now),
+            Some(Duration::from_secs(7))
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "retry-after",
+            HeaderValue::from_static("Wed, 21 Oct 2026 07:28:09 GMT"),
+        );
+        assert_eq!(
+            retry_after_hint_at(&headers, now),
+            Some(Duration::from_secs(9))
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-ratelimit-reset", HeaderValue::from_static("1792567691"));
+        assert_eq!(
+            retry_after_hint_at(&headers, now),
+            Some(Duration::from_secs(11))
+        );
+
+        assert_eq!(retry_after_hint_at(&HeaderMap::new(), now), None);
+    }
+
+    #[test]
+    fn only_rate_limit_and_server_errors_are_retryable_statuses() {
+        let empty = HeaderMap::new();
+        assert!(should_retry_response(StatusCode::TOO_MANY_REQUESTS, &empty));
+        assert!(should_retry_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &empty
+        ));
+        assert!(should_retry_response(StatusCode::BAD_GATEWAY, &empty));
+        assert!(!should_retry_response(StatusCode::FORBIDDEN, &empty));
+        let mut exhausted = HeaderMap::new();
+        exhausted.insert("x-ratelimit-remaining", HeaderValue::from_static("0"));
+        assert!(should_retry_response(StatusCode::FORBIDDEN, &exhausted));
+        assert!(!should_retry_response(StatusCode::OK, &empty));
+        assert!(!should_retry_response(StatusCode::NOT_FOUND, &empty));
+        assert!(!should_retry_response(StatusCode::UNAUTHORIZED, &empty));
+    }
+
+    #[test]
+    fn connection_and_timeout_failures_are_transient_transport_errors() {
+        let mut error = HttpError::status(
+            "Load projects",
+            Method::GET,
+            Url::parse("https://example.com/projects").unwrap(),
+            StatusCode::BAD_GATEWAY,
+            String::new(),
+        );
+        // Status retries are decided from the live response, not the error.
+        assert!(!is_transient_transport_error(&error));
+        error.kind = HttpErrorKind::Connect;
+        assert!(is_transient_transport_error(&error));
+        error.kind = HttpErrorKind::Timeout;
+        assert!(is_transient_transport_error(&error));
+        error.kind = HttpErrorKind::Decode;
+        assert!(!is_transient_transport_error(&error));
     }
 
     #[test]

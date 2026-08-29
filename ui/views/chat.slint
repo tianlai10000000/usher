@@ -426,15 +426,10 @@ export component GitHubChatPage inherits Rectangle {
 
                     Rectangle {
                         width: 1px;
-                        height: root.performance-optimized
-                            && root.virtual-document-height > 0px
-                            ? max(
-                                0px,
-                                root.virtual-document-height
-                                    - root.virtual-top-spacer
-                                    - mounted-message-list.preferred-height
-                            )
-                            : root.virtual-bottom-spacer;
+                        // Rust computes the remaining estimated rows directly.
+                        // In the final window this is exactly zero, so estimate
+                        // error in mounted rows cannot create a blank tail.
+                        height: root.virtual-bottom-spacer;
                         background: transparent;
                     }
                 }

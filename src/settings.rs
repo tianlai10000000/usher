@@ -173,14 +173,6 @@ pub struct GitTokenSettings {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct GitPlatformTokens {
-    pub github: String,
-    pub gitlab: String,
-    pub gitee: String,
-    pub gitee_enterprise: String,
-}
-
-#[derive(Debug, Clone, Default)]
 pub struct GitHostedRepositoryConfig {
     pub api_base_url: String,
     pub enterprise: String,
@@ -385,6 +377,22 @@ impl SettingsManager {
     /// Get current settings (clone)
     pub fn get(&self) -> AppSettings {
         self.settings.read().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    /// Run `f` against the live settings under the read lock, without cloning
+    /// the whole tree. Mirrors `get()`'s tolerance for a poisoned lock by
+    /// handing `f` default settings instead of panicking. `f` must stay cheap
+    /// and non-blocking: it runs while the read lock is held.
+    pub fn with_settings<R>(&self, f: impl FnOnce(&AppSettings) -> R) -> R {
+        match self.settings.read() {
+            Ok(settings) => f(&settings),
+            Err(_) => f(&AppSettings::default()),
+        }
+    }
+
+    /// Convenience wrapper over [`Self::with_settings`] for the Git subtree.
+    pub fn with_git<R>(&self, f: impl FnOnce(&GitSettings) -> R) -> R {
+        self.with_settings(|settings| f(&settings.git))
     }
 
     /// Update theme mode and save
@@ -670,21 +678,13 @@ pub fn get_settings_manager() -> &'static SettingsManager {
 /// Save theme mode setting asynchronously
 pub fn save_theme_mode(mode: i32) {
     get_settings_manager().set_theme_mode(mode);
-    Timer::single_shot(std::time::Duration::from_millis(100), || {
-        if let Err(e) = get_settings_manager().save() {
-            log::error!("[Settings] Failed to save settings: {}", e);
-        }
-    });
+    schedule_settings_save();
 }
 
 /// Save auto update setting asynchronously
 pub fn save_auto_update(enabled: bool) {
     get_settings_manager().set_auto_update(enabled);
-    Timer::single_shot(std::time::Duration::from_millis(100), || {
-        if let Err(e) = get_settings_manager().save() {
-            log::error!("[Settings] Failed to save settings: {}", e);
-        }
-    });
+    schedule_settings_save();
 }
 
 pub fn save_application_console_logging(enabled: bool) {
@@ -700,21 +700,13 @@ pub fn save_application_file_logging(enabled: bool) {
 /// Save tracing logger active setting asynchronously
 pub fn save_tracing_logger_active(enabled: bool) {
     get_settings_manager().set_tracing_logger_active(enabled);
-    Timer::single_shot(std::time::Duration::from_millis(100), || {
-        if let Err(e) = get_settings_manager().save() {
-            log::error!("[Settings] Failed to save settings: {}", e);
-        }
-    });
+    schedule_settings_save();
 }
 
 /// Save terminal verbose logging setting asynchronously
 pub fn save_terminal_verbose_logging(enabled: bool) {
     get_settings_manager().set_terminal_verbose_logging(enabled);
-    Timer::single_shot(std::time::Duration::from_millis(100), || {
-        if let Err(e) = get_settings_manager().save() {
-            log::error!("[Settings] Failed to save settings: {}", e);
-        }
-    });
+    schedule_settings_save();
 }
 
 pub fn save_memory_diagnostics_logging(enabled: bool) {
@@ -724,36 +716,30 @@ pub fn save_memory_diagnostics_logging(enabled: bool) {
 
 fn schedule_settings_save() {
     Timer::single_shot(std::time::Duration::from_millis(100), || {
-        if let Err(e) = get_settings_manager().save() {
-            log::error!("[Settings] Failed to save settings: {}", e);
-        }
+        crate::app_runtime::shared_runtime().spawn(async {
+            match tokio::task::spawn_blocking(|| get_settings_manager().save()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    log::error!("[Settings] Failed to save settings: {error}");
+                }
+                Err(error) => {
+                    log::error!("[Settings] Save worker failed: {error}");
+                }
+            }
+        });
     });
 }
 
 /// Save UI sound effects setting asynchronously
 pub fn save_ui_sound_effects(enabled: bool) {
     get_settings_manager().set_ui_sound_effects(enabled);
-    Timer::single_shot(std::time::Duration::from_millis(100), || {
-        if let Err(e) = get_settings_manager().save() {
-            log::error!("[Settings] Failed to save settings: {}", e);
-        }
-    });
+    schedule_settings_save();
 }
 
 /// Persist sidebar docking without blocking the Slint event loop.
 pub fn save_navigation_drawer_expanded(expanded: bool) {
     get_settings_manager().set_navigation_drawer_expanded(expanded);
-    crate::app_runtime::shared_runtime().spawn(async {
-        match tokio::task::spawn_blocking(|| get_settings_manager().save()).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                log::error!("[Settings] Failed to save sidebar state: {error}");
-            }
-            Err(error) => {
-                log::error!("[Settings] Sidebar state worker failed: {error}");
-            }
-        }
-    });
+    schedule_settings_save();
 }
 
 pub fn save_preview_presentation_mode(mode: &str) -> Result<(), String> {
@@ -813,22 +799,6 @@ pub fn load_settings() -> AppSettings {
     get_settings_manager().get()
 }
 
-pub fn load_git_platform_tokens() -> GitPlatformTokens {
-    let settings = get_settings_manager().get();
-    GitPlatformTokens {
-        github: settings.git.platform.github.token.trim().to_string(),
-        gitlab: settings.git.platform.gitlab.token.trim().to_string(),
-        gitee: settings.git.platform.gitee.token.trim().to_string(),
-        gitee_enterprise: settings
-            .git
-            .platform
-            .gitee
-            .enterprise_token
-            .trim()
-            .to_string(),
-    }
-}
-
 /// Resolve the chat RAG endpoint: settings first, then the `USHER_RAG_API_URL`
 /// environment variable. Returns `None` when neither is configured.
 pub fn load_chat_rag_api_url() -> Option<String> {
@@ -844,17 +814,18 @@ pub fn load_chat_rag_api_url() -> Option<String> {
 }
 
 pub fn load_git_hosted_repository_config(provider: &str) -> GitHostedRepositoryConfig {
-    let settings = get_settings_manager().get();
-    let platform = match provider {
-        "github" => &settings.git.platform.github,
-        "gitlab" => &settings.git.platform.gitlab,
-        "gitee" => &settings.git.platform.gitee,
-        _ => return GitHostedRepositoryConfig::default(),
-    };
-    GitHostedRepositoryConfig {
-        api_base_url: normalize_api_base_url(platform.api_base_url.as_str()),
-        enterprise: platform.enterprise.trim().to_string(),
-    }
+    get_settings_manager().with_git(|git| {
+        let platform = match provider {
+            "github" => &git.platform.github,
+            "gitlab" => &git.platform.gitlab,
+            "gitee" => &git.platform.gitee,
+            _ => return GitHostedRepositoryConfig::default(),
+        };
+        GitHostedRepositoryConfig {
+            api_base_url: normalize_api_base_url(platform.api_base_url.as_str()),
+            enterprise: platform.enterprise.trim().to_string(),
+        }
+    })
 }
 
 /// Setup settings module - Apply loaded settings to AppState and MainWindow

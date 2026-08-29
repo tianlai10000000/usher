@@ -4,11 +4,14 @@
 //! owns deterministic row sizing, connection, grouping, and commit-range math.
 //! Avatar download and `MainWindow` mutation remain in the controller façade.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
 use super::avatar::ConversationAvatarPixels;
+use super::cache::BoundedCache;
 use crate::git::{PullRequestCommit, PullRequestConversationItem, split_commit_message};
 use crate::{WorkflowPrCommit, WorkflowPrConversationItem};
 
@@ -123,7 +126,7 @@ fn conversation_card_row_height(body: &str) -> i32 {
 
 pub(super) fn conversation_model(
     items: &[PullRequestConversationItem],
-    avatars: &HashMap<String, ConversationAvatarPixels>,
+    avatars: &HashMap<String, Arc<ConversationAvatarPixels>>,
 ) -> ModelRc<WorkflowPrConversationItem> {
     ModelRc::new(VecModel::from(
         items
@@ -146,7 +149,7 @@ pub(super) fn conversation_model(
                     id: item.id.clone().into(),
                     kind: item.kind.clone().into(),
                     author: item.author.clone().into(),
-                    avatar: avatar_image(avatars.get(item.avatar_url.as_str())),
+                    avatar: cached_avatar_image(avatars, item.avatar_url.as_str()),
                     avatar_label: avatar_label(item.author.as_str()).into(),
                     author_association: item.author_association.clone().into(),
                     body: body.into(),
@@ -199,7 +202,7 @@ fn conversation_items_connect(
 
 pub(super) fn commit_model(
     commits: &[PullRequestCommit],
-    avatars: &HashMap<String, ConversationAvatarPixels>,
+    avatars: &HashMap<String, Arc<ConversationAvatarPixels>>,
 ) -> ModelRc<WorkflowPrCommit> {
     // Provider lists stay oldest→newest for range math; the Commits tab and
     // commit-range picker show newest→oldest.
@@ -239,7 +242,7 @@ pub(super) fn commit_model(
                     message_expanded: false,
                     group_expand_extra: 0,
                     author: commit.author.clone().into(),
-                    avatar: avatar_image(avatars.get(commit.avatar_url.as_str())),
+                    avatar: cached_avatar_image(avatars, commit.avatar_url.as_str()),
                     avatar_label: avatar_label(commit.author.as_str()).into(),
                     // Absolute local datetime for the relative-time tooltip.
                     authored_at: super::super::pr_list::format_github_absolute_tooltip(
@@ -247,8 +250,9 @@ pub(super) fn commit_model(
                     )
                     .into(),
                     committer: commit.committer.clone().into(),
-                    committer_avatar: avatar_image(
-                        avatars.get(commit.committer_avatar_url.as_str()),
+                    committer_avatar: cached_avatar_image(
+                        avatars,
+                        commit.committer_avatar_url.as_str(),
                     ),
                     committer_avatar_label: avatar_label(commit.committer.as_str()).into(),
                     committed_at: super::super::pr_list::format_github_absolute_tooltip(
@@ -309,16 +313,39 @@ fn commit_identity_action(commit: &PullRequestCommit, show_committer: bool) -> S
     }
 }
 
-fn avatar_image(avatar: Option<&ConversationAvatarPixels>) -> Image {
-    avatar
-        .map(|avatar| {
-            Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-                avatar.rgba.as_slice(),
-                avatar.width,
-                avatar.height,
-            ))
-        })
-        .unwrap_or_default()
+const AVATAR_IMAGE_CACHE_CAPACITY: usize = 128;
+
+thread_local! {
+    /// `slint::Image` is event-loop-owned rather than `Send`, so keep the
+    /// process-lifetime texture cache on the Slint thread. Conversation and
+    /// Commits model rebuilds reuse the same refcounted image for one URL.
+    static AVATAR_IMAGE_CACHE: RefCell<BoundedCache<Image>> =
+        RefCell::new(BoundedCache::new(AVATAR_IMAGE_CACHE_CAPACITY));
+}
+
+fn cached_avatar_image(
+    avatars: &HashMap<String, Arc<ConversationAvatarPixels>>,
+    url: &str,
+) -> Image {
+    let url = url.trim();
+    if url.is_empty() {
+        return Image::default();
+    }
+    AVATAR_IMAGE_CACHE.with(|cache| {
+        if let Some(image) = cache.borrow_mut().get_cloned(url) {
+            return image;
+        }
+        let Some(avatar) = avatars.get(url) else {
+            return Image::default();
+        };
+        let image = Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+            avatar.rgba.as_slice(),
+            avatar.width,
+            avatar.height,
+        ));
+        cache.borrow_mut().insert(url.to_string(), image.clone());
+        image
+    })
 }
 
 fn avatar_label(author: &str) -> String {

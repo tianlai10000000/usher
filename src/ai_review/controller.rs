@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
@@ -20,7 +20,7 @@ use usher_ai_review::{
     merge_review_results, parse_review_response, reduce_tasks,
 };
 use usher_messages::{MessageCenter, MessageDraft, MessageSeverity, NativeDelivery};
-use usher_state_store::{LocalStateStore, StateStore, Subscription};
+use usher_state_store::{LocalStateStore, StateStore, StateStoreExt, Subscription};
 
 use crate::agent_response::{
     AgentResponseProjector, ProjectionCacheStats, REPOSITORY_FILE_LINK_PREFIX,
@@ -207,6 +207,7 @@ async fn run_review_work_until_cancelled<T>(
 pub(crate) struct AiReviewController {
     inner: Arc<ControllerInner>,
     _task_subscription: Arc<Subscription>,
+    _pr_list_subscription: Arc<Subscription>,
     _config_subscription: Arc<Subscription>,
 }
 
@@ -522,19 +523,45 @@ pub(crate) fn setup_ai_review(
     apply_task_state_to_ui(ui, inner.task_store.snapshot().state());
 
     let weak_inner = Arc::downgrade(&inner);
-    let task_subscription = inner.task_store.subscribe(Arc::new(move |snapshot| {
-        let Some(inner) = weak_inner.upgrade() else {
-            return;
-        };
-        let state = snapshot.state_arc();
-        let window = inner.window.clone();
-        let _ = slint::invoke_from_event_loop(move || {
-            let Some(ui) = window.upgrade() else {
+    let task_subscription = inner.task_store.subscribe_selector(
+        // Project only the UI-visible task fields so commits that merely
+        // touch bookkeeping (for example timestamps) never wake the UI
+        // thread; per-chunk progress updates hop over exactly once each.
+        Arc::new(|state: &ReviewTaskState| project_task_rows(state)),
+        Arc::new(move |rows: Vec<TaskRowProjection>| {
+            let Some(inner) = weak_inner.upgrade() else {
                 return;
             };
-            apply_task_state_to_ui(&ui, &state);
-        });
-    }));
+            let state = inner.task_store.snapshot().state_arc();
+            let window = inner.window.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = window.upgrade() else {
+                    return;
+                };
+                apply_task_rows_to_ui(&ui, &rows);
+                apply_current_task_state_to_ui(&ui, &state);
+            });
+        }),
+    );
+
+    let weak_inner = Arc::downgrade(&inner);
+    let pr_list_subscription = inner.task_store.subscribe_selector(
+        // PR badges do not include chunk progress. Keeping this selector
+        // separate prevents every progress tick from scanning the PR list.
+        Arc::new(|state: &ReviewTaskState| project_pr_list_rows(state)),
+        Arc::new(move |rows: Vec<PrListTaskProjection>| {
+            let Some(inner) = weak_inner.upgrade() else {
+                return;
+            };
+            let window = inner.window.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = window.upgrade() else {
+                    return;
+                };
+                apply_pr_list_review_projection(&ui, &rows);
+            });
+        }),
+    );
 
     let weak_inner = Arc::downgrade(&inner);
     let settings_page = settings_page.clone();
@@ -561,6 +588,7 @@ pub(crate) fn setup_ai_review(
     let controller = AiReviewController {
         inner: inner.clone(),
         _task_subscription: Arc::new(task_subscription),
+        _pr_list_subscription: Arc::new(pr_list_subscription),
         _config_subscription: Arc::new(config_subscription),
     }
     .with_persistence_subscription(persistence_subscription);
@@ -804,6 +832,7 @@ impl AiReviewController {
     }
 
     pub(crate) fn shutdown(&self) {
+        self.inner.cancel_all_reviews();
         self.inner.cancel_all_chats();
         self.inner.task_persistence.shutdown();
         self.inner.config.shutdown();
@@ -1390,15 +1419,26 @@ impl ControllerInner {
                 );
                 let response = run_review_work_until_cancelled(
                     cancellation,
-                    agent::complete_review(
-                        &settings,
-                        &messages,
-                        "AI code review",
-                        format!("task={} chunk={}/{}", id.0, index + 1, count),
+                    tokio::time::timeout(
+                        agent::REVIEW_CHUNK_TOTAL_TIMEOUT,
+                        agent::complete_review(
+                            &settings,
+                            &messages,
+                            "AI code review",
+                            format!("task={} chunk={}/{}", id.0, index + 1, count),
+                        ),
                     ),
                 )
                 .await
                 .map_err(|()| "Review cancelled".to_string())?
+                .map_err(|_elapsed| {
+                    format!(
+                        "AI review chunk {}/{} timed out after {} seconds.",
+                        index + 1,
+                        count,
+                        agent::REVIEW_CHUNK_TOTAL_TIMEOUT.as_secs()
+                    )
+                })?
                 .map_err(|error| error.user_message().to_string())?;
                 log::info!(
                     "[AI Review][Task] event=completion_received task={} chunk={}/{} response_bytes={} elapsed_ms={}",
@@ -1624,6 +1664,17 @@ impl ControllerInner {
             && ui.get_ai_review_current_task_id() == id.0
         {
             ui.set_ai_review_chat_status("Stopping response...".into());
+        }
+    }
+
+    fn cancel_all_reviews(&self) {
+        let cancellations = self
+            .cancellations
+            .lock()
+            .map(|cancellations| cancellations.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for cancellation in cancellations {
+            cancellation.cancel();
         }
     }
 
@@ -2262,52 +2313,169 @@ fn apply_configuration_to_ui(ui: &MainWindow, state: &usher_ai_review::ReviewCon
     );
 }
 
-fn apply_task_state_to_ui(ui: &MainWindow, state: &ReviewTaskState) {
-    let task_rows = state
+/// UI-visible fields of one task row, newest first. Excludes timestamps so
+/// the selector subscription can drop commits that only touch bookkeeping.
+#[derive(Clone, PartialEq, Eq)]
+struct TaskRowProjection {
+    id: String,
+    project_key: String,
+    pull_request_number: String,
+    pull_request_title: String,
+    rule_name: String,
+    model_name: String,
+    status: ReviewTaskStatus,
+    progress_percent: u8,
+    completed_chunks: u32,
+    total_chunks: u32,
+    finding_count: u32,
+    error: String,
+}
+
+fn project_task_rows(state: &ReviewTaskState) -> Vec<TaskRowProjection> {
+    state
         .order
         .iter()
         .rev()
         .filter_map(|id| state.tasks.get(id))
-        .map(|task| AiReviewTaskItem {
-            id: task.id.0.clone().into(),
-            project_key: task.target.project_key.0.clone().into(),
-            pull_request_number: task.target.pull_request_number.clone().into(),
-            pull_request_title: task.target.pull_request_title.clone().into(),
-            rule_name: task.rule_name.clone().into(),
-            model_name: task.model_name.clone().into(),
-            status: task.status.as_str().into(),
-            progress_percent: i32::from(task.progress_percent),
-            completed_chunks: task.completed_chunks.min(i32::MAX as u32) as i32,
-            total_chunks: task.total_chunks.min(i32::MAX as u32) as i32,
-            finding_count: task.finding_count.min(i32::MAX as u32) as i32,
-            error: task.error.clone().into(),
+        .map(|task| TaskRowProjection {
+            id: task.id.0.clone(),
+            project_key: task.target.project_key.0.clone(),
+            pull_request_number: task.target.pull_request_number.clone(),
+            pull_request_title: task.target.pull_request_title.clone(),
+            rule_name: task.rule_name.clone(),
+            model_name: task.model_name.clone(),
+            status: task.status,
+            progress_percent: task.progress_percent,
+            completed_chunks: task.completed_chunks,
+            total_chunks: task.total_chunks,
+            finding_count: task.finding_count,
+            error: task.error.clone(),
         })
-        .collect::<Vec<_>>();
-    ui.set_ai_review_tasks(ModelRc::new(VecModel::from(task_rows)));
+        .collect()
+}
 
-    let project = ProjectReviewKey(ui.get_workflow_project_id().to_string());
-    let current_rows = ui.get_workflow_pr_list_items();
-    let mut rows = Vec::with_capacity(current_rows.row_count());
-    for index in 0..current_rows.row_count() {
-        let Some(mut row) = current_rows.row_data(index) else {
-            continue;
-        };
-        if let Some(task) = latest_task_for_pr(state, &project, row.number.as_str()) {
-            row.ai_review_status = task.status.as_str().into();
-            row.ai_review_task_id = task.id.0.clone().into();
-            row.ai_review_finding_count = task.finding_count.min(i32::MAX as u32) as i32;
-        } else {
-            row.ai_review_status = "".into();
-            row.ai_review_task_id = "".into();
-            row.ai_review_finding_count = 0;
-        }
-        rows.push(row);
+fn task_item_from_projection(row: &TaskRowProjection) -> AiReviewTaskItem {
+    AiReviewTaskItem {
+        id: row.id.clone().into(),
+        project_key: row.project_key.clone().into(),
+        pull_request_number: row.pull_request_number.clone().into(),
+        pull_request_title: row.pull_request_title.clone().into(),
+        rule_name: row.rule_name.clone().into(),
+        model_name: row.model_name.clone().into(),
+        status: row.status.as_str().into(),
+        progress_percent: i32::from(row.progress_percent),
+        completed_chunks: row.completed_chunks.min(i32::MAX as u32) as i32,
+        total_chunks: row.total_chunks.min(i32::MAX as u32) as i32,
+        finding_count: row.finding_count.min(i32::MAX as u32) as i32,
+        error: row.error.clone().into(),
     }
-    ui.set_workflow_pr_list_items(ModelRc::new(VecModel::from(rows)));
+}
 
+fn apply_task_state_to_ui(ui: &MainWindow, state: &ReviewTaskState) {
+    apply_task_rows_to_ui(ui, project_task_rows(state).as_slice());
+    apply_pr_list_review_projection(ui, project_pr_list_rows(state).as_slice());
+    apply_current_task_state_to_ui(ui, state);
+}
+
+fn apply_current_task_state_to_ui(ui: &MainWindow, state: &ReviewTaskState) {
     let current_id = ReviewTaskId(ui.get_ai_review_current_task_id().to_string());
     if let Some(task) = state.tasks.get(&current_id) {
         apply_task_header(ui, task);
+    }
+}
+
+fn apply_task_rows_to_ui(ui: &MainWindow, rows: &[TaskRowProjection]) {
+    let model = ui.get_ai_review_tasks();
+    let rows_match_model = model.row_count() == rows.len()
+        && rows.iter().enumerate().all(|(index, row)| {
+            model
+                .row_data(index)
+                .is_some_and(|item| item.id == row.id.as_str())
+        });
+    if !rows_match_model {
+        // Structural change (enqueue or eviction) is the rare rebuild path.
+        ui.set_ai_review_tasks(ModelRc::new(VecModel::from(
+            rows.iter()
+                .map(task_item_from_projection)
+                .collect::<Vec<_>>(),
+        )));
+        return;
+    }
+    for (index, row) in rows.iter().enumerate() {
+        let next = task_item_from_projection(row);
+        if model.row_data(index).is_some_and(|item| item != next) {
+            // In-place writes keep the ModelRc identity so the tasks list
+            // preserves its scroll position while one row changes.
+            model.set_row_data(index, next);
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct PrListTaskProjection {
+    project_key: String,
+    pull_request_number: String,
+    task_id: String,
+    status: ReviewTaskStatus,
+    finding_count: u32,
+}
+
+fn project_pr_list_rows(state: &ReviewTaskState) -> Vec<PrListTaskProjection> {
+    let mut seen = HashSet::new();
+    let mut rows = Vec::new();
+    for id in state.order.iter().rev() {
+        let Some(task) = state.tasks.get(id) else {
+            continue;
+        };
+        let key = (
+            task.target.project_key.0.clone(),
+            task.target.pull_request_number.clone(),
+        );
+        if seen.insert(key.clone()) {
+            rows.push(PrListTaskProjection {
+                project_key: key.0,
+                pull_request_number: key.1,
+                task_id: task.id.0.clone(),
+                status: task.status,
+                finding_count: task.finding_count,
+            });
+        }
+    }
+    rows
+}
+
+fn apply_pr_list_review_projection(ui: &MainWindow, tasks: &[PrListTaskProjection]) {
+    let project = ui.get_workflow_project_id();
+    let latest_by_number = tasks
+        .iter()
+        .filter(|task| task.project_key == project.as_str())
+        .map(|task| (task.pull_request_number.as_str(), task))
+        .collect::<HashMap<_, _>>();
+    let rows = ui.get_workflow_pr_list_items();
+    for index in 0..rows.row_count() {
+        let Some(mut row) = rows.row_data(index) else {
+            continue;
+        };
+        let (status, task_id, finding_count) = match latest_by_number.get(row.number.as_str()) {
+            Some(task) => (
+                task.status.as_str(),
+                task.task_id.as_str(),
+                task.finding_count.min(i32::MAX as u32) as i32,
+            ),
+            None => ("", "", 0),
+        };
+        if row.ai_review_status == status
+            && row.ai_review_task_id == task_id
+            && row.ai_review_finding_count == finding_count
+        {
+            continue;
+        }
+        row.ai_review_status = status.into();
+        row.ai_review_task_id = task_id.into();
+        row.ai_review_finding_count = finding_count;
+        // Preserve the ModelRc identity so the PR ListView keeps its
+        // viewport anchor and selection while only this row changes.
+        rows.set_row_data(index, row);
     }
 }
 
@@ -2389,13 +2557,22 @@ fn apply_projection(
 }
 
 fn append_ui_conversation(ui: &MainWindow, role: &str, content: &str, elapsed_ms: Option<u64>) {
-    let mut conversation = ui.get_ai_review_conversation().iter().collect::<Vec<_>>();
     let id = format!("optimistic:{role}:{}", unix_millis());
     let elapsed = elapsed_ms.map(format_elapsed_ms).unwrap_or_default();
-    conversation.push(response::plain_conversation_item(
-        &id, role, content, &elapsed,
-    ));
-    ui.set_ai_review_conversation(ModelRc::new(VecModel::from(conversation)));
+    let item = response::plain_conversation_item(&id, role, content, &elapsed);
+    let conversation = ui.get_ai_review_conversation();
+    // Append in place so the chat ListView keeps its model identity and
+    // scroll anchor instead of rebuilding every delegate per message.
+    if let Some(model) = conversation
+        .as_any()
+        .downcast_ref::<VecModel<crate::AiReviewConversationItem>>()
+    {
+        model.push(item);
+    } else {
+        let mut items = conversation.iter().collect::<Vec<_>>();
+        items.push(item);
+        ui.set_ai_review_conversation(ModelRc::new(VecModel::from(items)));
+    }
     rebuild_response_visual_rows(ui);
 }
 
@@ -2530,7 +2707,10 @@ fn unified_diff_from_detail(detail: &crate::git::PullRequestDiffDetail) -> Strin
         output.push_str(file.path.as_str());
         output.push('\n');
         for line in &file.lines {
-            if line.kind == "hunk" || line.content.starts_with("@@") {
+            // Only the provider-reported kind identifies hunk headers. Body
+            // lines whose content merely starts with "@@" must keep their
+            // +/-/space prefix, or the AI receives shifted line numbers.
+            if line.kind == "hunk" {
                 output.push_str(line.content.as_str());
             } else {
                 output.push(match line.kind.as_str() {
@@ -3406,6 +3586,46 @@ mod tests {
         assert!(normalized.contains("diff --git a/src/lib.rs b/src/lib.rs"));
         assert!(normalized.contains("-old()"));
         assert!(normalized.contains("+new()"));
+    }
+
+    #[test]
+    fn body_lines_starting_with_hunk_marker_keep_their_change_prefix() {
+        let detail = crate::git::PullRequestDiffDetail {
+            files: vec![PullRequestDiffFile {
+                path: "src/lib.rs".to_string(),
+                old_path: "src/lib.rs".to_string(),
+                change_type: "modified".to_string(),
+                added_lines: 1,
+                removed_lines: 0,
+                viewed: false,
+                lines: vec![
+                    PullRequestDiffLine {
+                        old_line: 0,
+                        new_line: 0,
+                        kind: "hunk".to_string(),
+                        content: "@@ -1,0 +1,1 @@".to_string(),
+                    },
+                    PullRequestDiffLine {
+                        old_line: 0,
+                        new_line: 1,
+                        kind: "addition".to_string(),
+                        content: "@@ inner attribute in raw text".to_string(),
+                    },
+                ],
+            }],
+            added_lines: 1,
+            removed_lines: 0,
+            commit_count: 1,
+            conversation_count: None,
+            base_sha: "base".to_string(),
+            head_sha: "head".to_string(),
+            start_sha: "base".to_string(),
+            too_many_commits: false,
+            files_truncated: false,
+        };
+        let normalized = unified_diff_from_detail(&detail);
+        assert!(normalized.contains("\n@@ -1,0 +1,1 @@\n"));
+        assert!(normalized.contains("\n+@@ inner attribute in raw text\n"));
     }
 
     #[test]

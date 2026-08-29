@@ -39,6 +39,18 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
 11. Detailed transfer diagnostics are request-scoped and opt-in. They may record
     body sizes, safe response-framing headers, chunk timing, and whitespace/progress
     classification, but never request/response content or authorization data.
+12. Transient retry is opt-in per request and defaults to GET/HEAD only. The
+    standard provider policy makes at most three attempts, retries connect and
+    timeout failures plus 429, 5xx, and rate-limit-exhausted 403 responses, and
+    uses capped exponential backoff with jitter. Intermediate failures remain
+    silent; only the terminal result enters normal error feedback.
+13. Retry delay honors numeric or HTTP-date `Retry-After` and GitHub-style
+    `X-RateLimit-Reset`, capped at 30 seconds. Rate-limit headers are diagnostic
+    signals only and must never expose credentials or unbounded response data.
+14. Provider fan-out must be bounded. Independent fixed reads may use
+    `join!`/`try_join!`; item hydration uses bounded unordered streams. GitLab
+    Closed pagination incrementally caches complete closed/merged prefixes for
+    30 seconds, at most 32 filter keys, and invalidates the project after merge.
 
 1. 应用代码不得在 `src/http/mod.rs` 外创建可复用 reqwest client。
 2. 所有应用自有请求使用模块内唯一的异步 client，并统一 User-Agent 与 10 秒连接超时。
@@ -58,6 +70,15 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
     通过它读取，避免绕过响应体空闲超时和统一错误。流式调用方仍自行管理进度和取消。
 11. 详细传输诊断必须按请求显式启用；可以记录 body 大小、安全的响应 framing header、
     chunk 时序及空白/进度分类，但绝不记录请求/响应内容或鉴权数据。
+12. 瞬态重试必须由请求显式启用，默认只允许 GET/HEAD。Provider 标准策略最多尝试三次，
+    重试连接/超时错误、429、5xx 及 rate-limit 已耗尽的 403，并使用带 jitter 的有上限
+    指数退避；中间失败保持静默，只有终态进入统一错误反馈。
+13. 重试延迟识别数字或 HTTP-date 形式的 `Retry-After` 以及 GitHub 风格
+    `X-RateLimit-Reset`，上限为 30 秒。Rate-limit header 只作诊断信号，不得泄露凭据或
+    无限正文。
+14. Provider fan-out 必须有界。固定且互相独立的读取可用 `join!`/`try_join!`；逐项补全
+    使用限并发 unordered stream。GitLab Closed 分页对完整 closed/merged 前缀做 30 秒、
+    最多 32 个筛选 key 的增量缓存，并在合并成功后使该项目缓存失效。
 
 ## Feedback policy / 反馈策略
 
@@ -139,6 +160,12 @@ Only the shared HTTP module should contain client creation or raw execution.
 - A successful JSON request decodes normally.
 - A 401/403 maps to a credential/permission message.
 - A 429 maps to rate-limit feedback.
+- Opted-in GET/HEAD transient requests retry at most three times; POST and other
+  writes remain single-attempt unless a caller explicitly supplies a custom policy.
+- Numeric/date `Retry-After`, provider reset instants, timeout/connect failures,
+  5xx, 429, and exhausted-rate-limit 403 produce bounded retry decisions.
+- GitLab Closed page N reuses the cached closed/merged prefixes from earlier
+  pages and extends only missing provider pages; expiry and merge invalidate it.
 - A 5xx response includes status but does not expose an unbounded body.
 - Timeout and connect failures remain distinct.
 - Request timeout configuration maps the 30-second default and custom durations

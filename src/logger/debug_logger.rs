@@ -29,10 +29,11 @@ use chrono::Local;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::LevelFilter;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// Logger configuration
 #[derive(Clone, Debug)]
@@ -66,25 +67,31 @@ static LOGGER_INITIALIZED: OnceLock<bool> = OnceLock::new();
 static CONSOLE_OUTPUT_ENABLED: AtomicBool = AtomicBool::new(true);
 static FILE_OUTPUT_ENABLED: AtomicBool = AtomicBool::new(false);
 
+/// Buffer capacity for the log file writer. Records are flushed eagerly for
+/// warn/error levels and on process shutdown, so the buffer only defers the
+/// low-severity chatter that used to hit the disk line by line.
+const LOG_FILE_BUFFER_CAPACITY: usize = 64 * 1024;
+const LOG_FILE_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
+
 struct LazyLogFile {
     path: PathBuf,
-    file: Option<File>,
+    writer: Option<BufWriter<File>>,
+    last_flush: Instant,
 }
 
 impl LazyLogFile {
-    fn file(&mut self) -> io::Result<&mut File> {
-        if self.file.is_none() {
+    fn writer(&mut self) -> io::Result<&mut BufWriter<File>> {
+        if self.writer.is_none() {
             if let Some(parent) = self.path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            self.file = Some(
-                OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&self.path)?,
-            );
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)?;
+            self.writer = Some(BufWriter::with_capacity(LOG_FILE_BUFFER_CAPACITY, file));
         }
-        Ok(self.file.as_mut().expect("log file initialized"))
+        Ok(self.writer.as_mut().expect("log file initialized"))
     }
 }
 
@@ -93,14 +100,21 @@ impl Write for LazyLogFile {
         if !file_output_enabled() {
             return Ok(buf.len());
         }
-        self.file()?.write(buf)
+        // write_all keeps a formatted record intact; a raw `write` may report
+        // a short write and truncate the line.
+        self.writer()?.write_all(buf)?;
+        if self.last_flush.elapsed() >= LOG_FILE_FLUSH_INTERVAL {
+            self.writer()?.flush()?;
+            self.last_flush = Instant::now();
+        }
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
         if !file_output_enabled() {
             return Ok(());
         }
-        self.file()?.flush()
+        self.writer()?.flush()
     }
 }
 
@@ -216,6 +230,18 @@ pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
         .clone()
         .unwrap_or_else(|| get_default_log_path(config.log_per_day));
 
+    let log_file = Arc::new(Mutex::new(LazyLogFile {
+        path: resolved_log_path.clone(),
+        writer: None,
+        last_flush: Instant::now(),
+    }));
+    let shutdown_log_file = log_file.clone();
+    crate::shutdown::register_post_shutdown_task("flush_debug_log_file", move || {
+        if let Ok(mut file) = shutdown_log_file.lock() {
+            let _ = file.flush();
+        }
+    });
+
     let file_dispatch = fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
@@ -241,10 +267,19 @@ pub fn setup_debug_logger(config: DebugLogConfig) -> Result<(), String> {
         .level_for("wgpu_hal", LevelFilter::Warn)
         .level_for("wgpu_types", LevelFilter::Warn)
         .level_for("naga", LevelFilter::Warn)
-        .chain(Box::new(LazyLogFile {
-            path: resolved_log_path.clone(),
-            file: None,
-        }) as Box<dyn Write + Send>);
+        .chain(fern::Output::call(move |record| {
+            let Ok(mut file) = log_file.lock() else {
+                return;
+            };
+            // `record.args()` already carries the formatted line from the
+            // dispatch formatter above.
+            let _ = writeln!(file, "{}", record.args());
+            // Warnings and errors are flushed immediately so a crash right
+            // after them cannot lose the interesting tail of the log.
+            if record.level() <= log::Level::Warn {
+                let _ = file.flush();
+            }
+        }));
 
     main_dispatch = main_dispatch.chain(file_dispatch);
 
