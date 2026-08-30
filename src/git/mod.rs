@@ -4,30 +4,29 @@ mod diff;
 pub(crate) mod gitee;
 mod github;
 mod gitlab;
+mod json;
 mod locator;
 mod model;
 mod overview;
+mod provider;
 
 use diff::{parse_unified_diff, unavailable_diff_file};
 use locator::*;
 pub(crate) use model::*;
 pub(crate) use overview::EnvironmentPullRequestCounts;
+use provider::RepoContext;
 
 /// Query the configured provider for the immutable numeric/string project id.
 ///
 /// The remote URL is the source of truth for both provider selection and the
 /// namespace/repository used by provider APIs.
 pub(crate) async fn get_repo_detail(remote_repo: &str) -> Result<RepoDetail, String> {
-    let locator = parse_repo_locator(remote_repo)?;
-    let repo_project_id = match locator.repo_type {
-        RepoType::Gitee => gitee::get_repo_detail(&locator).await?,
-        RepoType::GitLab => gitlab::get_repo_detail(&locator).await?,
-        RepoType::GitHub => github::get_repo_detail(&locator).await?,
-    };
+    let context = RepoContext::discover(remote_repo)?;
+    let repo_project_id = context.provider().repo_detail(&context).await?;
 
     Ok(RepoDetail {
         repo_project_id,
-        repo_type: locator.repo_type,
+        repo_type: context.repo_type(),
     })
 }
 
@@ -41,30 +40,11 @@ pub(crate) async fn get_pull_requests(
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
-    let locator = parse_repo_locator(remote_repo)?;
-    let expected_type = locator.repo_type.as_str();
-    if !repo_type.trim().eq_ignore_ascii_case(expected_type) {
-        return Err(
-            "Saved repository provider does not match the remote repository URL.".to_string(),
-        );
-    }
-    if repo_project_id.trim().is_empty() {
-        return Err("This project has no remote project id. Save it again to synchronize repository metadata.".to_string());
-    }
-
-    match locator.repo_type {
-        RepoType::Gitee => {
-            gitee::get_pull_requests(&locator, repo_project_id, state, filters, page, per_page)
-                .await
-        }
-        RepoType::GitLab => {
-            gitlab::get_pull_requests(&locator, repo_project_id, state, filters, page, per_page)
-                .await
-        }
-        RepoType::GitHub => {
-            github::get_pull_requests(&locator, state, filters, page, per_page).await
-        }
-    }
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+    context
+        .provider()
+        .pull_requests(&context, state, filters, page, per_page)
+        .await
 }
 
 /// Count open pull requests targeting the standard delivery environments.
@@ -76,46 +56,11 @@ pub(crate) async fn get_standard_environment_pull_request_counts(
     repo_project_id: &str,
     remote_repo: &str,
 ) -> Result<EnvironmentPullRequestCounts, String> {
-    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
-
-    match locator.repo_type {
-        RepoType::GitHub => {
-            let (fat, uat, prod) = tokio::try_join!(
-                github::get_open_pull_request_count(&locator, "fat"),
-                github::get_open_pull_request_count(&locator, "uat"),
-                github::get_open_pull_request_count(&locator, "prod"),
-            )?;
-            Ok(EnvironmentPullRequestCounts { fat, uat, prod })
-        }
-        RepoType::GitLab => {
-            let filters = PullRequestFilters::default();
-            overview::count_standard_environment_pages(|page, per_page| {
-                gitlab::get_pull_requests(
-                    &locator,
-                    repo_project_id,
-                    Some(PullRequestState::Open),
-                    &filters,
-                    page,
-                    per_page,
-                )
-            })
-            .await
-        }
-        RepoType::Gitee => {
-            let filters = PullRequestFilters::default();
-            overview::count_standard_environment_pages(|page, per_page| {
-                gitee::get_pull_requests(
-                    &locator,
-                    repo_project_id,
-                    Some(PullRequestState::Open),
-                    &filters,
-                    page,
-                    per_page,
-                )
-            })
-            .await
-        }
-    }
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+    context
+        .provider()
+        .standard_environment_counts(&context)
+        .await
 }
 
 /// Load the review diff for one pull request. Provider-specific response
@@ -127,46 +72,14 @@ pub(crate) async fn get_pull_request_diff(
     pull_request_iid: &str,
     ignore_whitespace_change: bool,
 ) -> Result<PullRequestDiffDetail, String> {
-    let locator = parse_repo_locator(remote_repo)?;
-    if !repo_type
-        .trim()
-        .eq_ignore_ascii_case(locator.repo_type.as_str())
-    {
-        return Err(
-            "Saved repository provider does not match the remote repository URL.".to_string(),
-        );
-    }
-    if repo_project_id.trim().is_empty() {
-        return Err("This project has no remote project id.".to_string());
-    }
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
         return Err("Pull request number is empty.".to_string());
     }
-
-    match locator.repo_type {
-        RepoType::Gitee => {
-            gitee::get_pull_request_diff(
-                &locator,
-                repo_project_id,
-                pull_request_iid,
-                ignore_whitespace_change,
-            )
-            .await
-        }
-        RepoType::GitLab => {
-            gitlab::get_pull_request_diff(
-                &locator,
-                repo_project_id,
-                pull_request_iid,
-                ignore_whitespace_change,
-            )
-            .await
-        }
-        RepoType::GitHub => {
-            github::get_pull_request_diff(&locator, pull_request_iid, ignore_whitespace_change)
-                .await
-        }
-    }
+    context
+        .provider()
+        .pull_request_diff(&context, pull_request_iid, ignore_whitespace_change)
+        .await
 }
 
 /// Load a diff for one contiguous commit range within a pull request.
@@ -179,62 +92,34 @@ pub(crate) async fn get_pull_request_commit_range_diff(
     commit_count: u32,
     ignore_whitespace_change: bool,
 ) -> Result<PullRequestDiffDetail, String> {
-    let locator = parse_repo_locator(remote_repo)?;
-    if !repo_type
-        .trim()
-        .eq_ignore_ascii_case(locator.repo_type.as_str())
-    {
-        return Err(
-            "Saved repository provider does not match the remote repository URL.".to_string(),
-        );
-    }
-    if repo_project_id.trim().is_empty() {
-        return Err("This project has no remote project id.".to_string());
-    }
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if base_sha.trim().is_empty() || head_sha.trim().is_empty() {
         return Err("Commit range is incomplete.".to_string());
     }
 
-    match locator.repo_type {
-        RepoType::Gitee => {
-            gitee::get_commit_range_diff(
-                &locator,
-                repo_project_id,
-                base_sha,
-                head_sha,
-                commit_count,
-                ignore_whitespace_change,
-            )
-            .await
-        }
-        RepoType::GitLab => {
-            gitlab::get_commit_range_diff(
-                &locator,
-                repo_project_id,
-                base_sha,
-                head_sha,
-                commit_count,
-            )
-            .await
-        }
-        RepoType::GitHub => {
-            github::get_commit_range_diff(&locator, base_sha, head_sha, commit_count).await
-        }
-    }
+    context
+        .provider()
+        .commit_range_diff(
+            &context,
+            base_sha,
+            head_sha,
+            commit_count,
+            ignore_whitespace_change,
+        )
+        .await
 }
 
 /// Whether the configured provider endpoint can filter whitespace-only diff
 /// changes. Currently this is part of the Gitee-compatible enterprise diff
 /// contract only; public Gitee, GitHub, and GitLab adapters do not support it.
 pub(crate) fn supports_ignore_whitespace(repo_type: &str, remote_repo: &str) -> bool {
-    let Ok(locator) = parse_repo_locator(remote_repo) else {
+    let Ok(context) = RepoContext::discover(remote_repo) else {
         return false;
     };
     repo_type
         .trim()
-        .eq_ignore_ascii_case(locator.repo_type.as_str())
-        && locator.repo_type == RepoType::Gitee
-        && gitee_api_profile(&locator) == GiteeApiProfile::EnterpriseV8
+        .eq_ignore_ascii_case(context.repo_type().as_str())
+        && context.capabilities().ignore_whitespace
 }
 
 /// Load repository source for a single diff file at an immutable commit ref.
@@ -247,20 +132,15 @@ pub(crate) async fn get_repository_file_text(
     path: &str,
     reference: &str,
 ) -> Result<String, String> {
-    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if path.trim().is_empty() || reference.trim().is_empty() {
         return Err("Repository file path or commit reference is empty.".to_string());
     }
 
-    match locator.repo_type {
-        RepoType::Gitee => {
-            gitee::get_repository_file_text(&locator, repo_project_id, path, reference).await
-        }
-        RepoType::GitLab => {
-            gitlab::get_repository_file_text(&locator, repo_project_id, path, reference).await
-        }
-        RepoType::GitHub => github::get_repository_file_text(&locator, path, reference).await,
-    }
+    context
+        .provider()
+        .repository_file_text(&context, path, reference)
+        .await
 }
 
 pub(crate) async fn get_pull_request_action_state(
@@ -269,19 +149,14 @@ pub(crate) async fn get_pull_request_action_state(
     remote_repo: &str,
     pull_request_iid: &str,
 ) -> Result<PullRequestActionState, String> {
-    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
         return Err("Pull request number is empty.".to_string());
     }
-    match locator.repo_type {
-        RepoType::Gitee => {
-            gitee::get_pull_request_action_state(&locator, repo_project_id, pull_request_iid).await
-        }
-        RepoType::GitHub => github::get_pull_request_action_state(&locator, pull_request_iid).await,
-        RepoType::GitLab => {
-            gitlab::get_pull_request_action_state(&locator, repo_project_id, pull_request_iid).await
-        }
-    }
+    context
+        .provider()
+        .pull_request_action_state(&context, pull_request_iid)
+        .await
 }
 
 pub(crate) async fn get_pull_request_conversation(
@@ -290,19 +165,14 @@ pub(crate) async fn get_pull_request_conversation(
     remote_repo: &str,
     pull_request_iid: &str,
 ) -> Result<Vec<PullRequestConversationItem>, String> {
-    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
         return Err("Pull request number is empty.".to_string());
     }
-    match locator.repo_type {
-        RepoType::Gitee => {
-            gitee::get_pull_request_conversation(&locator, repo_project_id, pull_request_iid).await
-        }
-        RepoType::GitHub => github::get_pull_request_conversation(&locator, pull_request_iid).await,
-        RepoType::GitLab => {
-            gitlab::get_pull_request_conversation(&locator, repo_project_id, pull_request_iid).await
-        }
-    }
+    context
+        .provider()
+        .pull_request_conversation(&context, pull_request_iid)
+        .await
 }
 
 pub(crate) async fn get_pull_request_commits(
@@ -311,19 +181,14 @@ pub(crate) async fn get_pull_request_commits(
     remote_repo: &str,
     pull_request_iid: &str,
 ) -> Result<Vec<PullRequestCommit>, String> {
-    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
         return Err("Pull request number is empty.".to_string());
     }
-    match locator.repo_type {
-        RepoType::Gitee => {
-            gitee::get_pull_request_commits(&locator, repo_project_id, pull_request_iid).await
-        }
-        RepoType::GitHub => github::get_pull_request_commits(&locator, pull_request_iid).await,
-        RepoType::GitLab => {
-            gitlab::get_pull_request_commits(&locator, repo_project_id, pull_request_iid).await
-        }
-    }
+    context
+        .provider()
+        .pull_request_commits(&context, pull_request_iid)
+        .await
 }
 
 pub(crate) async fn submit_pull_request_review(
@@ -334,35 +199,14 @@ pub(crate) async fn submit_pull_request_review(
     action: PullRequestReviewAction,
     body: &str,
 ) -> Result<(), String> {
-    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
         return Err("Pull request number is empty.".to_string());
     }
-    match locator.repo_type {
-        RepoType::Gitee => {
-            gitee::submit_pull_request_review(
-                &locator,
-                repo_project_id,
-                pull_request_iid,
-                action,
-                body,
-            )
-            .await
-        }
-        RepoType::GitHub => {
-            github::submit_pull_request_review(&locator, pull_request_iid, action, body).await
-        }
-        RepoType::GitLab => {
-            gitlab::submit_pull_request_review(
-                &locator,
-                repo_project_id,
-                pull_request_iid,
-                action,
-                body,
-            )
-            .await
-        }
-    }
+    context
+        .provider()
+        .submit_pull_request_review(&context, pull_request_iid, action, body)
+        .await
 }
 
 /// Dismiss one visible review through the configured provider's native
@@ -376,23 +220,14 @@ pub(crate) async fn dismiss_pull_request_review(
     review_id: &str,
     reason: &str,
 ) -> Result<(), String> {
-    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
         return Err("Pull request number is empty.".to_string());
     }
-    match locator.repo_type {
-        RepoType::Gitee => {
-            gitee::dismiss_pull_request_review(&locator, repo_project_id, pull_request_iid, reason)
-                .await
-        }
-        RepoType::GitHub => {
-            github::dismiss_pull_request_review(&locator, pull_request_iid, review_id, reason).await
-        }
-        RepoType::GitLab => {
-            gitlab::dismiss_pull_request_review(&locator, repo_project_id, pull_request_iid, reason)
-                .await
-        }
-    }
+    context
+        .provider()
+        .dismiss_pull_request_review(&context, pull_request_iid, review_id, reason)
+        .await
 }
 
 pub(crate) async fn merge_pull_request(
@@ -403,40 +238,14 @@ pub(crate) async fn merge_pull_request(
     method: PullRequestMergeMethod,
     remove_source_branch: bool,
 ) -> Result<(), String> {
-    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
         return Err("Pull request number is empty.".to_string());
     }
-    match locator.repo_type {
-        RepoType::Gitee => {
-            gitee::merge_pull_request(
-                &locator,
-                repo_project_id,
-                pull_request_iid,
-                method,
-                remove_source_branch,
-            )
-            .await
-        }
-        RepoType::GitHub => {
-            if remove_source_branch {
-                log::debug!(
-                    "[CodeReview][GitHub] Source-branch deletion is not part of the merge endpoint"
-                );
-            }
-            github::merge_pull_request(&locator, pull_request_iid, method).await
-        }
-        RepoType::GitLab => {
-            gitlab::merge_pull_request(
-                &locator,
-                repo_project_id,
-                pull_request_iid,
-                method,
-                remove_source_branch,
-            )
-            .await
-        }
-    }
+    context
+        .provider()
+        .merge_pull_request(&context, pull_request_iid, method, remove_source_branch)
+        .await
 }
 
 /// Create a provider-native reverse change for one merged pull request.
@@ -450,39 +259,20 @@ pub(crate) async fn revert_pull_request(
     remote_repo: &str,
     pull_request_iid: &str,
 ) -> Result<PullRequestRevertResult, String> {
-    let locator = validated_repository_context(repo_type, repo_project_id, remote_repo)?;
+    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
         return Err("Pull request number is empty.".to_string());
     }
-    match locator.repo_type {
-        RepoType::GitHub => github::revert_pull_request(&locator, pull_request_iid).await,
-        RepoType::Gitee => {
-            gitee::revert_pull_request(&locator, repo_project_id, pull_request_iid).await
-        }
-        RepoType::GitLab => {
-            Err("Automated merge-request revert is not implemented for GitLab yet.".to_string())
-        }
+    if !context.capabilities().server_side_revert {
+        return Err(format!(
+            "Automated merge-request revert is not implemented for {} yet.",
+            context.repo_type()
+        ));
     }
-}
-
-fn validated_repository_context(
-    repo_type: &str,
-    repo_project_id: &str,
-    remote_repo: &str,
-) -> Result<RepoLocator, String> {
-    let locator = parse_repo_locator(remote_repo)?;
-    if !repo_type
-        .trim()
-        .eq_ignore_ascii_case(locator.repo_type.as_str())
-    {
-        return Err(
-            "Saved repository provider does not match the remote repository URL.".to_string(),
-        );
-    }
-    if repo_project_id.trim().is_empty() {
-        return Err("This project has no remote project id.".to_string());
-    }
-    Ok(locator)
+    context
+        .provider()
+        .revert_pull_request(&context, pull_request_iid)
+        .await
 }
 
 #[cfg(test)]

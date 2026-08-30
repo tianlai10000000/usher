@@ -51,21 +51,25 @@ fields were intentionally not inspected.
 The 90-second client idle limit was shorter than the observed 188.576-second
 non-streaming inference. The provider was not proven to be offline or stuck: it
 accepted the request, emitted approximately 60-second whitespace heartbeats,
-and eventually returned a valid completion. Because whitespace is not valid
-JSON progress, those heartbeats continue not to reset the semantic idle timer.
+and eventually returned a valid completion. At the time, whitespace was not
+treated as semantic JSON progress. The current streaming implementation instead
+resets the transport idle timer for every received chunk and applies a separate
+600-second wall-clock limit to each review chunk.
 
 客户端原 90 秒正文空闲阈值短于本次实测的 188.576 秒非流式推理。没有证据表明 Provider
 离线或永久卡住：它接受了请求，约每 60 秒发送一次空白心跳，最后返回了有效 completion。
-空白不属于有效 JSON 进度，因此这些心跳仍不重置语义空闲计时。
+当时空白不属于有效 JSON 进度。当前 streaming 实现已改为任何收到的传输 chunk 都重置
+空闲计时，并对每个 Review chunk 另设 600 秒墙钟上限。
 
 `REVIEW_READ_IDLE_TIMEOUT` in `src/ai/agent.rs` was raised to 300 seconds for
 AI Review and review-scoped Ask only. The shared 10-second connect timeout,
-ordinary AI completion deadlines, non-whitespace progress policy, and explicit
-Stop cancellation remain unchanged.
+ordinary AI completion deadlines and explicit Stop cancellation remained
+unchanged in that fix. The later SSE migration superseded the body-progress
+policy as described above.
 
 `src/ai/agent.rs` 中的 `REVIEW_READ_IDLE_TIMEOUT` 已针对 AI Review 和 Review 专属 Ask
-提高到 300 秒。共享的 10 秒连接超时、普通 AI completion 截止时间、非空白进度策略和
-显式 Stop 取消能力均保持不变。
+提高到 300 秒。该次修复保持共享的 10 秒连接超时、普通 AI completion 截止时间和显式
+Stop 取消能力不变；后续 SSE 迁移已按上文所述替换正文进度策略。
 
 ## Future threshold adjustment / 后续阈值调整
 
@@ -86,8 +90,8 @@ and response-body idle failures:
    for a permanent threshold increase.
 4. If valid completions repeatedly arrive near or after 300 seconds, adjust only
    `REVIEW_READ_IDLE_TIMEOUT`, update both languages in the AI Review spec, and
-   update its focused unit test. Retain cancellation and the non-whitespace
-   progress rule.
+   update its focused unit test. Retain cancellation and the separate per-chunk
+   wall-clock limit.
 5. Choose a bounded threshold above the observed slow-completion range with an
    explicit margin. A larger value reduces false timeouts but also delays real
    stall detection. If latency keeps growing, prefer investigating streaming or
@@ -100,4 +104,3 @@ Useful log filter / 推荐日志筛选：
 ```sh
 rg -n '\[AI Review\]\[Task\]|\[AI Agent\]\[Completion\]|\[HTTP\]\[Transfer\]|\[HTTP\]\[Body\].*operation=AI code review' logs/<date>/usher.log
 ```
-

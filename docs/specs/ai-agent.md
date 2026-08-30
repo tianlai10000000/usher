@@ -39,14 +39,14 @@ Values are stored in the local platform `settings.toml` under `[ai.agent]`, incl
 3. Slint state is updated only on the event loop; the connection test runs on the shared Tokio runtime.
 4. A missing URL, key, or model is a local validation error and must not create a network request.
 5. Completion requests carry a bounded feature-owned message list. API keys, complete prompts, source payloads, and response bodies must not be logged.
-6. Ordinary completions keep the shared 30-second total and body-idle timeouts. Explicitly cancellable AI Review and Review Ask completions disable only the total deadline; they retain the 10-second connect timeout and use a 90-second response-body idle timeout through the same interceptor pipeline.
+6. Ordinary completions keep the shared 30-second total and body-idle timeouts. Explicitly cancellable AI Review and Review Ask completions use OpenAI-compatible SSE streaming through the same interceptor pipeline, disable only the request total deadline, retain the 10-second connect timeout, and use a 300-second response-body idle timeout. A provider that answers a streaming request with one JSON response remains supported.
 
 1. AI 请求不得创建 reqwest client，也不得绕过 `src/http/mod.rs`。
 2. API Key 仅附加到配置的 Provider 请求，不得出现在日志、Toast、通知或错误正文中。
 3. Slint 状态只在 event loop 更新；连通性测试运行在共享 Tokio runtime。
 4. URL、Key、模型任一缺失时为本地校验错误，不得发起网络请求。
 5. Completion 请求只接收 Feature 自有的有界消息列表；日志不得包含 API Key、完整 Prompt、源码 payload 或响应正文。
-6. 普通 completion 使用共享的 30 秒总时限和响应体空闲时限；可显式取消的 AI Review 与 Review Ask completion 只关闭总截止时间，仍保留 10 秒连接超时，并通过同一 interceptor 管线使用 90 秒响应体空闲超时。
+6. 普通 completion 使用共享的 30 秒总时限和响应体空闲时限；可显式取消的 AI Review 与 Review Ask completion 通过同一 interceptor 管线使用 OpenAI-compatible SSE streaming，只关闭请求总截止时间，仍保留 10 秒连接超时和 300 秒响应体空闲超时。若 Provider 对 streaming 请求返回一次性 JSON，仍须兼容。
 
 ## Regression checklist / 回归检查
 

@@ -54,6 +54,18 @@ enum ShutdownStage {
     Post,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum CleanupMode {
+    EventLoop,
+    BackgroundFallback,
+}
+
+impl CleanupMode {
+    fn runs_ui_cleanup(self) -> bool {
+        self == Self::EventLoop
+    }
+}
+
 impl ShutdownStage {
     fn as_str(self) -> &'static str {
         match self {
@@ -194,6 +206,10 @@ pub fn init_signal_handlers() {
 
 /// Run all registered cleanup tasks once.
 pub fn run_cleanup_once(trigger: &str) {
+    run_cleanup_once_with_mode(trigger, CleanupMode::EventLoop);
+}
+
+fn run_cleanup_once_with_mode(trigger: &str, mode: CleanupMode) {
     if CLEANUP_EXECUTED.swap(true, Ordering::SeqCst) {
         log::info!(
             "[Shutdown] Cleanup already executed, skipping (trigger: {})",
@@ -213,11 +229,21 @@ pub fn run_cleanup_once(trigger: &str) {
     };
 
     run_stage_tasks(ShutdownStage::Pre, &mut registry.pre_shutdown);
-    run_stage_tasks(ShutdownStage::Ui, &mut registry.ui_shutdown);
+    if mode.runs_ui_cleanup() {
+        run_stage_tasks(ShutdownStage::Ui, &mut registry.ui_shutdown);
+    } else {
+        log::warn!(
+            "[Shutdown] Background fallback skipped {} UI/AppKit cleanup task(s)",
+            registry.ui_shutdown.len()
+        );
+        registry.ui_shutdown.clear();
+    }
     run_stage_tasks(ShutdownStage::Post, &mut registry.post_shutdown);
 
     #[cfg(target_os = "macos")]
-    cleanup_associated_helpers();
+    if mode.runs_ui_cleanup() {
+        cleanup_associated_helpers();
+    }
 
     log::info!(
         "[Shutdown] Cleanup pipeline finished in {} ms",
@@ -299,7 +325,7 @@ pub fn request_shutdown(trigger: &str) {
     let trigger_owned = trigger.to_string();
     if slint::invoke_from_event_loop(move || perform_shutdown(&trigger_owned)).is_err() {
         log::error!("[Shutdown] Failed to dispatch shutdown to UI loop, running fallback path");
-        run_cleanup_once(trigger);
+        run_cleanup_once_with_mode(trigger, CleanupMode::BackgroundFallback);
         log::warn!("[Shutdown] Fallback shutdown: process::exit(0)");
         std::process::exit(0);
     }
@@ -423,5 +449,16 @@ fn cleanup_associated_helpers() {
         } else {
             log::info!("[Shutdown] No associated helper processes found");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CleanupMode;
+
+    #[test]
+    fn background_fallback_never_runs_ui_cleanup() {
+        assert!(CleanupMode::EventLoop.runs_ui_cleanup());
+        assert!(!CleanupMode::BackgroundFallback.runs_ui_cleanup());
     }
 }

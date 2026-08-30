@@ -876,6 +876,11 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     shutdown::register_ui_shutdown_task_with_priority("remove_tray", PRIORITY_HIGH, || {
         tray::remove_tray();
     });
+    shutdown::register_ui_shutdown_task_with_priority(
+        "shutdown_native_integrations",
+        PRIORITY_HIGH,
+        platform::shutdown_native_integrations,
+    );
     settings_page.install(&app);
     message_page.install(&app);
     memory_diagnostics::log_checkpoint("startup.ui_bindings_complete");

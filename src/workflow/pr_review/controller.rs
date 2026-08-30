@@ -1,21 +1,31 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+#[cfg(feature = "test-fixtures")]
 use std::fs::{File, OpenOptions};
+use std::future::Future;
+#[cfg(feature = "test-fixtures")]
 use std::io::{BufWriter, Write};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(feature = "test-fixtures")]
+use std::sync::OnceLock;
+#[cfg(feature = "test-fixtures")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+#[cfg(feature = "test-fixtures")]
 use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use usher_search::{SearchDirection, step_match_index};
 
+#[cfg(any(test, feature = "test-fixtures"))]
+use crate::git::PullRequestDiffLine;
 use crate::git::{
     PullRequestActionState, PullRequestCommit, PullRequestDiffDetail, PullRequestDiffFile,
-    PullRequestDiffLine, PullRequestMergeMethod, PullRequestReviewAction,
-    dismiss_pull_request_review, get_pull_request_action_state, get_pull_request_commit_range_diff,
-    get_pull_request_commits, get_pull_request_conversation, get_pull_request_diff,
-    get_repository_file_text, merge_pull_request, revert_pull_request, submit_pull_request_review,
+    PullRequestMergeMethod, PullRequestReviewAction, dismiss_pull_request_review,
+    get_pull_request_action_state, get_pull_request_commit_range_diff, get_pull_request_commits,
+    get_pull_request_conversation, get_pull_request_diff, get_repository_file_text,
+    merge_pull_request, revert_pull_request, submit_pull_request_review,
     supports_ignore_whitespace,
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
@@ -56,6 +66,7 @@ use super::selection::{
     diff_selection_slice, diff_selection_text, diff_wrap_line_start, resolve_diff_click_range,
     resolve_diff_selection_hit,
 };
+use super::state::{ReviewRequestKind, ReviewStateFacade};
 use super::text_geometry;
 use super::timeline::{
     chrono_commit_index_to_display, commit_index_by_sha, commit_model, commit_range_label,
@@ -67,16 +78,23 @@ use super::virtual_list::PrDiffVirtualListBridge;
 
 const LARGE_DIFF_LINE_THRESHOLD: usize = 400;
 const LARGE_DIFF_BYTE_THRESHOLD: usize = 64 * 1024;
+#[cfg(feature = "test-fixtures")]
 const PR_SCROLL_DIAGNOSTICS_PATH: &str = "/tmp/usher-pr-scroll-diagnostics.log";
 
+#[cfg(feature = "test-fixtures")]
 struct PrScrollDiagnostics {
     started_at: Instant,
     sequence: AtomicU64,
     writer: Mutex<BufWriter<File>>,
 }
 
+#[cfg(not(feature = "test-fixtures"))]
+struct PrScrollDiagnostics;
+
+#[cfg(feature = "test-fixtures")]
 static PR_SCROLL_DIAGNOSTICS: OnceLock<Option<PrScrollDiagnostics>> = OnceLock::new();
 
+#[cfg(feature = "test-fixtures")]
 fn pr_scroll_diagnostics() -> Option<&'static PrScrollDiagnostics> {
     PR_SCROLL_DIAGNOSTICS
         .get_or_init(|| {
@@ -109,6 +127,12 @@ fn pr_scroll_diagnostics() -> Option<&'static PrScrollDiagnostics> {
         .as_ref()
 }
 
+#[cfg(not(feature = "test-fixtures"))]
+fn pr_scroll_diagnostics() -> Option<&'static PrScrollDiagnostics> {
+    None
+}
+
+#[cfg(feature = "test-fixtures")]
 #[allow(clippy::too_many_arguments)]
 fn write_pr_scroll_diagnostic(
     kind: &str,
@@ -141,6 +165,24 @@ fn write_pr_scroll_diagnostic(
     }
 }
 
+#[cfg(not(feature = "test-fixtures"))]
+#[allow(clippy::too_many_arguments)]
+fn write_pr_scroll_diagnostic(
+    _kind: &str,
+    _viewport_y: f32,
+    _requested_y: f32,
+    _visible_height: f32,
+    _viewport_height: f32,
+    _find_open: bool,
+    _find_focused: bool,
+    _hunk_pending: bool,
+    _find_revision: i32,
+    _line_revision: i32,
+    _hunk_attempts: i32,
+) {
+}
+
+#[cfg(feature = "test-fixtures")]
 #[allow(clippy::too_many_arguments)]
 fn write_pr_find_reveal_diagnostic(
     line: i32,
@@ -174,6 +216,22 @@ fn write_pr_find_reveal_diagnostic(
     let _ = writer.flush();
 }
 
+#[cfg(not(feature = "test-fixtures"))]
+#[allow(clippy::too_many_arguments)]
+fn write_pr_find_reveal_diagnostic(
+    _line: i32,
+    _start_char: i32,
+    _row_count: usize,
+    _code_width: f32,
+    _cell_width: f32,
+    _side: &str,
+    _current_viewport_y: f32,
+    _target_viewport_y: f32,
+    _visible_height: f32,
+    _content_height: f32,
+) {
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReviewRequest {
     number: String,
@@ -199,12 +257,7 @@ pub(crate) struct WorkflowPrReviewController {
     highlight_resources: Arc<Mutex<Option<Arc<HighlightResources>>>>,
     highlighted_files: Arc<Mutex<BoundedCache<Arc<Vec<HighlightedLine>>>>>,
     source_files: Arc<Mutex<BoundedCache<String>>>,
-    request_sequence: Arc<AtomicU64>,
-    highlight_sequence: Arc<AtomicU64>,
-    expand_sequence: Arc<AtomicU64>,
-    action_sequence: Arc<AtomicU64>,
-    conversation_sequence: Arc<AtomicU64>,
-    commits_sequence: Arc<AtomicU64>,
+    state: ReviewStateFacade,
     conversation_loaded: Arc<Mutex<bool>>,
     commits_loaded: Arc<Mutex<bool>>,
     commits: Arc<Mutex<Vec<PullRequestCommit>>>,
@@ -241,12 +294,7 @@ pub(crate) fn bind_pr_review(
         highlight_resources: Arc::new(Mutex::new(None)),
         highlighted_files: Arc::new(Mutex::new(BoundedCache::new(HIGHLIGHT_CACHE_CAPACITY))),
         source_files: Arc::new(Mutex::new(BoundedCache::new(SOURCE_CACHE_CAPACITY))),
-        request_sequence: Arc::new(AtomicU64::new(0)),
-        highlight_sequence: Arc::new(AtomicU64::new(0)),
-        expand_sequence: Arc::new(AtomicU64::new(0)),
-        action_sequence: Arc::new(AtomicU64::new(0)),
-        conversation_sequence: Arc::new(AtomicU64::new(0)),
-        commits_sequence: Arc::new(AtomicU64::new(0)),
+        state: ReviewStateFacade::new(),
         conversation_loaded: Arc::new(Mutex::new(false)),
         commits_loaded: Arc::new(Mutex::new(false)),
         commits: Arc::new(Mutex::new(Vec::new())),
@@ -998,6 +1046,7 @@ pub(crate) fn bind_pr_review(
 }
 
 impl WorkflowPrReviewController {
+    #[cfg(feature = "test-fixtures")]
     pub(crate) fn install_memory_benchmark_fixture(&self, ui: &MainWindow) {
         if std::env::var("USHER_MEMORY_PR_REVIEW_FIXTURE").as_deref() != Ok("large-ranges-v1") {
             return;
@@ -1066,6 +1115,9 @@ impl WorkflowPrReviewController {
         });
     }
 
+    #[cfg(not(feature = "test-fixtures"))]
+    pub(crate) fn install_memory_benchmark_fixture(&self, _ui: &MainWindow) {}
+
     fn clear_owned_state(&self, ui: &MainWindow) {
         self.invalidate_pending_requests();
         if let Ok(mut request) = self.active_request.lock() {
@@ -1079,12 +1131,7 @@ impl WorkflowPrReviewController {
     }
 
     fn invalidate_pending_requests(&self) {
-        self.request_sequence.fetch_add(1, Ordering::SeqCst);
-        self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
-        self.expand_sequence.fetch_add(1, Ordering::SeqCst);
-        self.action_sequence.fetch_add(1, Ordering::SeqCst);
-        self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
-        self.commits_sequence.fetch_add(1, Ordering::SeqCst);
+        self.state.invalidate_all();
     }
 
     fn reset_request_scoped_state(&self, ui: &MainWindow, reset_tab: bool) {
@@ -1276,7 +1323,7 @@ impl WorkflowPrReviewController {
             return;
         }
 
-        self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
+        self.state.invalidate(ReviewRequestKind::Highlight);
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.clear();
         }
@@ -1292,7 +1339,7 @@ impl WorkflowPrReviewController {
         ui.set_workflow_pr_review_selected_file_path("".into());
         ui.set_workflow_pr_review_context_expanded(false);
 
-        let sequence = self.request_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.state.begin(ReviewRequestKind::Diff);
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
@@ -1324,7 +1371,10 @@ impl WorkflowPrReviewController {
             };
 
             let _ = slint::invoke_from_event_loop(move || {
-                if controller.request_sequence.load(Ordering::SeqCst) != sequence {
+                if !controller
+                    .state
+                    .is_current(ReviewRequestKind::Diff, generation)
+                {
                     return;
                 }
                 let Some(ui) = ui_weak.upgrade() else {
@@ -1409,7 +1459,7 @@ impl WorkflowPrReviewController {
             .lock()
             .map(|alias| alias.clone())
             .unwrap_or_default();
-        let sequence = self.conversation_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.state.begin(ReviewRequestKind::Conversation);
         ui.set_workflow_pr_review_conversation_loading(true);
         ui.set_workflow_pr_review_conversation_error("".into());
         let controller = self.clone();
@@ -1439,10 +1489,9 @@ impl WorkflowPrReviewController {
                     let initial_controller = controller.clone();
                     let initial_ui_weak = ui_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
-                        if initial_controller
-                            .conversation_sequence
-                            .load(Ordering::SeqCst)
-                            != sequence
+                        if !initial_controller
+                            .state
+                            .is_current(ReviewRequestKind::Conversation, generation)
                         {
                             return;
                         }
@@ -1468,7 +1517,10 @@ impl WorkflowPrReviewController {
                         return;
                     }
                     let _ = slint::invoke_from_event_loop(move || {
-                        if controller.conversation_sequence.load(Ordering::SeqCst) != sequence {
+                        if !controller
+                            .state
+                            .is_current(ReviewRequestKind::Conversation, generation)
+                        {
                             return;
                         }
                         let Some(ui) = ui_weak.upgrade() else {
@@ -1480,7 +1532,10 @@ impl WorkflowPrReviewController {
                 }
                 Err(error) => {
                     let _ = slint::invoke_from_event_loop(move || {
-                        if controller.conversation_sequence.load(Ordering::SeqCst) != sequence {
+                        if !controller
+                            .state
+                            .is_current(ReviewRequestKind::Conversation, generation)
+                        {
                             return;
                         }
                         let Some(ui) = ui_weak.upgrade() else {
@@ -1498,7 +1553,7 @@ impl WorkflowPrReviewController {
     }
 
     fn refresh_conversation_after_remote_action(&self, ui: &MainWindow) {
-        self.conversation_sequence.fetch_add(1, Ordering::SeqCst);
+        self.state.invalidate(ReviewRequestKind::Conversation);
         if let Ok(mut loaded) = self.conversation_loaded.lock() {
             *loaded = false;
         }
@@ -1529,7 +1584,7 @@ impl WorkflowPrReviewController {
             .lock()
             .map(|alias| alias.clone())
             .unwrap_or_default();
-        let sequence = self.commits_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.state.begin(ReviewRequestKind::Commits);
         ui.set_workflow_pr_review_commits_loading(true);
         ui.set_workflow_pr_review_commits_error("".into());
         let controller = self.clone();
@@ -1559,7 +1614,10 @@ impl WorkflowPrReviewController {
                     let initial_controller = controller.clone();
                     let initial_ui_weak = ui_weak.clone();
                     let _ = slint::invoke_from_event_loop(move || {
-                        if initial_controller.commits_sequence.load(Ordering::SeqCst) != sequence {
+                        if !initial_controller
+                            .state
+                            .is_current(ReviewRequestKind::Commits, generation)
+                        {
                             return;
                         }
                         let Some(ui) = initial_ui_weak.upgrade() else {
@@ -1598,7 +1656,10 @@ impl WorkflowPrReviewController {
                         return;
                     }
                     let _ = slint::invoke_from_event_loop(move || {
-                        if controller.commits_sequence.load(Ordering::SeqCst) != sequence {
+                        if !controller
+                            .state
+                            .is_current(ReviewRequestKind::Commits, generation)
+                        {
                             return;
                         }
                         let Some(ui) = ui_weak.upgrade() else {
@@ -1610,7 +1671,10 @@ impl WorkflowPrReviewController {
                 }
                 Err(error) => {
                     let _ = slint::invoke_from_event_loop(move || {
-                        if controller.commits_sequence.load(Ordering::SeqCst) != sequence {
+                        if !controller
+                            .state
+                            .is_current(ReviewRequestKind::Commits, generation)
+                        {
                             return;
                         }
                         let Some(ui) = ui_weak.upgrade() else {
@@ -1674,7 +1738,7 @@ impl WorkflowPrReviewController {
 
     fn apply_commit_range(&self, ui: &MainWindow, start: i32, end: i32) {
         if start < 0 || end < 0 {
-            self.request_sequence.fetch_add(1, Ordering::SeqCst);
+            self.state.invalidate(ReviewRequestKind::Diff);
             let detail = self
                 .cache
                 .lock()
@@ -1719,7 +1783,7 @@ impl WorkflowPrReviewController {
                 .ok()
                 .and_then(|cache| cache.as_ref().map(|cache| cache.all_detail.clone()));
             if let Some(detail) = detail {
-                self.request_sequence.fetch_add(1, Ordering::SeqCst);
+                self.state.invalidate(ReviewRequestKind::Diff);
                 self.activate_commit_range(ui, detail);
                 ui.set_workflow_pr_review_commit_range_start(display_start as i32);
                 ui.set_workflow_pr_review_commit_range_end(display_end as i32);
@@ -1761,7 +1825,7 @@ impl WorkflowPrReviewController {
                 .and_then(|cache| cache.range_diffs.get_cloned(cache_key.as_str()))
         });
         if let Some(detail) = cached {
-            self.request_sequence.fetch_add(1, Ordering::SeqCst);
+            self.state.invalidate(ReviewRequestKind::Diff);
             self.activate_commit_range(ui, detail);
             ui.set_workflow_pr_review_commit_range_start(display_start as i32);
             ui.set_workflow_pr_review_commit_range_end(display_end as i32);
@@ -1770,7 +1834,7 @@ impl WorkflowPrReviewController {
             return;
         }
 
-        let sequence = self.request_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.state.begin(ReviewRequestKind::Diff);
         ui.set_workflow_pr_review_loading(true);
         ui.set_workflow_pr_review_error("".into());
         let controller = self.clone();
@@ -1787,7 +1851,10 @@ impl WorkflowPrReviewController {
             )
             .await;
             let _ = slint::invoke_from_event_loop(move || {
-                if controller.request_sequence.load(Ordering::SeqCst) != sequence {
+                if !controller
+                    .state
+                    .is_current(ReviewRequestKind::Diff, generation)
+                {
                     return;
                 }
                 let Some(ui) = ui_weak.upgrade() else {
@@ -1830,8 +1897,8 @@ impl WorkflowPrReviewController {
     }
 
     fn activate_commit_range(&self, ui: &MainWindow, detail: Arc<SharedDiffDetail>) {
-        self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
-        self.expand_sequence.fetch_add(1, Ordering::SeqCst);
+        self.state.invalidate(ReviewRequestKind::Highlight);
+        self.state.invalidate(ReviewRequestKind::Expand);
         if let Ok(mut highlighted) = self.highlighted_files.lock() {
             highlighted.clear();
         }
@@ -1855,12 +1922,38 @@ impl WorkflowPrReviewController {
         })
     }
 
+    fn run_action<T, F, C>(&self, ui: &MainWindow, future: F, completion: C)
+    where
+        T: Send + 'static,
+        F: Future<Output = Result<T, String>> + Send + 'static,
+        C: FnOnce(&WorkflowPrReviewController, &MainWindow, Result<T, String>) + Send + 'static,
+    {
+        let generation = self.state.begin(ReviewRequestKind::RemoteAction);
+        ui.set_workflow_pr_action_loading(true);
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let result = future.await;
+            let _ = slint::invoke_from_event_loop(move || {
+                if !controller
+                    .state
+                    .is_current(ReviewRequestKind::RemoteAction, generation)
+                {
+                    return;
+                }
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_action_loading(false);
+                completion(&controller, &ui, result);
+            });
+        });
+    }
+
     fn refresh_action_state(&self, ui: &MainWindow) {
         let Some((metadata, pull_request_iid)) = self.action_context() else {
             return;
         };
-        let sequence = self.action_sequence.fetch_add(1, Ordering::SeqCst) + 1;
-        ui.set_workflow_pr_action_loading(true);
         if ui.get_workflow_pr_merge_readiness_label().trim().is_empty() {
             ui.set_workflow_pr_merge_readiness_kind("checking".into());
             ui.set_workflow_pr_merge_readiness_label("Checking mergeability…".into());
@@ -1868,41 +1961,31 @@ impl WorkflowPrReviewController {
                 "Waiting for the repository provider to calculate merge readiness.".into(),
             );
         }
-        let controller = self.clone();
-        let ui_weak = ui.as_weak();
-        crate::app_runtime::shared_runtime().spawn(async move {
-            let result = get_pull_request_action_state(
-                metadata.repo_type.as_str(),
-                metadata.repo_project_id.as_str(),
-                metadata.remote_repo.as_str(),
-                pull_request_iid.as_str(),
-            )
-            .await;
-            let _ = slint::invoke_from_event_loop(move || {
-                if controller.action_sequence.load(Ordering::SeqCst) != sequence {
-                    return;
+        self.run_action(
+            ui,
+            async move {
+                get_pull_request_action_state(
+                    metadata.repo_type.as_str(),
+                    metadata.repo_project_id.as_str(),
+                    metadata.remote_repo.as_str(),
+                    pull_request_iid.as_str(),
+                )
+                .await
+            },
+            |_controller, ui, result| match result {
+                Ok(state) => apply_action_state(ui, &state),
+                Err(error) => {
+                    log::warn!("[Workflow][PR Review] Failed to load remote action state: {error}");
+                    reset_action_capabilities(ui);
+                    ui.set_workflow_pr_merge_readiness_kind("unavailable".into());
+                    ui.set_workflow_pr_merge_readiness_label("Merge status unavailable".into());
+                    ui.set_workflow_pr_merge_readiness_detail(
+                        "The repository provider could not return merge readiness.".into(),
+                    );
+                    ui.set_workflow_pr_merge_block_reason(error.into());
                 }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
-                ui.set_workflow_pr_action_loading(false);
-                match result {
-                    Ok(state) => apply_action_state(&ui, &state),
-                    Err(error) => {
-                        log::warn!(
-                            "[Workflow][PR Review] Failed to load remote action state: {error}"
-                        );
-                        reset_action_capabilities(&ui);
-                        ui.set_workflow_pr_merge_readiness_kind("unavailable".into());
-                        ui.set_workflow_pr_merge_readiness_label("Merge status unavailable".into());
-                        ui.set_workflow_pr_merge_readiness_detail(
-                            "The repository provider could not return merge readiness.".into(),
-                        );
-                        ui.set_workflow_pr_merge_block_reason(error.into());
-                    }
-                }
-            });
-        });
+            },
+        );
     }
 
     fn submit_review(&self, ui: &MainWindow, action: &str, body: &str) {
@@ -1931,61 +2014,51 @@ impl WorkflowPrReviewController {
             return;
         };
         let body = body.to_string();
-        let sequence = self.action_sequence.fetch_add(1, Ordering::SeqCst) + 1;
-        ui.set_workflow_pr_action_loading(true);
-        let controller = self.clone();
-        let ui_weak = ui.as_weak();
-        crate::app_runtime::shared_runtime().spawn(async move {
-            let result = submit_pull_request_review(
-                metadata.repo_type.as_str(),
-                metadata.repo_project_id.as_str(),
-                metadata.remote_repo.as_str(),
-                pull_request_iid.as_str(),
-                action,
-                body.as_str(),
-            )
-            .await;
-            let _ = slint::invoke_from_event_loop(move || {
-                if controller.action_sequence.load(Ordering::SeqCst) != sequence {
-                    return;
-                }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
-                ui.set_workflow_pr_action_loading(false);
-                match result {
-                    Ok(()) => {
-                        ui.set_workflow_pr_review_dialog_open(false);
-                        if action == PullRequestReviewAction::Comment {
-                            let count = ui.get_workflow_pr_review_conversation_count();
-                            ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
+        self.run_action(
+            ui,
+            async move {
+                submit_pull_request_review(
+                    metadata.repo_type.as_str(),
+                    metadata.repo_project_id.as_str(),
+                    metadata.remote_repo.as_str(),
+                    pull_request_iid.as_str(),
+                    action,
+                    body.as_str(),
+                )
+                .await
+            },
+            move |controller, ui, result| match result {
+                Ok(()) => {
+                    ui.set_workflow_pr_review_dialog_open(false);
+                    if action == PullRequestReviewAction::Comment {
+                        let count = ui.get_workflow_pr_review_conversation_count();
+                        ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
+                    }
+                    ui.set_workflow_pr_remote_review_state(
+                        match action {
+                            PullRequestReviewAction::Comment => "commented",
+                            PullRequestReviewAction::Approve => "approved",
+                            PullRequestReviewAction::RequestChanges => "rejected",
                         }
-                        ui.set_workflow_pr_remote_review_state(
-                            match action {
-                                PullRequestReviewAction::Comment => "commented",
-                                PullRequestReviewAction::Approve => "approved",
-                                PullRequestReviewAction::RequestChanges => "rejected",
-                            }
-                            .into(),
-                        );
-                        show_success(
-                            &ui,
-                            if action == PullRequestReviewAction::Comment {
-                                "Comment submitted to the remote repository."
-                            } else {
-                                "Review submitted to the remote repository."
-                            },
-                        );
-                        controller.refresh_action_state(&ui);
-                        controller.refresh_conversation_after_remote_action(&ui);
-                    }
-                    Err(error) => {
-                        log::warn!("[Workflow][PR Review] Failed to submit review: {error}");
-                        show_error(&ui, error.as_str());
-                    }
+                        .into(),
+                    );
+                    show_success(
+                        ui,
+                        if action == PullRequestReviewAction::Comment {
+                            "Comment submitted to the remote repository."
+                        } else {
+                            "Review submitted to the remote repository."
+                        },
+                    );
+                    controller.refresh_action_state(ui);
+                    controller.refresh_conversation_after_remote_action(ui);
                 }
-            });
-        });
+                Err(error) => {
+                    log::warn!("[Workflow][PR Review] Failed to submit review: {error}");
+                    show_error(ui, error.as_str());
+                }
+            },
+        );
     }
 
     fn dismiss_review(&self, ui: &MainWindow, review_id: &str, reason: &str) {
@@ -1999,44 +2072,34 @@ impl WorkflowPrReviewController {
         };
         let review_id = review_id.to_string();
         let reason = reason.to_string();
-        let sequence = self.action_sequence.fetch_add(1, Ordering::SeqCst) + 1;
-        ui.set_workflow_pr_action_loading(true);
-        let controller = self.clone();
-        let ui_weak = ui.as_weak();
-        crate::app_runtime::shared_runtime().spawn(async move {
-            let result = dismiss_pull_request_review(
-                metadata.repo_type.as_str(),
-                metadata.repo_project_id.as_str(),
-                metadata.remote_repo.as_str(),
-                pull_request_iid.as_str(),
-                review_id.as_str(),
-                reason.as_str(),
-            )
-            .await;
-            let _ = slint::invoke_from_event_loop(move || {
-                if controller.action_sequence.load(Ordering::SeqCst) != sequence {
-                    return;
+        self.run_action(
+            ui,
+            async move {
+                dismiss_pull_request_review(
+                    metadata.repo_type.as_str(),
+                    metadata.repo_project_id.as_str(),
+                    metadata.remote_repo.as_str(),
+                    pull_request_iid.as_str(),
+                    review_id.as_str(),
+                    reason.as_str(),
+                )
+                .await
+            },
+            |controller, ui, result| match result {
+                Ok(()) => {
+                    ui.set_workflow_pr_dismiss_review_dialog_open(false);
+                    let count = ui.get_workflow_pr_review_conversation_count();
+                    ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
+                    show_success(ui, "Review dismissed on the remote repository.");
+                    controller.refresh_action_state(ui);
+                    controller.refresh_conversation_after_remote_action(ui);
                 }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
-                ui.set_workflow_pr_action_loading(false);
-                match result {
-                    Ok(()) => {
-                        ui.set_workflow_pr_dismiss_review_dialog_open(false);
-                        let count = ui.get_workflow_pr_review_conversation_count();
-                        ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
-                        show_success(&ui, "Review dismissed on the remote repository.");
-                        controller.refresh_action_state(&ui);
-                        controller.refresh_conversation_after_remote_action(&ui);
-                    }
-                    Err(error) => {
-                        log::warn!("[Workflow][PR Review] Failed to dismiss review: {error}");
-                        show_error(&ui, error.as_str());
-                    }
+                Err(error) => {
+                    log::warn!("[Workflow][PR Review] Failed to dismiss review: {error}");
+                    show_error(ui, error.as_str());
                 }
-            });
-        });
+            },
+        );
     }
 
     fn merge(&self, ui: &MainWindow, method: &str, remove_source_branch: bool) {
@@ -2070,55 +2133,45 @@ impl WorkflowPrReviewController {
             show_error(ui, "The pull request repository context is unavailable.");
             return;
         };
-        let sequence = self.action_sequence.fetch_add(1, Ordering::SeqCst) + 1;
-        ui.set_workflow_pr_action_loading(true);
-        let controller = self.clone();
-        let ui_weak = ui.as_weak();
-        crate::app_runtime::shared_runtime().spawn(async move {
-            let result = merge_pull_request(
-                metadata.repo_type.as_str(),
-                metadata.repo_project_id.as_str(),
-                metadata.remote_repo.as_str(),
-                pull_request_iid.as_str(),
-                method,
-                remove_source_branch,
-            )
-            .await;
-            let _ = slint::invoke_from_event_loop(move || {
-                if controller.action_sequence.load(Ordering::SeqCst) != sequence {
-                    return;
+        self.run_action(
+            ui,
+            async move {
+                merge_pull_request(
+                    metadata.repo_type.as_str(),
+                    metadata.repo_project_id.as_str(),
+                    metadata.remote_repo.as_str(),
+                    pull_request_iid.as_str(),
+                    method,
+                    remove_source_branch,
+                )
+                .await
+            },
+            |controller, ui, result| match result {
+                Ok(()) => {
+                    ui.set_workflow_pr_merge_dialog_open(false);
+                    ui.set_workflow_pr_can_merge(false);
+                    ui.set_workflow_pr_merge_readiness_kind("merged".into());
+                    ui.set_workflow_pr_merge_readiness_label("Merged".into());
+                    ui.set_workflow_pr_merge_readiness_detail(
+                        "This pull request has been merged successfully.".into(),
+                    );
+                    ui.set_workflow_pr_merge_block_reason(
+                        "This pull request has been merged.".into(),
+                    );
+                    controller
+                        .pr_list_refresh_pending
+                        .store(true, Ordering::SeqCst);
+                    show_success(ui, "Pull request merged successfully.");
+                    controller.refresh_action_state(ui);
+                    controller.refresh_conversation_after_remote_action(ui);
                 }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
-                ui.set_workflow_pr_action_loading(false);
-                match result {
-                    Ok(()) => {
-                        ui.set_workflow_pr_merge_dialog_open(false);
-                        ui.set_workflow_pr_can_merge(false);
-                        ui.set_workflow_pr_merge_readiness_kind("merged".into());
-                        ui.set_workflow_pr_merge_readiness_label("Merged".into());
-                        ui.set_workflow_pr_merge_readiness_detail(
-                            "This pull request has been merged successfully.".into(),
-                        );
-                        ui.set_workflow_pr_merge_block_reason(
-                            "This pull request has been merged.".into(),
-                        );
-                        controller
-                            .pr_list_refresh_pending
-                            .store(true, Ordering::SeqCst);
-                        show_success(&ui, "Pull request merged successfully.");
-                        controller.refresh_action_state(&ui);
-                        controller.refresh_conversation_after_remote_action(&ui);
-                    }
-                    Err(error) => {
-                        log::warn!("[Workflow][PR Review] Failed to merge pull request: {error}");
-                        show_error(&ui, error.as_str());
-                        controller.refresh_action_state(&ui);
-                    }
+                Err(error) => {
+                    log::warn!("[Workflow][PR Review] Failed to merge pull request: {error}");
+                    show_error(ui, error.as_str());
+                    controller.refresh_action_state(ui);
                 }
-            });
-        });
+            },
+        );
     }
 
     fn revert(&self, ui: &MainWindow) {
@@ -2138,34 +2191,25 @@ impl WorkflowPrReviewController {
             show_error(ui, "The pull request repository context is unavailable.");
             return;
         };
-        let sequence = self.action_sequence.fetch_add(1, Ordering::SeqCst) + 1;
-        ui.set_workflow_pr_action_loading(true);
-        let controller = self.clone();
-        let ui_weak = ui.as_weak();
-        crate::app_runtime::shared_runtime().spawn(async move {
-            let result = revert_pull_request(
-                metadata.repo_type.as_str(),
-                metadata.repo_project_id.as_str(),
-                metadata.remote_repo.as_str(),
-                pull_request_iid.as_str(),
-            )
-            .await;
-            let _ = slint::invoke_from_event_loop(move || {
-                if controller.action_sequence.load(Ordering::SeqCst) != sequence {
-                    return;
-                }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
-                ui.set_workflow_pr_action_loading(false);
-                match result {
+        self.run_action(
+            ui,
+            async move {
+                revert_pull_request(
+                    metadata.repo_type.as_str(),
+                    metadata.repo_project_id.as_str(),
+                    metadata.remote_repo.as_str(),
+                    pull_request_iid.as_str(),
+                )
+                .await
+            },
+            |_controller, ui, result| match result {
                     Ok(revert) => {
                         ui.set_workflow_pr_revert_dialog_open(false);
                         ui.set_workflow_pr_can_revert(false);
                         ui.set_workflow_pr_revert_block_reason(
                             "The revert action already completed in this review session.".into(),
                         );
-                        show_success(&ui, revert.message.as_str());
+                        show_success(ui, revert.message.as_str());
                         log::info!(
                             "[Workflow][PR Review] Completed revert action reference={} title_present={} url_present={}",
                             revert.number,
@@ -2175,11 +2219,10 @@ impl WorkflowPrReviewController {
                     }
                     Err(error) => {
                         log::warn!("[Workflow][PR Review] Revert action failed: {error}");
-                        show_error(&ui, error.as_str());
+                        show_error(ui, error.as_str());
                     }
-                }
-            });
-        });
+                },
+        );
     }
 
     fn select_file(&self, ui: &MainWindow, index: i32) {
@@ -2205,7 +2248,7 @@ impl WorkflowPrReviewController {
         }
         apply_file_header(ui, index, &file);
         if is_large_diff(&file) && !large_diff_loaded {
-            self.highlight_sequence.fetch_add(1, Ordering::SeqCst);
+            self.state.invalidate(ReviewRequestKind::Highlight);
             set_empty_line_model(ui);
             ui.set_workflow_pr_review_max_code_columns(0);
             ui.set_workflow_pr_review_longest_code_line("".into());
@@ -2222,7 +2265,7 @@ impl WorkflowPrReviewController {
             return;
         }
         ui.set_workflow_pr_review_large_diff_deferred(false);
-        let sequence = self.highlight_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.state.begin(ReviewRequestKind::Highlight);
         let cached = self
             .highlighted_files
             .lock()
@@ -2255,7 +2298,10 @@ impl WorkflowPrReviewController {
             })
             .await;
             let _ = slint::invoke_from_event_loop(move || {
-                if controller.highlight_sequence.load(Ordering::SeqCst) != sequence {
+                if !controller
+                    .state
+                    .is_current(ReviewRequestKind::Highlight, generation)
+                {
                     return;
                 }
                 let Some(ui) = ui_weak.upgrade() else {
@@ -2395,7 +2441,7 @@ impl WorkflowPrReviewController {
             return;
         }
 
-        let sequence = self.expand_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.state.begin(ReviewRequestKind::Expand);
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
@@ -2434,7 +2480,10 @@ impl WorkflowPrReviewController {
             let (base_result, head_result) = tokio::join!(base_future, head_future);
             let result = base_result.and_then(|base| head_result.map(|head| (base, head)));
             let _ = slint::invoke_from_event_loop(move || {
-                if controller.expand_sequence.load(Ordering::SeqCst) != sequence {
+                if !controller
+                    .state
+                    .is_current(ReviewRequestKind::Expand, generation)
+                {
                     return;
                 }
                 let Some(ui) = ui_weak.upgrade() else {
@@ -2540,7 +2589,7 @@ impl WorkflowPrReviewController {
         }
 
         ui.set_workflow_pr_review_code_loading(true);
-        let sequence = self.expand_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.state.begin(ReviewRequestKind::Expand);
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
@@ -2579,7 +2628,10 @@ impl WorkflowPrReviewController {
             let (base_result, head_result) = tokio::join!(base_future, head_future);
             let result = base_result.and_then(|base| head_result.map(|head| (base, head)));
             let _ = slint::invoke_from_event_loop(move || {
-                if controller.expand_sequence.load(Ordering::SeqCst) != sequence {
+                if !controller
+                    .state
+                    .is_current(ReviewRequestKind::Expand, generation)
+                {
                     return;
                 }
                 let Some(ui) = ui_weak.upgrade() else {
@@ -2641,7 +2693,7 @@ impl WorkflowPrReviewController {
 
     fn collapse_non_diff_lines(&self, ui: &MainWindow) {
         let selected_index = ui.get_workflow_pr_review_selected_file_index().max(0) as usize;
-        self.expand_sequence.fetch_add(1, Ordering::SeqCst);
+        self.state.invalidate(ReviewRequestKind::Expand);
         let restored = self.cache.lock().ok().and_then(|mut cache| {
             let cache = cache.as_mut()?;
             cache.collapse_file(selected_index)
@@ -2703,7 +2755,7 @@ impl WorkflowPrReviewController {
         }
 
         ui.set_workflow_pr_review_code_loading(true);
-        let sequence = self.expand_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.state.begin(ReviewRequestKind::Expand);
         let controller = self.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
@@ -2716,7 +2768,10 @@ impl WorkflowPrReviewController {
             )
             .await;
             let _ = slint::invoke_from_event_loop(move || {
-                if controller.expand_sequence.load(Ordering::SeqCst) != sequence {
+                if !controller
+                    .state
+                    .is_current(ReviewRequestKind::Expand, generation)
+                {
                     return;
                 }
                 let Some(ui) = ui_weak.upgrade() else {
@@ -2754,7 +2809,7 @@ impl WorkflowPrReviewController {
         ui.set_workflow_pr_review_has_expandable_hunks(false);
         ui.set_workflow_pr_review_context_expanded(false);
         ui.set_workflow_pr_review_code_loading(true);
-        let sequence = self.highlight_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.state.begin(ReviewRequestKind::Highlight);
         let controller = self.clone();
         let highlight_resources = self.highlight_resources.clone();
         let ui_weak = ui.as_weak();
@@ -2770,7 +2825,10 @@ impl WorkflowPrReviewController {
             })
             .await;
             let _ = slint::invoke_from_event_loop(move || {
-                if controller.highlight_sequence.load(Ordering::SeqCst) != sequence {
+                if !controller
+                    .state
+                    .is_current(ReviewRequestKind::Highlight, generation)
+                {
                     return;
                 }
                 let Some(ui) = ui_weak.upgrade() else {
@@ -3004,10 +3062,17 @@ fn commit_detail_source_tab(tab: i32) -> Option<i32> {
     matches!(tab, 0 | 1).then_some(tab)
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn ai_review_fixture_enabled() -> bool {
     std::env::var("USHER_AI_REVIEW_FIXTURE").as_deref() == Ok("review-v1")
 }
 
+#[cfg(not(any(test, feature = "test-fixtures")))]
+fn ai_review_fixture_enabled() -> bool {
+    false
+}
+
+#[cfg(any(test, feature = "test-fixtures"))]
 fn ai_review_fixture_diff_detail() -> PullRequestDiffDetail {
     PullRequestDiffDetail {
         files: vec![PullRequestDiffFile {
@@ -3074,6 +3139,12 @@ fn ai_review_fixture_diff_detail() -> PullRequestDiffDetail {
     }
 }
 
+#[cfg(not(any(test, feature = "test-fixtures")))]
+fn ai_review_fixture_diff_detail() -> PullRequestDiffDetail {
+    unreachable!("AI Review fixtures require the test-fixtures feature")
+}
+
+#[cfg(feature = "test-fixtures")]
 fn memory_benchmark_diff_detail(seed: usize) -> PullRequestDiffDetail {
     const TOTAL_FILES: usize = 206;
     const TOTAL_LINES: usize = 27_369;

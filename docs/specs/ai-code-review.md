@@ -484,12 +484,11 @@ bounded and credentials, complete prompts, source payloads, and rule contents
 must never be logged. Review-scoped Ask completions have no total request
 deadline. Each AI Review diff chunk additionally has a 600-second wall-clock
 deadline; both paths retain the shared 10-second connect timeout and a
-300-second response-body idle timeout. Every received body
-chunk resets that idle timer by default. Non-streaming JSON Review/Ask requests
-select a request-scoped semantic policy under which whitespace-only provider
-heartbeats do not count as body progress; the first non-whitespace byte and
-subsequent non-whitespace chunks reset the same deadline. This policy is based
-on the expected response representation, not a provider host or model name.
+300-second response-body idle timeout. Review and Ask request OpenAI-compatible
+SSE streaming, consume each frame through the shared HTTP response wrapper, and
+bound one streamed response to 16 MiB. Every received transport chunk resets
+the idle timer. Providers that answer the streaming request with one JSON
+response remain supported.
 Other AI completions retain the shared 30-second
 total and body-idle timeouts. Ordinary application diagnostics record the task
 stage, chunk index, completion message counts and byte totals, serialized request
@@ -507,10 +506,10 @@ UI stub，根 Slint 仍可编译。
 网络、模型配置、规则文件、空 diff 或 Provider JSON 错误只影响对应任务。用户可见错误
 必须有界，日志不得包含凭据、完整 Prompt、源码 payload 或规则正文。Review 专属 Ask
 completion 不设置请求总时限；每个 AI Review diff chunk 另有 600 秒墙钟总时限。
-两者仍受共享的 10 秒连接超时和 300 秒响应体空闲超时约束。普通请求默认按任意 body chunk 重置空闲计时；
-非流式 JSON Review/Ask 请求会选择
-请求级语义策略，Provider 仅发送空白心跳时不算正文进度，首个及后续非空白字节才重置
-同一截止时间。该策略依据预期响应表示，不依据 Provider host 或模型名称。其他 AI
+两者仍受共享的 10 秒连接超时和 300 秒响应体空闲超时约束。Review 与 Ask 请求
+OpenAI-compatible SSE streaming，通过共享 HTTP response wrapper 逐帧消费，并把单次
+streaming 响应限制在 16 MiB；每个收到的传输 chunk 都会重置空闲计时。若 Provider 对
+streaming 请求返回一次性 JSON，仍保持兼容。其他 AI
 completion 继续使用共享的 30 秒总时限和响应体空闲时限。普通应用诊断会记录任务阶段、
 chunk 序号、completion 消息数量与字节总量、序列化请求体大小、响应 framing、耗时，以及
 有界的响应体 chunk 大小、到达间隔和进度分类；绝不记录鉴权数据、Prompt/规则/源码内容
@@ -537,8 +536,8 @@ chunk 序号、completion 消息数量与字节总量、序列化请求体大小
 - While a multi-chunk review runs, verify the panel identifies the current and
   total chunk. Stall a successful response body and verify the task fails after
   300 seconds of no body progress rather than remaining at one percentage.
-- Keep non-whitespace bytes trickling beyond the idle threshold and verify one
-  review chunk still fails at the 600-second wall-clock deadline.
+- Keep transport chunks trickling so the idle threshold continues to reset and
+  verify one review chunk still fails at the 600-second wall-clock deadline.
 - Shut down with queued and running reviews; verify queued work does not start
   and all in-flight completions cancel before persistence workers join.
 - Cancel or fail a review before a session is created, then focus Ask and send
@@ -587,8 +586,8 @@ chunk 序号、completion 消息数量与字节总量、序列化请求体大小
   实时耗时持续增长，Send 操作切换为 Stop，且 Stop 只终止该次回复并冻结耗时。
 - 让 Review 运行超过 300 秒，确认 Provider 完成或用户取消前任务继续运行；同时确认普通
   AI Chat 仍在共享的 30 秒截止时间触发超时。
-- 让非空白字节持续零散到达并越过空闲阈值，确认单个 Review chunk 仍在 600 秒墙钟
-  上限失败；带排队/运行任务关闭应用时，确认在持久化 Worker join 前全部取消。
+- 让传输 chunk 持续零散到达并不断重置空闲阈值，确认单个 Review chunk 仍在 600 秒
+  墙钟上限失败；带排队/运行任务关闭应用时，确认在持久化 Worker join 前全部取消。
 - 多 chunk Review 运行时确认面板显示当前 chunk 与总数；让成功响应的 body 停止产生
   进度，确认任务在 300 秒后失败，而不是永久停在百分之一。
 - 在 Session 创建前取消 Review 或让其失败，再聚焦 Ask 并发送问题；确认配置的 Agent

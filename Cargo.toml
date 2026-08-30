@@ -39,7 +39,7 @@ test-fixtures = []
 # Headless AI review engine plus its optional application UI/settings bridges.
 # `--no-default-features --features renderer-femtovg` keeps the complete feature
 # out of the compile graph for constrained or comparison builds.
-ai-code-review = ["dep:usher-ai-review", "dep:usher-state-store", "usher-ui/ai-code-review", "usher-ui-settings/ai-code-review"]
+ai-code-review = ["dep:usher-ai-review", "usher-ui/ai-code-review", "usher-ui-settings/ai-code-review"]
 
 [[bin]]
 path = "src/main.rs"
@@ -57,7 +57,7 @@ usher-ui-settings = { path = "crates/usher-ui-settings", default-features = fals
 usher-messages = { path = "crates/usher-messages", default-features = false }
 usher-preview = { path = "crates/usher-preview" }
 usher-ai-review = { path = "crates/usher-ai-review", optional = true }
-usher-state-store = { path = "crates/usher-state-store", optional = true }
+usher-state-store = { path = "crates/usher-state-store" }
 usher-search = { path = "crates/usher-search" }
 usher-virtual-list = { path = "crates/usher-virtual-list" }
 parley = "0.10"
@@ -66,8 +66,9 @@ log = "0.4"
 fern = { version = "0.7", features = ["colored"] }
 chrono = "0.4"
 self_update = { version = "0.44", default-features = false, features = ["reqwest", "archive-tar", "archive-zip", "compression-flate2", "rustls"] }
-tokio = { version = "1.40", features = ["full"] }
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "sync", "time", "process", "fs", "io-util", "net"] }
 anyhow = "1.0"
+async-trait = "0.1"
 bytes = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls", "stream", "system-proxy"] }
 semver = "1.0.27"
@@ -90,7 +91,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "std"]
 rand = "0.10"
 signal-hook = "0.4.3"
 fs2 = "0.4.3"
-base64 = "0.23.1"
+base64 = "0.22.1"
 portable-pty = "0.9.0"
 vt100 = "0.16.2"
 libc = "0.2"

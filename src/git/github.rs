@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::codereview::api::github as endpoints;
 use crate::http::{self, RequestOptions};
 
+use super::json::{nested_string, string_field, value_to_id, value_u32};
 use super::{
     PageCollector, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
     PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters, PullRequestItem,
@@ -50,7 +51,7 @@ pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, Str
     )
     .await
     .map_err(|error| error.to_string())?;
-    value_to_id(&response.id, "GitHub")
+    value_to_id(Some(&response.id), "GitHub")
 }
 
 pub(super) async fn get_pull_requests(
@@ -1340,13 +1341,6 @@ fn decode_base64_content(payload: &Value, provider: &str) -> Result<String, Stri
         .map_err(|error| format!("{provider} repository file is not UTF-8 text: {error}"))
 }
 
-fn value_u32(value: &Value, key: &str) -> Option<u32> {
-    value
-        .get(key)
-        .and_then(Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-}
-
 fn api_base_url(locator: &RepoLocator) -> String {
     if is_configured_enterprise_host(RepoType::GitHub, locator.host.as_str())
         && let Some(api_base_url) = configured_api_base_url(RepoType::GitHub)
@@ -1366,31 +1360,6 @@ fn with_default_api_version(api_base_url: String, required_path: &str) -> String
     } else {
         format!("{api_base_url}{required_path}")
     }
-}
-
-fn value_to_id(value: &serde_json::Value, provider: &str) -> Result<String, String> {
-    match value {
-        serde_json::Value::String(value) if !value.trim().is_empty() => Ok(value.clone()),
-        serde_json::Value::Number(value) => Ok(value.to_string()),
-        _ => Err(format!("{provider} project details did not include an id.")),
-    }
-}
-
-fn string_field(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            value
-                .get(key)
-                .and_then(Value::as_i64)
-                .map(|value| value.to_string())
-        })
-}
-
-fn nested_string(value: &Value, parent: &str, key: &str) -> Option<String> {
-    value.get(parent)?.get(key)?.as_str().map(str::to_string)
 }
 
 fn pull_request_branches(value: &Value) -> Option<(String, String)> {

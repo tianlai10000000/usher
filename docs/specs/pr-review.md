@@ -58,7 +58,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 
 ## Ownership / 职责
 
-- `src/workflow/pr_review.rs` is the stable façade; `controller.rs` owns active requests, stale-response protection, remote action sequencing, and Slint model updates.
+- `src/workflow/pr_review.rs` is the stable façade; `controller.rs` owns active requests, state-store generation guards, remote action orchestration, and Slint model updates.
 - `src/workflow/pr_review/cache.rs` owns bounded review/range/highlight/source caches, shared immutable diff ownership, copy-on-write expanded files, and cache memory statistics.
 - `src/workflow/pr_review/avatar.rs` owns bounded, deduplicated avatar download and decoding.
 - `src/workflow/pr_review/hunk.rs` owns pure immutable-source alignment, bounded hunk expansion, collapse restoration, and full-source projection.
@@ -75,7 +75,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/ai_review/` owns optional AI task execution and result projection; PR list/detail only emit actions and consume task/result models.
 - `src/git/overview.rs` owns provider-neutral `fat`/`uat`/`prod` count aggregation; Provider selection, authentication, requests, and response normalization remain in the Git façade and adapters.
 
-- `src/workflow/pr_review.rs` 是稳定 façade；`controller.rs` 负责当前请求、旧响应防护、远端 action 序列和 Slint model 更新。
+- `src/workflow/pr_review.rs` 是稳定 façade；`controller.rs` 负责当前请求、state-store generation 防护、远端 action 编排和 Slint model 更新。
 - `src/workflow/pr_review/cache.rs` 负责有界 review/range/highlight/source 缓存、共享不可变 Diff 所有权、展开文件的写时复制和缓存内存统计。
 - `src/workflow/pr_review/avatar.rs` 负责有界且去重的头像下载和解码。
 - `src/workflow/pr_review/hunk.rs` 负责纯粹的固定源码对齐、有界 hunk 展开、收起恢复和完整源码投影。
@@ -167,7 +167,7 @@ project selected
   -> fetch the selected list page through one provider adapter
   -> normalize records and apply only if list sequence is current
   -> user opens a row
-  -> fetch normalized diff and remote action state with independent stale-response sequences
+  -> fetch normalized diff and remote action state under independent typed generations
   -> cache one shared immutable base by project + request + whitespace mode
   -> build a local file tree and select/highlight the first file
   -> optional hunk expansion fetches immutable source once, then creates or mutates only that file's copy-on-write override

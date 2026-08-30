@@ -38,6 +38,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Check architecture structure budgets
+        run: ./scripts/check-architecture-structure.sh
+
       - name: Test workspace
         # The repository's documented baseline has one failing logger doctest;
         # keep unit and integration coverage blocking without making CI

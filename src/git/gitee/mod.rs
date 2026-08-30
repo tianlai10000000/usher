@@ -13,6 +13,9 @@ use serde_json::Value;
 use crate::codereview::api::gitee as endpoints;
 use crate::http::{self, RequestOptions};
 
+use super::json::{
+    fallback_total, header_u32, nested_string, string_field, value_to_id, value_u32,
+};
 use super::{
     GiteeApiProfile, PageCollector, PullRequestActionState, PullRequestCommit,
     PullRequestConversationItem, PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters,
@@ -2487,26 +2490,6 @@ fn pagination_page_count(headers: &HeaderMap, payload: &Value) -> Option<u32> {
         })
 }
 
-fn header_u32(headers: &HeaderMap, name: &str) -> Option<u32> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u32>().ok())
-}
-
-fn value_u32(value: &Value, key: &str) -> Option<u32> {
-    value
-        .get(key)
-        .and_then(Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-        .or_else(|| {
-            value
-                .get(key)
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse::<u32>().ok())
-        })
-}
-
 fn to_pull_request_item(value: &Value) -> PullRequestItem {
     PullRequestItem {
         number: string_field(value, "iid")
@@ -2549,29 +2532,6 @@ fn gitee_list_review_status(value: &Value) -> PullRequestReviewStatus {
     }
 }
 
-fn string_field(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            value
-                .get(key)
-                .and_then(Value::as_i64)
-                .map(|value| value.to_string())
-        })
-}
-
-fn nested_string(value: &Value, parent: &str, key: &str) -> Option<String> {
-    value.get(parent)?.get(key)?.as_str().map(str::to_string)
-}
-
-fn fallback_total(page: u32, per_page: u32, item_count: usize) -> u32 {
-    page.saturating_sub(1)
-        .saturating_mul(per_page)
-        .saturating_add(item_count as u32)
-}
-
 fn project_exactly_matches_remote(
     project: &Value,
     expected_path: &str,
@@ -2588,14 +2548,6 @@ fn project_exactly_matches_remote(
     matches_value("path_with_namespace", expected_path)
         || matches_value("ssh_url_to_repo", locator.remote_repo.as_str())
         || matches_value("http_url_to_repo", locator.remote_repo.as_str())
-}
-
-fn value_to_id(value: Option<&Value>, provider: &str) -> Result<String, String> {
-    match value {
-        Some(Value::String(value)) if !value.trim().is_empty() => Ok(value.clone()),
-        Some(Value::Number(value)) => Ok(value.to_string()),
-        _ => Err(format!("{provider} project details did not include an id.")),
-    }
 }
 
 #[cfg(test)]

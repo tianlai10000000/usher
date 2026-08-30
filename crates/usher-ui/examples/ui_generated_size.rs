@@ -51,6 +51,11 @@ fn measure_root(
     } else {
         repository_root.join("ui/features/pr_review/full.slint")
     };
+    let ai_review_library = if cfg!(feature = "ai-code-review") {
+        repository_root.join("ui/features/ai_review/full.slint")
+    } else {
+        repository_root.join("ui/features/ai_review/disabled.slint")
+    };
     let config = slint_build::CompilerConfiguration::new().with_library_paths(HashMap::from([
         (
             "material".to_string(),
@@ -58,6 +63,7 @@ fn measure_root(
         ),
         ("ui-components".to_string(), ui_components_library),
         ("pr-review".to_string(), pr_review_library),
+        ("ai-review".to_string(), ai_review_library),
     ]));
 
     let started = Instant::now();

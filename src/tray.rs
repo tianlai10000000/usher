@@ -427,7 +427,6 @@ mod macos {
         let observer_class = unsafe { &*OBSERVER_CLASS };
         let observer: *mut Object = msg_send![observer_class, alloc];
         let observer: *mut Object = msg_send![observer, init];
-        let _: () = msg_send![observer, retain];
         unsafe {
             REOPEN_OBSERVER = observer;
         }
@@ -474,10 +473,33 @@ mod macos {
     #[allow(dead_code)]
     pub fn remove_tray_macos() {
         unsafe {
+            if !REOPEN_OBSERVER.is_null() {
+                if let Some(center_class) = Class::get("NSNotificationCenter") {
+                    let center: *mut Object = msg_send![center_class, defaultCenter];
+                    if !center.is_null() {
+                        let _: () = msg_send![center, removeObserver: REOPEN_OBSERVER];
+                    }
+                }
+                if let Some(manager_class) = Class::get("NSAppleEventManager") {
+                    let manager: *mut Object = msg_send![manager_class, sharedAppleEventManager];
+                    if !manager.is_null() {
+                        const K_CORE_EVENT_CLASS: u32 = 0x6165_7674;
+                        const K_AE_REOPEN_APPLICATION: u32 = 0x7261_7070;
+                        let _: () = msg_send![
+                            manager,
+                            removeEventHandlerForEventClass: K_CORE_EVENT_CLASS
+                            andEventID: K_AE_REOPEN_APPLICATION
+                        ];
+                    }
+                }
+                let _: () = msg_send![REOPEN_OBSERVER, release];
+                REOPEN_OBSERVER = std::ptr::null_mut();
+            }
             if !STATUS_ITEM.is_null() {
-                let status_bar_class = Class::get("NSStatusBar").unwrap();
-                let status_bar: *mut Object = msg_send![status_bar_class, systemStatusBar];
-                let _: () = msg_send![status_bar, removeStatusItem: STATUS_ITEM];
+                if let Some(status_bar_class) = Class::get("NSStatusBar") {
+                    let status_bar: *mut Object = msg_send![status_bar_class, systemStatusBar];
+                    let _: () = msg_send![status_bar, removeStatusItem: STATUS_ITEM];
+                }
                 let _: () = msg_send![STATUS_ITEM, release];
                 STATUS_ITEM = std::ptr::null_mut();
             }

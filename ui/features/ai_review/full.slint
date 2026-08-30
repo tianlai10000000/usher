@@ -6,62 +6,9 @@ import { GitHubCenteredLoadingState, GitHubSpinner } from "../../components/gith
 import { GitHubAiReviewFindingRow, GitHubAiReviewUserMessage } from "../../components/ai_review/github_ai_review_components.slint";
 import { GitHubSegmentedControl, GitHubSegmentedControlDivider, GitHubSegmentedControlItem } from "../../components/github_segmented_control.slint";
 import { AgentResponseBlock, GitHubAgentResponse } from "../../components/agent_response/github_agent_response.slint";
+import { AiReviewPanelContract, AiReviewFindingItem, AiReviewConversationItem, AiReviewResponseVisualRow } from "./contract.slint";
 
-export { AgentResponseBlockKind, AgentResponseBlock } from "../../components/agent_response/github_agent_response.slint";
-
-export struct AiReviewTaskItem {
-    id: string,
-    project-key: string,
-    pull-request-number: string,
-    pull-request-title: string,
-    rule-name: string,
-    model-name: string,
-    status: string,
-    progress-percent: int,
-    completed-chunks: int,
-    total-chunks: int,
-    finding-count: int,
-    error: string,
-}
-
-export struct AiReviewRuleChoice {
-    id: string,
-    name: string,
-    selected: bool,
-    inherited: bool,
-}
-
-export struct AiReviewFindingItem {
-    severity: string,
-    file: string,
-    line: int,
-    title: string,
-    explanation: string,
-    suggestion: string,
-}
-
-export struct AiReviewConversationItem {
-    id: string,
-    role: string,
-    content: string,
-    elapsed: string,
-    formatted: bool,
-    blocks: [AgentResponseBlock],
-    preview-title: string,
-    preview-available: bool,
-    truncated: bool,
-    projected-bytes: int,
-    repository-action-count: int,
-}
-
-// Candidate-only flattened projection for Slint's single-repeater ListView.
-// Nested models and strings are shared with the source conversation/finding
-// models; this row model does not own a second response payload.
-export struct AiReviewResponseVisualRow {
-    kind: string,
-    finding: AiReviewFindingItem,
-    message: AiReviewConversationItem,
-}
+export { AgentResponseBlockKind, AgentResponseBlock, AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AiReviewResponseVisualRow } from "./contract.slint";
 
 component GitHubAiReviewVirtualResponseRow inherits Rectangle {
     in property <AiReviewResponseVisualRow> visual-row;
@@ -379,49 +326,7 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
 // Route-independent review surface. The application keeps the light panel
 // shell mounted while it owns PR-side state, but may unmount the response
 // delegates while a Docked contextual Preview occupies the same surface.
-export component GitHubAiReviewPanel inherits Rectangle {
-    in property <string> task-id: "";
-    in property <string> project-name: "";
-    in property <string> pull-request-number: "";
-    in property <string> pull-request-title: "";
-    in property <string> rule-names: "";
-    in property <string> model-name: "";
-    in property <string> status: "queued";
-    in property <int> progress-percent: 0;
-    in property <int> completed-chunks: 0;
-    in property <int> total-chunks: 0;
-    in-out property <int> elapsed-seconds: 0;
-    in property <string> summary: "";
-    in property <string> error-text: "";
-    in property <[AiReviewFindingItem]> findings: [];
-    in property <[AiReviewConversationItem]> conversation: [];
-    in property <[AiReviewResponseVisualRow]> response-rows: [];
-    in property <bool> response-virtualized: false;
-    in-out property <int> retained-created-message-rows: 0;
-    in-out property <int> retained-created-blocks: 0;
-    in-out property <int> virtual-created-rows: 0;
-    in-out property <int> virtual-created-message-rows: 0;
-    in-out property <int> virtual-created-blocks: 0;
-    in-out property <string> message-input: "";
-    in-out property <string> extra-requirements: "";
-    in property <bool> chat-sending: false;
-    in property <string> chat-status: "";
-    in-out property <int> chat-elapsed-seconds: 0;
-    in property <bool> layout-resizing: false;
-    in property <bool> content-active: true;
-    in-out property <length> response-scroll-y: 0px;
-    in property <string> application-font-family: "sans-serif";
-    in property <string> code-font-family: "Menlo";
-    callback close();
-    callback cancel(string);
-    callback cancel-message(string);
-    callback re-review(string);
-    callback send-message(string);
-    callback select-finding(string, int);
-    callback open-response-artifact(string, string, string);
-    callback open-response-link(string);
-    callback response-wheel-consumed(length);
-    callback interaction-started();
+export component GitHubAiReviewPanel inherits AiReviewPanelContract {
 
     private property <bool> running: root.status == "queued" || root.status == "running";
     private property <bool> review-again-mode: false;

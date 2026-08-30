@@ -108,6 +108,12 @@ pub(crate) fn play_ui_click() {
     log::debug!("[Sound] UI click is unavailable on this platform");
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) use macos::shutdown_native_integrations;
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn shutdown_native_integrations() {}
+
 pub(crate) fn setup_application_font(app: &MainWindow) {
     #[cfg(target_os = "macos")]
     let family = ".AppleSystemUIFont";

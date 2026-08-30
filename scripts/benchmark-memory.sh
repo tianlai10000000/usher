@@ -123,6 +123,9 @@ case "$renderer" in
   skia) backend="winit-skia"; cargo_features=(--no-default-features --features renderer-skia) ;;
   *) die "unsupported renderer: $renderer" ;;
 esac
+if [[ -n "$pr_review_fixture" ]]; then
+  cargo_features+=(--features test-fixtures)
+fi
 
 if [[ "$binary" != /* ]]; then
   binary="${repo_root}/${binary}"

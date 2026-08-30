@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "ai-code-review")]
 const REVIEW_READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+#[cfg(feature = "ai-code-review")]
+const MAX_STREAMED_COMPLETION_BYTES: usize = 16 * 1024 * 1024;
 
 /// Total wall-clock budget AI Review callers wrap around one
 /// [`complete_review`] call. Twice the idle timeout: a stalled provider trips
@@ -84,6 +86,117 @@ struct CompletionChoice {
 struct CompletionResponseMessage {
     #[serde(default)]
     content: String,
+}
+
+#[cfg(feature = "ai-code-review")]
+#[derive(Debug, Default, Deserialize)]
+struct StreamingCompletionMessage {
+    #[serde(default)]
+    content: Option<String>,
+}
+
+#[cfg(feature = "ai-code-review")]
+#[derive(Debug, Deserialize)]
+struct StreamingCompletionChoice {
+    #[serde(default)]
+    delta: StreamingCompletionMessage,
+    #[serde(default)]
+    message: StreamingCompletionMessage,
+}
+
+#[cfg(feature = "ai-code-review")]
+#[derive(Debug, Deserialize)]
+struct StreamingCompletionResponse {
+    #[serde(default)]
+    choices: Vec<StreamingCompletionChoice>,
+}
+
+#[cfg(feature = "ai-code-review")]
+#[derive(Debug, Default)]
+struct CompletionSseParser {
+    line_buffer: Vec<u8>,
+    event_data: Vec<u8>,
+    content: String,
+    received_bytes: usize,
+    done: bool,
+}
+
+#[cfg(feature = "ai-code-review")]
+impl CompletionSseParser {
+    fn push(&mut self, chunk: &[u8]) -> Result<(), String> {
+        self.received_bytes = self.received_bytes.saturating_add(chunk.len());
+        if self.received_bytes > MAX_STREAMED_COMPLETION_BYTES {
+            return Err(format!(
+                "The AI provider response exceeded the {} byte limit",
+                MAX_STREAMED_COMPLETION_BYTES
+            ));
+        }
+        for byte in chunk {
+            self.line_buffer.push(*byte);
+            if *byte == b'\n' {
+                let mut line = std::mem::take(&mut self.line_buffer);
+                line.pop();
+                if line.last() == Some(&b'\r') {
+                    line.pop();
+                }
+                self.process_line(line.as_slice())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<String, String> {
+        if !self.line_buffer.is_empty() {
+            let mut line = std::mem::take(&mut self.line_buffer);
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            self.process_line(line.as_slice())?;
+        }
+        self.dispatch_event()?;
+        if self.content.trim().is_empty() {
+            Err("The AI provider returned no completion content".to_string())
+        } else {
+            Ok(self.content)
+        }
+    }
+
+    fn process_line(&mut self, line: &[u8]) -> Result<(), String> {
+        if line.is_empty() {
+            return self.dispatch_event();
+        }
+        let Some(data) = line.strip_prefix(b"data:") else {
+            return Ok(());
+        };
+        let data = data.strip_prefix(b" ").unwrap_or(data);
+        if !self.event_data.is_empty() {
+            self.event_data.push(b'\n');
+        }
+        self.event_data.extend_from_slice(data);
+        Ok(())
+    }
+
+    fn dispatch_event(&mut self) -> Result<(), String> {
+        if self.event_data.is_empty() {
+            return Ok(());
+        }
+        let data = std::mem::take(&mut self.event_data);
+        if data.as_slice() == b"[DONE]" {
+            self.done = true;
+            return Ok(());
+        }
+        if self.done {
+            return Ok(());
+        }
+        let response = serde_json::from_slice::<StreamingCompletionResponse>(&data)
+            .map_err(|error| format!("Invalid streaming completion event: {error}"))?;
+        for choice in response.choices {
+            if let Some(content) = choice.delta.content.or(choice.message.content) {
+                self.content.push_str(content.as_str());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -162,7 +275,7 @@ pub(crate) async fn complete(
     messages: &[CompletionMessage],
     operation: &'static str,
 ) -> Result<String, HttpError> {
-    complete_with_options(settings, messages, RequestOptions::new(operation)).await
+    complete_with_options(settings, messages, RequestOptions::new(operation), false).await
 }
 
 /// Execute an explicitly cancellable AI Review completion without a total
@@ -181,8 +294,8 @@ pub(crate) async fn complete_review(
         RequestOptions::new(operation)
             .timeout(std::time::Duration::ZERO)
             .read_idle_timeout(REVIEW_READ_IDLE_TIMEOUT)
-            .require_non_whitespace_body_progress()
             .body_diagnostics(diagnostic_context),
+        true,
     )
     .await
 }
@@ -191,6 +304,7 @@ async fn complete_with_options(
     settings: &AiAgentSettings,
     messages: &[CompletionMessage],
     options: RequestOptions,
+    stream: bool,
 ) -> Result<String, HttpError> {
     validate_settings(settings)?;
     if messages.is_empty() {
@@ -203,7 +317,7 @@ async fn complete_with_options(
         model: settings.model.trim(),
         messages,
         temperature: 0.1,
-        stream: false,
+        stream,
     };
     let operation = options.operation.clone();
     if let Some(context) = options.body_diagnostic_context.as_deref() {
@@ -230,7 +344,7 @@ async fn complete_with_options(
             .unwrap_or(0);
         let model = settings.model.trim().chars().take(128).collect::<String>();
         log::debug!(
-            "[AI Agent][Completion] event=payload_prepared operation={} context={} model={:?} messages={} system_messages={} user_messages={} assistant_messages={} message_bytes={} largest_message_bytes={} temperature=0.1 stream=false",
+            "[AI Agent][Completion] event=payload_prepared operation={} context={} model={:?} messages={} system_messages={} user_messages={} assistant_messages={} message_bytes={} largest_message_bytes={} temperature=0.1 stream={}",
             operation,
             context,
             model,
@@ -239,16 +353,53 @@ async fn complete_with_options(
             user_messages,
             assistant_messages,
             message_bytes,
-            largest_message_bytes
+            largest_message_bytes,
+            stream
         );
     }
-    let response = http::send_json::<CompletionResponse>(
+    let response = http::send(
         http::post(url)
             .bearer_auth(settings.api_key.trim())
             .json(&request),
         options,
     )
     .await?;
+    #[cfg(feature = "ai-code-review")]
+    if stream {
+        let is_event_stream = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"));
+        if is_event_stream {
+            let mut parser = CompletionSseParser::default();
+            response
+                .for_each_chunk(|chunk| {
+                    parser.push(chunk).map_err(|message| {
+                        Box::new(HttpError {
+                            kind: HttpErrorKind::Decode,
+                            operation: operation.clone(),
+                            method: Some(Method::POST),
+                            url: None,
+                            status: None,
+                            message,
+                            response_body: None,
+                        })
+                    })
+                })
+                .await?;
+            return parser.finish().map_err(|message| HttpError {
+                kind: HttpErrorKind::Decode,
+                operation,
+                method: Some(Method::POST),
+                url: None,
+                status: None,
+                message,
+                response_body: None,
+            });
+        }
+    }
+    let response = response.json::<CompletionResponse>().await?;
     response
         .choices
         .into_iter()
@@ -286,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn completion_requests_explicitly_use_non_streaming_json_transport() {
+    fn ordinary_completion_requests_explicitly_use_non_streaming_json_transport() {
         let messages = [CompletionMessage::user("review this")];
         let request = CompletionRequest {
             model: "provider-model",
@@ -300,6 +451,32 @@ mod tests {
             value.get("stream").and_then(serde_json::Value::as_bool),
             Some(false)
         );
+    }
+
+    #[cfg(feature = "ai-code-review")]
+    #[test]
+    fn streamed_completion_parser_handles_split_crlf_events() {
+        let mut parser = CompletionSseParser::default();
+        parser
+            .push(b"data: {\"choices\":[{\"delta\":{\"content\":\"hel")
+            .unwrap();
+        parser
+            .push(b"lo\"}}]}\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\r\n")
+            .unwrap();
+        parser.push(b"\r\ndata: [DONE]\r\n\r\n").unwrap();
+
+        assert_eq!(parser.finish().unwrap(), "hello world");
+    }
+
+    #[cfg(feature = "ai-code-review")]
+    #[test]
+    fn streamed_completion_parser_accepts_message_fallback() {
+        let mut parser = CompletionSseParser::default();
+        parser
+            .push(b"data: {\"choices\":[{\"message\":{\"content\":\"complete\"}}]}\n\n")
+            .unwrap();
+
+        assert_eq!(parser.finish().unwrap(), "complete");
     }
 
     #[cfg(feature = "ai-code-review")]

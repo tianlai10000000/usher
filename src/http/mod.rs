@@ -195,6 +195,7 @@ impl fmt::Display for HttpError {
 impl std::error::Error for HttpError {}
 
 pub(crate) type HttpResult<T> = Result<T, HttpError>;
+type ChunkConsumerResult = Result<(), Box<HttpError>>;
 
 /// UI side effect requested for one failed request.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -309,35 +310,15 @@ fn rate_limit_remaining(headers: &HeaderMap) -> Option<i64> {
         .and_then(|value| value.trim().parse::<i64>().ok())
 }
 
-/// Defines which response-body chunks reset a request's idle deadline.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(not(feature = "ai-code-review"), allow(dead_code))]
-pub(crate) enum BodyProgressPolicy {
-    #[default]
-    AnyChunk,
-    NonWhitespace,
-}
-
-impl BodyProgressPolicy {
-    fn chunk_made_progress(self, chunk: &[u8]) -> bool {
-        match self {
-            Self::AnyChunk => true,
-            Self::NonWhitespace => chunk.iter().any(|byte| !byte.is_ascii_whitespace()),
-        }
-    }
-}
-
 #[derive(Debug)]
 struct BodyProgressTracker {
-    policy: BodyProgressPolicy,
     timeout: Duration,
     last_progress_at: Instant,
 }
 
 impl BodyProgressTracker {
-    fn new(policy: BodyProgressPolicy, timeout: Duration, now: Instant) -> Self {
+    fn new(timeout: Duration, now: Instant) -> Self {
         Self {
-            policy,
             timeout,
             last_progress_at: now,
         }
@@ -354,12 +335,8 @@ impl BodyProgressTracker {
             .ok_or(())
     }
 
-    fn observe(&mut self, chunk: &[u8], now: Instant) -> bool {
-        let made_progress = self.policy.chunk_made_progress(chunk);
-        if made_progress {
-            self.last_progress_at = now;
-        }
-        made_progress
+    fn observe(&mut self, now: Instant) {
+        self.last_progress_at = now;
     }
 
     fn idle_elapsed(&self, now: Instant) -> Duration {
@@ -376,7 +353,6 @@ pub(crate) struct RequestOptions {
     pub timeout: Duration,
     pub read_idle_timeout: Duration,
     pub body_diagnostic_context: Option<String>,
-    body_progress_policy: BodyProgressPolicy,
     retry: Option<RetryPolicy>,
     retry_disabled: bool,
 }
@@ -390,7 +366,6 @@ impl RequestOptions {
             timeout: DEFAULT_TIMEOUT,
             read_idle_timeout: DEFAULT_READ_IDLE_TIMEOUT,
             body_diagnostic_context: None,
-            body_progress_policy: BodyProgressPolicy::AnyChunk,
             retry: None,
             retry_disabled: false,
         }
@@ -422,13 +397,6 @@ impl RequestOptions {
     #[cfg_attr(not(feature = "ai-code-review"), allow(dead_code))]
     pub(crate) fn body_diagnostics(mut self, context: impl Into<String>) -> Self {
         self.body_diagnostic_context = Some(context.into());
-        self
-    }
-
-    /// Require a non-whitespace response byte before resetting body-idle time.
-    #[cfg_attr(not(feature = "ai-code-review"), allow(dead_code))]
-    pub(crate) fn require_non_whitespace_body_progress(mut self) -> Self {
-        self.body_progress_policy = BodyProgressPolicy::NonWhitespace;
         self
     }
 
@@ -782,7 +750,10 @@ impl HttpResponse {
             .map_err(|error| handle_error(error, self.options.feedback))
     }
 
-    async fn bytes_raw(mut self) -> HttpResult<Vec<u8>> {
+    async fn for_each_chunk_raw(
+        &mut self,
+        mut consume: impl FnMut(&[u8]) -> ChunkConsumerResult,
+    ) -> HttpResult<()> {
         let diagnostic_context = self.options.body_diagnostic_context.clone();
         let operation = self.options.operation.clone();
         let started = Instant::now();
@@ -793,14 +764,10 @@ impl HttpResponse {
                 context
             );
         }
-        let mut body = Vec::new();
+        let mut total_bytes = 0usize;
         let mut chunk_count = 0usize;
         let mut last_chunk_at = started;
-        let mut progress = BodyProgressTracker::new(
-            self.options.body_progress_policy,
-            self.options.read_idle_timeout,
-            started,
-        );
+        let mut progress = BodyProgressTracker::new(self.options.read_idle_timeout, started);
         loop {
             let wait_timeout = match progress.remaining(Instant::now()) {
                 Ok(Some(timeout)) => timeout,
@@ -813,7 +780,7 @@ impl HttpResponse {
                             operation,
                             context,
                             chunk_count,
-                            body.len(),
+                            total_bytes,
                             progress.idle_elapsed(now).as_millis(),
                             now.saturating_duration_since(last_chunk_at).as_millis(),
                             started.elapsed().as_millis()
@@ -839,7 +806,7 @@ impl HttpResponse {
                             operation,
                             context,
                             chunk_count,
-                            body.len(),
+                            total_bytes,
                             progress.idle_elapsed(now).as_millis(),
                             now.saturating_duration_since(last_chunk_at).as_millis(),
                             started.elapsed().as_millis()
@@ -857,8 +824,11 @@ impl HttpResponse {
             let whitespace_only = !chunk.iter().any(|byte| !byte.is_ascii_whitespace());
             let interarrival_ms = now.saturating_duration_since(last_chunk_at).as_millis();
             last_chunk_at = now;
-            let made_progress = progress.observe(&chunk, now);
-            body.extend_from_slice(&chunk);
+            progress.observe(now);
+            total_bytes = total_bytes.saturating_add(chunk_bytes);
+            if let Err(error) = consume(&chunk) {
+                return Err(*error);
+            }
             if let Some(context) = diagnostic_context.as_deref()
                 && (chunk_count <= 8 || chunk_count.is_power_of_two())
             {
@@ -873,10 +843,10 @@ impl HttpResponse {
                     context,
                     chunk_count,
                     chunk_bytes,
-                    body.len(),
+                    total_bytes,
                     interarrival_ms,
                     whitespace_only,
-                    made_progress,
+                    true,
                     idle_remaining_ms,
                     started.elapsed().as_millis()
                 );
@@ -888,10 +858,33 @@ impl HttpResponse {
                 operation,
                 context,
                 chunk_count,
-                body.len(),
+                total_bytes,
                 started.elapsed().as_millis()
             );
         }
+        Ok(())
+    }
+
+    /// Consume the response body incrementally while retaining shared idle
+    /// timeout, diagnostics, and error-interceptor behavior.
+    #[cfg_attr(not(feature = "ai-code-review"), allow(dead_code))]
+    pub(crate) async fn for_each_chunk(
+        mut self,
+        consume: impl FnMut(&[u8]) -> ChunkConsumerResult,
+    ) -> HttpResult<()> {
+        let feedback = self.options.feedback;
+        self.for_each_chunk_raw(consume)
+            .await
+            .map_err(|error| handle_error(error, feedback))
+    }
+
+    async fn bytes_raw(mut self) -> HttpResult<Vec<u8>> {
+        let mut body = Vec::new();
+        self.for_each_chunk_raw(|chunk| {
+            body.extend_from_slice(chunk);
+            Ok(())
+        })
+        .await?;
         Ok(body)
     }
 
@@ -1249,7 +1242,6 @@ mod tests {
         assert_eq!(options.timeout, DEFAULT_TIMEOUT);
         assert_eq!(options.read_idle_timeout, DEFAULT_READ_IDLE_TIMEOUT);
         assert_eq!(options.body_diagnostic_context, None);
-        assert_eq!(options.body_progress_policy, BodyProgressPolicy::AnyChunk);
         assert_eq!(options.retry, None);
         assert!(!options.retry_disabled);
     }
@@ -1426,58 +1418,6 @@ mod tests {
         assert_eq!(
             options.body_diagnostic_context.as_deref(),
             Some("task=review-1")
-        );
-    }
-
-    #[test]
-    fn body_progress_policy_is_request_scoped() {
-        let default = RequestOptions::new("Load projects");
-        let json_completion =
-            RequestOptions::new("AI code review").require_non_whitespace_body_progress();
-
-        assert_eq!(default.body_progress_policy, BodyProgressPolicy::AnyChunk);
-        assert_eq!(
-            json_completion.body_progress_policy,
-            BodyProgressPolicy::NonWhitespace
-        );
-    }
-
-    #[test]
-    fn non_whitespace_progress_ignores_provider_heartbeats_without_affecting_default_requests() {
-        let started = Instant::now();
-        let mut default = BodyProgressTracker::new(
-            BodyProgressPolicy::AnyChunk,
-            Duration::from_secs(90),
-            started,
-        );
-        let mut json = BodyProgressTracker::new(
-            BodyProgressPolicy::NonWhitespace,
-            Duration::from_secs(90),
-            started,
-        );
-
-        let heartbeat_at = started + Duration::from_secs(60);
-        assert!(default.observe(b"\n", heartbeat_at));
-        assert!(!json.observe(b"\n", heartbeat_at));
-        assert_eq!(
-            default.remaining(started + Duration::from_secs(89)),
-            Ok(Some(Duration::from_secs(61)))
-        );
-        assert_eq!(
-            json.remaining(started + Duration::from_secs(89)),
-            Ok(Some(Duration::from_secs(1)))
-        );
-        assert_eq!(json.remaining(started + Duration::from_secs(90)), Err(()));
-
-        let mut json = BodyProgressTracker::new(
-            BodyProgressPolicy::NonWhitespace,
-            Duration::from_secs(90),
-            started,
-        );
-        assert!(json.observe(b" {", heartbeat_at));
-        assert_eq!(
-            json.remaining(started + Duration::from_secs(89)),
-            Ok(Some(Duration::from_secs(61)))
         );
     }
 

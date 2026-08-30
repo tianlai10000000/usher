@@ -146,7 +146,43 @@ P2 于 2026-08-28 在同一台 Apple M2 Pro（10 核、32 GiB）、rustc/Cargo
 统一优化 build script 与 proc-macro 的冷编译代价超过了预期的 Slint 代码生成收益；
 nightly `-Z threads` 也不进入 stable 交付链。
 
-## 2026-08-03 regression baseline
+## 2026-08-27 current Slint baseline
+
+The current Apple M2 Pro (10 cores, 32 GiB) hot-path measurement supersedes the
+2026-08-03 regression baseline for planning. A `ui/main.slint` edit took 39.1
+seconds: 7.9 seconds in Slint code generation, 28.5 seconds compiling the
+generated `usher-ui` crate, and 4.2 seconds checking the root application
+(rounded stages overlap slightly with Cargo reporting). Generated Rust was
+44.1 MB. The generated crate remains the dominant serial unit, so linker,
+Cargo-jobs, and repeated profile tuning cannot address most of this path.
+
+The same investigation recorded three environment constraints:
+
+- rustc 1.97.1 produced an incremental `evaluate_obligation` unstable-fingerprint
+  ICE; `cargo clean -p usher` recovered the affected identity. CI disables
+  incremental compilation so this local cache failure cannot make PR checks
+  nondeterministic.
+- `target/debug/incremental` contained four `usher_ui` identities and about
+  7.4 GiB for that crate alone. Default, disabled-feature, dev-shell, test, and
+  IDE graphs must keep deliberate target/profile identities instead of evicting
+  one another from the same cache.
+- The controlled dev build-override A/B below regressed cold time by 40.1%, so
+  it remains rejected. This replaces the earlier estimate that optimizing
+  build scripts would shorten Slint generation to 2-3 seconds.
+
+2026-08-27 在同一台 Apple M2 Pro（10 核、32 GiB）上的当前热路径实测取代
+2026-08-03 基线作为后续规划依据。修改 `ui/main.slint` 后总耗时 39.1 秒，其中
+Slint 代码生成 7.9 秒、生成的 `usher-ui` crate 编译 28.5 秒、根应用 4.2 秒
+（Cargo 阶段计时有少量重叠与取整）；生成 Rust 为 44.1 MB。主瓶颈仍是串行的巨型
+生成 crate，而不是链接、Cargo jobs 或 profile 参数。
+
+同次调查还确认：rustc 1.97.1 曾因 incremental `evaluate_obligation` 指纹异常 ICE，
+需 `cargo clean -p usher` 恢复；`target/debug/incremental` 中存在 4 份 `usher_ui`
+identity，合计约 7.4 GiB；下节 build-override A/B 冷构建回退 40.1%，因此明确不采纳。
+CI 已关闭 incremental，默认、disabled-feature、dev-shell、测试和 IDE 构建则应保持
+有意隔离的 target/profile identity。
+
+## 2026-08-03 historical regression baseline
 
 The UI compile graph has grown enough that the previous profile optimization is
 no longer sufficient by itself. A measured incremental build after a Slint

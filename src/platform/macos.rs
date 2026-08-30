@@ -24,6 +24,7 @@ static mut TITLEBAR_ACCESSORY_ANCHOR: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_CONTROLS_CONTAINER: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_MODAL_SHIELD: *mut Object = std::ptr::null_mut();
 static mut TITLEBAR_EVENT_MONITOR: *mut Object = std::ptr::null_mut();
+static mut SYSTEM_THEME_OBSERVER: *mut Object = std::ptr::null_mut();
 static mut ARTIFACT_PREVIEW_TITLEBAR_DELEGATE: *mut Object = std::ptr::null_mut();
 static mut TRAFFIC_LIGHT_BASE_X: [f64; 3] = [f64::NAN; 3];
 static mut TRAFFIC_LIGHT_BASE_Y: [f64; 3] = [f64::NAN; 3];
@@ -278,8 +279,9 @@ fn native_window(window: &MainWindow) -> Option<*mut Object> {
 }
 
 thread_local! {
-    static ARTIFACT_PREVIEW_RESIZE_WINDOWS: std::cell::RefCell<std::collections::HashSet<usize>> =
-        std::cell::RefCell::new(std::collections::HashSet::new());
+    static ARTIFACT_PREVIEW_RESIZE_OBSERVERS: std::cell::RefCell<
+        std::collections::HashMap<usize, (*mut Object, *mut Object)>
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
     static ARTIFACT_PREVIEW_TITLEBAR: std::cell::RefCell<Option<ArtifactPreviewTitlebar>> =
         const { std::cell::RefCell::new(None) };
 }
@@ -303,18 +305,13 @@ pub(crate) fn install_artifact_preview_live_resize(window: &crate::ArtifactPrevi
         return;
     };
     let key = native_window as usize;
-    let already_installed = ARTIFACT_PREVIEW_RESIZE_WINDOWS.with(|windows| {
-        let mut windows = windows.borrow_mut();
-        !windows.insert(key)
-    });
+    let already_installed =
+        ARTIFACT_PREVIEW_RESIZE_OBSERVERS.with(|observers| observers.borrow().contains_key(&key));
     if already_installed {
         return;
     }
 
     let Some(center_class) = Class::get("NSNotificationCenter") else {
-        ARTIFACT_PREVIEW_RESIZE_WINDOWS.with(|windows| {
-            windows.borrow_mut().remove(&key);
-        });
         return;
     };
     let center: *mut Object = unsafe { msg_send![center_class, defaultCenter] };
@@ -322,15 +319,9 @@ pub(crate) fn install_artifact_preview_live_resize(window: &crate::ArtifactPrevi
         nsstring("NSWindowWillStartLiveResizeNotification"),
         nsstring("NSWindowDidEndLiveResizeNotification"),
     ) else {
-        ARTIFACT_PREVIEW_RESIZE_WINDOWS.with(|windows| {
-            windows.borrow_mut().remove(&key);
-        });
         return;
     };
     if center.is_null() {
-        ARTIFACT_PREVIEW_RESIZE_WINDOWS.with(|windows| {
-            windows.borrow_mut().remove(&key);
-        });
         return;
     }
 
@@ -366,10 +357,20 @@ pub(crate) fn install_artifact_preview_live_resize(window: &crate::ArtifactPrevi
         ]
     };
     if begin_observer.is_null() || end_observer.is_null() {
-        ARTIFACT_PREVIEW_RESIZE_WINDOWS.with(|windows| {
-            windows.borrow_mut().remove(&key);
-        });
+        unsafe {
+            for observer in [begin_observer, end_observer] {
+                if !observer.is_null() {
+                    let _: () = msg_send![center, removeObserver: observer];
+                }
+            }
+        }
         log::warn!("[ArtifactPreview] Failed to install detached live-resize observers");
+    } else {
+        ARTIFACT_PREVIEW_RESIZE_OBSERVERS.with(|observers| {
+            observers
+                .borrow_mut()
+                .insert(key, (begin_observer, end_observer));
+        });
     }
 }
 
@@ -1954,8 +1955,6 @@ pub(crate) fn install_system_theme_change_observer() {
     static INSTALL: Once = Once::new();
     INSTALL.call_once(|| {
         static mut OBSERVER_CLASS: *const Class = std::ptr::null();
-        static mut OBSERVER: *mut Object = std::ptr::null_mut();
-
         unsafe {
             let Some(superclass) = Class::get("NSObject") else {
                 log::warn!("[Theme] NSObject unavailable for theme observer");
@@ -1989,8 +1988,7 @@ pub(crate) fn install_system_theme_change_observer() {
                 log::warn!("[Theme] Failed to allocate system theme observer");
                 return;
             }
-            let _: () = msg_send![observer, retain];
-            OBSERVER = observer;
+            SYSTEM_THEME_OBSERVER = observer;
 
             let Some(center_class) = Class::get("NSDistributedNotificationCenter") else {
                 log::warn!("[Theme] NSDistributedNotificationCenter unavailable");
@@ -2011,6 +2009,54 @@ pub(crate) fn install_system_theme_change_observer() {
                 object: std::ptr::null::<Object>()
             ];
             log::info!("[Theme] Listening for AppleInterfaceThemeChangedNotification");
+        }
+    });
+}
+
+pub(crate) fn shutdown_native_integrations() {
+    unsafe {
+        if !TITLEBAR_EVENT_MONITOR.is_null()
+            && let Some(event_class) = Class::get("NSEvent")
+        {
+            let _: () = msg_send![event_class, removeMonitor: TITLEBAR_EVENT_MONITOR];
+            TITLEBAR_EVENT_MONITOR = std::ptr::null_mut();
+        }
+
+        if !TITLEBAR_DELEGATE.is_null()
+            && let Some(center_class) = Class::get("NSNotificationCenter")
+        {
+            let center: *mut Object = msg_send![center_class, defaultCenter];
+            if !center.is_null() {
+                let _: () = msg_send![center, removeObserver: TITLEBAR_DELEGATE];
+            }
+        }
+
+        if !SYSTEM_THEME_OBSERVER.is_null() {
+            if let Some(center_class) = Class::get("NSDistributedNotificationCenter") {
+                let center: *mut Object = msg_send![center_class, defaultCenter];
+                if !center.is_null() {
+                    let _: () = msg_send![center, removeObserver: SYSTEM_THEME_OBSERVER];
+                }
+            }
+            let _: () = msg_send![SYSTEM_THEME_OBSERVER, release];
+            SYSTEM_THEME_OBSERVER = std::ptr::null_mut();
+        }
+    }
+
+    ARTIFACT_PREVIEW_RESIZE_OBSERVERS.with(|observers| {
+        let observers = std::mem::take(&mut *observers.borrow_mut());
+        let Some(center_class) = Class::get("NSNotificationCenter") else {
+            return;
+        };
+        let center: *mut Object = unsafe { msg_send![center_class, defaultCenter] };
+        if center.is_null() {
+            return;
+        }
+        for (begin, end) in observers.into_values() {
+            unsafe {
+                let _: () = msg_send![center, removeObserver: begin];
+                let _: () = msg_send![center, removeObserver: end];
+            }
         }
     });
 }

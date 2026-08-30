@@ -1,4 +1,4 @@
-# Usher 项目结构审计（2026-07）
+# Usher 项目结构审计（2026-08-29）
 
 > 本文是基于当前工作树的阶段性结构审计，不是稳定行为规格。稳定约束仍以
 > `docs/specs/` 为准，模块所有权仍以中英文架构文档为准。
@@ -12,8 +12,9 @@
 3. Workflow 与 Terminal 的关键状态按项目隔离。
 4. `usher-ui` 已形成生成 UI API 的独立编译边界。
 
-当前主要风险是少数热点文件拥有过多“变化原因”，而不是顶层目录设计错误。
-应采用保持公开 façade、逐块搬迁纯逻辑和适配器的渐进式拆分，避免一次性大改
+当前主要风险仍是少数热点文件拥有过多“变化原因”，但 7 月完成拆分后，新增功能
+已经让多个热点明显回流。此前“结构治理可以停止”的结论不再成立。后续仍应保持
+公开 façade，以可独立测试的状态、纯逻辑和适配器为单位渐进迁移，避免一次性改动
 模块 API、异步时序和 Slint callback。
 
 ## 审计方法
@@ -27,29 +28,46 @@
 - `src/lib.rs` 的启动顺序和 callback 装配；
 - Project、Workflow、Git Provider、Terminal、Chat 的状态所有权。
 
-审计时 `cargo check --locked` 可通过；已有两个 Chat response dead-code warning。
-没有发现 `src/http/mod.rs` 外创建应用级 reqwest client，也没有发现 feature
-自行创建 Tokio runtime。
+2026-08-29 复核时 `cargo check --locked` 可通过。PR CI 已覆盖 fmt、workspace
+tests、clippy 和 disabled-feature check；没有发现 `src/http/mod.rs` 外创建应用级
+reqwest client，也没有发现 `src/app_runtime.rs` 外创建 Tokio runtime。
 
 ## 热点与判断
 
 | 热点 | 当前规模 | 判断 | 优先级 |
 | --- | ---: | --- | --- |
-| `ui/views/workflow/pr_review_workspace.slint` + `ui/components/pr_review/` | 页面编排 3976 行；shell 1354 行；content 1385 行 | 根文件只保留跨区域状态、滚动锚点与页面编排；稳定 struct、Header/Actions 和可复用 Diff/File tree 内容组件已分层 | 已完成 P1 |
-| `src/workflow/pr_review.rs` + `pr_review/` | façade 13 行；controller 3630 行；cache 290 行；avatar 96 行，纯算法/adapter 各自独立 | façade、异步编排、共享缓存、头像 I/O、投影/选择/Timeline 等职责已有明确所有权 | 已完成 P1 |
-| `src/git/gitee/` | façade/用例编排 2263 行；transport 111 行；decode 234 行；conversation 194 行；readiness 148 行；revert 31 行 | Profile 分发保留在 façade；认证/endpoint、响应归一化、会话/提交映射、合并与回退语义已隔离 | 已完成 P1 |
+| `ui/views/workflow/pr_review_workspace.slint` + `ui/components/pr_review/` | 页面编排 4379 行 | 页面根仍持有大量跨区域状态；独立 package contract 已存在，但生产页面尚未形成独立生成 crate | P3 继续治理 |
+| `src/workflow/pr_review.rs` + `pr_review/` | façade 13 行；controller 4451 行 | cache/diff/avatar 等已有边界，但控制器新增 action、fixture 和 UI 编排后再次增长 | P3 继续治理 |
+| `src/git/gitee/` | façade/用例编排 3715 行；conversation 960 行 | transport/decode/readiness/revert 边界仍有效，但 Provider 用例和会话逻辑明显回流 | P3 继续治理 |
 | `src/workflow/tag/` | façade 7 行；controller 1698 行；commands 101 行；version 49 行 / 新增 4 个纯逻辑测试 | UI/取消编排与 SemVer、Git argv 计划分离；命令参数不经 shell 拼接 | 已完成 P1 |
 | `src/project/` | façade 13 行；controller 928 行；logo 421 行；model 125 行；storage 78 行；overview 50 行 | 保存/UI 编排保留在 controller；模型、JSON 存储、Logo 和 overview 任务选择已独立 | 已完成 P2 |
 | `src/git/overview.rs` | 约 120 行；3 个纯逻辑测试 | Project/Workflow 共用 Git façade；分页聚合只消费归一化 PR model，旧 `project/pr_stats.rs` 已删除 | 已完成收敛 |
-| `src/git/mod.rs` + `src/git/{model,locator,diff}.rs` | façade 656 行；model 584 行；locator 189 行；diff 95 行 | Provider-neutral façade、领域模型、remote 定位与统一 diff 解析已分离 | 已完成 P1 |
-| `src/chat/interactive.rs` + `virtual_layout.rs` | UI/请求编排 871 行；虚拟布局 387 行 / 新增 3 个边界测试 | 高度估算、prefix cache、增量更新和有界窗口已与 UI timer/请求分离 | 已完成 P2 |
+| `src/git/mod.rs` + `src/git/{model,locator,diff,json,provider}.rs` | façade 约 900 行；共享 JSON helper 与 Provider adapter 已独立 | `RepoContext`、对象安全 `GitProvider` 和 `ProviderCapabilities` 已统一读写分发；Provider endpoint/解码仍归各 adapter | 已完成 P3 #27 |
+| `src/chat/interactive.rs` + `virtual_layout.rs` | UI/请求编排 2104 行 | 虚拟布局边界仍有效，但持久化、请求与 UI 编排继续集中增长 | 门禁守护 |
 | `src/terminal/` | controller 1078 行；input 92 行；diagnostics 78 行；refresh 47 行，另有 render/session | PTY/session 时序保持原位；输入字节、诊断格式和刷新节流策略可独立测试 | 已完成 P2 |
 | `src/router/mod.rs` + `src/app_lifecycle.rs` | Router 249 行；lifecycle hook 34 行 | Router 只拥有 transition/history/reachability；跨 feature 清理由 composition root 注入 | 已完成 P2 |
 
 文件长度本身不是拆分依据。P1 文件的问题是同时包含三种以上独立变化原因，
 并且这些变化由不同测试策略验证。
 
-## 已完成的结构调整
+## 2026-08-29 回流结论与门禁
+
+7 月审计记录的 `src/lib.rs` 635 行、PR Review controller 3630 行、Gitee façade
+2263 行和 Chat controller 871 行，现分别为 1065、4451、3715 和 2104 行。
+这不是一次单纯的代码搬迁：PR/AI Review、会话归一化、虚拟化与持久化功能持续进入
+原控制器，说明原先只靠文档约束无法守住边界。
+
+`scripts/check-architecture-structure.sh` 现在把当前热点行数与函数/根 UI contract
+规模记录为带少量余量的可执行预算，并继续守护 HTTP client 与 Tokio runtime 的
+唯一创建位置。PR CI 执行该脚本。预算触发时应优先拆出已有独立变化原因；确需增长时，
+必须在同一改动中说明所有权并更新本审计基线，不能静默抬高数字。
+
+本轮 P3 已完成共享 Provider JSON helper 与对象安全 Provider adapter、PR Review 六类
+state-store generation、AI Review enabled/disabled 公共 contract、生成体积工具的
+`@ai-review` 注册，以及任务驱逐后的 session 文件清理。独立 PR Review 生成 crate、
+完整 objc2 迁移和剩余传递依赖去重仍是独立高风险阶段，必须分别建立回归护栏后推进。
+
+## 2026-07 已完成的结构调整（历史基线）
 
 截至路线图第 18 批，已完成以下行为不变的边界调整：
 

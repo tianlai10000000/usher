@@ -12,6 +12,9 @@ use serde_json::Value;
 use crate::codereview::api::gitlab as endpoints;
 use crate::http::{self, RequestOptions};
 
+use super::json::{
+    fallback_total, header_u32, nested_string, string_field, value_to_id, value_u32,
+};
 use super::{
     PageCollector, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
     PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters, PullRequestItem,
@@ -150,7 +153,7 @@ pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, Str
     )
     .await
     .map_err(|error| error.to_string())?;
-    value_to_id(&response.id, "GitLab")
+    value_to_id(Some(&response.id), "GitLab")
 }
 
 pub(super) async fn get_pull_requests(
@@ -608,6 +611,7 @@ pub(super) async fn get_commit_range_diff(
     base_sha: &str,
     head_sha: &str,
     commit_count: u32,
+    _ignore_whitespace_change: bool,
 ) -> Result<PullRequestDiffDetail, String> {
     let endpoint = endpoints::REPOSITORY_COMPARE_URL
         .replace("{api_base_url}", api_base_url(locator).as_str())
@@ -1722,57 +1726,6 @@ fn pagination_total(headers: &HeaderMap) -> Option<u32> {
     ["x-total", "x-total-count", "total-count"]
         .into_iter()
         .find_map(|header| header_u32(headers, header))
-}
-
-fn header_u32(headers: &HeaderMap, name: &str) -> Option<u32> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u32>().ok())
-}
-
-fn value_to_id(value: &serde_json::Value, provider: &str) -> Result<String, String> {
-    match value {
-        serde_json::Value::String(value) if !value.trim().is_empty() => Ok(value.clone()),
-        serde_json::Value::Number(value) => Ok(value.to_string()),
-        _ => Err(format!("{provider} project details did not include an id.")),
-    }
-}
-
-fn string_field(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            value
-                .get(key)
-                .and_then(Value::as_i64)
-                .map(|value| value.to_string())
-        })
-}
-
-fn value_u32(value: &Value, key: &str) -> Option<u32> {
-    value
-        .get(key)
-        .and_then(Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
-        .or_else(|| {
-            value
-                .get(key)
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse::<u32>().ok())
-        })
-}
-
-fn nested_string(value: &Value, parent: &str, key: &str) -> Option<String> {
-    value.get(parent)?.get(key)?.as_str().map(str::to_string)
-}
-
-fn fallback_total(page: u32, per_page: u32, item_count: usize) -> u32 {
-    page.saturating_sub(1)
-        .saturating_mul(per_page)
-        .saturating_add(item_count as u32)
 }
 
 #[cfg(test)]

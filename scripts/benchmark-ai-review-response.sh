@@ -328,6 +328,7 @@ if (( build_binary == 1 )); then
   cargo build \
     --release \
     --locked \
+    --features test-fixtures \
     --target "$host_target" \
     --target-dir "$repo_root/target" 2>&1 | tee "$result_root/build.log"
 fi

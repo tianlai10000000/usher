@@ -6739,7 +6739,6 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
@@ -7324,7 +7323,8 @@ version = "0.0.8-alpha.1"
 dependencies = [
  "anyhow",
  "arboard",
- "base64 0.23.1",
+ "async-trait",
+ "base64 0.22.1",
  "block2 0.6.2",
  "bytes",
  "chrono",

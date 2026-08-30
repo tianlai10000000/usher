@@ -21,10 +21,10 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
    and no total deadline when set to zero. `RequestOptions.read_idle_timeout`
    independently limits the interval without body progress: 30 seconds by
    default, any custom duration when supplied, and disabled when set to zero.
-   The request-scoped progress policy defaults to any received chunk. Buffered
-   JSON callers may require non-whitespace bytes, so blank transport heartbeats
-   do not keep a request alive. Policies describe response semantics and never
-   select behavior by provider host or model name.
+   Every received transport chunk resets the body-idle deadline for buffered
+   and streaming callers. Protocol-specific wall-clock limits and heartbeat
+   semantics remain the caller's responsibility and never depend on provider
+   host or model name.
 3. Every call has a non-empty operation label.
 4. Non-2xx responses fail by default and include only a bounded response-body excerpt.
 5. Request, response, and error interceptors execute in registration order.
@@ -60,9 +60,9 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
 2. 所有应用自有请求使用模块内唯一的异步 client，并统一 User-Agent 与 10 秒连接超时。
    总请求截止时间由 `RequestOptions.timeout` 管理：默认 30 秒，可传入任意自定义时长，
    传零则不设置总截止时间。`RequestOptions.read_idle_timeout` 独立限制未产生正文进度的
-   等待：默认 30 秒，可自定义，传零则关闭空闲检测。请求级进度策略默认把任意 chunk
-   视为进度；缓冲 JSON 调用方可要求非空白字节，避免空白传输心跳让请求续期。策略只描述
-   响应语义，禁止按 Provider host 或模型名称选择行为。
+   等待：默认 30 秒，可自定义，传零则关闭空闲检测。缓冲与流式调用中收到的每个传输
+   chunk 都会重置正文空闲截止时间；协议级墙钟上限与心跳语义仍由调用方负责，且禁止按
+   Provider host 或模型名称选择行为。
 3. 每个请求必须提供非空 operation 名称。
 4. 非 2xx 默认失败，响应正文只保留受限摘要。
 5. Request/Response/Error interceptor 按注册顺序执行。
@@ -127,21 +127,19 @@ Interceptor 必须线程安全、快速、确定性。鉴权拦截器必须按 h
 `HttpErrorKind` distinguishes build, timeout, connect, request, status, decode, and interceptor errors. Callers should match the kind/status when behavior differs; user messages must come from the normalized error rather than fragile substring matching.
 
 Response-body reading may fail or stop making progress after successful headers.
-Every buffered body format uses the same chunk loop and a request-scoped
-progress policy. The default resets the idle timer after each chunk; callers
-expecting JSON may require non-whitespace bytes. An idle interval becomes
-`Timeout`, transport errors retain reqwest's classification, and only invalid
-buffered JSON becomes `Decode`. A stalled non-2xx error body follows the same
-rule instead of hiding the timeout. Streaming callers retain the default
-chunk-progress semantics and own their higher-level protocol heartbeats.
+Every buffered body format uses the same chunk loop, and each received transport
+chunk resets the idle timer. An idle interval becomes `Timeout`, transport
+errors retain reqwest's classification, and only invalid buffered JSON becomes
+`Decode`. A stalled non-2xx error body follows the same rule instead of hiding
+the timeout. Streaming callers use the same transport progress semantics and
+own higher-level protocol heartbeats and wall-clock limits.
 
 `HttpErrorKind` 区分构建、超时、连接、请求、状态码、解码和拦截器错误。业务分支应匹配 kind/status，不应继续依赖错误字符串包含关系。
 
-响应头成功后，读取 body 仍可能失败或停止前进。所有缓冲响应格式使用同一 chunk 循环和
-请求级进度策略：默认每个 chunk 后重置空闲计时，预期 JSON 的调用方可要求非空白字节。
-空闲超限归类为 `Timeout`，transport 错误保留 reqwest 分类，只有缓冲后的 JSON 内容无效
-才归类为 `Decode`。非 2xx 的错误响应体卡住时也遵循同一规则；流式调用保留默认 chunk
-进度语义，并自行负责更高层协议心跳。
+响应头成功后，读取 body 仍可能失败或停止前进。所有缓冲响应格式使用同一 chunk 循环，
+收到的每个传输 chunk 都会重置空闲计时。空闲超限归类为 `Timeout`，transport 错误保留
+reqwest 分类，只有缓冲后的 JSON 内容无效才归类为 `Decode`。非 2xx 的错误响应体卡住时
+也遵循同一规则；流式调用使用相同的传输进度语义，并自行负责更高层协议心跳和墙钟上限。
 
 ## Migration status / 迁移状态
 
@@ -179,11 +177,11 @@ Only the shared HTTP module should contain client creation or raw execution.
 - Request timeout configuration maps the 30-second default and custom durations
   onto the reqwest request; zero maps to no total deadline without removing the
   connect timeout.
-- Body-idle timeout configuration defaults to 30 seconds, uses any received
-  chunk as progress by default, supports a request-scoped non-whitespace mode,
-  supports custom values, and treats zero as disabled.
-- Whitespace-only heartbeats cannot extend a non-whitespace progress deadline;
-  ordinary and streaming requests retain the default any-chunk behavior.
+- Body-idle timeout configuration defaults to 30 seconds, uses every received
+  transport chunk as progress, supports custom values, and treats zero as
+  disabled.
+- Buffered and streaming responses share the same any-chunk idle semantics;
+  protocol-specific wall-clock limits remain caller-owned.
 - A stalled JSON, text, bytes, streamed, or non-2xx error body becomes `Timeout`
   instead of waiting forever or being overwritten as `Decode`/`Status`.
 - Silent background calls do not create Toast/Notification.

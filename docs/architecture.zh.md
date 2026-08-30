@@ -51,8 +51,8 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `crates/usher-ai-review/` | 可选且与框架无关的 AI Review 领域包：规则/配置 reducer、动态有界调度器、Review 输入/Session、diff 分块、Prompt 构造、响应解析和 finding 聚合；不依赖 MainWindow 或 Slint。 |
 | `src/app_runtime.rs` | 进程级 Tokio runtime，生产默认使用 2 个 worker；runtime 线程安装 tracing dispatch，并保留显式环境覆盖用于受控基准。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint 与生命周期高水位、启动/运行元数据、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
-| `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观（强制浅色/深色，或 Auto 时跟随系统）、标题栏附件、窗口交互通知、用于关闭可消隐临时弹层的原生标题栏点击桥接、macOS PR Review 字体注册、`NSSound` 点击音，以及用于 Auto 实时跟随的 `AppleInterfaceThemeChangedNotification`；`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
-| `src/shutdown.rs` | 按优先级协调关闭。 |
+| `src/platform/` | 跨平台原生集成边界。`macos.rs` 负责 AppKit 外观、标题栏附件、窗口交互通知、原生标题栏点击桥接、PR Review 字体注册、`NSSound` 点击音和 Auto 主题实时跟随；同时成对管理并在正常关闭时注销 NSEvent monitor、窗口/主题 observer 与独立 Preview resize observer。`windows.rs` 负责 Windows 主题检测与 `MessageBeep`；`linux.rs` 负责 XDG Portal 主题检测和不阻塞 UI 的桌面音效播放。`mod.rs` 提供统一 API、Auto 主题监听开关（全平台 1 秒轮询兜底），以及用操作系统文件管理器打开目录（Finder / Explorer / `xdg-open`）。 |
+| `src/shutdown.rs` | 按优先级协调关闭。正常关闭在 event loop 执行 UI/AppKit 清理；若 event-loop dispatch 失败，后台兜底只执行线程安全的 pre/post 清理并跳过 UI/AppKit。 |
 | `src/single_instance.rs` | 单实例进程行为。 |
 | `src/tray.rs` | 桌面托盘和托盘触发的生命周期操作。 |
 
@@ -498,7 +498,7 @@ GitHub 控件。
 
 应用 Shell 统一拥有一个 240px 桌面侧栏。持久化固定状态驱动同一个可中断、按显示帧推进的弹簧，移动侧栏、内容表面、标题栏分割线和状态栏绘制起点。Slint 显示动画时钟把真实帧间隔交给闭式阻尼振子，因此在 120Hz 屏幕上每个渲染帧都会更新位置，延迟帧也不会积累固定步长误差；目标反转保留当前进度和速度。路由只在运动开始时采用一次目标布局宽度，状态栏透明宿主与右侧常驻工具组保持窗口坐标。连续点击标题栏按钮重定向同一运动，不排队旧回调。原生 Live Resize 会把侧栏运动吸附到目标，冻结已挂载路由宽度，并在拖拽结束后一次应用最终宽度。固定态边界 Elevation 由主内容面拥有并只向侧栏方向投射；取消固定后，窗口左侧 8px Hover 热区把同一侧栏作为只有边框、尾部上下圆角的根层临时浮层打开。macOS 通过原生标题栏附件提供侧栏、Back 和 Forward。面包屑占用剩余原生标题栏安全区，原生附件、Slint 面包屑和尾部操作统一按完整 46px inset 中轴线对齐。macOS 的 `NSVisualEffectView` 固定为 240px 宽，只在侧栏下方提供 Menu/BehindWindow 材质；Slint 渲染器下方另有与当前主题 Canvas 一致的全窗口不透明原生底面，GPU Surface resize 晚一帧时也不会在右侧露出壁纸蓝色。Vibrancy 安装先切换全尺寸透明标题栏样式，再在窗口仍不透明时挂上 Effect 与底面，最后才打开透明窗口路径并使用近透明背景而非 `clearColor`；整个过程在启动窗口 alpha 门控期间的同一个 AppKit 事务内完成，避免启动瞬间半透明 Slint 侧栏透出桌面内容。固定侧栏 Rectangle 在 Effect 上绘制随焦点变化的最终表面；失去 Key 时隐藏 Effect。临时 Hover 侧栏保持独立不透明浮层。按钮可用状态由 Router 历史驱动；三端共享 Router callback 和侧栏偏好，平台代码不持有路由历史。
 
-Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。所有列表、详情/diff、仓库文件、review state、review submit 和 merge 请求都根据当前项目持久化的 `repo_type` 选择实现，并在执行前校验其与 `remote_repo` 一致。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，并用独立 action 序列防止迟到的 review/merge 响应更新其他项目或 PR。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 在 adapter 边界解码，每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写都使用序列号防止迟到响应污染当前项目或 PR。
+Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。`RepoContext` 一次性校验当前项目持久化的 Provider/id 与 `remote_repo`，随后列表、详情/diff、仓库文件、review state、review submit、merge 和 revert 均由对象安全的 `GitProvider` 分发；`ProviderCapabilities` 统一暴露 endpoint 能力，UI 不自行推断。共享 JSON 解码与分页 helper 归 `src/git/json.rs` 所有。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，其 feature 自有 state-store façade 为 diff、高亮、展开、Conversation、Commits 和远端 action 保存六类独立强类型 generation。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 在 adapter 边界解码，每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写均由对应 generation 防止迟到响应污染当前项目或 PR。
 
 PR Review 将逻辑选区与 shaped-text 几何分离：`selection.rs` 负责行/字符范围和剪贴板
 投影；`text_geometry.rs` 是 styled-run 与软换行 caret 命中及范围边界的可替换数值门面，
@@ -528,7 +528,7 @@ stdout/stderr 并发布有界进度，因此已展开 Step 可实时更新。展
 `notice`、`warning`、`error`、`debug` 标注映射为 Primer 语义行，为运行中 Step
 旋转 attention 色 Spinner，并让 queued Step 保持不可交互。
 
-Revert 命令与 review/merge 命令共用 Provider-neutral façade 和 action 序列，迟到响应不得影响其他项目或 PR。已合并或已关闭请求隐藏页头 review/merge 控件；在已配置凭据时 Conversation 评论框保持可用（GitHub Conversation 评论按 issue comment 写入，因此合并后仍可留言）。只有 adapter 返回 `can_revert` 时，已合并请求的页头才在就绪徽标同一行显示明确可见的 Primer 风格次级回退按钮（Usher 不用 GitHub 页头 kebab ActionMenu，以保证完整标签可读）。GitHub GraphQL 创建独立的反向 PR；Gitee 企业版重新读取 MR，要求 merge/squash commit 的 `/repository/commits/:sha/refs` 响应同时返回 `merge_commit_by_pr` 与 `can_revert`，随后对目标分支调用文档定义的 commit revert endpoint。rebase/fast-forward、Gitee 公有版与 GitLab 均保持不支持；Provider 专属确认说明必须明确 Gitee 会直接修改目标分支。
+Revert 命令与 review/merge 命令共用 Provider-neutral façade 和强类型 remote-action generation，迟到响应不得影响其他项目或 PR。已合并或已关闭请求隐藏页头 review/merge 控件；在已配置凭据时 Conversation 评论框保持可用（GitHub Conversation 评论按 issue comment 写入，因此合并后仍可留言）。只有 adapter 返回 `can_revert` 时，已合并请求的页头才在就绪徽标同一行显示明确可见的 Primer 风格次级回退按钮（Usher 不用 GitHub 页头 kebab ActionMenu，以保证完整标签可读）。GitHub GraphQL 创建独立的反向 PR；Gitee 企业版重新读取 MR，要求 merge/squash commit 的 `/repository/commits/:sha/refs` 响应同时返回 `merge_commit_by_pr` 与 `can_revert`，随后对目标分支调用文档定义的 commit revert endpoint。rebase/fast-forward、Gitee 公有版与 GitLab 均保持不支持；Provider 专属确认说明必须明确 Gitee 会直接修改目标分支。
 
 Gitee 企业版 Commit 角标只把 MR detail/diff 中的正数摘要视为可信总数。部分部署在读取 commits 集合前会报告零，因此零值或缺失时必须在激活 Commits Tab 前执行轻量计数探测；完整 Commits 内容 model 仍保持懒加载。
 
@@ -581,7 +581,7 @@ ListView/ScrollView 可以为大型时间线、文件树和 diff 提供虚拟化
 排版、配色、焦点状态或控件外观；这些能力全部由项目自有 GitHub 组件负责。
 空白/错误状态复用 `GitHubBlankslate`，图标操作复用 `GitHubIconButton`。
 
-PR Review 为 diff、高亮、展开、action state、Conversation 与 Commits 使用统一请求代际边界。切换 PR、手动 Reload 与 ignore-whitespace 变更都会使六类代际全部失效；强刷绕过 diff 缓存、清空惰性 Tab model，并重新加载当前 Tab。Provider changed-file 分页共用一个有界收集器；最后一页仍满时把归一化 detail 标记为 `files_truncated`，Files changed 明确展示该限制。Conversation block 按解析后的 RFC3339 时刻而不是 Provider 原始字符串比较。Merge 能力采用 fail-closed：必需的 Review/approval 状态读取失败时，action-state bridge 清空全部写能力并发布不可用 readiness。
+PR Review 为 diff、高亮、展开、远端 action、Conversation 与 Commits 使用六个相互独立的 typed state-store 代际；启动一种惰性读取不会使另一种失效。切换 PR、手动 Reload 与 ignore-whitespace 变更通过一个 reducer action 使六类代际全部失效；强刷绕过 diff 缓存、清空惰性 Tab model，并重新加载当前 Tab。Provider changed-file 分页共用一个有界收集器；最后一页仍满时把归一化 detail 标记为 `files_truncated`，Files changed 明确展示该限制。Conversation block 按解析后的 RFC3339 时刻而不是 Provider 原始字符串比较。Merge 能力采用 fail-closed：必需的 Review/approval 状态读取失败时，action-state bridge 清空全部写能力并发布不可用 readiness。
 
 ### Pull Request 子系统边界
 
@@ -604,7 +604,7 @@ Provider adapters
   项目注册表、本地 token/配置、HTTP client/interceptors、runtime
 ```
 
-展示层不接收 Provider JSON 或凭据；Provider adapter 不拥有 UI 状态。仓库服务层是唯一可在校验 remote URL 后选择 adapter 的层，并把空白字符过滤、评审动作、可合并性和允许的合并策略暴露为归一化能力，而不是让 UI 自行推断。当前应用通过 Slint、Tokio 和 Rust mutex 实现这些层，但长期契约是归一化的 page/item/diff/source/action-state 数据，以及 [PR 工作流规格](specs/pr-review.md)定义的“最新请求优先”生命周期。Approve/Comment/Request changes 等决策只通过 Provider review 命令写入远端。
+展示层不接收 Provider JSON 或凭据；Provider adapter 不拥有 UI 状态。仓库服务层通过 `RepoContext` 一次性校验持久化 Provider/id 与 remote URL，再由对象安全的 `GitProvider` 分发全部读写操作；`ProviderCapabilities` 统一暴露空白过滤和服务端回退等能力，UI 不自行推断。通用 JSON 解码与分页 helper 归 `src/git/json.rs` 所有。当前应用通过 Slint、Tokio 和 feature 自有 state-store 门面实现这些层；长期契约是归一化的 page/item/diff/source/action-state 数据，以及 [PR 工作流规格](specs/pr-review.md)定义的“最新请求优先”生命周期。Approve/Comment/Request changes 等决策只通过 Provider review 命令写入远端。
 
 ### Chat
 
@@ -767,9 +767,9 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 - `reject_http_errors` 默认开启，把非 2xx 响应转换为 `HttpError`，并保留受长度限制的响应正文摘要。
 - `feedback` 默认 `Silent`；用户操作可以选择 Toast、Notification 或两者。
 - `timeout` 默认 30 秒，可传入自定义时长；零表示无总截止时间，独立的 10 秒连接超时仍然生效。
-- `read_idle_timeout` 默认 30 秒，可自定义，零表示关闭空闲检测。请求级 body-progress
-  策略默认按任意响应体 chunk 重新计时；缓冲 JSON 调用方可改为要求非空白进度，避免传输
-  心跳延长截止时间。该策略描述响应表示语义，绝不按 Provider host 或模型名称分支。
+- `read_idle_timeout` 默认 30 秒，可自定义，零表示关闭空闲检测；每个收到的响应体传输
+  chunk 都会重新计时。增量调用方使用 `HttpResponse::for_each_chunk`，与缓冲读取共享同一套
+  诊断、错误拦截和 idle 语义。
 - `retry_transient(3)` 为幂等 Provider 读取启用带 jitter 的有上限指数退避，覆盖连接/
   超时、429、5xx 及 rate-limit 耗尽的 403；识别有界 `Retry-After`/Provider reset 提示，
   中间尝试保持静默。独立读取使用 `join!`，逐项补全使用限并发 unordered stream。

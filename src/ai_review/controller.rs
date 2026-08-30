@@ -484,8 +484,14 @@ pub(crate) fn setup_ai_review(
         .unwrap_or(session_dir.as_path())
         .join(TASK_STATE_FILE);
     let (initial_tasks, task_writes_allowed) = load_task_state(&task_state_path);
+    let initial_task_ids = initial_tasks.tasks.keys().cloned().collect();
     let task_store: Arc<TaskStore> = Arc::new(LocalStateStore::new(initial_tasks, reduce_tasks));
-    let task_persistence = TaskPersistenceWorker::start(task_state_path, task_writes_allowed);
+    let task_persistence = TaskPersistenceWorker::start(
+        task_state_path,
+        session_dir.clone(),
+        initial_task_ids,
+        task_writes_allowed,
+    );
     let persistence_sender = task_persistence.sender.clone();
     let persistence_subscription = task_store.observe_commits(Arc::new(move |snapshot| {
         let _ = persistence_sender.send(Some(snapshot.state_arc()));
@@ -1938,21 +1944,11 @@ impl ControllerInner {
     }
 
     fn session_path(&self, id: &ReviewTaskId) -> PathBuf {
-        let safe = id
-            .0
-            .chars()
-            .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-            .collect::<String>();
-        self.session_dir.join(format!("{safe}.json"))
+        session_paths(&self.session_dir, id).0
     }
 
     fn chat_session_path(&self, id: &ReviewTaskId) -> PathBuf {
-        let safe = id
-            .0
-            .chars()
-            .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-            .collect::<String>();
-        self.session_dir.join(format!("{safe}.chat.json"))
+        session_paths(&self.session_dir, id).1
     }
 
     fn log_owned_bytes(&self, reason: &str) {
@@ -3197,7 +3193,12 @@ struct TaskPersistenceWorker {
 }
 
 impl TaskPersistenceWorker {
-    fn start(path: PathBuf, writes_allowed: bool) -> Self {
+    fn start(
+        path: PathBuf,
+        session_dir: PathBuf,
+        mut retained_ids: HashSet<ReviewTaskId>,
+        writes_allowed: bool,
+    ) -> Self {
         let (sender, receiver) = mpsc::channel::<Option<Arc<ReviewTaskState>>>();
         let handle = std::thread::Builder::new()
             .name("ai-review-tasks".into())
@@ -3214,7 +3215,13 @@ impl TaskPersistenceWorker {
                     }
                     if let Err(error) = persist_task_state(&path, &latest) {
                         log::error!("[AI Review][Task Store] Persistence failed: {error}");
+                        continue;
                     }
+                    retained_ids = remove_evicted_session_files(
+                        &session_dir,
+                        &retained_ids,
+                        latest.tasks.keys(),
+                    );
                 }
             })
             .expect("failed to start AI review task persistence worker");
@@ -3241,6 +3248,45 @@ impl TaskPersistenceWorker {
             let _ = handle.join();
         }
     }
+}
+
+fn session_paths(session_dir: &Path, id: &ReviewTaskId) -> (PathBuf, PathBuf) {
+    let safe =
+        id.0.chars()
+            .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+            .collect::<String>();
+    (
+        session_dir.join(format!("{safe}.json")),
+        session_dir.join(format!("{safe}.chat.json")),
+    )
+}
+
+fn remove_evicted_session_files<'a>(
+    session_dir: &Path,
+    retained_ids: &HashSet<ReviewTaskId>,
+    current_ids: impl Iterator<Item = &'a ReviewTaskId>,
+) -> HashSet<ReviewTaskId> {
+    let current_ids = current_ids.cloned().collect::<HashSet<_>>();
+    let mut next_retained_ids = current_ids.clone();
+    for id in retained_ids.difference(&current_ids) {
+        let (review_path, chat_path) = session_paths(session_dir, id);
+        let mut retry = false;
+        for path in [review_path, chat_path] {
+            if let Err(error) = fs::remove_file(&path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                retry = true;
+                log::warn!(
+                    "[AI Review][Session Store] Failed to remove evicted session {}: {error}",
+                    path.display()
+                );
+            }
+        }
+        if retry {
+            next_retained_ids.insert(id.clone());
+        }
+    }
+    next_retained_ids
 }
 
 fn persist_task_state(path: &Path, state: &ReviewTaskState) -> Result<(), String> {
@@ -3336,6 +3382,46 @@ mod tests {
         assert_eq!(fs::read(&backup).unwrap(), b"{invalid");
 
         fs::remove_file(backup).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn evicted_tasks_remove_only_their_review_and_chat_sessions() {
+        let dir = std::env::temp_dir().join(format!(
+            "usher-ai-review-session-eviction-{}-{}",
+            std::process::id(),
+            NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let evicted = ReviewTaskId("review/evicted".to_string());
+        let retained = ReviewTaskId("review-retained".to_string());
+        let (evicted_review, evicted_chat) = session_paths(&dir, &evicted);
+        let (retained_review, retained_chat) = session_paths(&dir, &retained);
+        let corrupt_backup = evicted_review.with_extension("json.corrupt-test");
+        for path in [
+            &evicted_review,
+            &evicted_chat,
+            &retained_review,
+            &retained_chat,
+            &corrupt_backup,
+        ] {
+            fs::write(path, b"{}").unwrap();
+        }
+
+        let previous = HashSet::from([evicted.clone(), retained.clone()]);
+        let current = HashSet::from([retained.clone()]);
+        let next = remove_evicted_session_files(&dir, &previous, current.iter());
+
+        assert_eq!(next, current);
+        assert!(!evicted_review.exists());
+        assert!(!evicted_chat.exists());
+        assert!(retained_review.exists());
+        assert!(retained_chat.exists());
+        assert!(corrupt_backup.exists());
+
+        for path in [retained_review, retained_chat, corrupt_backup] {
+            fs::remove_file(path).unwrap();
+        }
         fs::remove_dir(dir).unwrap();
     }
 
