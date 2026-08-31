@@ -11,7 +11,8 @@ pub(super) enum ReviewRequestKind {
     Expand,
     Conversation,
     Commits,
-    RemoteAction,
+    RemoteActionState,
+    RemoteMutation,
 }
 
 #[derive(Clone, Default)]
@@ -21,7 +22,8 @@ struct ReviewState {
     expand_generation: u64,
     conversation_generation: u64,
     commits_generation: u64,
-    remote_action_generation: u64,
+    remote_action_state_generation: u64,
+    remote_mutation_generation: u64,
 }
 
 impl ReviewState {
@@ -32,7 +34,8 @@ impl ReviewState {
             ReviewRequestKind::Expand => self.expand_generation,
             ReviewRequestKind::Conversation => self.conversation_generation,
             ReviewRequestKind::Commits => self.commits_generation,
-            ReviewRequestKind::RemoteAction => self.remote_action_generation,
+            ReviewRequestKind::RemoteActionState => self.remote_action_state_generation,
+            ReviewRequestKind::RemoteMutation => self.remote_mutation_generation,
         }
     }
 
@@ -43,7 +46,8 @@ impl ReviewState {
             ReviewRequestKind::Expand => &mut self.expand_generation,
             ReviewRequestKind::Conversation => &mut self.conversation_generation,
             ReviewRequestKind::Commits => &mut self.commits_generation,
-            ReviewRequestKind::RemoteAction => &mut self.remote_action_generation,
+            ReviewRequestKind::RemoteActionState => &mut self.remote_action_state_generation,
+            ReviewRequestKind::RemoteMutation => &mut self.remote_mutation_generation,
         };
         *generation = generation.saturating_add(1);
         *generation
@@ -78,7 +82,8 @@ impl ReviewStateFacade {
                                 ReviewRequestKind::Expand,
                                 ReviewRequestKind::Conversation,
                                 ReviewRequestKind::Commits,
-                                ReviewRequestKind::RemoteAction,
+                                ReviewRequestKind::RemoteActionState,
+                                ReviewRequestKind::RemoteMutation,
                             ] {
                                 next.advance(kind);
                             }
@@ -119,8 +124,17 @@ mod tests {
         let state = ReviewStateFacade::new();
         let diff = state.begin(ReviewRequestKind::Diff);
         let conversation = state.begin(ReviewRequestKind::Conversation);
+        let action_state = state.begin(ReviewRequestKind::RemoteActionState);
+        let mutation = state.begin(ReviewRequestKind::RemoteMutation);
         assert!(state.is_current(ReviewRequestKind::Diff, diff));
         assert!(state.is_current(ReviewRequestKind::Conversation, conversation));
+        assert!(state.is_current(ReviewRequestKind::RemoteActionState, action_state));
+        assert!(state.is_current(ReviewRequestKind::RemoteMutation, mutation));
+
+        let next_action_state = state.begin(ReviewRequestKind::RemoteActionState);
+        assert!(!state.is_current(ReviewRequestKind::RemoteActionState, action_state));
+        assert!(state.is_current(ReviewRequestKind::RemoteActionState, next_action_state));
+        assert!(state.is_current(ReviewRequestKind::RemoteMutation, mutation));
 
         let next_diff = state.begin(ReviewRequestKind::Diff);
         assert!(!state.is_current(ReviewRequestKind::Diff, diff));
@@ -130,5 +144,7 @@ mod tests {
         state.invalidate_all();
         assert!(!state.is_current(ReviewRequestKind::Diff, next_diff));
         assert!(!state.is_current(ReviewRequestKind::Conversation, conversation));
+        assert!(!state.is_current(ReviewRequestKind::RemoteActionState, next_action_state));
+        assert!(!state.is_current(ReviewRequestKind::RemoteMutation, mutation));
     }
 }

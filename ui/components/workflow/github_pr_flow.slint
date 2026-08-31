@@ -48,6 +48,7 @@ export component GitHubPullRequestFlow {
     in property <string> pr-sort-filter: "newest";
     in property <bool> pr-loading: false;
     in property <string> pr-error: "";
+    in property <string> pr-error-kind: "";
     in property <[AiReviewRuleChoice]> ai-review-rule-options: [];
     in property <string> ai-review-project-rule-id: "";
     in property <string> ai-review-project-rule-name: "No preset";
@@ -62,6 +63,7 @@ export component GitHubPullRequestFlow {
     callback open-ai-review(string);
     callback cancel-ai-review(string);
     callback set-ai-review-rule(string);
+    callback open-settings();
 
     private property <string> active-menu: "";
     private property <string> hovered-inline-tooltip: "";
@@ -302,7 +304,16 @@ export component GitHubPullRequestFlow {
             title: "Unable to load pull requests";
             description: "Check your code hosting configuration or connection, then try again.";
             show-action: true;
-            action => { root.change-page(root.pr-page); }
+            action-label: root.pr-error-kind == "authentication" || root.pr-error-kind == "configuration"
+                ? "Open Settings"
+                : "Retry request";
+            action => {
+                if root.pr-error-kind == "authentication" || root.pr-error-kind == "configuration" {
+                    root.open-settings();
+                } else {
+                    root.change-page(root.pr-page);
+                }
+            }
         }
 
         if !root.pr-loading && root.pr-error == "" && root.pr-items.length == 0: GitHubPullRequestListStatePanel {

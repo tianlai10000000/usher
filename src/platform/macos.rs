@@ -39,6 +39,54 @@ static mut SIDEBAR_VIBRANCY_VIEW: *mut Object = std::ptr::null_mut();
 static mut WINDOW_SURFACE_BACKDROP_VIEW: *mut Object = std::ptr::null_mut();
 static mut SIDEBAR_DARK_MODE: bool = false;
 
+pub(crate) fn activate_main_window(window: &MainWindow) {
+    let Some(native_window) = native_window(window) else {
+        return;
+    };
+    unsafe {
+        if let Some(app_class) = Class::get("NSApplication") {
+            let app: *mut Object = msg_send![app_class, sharedApplication];
+            if !app.is_null() {
+                let _: () = msg_send![app, activateIgnoringOtherApps: true];
+            }
+        }
+        let sender: *mut Object = std::ptr::null_mut();
+        let _: () = msg_send![native_window, makeKeyAndOrderFront: sender];
+    }
+}
+
+pub(crate) fn show_startup_error(message: &str) {
+    unsafe {
+        let Some(alert_class) = Class::get("NSAlert") else {
+            eprintln!("Usher could not start: {message}");
+            return;
+        };
+        let alert: *mut Object = msg_send![alert_class, alloc];
+        let alert: *mut Object = msg_send![alert, init];
+        if alert.is_null() {
+            eprintln!("Usher could not start: {message}");
+            return;
+        }
+        let Some(title) = nsstring("Usher could not start") else {
+            eprintln!("Usher could not start: {message}");
+            return;
+        };
+        let Some(details) = nsstring(message) else {
+            eprintln!("Usher could not start: {message}");
+            return;
+        };
+        let Some(button) = nsstring("Quit") else {
+            eprintln!("Usher could not start: {message}");
+            return;
+        };
+        let _: () = msg_send![alert, setMessageText: title];
+        let _: () = msg_send![alert, setInformativeText: details];
+        let _: *mut Object = msg_send![alert, addButtonWithTitle: button];
+        let _: isize = msg_send![alert, runModal];
+        let _: () = msg_send![alert, release];
+    }
+}
+
 pub(crate) fn install_memory_benchmark_window_control(window: &MainWindow) {
     if std::env::var("USHER_MEMORY_WINDOW_CONTROL").as_deref() != Ok("signal-file-v1")
         || MEMORY_WINDOW_CONTROL_INSTALLED.swap(true, Ordering::SeqCst)

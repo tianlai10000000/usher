@@ -1,9 +1,6 @@
 // Settings module - Responsible for configuration read/write
-use std::ffi::OsString;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use config::{Config, File as ConfigFile, FileFormat};
@@ -22,6 +19,10 @@ pub struct AppSettings {
     /// Auto update enabled
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
+
+    /// Update release channel: `stable` or `alpha`.
+    #[serde(default = "default_update_channel")]
+    pub update_channel: String,
 
     /// Standard-output application logs
     #[serde(default = "default_application_console_logging")]
@@ -186,6 +187,18 @@ fn default_auto_update() -> bool {
     true // Default to enabled
 }
 
+fn default_update_channel() -> String {
+    default_update_channel_for_version(env!("CARGO_PKG_VERSION")).to_string()
+}
+
+fn default_update_channel_for_version(version: &str) -> &'static str {
+    if version.contains('-') {
+        "alpha"
+    } else {
+        "stable"
+    }
+}
+
 fn default_application_console_logging() -> bool {
     true
 }
@@ -227,6 +240,7 @@ impl Default for AppSettings {
         Self {
             theme_mode: default_theme_mode(),
             auto_update: default_auto_update(),
+            update_channel: default_update_channel(),
             application_console_logging: default_application_console_logging(),
             application_file_logging: default_application_file_logging(),
             tracing_logger_active: default_tracing_logger_active(),
@@ -259,8 +273,6 @@ struct SettingsLoad {
     settings: AppSettings,
     writes_blocked: bool,
 }
-
-static SETTINGS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 impl SettingsManager {
     /// Create a new settings manager and load settings from file
@@ -367,7 +379,7 @@ impl SettingsManager {
         let toml_content =
             toml::to_string_pretty(&settings).map_err(|e| format!("Failed to serialize: {}", e))?;
 
-        atomic_write(&self.config_path, toml_content.as_bytes())
+        usher_fs::atomic_write_private(&self.config_path, toml_content.as_bytes())
             .map_err(|e| format!("Failed to write config file: {}", e))?;
 
         log::info!("[Settings] Saved settings to {:?}", self.config_path);
@@ -406,6 +418,16 @@ impl SettingsManager {
     pub fn set_auto_update(&self, enabled: bool) {
         if let Ok(mut settings) = self.settings.write() {
             settings.auto_update = enabled;
+        }
+    }
+
+    pub fn set_update_channel(&self, channel: &str) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.update_channel = if channel == "alpha" {
+                "alpha".to_string()
+            } else {
+                "stable".to_string()
+            };
         }
     }
 
@@ -571,98 +593,10 @@ fn preserve_corrupt_settings(config_path: &Path, failure_stage: &str) -> Setting
     }
 }
 
-fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
-    let parent = parent_directory(path);
-
-    let (temporary_path, mut temporary_file) = create_temporary_file(path)?;
-    let write_result: io::Result<()> = (|| {
-        temporary_file.write_all(contents)?;
-        temporary_file.sync_all()?;
-        drop(temporary_file);
-        replace_file(&temporary_path, path)?;
-
-        #[cfg(unix)]
-        File::open(parent)?.sync_all()?;
-
-        Ok(())
-    })();
-
-    if write_result.is_err() {
-        let _ = fs::remove_file(&temporary_path);
-    }
-    write_result
-}
-
 fn parent_directory(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
-}
-
-fn create_temporary_file(path: &Path) -> io::Result<(PathBuf, File)> {
-    let Some(file_name) = path.file_name() else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "settings path has no file name",
-        ));
-    };
-
-    for _ in 0..16 {
-        let sequence = SETTINGS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let mut temporary_name = OsString::from(file_name);
-        temporary_name.push(format!(".tmp-{}-{sequence}", std::process::id()));
-        let temporary_path = path.with_file_name(temporary_name);
-        match OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary_path)
-        {
-            Ok(file) => return Ok((temporary_path, file)),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        }
-    }
-
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "could not allocate a unique settings temporary file",
-    ))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    fs::rename(source, destination)
-}
-
-#[cfg(target_os = "windows")]
-fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let result = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if result == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
 }
 
 // Global settings manager instance
@@ -684,6 +618,11 @@ pub fn save_theme_mode(mode: i32) {
 /// Save auto update setting asynchronously
 pub fn save_auto_update(enabled: bool) {
     get_settings_manager().set_auto_update(enabled);
+    schedule_settings_save();
+}
+
+pub fn save_update_channel(channel: &str) {
+    get_settings_manager().set_update_channel(channel);
     schedule_settings_save();
 }
 
@@ -837,6 +776,7 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     let app_state = AppState::get(app);
     app_state.set_theme_mode(settings.theme_mode);
     app_state.set_auto_update(settings.auto_update);
+    app_state.set_update_channel(settings.update_channel.clone().into());
     app_state.set_application_console_logging(settings.application_console_logging);
     app_state.set_application_file_logging(settings.application_file_logging);
     app_state.set_tracing_logger_active(settings.tracing_logger_active);
@@ -981,6 +921,26 @@ auto_update = false
         assert!(settings.tracing_logger_active);
         assert!(!settings.terminal_verbose_logging);
         assert_eq!(settings.memory_diagnostics_logging, cfg!(debug_assertions));
+        assert_eq!(settings.update_channel, default_update_channel());
+    }
+
+    #[test]
+    fn update_channel_default_tracks_the_build_version_kind() {
+        assert_eq!(default_update_channel_for_version("1.2.3"), "stable");
+        assert_eq!(default_update_channel_for_version("1.2.3-alpha.4"), "alpha");
+        assert_eq!(default_update_channel_for_version("1.2.3-rc.1"), "alpha");
+    }
+
+    #[test]
+    fn update_channel_setting_normalizes_unknown_values() {
+        let manager = SettingsManager::with_config_path(
+            unique_test_directory("channel").join("settings.toml"),
+        );
+
+        manager.set_update_channel("alpha");
+        assert_eq!(manager.get().update_channel, "alpha");
+        manager.set_update_channel("nightly");
+        assert_eq!(manager.get().update_channel, "stable");
     }
 
     #[test]
@@ -1120,10 +1080,11 @@ auto_update = false
     }
 
     fn unique_test_directory(label: &str) -> PathBuf {
+        static NEXT_TEST_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         std::env::temp_dir().join(format!(
             "usher-settings-{label}-{}-{}",
             std::process::id(),
-            SETTINGS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+            NEXT_TEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ))
     }
 }

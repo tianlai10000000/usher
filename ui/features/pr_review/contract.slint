@@ -64,7 +64,9 @@ export component PullRequestReviewPageContract inherits FocusScope {
     in property <bool> large-diff-deferred: false;
     in property <bool> large-diff-loading: false;
     in property <string> error-text;
+    in property <string> error-kind: "";
     in property <bool> ignore-whitespace-supported: false;
+    in property <bool> merge-delete-source-branch-supported: false;
     in-out property <bool> ignore-whitespace: false;
     in-out property <string> diff-view: "unified";
     in-out property <string> file-filter: "";
@@ -139,6 +141,7 @@ export component PullRequestReviewPageContract inherits FocusScope {
     callback layout-diff-virtual-window(int, [WorkflowPrDiffRowMetric], float, float, float, float, float, float) -> WorkflowPrDiffVirtualWindow;
     callback diagnose-diff-scroll(string, float, float, float, float, bool, bool, bool, int, int, int);
     callback view-file();
+    callback open-settings();
     callback toggle-commit-message(string);
     callback toggle-ai-review();
 }

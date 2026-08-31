@@ -25,6 +25,8 @@ use toast::setup_toast;
 mod dialog;
 use dialog::setup_dialog;
 
+mod diagnostics;
+
 mod tray;
 use tray::setup_tray;
 
@@ -43,7 +45,6 @@ mod settings_page;
 use settings_page::SettingsPageBridge;
 mod message_center;
 use message_center::MessagePageBridge;
-use usher_messages::{MessageCenter, NotifyRustDesktopNotifier};
 
 mod constants;
 use constants::shutdown_priority::PRIORITY_HIGH;
@@ -65,6 +66,7 @@ mod memory_diagnostics;
 mod platform;
 mod shortcuts;
 mod sidebar_motion;
+mod startup;
 mod transient_input;
 use platform::{
     THEME_MODE_AUTO, apply_native_appearance_for_mode, apply_native_chrome_for_mode,
@@ -184,8 +186,12 @@ fn save_settings_with_feedback<F>(
     });
 }
 
-fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWindow> {
+fn ui(
+    sidebar_motion_mode: sidebar_motion::SidebarMotionMode,
+    startup_timeline: &startup::StartupTimeline,
+) -> Result<MainWindow> {
     let loaded_settings = settings::load_settings();
+    startup_timeline.checkpoint("settings_loaded");
     let benchmark_offline = app_paths::benchmark_offline_mode();
     memory_diagnostics::set_logging_enabled(loaded_settings.memory_diagnostics_logging);
     memory_diagnostics::initialize_baseline();
@@ -198,20 +204,16 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     // Auto clears any forced AppKit appearance so the process can track the OS.
     let is_dark = apply_native_appearance_for_mode(loaded_settings.theme_mode);
     set_auto_theme_watch_enabled(loaded_settings.theme_mode == THEME_MODE_AUTO);
+    startup_timeline.checkpoint("native_appearance_applied");
 
     // Now create the MainWindow (will inherit app appearance)
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
+    startup_timeline.checkpoint("main_window_created");
     app.set_sidebar_motion_display_linked(sidebar_motion_mode.is_display_linked());
     app.on_advance_sidebar_motion(sidebar_motion::advance);
     let settings_page = SettingsPageBridge::default();
-    let message_center = if let Some(path) = app_paths::message_store_path() {
-        MessageCenter::open_with(path, std::sync::Arc::new(NotifyRustDesktopNotifier))
-    } else {
-        MessageCenter::open_default()
-    }
-    .context("Failed to open message center")?;
-    let message_page = MessagePageBridge::new(message_center.clone());
+    let (message_center, message_page) = MessagePageBridge::open_deferred(startup_timeline)?;
     app.set_platform_is_macos(cfg!(target_os = "macos"));
     message_center.set_application_active(app.get_native_window_active());
     let message_center_for_activity = message_center.clone();
@@ -234,6 +236,8 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
         loaded_settings.application_file_logging,
     )
     .unwrap_or_else(|e| eprintln!("Debug Logger init failed: {}", e)); // eprintln here since logger not yet initialized
+    startup_timeline.logger_ready();
+    startup_timeline.checkpoint("debug_logger_ready");
     log::info!("[SidebarMotion] mode={}", sidebar_motion_mode.label());
     memory_diagnostics::log_checkpoint("startup.debug_logger_ready");
 
@@ -298,6 +302,11 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
         }
 
         log::info!("[Settings] Auto update changed to: {}", enabled);
+    });
+
+    AppState::get(&app).on_set_update_channel(move |channel| {
+        settings::save_update_channel(channel.as_str());
+        log::info!("[Settings] Update channel changed to: {channel}");
     });
 
     // ========= Tracing File Logs ========= //
@@ -486,33 +495,21 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     });
 
     // ========= Router ========= //
-    let router = Router::new(
-        app.as_weak(),
-        std::rc::Rc::new(app_lifecycle::handle_route_transition),
-    );
+    let router = Router::new(app.as_weak(), app_lifecycle::hooks(app.get_current_route()));
 
     let router_for_nav_index = router.clone();
-    let app_for_nav_index = app.as_weak();
     app.on_navigate_from_nav_index(move |item_index| {
-        if let Some(route) = route_for_navigation_index(item_index)
-            && let Some(state) = router_for_nav_index.navigate(route)
-            && let Some(ui) = app_for_nav_index.upgrade()
-        {
-            ui.invoke_chat_route_visible_changed(state.chat_route_visible);
+        if let Some(route) = route_for_navigation_index(item_index) {
+            router_for_nav_index.navigate(route);
         }
     });
 
     // Connect navigate callback in slint
     let router_clone = router.clone();
-    let app_for_chat_route = app.as_weak();
     let app_for_ai_agent_provider = app.as_weak();
     let settings_page_for_navigation = settings_page.clone();
     app.on_navigate(move |route| {
-        if let Some(state) = router_clone.navigate(route)
-            && let Some(ui) = app_for_chat_route.upgrade()
-        {
-            ui.invoke_chat_route_visible_changed(state.chat_route_visible);
-        }
+        router_clone.navigate(route);
 
         if route == Route::Settings
             && let Some(ui) = app_for_ai_agent_provider.upgrade()
@@ -548,20 +545,13 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
                 ui.invoke_workflow_pr_review_back();
                 return;
             }
-            if let Some(state) = router_for_back.back() {
-                ui.invoke_chat_route_visible_changed(state.chat_route_visible);
-            }
+            router_for_back.back();
         }
     });
 
     let router_for_feature_back = router.clone();
-    let app_for_feature_back = app.as_weak();
     app.on_router_back(move || {
-        if let Some(state) = router_for_feature_back.back()
-            && let Some(ui) = app_for_feature_back.upgrade()
-        {
-            ui.invoke_chat_route_visible_changed(state.chat_route_visible);
-        }
+        router_for_feature_back.back();
     });
 
     let router_for_forward = router.clone();
@@ -571,9 +561,7 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
             if AppState::get(&ui).get_ui_sound_effects() {
                 play_ui_click();
             }
-            if let Some(state) = router_for_forward.forward() {
-                ui.invoke_chat_route_visible_changed(state.chat_route_visible);
-            }
+            router_for_forward.forward();
         }
     });
 
@@ -728,7 +716,7 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     memory_diagnostics::log_checkpoint("startup.toast_http_network_dialog_ready");
 
     // ========= Project ========= //
-    setup_project(&app);
+    let project_controller = setup_project(&app);
     memory_diagnostics::log_checkpoint("startup.project_ready");
 
     // ========= Chat ========= //
@@ -861,6 +849,11 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     shutdown::register_pre_shutdown_task_with_priority("shutdown_terminal", PRIORITY_HIGH, || {
         shutdown_terminal();
     });
+    shutdown::register_pre_shutdown_task_with_priority(
+        "shutdown_project_state",
+        PRIORITY_HIGH,
+        move || project_controller.shutdown(),
+    );
     #[cfg(feature = "ai-code-review")]
     shutdown::register_pre_shutdown_task_with_priority(
         "shutdown_ai_review",
@@ -884,27 +877,22 @@ fn ui(sidebar_motion_mode: sidebar_motion::SidebarMotionMode) -> Result<MainWind
     settings_page.install(&app);
     message_page.install(&app);
     memory_diagnostics::log_checkpoint("startup.ui_bindings_complete");
+    startup_timeline.checkpoint("ui_bindings_complete");
 
     Ok(app)
 }
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 pub fn main() {
-    match single_instance::acquire_instance_lock() {
-        Ok(true) => {}
-        Ok(false) => {
-            eprintln!("[Usher] Another instance is already running, exiting this process.");
-            return;
-        }
-        Err(e) => {
-            eprintln!(
-                "[Usher] Failed to acquire instance lock (continuing anyway): {}",
-                e
-            );
-        }
-    }
+    let Some((startup_timeline, run_guard)) = startup::initialize_process() else {
+        return;
+    };
 
     let sidebar_motion_mode = sidebar_motion::SidebarMotionMode::from_environment();
-    let ui: MainWindow = ui(sidebar_motion_mode).unwrap();
+    let ui: MainWindow = ui(sidebar_motion_mode, &startup_timeline)
+        .unwrap_or_else(|error| startup::exit_failure("Application initialization failed", &error));
+    diagnostics::setup(&ui, run_guard);
+    startup_timeline.checkpoint("diagnostics_ready");
     let sidebar_motion_trace_path =
         std::env::var_os("USHER_SIDEBAR_MOTION_TRACE").map(std::path::PathBuf::from);
     let sidebar_motion_trace_started = std::time::Instant::now();
@@ -917,6 +905,8 @@ pub fn main() {
     // alpha change commits in the same transaction as the first frame.
     let ui_weak_first_frame = ui.as_weak();
     let first_frame_gate = std::cell::Cell::new(false);
+    let first_frame_completed = std::cell::Cell::new(false);
+    let timeline_for_render = startup_timeline.clone();
     let sidebar_motion_trace_enabled = sidebar_motion_trace_path.is_some();
     let sidebar_motion_trace_samples_for_render = sidebar_motion_trace_samples.clone();
     let chat_frame_trace = chat::performance::FrameTrace::from_environment();
@@ -927,6 +917,7 @@ pub fn main() {
             if let Some(win) = ui_weak_first_frame.upgrade() {
                 if !first_frame_gate.get() {
                     first_frame_gate.set(true);
+                    timeline_for_render.checkpoint("first_frame_before_rendering");
                     set_startup_presentation_hidden(&win, true);
                     install_titlebar_settings_button(&win);
                 }
@@ -948,6 +939,10 @@ pub fn main() {
                 artifact_preview::performance::before_main_rendering(&win);
             }
         } else if matches!(state, slint::RenderingState::AfterRendering) {
+            if !first_frame_completed.replace(true) {
+                timeline_for_render.checkpoint("first_frame_after_rendering");
+                startup::mark_first_frame_rendered();
+            }
             chat_frame_trace_for_render.borrow_mut().after_rendering();
             artifact_preview::performance::after_main_rendering();
         }
@@ -957,12 +952,24 @@ pub fn main() {
     // Prefer installing Menu vibrancy before the first ordered frame so the
     // translucent macOS sidebar never reveals desktop content at startup.
     install_titlebar_settings_button(&ui);
-    ui.show().unwrap();
+    if let Err(error) = ui.show() {
+        startup::exit_failure("The main window could not be shown", &error);
+    }
+    startup_timeline.checkpoint("window_show_requested");
+    let _activation_listener = match single_instance::start_activation_listener(&ui) {
+        Ok(listener) => Some(listener),
+        Err(error) => {
+            log::error!("[SingleInstance] Activation listener unavailable: {error:#}");
+            None
+        }
+    };
     // The production backend creates its real window adapter during show().
     // macOS uses its existing application-local event monitor because native
     // StyledText consumes the Slint event; other backends use the generic hook.
     #[cfg(not(target_os = "macos"))]
-    transient_input::install(&ui).expect("Failed to install transient input bridge");
+    if let Err(error) = transient_input::install(&ui) {
+        startup::exit_failure("The native input bridge could not be installed", &error);
+    }
     install_memory_benchmark_window_control(&ui);
     // Keep the window invisible while native chrome is attached so the first
     // visible frame is the final shell rather than a staged transition.
@@ -1017,7 +1024,9 @@ pub fn main() {
             );
         },
     );
-    slint::run_event_loop_until_quit().unwrap();
+    if let Err(error) = slint::run_event_loop_until_quit() {
+        startup::exit_failure("The application event loop stopped unexpectedly", &error);
+    }
     if let Some(path) = sidebar_motion_trace_path {
         if let Err(error) = sidebar_motion::write_trace(
             &path,

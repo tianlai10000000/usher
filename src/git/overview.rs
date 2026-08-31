@@ -5,6 +5,7 @@ use std::future::Future;
 use super::{PullRequestItem, PullRequestPage};
 
 const OVERVIEW_PAGE_SIZE: u32 = 100;
+const OVERVIEW_MAX_PAGES: u32 = 100;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct EnvironmentPullRequestCounts {
@@ -28,7 +29,9 @@ where
         let item_count = page.items.len();
         add_items(&mut counts, &page.items);
 
-        if is_last_page(page_number, page.page_count, item_count) {
+        if is_last_page(page_number, page.page_count, item_count)
+            || page_number >= OVERVIEW_MAX_PAGES
+        {
             break;
         }
         page_number = page_number.saturating_add(1);
@@ -128,5 +131,24 @@ mod tests {
         assert!(is_last_page(1, None, 99));
         assert!(!is_last_page(1, Some(2), OVERVIEW_PAGE_SIZE as usize));
         assert!(!is_last_page(1, None, OVERVIEW_PAGE_SIZE as usize));
+    }
+
+    #[tokio::test]
+    async fn overview_scan_stops_at_the_hard_page_limit() {
+        let mut calls = 0u32;
+        let counts = count_standard_environment_pages(|_, _| {
+            calls += 1;
+            std::future::ready(Ok(PullRequestPage {
+                items: (0..OVERVIEW_PAGE_SIZE).map(|_| item("fat")).collect(),
+                total: 0,
+                total_exact: false,
+                page_count: None,
+            }))
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(calls, OVERVIEW_MAX_PAGES);
+        assert_eq!(counts.fat, OVERVIEW_PAGE_SIZE * OVERVIEW_MAX_PAGES);
     }
 }

@@ -392,6 +392,7 @@ impl ReviewTaskState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewTaskAction {
+    Hydrate(ReviewTaskState),
     Enqueue(ReviewTaskSummary),
     Start {
         id: ReviewTaskId,
@@ -436,18 +437,53 @@ pub fn reduce_tasks(
     current: &ReviewTaskState,
     action: ReviewTaskAction,
 ) -> Reduction<ReviewTaskState, ReviewTaskActionResult> {
-    let mut next = current.clone();
-    let result = match action {
+    match action {
+        ReviewTaskAction::Hydrate(stored) => {
+            let mut next = stored;
+            next.order.retain(|id| next.tasks.contains_key(id));
+            next.tasks.retain(|id, _| next.order.contains(id));
+            for id in &current.order {
+                if let Some(task) = current.tasks.get(id) {
+                    if !next.order.contains(id) {
+                        next.order.push(id.clone());
+                    }
+                    next.tasks.insert(id.clone(), task.clone());
+                }
+            }
+            while next.order.len() > MAX_RETAINED_TASK_SUMMARIES {
+                let Some(index) = next.order.iter().position(|id| {
+                    next.tasks
+                        .get(id)
+                        .is_some_and(|task| !task.status.is_active())
+                }) else {
+                    break;
+                };
+                let removed = next.order.remove(index);
+                next.tasks.remove(&removed);
+            }
+            if &next == current {
+                Reduction::unchanged(current.clone(), ReviewTaskActionResult::Changed)
+            } else {
+                Reduction::changed(next, ReviewTaskActionResult::Changed)
+            }
+        }
         ReviewTaskAction::Enqueue(summary) => {
             if let Some(existing) = current.tasks.values().find(|task| {
                 task.status.is_active()
                     && task.target.project_key == summary.target.project_key
                     && task.target.pull_request_number == summary.target.pull_request_number
             }) {
-                ReviewTaskActionResult::Duplicate(existing.id.clone())
-            } else if next.tasks.contains_key(&summary.id) {
-                ReviewTaskActionResult::Duplicate(summary.id)
+                Reduction::unchanged(
+                    current.clone(),
+                    ReviewTaskActionResult::Duplicate(existing.id.clone()),
+                )
+            } else if current.tasks.contains_key(&summary.id) {
+                Reduction::unchanged(
+                    current.clone(),
+                    ReviewTaskActionResult::Duplicate(summary.id),
+                )
             } else {
+                let mut next = current.clone();
                 next.order.push(summary.id.clone());
                 next.tasks.insert(summary.id.clone(), summary);
                 while next.order.len() > MAX_RETAINED_TASK_SUMMARIES {
@@ -461,62 +497,88 @@ pub fn reduce_tasks(
                     let removed = next.order.remove(index);
                     next.tasks.remove(&removed);
                 }
-                ReviewTaskActionResult::Changed
+                Reduction::changed(next, ReviewTaskActionResult::Changed)
             }
         }
         ReviewTaskAction::Start {
             id,
             updated_at_unix_ms,
-        } => match next.tasks.get_mut(&id) {
+        } => match current.tasks.get(&id) {
             Some(task) if task.status == ReviewTaskStatus::Queued => {
+                let mut next = current.clone();
+                let task = next.tasks.get_mut(&id).expect("validated task exists");
                 task.status = ReviewTaskStatus::Running;
                 task.progress_percent = task.progress_percent.max(1);
                 task.updated_at_unix_ms = updated_at_unix_ms;
-                ReviewTaskActionResult::Changed
+                Reduction::changed(next, ReviewTaskActionResult::Changed)
             }
-            Some(_) => ReviewTaskActionResult::InvalidTransition,
-            None => ReviewTaskActionResult::UnknownTask,
+            Some(_) => {
+                Reduction::unchanged(current.clone(), ReviewTaskActionResult::InvalidTransition)
+            }
+            None => Reduction::unchanged(current.clone(), ReviewTaskActionResult::UnknownTask),
         },
         ReviewTaskAction::SetTarget {
             id,
             target,
             updated_at_unix_ms,
-        } => match next.tasks.get_mut(&id) {
+        } => match current.tasks.get(&id) {
             Some(task) if task.status.is_active() => {
+                if task.target == target && task.updated_at_unix_ms == updated_at_unix_ms {
+                    return Reduction::unchanged(current.clone(), ReviewTaskActionResult::Changed);
+                }
+                let mut next = current.clone();
+                let task = next.tasks.get_mut(&id).expect("validated task exists");
                 task.target = target;
                 task.updated_at_unix_ms = updated_at_unix_ms;
-                ReviewTaskActionResult::Changed
+                Reduction::changed(next, ReviewTaskActionResult::Changed)
             }
-            Some(_) => ReviewTaskActionResult::InvalidTransition,
-            None => ReviewTaskActionResult::UnknownTask,
+            Some(_) => {
+                Reduction::unchanged(current.clone(), ReviewTaskActionResult::InvalidTransition)
+            }
+            None => Reduction::unchanged(current.clone(), ReviewTaskActionResult::UnknownTask),
         },
         ReviewTaskAction::SetChunkProgress {
             id,
             completed_chunks,
             total_chunks,
             updated_at_unix_ms,
-        } => match next.tasks.get_mut(&id) {
+        } => match current.tasks.get(&id) {
             Some(task) if task.status == ReviewTaskStatus::Running => {
-                task.total_chunks = total_chunks;
-                task.completed_chunks = completed_chunks.min(total_chunks);
-                task.progress_percent = if total_chunks == 0 {
+                let completed_chunks = completed_chunks.min(total_chunks);
+                let progress_percent = if total_chunks == 0 {
                     task.progress_percent.max(1)
                 } else {
-                    ((u64::from(task.completed_chunks) * 96) / u64::from(total_chunks)).clamp(1, 96)
+                    ((u64::from(completed_chunks) * 96) / u64::from(total_chunks)).clamp(1, 96)
                         as u8
                 };
+                if task.total_chunks == total_chunks
+                    && task.completed_chunks == completed_chunks
+                    && task.progress_percent == progress_percent
+                    && task.updated_at_unix_ms == updated_at_unix_ms
+                {
+                    return Reduction::unchanged(current.clone(), ReviewTaskActionResult::Changed);
+                }
+                let mut next = current.clone();
+                let task = next.tasks.get_mut(&id).expect("validated task exists");
+                task.total_chunks = total_chunks;
+                task.completed_chunks = completed_chunks;
+                task.progress_percent = progress_percent;
                 task.updated_at_unix_ms = updated_at_unix_ms;
-                ReviewTaskActionResult::Changed
+                Reduction::changed(next, ReviewTaskActionResult::Changed)
             }
-            Some(_) => ReviewTaskActionResult::InvalidTransition,
-            None => ReviewTaskActionResult::UnknownTask,
+            Some(_) => {
+                Reduction::unchanged(current.clone(), ReviewTaskActionResult::InvalidTransition)
+            }
+            None => Reduction::unchanged(current.clone(), ReviewTaskActionResult::UnknownTask),
         },
         ReviewTaskAction::Complete {
             id,
             finding_count,
             updated_at_unix_ms,
-        } => match next.tasks.get_mut(&id) {
+        } => match current.tasks.get(&id) {
             Some(task) if task.status == ReviewTaskStatus::Running => {
+                let mut next = current.clone();
+                let task = next.tasks.get_mut(&id).expect("validated task exists");
                 task.status = ReviewTaskStatus::Completed;
                 task.progress_percent = 100;
                 if task.total_chunks > 0 {
@@ -525,43 +587,47 @@ pub fn reduce_tasks(
                 task.finding_count = finding_count;
                 task.error.clear();
                 task.updated_at_unix_ms = updated_at_unix_ms;
-                ReviewTaskActionResult::Changed
+                Reduction::changed(next, ReviewTaskActionResult::Changed)
             }
-            Some(_) => ReviewTaskActionResult::InvalidTransition,
-            None => ReviewTaskActionResult::UnknownTask,
+            Some(_) => {
+                Reduction::unchanged(current.clone(), ReviewTaskActionResult::InvalidTransition)
+            }
+            None => Reduction::unchanged(current.clone(), ReviewTaskActionResult::UnknownTask),
         },
         ReviewTaskAction::Fail {
             id,
             error,
             updated_at_unix_ms,
-        } => match next.tasks.get_mut(&id) {
+        } => match current.tasks.get(&id) {
             Some(task) if task.status.is_active() => {
+                let mut next = current.clone();
+                let task = next.tasks.get_mut(&id).expect("validated task exists");
                 task.status = ReviewTaskStatus::Failed;
                 task.error = error;
                 task.updated_at_unix_ms = updated_at_unix_ms;
-                ReviewTaskActionResult::Changed
+                Reduction::changed(next, ReviewTaskActionResult::Changed)
             }
-            Some(_) => ReviewTaskActionResult::InvalidTransition,
-            None => ReviewTaskActionResult::UnknownTask,
+            Some(_) => {
+                Reduction::unchanged(current.clone(), ReviewTaskActionResult::InvalidTransition)
+            }
+            None => Reduction::unchanged(current.clone(), ReviewTaskActionResult::UnknownTask),
         },
         ReviewTaskAction::Cancel {
             id,
             updated_at_unix_ms,
-        } => match next.tasks.get_mut(&id) {
+        } => match current.tasks.get(&id) {
             Some(task) if task.status.is_active() => {
+                let mut next = current.clone();
+                let task = next.tasks.get_mut(&id).expect("validated task exists");
                 task.status = ReviewTaskStatus::Cancelled;
                 task.updated_at_unix_ms = updated_at_unix_ms;
-                ReviewTaskActionResult::Changed
+                Reduction::changed(next, ReviewTaskActionResult::Changed)
             }
-            Some(_) => ReviewTaskActionResult::InvalidTransition,
-            None => ReviewTaskActionResult::UnknownTask,
+            Some(_) => {
+                Reduction::unchanged(current.clone(), ReviewTaskActionResult::InvalidTransition)
+            }
+            None => Reduction::unchanged(current.clone(), ReviewTaskActionResult::UnknownTask),
         },
-    };
-
-    if result == ReviewTaskActionResult::Changed && &next != current {
-        Reduction::changed(next, result)
-    } else {
-        Reduction::unchanged(current.clone(), result)
     }
 }
 
@@ -1120,6 +1186,29 @@ mod tests {
         assert_eq!(task.completed_chunks, 0);
         assert_eq!(task.total_chunks, 0);
         assert_eq!(task.progress_percent, 41);
+    }
+
+    #[test]
+    fn task_hydration_preserves_tasks_created_during_startup() {
+        let stored = reduce_tasks(
+            &ReviewTaskState::default(),
+            ReviewTaskAction::Enqueue(task("stored", "7")),
+        )
+        .state;
+        let current = reduce_tasks(
+            &ReviewTaskState::default(),
+            ReviewTaskAction::Enqueue(task("live", "8")),
+        )
+        .state;
+
+        let hydrated = reduce_tasks(&current, ReviewTaskAction::Hydrate(stored)).state;
+
+        assert_eq!(
+            hydrated.order,
+            vec![ReviewTaskId("stored".into()), ReviewTaskId("live".into())]
+        );
+        assert!(hydrated.tasks.contains_key(&ReviewTaskId("stored".into())));
+        assert!(hydrated.tasks.contains_key(&ReviewTaskId("live".into())));
     }
 
     #[test]

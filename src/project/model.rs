@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct ProjectConfig {
     pub(super) project_name: String,
     pub(super) project_alias: String,
@@ -31,7 +31,7 @@ pub(crate) struct ProjectRepositoryMetadata {
     pub(crate) repo_type: String,
     pub(crate) remote_repo: String,
 }
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct ProjectPrOverview {
     pub(super) loading: bool,
     pub(super) failed: bool,

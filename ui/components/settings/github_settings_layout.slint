@@ -226,6 +226,8 @@ export component GitHubSettingsPane inherits Rectangle {
     callback ai-review-set-default-rule(string);
     callback check-update();
     callback simulate-crash();
+    callback open-log-directory();
+    callback export-diagnostics();
     private property <bool> any-log-output-enabled:
         AppState.application-console-logging
         || AppState.application-file-logging
@@ -390,6 +392,40 @@ export component GitHubSettingsPane inherits Rectangle {
                     toggled(value) => {
                         AppState.artifact-preview-plain-text-enabled = value;
                         AppState.set-artifact-preview-provider-enabled("plain-text", value);
+                    }
+                }
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: 36px;
+                    spacing: 8px;
+                    alignment: start;
+
+                    Text {
+                        width: max(120px, parent.width - 220px);
+                        height: parent.height;
+                        text: "Release channel";
+                        font-size: 14px;
+                        color: GitHubTheme.fg-default;
+                        vertical-alignment: center;
+                    }
+                    GitHubSegment {
+                        width: 96px;
+                        text: "Stable";
+                        selected: AppState.update-channel == "stable";
+                        clicked => {
+                            AppState.update-channel = "stable";
+                            AppState.set-update-channel("stable");
+                        }
+                    }
+                    GitHubSegment {
+                        width: 96px;
+                        text: "Alpha";
+                        selected: AppState.update-channel == "alpha";
+                        clicked => {
+                            AppState.update-channel = "alpha";
+                            AppState.set-update-channel("alpha");
+                        }
                     }
                 }
             }
@@ -1015,6 +1051,22 @@ export component GitHubSettingsPane inherits Rectangle {
                 width: parent.width;
                 height: 1px;
                 background: GitHubTheme.border-default;
+            }
+
+            HorizontalLayout {
+                width: parent.width;
+                height: 32px;
+                spacing: 8px;
+                alignment: start;
+
+                GitHubButton {
+                    text: "Open logs";
+                    clicked => { root.open-log-directory(); }
+                }
+                GitHubButton {
+                    text: "Export diagnostics";
+                    clicked => { root.export-diagnostics(); }
+                }
             }
 
             Rectangle {

@@ -2,9 +2,9 @@
 
 ## Scope / 范围
 
-This specification defines user-controlled application log destinations and optional high-volume diagnostics. Explicit benchmark-only environment outputs remain developer tooling and are outside ordinary Settings behavior.
+This specification defines user-controlled application log destinations, optional high-volume diagnostics, crash-run detection, retention, and privacy-bounded diagnostic export. Explicit benchmark-only environment outputs remain developer tooling and are outside ordinary Settings behavior.
 
-本文定义用户可控制的应用日志输出目标与可选高频诊断。由显式环境变量启用的基准专用输出仍属于开发工具，不属于普通设置行为。
+本文定义用户可控制的应用日志输出目标、可选高频诊断、异常运行检测、保留策略与隐私有界的诊断包导出。由显式环境变量启用的基准专用输出仍属于开发工具，不属于普通设置行为。
 
 ## Controls / 控制项
 
@@ -36,6 +36,21 @@ This specification defines user-controlled application log destinations and opti
    immediately; ordinary write activity flushes at least once per second, and
    registered shutdown flushes the remaining buffer. No long-lived background
    flush thread is created.
+10. Startup writes a crash sentinel under application data before UI setup. An
+    orderly shutdown removes it; finding it on the next launch produces one
+    bounded warning and never includes user content.
+11. Date-partitioned log directories older than 14 days are removed on a worker.
+    Diagnostic archives are retained newest-first with a maximum of five.
+12. Settings can reveal the log directory and export a `.tar.gz` containing only
+    regular `.log` files plus a non-sensitive runtime manifest. Symlinks, files
+    larger than 8 MiB, and content beyond a 64 MiB aggregate budget are skipped.
+    Settings, tokens, messages, chat histories, repository content, and other
+    user data are never collected.
+13. The scheduled macOS performance gate runs the Release Home fixture in three
+    isolated processes with two settled cycles. It must observe the expected
+    route, keep RSS and physical-footprint peaks at or below 256 MiB, and keep
+    the median cycle-two growth for both metrics at or below 16 MiB. Raw logs,
+    summaries, and the threshold report are retained as workflow artifacts.
 
 1. 关闭 Console 与两个文件输出后，普通应用日志立即停止，无需重启。
 2. 关闭全部控制项后，不再产生普通 `log`/`tracing` 输出，也不再产生 Terminal 或内存诊断记录。
@@ -47,6 +62,16 @@ This specification defines user-controlled application log destinations and opti
 8. 全局 panic hook 无论 structured tracing 是否关闭，都必须向已配置 tracing 路径追加一条有效 JSON panic 记录；tracing 尚未初始化时使用默认路径。落盘后请求关闭；普通 tracing 事件仍遵循运行时开关。
 9. 应用文件 sink 使用 64 KiB `BufWriter`；warn/error 立即 flush，普通写入活动至少每秒
    flush 一次，注册的 shutdown 任务负责冲刷剩余缓冲。不得为此新增常驻 flush 线程。
+10. UI 装配前在应用数据目录写入崩溃哨兵；正常关闭时删除。下次启动发现哨兵时只显示一条
+    有界警告，且哨兵不包含用户内容。
+11. 在 Worker 上删除早于 14 天的日期日志目录；诊断归档按时间保留最新文件，最多 5 个。
+12. Settings 可打开日志目录并导出 `.tar.gz`；归档只包含普通 `.log` 文件和不敏感的运行
+    manifest。跳过符号链接、单文件超过 8 MiB 或累计超过 64 MiB 的内容；不得收集 Settings、
+    Token、消息、Chat 历史、仓库内容或其他用户数据。
+13. 定时 macOS 性能门禁使用 Release Home fixture 运行 3 个隔离进程和两个稳定周期；必须
+    观察到预期路由，将 RSS 与 physical footprint 峰值分别限制在 256 MiB 以内，并将两项
+    指标第二周期相对第一周期的中位增长限制在 16 MiB 以内。原始日志、汇总和阈值报告作为
+    workflow artifact 保留。
 
 ## Troubleshooting workflow / 问题排查流程
 
@@ -85,6 +110,16 @@ Record the reproduction start time, actions, affected project/route, and expecte
 - Confirm Settings works in both regular and compact layouts.
 - Write ordinary, warn, and error records; verify urgent records are flushed
   immediately and shutdown leaves no buffered tail behind.
+- Simulate one unclean run and verify the next launch warns once; complete a
+  clean shutdown and verify the following launch does not warn.
+- Export diagnostics with unrelated files and symlinks present under the log
+  tree; inspect the archive and verify only bounded `.log` files and the
+  manifest are included. Create more than five exports and verify only the five
+  newest remain.
+- Run `python3 -m unittest scripts/tests/test_memory_benchmark_thresholds.py`
+  and verify both the passing fixture and intentional over-budget fixture are
+  classified correctly. Dispatch the nightly workflow and inspect its retained
+  `thresholds.md` plus raw samples.
 
 - 分别切换每个输出目标，确认只有对应 sink 变化。
 - 先单独开启部分行，再使用 `Disable all`；确认所有开关都显示为关闭、批量操作变为 `Enable all`，并且 Console、`usher.log`、`usher_tracing.log`、Terminal verbose 与周期内存记录停止。
@@ -93,3 +128,9 @@ Record the reproduction start time, actions, affected project/route, and expecte
 - 重启后确认五项值从 `settings.toml` 恢复。
 - 加载不含五项细分字段的旧配置并确认默认值。
 - 确认 Settings 在普通与紧凑布局下均可用。
+- 模拟一次异常退出，确认下次启动只警告一次；随后正常关闭，确认再启动时不再警告。
+- 在日志树中放入无关文件和符号链接后导出，检查归档仅含有界 `.log` 与 manifest；连续创建
+  超过 5 个归档，确认只保留最新 5 个。
+- 运行 `python3 -m unittest scripts/tests/test_memory_benchmark_thresholds.py`，确认正常 fixture
+  与故意超限 fixture 分别判定为通过和失败；手动触发 nightly workflow，检查保留的
+  `thresholds.md` 与原始采样。

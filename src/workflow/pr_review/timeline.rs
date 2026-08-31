@@ -190,8 +190,11 @@ pub(super) fn patch_conversation_avatars(
         let Some(mut row) = model.row_data(index) else {
             continue;
         };
-        row.avatar = cached_avatar_image(avatars, item.avatar_url.as_str());
-        model.set_row_data(index, row);
+        let avatar = cached_avatar_image(avatars, item.avatar_url.as_str());
+        if row.avatar != avatar {
+            row.avatar = avatar;
+            model.set_row_data(index, row);
+        }
     }
 }
 
@@ -300,9 +303,13 @@ pub(super) fn patch_commit_avatars(
         let Some(mut row) = model.row_data(index) else {
             continue;
         };
-        row.avatar = cached_avatar_image(avatars, commit.avatar_url.as_str());
-        row.committer_avatar = cached_avatar_image(avatars, commit.committer_avatar_url.as_str());
-        model.set_row_data(index, row);
+        let avatar = cached_avatar_image(avatars, commit.avatar_url.as_str());
+        let committer_avatar = cached_avatar_image(avatars, commit.committer_avatar_url.as_str());
+        if row.avatar != avatar || row.committer_avatar != committer_avatar {
+            row.avatar = avatar;
+            row.committer_avatar = committer_avatar;
+            model.set_row_data(index, row);
+        }
     }
 }
 

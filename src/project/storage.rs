@@ -3,33 +3,10 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Mutex,
 };
 
 use super::logo::normalize_project_logo;
-use super::model::{ProjectConfig, ProjectRepositoryMetadata, normalize_project_tags};
-
-pub(crate) fn load_repository_metadata(
-    project_alias: &str,
-) -> Result<ProjectRepositoryMetadata, String> {
-    let alias = project_alias.trim();
-    let project = load_projects()
-        .into_iter()
-        .find(|project| project.project_alias == alias)
-        .ok_or_else(|| format!("Project configuration for '{alias}' was not found."))?;
-
-    if project.repo_project_id.trim().is_empty() || project.repo_type.trim().is_empty() {
-        return Err(
-            "Repository metadata is missing. Save the project again to synchronize it.".to_string(),
-        );
-    }
-
-    Ok(ProjectRepositoryMetadata {
-        repo_project_id: project.repo_project_id,
-        repo_type: project.repo_type,
-        remote_repo: project.remote_repo,
-    })
-}
+use super::model::{ProjectConfig, normalize_project_tags};
 
 pub(super) fn load_projects() -> Vec<ProjectConfig> {
     let Some(path) = projects_file_path() else {
@@ -67,64 +44,23 @@ fn projects_file_path() -> Option<PathBuf> {
     Some(project_dir.join("projects.json"))
 }
 
-/// Serializes concurrent background writers so a slow write cannot interleave
-/// with a newer one.
-static PROJECTS_WRITE_LOCK: Mutex<()> = Mutex::new(());
-
-pub(super) fn write_projects_from_state(state: &Mutex<Vec<ProjectConfig>>) -> std::io::Result<()> {
+pub(super) fn write_projects(projects: &[ProjectConfig]) -> std::io::Result<()> {
     let Some(path) = projects_file_path() else {
         return Ok(());
     };
-    write_projects_from_state_to(&path, state)
+    write_projects_to(&path, projects)
 }
 
-#[cfg(test)]
 fn write_projects_to(path: &Path, projects: &[ProjectConfig]) -> std::io::Result<()> {
-    let _guard = PROJECTS_WRITE_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    write_projects_to_locked(path, projects)
-}
-
-fn write_projects_from_state_to(
-    path: &Path,
-    state: &Mutex<Vec<ProjectConfig>>,
-) -> std::io::Result<()> {
-    let _guard = PROJECTS_WRITE_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let snapshot = state
-        .lock()
-        .map_err(|_| std::io::Error::other("project registry lock poisoned"))?
-        .clone();
-    write_projects_to_locked(path, &snapshot)
-}
-
-fn write_projects_to_locked(path: &Path, projects: &[ProjectConfig]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
     let data = serde_json::to_string_pretty(projects).unwrap_or_else(|_| "[]".to_string());
-    // Write to a temporary sibling and rename so readers never observe a
-    // partially written registry.
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, data)?;
-
-    #[cfg(target_os = "windows")]
-    if path.exists() {
-        fs::remove_file(path)?;
-    }
-    fs::rename(temporary, path)
+    usher_fs::atomic_write(path, data.as_bytes())
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::model::ProjectPrOverview;
-    use super::{
-        PROJECTS_WRITE_LOCK, ProjectConfig, write_projects_from_state_to, write_projects_to,
-    };
+    use super::{ProjectConfig, write_projects_to};
     use std::fs;
-    use std::sync::{Arc, Mutex};
 
     fn sample_project(alias: &str) -> ProjectConfig {
         ProjectConfig {
@@ -160,51 +96,10 @@ mod tests {
         let parsed: Vec<ProjectConfig> =
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed.len(), 2);
-        assert!(
-            !path.with_extension("json.tmp").exists(),
-            "temporary file must be renamed away"
-        );
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn queued_writers_cannot_overwrite_a_newer_project_snapshot() {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "usher-project-order-test-{}-{nonce}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("projects.json");
-        let state = Arc::new(Mutex::new(vec![sample_project("alpha")]));
-
-        let write_gate = PROJECTS_WRITE_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let first_state = state.clone();
-        let first_path = path.clone();
-        let first =
-            std::thread::spawn(move || write_projects_from_state_to(&first_path, &first_state));
-        state.lock().unwrap().push(sample_project("beta"));
-        let second_state = state.clone();
-        let second_path = path.clone();
-        let second =
-            std::thread::spawn(move || write_projects_from_state_to(&second_path, &second_state));
-        drop(write_gate);
-
-        first.join().unwrap().unwrap();
-        second.join().unwrap().unwrap();
-        let parsed: Vec<ProjectConfig> =
-            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(
-            parsed
-                .iter()
-                .map(|item| item.project_alias.as_str())
-                .collect::<Vec<_>>(),
-            ["alpha", "beta"]
+            fs::read_dir(&dir).unwrap().count(),
+            1,
+            "atomic replacement must not leave a temporary file"
         );
         fs::remove_dir_all(dir).unwrap();
     }

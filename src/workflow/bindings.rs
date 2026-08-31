@@ -105,7 +105,7 @@ pub(crate) fn bind_project_context(
                             )
                             .await
                         }
-                        Err(error) => Err(error),
+                        Err(error) => Err(crate::git::GitError::configuration(error)),
                     };
                     let _ = slint::invoke_from_event_loop(move || {
                         let Some(ui) = ui_weak_task.upgrade() else {

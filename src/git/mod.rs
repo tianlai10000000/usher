@@ -1,6 +1,7 @@
 //! Provider-neutral Git repository operations and response models.
 
 mod diff;
+mod error;
 pub(crate) mod gitee;
 mod github;
 mod gitlab;
@@ -8,21 +9,28 @@ mod json;
 mod locator;
 mod model;
 mod overview;
+mod prefix_cache;
 mod provider;
 
 use diff::{parse_unified_diff, unavailable_diff_file};
+pub(crate) use error::{GitError, GitResult};
 use locator::*;
 pub(crate) use model::*;
 pub(crate) use overview::EnvironmentPullRequestCounts;
-use provider::RepoContext;
+pub(crate) use provider::ProviderCapabilities;
+use provider::{ProjectContext, RepoContext};
 
 /// Query the configured provider for the immutable numeric/string project id.
 ///
 /// The remote URL is the source of truth for both provider selection and the
 /// namespace/repository used by provider APIs.
-pub(crate) async fn get_repo_detail(remote_repo: &str) -> Result<RepoDetail, String> {
+pub(crate) async fn get_repo_detail(remote_repo: &str) -> GitResult<RepoDetail> {
     let context = RepoContext::discover(remote_repo)?;
-    let repo_project_id = context.provider().repo_detail(&context).await?;
+    let repo_project_id = context
+        .provider()
+        .repo_detail(&context)
+        .await
+        .map_err(|error| GitError::provider("load repository details", error))?;
 
     Ok(RepoDetail {
         repo_project_id,
@@ -39,12 +47,13 @@ pub(crate) async fn get_pull_requests(
     filters: &PullRequestFilters,
     page: u32,
     per_page: u32,
-) -> Result<PullRequestPage, String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<PullRequestPage> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     context
         .provider()
         .pull_requests(&context, state, filters, page, per_page)
         .await
+        .map_err(|error| GitError::provider("load pull requests", error))
 }
 
 /// Count open pull requests targeting the standard delivery environments.
@@ -55,12 +64,13 @@ pub(crate) async fn get_standard_environment_pull_request_counts(
     repo_type: &str,
     repo_project_id: &str,
     remote_repo: &str,
-) -> Result<EnvironmentPullRequestCounts, String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<EnvironmentPullRequestCounts> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     context
         .provider()
         .standard_environment_counts(&context)
         .await
+        .map_err(|error| GitError::provider("load pull request counts", error))
 }
 
 /// Load the review diff for one pull request. Provider-specific response
@@ -71,15 +81,16 @@ pub(crate) async fn get_pull_request_diff(
     remote_repo: &str,
     pull_request_iid: &str,
     ignore_whitespace_change: bool,
-) -> Result<PullRequestDiffDetail, String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<PullRequestDiffDetail> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
-        return Err("Pull request number is empty.".to_string());
+        return Err(GitError::configuration("Pull request number is empty."));
     }
     context
         .provider()
         .pull_request_diff(&context, pull_request_iid, ignore_whitespace_change)
         .await
+        .map_err(|error| GitError::provider("load pull request diff", error))
 }
 
 /// Load a diff for one contiguous commit range within a pull request.
@@ -91,10 +102,10 @@ pub(crate) async fn get_pull_request_commit_range_diff(
     head_sha: &str,
     commit_count: u32,
     ignore_whitespace_change: bool,
-) -> Result<PullRequestDiffDetail, String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<PullRequestDiffDetail> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if base_sha.trim().is_empty() || head_sha.trim().is_empty() {
-        return Err("Commit range is incomplete.".to_string());
+        return Err(GitError::configuration("Commit range is incomplete."));
     }
 
     context
@@ -107,19 +118,18 @@ pub(crate) async fn get_pull_request_commit_range_diff(
             ignore_whitespace_change,
         )
         .await
+        .map_err(|error| GitError::provider("load commit range diff", error))
 }
 
 /// Whether the configured provider endpoint can filter whitespace-only diff
 /// changes. Currently this is part of the Gitee-compatible enterprise diff
 /// contract only; public Gitee, GitHub, and GitLab adapters do not support it.
-pub(crate) fn supports_ignore_whitespace(repo_type: &str, remote_repo: &str) -> bool {
-    let Ok(context) = RepoContext::discover(remote_repo) else {
-        return false;
-    };
-    repo_type
-        .trim()
-        .eq_ignore_ascii_case(context.repo_type().as_str())
-        && context.capabilities().ignore_whitespace
+pub(crate) fn provider_capabilities(
+    repo_type: &str,
+    repo_project_id: &str,
+    remote_repo: &str,
+) -> GitResult<ProviderCapabilities> {
+    Ok(ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?.capabilities())
 }
 
 /// Load repository source for a single diff file at an immutable commit ref.
@@ -131,16 +141,19 @@ pub(crate) async fn get_repository_file_text(
     remote_repo: &str,
     path: &str,
     reference: &str,
-) -> Result<String, String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<String> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if path.trim().is_empty() || reference.trim().is_empty() {
-        return Err("Repository file path or commit reference is empty.".to_string());
+        return Err(GitError::configuration(
+            "Repository file path or commit reference is empty.",
+        ));
     }
 
     context
         .provider()
         .repository_file_text(&context, path, reference)
         .await
+        .map_err(|error| GitError::provider("load repository file", error))
 }
 
 pub(crate) async fn get_pull_request_action_state(
@@ -148,15 +161,16 @@ pub(crate) async fn get_pull_request_action_state(
     repo_project_id: &str,
     remote_repo: &str,
     pull_request_iid: &str,
-) -> Result<PullRequestActionState, String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<PullRequestActionState> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
-        return Err("Pull request number is empty.".to_string());
+        return Err(GitError::configuration("Pull request number is empty."));
     }
     context
         .provider()
         .pull_request_action_state(&context, pull_request_iid)
         .await
+        .map_err(|error| GitError::provider("load pull request action state", error))
 }
 
 pub(crate) async fn get_pull_request_conversation(
@@ -164,15 +178,16 @@ pub(crate) async fn get_pull_request_conversation(
     repo_project_id: &str,
     remote_repo: &str,
     pull_request_iid: &str,
-) -> Result<Vec<PullRequestConversationItem>, String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<Vec<PullRequestConversationItem>> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
-        return Err("Pull request number is empty.".to_string());
+        return Err(GitError::configuration("Pull request number is empty."));
     }
     context
         .provider()
         .pull_request_conversation(&context, pull_request_iid)
         .await
+        .map_err(|error| GitError::provider("load pull request conversation", error))
 }
 
 pub(crate) async fn get_pull_request_commits(
@@ -180,15 +195,16 @@ pub(crate) async fn get_pull_request_commits(
     repo_project_id: &str,
     remote_repo: &str,
     pull_request_iid: &str,
-) -> Result<Vec<PullRequestCommit>, String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<Vec<PullRequestCommit>> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
-        return Err("Pull request number is empty.".to_string());
+        return Err(GitError::configuration("Pull request number is empty."));
     }
     context
         .provider()
         .pull_request_commits(&context, pull_request_iid)
         .await
+        .map_err(|error| GitError::provider("load pull request commits", error))
 }
 
 pub(crate) async fn submit_pull_request_review(
@@ -198,15 +214,16 @@ pub(crate) async fn submit_pull_request_review(
     pull_request_iid: &str,
     action: PullRequestReviewAction,
     body: &str,
-) -> Result<(), String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<()> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
-        return Err("Pull request number is empty.".to_string());
+        return Err(GitError::configuration("Pull request number is empty."));
     }
     context
         .provider()
         .submit_pull_request_review(&context, pull_request_iid, action, body)
         .await
+        .map_err(|error| GitError::provider("submit pull request review", error))
 }
 
 /// Dismiss one visible review through the configured provider's native
@@ -219,15 +236,16 @@ pub(crate) async fn dismiss_pull_request_review(
     pull_request_iid: &str,
     review_id: &str,
     reason: &str,
-) -> Result<(), String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<()> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
-        return Err("Pull request number is empty.".to_string());
+        return Err(GitError::configuration("Pull request number is empty."));
     }
     context
         .provider()
         .dismiss_pull_request_review(&context, pull_request_iid, review_id, reason)
         .await
+        .map_err(|error| GitError::provider("dismiss pull request review", error))
 }
 
 pub(crate) async fn merge_pull_request(
@@ -237,15 +255,22 @@ pub(crate) async fn merge_pull_request(
     pull_request_iid: &str,
     method: PullRequestMergeMethod,
     remove_source_branch: bool,
-) -> Result<(), String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<()> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
-        return Err("Pull request number is empty.".to_string());
+        return Err(GitError::configuration("Pull request number is empty."));
+    }
+    if remove_source_branch && !context.capabilities().merge_delete_source_branch {
+        return Err(GitError::unsupported(
+            "merge pull request",
+            "The configured provider cannot delete the source branch through its merge endpoint.",
+        ));
     }
     context
         .provider()
         .merge_pull_request(&context, pull_request_iid, method, remove_source_branch)
         .await
+        .map_err(|error| GitError::provider("merge pull request", error))
 }
 
 /// Create a provider-native reverse change for one merged pull request.
@@ -258,21 +283,25 @@ pub(crate) async fn revert_pull_request(
     repo_project_id: &str,
     remote_repo: &str,
     pull_request_iid: &str,
-) -> Result<PullRequestRevertResult, String> {
-    let context = RepoContext::from_saved(repo_type, repo_project_id, remote_repo)?;
+) -> GitResult<PullRequestRevertResult> {
+    let context = ProjectContext::from_saved(repo_type, repo_project_id, remote_repo)?;
     if pull_request_iid.trim().is_empty() {
-        return Err("Pull request number is empty.".to_string());
+        return Err(GitError::configuration("Pull request number is empty."));
     }
     if !context.capabilities().server_side_revert {
-        return Err(format!(
-            "Automated merge-request revert is not implemented for {} yet.",
-            context.repo_type()
+        return Err(GitError::unsupported(
+            "revert pull request",
+            format!(
+                "Automated merge-request revert is not implemented for {}.",
+                context.repo_type()
+            ),
         ));
     }
     context
         .provider()
         .revert_pull_request(&context, pull_request_iid)
         .await
+        .map_err(|error| GitError::provider("revert pull request", error))
 }
 
 #[cfg(test)]
@@ -282,7 +311,7 @@ mod tests {
         conversation_body_to_plain_text, conversation_commit_batch_items,
         conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
         is_redundant_commit_system_note, is_redundant_merge_system_note, parse_repo_locator,
-        parse_unified_diff, percent_encode_path, split_commit_message, supports_ignore_whitespace,
+        parse_unified_diff, percent_encode_path, provider_capabilities, split_commit_message,
     };
 
     #[test]
@@ -666,14 +695,15 @@ mod tests {
 
     #[test]
     fn does_not_advertise_whitespace_filtering_for_github() {
-        assert!(!supports_ignore_whitespace(
-            "github",
-            "https://github.com/acme/widget.git"
-        ));
-        assert!(!supports_ignore_whitespace(
-            "gitee",
-            "https://github.com/acme/widget.git"
-        ));
+        let github =
+            provider_capabilities("github", "42", "https://github.com/acme/widget.git").unwrap();
+        assert!(!github.pull_request_ignore_whitespace);
+        assert!(!github.merge_delete_source_branch);
+        assert!(github.dismiss_review_by_id);
+
+        assert!(
+            provider_capabilities("gitee", "42", "https://github.com/acme/widget.git").is_err()
+        );
     }
 
     #[test]

@@ -22,6 +22,10 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
   Subscribers hydrate immediately and follow changed revisions automatically;
   each changed revision automatically queues the complete bounded State to the
   JSON persistence worker. Concrete Store-engine types never cross this facade.
+  Application startup may construct the facade empty and hydrate JSON after the
+  first frame. That typed hydration Action merges messages published meanwhile,
+  including `(channel, deduplication key)` identity, before persistence starts;
+  it never replaces a newer in-memory snapshot with an older disk snapshot.
 - `src/message_center.rs` is the only root-window bridge. It converts immutable
   snapshots to Slint models, mirrors theme/viewport state, pushes explicit
   total/unread/read filter counts, and forwards page commands to the domain
@@ -62,7 +66,9 @@ GitHub 风格通知 Inbox。短时 Toast/Banner 仍是独立职责。
 - `MessageCenter` 是稳定的 Feature Store 门面；私有强类型 Action 通过与框架无关的
   `usher-state-store::StateStore` 接口 reduce。订阅者立即 hydration，并自动跟随
   有效 revision；每个有效 revision 自动把完整有界 State 排队到 JSON 持久化
-  Worker。具体 Store 引擎类型不得越过该门面。
+  Worker。应用启动可先创建空门面，首帧后再 hydration JSON；该强类型 Action 会按消息
+  ID 与 `(channel, deduplication key)` 合并期间新发布的消息，恢复持久化前不得用旧磁盘
+  快照覆盖较新的内存 State。具体 Store 引擎类型不得越过该门面。
 - `src/message_center.rs` 是唯一主窗口桥接层，负责把不可变快照转换为 Slint model、
   同步主题/视口、下发 All/Unread/Read 整型计数，并把页面命令转给领域服务。Inbox
   行动作使用写死 SVG 和 Tooltip 字面量文案，避免动态列表 delegate 串用图标或文案
@@ -205,8 +211,12 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   and replacing `queue[0]` with another notification always starts with the
   ActionMenu closed. Clicking the non-interactive Banner surface also closes
   the menu, while action buttons, close, and the overflow trigger keep their
-  own behavior. Window hosts must pass the
-  real window size as `overlay-viewport-*` so collision clamping uses
+  own behavior.
+  Banner rows remain in one stable incremental model. Auto-close and dismiss
+  timers carry per-notification generations, so an older timer cannot close a
+  newer row; Inbox reconciliation copies only the at-most-three mounted message
+  IDs rather than the complete durable history.
+  Window hosts must pass the real window size as `overlay-viewport-*` so collision clamping uses
   window-mapped coordinates; demo hosts that omit those inputs keep Banner-local
   clamping. The menu is end-aligned with the overflow trigger horizontally and
   anchored 6 px below the complete Banner card rather than overlapping its
@@ -246,6 +256,8 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   `TransientOverlayState.dismiss-all` 关闭——禁止在 Notify 根 z 铺全窗口 scrim
   抢走其它弹层的首次点击。overflow 展开状态只属于当前可见队首：关闭当前 Banner
   时必须立即复位，`queue[0]` 替换为下一条通知时 ActionMenu 也必须默认关闭。
+  Banner 行保存在同一个增量 model 中；自动关闭与 dismiss timer 携带逐通知世代号，
+  旧 timer 不得关闭新行。Inbox 对账只复制最多三条已挂载消息 ID，不复制完整持久历史。
   点击 Banner 的非交互表面也必须关闭菜单；操作按钮、关闭按钮与三点入口保持各自行为。
   窗口宿主必须把真实窗口尺寸传入 `overlay-viewport-*`，
   碰撞夹紧才使用窗口坐标；演练场等未传入的宿主则回退到 Banner 本地夹紧，保证

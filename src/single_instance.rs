@@ -1,9 +1,15 @@
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::JoinHandle;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
+use slint::ComponentHandle;
+
+use crate::MainWindow;
 
 static INSTANCE_LOCK_FILE: OnceLock<Mutex<Option<File>>> = OnceLock::new();
 
@@ -25,6 +31,10 @@ fn lock_file_name(namespace: Option<&str>) -> String {
     )
 }
 
+fn activation_file_name(namespace: Option<&str>) -> String {
+    lock_file_name(namespace).replace(".instance.lock", ".instance.activate")
+}
+
 fn lock_file_path() -> PathBuf {
     let namespace = std::env::var("USHER_BENCHMARK_INSTANCE_NAMESPACE").ok();
     let file_name = lock_file_name(namespace.as_deref());
@@ -34,6 +44,14 @@ fn lock_file_path() -> PathBuf {
     } else {
         PathBuf::from(file_name)
     }
+}
+
+fn activation_file_path() -> PathBuf {
+    let namespace = std::env::var("USHER_BENCHMARK_INSTANCE_NAMESPACE").ok();
+    let file_name = activation_file_name(namespace.as_deref());
+    crate::app_paths::data_local_dir()
+        .map(|dir| dir.join(&file_name))
+        .unwrap_or_else(|| PathBuf::from(file_name))
 }
 
 /// Acquire global process lock.
@@ -57,11 +75,85 @@ pub fn acquire_instance_lock() -> Result<bool> {
 
     match file.try_lock_exclusive() {
         Ok(()) => {
+            let _ = std::fs::remove_file(activation_file_path());
             *lock_file = Some(file);
             Ok(true)
         }
         Err(_) => Ok(false),
     }
+}
+
+pub fn request_existing_instance_activation() -> Result<()> {
+    let path = activation_file_path();
+    let nonce = format!(
+        "{}:{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    usher_fs::atomic_write_private(&path, nonce.as_bytes())
+        .with_context(|| format!("Failed to publish activation request: {}", path.display()))
+}
+
+pub struct ActivationListener {
+    running: Arc<AtomicBool>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl Drop for ActivationListener {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Release);
+        if let Some(join) = self.join.take()
+            && let Err(error) = join.join()
+        {
+            log::warn!("[SingleInstance] Activation listener panicked: {error:?}");
+        }
+    }
+}
+
+pub fn start_activation_listener(window: &MainWindow) -> Result<ActivationListener> {
+    let path = activation_file_path();
+    let running = Arc::new(AtomicBool::new(true));
+    let running_worker = running.clone();
+    let weak = window.as_weak();
+    let join = std::thread::Builder::new()
+        .name("single-instance-activation".to_string())
+        .spawn(move || {
+            let mut previous = String::new();
+            while running_worker.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(100));
+                let Ok(request) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                if request.is_empty() || request == previous {
+                    continue;
+                }
+                previous = request;
+                let weak = weak.clone();
+                if slint::invoke_from_event_loop(move || {
+                    let Some(window) = weak.upgrade() else {
+                        return;
+                    };
+                    if let Err(error) = window.show() {
+                        log::error!("[SingleInstance] Failed to reveal existing window: {error}");
+                        return;
+                    }
+                    crate::platform::activate_main_window(&window);
+                    window.window().request_redraw();
+                })
+                .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .context("Failed to start single-instance activation listener")?;
+    Ok(ActivationListener {
+        running,
+        join: Some(join),
+    })
 }
 
 /// Release the process lock before handing an update restart to a new process.
@@ -83,7 +175,7 @@ pub fn release_instance_lock() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::lock_file_name;
+    use super::{activation_file_name, lock_file_name};
 
     #[test]
     fn ordinary_launches_keep_the_global_lock_name() {
@@ -101,6 +193,18 @@ mod tests {
         assert_eq!(
             lock_file_name(Some("contains space")),
             "usher.instance.lock"
+        );
+    }
+
+    #[test]
+    fn activation_channel_uses_the_same_safe_namespace() {
+        assert_eq!(
+            activation_file_name(Some("chat-fast-drag")),
+            "usher.chat-fast-drag.instance.activate"
+        );
+        assert_eq!(
+            activation_file_name(Some("../escape")),
+            "usher.instance.activate"
         );
     }
 }

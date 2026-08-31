@@ -235,7 +235,7 @@ mod macos {
 
     /// Create NSString from Rust string
     unsafe fn create_nsstring(s: &str) -> *mut Object {
-        let c_str = CString::new(s).unwrap();
+        let c_str = CString::new(s).unwrap_or_default();
         let ns_string_class = Class::get("NSString").unwrap();
         msg_send![ns_string_class, stringWithUTF8String: c_str.as_ptr()]
     }

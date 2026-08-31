@@ -81,6 +81,19 @@ pub(crate) struct PendingChatMessage {
     message: StoredChatMessage,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PendingHistoryLoad {
+    store: JsonlHistoryStore,
+    before_id: i64,
+    page_size: usize,
+}
+
+impl PendingHistoryLoad {
+    pub(crate) fn load(&self) -> io::Result<HistoryPage> {
+        self.store.load_before(self.before_id, self.page_size)
+    }
+}
+
 impl PendingChatMessage {
     pub(crate) fn message(&self) -> &StoredChatMessage {
         &self.message
@@ -130,16 +143,33 @@ impl ChatSessionService {
         self.can_load_more
     }
 
-    pub fn load_more_history(&mut self) -> io::Result<usize> {
+    fn prepare_history_load(&mut self) -> Option<PendingHistoryLoad> {
         let Some(first) = self.loaded_messages.first() else {
             self.can_load_more = false;
-            return Ok(0);
+            return None;
         };
 
+        Some(PendingHistoryLoad {
+            store: self.store.clone(),
+            before_id: first.id,
+            page_size: self.page_size,
+        })
+    }
+
+    fn commit_history_load(
+        &mut self,
+        request: &PendingHistoryLoad,
+        page: HistoryPage,
+    ) -> io::Result<usize> {
         let HistoryPage {
             mut messages,
             has_more_before,
-        } = self.store.load_before(first.id, self.page_size)?;
+        } = page;
+        if self.loaded_messages.first().map(|message| message.id) != Some(request.before_id) {
+            return Err(io::Error::other(
+                "chat history changed before the loaded page could be committed",
+            ));
+        }
 
         if messages.is_empty() {
             self.can_load_more = false;
@@ -319,8 +349,20 @@ impl ChatSessions {
         self.session(mode).can_load_more()
     }
 
-    pub(crate) fn load_more_history_for(&mut self, mode: ChatMode) -> io::Result<usize> {
-        self.session_mut(mode).load_more_history()
+    pub(crate) fn prepare_history_load_for(
+        &mut self,
+        mode: ChatMode,
+    ) -> Option<PendingHistoryLoad> {
+        self.session_mut(mode).prepare_history_load()
+    }
+
+    pub(crate) fn commit_history_load_for(
+        &mut self,
+        mode: ChatMode,
+        request: &PendingHistoryLoad,
+        page: HistoryPage,
+    ) -> io::Result<usize> {
+        self.session_mut(mode).commit_history_load(request, page)
     }
 
     #[cfg(test)]
@@ -416,9 +458,22 @@ fn current_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::{ChatMode, ChatRequestState, ChatSessionService, ChatSessions};
-    use crate::chat::persistence::JsonlHistoryStore;
+    use crate::chat::persistence::{
+        JsonlHistoryStore, StoredChatMessage, StoredMessageRole, StoredMessageStatus,
+    };
     use std::fs;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+    fn stored_message(id: i64) -> StoredChatMessage {
+        StoredChatMessage {
+            id,
+            role: StoredMessageRole::User,
+            status: StoredMessageStatus::Normal,
+            content: format!("message {id}"),
+            timestamp: "2026-08-30T12:00:00+08:00".into(),
+            elapsed_ms: None,
+        }
+    }
 
     #[test]
     fn sending_state_is_isolated_by_mode() {
@@ -432,6 +487,49 @@ mod tests {
         state.finish(ChatMode::Ai);
         assert!(!state.is_sending(ChatMode::Ai));
         assert!(state.is_sending(ChatMode::Rag));
+    }
+
+    #[test]
+    fn history_pages_are_loaded_before_taking_the_session_commit_lock() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "usher-chat-history-request-test-{}-{nonce}",
+            std::process::id()
+        ));
+        let store = JsonlHistoryStore::open_test_path(dir.join("history.jsonl")).unwrap();
+        for id in 1..=10 {
+            store.append(&stored_message(id)).unwrap();
+        }
+        let mut session = ChatSessionService::bootstrap(store, 4, 3).unwrap();
+
+        let first_request = session.prepare_history_load().expect("first request");
+        let first_page = first_request
+            .load()
+            .expect("read first page without session");
+        assert_eq!(
+            session
+                .commit_history_load(&first_request, first_page)
+                .unwrap(),
+            3
+        );
+        assert_eq!(session.loaded_messages().first().unwrap().id, 4);
+
+        let stale_request = session.prepare_history_load().expect("stale request");
+        let current_request = session.prepare_history_load().expect("current request");
+        let current_page = current_request.load().unwrap();
+        session
+            .commit_history_load(&current_request, current_page)
+            .unwrap();
+        let stale_page = stale_request.load().unwrap();
+        assert!(
+            session
+                .commit_history_load(&stale_request, stale_page)
+                .is_err()
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

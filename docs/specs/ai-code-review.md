@@ -160,7 +160,7 @@ never claim to expose hidden model reasoning. The composer action becomes the
 same compact Stop control used by Review cancellation. Activating it aborts
 context loading or the in-flight Agent completion without cancelling the AI
 Review task, then marks the visible response as stopped.
-The same user message is committed to the review or lightweight chat session before model validation, PR-context loading, or any Agent request starts. The assistant response is committed in a second write. Configuration, task, review-session, and chat-history JSON loads preserve invalid input as a `.corrupt-*` sibling before falling back or reporting an error; if preservation fails, automatic writes for that store remain disabled so defaults cannot overwrite the original file.
+The same user message is committed to the review or lightweight chat session before model validation, PR-context loading, or any Agent request starts. The assistant response is committed in a second write. Configuration, task, review-session, and chat-history JSON loads preserve invalid input as a `.corrupt-*` sibling before falling back or reporting an error; if preservation fails, automatic writes for that store remain disabled so defaults cannot overwrite the original file. Task-state disk hydration starts after the first frame and merges through a typed Action so tasks enqueued during startup win over stored rows with the same ID; automatic task persistence remains disabled until preservation succeeds. Startup then reconciles task/session files against the merged task IDs, removes orphan session JSON and stale temporary siblings, and preserves corrupt backups. Large deterministic fixture payloads compile only for tests or the explicit `test-fixtures` feature.
 The review status and every pending Ask response show one compact live elapsed
 timer. Review duration starts when the task is enqueued and freezes on
 completion, failure, or cancellation. Ask duration starts on submission;
@@ -215,7 +215,7 @@ Approval 或其他写操作。
 上下文”“正在思考”等有界运行阶段；这些阶段不得声称展示模型隐藏推理。Composer
 主操作切换为与 Review 取消一致的紧凑 Stop 控件；点击后中止上下文读取或在途 Agent
 completion，但不取消 AI Review 任务，并在当前对话中标记回复已停止。
-同一条用户消息必须在模型配置校验、PR 上下文加载或任何 Agent 请求开始前提交到 Review Session 或轻量 Chat Session；assistant 回复通过第二次写入提交。配置、任务、Review Session 和 Chat 历史 JSON 解析失败时，必须先把原始内容保留为同目录 `.corrupt-*` 文件，再回退或报错；如果保留失败，对应 Store 的自动写入保持禁用，默认值不得覆盖原文件。
+同一条用户消息必须在模型配置校验、PR 上下文加载或任何 Agent 请求开始前提交到 Review Session 或轻量 Chat Session；assistant 回复通过第二次写入提交。配置、任务、Review Session 和 Chat 历史 JSON 解析失败时，必须先把原始内容保留为同目录 `.corrupt-*` 文件，再回退或报错；如果保留失败，对应 Store 的自动写入保持禁用，默认值不得覆盖原文件。Task State 磁盘 hydration 在首帧后启动，并通过强类型 Action 合并；同 ID 下启动期间新入队的任务优先于旧磁盘行，且保留成功前不得开启自动任务持久化。随后按合并后的 task ID 对账任务/Session 文件，删除孤儿 Session JSON 与残留临时同级文件，并保留 corrupt 备份。大型确定性 fixture payload 只在测试或显式 `test-fixtures` feature 中编译。
 Review 状态和每条等待中的 Ask 回复都显示一个紧凑的实时耗时。Review 从任务入队开始
 计时，并在完成、失败或取消时冻结；Ask 从提交开始计时，成功的 assistant 消息会持久化
 最终毫秒耗时，停止或失败的可见回复立即冻结实测耗时。
@@ -481,14 +481,17 @@ the root Slint contract compilable without the task engine.
 Network, invalid model configuration, unreadable rule files, empty diffs, and
 invalid provider JSON fail only the affected task. User-facing task errors are
 bounded and credentials, complete prompts, source payloads, and rule contents
-must never be logged. Review-scoped Ask completions have no total request
-deadline. Each AI Review diff chunk additionally has a 600-second wall-clock
-deadline; both paths retain the shared 10-second connect timeout and a
+must never be logged. Review-scoped Ask completions have no HTTP request total
+deadline. Each Ask conversation and AI Review diff chunk has a 600-second
+wall-clock deadline; both paths retain the shared 10-second connect timeout and a
 300-second response-body idle timeout. Review and Ask request OpenAI-compatible
 SSE streaming, consume each frame through the shared HTTP response wrapper, and
 bound one streamed response to 16 MiB. Every received transport chunk resets
 the idle timer. Providers that answer the streaming request with one JSON
 response remain supported.
+SSE content is committed only after `[DONE]` or a `finish_reason`. A top-level
+provider error event fails immediately, and a connection that closes before a
+completion marker must not persist or present its partial content as success.
 Other AI completions retain the shared 30-second
 total and body-idle timeouts. Ordinary application diagnostics record the task
 stage, chunk index, completion message counts and byte totals, serialized request
@@ -505,11 +508,14 @@ UI stub，根 Slint 仍可编译。
 
 网络、模型配置、规则文件、空 diff 或 Provider JSON 错误只影响对应任务。用户可见错误
 必须有界，日志不得包含凭据、完整 Prompt、源码 payload 或规则正文。Review 专属 Ask
-completion 不设置请求总时限；每个 AI Review diff chunk 另有 600 秒墙钟总时限。
+completion 不设置 HTTP 请求总时限；每个 Ask conversation 与 AI Review diff chunk
+均有 600 秒墙钟总时限。
 两者仍受共享的 10 秒连接超时和 300 秒响应体空闲超时约束。Review 与 Ask 请求
 OpenAI-compatible SSE streaming，通过共享 HTTP response wrapper 逐帧消费，并把单次
 streaming 响应限制在 16 MiB；每个收到的传输 chunk 都会重置空闲计时。若 Provider 对
-streaming 请求返回一次性 JSON，仍保持兼容。其他 AI
+streaming 请求返回一次性 JSON，仍保持兼容。
+SSE 只有在收到 `[DONE]` 或 `finish_reason` 后才提交内容；顶层 Provider error event
+立即失败，连接在完成标记前关闭时不得把已收部分正文当作成功结果落盘或上屏。其他 AI
 completion 继续使用共享的 30 秒总时限和响应体空闲时限。普通应用诊断会记录任务阶段、
 chunk 序号、completion 消息数量与字节总量、序列化请求体大小、响应 framing、耗时，以及
 有界的响应体 chunk 大小、到达间隔和进度分类；绝不记录鉴权数据、Prompt/规则/源码内容

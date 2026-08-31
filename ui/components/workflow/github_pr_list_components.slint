@@ -357,6 +357,7 @@ export component GitHubPullRequestListStatePanel inherits Rectangle {
     in property <string> title;
     in property <string> description;
     in property <bool> show-action: false;
+    in property <string> action-label: "Retry request";
     callback action();
 
     height: 320px;
@@ -373,7 +374,7 @@ export component GitHubPullRequestListStatePanel inherits Rectangle {
         visual-opacity: GitHubTheme.dark-mode ? 0.58 : 0.82;
         heading: root.title;
         description: root.description;
-        primary-label: root.show-action ? "Retry request" : "";
+        primary-label: root.show-action ? root.action-label : "";
         error: root.error-state;
         primary-clicked => { root.action(); }
     }

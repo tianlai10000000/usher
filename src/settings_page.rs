@@ -319,6 +319,7 @@ fn sync_state_from_window(window: &MainWindow, page: &GitHubSettingsPage) {
     target.set_effective_dark_mode(source.get_effective_dark_mode());
     target.set_version(source.get_version());
     target.set_auto_update(source.get_auto_update());
+    target.set_update_channel(source.get_update_channel());
     target.set_application_console_logging(source.get_application_console_logging());
     target.set_application_file_logging(source.get_application_file_logging());
     target.set_tracing_logger_active(source.get_tracing_logger_active());
@@ -370,6 +371,20 @@ fn bind_callbacks(window: &MainWindow, page: &GitHubSettingsPage) {
         }
     });
 
+    let window_weak = window.as_weak();
+    page.on_open_log_directory(move || {
+        if let Some(window) = window_weak.upgrade() {
+            window.invoke_open_log_directory();
+        }
+    });
+
+    let window_weak = window.as_weak();
+    page.on_export_diagnostics(move || {
+        if let Some(window) = window_weak.upgrade() {
+            window.invoke_export_diagnostics();
+        }
+    });
+
     let state = SettingsAppState::get(page);
 
     let page_weak = page.as_weak();
@@ -389,6 +404,19 @@ fn bind_callbacks(window: &MainWindow, page: &GitHubSettingsPage) {
             let state = AppState::get(&window);
             state.set_auto_update(enabled);
             state.invoke_toggle_auto_update(enabled);
+        }
+    });
+
+    let page_weak = page.as_weak();
+    let window_weak = window.as_weak();
+    state.on_set_update_channel(move |channel| {
+        if let Some(page) = page_weak.upgrade() {
+            SettingsAppState::get(&page).set_update_channel(channel.clone());
+        }
+        if let Some(window) = window_weak.upgrade() {
+            let state = AppState::get(&window);
+            state.set_update_channel(channel.clone());
+            state.invoke_set_update_channel(channel);
         }
     });
 

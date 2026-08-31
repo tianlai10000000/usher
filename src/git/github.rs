@@ -22,6 +22,10 @@ use super::{
     parse_unified_diff, percent_encode_path, unavailable_diff_file,
 };
 
+const GITHUB_API_VERSION: &str = "2022-11-28";
+const GITHUB_SEARCH_RESULT_LIMIT: u32 = 1_000;
+const GITHUB_USER_AGENT: &str = concat!("usher/", env!("CARGO_PKG_VERSION"));
+
 #[derive(Deserialize)]
 struct GitHubRepository {
     id: serde_json::Value,
@@ -38,9 +42,7 @@ pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, Str
             "{repository}",
             percent_encode_path(locator.repo.as_str()).as_str(),
         );
-    let mut request = http::get(endpoint)
-        .header(ACCEPT, "application/vnd.github+json")
-        .header(USER_AGENT, "usher-project-lookup");
+    let mut request = github_request(http::get(endpoint));
     if let Some(token) = configured_token(RepoType::GitHub) {
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
@@ -93,16 +95,13 @@ pub(super) async fn get_pull_requests(
     };
     let endpoint = endpoints::SEARCH_PULL_REQUESTS_URL
         .replace("{api_base_url}", api_base_url(locator).as_str());
-    let mut request = http::get(endpoint)
-        .header(ACCEPT, "application/vnd.github+json")
-        .header(USER_AGENT, "usher-project-detail")
-        .query(&[
-            ("q", query.as_str()),
-            ("per_page", &per_page.to_string()),
-            ("page", &page.max(1).to_string()),
-            ("sort", sort),
-            ("order", order),
-        ]);
+    let mut request = github_request(http::get(endpoint)).query(&[
+        ("q", query.as_str()),
+        ("per_page", &per_page.to_string()),
+        ("page", &page.max(1).to_string()),
+        ("sort", sort),
+        ("order", order),
+    ]);
     if let Some(token) = configured_token(RepoType::GitHub) {
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
@@ -158,7 +157,7 @@ pub(super) async fn get_pull_requests(
         items,
         total,
         total_exact: true,
-        page_count: Some(total.div_ceil(per_page)),
+        page_count: Some(github_search_page_count(total, per_page)),
     })
 }
 
@@ -169,10 +168,11 @@ pub(super) async fn get_open_pull_request_count(
     let query = open_pull_request_count_query(locator, target_branch);
     let endpoint = endpoints::SEARCH_PULL_REQUESTS_URL
         .replace("{api_base_url}", api_base_url(locator).as_str());
-    let mut request = http::get(endpoint)
-        .header(ACCEPT, "application/vnd.github+json")
-        .header(USER_AGENT, "usher-project-overview")
-        .query(&[("q", query.as_str()), ("per_page", "1"), ("page", "1")]);
+    let mut request = github_request(http::get(endpoint)).query(&[
+        ("q", query.as_str()),
+        ("per_page", "1"),
+        ("page", "1"),
+    ]);
     if let Some(token) = configured_token(RepoType::GitHub) {
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
@@ -1288,14 +1288,24 @@ fn authenticated_builder(
     request: reqwest::RequestBuilder,
     token: Option<&str>,
 ) -> reqwest::RequestBuilder {
-    let mut request = request
-        .header(ACCEPT, "application/vnd.github+json")
-        .header(USER_AGENT, "usher-code-review")
-        .header("X-GitHub-Api-Version", "2022-11-28");
+    let mut request = github_request(request);
     if let Some(token) = token {
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
     request
+}
+
+fn github_request(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    request
+        .header(ACCEPT, "application/vnd.github+json")
+        .header(USER_AGENT, GITHUB_USER_AGENT)
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+}
+
+fn github_search_page_count(total: u32, per_page: u32) -> u32 {
+    total
+        .min(GITHUB_SEARCH_RESULT_LIMIT)
+        .div_ceil(per_page.max(1))
 }
 
 fn repository_endpoint(
@@ -1523,11 +1533,19 @@ mod tests {
         aggregate_review_state, decode_commit, decode_github_timeline_activity,
         decode_revert_pull_request_result, github_can_dismiss_reviews, github_list_review_status,
         github_merge_readiness, github_pull_request_collection_error, github_review_action,
-        graphql_url_from_rest_base, link_rel_last_page, open_pull_request_count_query,
-        pull_request_branches, revert_pull_request_payload, single_item_page_total,
+        github_search_page_count, graphql_url_from_rest_base, link_rel_last_page,
+        open_pull_request_count_query, pull_request_branches, revert_pull_request_payload,
+        single_item_page_total,
     };
     use crate::git::{PullRequestReadinessKind, PullRequestReviewStatus, parse_repo_locator};
     use crate::http::{HttpError, HttpErrorKind};
+
+    #[test]
+    fn github_search_pagination_never_exceeds_the_provider_result_window() {
+        assert_eq!(github_search_page_count(25, 10), 3);
+        assert_eq!(github_search_page_count(5_000, 100), 10);
+        assert_eq!(github_search_page_count(5_000, 30), 34);
+    }
 
     #[test]
     fn scopes_overview_count_to_repository_state_and_target_branch() {

@@ -1,19 +1,18 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread::JoinHandle;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use usher_ai_review::{
     MAX_RULE_BYTES, ProjectReviewKey, ReviewConfigAction, ReviewConfigError,
     ReviewConfigurationState, ReviewRule, RuleBinding, RuleId, reduce_configuration,
 };
-use usher_state_store::{LocalStateStore, StateStore, StoreSnapshot, Subscription};
+use usher_state_store::{PersistentStore, StoreSnapshot, Subscription};
 
 use super::storage::{JsonLoad, load_json_preserving_corrupt};
 
 type ConfigStore =
-    dyn StateStore<ReviewConfigurationState, ReviewConfigAction, Result<(), ReviewConfigError>>;
+    PersistentStore<ReviewConfigurationState, ReviewConfigAction, Result<(), ReviewConfigError>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuleFileValidationError {
@@ -71,26 +70,28 @@ pub(crate) fn validate_rule_file(path: &Path) -> Result<(), RuleFileValidationEr
 
 #[derive(Clone)]
 pub(crate) struct ReviewConfigFacade {
-    store: Arc<ConfigStore>,
-    worker: Arc<PersistenceWorker>,
-    _commit_subscription: Arc<Subscription>,
+    store: ConfigStore,
 }
 
 impl ReviewConfigFacade {
     pub(crate) fn open_default() -> Self {
         let path = default_config_path();
         let (initial, writes_allowed) = load_configuration(&path);
-        let store: Arc<ConfigStore> = Arc::new(LocalStateStore::new(initial, reduce_configuration));
-        let worker = Arc::new(PersistenceWorker::start(path, writes_allowed));
-        let sender = worker.sender.clone();
-        let subscription = store.observe_commits(Arc::new(move |snapshot| {
-            let _ = sender.send(Some(snapshot.state_arc()));
-        }));
-        Self {
-            store,
-            worker,
-            _commit_subscription: Arc::new(subscription),
-        }
+        let store = PersistentStore::new(
+            initial,
+            reduce_configuration,
+            "ai-review-config",
+            move |state| {
+                if writes_allowed {
+                    persist_configuration(&path, state)
+                } else {
+                    Ok(())
+                }
+            },
+            |_, error| log::error!("[AI Review][Config] Persistence failed: {error}"),
+        )
+        .expect("failed to start AI review config worker");
+        Self { store }
     }
 
     pub(crate) fn snapshot(&self) -> StoreSnapshot<ReviewConfigurationState> {
@@ -167,48 +168,7 @@ impl ReviewConfigFacade {
     }
 
     pub(crate) fn shutdown(&self) {
-        self.worker.shutdown();
-    }
-}
-
-struct PersistenceWorker {
-    sender: mpsc::Sender<Option<Arc<ReviewConfigurationState>>>,
-    handle: Mutex<Option<JoinHandle<()>>>,
-}
-
-impl PersistenceWorker {
-    fn start(path: PathBuf, writes_allowed: bool) -> Self {
-        let (sender, receiver) = mpsc::channel::<Option<Arc<ReviewConfigurationState>>>();
-        let handle = std::thread::Builder::new()
-            .name("ai-review-config".into())
-            .spawn(move || {
-                while let Ok(message) = receiver.recv() {
-                    let Some(mut latest) = message else {
-                        break;
-                    };
-                    while let Ok(Some(newer)) = receiver.try_recv() {
-                        latest = newer;
-                    }
-                    if !writes_allowed {
-                        continue;
-                    }
-                    if let Err(error) = persist_configuration(&path, &latest) {
-                        log::error!("[AI Review][Config] Persistence failed: {error}");
-                    }
-                }
-            })
-            .expect("failed to start AI review config worker");
-        Self {
-            sender,
-            handle: Mutex::new(Some(handle)),
-        }
-    }
-
-    fn shutdown(&self) {
-        let _ = self.sender.send(None);
-        if let Some(handle) = self.handle.lock().ok().and_then(|mut handle| handle.take()) {
-            let _ = handle.join();
-        }
+        self.store.shutdown();
     }
 }
 
@@ -243,14 +203,8 @@ fn load_configuration(path: &Path) -> (ReviewConfigurationState, bool) {
 }
 
 fn persist_configuration(path: &Path, state: &ReviewConfigurationState) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| "configuration path has no parent".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let data = serde_json::to_vec_pretty(state).map_err(|error| error.to_string())?;
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, data).map_err(|error| error.to_string())?;
-    fs::rename(&temporary, path).map_err(|error| error.to_string())
+    usher_fs::atomic_write(path, &data).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

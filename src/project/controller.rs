@@ -6,55 +6,99 @@ use base64::Engine as _;
 use image::GenericImageView;
 use slint::{ComponentHandle, Global, ModelRc, VecModel};
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, OnceLock};
 
 use super::logo::*;
 use super::model::{
     ProjectConfig, ProjectDraft, ProjectPrOverview, ProjectSaveAction, ProjectViewDiagSnapshot,
     parse_project_tags,
 };
-use super::overview::{ProjectPrOverviewTask, collect_pr_overview_tasks};
-use super::storage::{load_projects, write_projects_from_state};
+use super::overview::ProjectPrOverviewTask;
+use super::state::ProjectStateFacade;
+use super::storage::load_projects;
 
 thread_local! {
     static PROJECT_VIEW_DIAG_CACHE: RefCell<Option<ProjectViewDiagSnapshot>> =
         const { RefCell::new(None) };
 }
 
-pub fn setup_project(ui: &MainWindow) {
-    let projects = load_projects();
-    let state = Arc::new(Mutex::new(projects));
-    let pending_remote_logos = Arc::new(Mutex::new(HashSet::<String>::new()));
-    let pending_pr_overview = Arc::new(Mutex::new(HashSet::<String>::new()));
-    let pending_project_saves = Arc::new(Mutex::new(HashSet::<String>::new()));
+#[derive(Clone)]
+pub(crate) struct ProjectController {
+    state: ProjectStateFacade,
+    _subscription: Arc<usher_state_store::Subscription>,
+}
 
-    refresh_project_items(
-        ui,
-        &state,
-        &pending_remote_logos,
-        &pending_pr_overview,
-        &ui.get_project_search_query(),
-    );
-    ui.set_project_logo_preview_image(resolve_project_logo_image(""));
-    ui.set_project_logo_preview_status("Using app default logo".into());
+impl ProjectController {
+    pub(crate) fn shutdown(&self) {
+        self.state.shutdown();
+    }
+}
+
+pub fn setup_project(ui: &MainWindow) -> ProjectController {
+    let state_slot = Arc::new(OnceLock::<ProjectStateFacade>::new());
+    let state_slot_for_failure = state_slot.clone();
+    let ui_weak_for_success = ui.as_weak();
+    let ui_weak_for_failure = ui.as_weak();
+    let state = ProjectStateFacade::open_deferred(
+        Arc::new(move |message| {
+            let ui_weak = ui_weak_for_success.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_weak.upgrade() {
+                    show_success(&ui, message);
+                }
+            });
+        }),
+        Arc::new(move |expected, rollback, error| {
+            log::error!("[Project] Failed to persist project registry: {error}");
+            let Some(state) = state_slot_for_failure.get().cloned() else {
+                return;
+            };
+            let ui_weak = ui_weak_for_failure.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if state.rollback_if_current(expected, rollback) {
+                    if let Some(ui) = ui_weak.upgrade() {
+                        show_error(&ui, &format!("Failed to save project: {error}"));
+                    }
+                } else {
+                    log::warn!(
+                        "[Project] Skipped persistence rollback because the registry changed again"
+                    );
+                }
+            });
+        }),
+    )
+    .expect("failed to start project persistence worker");
+    let _ = state_slot.set(state.clone());
+    super::state::register(&state);
+    ui.set_project_list_loading(true);
 
     let ui_weak = ui.as_weak();
-    let pending_preview_logos = pending_remote_logos.clone();
+    let state_for_projection = state.clone();
+    let subscription = state.subscribe(Arc::new(move |_| {
+        let ui_weak = ui_weak.clone();
+        let state = state_for_projection.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let query = ui.get_project_search_query();
+            refresh_project_items(&ui, &state, query.as_str());
+        });
+    }));
+
+    let ui_weak = ui.as_weak();
+    let state_preview = state.clone();
     ui.on_project_preview_logo(move |logo| {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
-        refresh_logo_preview(&ui, &pending_preview_logos, logo.as_str());
+        refresh_logo_preview(&ui, &state_preview, logo.as_str());
     });
 
     let ui_weak = ui.as_weak();
     let state_add = state.clone();
-    let pending_remote_logos_add = pending_remote_logos.clone();
-    let pending_pr_overview_add = pending_pr_overview.clone();
-    let pending_project_saves_add = pending_project_saves.clone();
     ui.on_project_add_project(
         move |name, alias, local_repo, remote_repo, logo, project_tags, is_pr_auto_update| {
             let Some(ui) = ui_weak.upgrade() else {
@@ -83,20 +127,10 @@ pub fn setup_project(ui: &MainWindow) {
                 return;
             }
 
-            let guard = match state_add.lock() {
-                Ok(guard) => guard,
-                Err(_) => {
-                    show_error(&ui, "Failed to update project list.");
-                    return;
-                }
-            };
-
-            if guard.iter().any(|item| item.project_alias == alias) {
+            if state_add.contains_alias(alias) {
                 show_error(&ui, "Project alias already exists.");
                 return;
             }
-
-            drop(guard);
             start_project_save(
                 ProjectSaveAction::Add,
                 ProjectDraft {
@@ -110,18 +144,12 @@ pub fn setup_project(ui: &MainWindow) {
                 },
                 ui.as_weak(),
                 state_add.clone(),
-                pending_remote_logos_add.clone(),
-                pending_pr_overview_add.clone(),
-                pending_project_saves_add.clone(),
             );
         },
     );
 
     let ui_weak = ui.as_weak();
     let state_update = state.clone();
-    let pending_remote_logos_update = pending_remote_logos.clone();
-    let pending_pr_overview_update = pending_pr_overview.clone();
-    let pending_project_saves_update = pending_project_saves.clone();
     ui.on_project_update_project(
         move |original_alias,
               name,
@@ -162,28 +190,15 @@ pub fn setup_project(ui: &MainWindow) {
                 return;
             }
 
-            let guard = match state_update.lock() {
-                Ok(guard) => guard,
-                Err(_) => {
-                    show_error(&ui, "Failed to update project list.");
-                    return;
-                }
-            };
-
-            if !guard
-                .iter()
-                .any(|item| item.project_alias == original_alias)
-            {
+            if !state_update.contains_alias(original_alias) {
                 show_error(&ui, "Project not found.");
                 return;
             }
 
-            if alias != original_alias && guard.iter().any(|item| item.project_alias == alias) {
+            if alias != original_alias && state_update.contains_alias(alias) {
                 show_error(&ui, "Project alias already exists.");
                 return;
             }
-
-            drop(guard);
             start_project_save(
                 ProjectSaveAction::Update {
                     original_alias: original_alias.to_string(),
@@ -199,17 +214,12 @@ pub fn setup_project(ui: &MainWindow) {
                 },
                 ui.as_weak(),
                 state_update.clone(),
-                pending_remote_logos_update.clone(),
-                pending_pr_overview_update.clone(),
-                pending_project_saves_update.clone(),
             );
         },
     );
 
     let ui_weak = ui.as_weak();
     let state_delete = state.clone();
-    let pending_remote_logos_delete = pending_remote_logos.clone();
-    let pending_pr_overview_delete = pending_pr_overview.clone();
     ui.on_project_delete_project(move |alias| {
         let Some(ui) = ui_weak.upgrade() else {
             return;
@@ -223,59 +233,23 @@ pub fn setup_project(ui: &MainWindow) {
             return;
         }
 
-        let mut guard = match state_delete.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                show_error(&ui, "Failed to update project list.");
-                return;
-            }
-        };
-
-        let Some(index) = guard.iter().position(|item| item.project_alias == alias) else {
-            show_error(&ui, "Project not found.");
-            return;
-        };
-
-        guard.remove(index);
-        drop(guard);
-        persist_projects_in_background(
-            state_delete.clone(),
-            ui.as_weak(),
-            "delete",
-            "Project deleted.",
-        );
-        let query = ui.get_project_search_query();
-        refresh_project_items(
-            &ui,
-            &state_delete,
-            &pending_remote_logos_delete,
-            &pending_pr_overview_delete,
-            &query,
-        );
+        if let Err(error) = state_delete.delete(alias.to_string()) {
+            show_error(&ui, &error);
+        }
     });
 
     let ui_weak = ui.as_weak();
     let state_search = state.clone();
-    let pending_remote_logos_search = pending_remote_logos.clone();
-    let pending_pr_overview_search = pending_pr_overview.clone();
     ui.on_project_search_projects(move |query| {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
 
-        refresh_project_items(
-            &ui,
-            &state_search,
-            &pending_remote_logos_search,
-            &pending_pr_overview_search,
-            &query,
-        );
+        refresh_project_items(&ui, &state_search, query.as_str());
     });
 
     let ui_weak = ui.as_weak();
     let state_reload = state.clone();
-    let pending_remote_logos_reload = pending_remote_logos.clone();
-    let pending_pr_overview_reload = pending_pr_overview.clone();
     ui.on_project_reload_projects(move || {
         let Some(ui) = ui_weak.upgrade() else {
             return;
@@ -288,8 +262,6 @@ pub fn setup_project(ui: &MainWindow) {
 
         let ui_weak_task = ui.as_weak();
         let state_task = state_reload.clone();
-        let pending_remote_logos_task = pending_remote_logos_reload.clone();
-        let pending_pr_overview_task = pending_pr_overview_reload.clone();
         crate::app_runtime::shared_runtime().spawn(async move {
             let loaded = tokio::task::spawn_blocking(load_projects).await;
             let _ = slint::invoke_from_event_loop(move || {
@@ -310,26 +282,8 @@ pub fn setup_project(ui: &MainWindow) {
                     }
                 };
 
-                let mut guard = match state_task.lock() {
-                    Ok(guard) => guard,
-                    Err(_) => {
-                        ui.set_project_list_error(
-                            "The project registry is temporarily unavailable.".into(),
-                        );
-                        show_error(&ui, "Failed to reload projects.");
-                        return;
-                    }
-                };
-
-                *guard = list;
-                drop(guard);
-                refresh_project_items(
-                    &ui,
-                    &state_task,
-                    &pending_remote_logos_task,
-                    &pending_pr_overview_task,
-                    &query,
-                );
+                state_task.hydrate(list);
+                refresh_project_items(&ui, &state_task, query.as_str());
                 show_success(&ui, "Projects reloaded.");
             });
         });
@@ -348,23 +302,50 @@ pub fn setup_project(ui: &MainWindow) {
             local_repo.trim(),
         );
     });
+
+    let ui_weak = ui.as_weak();
+    let state_initial = state.clone();
+    crate::startup::run_after_first_frame(move || {
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let loaded = tokio::task::spawn_blocking(load_projects).await;
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                match loaded {
+                    Ok(projects) => {
+                        state_initial.hydrate(projects);
+                        let query = ui.get_project_search_query();
+                        refresh_project_items(&ui, &state_initial, query.as_str());
+                    }
+                    Err(error) => {
+                        log::error!("[Project] Initial load worker failed: {error}");
+                        ui.set_project_list_error(
+                            "The local project registry could not be read.".into(),
+                        );
+                    }
+                }
+                ui.set_project_logo_preview_image(resolve_project_logo_image(""));
+                ui.set_project_logo_preview_status("Using app default logo".into());
+                ui.set_project_list_loading(false);
+            });
+        });
+    });
+
+    ProjectController {
+        state,
+        _subscription: Arc::new(subscription),
+    }
 }
 
 fn start_project_save(
     action: ProjectSaveAction,
     draft: ProjectDraft,
     ui_weak: slint::Weak<MainWindow>,
-    state: Arc<Mutex<Vec<ProjectConfig>>>,
-    pending_remote_logos: Arc<Mutex<HashSet<String>>>,
-    pending_pr_overview: Arc<Mutex<HashSet<String>>>,
-    pending_project_saves: Arc<Mutex<HashSet<String>>>,
+    state: ProjectStateFacade,
 ) {
     let pending_key = action.pending_key(draft.project_alias.as_str());
-    let inserted = pending_project_saves
-        .lock()
-        .map(|mut saves| saves.insert(pending_key.clone()))
-        .unwrap_or(false);
-    if !inserted {
+    if !state.begin_save(pending_key.clone()) {
         if let Some(ui) = ui_weak.upgrade() {
             show_error(&ui, "A save for this project is already in progress.");
         }
@@ -374,9 +355,7 @@ fn start_project_save(
     crate::app_runtime::shared_runtime().spawn(async move {
         let details = crate::git::get_repo_detail(draft.remote_repo.as_str()).await;
         let _ = slint::invoke_from_event_loop(move || {
-            if let Ok(mut saves) = pending_project_saves.lock() {
-                saves.remove(pending_key.as_str());
-            }
+            state.finish_save(pending_key);
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
@@ -397,14 +376,6 @@ fn start_project_save(
                 }
             };
 
-            let mut projects = match state.lock() {
-                Ok(projects) => projects,
-                Err(_) => {
-                    show_error(&ui, "Failed to update project list.");
-                    return;
-                }
-            };
-
             let config = ProjectConfig {
                 project_name: draft.project_name,
                 project_alias: draft.project_alias,
@@ -419,133 +390,34 @@ fn start_project_save(
             };
 
             let outcome = match action {
-                ProjectSaveAction::Add => {
-                    if projects
-                        .iter()
-                        .any(|item| item.project_alias == config.project_alias)
-                    {
-                        Err("Project alias already exists.".to_string())
-                    } else {
-                        projects.push(config);
-                        persist_projects_in_background(
-                            state.clone(),
-                            ui.as_weak(),
-                            "add",
-                            "Project added.",
-                        );
-                        Ok("Project added.")
-                    }
-                }
+                ProjectSaveAction::Add => state.add(config),
                 ProjectSaveAction::Update { original_alias } => {
-                    let Some(index) = projects
-                        .iter()
-                        .position(|item| item.project_alias == original_alias)
-                    else {
-                        show_error(&ui, "Project not found.");
-                        return;
-                    };
-                    if config.project_alias != original_alias
-                        && projects
-                            .iter()
-                            .any(|item| item.project_alias == config.project_alias)
-                    {
-                        Err("Project alias already exists.".to_string())
-                    } else {
-                        projects[index] = config;
-                        persist_projects_in_background(
-                            state.clone(),
-                            ui.as_weak(),
-                            "update",
-                            "Project updated.",
-                        );
-                        Ok("Project updated.")
-                    }
+                    state.update(original_alias, config)
                 }
             };
 
-            let message = match outcome {
-                Ok(message) => message,
-                Err(message) => {
-                    show_error(&ui, message.as_str());
-                    return;
-                }
-            };
-            drop(projects);
-            let query = ui.get_project_search_query();
-            refresh_project_items(
-                &ui,
-                &state,
-                &pending_remote_logos,
-                &pending_pr_overview,
-                query.as_str(),
-            );
-            let _ = message;
-        });
-    });
-}
-
-/// Persists the current in-memory registry on a blocking worker so project
-/// mutations never run file IO on the UI thread. The snapshot is taken at
-/// write time, so queued writers always land the latest state.
-fn persist_projects_in_background(
-    state: Arc<Mutex<Vec<ProjectConfig>>>,
-    ui_weak: slint::Weak<MainWindow>,
-    context: &'static str,
-    success_message: &'static str,
-) {
-    crate::app_runtime::shared_runtime().spawn(async move {
-        let result = tokio::task::spawn_blocking(move || write_projects_from_state(&state)).await;
-
-        let failure = match result {
-            Ok(Ok(())) => None,
-            Ok(Err(error)) => Some(error.to_string()),
-            Err(error) => Some(error.to_string()),
-        };
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Some(ui) = ui_weak.upgrade() {
-                match failure {
-                    None => show_success(&ui, success_message),
-                    Some(failure) => {
-                        log::error!(
-                            "[Project] Failed to persist projects after {context}: {failure}"
-                        );
-                        show_error(&ui, &format!("Failed to save project: {failure}"));
-                    }
-                }
+            if let Err(message) = outcome {
+                show_error(&ui, message.as_str());
             }
         });
     });
 }
 
-fn refresh_project_items(
-    ui: &MainWindow,
-    state: &Arc<Mutex<Vec<ProjectConfig>>>,
-    pending_remote_logos: &Arc<Mutex<HashSet<String>>>,
-    pending_pr_overview: &Arc<Mutex<HashSet<String>>>,
-    query: &str,
-) {
-    let Ok(mut guard) = state.lock() else {
-        return;
-    };
-    let pr_tasks = collect_pr_overview_tasks(&mut guard, query);
-    let (ui_items, remote_urls) = prepare_project_items(&guard, query);
-    log_project_view_diagnostics(&guard, query, &ui_items, &remote_urls, pr_tasks.len());
-    drop(guard);
+fn refresh_project_items(ui: &MainWindow, state: &ProjectStateFacade, query: &str) {
+    let pr_tasks = state.prepare_pr_overview(query.to_string());
+    let snapshot = state.snapshot();
+    let projects = &snapshot.state().projects;
+    let (ui_items, remote_urls) = prepare_project_items(projects, query);
+    log_project_view_diagnostics(
+        projects,
+        query,
+        &ui_items,
+        &remote_urls,
+        state.pending_pr_overview_count(),
+    );
     ui.set_project_items(ModelRc::new(VecModel::from(ui_items)));
-    prefetch_remote_logos(
-        ui.as_weak(),
-        state.clone(),
-        pending_remote_logos.clone(),
-        pending_pr_overview.clone(),
-        remote_urls,
-    );
-    prefetch_project_pr_overview(
-        ui.as_weak(),
-        state.clone(),
-        pending_remote_logos.clone(),
-        pending_pr_overview.clone(),
-        pr_tasks,
-    );
+    prefetch_remote_logos(state.clone(), remote_urls);
+    prefetch_project_pr_overview(state.clone(), pr_tasks);
 }
 
 fn log_project_view_diagnostics(
@@ -779,77 +651,35 @@ fn pr_count_display(value: &str, failed: bool) -> &str {
     }
 }
 
-fn prefetch_remote_logos(
-    ui_weak: slint::Weak<MainWindow>,
-    state: Arc<Mutex<Vec<ProjectConfig>>>,
-    pending_remote_logos: Arc<Mutex<HashSet<String>>>,
-    pending_pr_overview: Arc<Mutex<HashSet<String>>>,
-    remote_urls: Vec<String>,
-) {
+fn prefetch_remote_logos(state: ProjectStateFacade, remote_urls: Vec<String>) {
     for url in remote_urls {
         if find_cached_remote_logo_path(url.as_str()).is_some() {
             continue;
         }
 
-        let mut should_spawn = false;
-        if let Ok(mut guard) = pending_remote_logos.lock() {
-            should_spawn = guard.insert(url.clone());
-        }
-        if !should_spawn {
+        if !state.begin_remote_logo(url.clone()) {
             continue;
         }
 
-        let ui_weak_task = ui_weak.clone();
         let state_task = state.clone();
-        let pending_logo_task = pending_remote_logos.clone();
-        let pending_pr_task = pending_pr_overview.clone();
         crate::app_runtime::shared_runtime().spawn(async move {
             let downloaded = download_remote_logo_to_cache(url.as_str()).await.is_some();
-            if let Ok(mut guard) = pending_logo_task.lock() {
-                guard.remove(url.as_str());
-            }
             if !downloaded {
+                state_task.finish_remote_logo(url);
                 return;
             }
 
             let _ = slint::invoke_from_event_loop(move || {
-                let Some(ui) = ui_weak_task.upgrade() else {
-                    return;
-                };
                 invalidate_cached_logo_image(&logo_image_cache_key(url.as_str()));
-                let query = ui.get_project_search_query();
-                refresh_project_items(
-                    &ui,
-                    &state_task,
-                    &pending_logo_task,
-                    &pending_pr_task,
-                    &query,
-                );
+                state_task.finish_remote_logo(url);
             });
         });
     }
 }
 
-fn prefetch_project_pr_overview(
-    ui_weak: slint::Weak<MainWindow>,
-    state: Arc<Mutex<Vec<ProjectConfig>>>,
-    pending_remote_logos: Arc<Mutex<HashSet<String>>>,
-    pending_pr_overview: Arc<Mutex<HashSet<String>>>,
-    tasks: Vec<ProjectPrOverviewTask>,
-) {
+fn prefetch_project_pr_overview(state: ProjectStateFacade, tasks: Vec<ProjectPrOverviewTask>) {
     for task in tasks {
-        let mut should_spawn = false;
-        if let Ok(mut guard) = pending_pr_overview.lock() {
-            should_spawn = guard.insert(task.project_alias.clone());
-        }
-        if !should_spawn {
-            continue;
-        }
-
-        let ui_weak_task = ui_weak.clone();
         let state_task = state.clone();
-        let pending_logo_task = pending_remote_logos.clone();
-        let pending_task = pending_pr_overview.clone();
         crate::app_runtime::shared_runtime().spawn(async move {
             let result = get_standard_environment_pull_request_counts(
                 &task.repo_type,
@@ -857,45 +687,18 @@ fn prefetch_project_pr_overview(
                 &task.remote_repo,
             )
             .await;
-
-            if let Ok(mut guard) = state_task.lock()
-                && let Some(item) = guard
-                    .iter_mut()
-                    .find(|item| item.project_alias == task.project_alias)
-            {
-                item.pr_overview.loading = false;
-                match result {
-                    Ok(counts) => {
-                        item.pr_overview.failed = false;
-                        item.pr_overview.fat_display = counts.fat.to_string();
-                        item.pr_overview.uat_display = counts.uat.to_string();
-                        item.pr_overview.prod_display = counts.prod.to_string();
-                    }
-                    Err(error) => {
-                        log::warn!(
-                            "[Project] Failed to load PR overview for '{}': {}",
-                            task.project_alias,
-                            error
-                        );
-                        item.pr_overview.failed = true;
-                        item.pr_overview.fat_display.clear();
-                        item.pr_overview.uat_display.clear();
-                        item.pr_overview.prod_display.clear();
-                    }
+            let counts = match result {
+                Ok(counts) => Some((counts.fat, counts.uat, counts.prod)),
+                Err(error) => {
+                    log::warn!(
+                        "[Project] Failed to load PR overview for '{}': {}",
+                        task.project_alias,
+                        error
+                    );
+                    None
                 }
-            }
-
-            if let Ok(mut guard) = pending_task.lock() {
-                guard.remove(task.project_alias.as_str());
-            }
-
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(ui) = ui_weak_task.upgrade() else {
-                    return;
-                };
-                let query = ui.get_project_search_query();
-                refresh_project_items(&ui, &state_task, &pending_logo_task, &pending_task, &query);
-            });
+            };
+            state_task.complete_pr_overview(task.project_alias, counts);
         });
     }
 }

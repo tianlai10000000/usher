@@ -329,6 +329,8 @@ export component MainWindow inherits Window {
     
     // Debug: simulate crash
     callback simulate-crash();
+    callback open-log-directory();
+    callback export-diagnostics();
 
     // Chat 相关属性和回调
     in property <[ChatMessage]> chat-messages: [];
@@ -654,12 +656,14 @@ export component MainWindow inherits Window {
     in property <string> workflow-pr-list-sort-filter: "newest";
     in property <bool> workflow-pr-list-loading: false;
     in property <string> workflow-pr-list-error: "";
+    in property <string> workflow-pr-list-error-kind: "";
     in-out property <bool> workflow-pr-review-visible: false;
     in property <bool> workflow-pr-review-loading: false;
     in property <bool> workflow-pr-review-code-loading: false;
     in property <bool> workflow-pr-review-large-diff-deferred: false;
     in property <bool> workflow-pr-review-large-diff-loading: false;
     in property <string> workflow-pr-review-error: "";
+    in property <string> workflow-pr-review-error-kind: "";
     in property <string> workflow-pr-review-number: "";
     in property <string> workflow-pr-review-title: "";
     in property <string> workflow-pr-review-author: "";
@@ -715,6 +719,7 @@ export component MainWindow inherits Window {
     in property <bool> workflow-pr-review-context-expanded: false;
     in property <bool> workflow-pr-review-viewing-file: false;
     in property <bool> workflow-pr-review-ignore-whitespace-supported: false;
+    in property <bool> workflow-pr-merge-delete-source-branch-supported: false;
     in-out property <bool> workflow-pr-review-ignore-whitespace: false;
     in-out property <string> workflow-pr-review-diff-view: "unified";
     in-out property <string> workflow-pr-review-file-filter: "";
@@ -1329,6 +1334,7 @@ export component MainWindow inherits Window {
                             pr-list-sort-filter: root.workflow-pr-list-sort-filter;
                             pr-list-loading: root.workflow-pr-list-loading;
                             pr-list-error: root.workflow-pr-list-error;
+                            pr-list-error-kind: root.workflow-pr-list-error-kind;
                             ai-review-rule-options: root.ai-review-rule-options;
                             ai-review-project-rule-id: root.ai-review-project-rule-id;
                             ai-review-project-rule-name: root.ai-review-project-rule-name;
@@ -1378,6 +1384,7 @@ export component MainWindow inherits Window {
                             pr-list-page-change(page) => {
                                 root.workflow-pr-list-page-change(page);
                             }
+                            open-settings => { root.navigate(Route.Settings); }
                             pr-list-review-filter-change(value) => {
                                 root.workflow-pr-list-review-filter-change(value);
                             }
@@ -2241,7 +2248,9 @@ export component MainWindow inherits Window {
         large-diff-deferred: root.workflow-pr-review-large-diff-deferred;
         large-diff-loading: root.workflow-pr-review-large-diff-loading;
         error-text: root.workflow-pr-review-error;
+        error-kind: root.workflow-pr-review-error-kind;
         ignore-whitespace-supported: root.workflow-pr-review-ignore-whitespace-supported;
+        merge-delete-source-branch-supported: root.workflow-pr-merge-delete-source-branch-supported;
         ignore-whitespace <=> root.workflow-pr-review-ignore-whitespace;
         diff-view <=> root.workflow-pr-review-diff-view;
         file-filter <=> root.workflow-pr-review-file-filter;
@@ -2372,6 +2381,7 @@ export component MainWindow inherits Window {
             )
         }
         view-file => { root.workflow-pr-review-view-file(); }
+        open-settings => { root.navigate(Route.Settings); }
         toggle-commit-message(sha) => { root.workflow-pr-review-toggle-commit-message(sha); }
         submit-review(action, body) => { root.workflow-pr-submit-review(action, body); }
         dismiss-review(review-id, reason) => { root.workflow-pr-dismiss-review(review-id, reason); }

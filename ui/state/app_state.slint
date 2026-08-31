@@ -26,6 +26,7 @@ export global AppState {
 
     // auto-update
     in-out property <bool> auto-update: true; // default enabled
+    in-out property <string> update-channel: "stable";
     
     // logging outputs and diagnostics
     in-out property <bool> application-console-logging: true;
@@ -73,6 +74,7 @@ export global AppState {
     
     // auto-update
     callback toggle-auto-update(enabled: bool);
+    callback set-update-channel(channel: string);
     
     // logging outputs and diagnostics
     callback toggle-application-console-logging(enabled: bool);

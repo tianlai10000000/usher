@@ -73,6 +73,38 @@ jobs:
       - name: Create App Bundle
         run: cargo bundle --release --target ${{ matrix.target }}
 
+      - name: Install Apple signing certificate
+        if: startsWith(github.ref, 'refs/tags/') && vars.MACOS_SIGNING_NOTARIZATION_ENABLED == 'true'
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          test -n "$BUILD_CERTIFICATE_BASE64" || { echo "MACOS_CERTIFICATE_BASE64 is required for tag releases"; exit 1; }
+          test -n "$P12_PASSWORD" || { echo "MACOS_CERTIFICATE_PASSWORD is required for tag releases"; exit 1; }
+          test -n "$KEYCHAIN_PASSWORD" || { echo "MACOS_KEYCHAIN_PASSWORD is required for tag releases"; exit 1; }
+          CERTIFICATE_PATH="$RUNNER_TEMP/usher-signing.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/usher-signing.keychain-db"
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+      - name: Sign macOS executable and app bundle
+        if: startsWith(github.ref, 'refs/tags/') && vars.MACOS_SIGNING_NOTARIZATION_ENABLED == 'true'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          test -n "$APPLE_SIGNING_IDENTITY" || { echo "APPLE_SIGNING_IDENTITY is required for tag releases"; exit 1; }
+          EXE_PATH="target/${{ matrix.target }}/release/usher"
+          BUNDLE_PATH="target/${{ matrix.target }}/release/bundle/osx/${{ env.APP_NAME }}.app"
+          codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$EXE_PATH"
+          codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$BUNDLE_PATH"
+          codesign --verify --deep --strict --verbose=2 "$BUNDLE_PATH"
+
       - name: Create tar.gz for self_update
         run: |
           # 创建三个 tar.gz 文件：
@@ -194,6 +226,29 @@ jobs:
           echo "Current directory: $(pwd)"
           echo "Files in current directory:"
           ls -lh | grep -E "\.(tar\.gz|dmg)$" || echo "No matching files found"
+
+      - name: Notarize and staple DMG
+        if: startsWith(github.ref, 'refs/tags/') && vars.MACOS_SIGNING_NOTARIZATION_ENABLED == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          test -n "$APPLE_ID" || { echo "APPLE_ID is required for tag releases"; exit 1; }
+          test -n "$APPLE_TEAM_ID" || { echo "APPLE_TEAM_ID is required for tag releases"; exit 1; }
+          test -n "$APPLE_APP_PASSWORD" || { echo "APPLE_APP_PASSWORD is required for tag releases"; exit 1; }
+          DMG_NAME="${{ env.APP_NAME }}-${{ matrix.target }}.dmg"
+          xcrun notarytool submit "$DMG_NAME" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          xcrun stapler staple "$DMG_NAME"
+          xcrun stapler validate "$DMG_NAME"
+
+      - name: Remove temporary signing keychain
+        if: always() && startsWith(github.ref, 'refs/tags/') && vars.MACOS_SIGNING_NOTARIZATION_ENABLED == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/usher-signing.keychain-db" || true
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4

@@ -889,3 +889,55 @@ impl PullRequestState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        PageCollector, PullRequestMergeMethod, PullRequestReviewAction, PullRequestState,
+        split_commit_message,
+    };
+
+    #[test]
+    fn page_collector_distinguishes_short_completion_from_a_full_hard_limit() {
+        let mut complete = PageCollector::new(2, 3);
+        assert!(complete.append(vec![1, 2]));
+        assert!(!complete.append(vec![3]));
+        assert_eq!(complete.into_parts(), (vec![1, 2, 3], false));
+
+        let mut truncated = PageCollector::new(2, 2);
+        assert!(truncated.append(vec![1, 2]));
+        assert!(!truncated.append(vec![3, 4]));
+        assert_eq!(truncated.into_parts(), (vec![1, 2, 3, 4], true));
+    }
+
+    #[test]
+    fn command_models_accept_only_documented_portable_values() {
+        assert_eq!(
+            PullRequestReviewAction::parse("request-changes"),
+            Some(PullRequestReviewAction::RequestChanges)
+        );
+        assert_eq!(
+            PullRequestMergeMethod::parse("fast_forward"),
+            Some(PullRequestMergeMethod::FastForward)
+        );
+        assert_eq!(
+            PullRequestState::parse("opened"),
+            Some(PullRequestState::Open)
+        );
+        assert!(PullRequestReviewAction::parse("merge").is_none());
+        assert!(PullRequestMergeMethod::parse("approve").is_none());
+        assert!(PullRequestState::parse("draft").is_none());
+    }
+
+    #[test]
+    fn commit_message_model_separates_trimmed_title_and_body() {
+        assert_eq!(
+            split_commit_message("  Add cache guard  \n\nDetails stay intact.\n"),
+            (
+                "Add cache guard".to_string(),
+                "Details stay intact.".to_string()
+            )
+        );
+        assert_eq!(split_commit_message(""), (String::new(), String::new()));
+    }
+}

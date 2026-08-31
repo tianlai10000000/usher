@@ -22,6 +22,9 @@ const MAX_STREAMED_COMPLETION_BYTES: usize = 16 * 1024 * 1024;
 #[cfg(feature = "ai-code-review")]
 pub(crate) const REVIEW_CHUNK_TOTAL_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(600);
+#[cfg(feature = "ai-code-review")]
+pub(crate) const REVIEW_CHAT_TOTAL_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(600);
 
 #[derive(Debug, Deserialize)]
 struct ModelsResponse {
@@ -102,6 +105,14 @@ struct StreamingCompletionChoice {
     delta: StreamingCompletionMessage,
     #[serde(default)]
     message: StreamingCompletionMessage,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
+#[cfg(feature = "ai-code-review")]
+#[derive(Debug, Deserialize)]
+struct StreamingCompletionError {
+    message: String,
 }
 
 #[cfg(feature = "ai-code-review")]
@@ -109,6 +120,8 @@ struct StreamingCompletionChoice {
 struct StreamingCompletionResponse {
     #[serde(default)]
     choices: Vec<StreamingCompletionChoice>,
+    #[serde(default)]
+    error: Option<StreamingCompletionError>,
 }
 
 #[cfg(feature = "ai-code-review")]
@@ -155,10 +168,12 @@ impl CompletionSseParser {
         }
         self.dispatch_event()?;
         if self.content.trim().is_empty() {
-            Err("The AI provider returned no completion content".to_string())
-        } else {
-            Ok(self.content)
+            return Err("The AI provider returned no completion content".to_string());
         }
+        if !self.done {
+            return Err("The AI provider closed the stream before a completion marker".to_string());
+        }
+        Ok(self.content)
     }
 
     fn process_line(&mut self, line: &[u8]) -> Result<(), String> {
@@ -190,7 +205,14 @@ impl CompletionSseParser {
         }
         let response = serde_json::from_slice::<StreamingCompletionResponse>(&data)
             .map_err(|error| format!("Invalid streaming completion event: {error}"))?;
+        if let Some(error) = response.error {
+            let message = error.message.chars().take(512).collect::<String>();
+            return Err(format!("The AI provider returned an error: {message}"));
+        }
         for choice in response.choices {
+            if choice.finish_reason.is_some() {
+                self.done = true;
+            }
             if let Some(content) = choice.delta.content.or(choice.message.content) {
                 self.content.push_str(content.as_str());
             }
@@ -473,10 +495,32 @@ mod tests {
     fn streamed_completion_parser_accepts_message_fallback() {
         let mut parser = CompletionSseParser::default();
         parser
-            .push(b"data: {\"choices\":[{\"message\":{\"content\":\"complete\"}}]}\n\n")
+            .push(b"data: {\"choices\":[{\"message\":{\"content\":\"complete\"},\"finish_reason\":\"stop\"}]}\n\n")
             .unwrap();
 
         assert_eq!(parser.finish().unwrap(), "complete");
+    }
+
+    #[cfg(feature = "ai-code-review")]
+    #[test]
+    fn streamed_completion_parser_rejects_clean_truncation_without_terminal_marker() {
+        let mut parser = CompletionSseParser::default();
+        parser
+            .push(b"data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+            .unwrap();
+
+        assert!(parser.finish().unwrap_err().contains("completion marker"));
+    }
+
+    #[cfg(feature = "ai-code-review")]
+    #[test]
+    fn streamed_completion_parser_surfaces_provider_error_events() {
+        let mut parser = CompletionSseParser::default();
+        let error = parser
+            .push(b"data: {\"error\":{\"message\":\"capacity unavailable\"}}\n\n")
+            .unwrap_err();
+
+        assert!(error.contains("capacity unavailable"));
     }
 
     #[cfg(feature = "ai-code-review")]
@@ -492,5 +536,6 @@ mod tests {
     #[test]
     fn review_chunk_total_budget_doubles_the_idle_timeout() {
         assert_eq!(REVIEW_CHUNK_TOTAL_TIMEOUT, REVIEW_READ_IDLE_TIMEOUT * 2);
+        assert_eq!(REVIEW_CHAT_TOTAL_TIMEOUT, REVIEW_CHUNK_TOTAL_TIMEOUT);
     }
 }

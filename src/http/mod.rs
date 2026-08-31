@@ -400,11 +400,6 @@ impl RequestOptions {
         self
     }
 
-    pub(crate) fn allow_http_errors(mut self) -> Self {
-        self.reject_http_errors = false;
-        self
-    }
-
     /// Retry transient failures (HTTP 429/5xx and connection errors) up to
     /// `max_attempts` total attempts with exponential backoff and jitter.
     /// Only GET/HEAD requests are retried under this shorthand; requests
@@ -447,6 +442,16 @@ fn retry_policy_for(method: &Method, options: &RequestOptions) -> Option<RetryPo
 
 fn remaining_operation_budget(deadline: Option<Instant>) -> Option<Duration> {
     deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()))
+}
+
+fn request_attempt_timeout(
+    has_later_attempt: bool,
+    remaining: Option<Duration>,
+) -> Option<Duration> {
+    match (has_later_attempt, remaining) {
+        (true, Some(remaining)) => Some(remaining.min(RETRY_ATTEMPT_TIMEOUT)),
+        (_, remaining) => remaining,
+    }
 }
 
 fn retry_delay_fits_budget(delay: Duration, deadline: Option<Instant>) -> bool {
@@ -1040,15 +1045,12 @@ pub(crate) async fn send(
                 options.feedback,
             ));
         }
-        *request.timeout_mut() = match (retry, remaining) {
-            (Some(_), Some(remaining)) => Some(remaining.min(RETRY_ATTEMPT_TIMEOUT)),
-            (_, remaining) => remaining,
-        };
         // A streaming request body cannot be cloned; without a clone this
         // attempt is final regardless of the configured policy.
         let retry_request = (attempt < max_attempts)
             .then(|| request.try_clone())
             .flatten();
+        *request.timeout_mut() = request_attempt_timeout(retry_request.is_some(), remaining);
         match send_attempt(request, &options).await {
             Ok(response) => {
                 let status = response.status();
@@ -1391,6 +1393,20 @@ mod tests {
             Duration::from_secs(2),
             Some(Instant::now() + Duration::from_millis(10))
         ));
+    }
+
+    #[test]
+    fn attempt_timeout_caps_only_attempts_that_can_still_retry() {
+        let remaining = Duration::from_secs(90);
+        assert_eq!(
+            request_attempt_timeout(true, Some(remaining)),
+            Some(RETRY_ATTEMPT_TIMEOUT)
+        );
+        assert_eq!(
+            request_attempt_timeout(false, Some(remaining)),
+            Some(remaining)
+        );
+        assert_eq!(request_attempt_timeout(true, None), None);
     }
 
     #[test]

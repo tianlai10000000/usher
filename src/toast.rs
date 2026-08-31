@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use slint::{ComponentHandle, Global, Timer};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,6 +9,8 @@ use crate::{MainWindow, ToastManager, ToastOptions, ToastType};
 lazy_static! {
     static ref UI_WEAK: Arc<Mutex<Option<slint::Weak<MainWindow>>>> = Arc::new(Mutex::new(None));
 }
+
+static TOAST_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 // Default value constants
 const DEFAULT_DURATION_TEXT: i32 = 2500;
@@ -136,6 +139,7 @@ fn apply_toast(
     width: String,
     duration: i32,
 ) {
+    let generation = TOAST_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
     // Parse width string
     let (width_is_auto, width_value_px, width_percent) = parse_width(&width);
 
@@ -163,6 +167,9 @@ fn apply_toast(
 
         if let Some(weak) = ui_weak {
             Timer::single_shot(Duration::from_millis(duration as u64), move || {
+                if TOAST_GENERATION.load(Ordering::Relaxed) != generation {
+                    return;
+                }
                 if let Some(ui) = weak.upgrade() {
                     let manager = ToastManager::get(&ui);
                     manager.set_visible(false);
@@ -330,6 +337,7 @@ pub fn setup_toast(ui: &MainWindow) {
     // dismiss callback
     let ui_weak_dismiss = ui_weak.clone();
     manager.on_dismiss(move || {
+        TOAST_GENERATION.fetch_add(1, Ordering::Relaxed);
         if let Some(ui) = ui_weak_dismiss.upgrade() {
             let manager = ToastManager::get(&ui);
             manager.set_visible(false);

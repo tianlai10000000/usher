@@ -28,20 +28,6 @@ pub(crate) fn load(path: &Path) -> io::Result<Vec<Message>> {
 }
 
 pub(crate) fn save(path: &Path, messages: &[Message]) -> io::Result<()> {
-    let Some(parent) = path.parent() else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "message path has no parent",
-        ));
-    };
-    fs::create_dir_all(parent)?;
     let encoded = serde_json::to_vec_pretty(messages).map_err(io::Error::other)?;
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, encoded)?;
-
-    #[cfg(target_os = "windows")]
-    if path.exists() {
-        fs::remove_file(path)?;
-    }
-    fs::rename(temporary, path)
+    usher_fs::atomic_write(path, &encoded)
 }

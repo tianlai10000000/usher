@@ -2,23 +2,26 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
-use std::io::{BufWriter, Write};
+#[cfg(any(test, feature = "test-fixtures"))]
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use slint::{ComponentHandle, Global, Model, ModelRc, Timer, VecModel};
+use slint::{ComponentHandle, Global, Model, ModelRc, SharedString, Timer, VecModel};
 use tokio::sync::Notify;
 use usher_ai_review::{
-    AiModelRef, DEFAULT_DIFF_CHUNK_BYTES, FindingSeverity, MAX_RULE_BYTES, ProjectReviewKey,
-    RepositoryContext, ReviewConversationMessage, ReviewConversationRole, ReviewFinding,
-    ReviewInput, ReviewResult, ReviewRule, ReviewScheduler, ReviewSession, ReviewTarget,
-    ReviewTaskAction, ReviewTaskActionResult, ReviewTaskId, ReviewTaskState, ReviewTaskStatus,
-    ReviewTaskSummary, RuleBinding, RuleId, RuleSnapshot, build_review_prompt, chunk_diff,
-    merge_review_results, parse_review_response, reduce_tasks,
+    AiModelRef, DEFAULT_DIFF_CHUNK_BYTES, MAX_RULE_BYTES, ProjectReviewKey, RepositoryContext,
+    ReviewConversationMessage, ReviewConversationRole, ReviewInput, ReviewResult, ReviewRule,
+    ReviewScheduler, ReviewSession, ReviewTarget, ReviewTaskAction, ReviewTaskActionResult,
+    ReviewTaskId, ReviewTaskState, ReviewTaskStatus, ReviewTaskSummary, RuleBinding, RuleId,
+    RuleSnapshot, build_review_prompt, chunk_diff, merge_review_results, parse_review_response,
+    reduce_tasks,
 };
+#[cfg(any(test, feature = "test-fixtures"))]
+use usher_ai_review::{FindingSeverity, ReviewFinding};
 use usher_messages::{MessageCenter, MessageDraft, MessageSeverity, NativeDelivery};
 use usher_state_store::{LocalStateStore, StateStore, StateStoreExt, Subscription};
 
@@ -36,15 +39,21 @@ use crate::{
 
 use super::config::{ReviewConfigFacade, default_session_dir};
 use super::response::{self, ResponseVariant};
-use super::storage::{JsonLoad, load_json_preserving_corrupt};
+use super::storage::{
+    JsonLoad, load_json_preserving_corrupt, reconcile_session_files, remove_stale_temporary_files,
+    session_paths,
+};
 
 type TaskStore = dyn StateStore<ReviewTaskState, ReviewTaskAction, ReviewTaskActionResult>;
 
 const TASK_STATE_FILE: &str = "tasks.json";
+#[cfg(any(test, feature = "test-fixtures"))]
 const FIXTURE_NAME: &str = "review-v1";
+#[cfg(any(test, feature = "test-fixtures"))]
 const RESPONSE_FIXTURE_NAME: &str = "markdown-v1";
 const DOCKED_LIFECYCLE_ENV: &str = "USHER_AI_REVIEW_DOCKED_LIFECYCLE";
 const RESPONSE_LIST_ENV: &str = "USHER_AI_REVIEW_RESPONSE_LIST";
+#[cfg(any(test, feature = "test-fixtures"))]
 const DEFAULT_FIXTURE_DELAY_MS: u64 = 90;
 const MAX_CHAT_DIFF_BYTES: usize = 48 * 1024;
 const MAX_CHAT_HISTORY_MESSAGES: usize = 20;
@@ -483,15 +492,12 @@ pub(crate) fn setup_ai_review(
         .parent()
         .unwrap_or(session_dir.as_path())
         .join(TASK_STATE_FILE);
-    let (initial_tasks, task_writes_allowed) = load_task_state(&task_state_path);
-    let initial_task_ids = initial_tasks.tasks.keys().cloned().collect();
-    let task_store: Arc<TaskStore> = Arc::new(LocalStateStore::new(initial_tasks, reduce_tasks));
-    let task_persistence = TaskPersistenceWorker::start(
-        task_state_path,
-        session_dir.clone(),
-        initial_task_ids,
-        task_writes_allowed,
-    );
+    let task_store: Arc<TaskStore> = Arc::new(LocalStateStore::new(
+        ReviewTaskState::default(),
+        reduce_tasks,
+    ));
+    let task_persistence =
+        TaskPersistenceWorker::start(task_state_path.clone(), session_dir.clone(), false);
     let persistence_sender = task_persistence.sender.clone();
     let persistence_subscription = task_store.observe_commits(Arc::new(move |snapshot| {
         let _ = persistence_sender.send(Some(snapshot.state_arc()));
@@ -598,10 +604,34 @@ pub(crate) fn setup_ai_review(
         _config_subscription: Arc::new(config_subscription),
     }
     .with_persistence_subscription(persistence_subscription);
+    let weak_inner = Arc::downgrade(&inner);
+    crate::startup::run_after_first_frame(move || {
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let loaded =
+                tokio::task::spawn_blocking(move || load_task_state(&task_state_path)).await;
+            let Ok((state, writes_allowed)) = loaded else {
+                log::error!("[AI Review][Task Store] Deferred hydration worker failed");
+                return;
+            };
+            let Some(inner) = weak_inner.upgrade() else {
+                return;
+            };
+            inner.task_persistence.set_writes_allowed(writes_allowed);
+            inner.task_store.dispatch(ReviewTaskAction::Hydrate(state));
+            if writes_allowed {
+                let _ = inner
+                    .task_persistence
+                    .sender
+                    .send(Some(inner.task_store.snapshot().state_arc()));
+            }
+            log::info!("[AI Review][Task Store] Deferred hydration complete");
+        });
+    });
     maybe_mount_response_fixture(ui, inner);
     controller
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn maybe_mount_response_fixture(ui: &MainWindow, inner: Arc<ControllerInner>) {
     if std::env::var("USHER_AI_REVIEW_RESPONSE_FIXTURE").as_deref() != Ok(RESPONSE_FIXTURE_NAME) {
         return;
@@ -727,6 +757,10 @@ fn maybe_mount_response_fixture(ui: &MainWindow, inner: Arc<ControllerInner>) {
     });
 }
 
+#[cfg(not(any(test, feature = "test-fixtures")))]
+fn maybe_mount_response_fixture(_ui: &MainWindow, _inner: Arc<ControllerInner>) {}
+
+#[cfg(any(test, feature = "test-fixtures"))]
 fn schedule_response_preview_memory_fixture(ui: &MainWindow) {
     let scenario = std::env::var("USHER_MEMORY_SCENARIO").unwrap_or_default();
     let (detached, close_after_settle, cycles) = match scenario.as_str() {
@@ -740,6 +774,7 @@ fn schedule_response_preview_memory_fixture(ui: &MainWindow) {
     schedule_response_preview_memory_fixture_cycle(ui, detached, close_after_settle, 1, cycles);
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn response_preview_checkpoint(stage: &str, cycle: u8, total_cycles: u8) -> String {
     if total_cycles == 1 {
         format!("ai_review.preview_fixture.{stage}")
@@ -748,6 +783,7 @@ fn response_preview_checkpoint(stage: &str, cycle: u8, total_cycles: u8) -> Stri
     }
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn schedule_response_preview_memory_fixture_cycle(
     ui: &MainWindow,
     detached: bool,
@@ -1015,24 +1051,26 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
         inner_response_link.open_response_link(url.as_str());
     });
 
-    let response_fixture_scroll_reported = Arc::new(AtomicBool::new(false));
-    let scroll_reported = response_fixture_scroll_reported.clone();
-    let response_variant = inner.response_variant;
-    ui.on_ai_review_response_wheel_consumed(move |movement| {
-        if std::env::var("USHER_AI_REVIEW_RESPONSE_FIXTURE").as_deref()
-            != Ok(RESPONSE_FIXTURE_NAME)
-            || movement.abs() <= 0.25
-            || scroll_reported.swap(true, Ordering::AcqRel)
-        {
-            return;
-        }
-        println!(
-            "[AI Review][ResponseFixture] scroll-consumed fixture={} variant={} movement_px={movement:.2}",
-            RESPONSE_FIXTURE_NAME,
-            response_variant.label(),
-        );
-        let _ = std::io::stdout().flush();
-    });
+    #[cfg(any(test, feature = "test-fixtures"))]
+    {
+        let response_fixture_scroll_reported = Arc::new(AtomicBool::new(false));
+        let scroll_reported = response_fixture_scroll_reported.clone();
+        let response_variant = inner.response_variant;
+        ui.on_ai_review_response_wheel_consumed(move |movement| {
+            if !response_fixture_enabled()
+                || movement.abs() <= 0.25
+                || scroll_reported.swap(true, Ordering::AcqRel)
+            {
+                return;
+            }
+            println!(
+                "[AI Review][ResponseFixture] scroll-consumed fixture={} variant={} movement_px={movement:.2}",
+                RESPONSE_FIXTURE_NAME,
+                response_variant.label(),
+            );
+            let _ = std::io::stdout().flush();
+        });
+    }
 }
 
 impl ControllerInner {
@@ -2083,7 +2121,8 @@ async fn load_pull_request_context(
         request.number.as_str(),
         false,
     )
-    .await?;
+    .await
+    .map_err(|error| error.user_message().to_string())?;
     Ok((
         target_from_detail(request, &detail),
         unified_diff_from_detail(&detail),
@@ -2151,17 +2190,31 @@ async fn complete_chat(
     fixture: bool,
 ) -> Result<String, String> {
     if fixture {
-        tokio::time::sleep(Duration::from_millis(fixture_delay_ms())).await;
-        return Ok(response_fixture_markdown(1, 1_500));
+        #[cfg(any(test, feature = "test-fixtures"))]
+        {
+            tokio::time::sleep(Duration::from_millis(fixture_delay_ms())).await;
+            return Ok(response_fixture_markdown(1, 1_500));
+        }
+        #[cfg(not(any(test, feature = "test-fixtures")))]
+        return Err("AI Review fixtures require the test-fixtures feature".to_string());
     }
     let messages = build_chat_messages(input, review_result, conversation)?;
-    agent::complete_review(
-        settings,
-        messages.as_slice(),
-        "AI review conversation",
-        format!("task={} kind=chat", task_id.0),
+    tokio::time::timeout(
+        agent::REVIEW_CHAT_TOTAL_TIMEOUT,
+        agent::complete_review(
+            settings,
+            messages.as_slice(),
+            "AI review conversation",
+            format!("task={} kind=chat", task_id.0),
+        ),
     )
     .await
+    .map_err(|_| {
+        format!(
+            "AI review conversation timed out after {} seconds.",
+            agent::REVIEW_CHAT_TOTAL_TIMEOUT.as_secs()
+        )
+    })?
     .map_err(|error| error.user_message().to_string())
 }
 
@@ -2313,18 +2366,18 @@ fn apply_configuration_to_ui(ui: &MainWindow, state: &usher_ai_review::ReviewCon
 /// the selector subscription can drop commits that only touch bookkeeping.
 #[derive(Clone, PartialEq, Eq)]
 struct TaskRowProjection {
-    id: String,
-    project_key: String,
-    pull_request_number: String,
-    pull_request_title: String,
-    rule_name: String,
-    model_name: String,
+    id: SharedString,
+    project_key: SharedString,
+    pull_request_number: SharedString,
+    pull_request_title: SharedString,
+    rule_name: SharedString,
+    model_name: SharedString,
     status: ReviewTaskStatus,
     progress_percent: u8,
     completed_chunks: u32,
     total_chunks: u32,
     finding_count: u32,
-    error: String,
+    error: SharedString,
 }
 
 fn project_task_rows(state: &ReviewTaskState) -> Vec<TaskRowProjection> {
@@ -2334,36 +2387,36 @@ fn project_task_rows(state: &ReviewTaskState) -> Vec<TaskRowProjection> {
         .rev()
         .filter_map(|id| state.tasks.get(id))
         .map(|task| TaskRowProjection {
-            id: task.id.0.clone(),
-            project_key: task.target.project_key.0.clone(),
-            pull_request_number: task.target.pull_request_number.clone(),
-            pull_request_title: task.target.pull_request_title.clone(),
-            rule_name: task.rule_name.clone(),
-            model_name: task.model_name.clone(),
+            id: task.id.0.as_str().into(),
+            project_key: task.target.project_key.0.as_str().into(),
+            pull_request_number: task.target.pull_request_number.as_str().into(),
+            pull_request_title: task.target.pull_request_title.as_str().into(),
+            rule_name: task.rule_name.as_str().into(),
+            model_name: task.model_name.as_str().into(),
             status: task.status,
             progress_percent: task.progress_percent,
             completed_chunks: task.completed_chunks,
             total_chunks: task.total_chunks,
             finding_count: task.finding_count,
-            error: task.error.clone(),
+            error: task.error.as_str().into(),
         })
         .collect()
 }
 
 fn task_item_from_projection(row: &TaskRowProjection) -> AiReviewTaskItem {
     AiReviewTaskItem {
-        id: row.id.clone().into(),
-        project_key: row.project_key.clone().into(),
-        pull_request_number: row.pull_request_number.clone().into(),
-        pull_request_title: row.pull_request_title.clone().into(),
-        rule_name: row.rule_name.clone().into(),
-        model_name: row.model_name.clone().into(),
+        id: row.id.clone(),
+        project_key: row.project_key.clone(),
+        pull_request_number: row.pull_request_number.clone(),
+        pull_request_title: row.pull_request_title.clone(),
+        rule_name: row.rule_name.clone(),
+        model_name: row.model_name.clone(),
         status: row.status.as_str().into(),
         progress_percent: i32::from(row.progress_percent),
         completed_chunks: row.completed_chunks.min(i32::MAX as u32) as i32,
         total_chunks: row.total_chunks.min(i32::MAX as u32) as i32,
         finding_count: row.finding_count.min(i32::MAX as u32) as i32,
-        error: row.error.clone().into(),
+        error: row.error.clone(),
     }
 }
 
@@ -2774,10 +2827,22 @@ fn validate_model_settings(settings: &AiAgentSettings) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn fixture_enabled() -> bool {
     std::env::var("USHER_AI_REVIEW_FIXTURE").is_ok_and(|value| value == FIXTURE_NAME)
 }
 
+#[cfg(not(any(test, feature = "test-fixtures")))]
+fn fixture_enabled() -> bool {
+    false
+}
+
+#[cfg(any(test, feature = "test-fixtures"))]
+fn response_fixture_enabled() -> bool {
+    std::env::var("USHER_AI_REVIEW_RESPONSE_FIXTURE").as_deref() == Ok(RESPONSE_FIXTURE_NAME)
+}
+
+#[cfg(any(test, feature = "test-fixtures"))]
 fn response_fixture_message_count() -> usize {
     std::env::var("USHER_AI_REVIEW_RESPONSE_FIXTURE_MESSAGES")
         .ok()
@@ -2786,6 +2851,7 @@ fn response_fixture_message_count() -> usize {
         .clamp(1, 64)
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn response_fixture_bytes() -> usize {
     std::env::var("USHER_AI_REVIEW_RESPONSE_FIXTURE_BYTES")
         .ok()
@@ -2794,6 +2860,7 @@ fn response_fixture_bytes() -> usize {
         .clamp(512, 16 * 1024)
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn response_fixture_session(
     message_count: usize,
     bytes_per_response: usize,
@@ -2867,6 +2934,7 @@ fn response_fixture_session(
     }
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn response_fixture_markdown(index: usize, target_bytes: usize) -> String {
     const CODEX_REFERENCE_SECTION: &str = r#"有轻微理论开销，但实测没有发现有意义的性能回退。
 
@@ -2963,12 +3031,18 @@ H6 仍有标题权重，同时不会放大文档高度。
     markdown
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn fixture_delay_ms() -> u64 {
     std::env::var("USHER_AI_REVIEW_FIXTURE_DELAY_MS")
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(DEFAULT_FIXTURE_DELAY_MS)
         .min(10_000)
+}
+
+#[cfg(not(any(test, feature = "test-fixtures")))]
+fn fixture_delay_ms() -> u64 {
+    0
 }
 
 fn diff_chunk_bytes() -> usize {
@@ -2979,6 +3053,7 @@ fn diff_chunk_bytes() -> usize {
         .clamp(1024, 1024 * 1024)
 }
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn fixture_diff(request: &PendingReviewRequest) -> (ReviewTarget, String) {
     let repeat = std::env::var("USHER_AI_REVIEW_FIXTURE_DIFF_BYTES")
         .ok()
@@ -3008,6 +3083,12 @@ fn fixture_diff(request: &PendingReviewRequest) -> (ReviewTarget, String) {
     )
 }
 
+#[cfg(not(any(test, feature = "test-fixtures")))]
+fn fixture_diff(_request: &PendingReviewRequest) -> (ReviewTarget, String) {
+    unreachable!("AI Review fixtures require the test-fixtures feature")
+}
+
+#[cfg(any(test, feature = "test-fixtures"))]
 fn fixture_result() -> ReviewResult {
     ReviewResult {
         summary: "The change introduces one correctness issue in the validation path.".to_string(),
@@ -3023,16 +3104,15 @@ fn fixture_result() -> ReviewResult {
     }
 }
 
+#[cfg(not(any(test, feature = "test-fixtures")))]
+fn fixture_result() -> ReviewResult {
+    unreachable!("AI Review fixtures require the test-fixtures feature")
+}
+
 async fn persist_session(path: PathBuf, session: ReviewSession) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let parent = path
-            .parent()
-            .ok_or_else(|| "AI review session path has no parent.".to_string())?;
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        let temporary = path.with_extension("json.tmp");
-        let file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
-        serde_json::to_writer(BufWriter::new(file), &session).map_err(|error| error.to_string())?;
-        fs::rename(&temporary, path).map_err(|error| error.to_string())
+        let data = serde_json::to_vec(&session).map_err(|error| error.to_string())?;
+        usher_fs::atomic_write(&path, &data).map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| format!("AI review persistence worker failed: {error}"))?
@@ -3059,14 +3139,8 @@ async fn persist_chat_session(
     session: PullRequestChatSession,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let parent = path
-            .parent()
-            .ok_or_else(|| "AI review chat session path has no parent.".to_string())?;
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        let temporary = path.with_extension("json.tmp");
-        let file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
-        serde_json::to_writer(BufWriter::new(file), &session).map_err(|error| error.to_string())?;
-        fs::rename(&temporary, path).map_err(|error| error.to_string())
+        let data = serde_json::to_vec(&session).map_err(|error| error.to_string())?;
+        usher_fs::atomic_write(&path, &data).map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| format!("AI review chat persistence worker failed: {error}"))?
@@ -3190,19 +3264,18 @@ struct TaskPersistenceWorker {
     sender: mpsc::Sender<Option<Arc<ReviewTaskState>>>,
     handle: Mutex<Option<JoinHandle<()>>>,
     subscription: Mutex<Option<Subscription>>,
+    writes_allowed: Arc<AtomicBool>,
 }
 
 impl TaskPersistenceWorker {
-    fn start(
-        path: PathBuf,
-        session_dir: PathBuf,
-        mut retained_ids: HashSet<ReviewTaskId>,
-        writes_allowed: bool,
-    ) -> Self {
+    fn start(path: PathBuf, session_dir: PathBuf, writes_allowed: bool) -> Self {
         let (sender, receiver) = mpsc::channel::<Option<Arc<ReviewTaskState>>>();
+        let writes_allowed = Arc::new(AtomicBool::new(writes_allowed));
+        let writes_allowed_worker = writes_allowed.clone();
         let handle = std::thread::Builder::new()
             .name("ai-review-tasks".into())
             .spawn(move || {
+                remove_stale_temporary_files(path.parent().unwrap_or_else(|| Path::new(".")));
                 while let Ok(message) = receiver.recv() {
                     let Some(mut latest) = message else {
                         break;
@@ -3210,18 +3283,14 @@ impl TaskPersistenceWorker {
                     while let Ok(Some(newer)) = receiver.try_recv() {
                         latest = newer;
                     }
-                    if !writes_allowed {
+                    if !writes_allowed_worker.load(Ordering::Acquire) {
                         continue;
                     }
                     if let Err(error) = persist_task_state(&path, &latest) {
                         log::error!("[AI Review][Task Store] Persistence failed: {error}");
                         continue;
                     }
-                    retained_ids = remove_evicted_session_files(
-                        &session_dir,
-                        &retained_ids,
-                        latest.tasks.keys(),
-                    );
+                    let _ = reconcile_session_files(&session_dir, latest.tasks.keys());
                 }
             })
             .expect("failed to start AI review task persistence worker");
@@ -3229,7 +3298,12 @@ impl TaskPersistenceWorker {
             sender,
             handle: Mutex::new(Some(handle)),
             subscription: Mutex::new(None),
+            writes_allowed,
         }
+    }
+
+    fn set_writes_allowed(&self, allowed: bool) {
+        self.writes_allowed.store(allowed, Ordering::Release);
     }
 
     fn retain_subscription(&self, subscription: Subscription) {
@@ -3250,54 +3324,9 @@ impl TaskPersistenceWorker {
     }
 }
 
-fn session_paths(session_dir: &Path, id: &ReviewTaskId) -> (PathBuf, PathBuf) {
-    let safe =
-        id.0.chars()
-            .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-            .collect::<String>();
-    (
-        session_dir.join(format!("{safe}.json")),
-        session_dir.join(format!("{safe}.chat.json")),
-    )
-}
-
-fn remove_evicted_session_files<'a>(
-    session_dir: &Path,
-    retained_ids: &HashSet<ReviewTaskId>,
-    current_ids: impl Iterator<Item = &'a ReviewTaskId>,
-) -> HashSet<ReviewTaskId> {
-    let current_ids = current_ids.cloned().collect::<HashSet<_>>();
-    let mut next_retained_ids = current_ids.clone();
-    for id in retained_ids.difference(&current_ids) {
-        let (review_path, chat_path) = session_paths(session_dir, id);
-        let mut retry = false;
-        for path in [review_path, chat_path] {
-            if let Err(error) = fs::remove_file(&path)
-                && error.kind() != std::io::ErrorKind::NotFound
-            {
-                retry = true;
-                log::warn!(
-                    "[AI Review][Session Store] Failed to remove evicted session {}: {error}",
-                    path.display()
-                );
-            }
-        }
-        if retry {
-            next_retained_ids.insert(id.clone());
-        }
-    }
-    next_retained_ids
-}
-
 fn persist_task_state(path: &Path, state: &ReviewTaskState) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| "AI review task-state path has no parent.".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    let temporary = path.with_extension("json.tmp");
-    let file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
-    serde_json::to_writer_pretty(BufWriter::new(file), state).map_err(|error| error.to_string())?;
-    fs::rename(&temporary, path).map_err(|error| error.to_string())
+    let data = serde_json::to_vec_pretty(state).map_err(|error| error.to_string())?;
+    usher_fs::atomic_write(path, &data).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -3398,19 +3427,22 @@ mod tests {
         let (evicted_review, evicted_chat) = session_paths(&dir, &evicted);
         let (retained_review, retained_chat) = session_paths(&dir, &retained);
         let corrupt_backup = evicted_review.with_extension("json.corrupt-test");
+        let orphan_review = dir.join("orphaned-after-corrupt-recovery.json");
+        let stale_temporary = dir.join("review-retained.json.tmp-123-1");
         for path in [
             &evicted_review,
             &evicted_chat,
             &retained_review,
             &retained_chat,
             &corrupt_backup,
+            &orphan_review,
+            &stale_temporary,
         ] {
             fs::write(path, b"{}").unwrap();
         }
 
-        let previous = HashSet::from([evicted.clone(), retained.clone()]);
         let current = HashSet::from([retained.clone()]);
-        let next = remove_evicted_session_files(&dir, &previous, current.iter());
+        let next = reconcile_session_files(&dir, current.iter());
 
         assert_eq!(next, current);
         assert!(!evicted_review.exists());
@@ -3418,11 +3450,25 @@ mod tests {
         assert!(retained_review.exists());
         assert!(retained_chat.exists());
         assert!(corrupt_backup.exists());
+        assert!(!orphan_review.exists());
+        assert!(!stale_temporary.exists());
 
         for path in [retained_review, retained_chat, corrupt_backup] {
             fs::remove_file(path).unwrap();
         }
         fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn filtered_session_ids_keep_a_stable_collision_resistant_suffix() {
+        let dir = Path::new("sessions");
+        let slash = session_paths(dir, &ReviewTaskId("review/a".to_string())).0;
+        let colon = session_paths(dir, &ReviewTaskId("review:a".to_string())).0;
+        assert_ne!(slash, colon);
+        assert_eq!(
+            session_paths(dir, &ReviewTaskId("review-safe".to_string())).0,
+            dir.join("review-safe.json")
+        );
     }
 
     #[test]

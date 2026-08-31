@@ -35,6 +35,26 @@ pub type ProgressCallback = Arc<dyn Fn(f32, u64, u64, &str) + Send + Sync>;
 /// Cancel flag
 pub type CancelFlag = Arc<AtomicBool>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UpdateChannel {
+    Stable,
+    Alpha,
+}
+
+impl UpdateChannel {
+    fn configured() -> Self {
+        if crate::settings::get_settings_manager().get().update_channel == "alpha" {
+            Self::Alpha
+        } else {
+            Self::Stable
+        }
+    }
+
+    fn accepts(self, version: &Version) -> bool {
+        self == Self::Alpha || version.pre.is_empty()
+    }
+}
+
 fn create_updater() -> Result<Box<dyn self_update::update::ReleaseUpdate>> {
     log::debug!(
         "Creating updater, repo: tianlai10000000/usher, current version: {}",
@@ -47,6 +67,32 @@ fn create_updater() -> Result<Box<dyn self_update::update::ReleaseUpdate>> {
         .current_version(cargo_crate_version!())
         .build()
         .context("Failed to configure updater")
+}
+
+fn select_release(
+    releases: Vec<self_update::update::Release>,
+    channel: UpdateChannel,
+) -> Option<self_update::update::Release> {
+    releases
+        .into_iter()
+        .filter_map(|release| {
+            Version::parse(&release.version)
+                .ok()
+                .map(|version| (version, release))
+        })
+        .filter(|(version, _)| channel.accepts(version))
+        .max_by(|(left, _), (right, _)| left.cmp(right))
+        .map(|(_, release)| release)
+}
+
+fn selected_release(
+    updater: &dyn self_update::update::ReleaseUpdate,
+    current_version: &str,
+) -> Result<Option<self_update::update::Release>> {
+    let releases = updater
+        .get_latest_releases(current_version)
+        .context("Failed to get available releases")?;
+    Ok(select_release(releases, UpdateChannel::configured()))
 }
 
 pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
@@ -63,7 +109,7 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
 
         // Get latest version information
         log::debug!(" Getting latest version information...");
-        let latest_release = updater.get_latest_release().map_err(|e| {
+        let Some(latest_release) = selected_release(updater.as_ref(), cargo_crate_version!()).map_err(|e| {
             log::debug!(" Failed to get latest version: {}", e);
             let error_msg = e.to_string();
             // Provide more user-friendly error messages
@@ -79,7 +125,9 @@ pub async fn check_for_update(state: &Arc<Mutex<UpdateState>>) -> Result<bool> {
             } else {
                 anyhow::anyhow!("Failed to check for updates: {}", error_msg)
             }
-        })?;
+        })? else {
+            return Ok((true, String::new()));
+        };
         let current_version_str = cargo_crate_version!();
         log::debug!(
             "Current version: {}, Latest version: {}",
@@ -170,6 +218,11 @@ pub async fn perform_update_with_progress(
     let progress_callback_clone = progress_callback.clone();
 
     // Get release information (in blocking thread)
+    let selected_version = state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .version
+        .clone();
     let release_info =
         tokio::task::spawn_blocking(move || -> Result<(String, String), anyhow::Error> {
             progress_callback_clone(0.05, 0, 0, "Connecting to server...");
@@ -178,7 +231,15 @@ pub async fn perform_update_with_progress(
 
             progress_callback_clone(0.1, 0, 0, "Fetching release info...");
 
-            let latest_release = updater.get_latest_release()?;
+            let releases = updater.get_latest_releases(cargo_crate_version!())?;
+            let latest_release = if selected_version.is_empty() {
+                select_release(releases, UpdateChannel::configured())
+            } else {
+                releases
+                    .into_iter()
+                    .find(|release| release.version == selected_version)
+            }
+            .context("The selected update release is no longer available")?;
             log::debug!(" Got latest version: {}", latest_release.version);
 
             // Get download URL for current platform
@@ -276,7 +337,9 @@ pub async fn perform_update_with_progress(
             .header("User-Agent", format!("usher/{}", cargo_crate_version!()))
             .header("Accept", "application/octet-stream"),
         // The updater already owns progress and notification UX.
-        RequestOptions::new("Download update").timeout(Duration::from_secs(10 * 60)),
+        RequestOptions::new("Download update")
+            .timeout(Duration::from_secs(10 * 60))
+            .no_retry(),
     )
     .await
     .context("Failed to start download")?;
@@ -388,17 +451,11 @@ pub async fn perform_update_with_progress(
             temp_file_path_clone
         );
 
-        // Create temporary directory for extraction
-        // Use system temporary directory
-        let temp_dir = std::env::temp_dir();
-        let extract_path = temp_dir.join(format!("usher_update_extract_{}", std::process::id()));
-
-        // If directory exists, remove it first
-        if extract_path.exists() {
-            std::fs::remove_dir_all(&extract_path)
-                .context("Failed to remove existing extract directory")?;
-        }
-        std::fs::create_dir_all(&extract_path).context("Failed to create extraction directory")?;
+        let extract_dir = tempfile::Builder::new()
+            .prefix("usher_update_extract_")
+            .tempdir()
+            .context("Failed to create secure extraction directory")?;
+        let extract_path = extract_dir.path();
 
         log::debug!("Extracting to temporary directory: {:?}", extract_path);
 
@@ -450,7 +507,7 @@ pub async fn perform_update_with_progress(
 
         // Extract all files to temporary directory
         archive
-            .unpack(&extract_path)
+            .unpack(extract_path)
             .context("Failed to extract tar.gz archive")?;
 
         log::debug!(" Extraction complete, looking for usher file...");
@@ -478,7 +535,7 @@ pub async fn perform_update_with_progress(
                 None
             }
 
-            if let Some(path) = find_usher_recursive(&extract_path) {
+            if let Some(path) = find_usher_recursive(extract_path) {
                 found_path = Some(path);
             }
 
@@ -487,7 +544,7 @@ pub async fn perform_update_with_progress(
             } else {
                 // List extracted files for debugging
                 log::debug!(" Extracted file list:");
-                if let Ok(entries) = std::fs::read_dir(&extract_path) {
+                if let Ok(entries) = std::fs::read_dir(extract_path) {
                     for entry in entries.flatten() {
                         log::debug!("   - {:?}", entry.path());
                     }
@@ -534,9 +591,8 @@ pub async fn perform_update_with_progress(
             s.download_status = "Update complete! Restarting...".to_string();
         }
 
-        // Clean up temporary files and extraction directory
+        // TempDir removes the extraction directory when this worker exits.
         let _ = std::fs::remove_file(&temp_file_path_clone);
-        let _ = std::fs::remove_dir_all(&extract_path);
 
         // Brief delay to let user see completion status
         std::thread::sleep(std::time::Duration::from_millis(800));
@@ -1075,4 +1131,59 @@ pub fn setup_updater(
 
     // Return the context for auto-update control
     Ok(UpdaterContext { rt, state })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UpdateChannel, select_release};
+    use self_update::update::Release;
+
+    fn release(version: &str) -> Release {
+        Release {
+            version: version.to_string(),
+            ..Release::default()
+        }
+    }
+
+    #[test]
+    fn stable_channel_ignores_prereleases_and_invalid_versions() {
+        let selected = select_release(
+            vec![
+                release("1.2.0-alpha.3"),
+                release("not-semver"),
+                release("1.1.9"),
+                release("1.2.0-rc.1"),
+            ],
+            UpdateChannel::Stable,
+        )
+        .unwrap();
+
+        assert_eq!(selected.version, "1.1.9");
+    }
+
+    #[test]
+    fn alpha_channel_selects_the_highest_semver_release() {
+        let selected = select_release(
+            vec![
+                release("1.2.0-alpha.3"),
+                release("1.1.9"),
+                release("1.2.0-beta.1"),
+            ],
+            UpdateChannel::Alpha,
+        )
+        .unwrap();
+
+        assert_eq!(selected.version, "1.2.0-beta.1");
+    }
+
+    #[test]
+    fn stable_channel_returns_none_when_only_prereleases_exist() {
+        assert!(
+            select_release(
+                vec![release("2.0.0-alpha.1"), release("2.0.0-rc.1")],
+                UpdateChannel::Stable,
+            )
+            .is_none()
+        );
+    }
 }

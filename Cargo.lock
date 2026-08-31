@@ -7329,6 +7329,7 @@ dependencies = [
  "bytes",
  "chrono",
  "config",
+ "core-foundation 0.9.4",
  "dark-light",
  "directories",
  "fern",
@@ -7356,13 +7357,16 @@ dependencies = [
  "signal-hook",
  "slint",
  "syntect",
+ "system-configuration",
  "tar",
+ "tempfile",
  "tokio",
  "toml 1.1.4+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
  "tray-icon",
  "usher-ai-review",
+ "usher-fs",
  "usher-messages",
  "usher-preview",
  "usher-search",
@@ -7385,6 +7389,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "usher-fs"
+version = "0.0.8-alpha.1"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "usher-messages"
 version = "0.0.8-alpha.1"
 dependencies = [
@@ -7396,6 +7407,7 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+ "usher-fs",
  "usher-state-store",
 ]
 

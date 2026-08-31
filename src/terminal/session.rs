@@ -2,6 +2,7 @@ use portable_pty::{CommandBuilder, PtyPair, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
 pub enum SessionEvent {
     Output(Vec<u8>),
@@ -12,6 +13,7 @@ pub struct PtySession {
     _pair: PtyPair,
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    process_id: Option<u32>,
 }
 
 impl PtySession {
@@ -44,6 +46,7 @@ impl PtySession {
             .slave
             .spawn_command(cmd)
             .map_err(|error| format!("spawn shell failed: {error}"))?;
+        let process_id = child.process_id();
 
         let mut reader = pair
             .master
@@ -77,6 +80,7 @@ impl PtySession {
             _pair: pair,
             writer,
             child,
+            process_id,
         })
     }
 
@@ -103,6 +107,55 @@ impl PtySession {
     }
 
     pub fn terminate(&mut self) {
+        self.signal_process_tree(libc::SIGTERM);
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+                Err(error) => {
+                    log::warn!("[Terminal] Failed to poll PTY child during shutdown: {error}");
+                    break;
+                }
+            }
+        }
+
+        self.signal_process_tree(libc::SIGKILL);
+        let _ = self.child.kill();
+        if let Err(error) = self.child.wait() {
+            log::warn!("[Terminal] Failed to reap PTY child: {error}");
+        }
+    }
+
+    #[cfg(unix)]
+    fn signal_process_tree(&mut self, signal: libc::c_int) {
+        let Some(process_id) = self
+            .process_id
+            .and_then(|id| libc::pid_t::try_from(id).ok())
+        else {
+            let _ = self.child.kill();
+            return;
+        };
+        // portable-pty starts the shell as the PTY session leader. Validate
+        // that assumption before addressing a process group so Usher can
+        // never signal its own group if a backend changes behavior.
+        let process_group = unsafe { libc::getpgid(process_id) };
+        if process_group == process_id {
+            if unsafe { libc::killpg(process_group, signal) } != 0 {
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::ESRCH) {
+                    log::warn!(
+                        "[Terminal] Failed to signal PTY process group {process_group}: {error}"
+                    );
+                }
+            }
+        } else {
+            let _ = self.child.kill();
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn signal_process_tree(&mut self, _signal: libc::c_int) {
         let _ = self.child.kill();
     }
 }

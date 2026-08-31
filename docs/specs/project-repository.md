@@ -9,25 +9,29 @@ This specification covers provider metadata resolved on the Project page and the
 ## Ownership / 职责
 
 - `src/project/mod.rs` is the stable feature façade. `controller.rs` validates form data and
-  coordinates asynchronous saves; `model.rs`, `storage.rs`, `logo.rs`, and `overview.rs` own
-  persistence records, `projects.json`, logo handling, and PR-overview task selection.
+  coordinates asynchronous saves; `state.rs` owns the typed Project reducer, selectors,
+  request de-duplication, and `PersistentStore`; `model.rs`, `storage.rs`, `logo.rs`, and
+  `overview.rs` own persistence records, `projects.json`, logo handling, and PR-overview tasks.
 - `src/codereview/api/` owns provider URL/path constants only.
 - `src/git/` parses remotes and owns provider-specific operations, authentication headers, and response decoding.
 - `src/git/overview.rs` aggregates normalized open PR/MR pages into `fat`, `uat`, and `prod` counts; Project and Workflow do not implement provider requests.
 - `src/http/mod.rs` owns request execution, interception, timeout/status handling, and safe logging.
-- `src/workflow/pr_list.rs` owns selected-project list state, request sequencing, status filters, and pagination.
+- `src/workflow/pr_list.rs` owns selected-project list presentation, status filters, and
+  pagination; `pr_list_state.rs` owns independent typed Page and Totals request generations.
 - `ui/views/project.slint` owns only `GitHubProjectPage` route composition.
   Project controls/cards/dialogs live under `ui/components/project/`; generic
   empty/loading/error presentation is owned by `GitHubBlankslate`.
 
 - `src/project/mod.rs` 是稳定 feature façade。`controller.rs` 校验表单并编排异步保存；
+  `state.rs` 负责强类型 Project reducer、selector、请求去重和 `PersistentStore`；
   `model.rs`、`storage.rs`、`logo.rs`、`overview.rs` 分别负责持久化记录、
   `projects.json`、Logo 处理和 PR overview 任务选择。
 - `src/codereview/api/` 只负责 Provider URL/路径常量。
 - `src/git/` 解析 remote，负责 Provider 实际操作、鉴权 header 和响应解码。
 - `src/git/overview.rs` 将归一化的 open PR/MR 分页聚合为 `fat`、`uat`、`prod` 数量；Project 与 Workflow 不实现 Provider 请求。
 - `src/http/mod.rs` 负责请求执行、拦截、超时/状态处理及安全日志。
-- `src/workflow/pr_list.rs` 负责当前项目的 PR 列表状态、请求序号、状态筛选和分页。
+- `src/workflow/pr_list.rs` 负责当前项目的 PR 列表展示、状态筛选和分页；
+  `pr_list_state.rs` 负责相互独立的强类型 Page 与 Totals 请求代际。
 - `ui/views/project.slint` 只负责 `GitHubProjectPage` 路由编排。Project
   控件、卡片和对话框统一位于 `ui/components/project/`；通用空白、加载和错误
   展示由 `GitHubBlankslate` 负责。
@@ -40,10 +44,10 @@ This specification covers provider metadata resolved on the Project page and the
 4. Provider project details must be loaded through the shared HTTP module. Tokens and enterprise API configuration come from the matching Git platform settings and must not be logged.
 5. Enterprise API URLs are supplied only by `[git.platform.<provider>].api_base_url`; source code must not contain environment-specific endpoints or enterprise identifiers. A configured URL is used only if its host matches `remote_repo`. The service host or full versioned API root is accepted; the provider version path is added when omitted.
 6. A successful save writes non-empty `repo_project_id` and lower-case `repo_type` to `project/projects.json`.
-7. If lookup, parsing, or local persistence fails, no new partial project record is written and an existing record remains unchanged.
+7. If lookup, parsing, or local persistence fails, no new partial project record is written and an existing record remains unchanged. A failed optimistic add, update, or delete rolls the in-memory registry and Project UI back when that operation is still the current version; it must not overwrite a later edit.
 8. A duplicate save for the same project while a lookup is running is rejected. Network work must not block the Slint event loop.
-9. Opening Workflow loads `repo_project_id` and `repo_type` from `projects.json`, then requests open PRs by default. Open, closed, merged, and all are explicit caller-selected filters; provider APIs do not inject a default state query.
-10. The PR tab displays 10 records per page and bottom-centered pagination. It must lazily request only the page selected by the user. GitHub may issue one detail request for each visible row to enrich its search response with source and target branch names; these requests remain scoped to that selected page. All parseable provider `updated_at` timestamps are displayed in UTC+08:00. Branch pairs and Updated timestamps wrap to additional lines instead of eliding; when the list card is narrower than the table floor width, the table scrolls horizontally rather than dropping columns. The documented response `meta.total_count` and `meta.total_pages` determine the exact total and total pages where available. Stale responses must not overwrite the current project/filter/page.
+9. Opening Workflow selects `repo_project_id` and `repo_type` from the hydrated Project Store, then requests open PRs by default. It must not reread `projects.json` for each lookup. Open, closed, merged, and all are explicit caller-selected filters; provider APIs do not inject a default state query.
+10. The PR tab displays 10 records per page and bottom-centered pagination. It must lazily request only the page selected by the user. Page loads and Open/Closed total loads use independent typed generations so either request class can advance without invalidating the other. GitHub may issue one detail request for each visible row to enrich its search response with source and target branch names; these requests remain scoped to that selected page. All parseable provider `updated_at` timestamps are displayed in UTC+08:00. Branch pairs and Updated timestamps wrap to additional lines instead of eliding; when the list card is narrower than the table floor width, the table scrolls horizontally rather than dropping columns. The documented response `meta.total_count` and `meta.total_pages` determine the exact total and total pages where available. Stale responses must not overwrite the current project/filter/page.
 11. `src/codereview/api/` must remain constants-only. It must not execute requests or own provider response models; endpoint changes must not require changing operation call sites.
 12. Project-card and Workflow environment counts use the persisted provider type/id and the same Git façade as the PR list. They run on the shared runtime, count only open requests whose normalized target branch is exactly `fat`, `uat`, or `prod`, and write UI state only from the Slint event loop.
 13. User-triggered project-registry reloads run on the shared runtime with
@@ -71,16 +75,25 @@ This specification covers provider metadata resolved on the Project page and the
     responsive host would crowd the project identity or paths. Brand
     backgrounds remain fixed across themes: GitHub `#24292E`, GitLab
     `#FC6D26`, and Gitee `#C71D23`, with white provider artwork and text.
-18. Project-registry reads and writes run off the Slint event loop. Writers are
-    serialized across both snapshot acquisition and the temporary-sibling
-    rename, so a queued older writer cannot overwrite newer in-memory state and
-    readers cannot observe partial JSON. Success feedback is emitted only after
-    the write completes.
-19. GitLab Closed logical pages merge provider-sorted closed and merged
-    prefixes. Complete provider pages are cached incrementally for 30 seconds,
-    bounded to 32 repository/filter/state/page-size keys, deduplicated by IID,
-    and invalidated after a successful merge. Explicit page-one refresh bypasses
-    the cached prefix and refreshes provider totals.
+18. Project-registry reads and writes run off the Slint event loop. Add, update,
+    and delete dispatch typed Actions; each changed commit is automatically
+    queued through `PersistentStore`, whose single worker may collapse adjacent
+    snapshots to the newest registry before atomically renaming a temporary
+    sibling over `projects.json`. Runtime-only logo, overview, and pending-state
+    commits do not rewrite unchanged durable records. Initial registry hydration
+    and logo decode start only after the first rendered frame; persistence is
+    enabled after hydration so the loaded snapshot is not rewritten. The Project
+    page exposes loading until the event-loop commit applies the prepared model.
+    Success feedback is emitted only after a real write completes; failure rolls
+    back only while the failed durable registry is still current.
+19. Provider adapters use the shared `src/git/prefix_cache.rs` TTL/LRU boundary
+    for client-composed logical pages. GitLab Closed merges provider-sorted
+    closed and merged prefixes. Gitee public Merged and Closed-unmerged share a
+    raw closed prefix, then apply state and keyword filters locally. Complete
+    provider pages are cached incrementally for 30 seconds, bounded to 32
+    repository/filter/state/page-size keys per adapter, and deduplicated by IID.
+    Explicit page-one refresh bypasses the cached prefix; a successful merge
+    invalidates every prefix for that repository.
 
 1. `remote_repo` 决定 Provider，支持 `gitee`、`gitlab`、`github`。
 2. 支持 HTTPS 或 SSH Git URL，且必须包含 owner/group 与仓库路径。
@@ -88,10 +101,10 @@ This specification covers provider metadata resolved on the Project page and the
 4. Provider 详情必须经由统一 HTTP 模块请求；Token 和企业版 API 配置来自对应 Git 平台设置，且不得写入日志。
 5. 企业版 API 地址只能由 `[git.platform.<provider>].api_base_url` 提供；源码不得保留环境专属地址或企业标识。只有 API 地址主机与 `remote_repo` 匹配时才使用该配置；既支持服务主机，也支持带版本路径的完整 API 根地址，缺少版本路径时由 Provider 自动补齐。
 6. 保存成功后，`project/projects.json` 中写入非空 `repo_project_id` 和小写 `repo_type`。
-7. 查询、解析或本地持久化失败时，不写入新的不完整项目记录，已有记录也保持不变。
+7. 查询、解析或本地持久化失败时，不写入新的不完整项目记录，已有记录也保持不变。乐观新增、更新或删除写入失败时，若该操作仍是当前版本，必须回滚内存注册表和 Project UI；不得覆盖后续编辑。
 8. 同一项目在查询未完成时重复保存必须被拒绝；网络工作不得阻塞 Slint event loop。
-9. 进入 Workflow 时从 `projects.json` 读取 `repo_project_id`、`repo_type`，默认查询 open PR。open、closed、merged、all 均由调用场景显式选择，Provider API 不自行注入默认状态 query。
-10. PR Tab 每页显示 10 条以及底部水平居中的分页，并且必须只懒加载用户选中的页。GitHub 可以为当前可见的每一行补充发起一个详情请求，以从搜索响应中补齐源分支和目标分支；这些请求必须始终限定在已选中的页面内。所有可解析的 Provider `updated_at` 时间戳均按东八区（UTC+08:00）显示。Branch 与 Updated 列换行完整显示，不得省略号截断；列表卡片窄于表宽下限时横向滚动，而不是丢列。可用时使用接口响应中定义的 `meta.total_count`、`meta.total_pages` 显示准确总条数和总页数；旧项目、旧筛选或旧页码响应不得覆盖当前视图。
+9. 进入 Workflow 时从已 hydration 的 Project Store selector 读取 `repo_project_id`、`repo_type`，不得为每次查询重新读取 `projects.json`；默认查询 open PR。open、closed、merged、all 均由调用场景显式选择，Provider API 不自行注入默认状态 query。
+10. PR Tab 每页显示 10 条以及底部水平居中的分页，并且必须只懒加载用户选中的页。Page 加载与 Open/Closed 总数加载使用相互独立的强类型代际，任一类请求递增不得使另一类失效。GitHub 可以为当前可见的每一行补充发起一个详情请求，以从搜索响应中补齐源分支和目标分支；这些请求必须始终限定在已选中的页面内。所有可解析的 Provider `updated_at` 时间戳均按东八区（UTC+08:00）显示。Branch 与 Updated 列换行完整显示，不得省略号截断；列表卡片窄于表宽下限时横向滚动，而不是丢列。可用时使用接口响应中定义的 `meta.total_count`、`meta.total_pages` 显示准确总条数和总页数；旧项目、旧筛选或旧页码响应不得覆盖当前视图。
 11. `src/codereview/api/` 必须保持仅包含常量，不得执行请求或持有 Provider 响应模型；修改接口地址时不应要求修改业务调用点。
 12. Project 卡片和 Workflow 环境计数使用持久化的 Provider 类型/id，并与 PR 列表共用 Git façade。任务运行在共享 runtime，只统计归一化目标分支严格为 `fat`、`uat`、`prod` 的 open 请求，且只能在 Slint event loop 回写 UI。
 13. 用户主动刷新项目注册表时，存储读取在共享 runtime 的 blocking task 中
@@ -111,12 +124,18 @@ This specification covers provider metadata resolved on the Project page and the
     缎带两端由卡片边缘裁切。缎带不得占用独立元数据行；响应式宿主空间不足时必须
     先缩小，不能挤压项目身份或路径。品牌底色在明暗主题下保持固定：GitHub
     `#24292E`、GitLab `#FC6D26`、Gitee `#C71D23`，Provider 图形与文字统一使用白色。
-18. 项目注册表读写必须离开 Slint event loop；写入方串行执行，并通过同目录临时文件
-    rename 替换 `projects.json`。串行范围必须同时覆盖快照获取与落盘，排队中的旧 Writer
-    不得覆盖更新状态；只有真实落盘完成后才提示成功。
-19. GitLab Closed 逻辑页按 Provider 排序合并 closed/merged 前缀；完整 Provider 页按
-    30 秒 TTL 增量缓存，最多保留 32 个仓库/筛选/状态/页大小 key，按 IID 去重，并在
-    合并成功后失效。显式刷新第 1 页必须绕过旧前缀并刷新 Provider total。
+18. 项目注册表读写必须离开 Slint event loop。新增、更新和删除统一 dispatch 强类型
+    Action；每个有效 commit 自动进入 `PersistentStore`，单一 Worker 可把相邻快照合并为
+    最新注册表，再通过同目录临时文件原子 rename 替换 `projects.json`。仅 Logo、概览和
+    pending 状态变化时不得重写未变化的持久字段。初始注册表 hydration 与 Logo 解码只在
+    首帧后启动；hydration 后才启用持久化，不能冗余回写刚加载的快照。Project 页面保持
+    Loading，直到准备后的 model 在 event loop 提交。只有真实落盘完成后才提示成功；
+    持久化失败也只能在失败的 durable 注册表仍为当前版本时回滚。
+19. Provider adapter 统一使用 `src/git/prefix_cache.rs` 的 TTL/LRU 边界组装客户端逻辑页。
+    GitLab Closed 按 Provider 排序合并 closed/merged 前缀；Gitee 公有版 Merged 与关闭未合并
+    共用原始 closed 前缀，再在本地应用状态与关键词筛选。完整 Provider 页按 30 秒 TTL
+    增量缓存，每个 adapter 最多保留 32 个仓库/筛选/状态/页大小 key，并按 IID 去重。
+    显式刷新第 1 页必须绕过旧前缀；合并成功后必须使该仓库的全部前缀失效。
 
 ## Deferred enhancement / 后续优化
 

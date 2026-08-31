@@ -1,0 +1,74 @@
+name: Nightly performance gates
+
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  memory:
+    name: Release memory thresholds
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-nightly-performance-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nightly-performance-
+
+      - name: Run isolated Home memory benchmark
+        run: |
+          scripts/benchmark-memory.sh \
+            --runs 3 \
+            --scenarios home \
+            --protocol static \
+            --samples 5 \
+            --interval 0.25 \
+            --prepare-delay 1 \
+            --fixture nightly-home-v1 \
+            --output memory-benchmark-results/nightly
+
+      - name: Resolve benchmark result
+        id: result
+        run: |
+          result_dir="$(find memory-benchmark-results/nightly -mindepth 1 -maxdepth 1 -type d | sort | tail -1)"
+          test -n "$result_dir"
+          echo "path=$result_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce memory thresholds
+        run: |
+          scripts/check-memory-benchmark-thresholds.py \
+            "${{ steps.result.outputs.path }}" \
+            --minimum-runs 3 \
+            --max-rss-peak-mib 256 \
+            --max-footprint-peak-mib 256 \
+            --max-rss-cycle-growth-mib 16 \
+            --max-footprint-cycle-growth-mib 16
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-memory-${{ github.run_id }}
+          path: memory-benchmark-results/nightly/
+          retention-days: 14

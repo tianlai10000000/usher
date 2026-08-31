@@ -42,6 +42,28 @@ const MAX_AI_CONTEXT_MESSAGES: usize = 20;
 /// window between startup and the event-loop backfill.
 type SharedChatSessions = Arc<Mutex<Option<ChatSessions>>>;
 
+#[derive(Default)]
+struct ChatDrafts {
+    ai: String,
+    rag: String,
+}
+
+impl ChatDrafts {
+    fn get(&self, mode: ChatMode) -> &str {
+        match mode {
+            ChatMode::Ai => self.ai.as_str(),
+            ChatMode::Rag => self.rag.as_str(),
+        }
+    }
+
+    fn set(&mut self, mode: ChatMode, text: String) {
+        match mode {
+            ChatMode::Ai => self.ai = text,
+            ChatMode::Rag => self.rag = text,
+        }
+    }
+}
+
 fn virtual_scroll_bucket(scroll_offset_px: f32) -> i32 {
     (scroll_offset_px.max(0.0) / VIRTUAL_SCROLL_BUCKET_HEIGHT_PX).floor() as i32
 }
@@ -1041,6 +1063,7 @@ pub fn setup_interactive(ui: &MainWindow) {
     // loop; the UI starts from the empty/loading state until then.
     let session: SharedChatSessions = Arc::new(Mutex::new(None));
     let request_state = Arc::new(Mutex::new(ChatRequestState::default()));
+    let drafts = Arc::new(Mutex::new(ChatDrafts::default()));
     ui.set_chat_ai_mode(true);
     ui.set_chat_ai_model_name(load_settings().ai.agent.model.into());
     let performance_variant = crate::chat::performance::variant();
@@ -1121,15 +1144,24 @@ pub fn setup_interactive(ui: &MainWindow) {
     let ui_weak_mode = ui_weak.clone();
     let session_mode = session.clone();
     let request_state_mode = request_state.clone();
+    let drafts_mode = drafts.clone();
     let chat_ui_mount_revision_mode = chat_ui_mount_revision.clone();
     ui.on_chat_switch_mode(move |ai_mode| {
         let Some(ui) = ui_weak_mode.upgrade() else {
             return;
         };
+        let previous_mode = chat_mode_from_ui(&ui);
         let mode = if ai_mode { ChatMode::Ai } else { ChatMode::Rag };
-        if chat_mode_from_ui(&ui) == mode {
+        if previous_mode == mode {
             return;
         }
+        let next_draft = drafts_mode
+            .lock()
+            .map(|mut drafts| {
+                drafts.set(previous_mode, ui.get_chat_input_text().to_string());
+                drafts.get(mode).to_owned()
+            })
+            .unwrap_or_default();
         if let Ok(mut sessions) = session_mode.lock() {
             // A still-loading session syncs its active mode from the UI once
             // the bootstrap completion handler remounts.
@@ -1145,6 +1177,7 @@ pub fn setup_interactive(ui: &MainWindow) {
         clear_render_cache();
         LAST_RENDER_SIGNATURE.with(|last| *last.borrow_mut() = None);
         ui.set_chat_ai_mode(ai_mode);
+        ui.set_chat_input_text(next_draft.into());
         ui.set_chat_loading_history(false);
         let (sending, elapsed_seconds) = request_state_mode
             .lock()
@@ -1317,15 +1350,29 @@ pub fn setup_interactive(ui: &MainWindow) {
             let ui_weak_for_task = ui_weak_load_more.clone();
             runtime_load_more.spawn(async move {
                 let io_result = tokio::task::spawn_blocking(move || {
+                    let request = {
+                        let mut guard = session_for_task
+                            .lock()
+                            .map_err(|e| format!("session lock poisoned: {e}"))?;
+                        let sessions = guard
+                            .as_mut()
+                            .ok_or_else(|| "chat history is still loading".to_string())?;
+                        sessions.prepare_history_load_for(mode)
+                    };
+                    let Some(request) = request else {
+                        return Ok(0);
+                    };
+                    let page = request
+                        .load()
+                        .map_err(|e| format!("load history failed: {e}"))?;
                     let mut guard = session_for_task
                         .lock()
                         .map_err(|e| format!("session lock poisoned: {e}"))?;
-                    let sessions = guard
+                    guard
                         .as_mut()
-                        .ok_or_else(|| "chat history is still loading".to_string())?;
-                    sessions
-                        .load_more_history_for(mode)
-                        .map_err(|e| format!("load history failed: {e}"))
+                        .ok_or_else(|| "chat history is still loading".to_string())?
+                        .commit_history_load_for(mode, &request, page)
+                        .map_err(|e| format!("commit history failed: {e}"))
                 })
                 .await;
 
@@ -1378,6 +1425,7 @@ pub fn setup_interactive(ui: &MainWindow) {
     // 处理发送消息回调
     let session_send = session.clone();
     let request_state_send = request_state.clone();
+    let drafts_send = drafts.clone();
     let runtime_send = runtime.clone();
     ui.on_chat_send_message(move |text: slint::SharedString| {
         let ui_weak_local = ui_weak.clone();
@@ -1406,6 +1454,9 @@ pub fn setup_interactive(ui: &MainWindow) {
         }
 
         let request_started = Instant::now();
+        if let Ok(mut drafts) = drafts_send.lock() {
+            drafts.set(mode, String::new());
+        }
         ui.set_chat_input_text("".into());
         ui.set_chat_is_sending(true);
         ui.set_chat_request_elapsed_seconds(0);
@@ -1420,6 +1471,7 @@ pub fn setup_interactive(ui: &MainWindow) {
         let ui_weak_clone = ui_weak.clone();
         let session_response = session_send.clone();
         let request_state_response = request_state_send.clone();
+        let drafts_response = drafts_send.clone();
         let loading_phase_active_response = loading_phase_active_send.clone();
         runtime_send.spawn(async move {
             let appended = tokio::task::spawn_blocking({
@@ -1465,6 +1517,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                     log::error!("[Chat::Storage] Failed to persist user message: {}", e);
                     let ui_weak_failed = ui_weak_clone.clone();
                     let request_state_failed = request_state_response.clone();
+                    let drafts_failed = drafts_response.clone();
                     let loading_phase_failed = loading_phase_active_response.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Ok(mut state) = request_state_failed.lock() {
@@ -1473,14 +1526,17 @@ pub fn setup_interactive(ui: &MainWindow) {
                         let Some(ui) = ui_weak_failed.upgrade() else {
                             return;
                         };
+                        if let Ok(mut drafts) = drafts_failed.lock() {
+                            drafts.set(mode, text_str.clone());
+                        }
                         if chat_mode_from_ui(&ui) == mode {
                             loading_phase_failed.store(false, Ordering::Relaxed);
-                            ui.set_chat_input_text(text_str.into());
+                            ui.set_chat_input_text(text_str.clone().into());
                             ui.set_chat_is_sending(false);
                             ui.set_chat_loading_phase(0);
                             ui.set_chat_request_elapsed_seconds(0);
-                            show_chat_storage_error(&ui);
                         }
+                        show_chat_storage_error(&ui);
                     });
                     return;
                 }
@@ -1813,6 +1869,16 @@ pub fn setup_interactive(ui: &MainWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drafts_are_isolated_by_chat_mode() {
+        let mut drafts = ChatDrafts::default();
+        drafts.set(ChatMode::Ai, "AI draft".into());
+        drafts.set(ChatMode::Rag, "RAG draft".into());
+
+        assert_eq!(drafts.get(ChatMode::Ai), "AI draft");
+        assert_eq!(drafts.get(ChatMode::Rag), "RAG draft");
+    }
 
     #[test]
     fn virtual_scroll_bucket_changes_only_with_scroll_position() {

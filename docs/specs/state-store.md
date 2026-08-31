@@ -15,7 +15,8 @@ features when their shared state is materially changed.
 
 - `crates/usher-state-store/` owns the framework-neutral `StateStore` port,
   revisioned `StoreSnapshot`, reducer contract, automatic subscriptions, RAII
-  unsubscription, selector access, and the built-in `LocalStateStore` engine.
+  unsubscription, selector access, the built-in `LocalStateStore` engine, and
+  the reusable `PersistentStore` facade for worker-owned durable commits.
 - Feature/domain crates own their State, Action, Output, reducer, validation,
   persistence schema, and side-effect adapters. They depend on the `StateStore`
   trait and must not expose `LocalStateStore` or a third-party engine in their
@@ -26,8 +27,8 @@ features when their shared state is materially changed.
   never be treated as shared with a global of the same name in another crate.
 
 - `crates/usher-state-store/` 持有与框架无关的 `StateStore` 接口、带 revision 的
-  `StoreSnapshot`、reducer 契约、自动订阅、RAII 退订、selector 读取和内置
-  `LocalStateStore` 引擎。
+  `StoreSnapshot`、reducer 契约、自动订阅、RAII 退订、selector 读取、内置
+  `LocalStateStore` 引擎，以及负责后台持久化 commit 的通用 `PersistentStore` 门面。
 - Feature/domain crate 持有自己的 State、Action、Output、reducer、校验、持久化
   Schema 与副作用适配器。Feature 只能依赖 `StateStore` trait，公共 API 禁止暴露
   `LocalStateStore` 或第三方引擎类型。
@@ -69,29 +70,38 @@ features when their shared state is materially changed.
 
 ## Persistence / 持久化
 
-- Durable shared State registers a non-blocking commit subscriber/observer.
-  Every changed revision is automatically queued to its feature-owned
-  persistence worker; individual action creators must not call save manually.
-- Startup loads and validates the persisted schema before constructing revision
-  zero. Corrupt data follows the feature's documented recovery policy.
+- Durable shared State uses `PersistentStore` or an equivalent feature facade.
+  Every changed revision is automatically queued to one owned worker; adjacent
+  pending snapshots may collapse to the latest State, and individual action
+  creators must not call save manually.
+- A feature may load and validate persisted data before constructing revision
+  zero, or create a deferred store and enable persistence immediately after a
+  typed hydration action. Deferred hydration must not redundantly write the
+  loaded snapshot back to disk. Corrupt data follows the feature's documented
+  recovery policy.
 - File/network/OS side effects never run in a reducer or on the Slint event
   loop. Persistence preserves commit order, writes through a temporary file when
   replacing JSON, and participates in the application shutdown flush sequence.
-- A persistence failure is observable in bounded logs/diagnostics. The feature
-  must document whether it retries or degrades to memory-only state; it must not
-  silently block UI dispatch.
+- `flush()` waits for all commits queued before it; `shutdown()` drains prior
+  commits and joins the worker. Both belong in the application shutdown order.
+- A persistence failure is observable through the facade callback and bounded
+  logs/diagnostics. The feature must document retry, rollback, or memory-only
+  degradation and must not silently block UI dispatch.
 - Ephemeral UI state such as hover, focus, an open menu, or a local confirmation
   timer does not enter the durable Store unless another page genuinely consumes it.
 
-- 需要持久化的共享 State 必须注册非阻塞 commit subscriber/observer。每个有效
-  revision 自动排队到 Feature 自有持久化 Worker；各 Action creator 禁止手工调用
-  save。
-- 启动时先加载并校验持久化 Schema，再构造 revision 0；损坏数据按 Feature 文档
-  规定恢复。
+- 需要持久化的共享 State 必须使用 `PersistentStore` 或等价 Feature 门面。每个有效
+  revision 自动排队到单一自有 Worker；相邻待处理快照可以合并为最新 State，各 Action
+  creator 禁止手工调用 save。
+- Feature 可以在构造 revision 0 前读取并校验持久化数据，也可以先创建 deferred store，
+  通过强类型 hydration Action 提交数据后立即启用持久化。deferred hydration 不得把刚
+  读取的快照冗余写回磁盘；损坏数据按 Feature 文档规定恢复。
 - 文件、网络和 OS 副作用不得进入 reducer，也不得在 Slint event loop 执行。
   持久化必须保持 commit 顺序，替换 JSON 时使用临时文件，并接入应用关闭 flush。
-- 持久化失败必须进入有界日志/诊断；Feature 应明确重试还是降级为仅内存状态，禁止
-  静默阻塞 UI dispatch。
+- `flush()` 必须等待此前已排队 commit，`shutdown()` 必须排空此前任务并 join Worker；
+  两者都要接入应用关闭顺序。
+- 持久化失败必须通过门面回调及有界日志/诊断可观测；Feature 应明确重试、回滚或降级
+  为仅内存状态，禁止静默阻塞 UI dispatch。
 - Hover、Focus、打开菜单、本地确认计时器等临时 UI 状态，除非确有其他页面消费，
   否则不得进入持久 Store。
 
@@ -114,7 +124,7 @@ runtime 归属、event-loop 兼容性和编译成本。
 
 ## Reference implementation / 参考实现
 
-The application message center is the first reference implementation:
+The message center and Project registry are reference implementations:
 
 - `MessageCenter` is the stable feature facade.
 - private `MessageAction` values are reduced through `StateStore`;
@@ -123,11 +133,20 @@ The application message center is the first reference implementation:
   messages published from other routes;
 - each changed revision automatically queues `messages/messages.json` through
   the owned persistence worker.
+- `ProjectStateFacade` owns typed add/update/delete, save/logo/overview
+  de-duplication, and repository metadata selectors;
+- Project creates `PersistentStore` before the first frame is available, hydrates
+  after that frame, and then enables automatic persistence;
+- Project reports success only after a real durable write and rolls back a failed
+  optimistic registry only while that exact failed snapshot remains current.
 
-消息中心是首个参考实现：`MessageCenter` 是稳定 Feature 门面；私有
+消息中心与 Project 注册表是参考实现：`MessageCenter` 是稳定 Feature 门面；私有
 `MessageAction` 通过 `StateStore` reduce；状态徽标与 Inbox bridge 自动订阅；Inbox
 创建/重新进入读取最新 Store 快照（包含其他页面期间发布的消息）；每个有效 revision
-自动通过自有 Worker 排队写入 `messages/messages.json`。
+自动通过自有 Worker 排队写入 `messages/messages.json`。`ProjectStateFacade` 持有强类型
+新增/更新/删除、保存/Logo/概览去重和仓库元数据 selector；Project 在首帧前创建
+`PersistentStore`，首帧后 hydration 再启用自动持久化；只有真实写盘成功才提示成功，
+失败的乐观注册表也只在对应失败快照仍为当前版本时回滚。
 
 ## Regression checklist / 回归清单
 
@@ -140,6 +159,8 @@ The application message center is the first reference implementation:
 - Publish/change shared data on route A, then create route B and verify its first
   visible frame contains the current selected State.
 - Restart after each durable action class and verify the final State reloads.
+- For deferred stores, verify hydration causes no write, then verify the first
+  changed post-hydration action persists and `flush` observes it.
 - Drop a subscription and verify it receives no later commits.
 - Run Store crate tests, the feature's persistence tests, full library tests,
   and the affected route-switch matrix.
@@ -150,5 +171,7 @@ The application message center is the first reference implementation:
 - 在路由 A 修改共享数据，再创建路由 B，确认 B 的首个可见帧已包含最新 selector
   状态。
 - 每类持久 Action 后重启，确认最终 State 正确恢复。
+- 对 deferred store，确认 hydration 不写盘，随后第一个变更 Action 会持久化且 `flush`
+  能观察到该写入。
 - Drop subscription 后不得再收到 commit。
 - 运行 Store crate 测试、Feature 持久化测试、完整 lib 测试和受影响路由切换矩阵。

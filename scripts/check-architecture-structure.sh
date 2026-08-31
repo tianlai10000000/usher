@@ -40,8 +40,10 @@ check_max "Gitee adapter lines" "$(line_count src/git/gitee/mod.rs)" 3825
 check_max "Gitee adapter functions" "$(rust_function_count src/git/gitee/mod.rs)" 125
 check_max "Chat controller lines" "$(line_count src/chat/interactive.rs)" 2200
 check_max "Chat controller functions" "$(rust_function_count src/chat/interactive.rs)" 70
+check_max "AI Review controller lines" "$(line_count src/ai_review/controller.rs)" 3850
+check_max "AI Review controller functions" "$(rust_function_count src/ai_review/controller.rs)" 120
 check_max "root Slint lines" "$(line_count ui/main.slint)" 3000
-check_max "root Slint callbacks" "$(slint_declaration_count ui/main.slint '^[[:space:]]*callback[[:space:]]+')" 140
+check_max "root Slint callbacks" "$(slint_declaration_count ui/main.slint '^[[:space:]]*(pure[[:space:]]+)?callback[[:space:]]+')" 140
 check_max "root Slint properties" "$(slint_declaration_count ui/main.slint '^[[:space:]]*(in|out|in-out|private)[[:space:]]+property')" 410
 check_max "PR Review Slint lines" "$(line_count ui/views/workflow/pr_review_workspace.slint)" 4500
 

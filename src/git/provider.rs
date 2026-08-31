@@ -1,53 +1,81 @@
 use async_trait::async_trait;
 
 use super::{
-    EnvironmentPullRequestCounts, GiteeApiProfile, PullRequestActionState, PullRequestCommit,
-    PullRequestConversationItem, PullRequestDiffDetail, PullRequestFilters, PullRequestMergeMethod,
-    PullRequestPage, PullRequestRevertResult, PullRequestReviewAction, PullRequestState,
-    RepoLocator, RepoType, gitee, gitee_api_profile, github, gitlab, overview, parse_repo_locator,
+    EnvironmentPullRequestCounts, GitError, GitResult, GiteeApiProfile, PullRequestActionState,
+    PullRequestCommit, PullRequestConversationItem, PullRequestDiffDetail, PullRequestFilters,
+    PullRequestMergeMethod, PullRequestPage, PullRequestRevertResult, PullRequestReviewAction,
+    PullRequestState, RepoLocator, RepoType, gitee, gitee_api_profile, github, gitlab, overview,
+    parse_repo_locator,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct ProviderCapabilities {
-    pub(super) ignore_whitespace: bool,
-    pub(super) server_side_revert: bool,
+pub(crate) struct ProviderCapabilities {
+    pub(crate) pull_request_ignore_whitespace: bool,
+    pub(crate) commit_range_ignore_whitespace: bool,
+    pub(crate) merge_delete_source_branch: bool,
+    pub(crate) dismiss_review_by_id: bool,
+    pub(crate) dismiss_own_review: bool,
+    pub(crate) server_side_revert: bool,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct RepoContext {
     locator: RepoLocator,
-    project_id: String,
 }
 
 impl RepoContext {
-    pub(super) fn discover(remote_repo: &str) -> Result<Self, String> {
+    pub(super) fn discover(remote_repo: &str) -> GitResult<Self> {
         Ok(Self {
-            locator: parse_repo_locator(remote_repo)?,
-            project_id: String::new(),
+            locator: parse_repo_locator(remote_repo).map_err(GitError::configuration)?,
         })
     }
 
+    pub(super) fn locator(&self) -> &RepoLocator {
+        &self.locator
+    }
+
+    pub(super) fn repo_type(&self) -> RepoType {
+        self.locator.repo_type
+    }
+
+    pub(super) fn provider(&self) -> &'static dyn GitProvider {
+        provider(self.repo_type())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ProjectContext {
+    locator: RepoLocator,
+    project_id: String,
+    capabilities: ProviderCapabilities,
+}
+
+impl ProjectContext {
     pub(super) fn from_saved(
         repo_type: &str,
         repo_project_id: &str,
         remote_repo: &str,
-    ) -> Result<Self, String> {
-        let context = Self::discover(remote_repo)?;
+    ) -> GitResult<Self> {
+        let context = RepoContext::discover(remote_repo)?;
         if !repo_type
             .trim()
             .eq_ignore_ascii_case(context.locator.repo_type.as_str())
         {
-            return Err(
-                "Saved repository provider does not match the remote repository URL.".to_string(),
-            );
+            return Err(GitError::configuration(
+                "Saved repository provider does not match the remote repository URL.",
+            ));
         }
         let project_id = repo_project_id.trim();
         if project_id.is_empty() {
-            return Err("This project has no remote project id.".to_string());
+            return Err(GitError::configuration(
+                "This project has no remote project id.",
+            ));
         }
+        let capabilities = provider(context.repo_type()).capabilities(context.locator());
         Ok(Self {
             locator: context.locator,
             project_id: project_id.to_string(),
+            capabilities,
         })
     }
 
@@ -68,19 +96,19 @@ impl RepoContext {
     }
 
     pub(super) fn capabilities(&self) -> ProviderCapabilities {
-        self.provider().capabilities(self)
+        self.capabilities
     }
 }
 
 #[async_trait]
 pub(super) trait GitProvider: Sync {
-    fn capabilities(&self, context: &RepoContext) -> ProviderCapabilities;
+    fn capabilities(&self, locator: &RepoLocator) -> ProviderCapabilities;
 
     async fn repo_detail(&self, context: &RepoContext) -> Result<String, String>;
 
     async fn pull_requests(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         state: Option<PullRequestState>,
         filters: &PullRequestFilters,
         page: u32,
@@ -89,19 +117,19 @@ pub(super) trait GitProvider: Sync {
 
     async fn standard_environment_counts(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
     ) -> Result<EnvironmentPullRequestCounts, String>;
 
     async fn pull_request_diff(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
         ignore_whitespace_change: bool,
     ) -> Result<PullRequestDiffDetail, String>;
 
     async fn commit_range_diff(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         base_sha: &str,
         head_sha: &str,
         commit_count: u32,
@@ -110,32 +138,32 @@ pub(super) trait GitProvider: Sync {
 
     async fn repository_file_text(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         path: &str,
         reference: &str,
     ) -> Result<String, String>;
 
     async fn pull_request_action_state(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
     ) -> Result<PullRequestActionState, String>;
 
     async fn pull_request_conversation(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
     ) -> Result<Vec<PullRequestConversationItem>, String>;
 
     async fn pull_request_commits(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
     ) -> Result<Vec<PullRequestCommit>, String>;
 
     async fn submit_pull_request_review(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
         action: PullRequestReviewAction,
         body: &str,
@@ -143,7 +171,7 @@ pub(super) trait GitProvider: Sync {
 
     async fn dismiss_pull_request_review(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
         review_id: &str,
         reason: &str,
@@ -151,7 +179,7 @@ pub(super) trait GitProvider: Sync {
 
     async fn merge_pull_request(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
         method: PullRequestMergeMethod,
         remove_source_branch: bool,
@@ -159,19 +187,9 @@ pub(super) trait GitProvider: Sync {
 
     async fn revert_pull_request(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
-    ) -> Result<PullRequestRevertResult, String> {
-        if context.repo_type() == RepoType::Gitee {
-            gitee::revert_pull_request(context.locator(), context.project_id(), pull_request_iid)
-                .await
-        } else {
-            Err(
-                "Automated merge-request revert is not implemented for this provider yet."
-                    .to_string(),
-            )
-        }
-    }
+    ) -> Result<PullRequestRevertResult, String>;
 }
 
 struct GitHubProvider;
@@ -192,10 +210,11 @@ fn provider(repo_type: RepoType) -> &'static dyn GitProvider {
 
 #[async_trait]
 impl GitProvider for GitHubProvider {
-    fn capabilities(&self, _context: &RepoContext) -> ProviderCapabilities {
+    fn capabilities(&self, _locator: &RepoLocator) -> ProviderCapabilities {
         ProviderCapabilities {
-            ignore_whitespace: false,
+            dismiss_review_by_id: true,
             server_side_revert: true,
+            ..ProviderCapabilities::default()
         }
     }
 
@@ -205,7 +224,7 @@ impl GitProvider for GitHubProvider {
 
     async fn pull_requests(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         state: Option<PullRequestState>,
         filters: &PullRequestFilters,
         page: u32,
@@ -216,7 +235,7 @@ impl GitProvider for GitHubProvider {
 
     async fn standard_environment_counts(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
     ) -> Result<EnvironmentPullRequestCounts, String> {
         let (fat, uat, prod) = tokio::try_join!(
             github::get_open_pull_request_count(context.locator(), "fat"),
@@ -228,7 +247,7 @@ impl GitProvider for GitHubProvider {
 
     async fn pull_request_diff(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
         ignore_whitespace_change: bool,
     ) -> Result<PullRequestDiffDetail, String> {
@@ -242,7 +261,7 @@ impl GitProvider for GitHubProvider {
 
     async fn commit_range_diff(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         base_sha: &str,
         head_sha: &str,
         commit_count: u32,
@@ -253,7 +272,7 @@ impl GitProvider for GitHubProvider {
 
     async fn repository_file_text(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         path: &str,
         reference: &str,
     ) -> Result<String, String> {
@@ -262,7 +281,7 @@ impl GitProvider for GitHubProvider {
 
     async fn pull_request_action_state(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
     ) -> Result<PullRequestActionState, String> {
         github::get_pull_request_action_state(context.locator(), pull_request_iid).await
@@ -270,7 +289,7 @@ impl GitProvider for GitHubProvider {
 
     async fn pull_request_conversation(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
     ) -> Result<Vec<PullRequestConversationItem>, String> {
         github::get_pull_request_conversation(context.locator(), pull_request_iid).await
@@ -278,7 +297,7 @@ impl GitProvider for GitHubProvider {
 
     async fn pull_request_commits(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
     ) -> Result<Vec<PullRequestCommit>, String> {
         github::get_pull_request_commits(context.locator(), pull_request_iid).await
@@ -286,7 +305,7 @@ impl GitProvider for GitHubProvider {
 
     async fn submit_pull_request_review(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
         action: PullRequestReviewAction,
         body: &str,
@@ -296,7 +315,7 @@ impl GitProvider for GitHubProvider {
 
     async fn dismiss_pull_request_review(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
         review_id: &str,
         reason: &str,
@@ -307,7 +326,7 @@ impl GitProvider for GitHubProvider {
 
     async fn merge_pull_request(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
         method: PullRequestMergeMethod,
         remove_source_branch: bool,
@@ -322,7 +341,7 @@ impl GitProvider for GitHubProvider {
 
     async fn revert_pull_request(
         &self,
-        context: &RepoContext,
+        context: &ProjectContext,
         pull_request_iid: &str,
     ) -> Result<PullRequestRevertResult, String> {
         github::revert_pull_request(context.locator(), pull_request_iid).await
@@ -333,8 +352,8 @@ macro_rules! impl_project_provider {
     ($provider:ty, $module:ident, $capabilities:expr) => {
         #[async_trait]
         impl GitProvider for $provider {
-            fn capabilities(&self, context: &RepoContext) -> ProviderCapabilities {
-                ($capabilities)(context)
+            fn capabilities(&self, locator: &RepoLocator) -> ProviderCapabilities {
+                ($capabilities)(locator)
             }
 
             async fn repo_detail(&self, context: &RepoContext) -> Result<String, String> {
@@ -343,7 +362,7 @@ macro_rules! impl_project_provider {
 
             async fn pull_requests(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
                 state: Option<PullRequestState>,
                 filters: &PullRequestFilters,
                 page: u32,
@@ -362,7 +381,7 @@ macro_rules! impl_project_provider {
 
             async fn standard_environment_counts(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
             ) -> Result<EnvironmentPullRequestCounts, String> {
                 let filters = PullRequestFilters::default();
                 overview::count_standard_environment_pages(|page, per_page| {
@@ -380,7 +399,7 @@ macro_rules! impl_project_provider {
 
             async fn pull_request_diff(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
                 pull_request_iid: &str,
                 ignore_whitespace_change: bool,
             ) -> Result<PullRequestDiffDetail, String> {
@@ -395,7 +414,7 @@ macro_rules! impl_project_provider {
 
             async fn commit_range_diff(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
                 base_sha: &str,
                 head_sha: &str,
                 commit_count: u32,
@@ -414,7 +433,7 @@ macro_rules! impl_project_provider {
 
             async fn repository_file_text(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
                 path: &str,
                 reference: &str,
             ) -> Result<String, String> {
@@ -429,7 +448,7 @@ macro_rules! impl_project_provider {
 
             async fn pull_request_action_state(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
                 pull_request_iid: &str,
             ) -> Result<PullRequestActionState, String> {
                 $module::get_pull_request_action_state(
@@ -442,7 +461,7 @@ macro_rules! impl_project_provider {
 
             async fn pull_request_conversation(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
                 pull_request_iid: &str,
             ) -> Result<Vec<PullRequestConversationItem>, String> {
                 $module::get_pull_request_conversation(
@@ -455,7 +474,7 @@ macro_rules! impl_project_provider {
 
             async fn pull_request_commits(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
                 pull_request_iid: &str,
             ) -> Result<Vec<PullRequestCommit>, String> {
                 $module::get_pull_request_commits(
@@ -468,7 +487,7 @@ macro_rules! impl_project_provider {
 
             async fn submit_pull_request_review(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
                 pull_request_iid: &str,
                 action: PullRequestReviewAction,
                 body: &str,
@@ -485,7 +504,7 @@ macro_rules! impl_project_provider {
 
             async fn dismiss_pull_request_review(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
                 pull_request_iid: &str,
                 _review_id: &str,
                 reason: &str,
@@ -501,7 +520,7 @@ macro_rules! impl_project_provider {
 
             async fn merge_pull_request(
                 &self,
-                context: &RepoContext,
+                context: &ProjectContext,
                 pull_request_iid: &str,
                 method: PullRequestMergeMethod,
                 remove_source_branch: bool,
@@ -515,45 +534,68 @@ macro_rules! impl_project_provider {
                 )
                 .await
             }
+
+            async fn revert_pull_request(
+                &self,
+                context: &ProjectContext,
+                pull_request_iid: &str,
+            ) -> Result<PullRequestRevertResult, String> {
+                $module::revert_pull_request(
+                    context.locator(),
+                    context.project_id(),
+                    pull_request_iid,
+                )
+                .await
+            }
         }
     };
 }
 
-impl_project_provider!(GitLabProvider, gitlab, |_context: &RepoContext| {
-    ProviderCapabilities::default()
+impl_project_provider!(GitLabProvider, gitlab, |_locator: &RepoLocator| {
+    ProviderCapabilities {
+        merge_delete_source_branch: true,
+        dismiss_own_review: true,
+        ..ProviderCapabilities::default()
+    }
 });
 
-impl_project_provider!(GiteeProvider, gitee, |context: &RepoContext| {
-    let enterprise = gitee_api_profile(context.locator()) == GiteeApiProfile::EnterpriseV8;
+impl_project_provider!(GiteeProvider, gitee, |locator: &RepoLocator| {
+    let enterprise = gitee_api_profile(locator) == GiteeApiProfile::EnterpriseV8;
     ProviderCapabilities {
-        ignore_whitespace: enterprise,
+        pull_request_ignore_whitespace: enterprise,
+        commit_range_ignore_whitespace: enterprise,
+        merge_delete_source_branch: true,
+        dismiss_own_review: enterprise,
         server_side_revert: enterprise,
+        ..ProviderCapabilities::default()
     }
 });
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::error::GitErrorKind;
 
     #[test]
     fn saved_context_rejects_provider_mismatch_and_missing_id() {
-        let mismatch = RepoContext::from_saved("gitlab", "42", "https://github.com/acme/app");
-        assert!(mismatch.unwrap_err().contains("does not match"));
+        let mismatch = ProjectContext::from_saved("gitlab", "42", "https://github.com/acme/app");
+        assert_eq!(mismatch.unwrap_err().kind(), GitErrorKind::Configuration);
 
-        let missing = RepoContext::from_saved("github", "", "https://github.com/acme/app");
-        assert!(missing.unwrap_err().contains("no remote project id"));
+        let missing = ProjectContext::from_saved("github", "", "https://github.com/acme/app");
+        assert_eq!(missing.unwrap_err().kind(), GitErrorKind::Configuration);
     }
 
     #[test]
     fn github_capabilities_are_selected_from_the_validated_context() {
         let context =
-            RepoContext::from_saved("github", "42", "https://github.com/acme/app").unwrap();
+            ProjectContext::from_saved("github", "42", "https://github.com/acme/app").unwrap();
         assert_eq!(context.repo_type(), RepoType::GitHub);
         assert_eq!(
             context.capabilities(),
             ProviderCapabilities {
-                ignore_whitespace: false,
+                dismiss_review_by_id: true,
                 server_side_revert: true,
+                ..ProviderCapabilities::default()
             }
         );
     }

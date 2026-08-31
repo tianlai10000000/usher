@@ -6,6 +6,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static CLICK_PLAYING: AtomicBool = AtomicBool::new(false);
 
+pub(crate) fn show_startup_error(message: &str) {
+    let shown = Command::new("zenity")
+        .args(["--error", "--title=Usher Startup Error", "--text"])
+        .arg(message)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !shown {
+        eprintln!("Usher could not start: {message}");
+    }
+}
+
 /// Read the desktop theme through the XDG Desktop Portal.
 pub(crate) fn detect_system_dark_mode() -> bool {
     match dark_light::detect() {

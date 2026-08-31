@@ -8,7 +8,7 @@ license = "LicenseRef-Proprietary"
 publish = false
 
 [workspace]
-members = [".", "crates/usher-ai-review", "crates/usher-messages", "crates/usher-preview", "crates/usher-search", "crates/usher-state-store", "crates/usher-ui", "crates/usher-ui-settings", "crates/usher-virtual-list"]
+members = [".", "crates/usher-ai-review", "crates/usher-fs", "crates/usher-messages", "crates/usher-preview", "crates/usher-search", "crates/usher-state-store", "crates/usher-ui", "crates/usher-ui-settings", "crates/usher-virtual-list"]
 default-members = ["."]
 resolver = "3"
 
@@ -54,6 +54,7 @@ slint = { version = "1.17.1", default-features = false, features = ["std", "comp
 i-slint-core = "=1.17.1"
 usher-ui = { path = "crates/usher-ui", default-features = false }
 usher-ui-settings = { path = "crates/usher-ui-settings", default-features = false }
+usher-fs = { path = "crates/usher-fs" }
 usher-messages = { path = "crates/usher-messages", default-features = false }
 usher-preview = { path = "crates/usher-preview" }
 usher-ai-review = { path = "crates/usher-ai-review", optional = true }
@@ -95,11 +96,14 @@ base64 = "0.22.1"
 portable-pty = "0.9.0"
 vt100 = "0.16.2"
 libc = "0.2"
+tempfile = "3.27"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 raw-window-handle = "0.6"
 objc = "0.2"
 block2 = "0.6.2"
+core-foundation = "0.9.4"
+system-configuration = "0.7.0"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.4", features = ["fs"] }

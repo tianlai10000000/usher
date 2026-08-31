@@ -477,4 +477,53 @@ mod tests {
         }
         assert_eq!(model.cached_row_count(), VISIBLE_LINE_CACHE_CAPACITY);
     }
+
+    #[test]
+    fn split_model_pairs_deletions_and_additions_on_the_same_visual_row() {
+        let file = PullRequestDiffFile {
+            path: "src/lib.rs".to_string(),
+            old_path: "src/lib.rs".to_string(),
+            change_type: "edit_file".to_string(),
+            added_lines: 1,
+            removed_lines: 1,
+            viewed: false,
+            lines: vec![
+                PullRequestDiffLine {
+                    old_line: 1,
+                    new_line: 0,
+                    kind: "deletion".to_string(),
+                    content: "old value".to_string(),
+                },
+                PullRequestDiffLine {
+                    old_line: 0,
+                    new_line: 1,
+                    kind: "addition".to_string(),
+                    content: "new value".to_string(),
+                },
+            ],
+        };
+        let highlighted = ["old value", "new value"]
+            .into_iter()
+            .map(|text| HighlightedLine {
+                tokens: vec![HighlightedToken {
+                    text: text.to_string(),
+                    color: [0xff, 0x24, 0x29, 0x2f],
+                    dark_color: [0xff, 0xe6, 0xed, 0xf3],
+                    bold: false,
+                    italic: false,
+                }],
+                columns: text.len() as u32,
+            })
+            .collect::<Vec<_>>();
+        let model = LazyPrDiffLineModel::new(Arc::new(file), Arc::new(highlighted), true);
+
+        assert_eq!(model.row_count(), 1);
+        let row = model.row_data(0).expect("paired split row");
+        assert_eq!(row.kind.as_str(), "split");
+        assert_eq!((row.left_line, row.right_line), (1, 1));
+        assert_eq!(row.left_kind.as_str(), "deletion");
+        assert_eq!(row.right_kind.as_str(), "addition");
+        assert_eq!(row.left_content.as_str(), "old value");
+        assert_eq!(row.right_content.as_str(), "new value");
+    }
 }

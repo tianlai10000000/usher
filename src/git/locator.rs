@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::{Mutex, OnceLock};
 
 use super::{GiteeApiProfile, RepoType};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) struct RepoLocator {
     pub(super) remote_repo: String,
     pub(super) scheme: String,
@@ -12,6 +13,21 @@ pub(super) struct RepoLocator {
     pub(super) namespace: String,
     pub(super) repo: String,
     pub(super) repo_type: RepoType,
+}
+
+impl fmt::Debug for RepoLocator {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RepoLocator")
+            .field("remote_repo", &"<redacted>")
+            .field("scheme", &self.scheme)
+            .field("authority", &self.authority)
+            .field("host", &self.host)
+            .field("namespace", &self.namespace)
+            .field("repo", &self.repo)
+            .field("repo_type", &self.repo_type)
+            .finish()
+    }
 }
 
 pub(super) fn parse_repo_locator(remote_repo: &str) -> Result<RepoLocator, String> {
@@ -97,15 +113,17 @@ fn parse_ssh_remote(remote: &str) -> Option<(String, String)> {
 
 fn detect_repo_type(host: &str) -> Option<RepoType> {
     let host = host.to_ascii_lowercase();
-    if is_configured_enterprise_host(RepoType::GitHub, host.as_str()) || host.contains("github") {
+    if host.contains("github") {
         Some(RepoType::GitHub)
-    } else if is_configured_enterprise_host(RepoType::Gitee, host.as_str())
-        || host.contains("gitee")
-    {
+    } else if host.contains("gitee") {
         Some(RepoType::Gitee)
-    } else if is_configured_enterprise_host(RepoType::GitLab, host.as_str())
-        || host.contains("gitlab")
-    {
+    } else if host.contains("gitlab") {
+        Some(RepoType::GitLab)
+    } else if is_configured_enterprise_host(RepoType::GitHub, host.as_str()) {
+        Some(RepoType::GitHub)
+    } else if is_configured_enterprise_host(RepoType::Gitee, host.as_str()) {
+        Some(RepoType::Gitee)
+    } else if is_configured_enterprise_host(RepoType::GitLab, host.as_str()) {
         Some(RepoType::GitLab)
     } else {
         None
@@ -229,4 +247,20 @@ pub(super) fn configured_gitee_token(profile: GiteeApiProfile) -> Option<String>
         let token = token.trim();
         (!token.is_empty()).then(|| token.to_string())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_repo_locator;
+
+    #[test]
+    fn locator_debug_never_exposes_remote_url_credentials() {
+        let locator = parse_repo_locator("https://user:secret@github.com/acme/app.git").unwrap();
+        let debug = format!("{locator:?}");
+
+        assert!(!debug.contains("secret"));
+        assert!(!debug.contains("user:"));
+        assert!(debug.contains("<redacted>"));
+        assert!(debug.contains("github.com"));
+    }
 }

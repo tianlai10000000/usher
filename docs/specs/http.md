@@ -46,6 +46,10 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
     failures plus 429 and 5xx responses, and uses capped exponential backoff
     with jitter. Intermediate failures remain silent; only the terminal result
     enters normal error feedback.
+    Only an attempt with a clonable later retry is capped to 10 seconds; the
+    final attempt receives the complete remaining operation budget. Streaming
+    downloads that continue reading a successful response for longer than that
+    cap explicitly disable retry and retain their feature-owned deadline.
 13. All attempts, per-attempt timeouts, and retry sleeps share the one
     `RequestOptions.timeout` operation budget. Retry delay honors numeric or
     HTTP-date `Retry-After` and GitHub-style `X-RateLimit-Reset` without
@@ -78,6 +82,9 @@ This spec covers application-owned HTTP requests. It does not replace reqwest an
     POST 和其他写请求仍保持单次尝试，除非调用方提供确认可安全重复的自定义策略。
     标准策略最多尝试三次，重试连接/超时错误、429 与 5xx，并使用带 jitter 的有上限
     指数退避；中间失败保持静默，只有终态进入统一错误反馈。
+    只有仍存在可克隆后续重试的 attempt 才限制为 10 秒；末次 attempt 使用完整剩余操作
+    预算。成功响应后还会持续读取正文的流式下载必须显式关闭 retry，并保留 Feature 自有
+    截止时间。
 13. 所有尝试、单次尝试超时与重试等待共享同一个 `RequestOptions.timeout` 操作预算。
     重试延迟识别数字或 HTTP-date 形式的 `Retry-After` 以及 GitHub 风格
     `X-RateLimit-Reset`，不得擅自缩短服务端等待窗口。主配额耗尽的 403 只有在服务端
@@ -167,6 +174,9 @@ Only the shared HTTP module should contain client creation or raw execution.
 - GET/HEAD transient requests retry at most three times by default and support
   explicit opt-out; POST and other writes remain single-attempt unless a caller
   explicitly supplies a custom policy.
+- Retryable non-final attempts use the 10-second cap, while the final or
+  unclonable attempt uses the complete remaining operation budget. Update,
+  avatar, and other long streaming downloads opt out of retries.
 - Numeric/date `Retry-After`, provider reset instants, timeout/connect failures,
   5xx, 429, and exhausted-rate-limit 403 produce decisions bounded by one total
   operation deadline.

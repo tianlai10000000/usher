@@ -4,6 +4,7 @@ pub mod cd;
 mod pr_list;
 #[cfg(feature = "test-fixtures")]
 mod pr_list_fixture;
+mod pr_list_state;
 mod pr_review;
 pub mod state;
 mod syntax_highlight;

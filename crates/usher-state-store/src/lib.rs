@@ -6,7 +6,8 @@
 
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, Weak};
+use std::sync::{Arc, Mutex, RwLock, Weak, mpsc};
+use std::thread::JoinHandle;
 
 /// Immutable, revisioned state delivered to selectors and subscribers.
 pub struct StoreSnapshot<S> {
@@ -392,9 +393,207 @@ where
     }
 }
 
+type PersistCallback<S> = dyn Fn(&S) -> Result<(), String> + Send + Sync;
+type PersistenceErrorHandler<S> = dyn Fn(Arc<S>, String) + Send + Sync;
+
+enum PersistenceCommand<S> {
+    Persist(Arc<S>),
+    Flush(mpsc::Sender<()>),
+    Shutdown(mpsc::Sender<()>),
+}
+
+struct PersistenceWorker<S> {
+    sender: mpsc::Sender<PersistenceCommand<S>>,
+    handle: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl<S> PersistenceWorker<S>
+where
+    S: Send + Sync + 'static,
+{
+    fn start(
+        thread_name: impl Into<String>,
+        persist: Arc<PersistCallback<S>>,
+        on_error: Arc<PersistenceErrorHandler<S>>,
+    ) -> std::io::Result<Self> {
+        let (sender, receiver) = mpsc::channel();
+        let handle = std::thread::Builder::new()
+            .name(thread_name.into())
+            .spawn(move || {
+                let mut pending = None;
+                loop {
+                    let command = match pending.take() {
+                        Some(command) => command,
+                        None => match receiver.recv() {
+                            Ok(command) => command,
+                            Err(_) => break,
+                        },
+                    };
+                    match command {
+                        PersistenceCommand::Persist(mut latest) => {
+                            while let Ok(command) = receiver.try_recv() {
+                                match command {
+                                    PersistenceCommand::Persist(newer) => latest = newer,
+                                    control => {
+                                        pending = Some(control);
+                                        break;
+                                    }
+                                }
+                            }
+                            if let Err(error) = persist(&latest) {
+                                on_error(latest, error);
+                            }
+                        }
+                        PersistenceCommand::Flush(done) => {
+                            let _ = done.send(());
+                        }
+                        PersistenceCommand::Shutdown(done) => {
+                            let _ = done.send(());
+                            break;
+                        }
+                    }
+                }
+            })?;
+        Ok(Self {
+            sender,
+            handle: Mutex::new(Some(handle)),
+        })
+    }
+
+    fn flush(&self) -> Result<(), String> {
+        let (sender, receiver) = mpsc::channel();
+        self.sender
+            .send(PersistenceCommand::Flush(sender))
+            .map_err(|_| "persistence worker is unavailable".to_string())?;
+        receiver
+            .recv()
+            .map_err(|_| "persistence worker stopped before flushing".to_string())
+    }
+
+    fn shutdown(&self) {
+        let handle = self.handle.lock().ok().and_then(|mut handle| handle.take());
+        let Some(handle) = handle else {
+            return;
+        };
+        let (sender, receiver) = mpsc::channel();
+        let _ = self.sender.send(PersistenceCommand::Shutdown(sender));
+        let _ = receiver.recv();
+        let _ = handle.join();
+    }
+}
+
+/// Stable store facade for durable state. Every changed commit is queued to
+/// one owned worker; callers dispatch typed actions and never save manually.
+pub struct PersistentStore<S, A, O>
+where
+    S: Send + Sync + 'static,
+    A: Send + 'static,
+    O: Send + 'static,
+{
+    store: Arc<dyn StateStore<S, A, O>>,
+    worker: Arc<PersistenceWorker<S>>,
+    commit_subscription: Arc<Mutex<Option<Subscription>>>,
+}
+
+impl<S, A, O> Clone for PersistentStore<S, A, O>
+where
+    S: Send + Sync + 'static,
+    A: Send + 'static,
+    O: Send + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            store: self.store.clone(),
+            worker: self.worker.clone(),
+            commit_subscription: self.commit_subscription.clone(),
+        }
+    }
+}
+
+impl<S, A, O> PersistentStore<S, A, O>
+where
+    S: Send + Sync + 'static,
+    A: Send + 'static,
+    O: Send + 'static,
+{
+    pub fn new(
+        initial_state: S,
+        reducer: impl Reducer<S, A, O>,
+        thread_name: impl Into<String>,
+        persist: impl Fn(&S) -> Result<(), String> + Send + Sync + 'static,
+        on_error: impl Fn(Arc<S>, String) + Send + Sync + 'static,
+    ) -> std::io::Result<Self> {
+        let store = Self::new_deferred(initial_state, reducer, thread_name, persist, on_error)?;
+        store.enable_persistence();
+        Ok(store)
+    }
+
+    /// Creates a durable store before startup hydration is available. Call
+    /// [`Self::enable_persistence`] immediately after dispatching hydration so
+    /// the loaded revision is not redundantly written back to disk.
+    pub fn new_deferred(
+        initial_state: S,
+        reducer: impl Reducer<S, A, O>,
+        thread_name: impl Into<String>,
+        persist: impl Fn(&S) -> Result<(), String> + Send + Sync + 'static,
+        on_error: impl Fn(Arc<S>, String) + Send + Sync + 'static,
+    ) -> std::io::Result<Self> {
+        let store: Arc<dyn StateStore<S, A, O>> =
+            Arc::new(LocalStateStore::new(initial_state, reducer));
+        let worker = Arc::new(PersistenceWorker::start(
+            thread_name,
+            Arc::new(persist),
+            Arc::new(on_error),
+        )?);
+        Ok(Self {
+            store,
+            worker,
+            commit_subscription: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    pub fn enable_persistence(&self) {
+        let Ok(mut subscription) = self.commit_subscription.lock() else {
+            return;
+        };
+        if subscription.is_some() {
+            return;
+        }
+        let persistence_sender = self.worker.sender.clone();
+        *subscription = Some(self.store.observe_commits(Arc::new(move |snapshot| {
+            let _ = persistence_sender.send(PersistenceCommand::Persist(snapshot.state_arc()));
+        })));
+    }
+
+    pub fn snapshot(&self) -> StoreSnapshot<S> {
+        self.store.snapshot()
+    }
+
+    pub fn dispatch(&self, action: A) -> DispatchResult<S, O> {
+        self.store.dispatch(action)
+    }
+
+    pub fn subscribe(&self, listener: StoreListener<S>) -> Subscription {
+        self.store.subscribe(listener)
+    }
+
+    pub fn flush(&self) -> Result<(), String> {
+        self.worker.flush()
+    }
+
+    pub fn shutdown(&self) {
+        let _ = self
+            .commit_subscription
+            .lock()
+            .ok()
+            .and_then(|mut subscription| subscription.take());
+        self.worker.shutdown();
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LocalStateStore, Reduction, StateStore, StateStoreExt};
+    use super::{LocalStateStore, PersistentStore, Reduction, StateStore, StateStoreExt};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -517,5 +716,66 @@ mod tests {
         store.dispatch(3);
         store.dispatch(4);
         assert_eq!(*parity.lock().unwrap(), vec![1, 0]);
+    }
+
+    #[test]
+    fn persistent_store_writes_changed_commits_and_flushes_before_shutdown() {
+        let persisted = Arc::new(Mutex::new(Vec::new()));
+        let persisted_for_worker = persisted.clone();
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let errors_for_worker = errors.clone();
+        let store = PersistentStore::new(
+            Counter(1),
+            |current: &Counter, next: i32| {
+                if current.0 == next {
+                    Reduction::unchanged(current.clone(), false)
+                } else {
+                    Reduction::changed(Counter(next), true)
+                }
+            },
+            "state-store-test",
+            move |state| {
+                persisted_for_worker.lock().unwrap().push(state.0);
+                Ok(())
+            },
+            move |_, error| errors_for_worker.lock().unwrap().push(error),
+        )
+        .unwrap();
+
+        assert!(!store.dispatch(1).output);
+        assert!(store.dispatch(2).output);
+        assert!(store.dispatch(3).output);
+        store.flush().unwrap();
+        store.shutdown();
+
+        assert_eq!(persisted.lock().unwrap().last(), Some(&3));
+        assert!(errors.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn deferred_persistence_skips_hydration_and_writes_later_changes() {
+        let persisted = Arc::new(Mutex::new(Vec::new()));
+        let persisted_for_worker = persisted.clone();
+        let store = PersistentStore::new_deferred(
+            Counter(0),
+            |_: &Counter, next: i32| Reduction::changed(Counter(next), ()),
+            "deferred-state-store-test",
+            move |state| {
+                persisted_for_worker.lock().unwrap().push(state.0);
+                Ok(())
+            },
+            |_, error| panic!("unexpected persistence error: {error}"),
+        )
+        .unwrap();
+
+        store.dispatch(7);
+        store.flush().unwrap();
+        assert!(persisted.lock().unwrap().is_empty());
+
+        store.enable_persistence();
+        store.dispatch(8);
+        store.flush().unwrap();
+        store.shutdown();
+        assert_eq!(*persisted.lock().unwrap(), vec![8]);
     }
 }

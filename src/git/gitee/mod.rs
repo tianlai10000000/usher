@@ -30,6 +30,7 @@ use super::{
 
 mod conversation;
 mod decode;
+mod public_prefix;
 mod readiness;
 mod revert;
 mod transport;
@@ -2051,6 +2052,7 @@ pub(super) async fn merge_pull_request(
             )
             .await
             .map_err(|error| error.to_string())?;
+            public_prefix::invalidate(locator);
             Ok(())
         }
     }
@@ -2186,48 +2188,49 @@ async fn get_filtered_public_pull_requests(
     page: u32,
     per_page: u32,
 ) -> Result<PullRequestPage, String> {
-    const SCAN_PAGE_SIZE: u32 = 100;
-    const MAX_SCAN_PAGES: u32 = 30;
+    let server_state = public_prefix::server_state(state);
+    let per_page = per_page.max(1);
+    let requested_page = page.max(1);
+    let required_matches = requested_page.saturating_mul(per_page) as usize;
+    let cached = public_prefix::get(locator, server_state, filters, requested_page == 1);
+    let mut entry = cached
+        .as_deref()
+        .cloned()
+        .unwrap_or_else(|| public_prefix::Entry {
+            items: Vec::new(),
+            exhausted: false,
+            next_page: 1,
+        });
+    let mut matches = public_prefix::filter(&entry.items, state, filters.query.as_str());
 
-    let server_state = if matches!(
-        state,
-        Some(PullRequestState::Merged | PullRequestState::ClosedUnmerged)
-    ) {
-        Some(PullRequestState::Closed)
-    } else {
-        state
-    };
-    let mut matches = Vec::new();
-    let mut exhausted = false;
-
-    for server_page in 1..=MAX_SCAN_PAGES {
+    while matches.len() < required_matches
+        && !entry.exhausted
+        && entry.next_page <= public_prefix::MAX_SCAN_PAGES
+    {
+        let server_page = entry.next_page;
         let result = get_public_pull_request_server_page(
             locator,
             server_state,
             filters,
             server_page,
-            SCAN_PAGE_SIZE,
+            public_prefix::SCAN_PAGE_SIZE,
         )
         .await?;
         let batch_len = result.items.len();
-        matches.extend(result.items.into_iter().filter(|item| {
-            (state != Some(PullRequestState::Merged) || item.state == "merged")
-                && (state != Some(PullRequestState::ClosedUnmerged) || item.state == "closed")
-                && matches_public_query(item, filters.query.as_str())
-        }));
+        public_prefix::merge(&mut entry.items, result.items);
 
         let reached_provider_end = result
             .page_count
             .is_some_and(|page_count| server_page >= page_count)
-            || batch_len < SCAN_PAGE_SIZE as usize;
+            || batch_len < public_prefix::SCAN_PAGE_SIZE as usize;
         if reached_provider_end {
-            exhausted = true;
-            break;
+            entry.exhausted = true;
         }
+        entry.next_page = server_page.saturating_add(1);
+        matches = public_prefix::filter(&entry.items, state, filters.query.as_str());
     }
+    public_prefix::insert(locator, server_state, filters, entry.clone());
 
-    let per_page = per_page.max(1);
-    let requested_page = page.max(1);
     let total = matches.len() as u32;
     let start = requested_page.saturating_sub(1).saturating_mul(per_page) as usize;
     let items = matches
@@ -2235,7 +2238,7 @@ async fn get_filtered_public_pull_requests(
         .skip(start)
         .take(per_page as usize)
         .collect::<Vec<_>>();
-    let page_count = if exhausted {
+    let page_count = if entry.exhausted {
         total.div_ceil(per_page).max(1)
     } else if items.len() == per_page as usize {
         requested_page.saturating_add(1)
@@ -2245,22 +2248,9 @@ async fn get_filtered_public_pull_requests(
     Ok(PullRequestPage {
         items,
         total,
-        total_exact: exhausted,
+        total_exact: entry.exhausted,
         page_count: Some(page_count),
     })
-}
-
-fn matches_public_query(item: &PullRequestItem, query: &str) -> bool {
-    let haystack = format!(
-        "{} {} {} {}",
-        item.title, item.author, item.source_branch, item.target_branch
-    )
-    .to_ascii_lowercase();
-    query
-        .split_whitespace()
-        .map(|term| term.trim_matches(['\'', '"']).to_ascii_lowercase())
-        .filter(|term| !term.is_empty())
-        .all(|term| haystack.contains(term.as_str()))
 }
 
 async fn get_public_pull_request_server_page(

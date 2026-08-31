@@ -22,6 +22,8 @@ export component GitHubSettingsPage inherits Rectangle {
     background: GitHubTheme.canvas-default;
     callback check-update();
     callback simulate-crash();
+    callback open-log-directory();
+    callback export-diagnostics();
 
     in-out property <bool> simulate-crash-active: false;
     in-out property <bool> reveal-git-tokens: false;
@@ -157,6 +159,8 @@ export component GitHubSettingsPage inherits Rectangle {
                                 ai-review-set-default-rule(id) => { root.ai-review-set-default-rule(id); }
                                 check-update => { root.check-update(); }
                                 simulate-crash => { root.simulate-crash(); }
+                                open-log-directory => { root.open-log-directory(); }
+                                export-diagnostics => { root.export-diagnostics(); }
                             }
                         }
 
@@ -245,6 +249,8 @@ export component GitHubSettingsPage inherits Rectangle {
                                 ai-review-set-default-rule(id) => { root.ai-review-set-default-rule(id); }
                                 check-update => { root.check-update(); }
                                 simulate-crash => { root.simulate-crash(); }
+                                open-log-directory => { root.open-log-directory(); }
+                                export-diagnostics => { root.export-diagnostics(); }
                             }
                         }
                     }

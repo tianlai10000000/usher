@@ -847,6 +847,7 @@ export component GitHubCenteredErrorState inherits Rectangle {
     in property <color> outline-color;
     in property <color> foreground-color;
     in property <color> muted-color;
+    in property <string> action-label: "Try again";
     callback retry();
 
     background: root.background-color;
@@ -858,7 +859,7 @@ export component GitHubCenteredErrorState inherits Rectangle {
         icon: @image-url("../../assets/icons/octicon-alert-16.svg");
         heading: root.title;
         description: root.detail;
-        primary-label: "Try again";
+        primary-label: root.action-label;
         error: true;
         narrow: true;
         primary-clicked => { root.retry(); }

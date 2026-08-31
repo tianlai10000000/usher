@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 
 use chrono::Utc;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use usher_state_store::{
     LocalStateStore, Reduction, StateStore, Subscription as StoreSubscription,
 };
@@ -74,6 +74,7 @@ type MessageStore = dyn StateStore<MessageSnapshot, MessageAction, MessageAction
 
 struct Inner {
     store: Arc<MessageStore>,
+    storage_path: PathBuf,
     // Keeps the automatic persistence observer registered for this center.
     persistence_subscription: Mutex<Option<StoreSubscription>>,
     application_active: AtomicBool,
@@ -95,6 +96,7 @@ enum WorkerCommand {
 /// Closed set of domain mutations accepted by the message store. Public
 /// methods below are typed action creators; only `dispatch` mutates state.
 enum MessageAction {
+    Hydrate(Vec<Message>),
     Publish(Box<Message>),
     SetRead { id: String, read: bool },
     MarkAllRead,
@@ -124,46 +126,91 @@ impl MessageCenter {
         )
     }
 
+    pub fn open_default_deferred() -> Result<Self, MessageCenterError> {
+        Self::open_deferred_with(
+            storage::default_storage_path()?,
+            Arc::new(NotifyRustDesktopNotifier),
+        )
+    }
+
     pub fn open_with(
         path: impl Into<PathBuf>,
         notifier: Arc<dyn DesktopNotifier>,
     ) -> Result<Self, MessageCenterError> {
         let path = path.into();
-        let mut messages = match storage::load(&path) {
-            Ok(messages) => messages,
-            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
-                log::error!("[Messages] Ignoring corrupt message store: {error}");
-                Vec::new()
-            }
-            Err(error) => return Err(error.into()),
-        };
-        messages.sort_by_key(|message| std::cmp::Reverse(message.created_at));
-        messages.truncate(MAX_STORED_MESSAGES);
-        let worker = Worker::start(path, notifier)?;
+        let messages = load_messages(&path)?;
+        Self::open_initialized(path, notifier, messages, true)
+    }
+
+    pub fn open_deferred_with(
+        path: impl Into<PathBuf>,
+        notifier: Arc<dyn DesktopNotifier>,
+    ) -> Result<Self, MessageCenterError> {
+        Self::open_initialized(path.into(), notifier, Vec::new(), false)
+    }
+
+    fn open_initialized(
+        path: PathBuf,
+        notifier: Arc<dyn DesktopNotifier>,
+        messages: Vec<Message>,
+        install_persistence: bool,
+    ) -> Result<Self, MessageCenterError> {
+        let worker = Worker::start(path.clone(), notifier)?;
         let store: Arc<MessageStore> = Arc::new(LocalStateStore::new(
             MessageSnapshot::from_messages(messages),
             reduce_state,
         ));
-        let persistence_sender = worker.sender.clone();
-        let persistence_subscription = store.observe_commits(Arc::new(move |snapshot| {
-            if persistence_sender
-                .send(WorkerCommand::Persist(snapshot.state().messages.to_vec()))
-                .is_err()
-            {
-                log::error!("[Messages] State commit could not reach persistence worker");
-            }
-        }));
-        Ok(Self {
+        let center = Self {
             inner: Arc::new(Inner {
                 store,
-                persistence_subscription: Mutex::new(Some(persistence_subscription)),
+                storage_path: path,
+                persistence_subscription: Mutex::new(None),
                 // Unknown activity is treated as foreground. This conservative
                 // default prevents duplicate native + in-app presentation until
                 // the host supplies its first focus state.
                 application_active: AtomicBool::new(true),
                 worker: Mutex::new(Some(worker)),
             }),
-        })
+        };
+        if install_persistence {
+            center.install_persistence_observer();
+        }
+        Ok(center)
+    }
+
+    pub fn hydrate_from_storage(&self) -> Result<usize, MessageCenterError> {
+        let messages = load_messages(&self.inner.storage_path)?;
+        let loaded = messages.len();
+        self.inner.store.dispatch(MessageAction::Hydrate(messages));
+        self.install_persistence_observer();
+        self.send_worker(WorkerCommand::Persist(self.snapshot().messages.to_vec()))?;
+        Ok(loaded)
+    }
+
+    fn install_persistence_observer(&self) {
+        let Ok(mut subscription) = self.inner.persistence_subscription.lock() else {
+            return;
+        };
+        if subscription.is_some() {
+            return;
+        }
+        let Some(persistence_sender) = self
+            .inner
+            .worker
+            .lock()
+            .ok()
+            .and_then(|worker| worker.as_ref().map(|worker| worker.sender.clone()))
+        else {
+            return;
+        };
+        *subscription = Some(self.inner.store.observe_commits(Arc::new(move |snapshot| {
+            if persistence_sender
+                .send(WorkerCommand::Persist(snapshot.state().messages.to_vec()))
+                .is_err()
+            {
+                log::error!("[Messages] State commit could not reach persistence worker");
+            }
+        })));
     }
 
     pub fn snapshot(&self) -> MessageSnapshot {
@@ -190,6 +237,11 @@ impl MessageCenter {
         self.inner.application_active.load(Ordering::Acquire)
     }
 
+    /*
+     * The remainder of the public action creators intentionally stays below
+     * the deferred hydration boundary. Hydration is one typed Store action, so
+     * subscribers and persistence observe the merged commit exactly once.
+     */
     pub fn publish(&self, draft: MessageDraft) -> Result<Message, MessageCenterError> {
         let sequence = MESSAGE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let created_at = Utc::now();
@@ -353,6 +405,20 @@ impl MessageCenter {
     }
 }
 
+fn load_messages(path: &Path) -> Result<Vec<Message>, MessageCenterError> {
+    let mut messages = match storage::load(path) {
+        Ok(messages) => messages,
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+            log::error!("[Messages] Ignoring corrupt message store: {error}");
+            Vec::new()
+        }
+        Err(error) => return Err(error.into()),
+    };
+    messages.sort_by_key(|message| std::cmp::Reverse(message.created_at));
+    messages.truncate(MAX_STORED_MESSAGES);
+    Ok(messages)
+}
+
 fn reduce_state(
     current: &MessageSnapshot,
     action: MessageAction,
@@ -372,6 +438,37 @@ fn reduce_messages(
     action: MessageAction,
 ) -> (MessageActionResult, bool) {
     match action {
+        MessageAction::Hydrate(stored) => {
+            let current_ids = messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<HashSet<_>>();
+            let current_deduplication_keys = messages
+                .iter()
+                .filter_map(|message| {
+                    message
+                        .deduplication_key
+                        .as_deref()
+                        .map(|key| (message.channel.as_str(), key))
+                })
+                .collect::<HashSet<_>>();
+            let mut hydrated = stored
+                .into_iter()
+                .filter(|message| {
+                    !current_ids.contains(message.id.as_str())
+                        && !message.deduplication_key.as_deref().is_some_and(|key| {
+                            current_deduplication_keys.contains(&(message.channel.as_str(), key))
+                        })
+                })
+                .collect::<Vec<_>>();
+            let changed = !hydrated.is_empty();
+            hydrated.append(messages);
+            hydrated.sort_by_key(|message| std::cmp::Reverse(message.created_at));
+            hydrated.truncate(MAX_STORED_MESSAGES);
+            let count = hydrated.len();
+            *messages = hydrated;
+            (MessageActionResult::Count(count), changed)
+        }
         MessageAction::Publish(message) => {
             if let Some(key) = message.deduplication_key.as_deref()
                 && let Some(existing) = messages.iter().find(|existing| {
@@ -569,6 +666,46 @@ mod tests {
         let snapshot = reloaded.snapshot();
         assert_eq!(snapshot.messages.len(), 2);
         assert_eq!(snapshot.messages[0].title, "Second");
+        reloaded.shutdown();
+    }
+
+    #[test]
+    fn deferred_hydration_merges_messages_published_during_startup() {
+        let path = temporary_path("deferred-hydration");
+        let writer = MessageCenter::open_with(&path, Arc::new(NoopDesktopNotifier)).unwrap();
+        writer
+            .publish(MessageDraft::new("Stored", "before restart").desktop(false))
+            .unwrap();
+        writer.flush().unwrap();
+        writer.shutdown();
+
+        let center =
+            MessageCenter::open_deferred_with(&path, Arc::new(NoopDesktopNotifier)).unwrap();
+        assert!(center.snapshot().messages.is_empty());
+        center
+            .publish(MessageDraft::new("Live", "during startup").desktop(false))
+            .unwrap();
+
+        assert_eq!(center.hydrate_from_storage().unwrap(), 1);
+        let snapshot = center.snapshot();
+        assert_eq!(snapshot.messages.len(), 2);
+        assert!(
+            snapshot
+                .messages
+                .iter()
+                .any(|message| message.title == "Stored")
+        );
+        assert!(
+            snapshot
+                .messages
+                .iter()
+                .any(|message| message.title == "Live")
+        );
+        center.flush().unwrap();
+        center.shutdown();
+
+        let reloaded = MessageCenter::open_with(&path, Arc::new(NoopDesktopNotifier)).unwrap();
+        assert_eq!(reloaded.snapshot().messages.len(), 2);
         reloaded.shutdown();
     }
 

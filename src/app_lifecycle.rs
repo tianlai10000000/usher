@@ -1,13 +1,25 @@
 //! Cross-feature cleanup triggered by completed route transitions.
 
-use crate::MainWindow;
-use crate::router::RouteLifecycleEvent;
+use std::rc::Rc;
 
-pub(crate) fn handle_route_transition(window: &MainWindow, event: RouteLifecycleEvent) {
-    if !event.workflow_became_unreachable {
-        return;
-    }
+use crate::router::{RouteLifecycleEvent, RouteLifecycleHooks, is_workflow_route};
+use crate::{MainWindow, Route};
 
+pub(crate) fn hooks(initial_route: Route) -> RouteLifecycleHooks {
+    let hooks = RouteLifecycleHooks::default();
+    hooks.on_transition(Rc::new(|window, event| {
+        window.invoke_chat_route_visible_changed(event.current == Route::Chat);
+    }));
+    hooks.on_scope_unreachable(
+        "workflow",
+        initial_route,
+        Rc::new(is_workflow_route),
+        Rc::new(release_workflow),
+    );
+    hooks
+}
+
+fn release_workflow(window: &MainWindow, event: RouteLifecycleEvent) {
     log::debug!(
         "[Lifecycle] Releasing Workflow state after {:?} -> {:?}",
         event.previous,

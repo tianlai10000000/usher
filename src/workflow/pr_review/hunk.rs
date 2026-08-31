@@ -521,3 +521,151 @@ pub(super) fn full_source_file(file: &PullRequestDiffFile, source: &str) -> Pull
             .collect(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        HunkExpansionDirection, expand_all_hunk_context_from_sources,
+        expand_hunk_context_from_sources, full_source_file, sanitize_diff_content,
+    };
+    use crate::git::{PullRequestDiffFile, PullRequestDiffLine};
+
+    fn line(old_line: i32, new_line: i32, kind: &str, content: &str) -> PullRequestDiffLine {
+        PullRequestDiffLine {
+            old_line,
+            new_line,
+            kind: kind.to_string(),
+            content: content.to_string(),
+        }
+    }
+
+    fn file(lines: Vec<PullRequestDiffLine>) -> PullRequestDiffFile {
+        PullRequestDiffFile {
+            path: "src/lib.rs".to_string(),
+            old_path: "src/lib.rs".to_string(),
+            change_type: "edit_file".to_string(),
+            added_lines: 0,
+            removed_lines: 0,
+            viewed: false,
+            lines,
+        }
+    }
+
+    #[test]
+    fn sanitizes_control_newlines_and_expands_tabs_for_rendering() {
+        assert_eq!(sanitize_diff_content("\talpha\r\n"), "    alpha");
+    }
+
+    #[test]
+    fn bounded_expansion_reveals_both_sides_without_reordering() {
+        let source = "one\ntwo\nthree\nfour\nfive\nsix";
+        let mut diff = file(vec![
+            line(1, 1, "context", "one"),
+            line(0, 0, "hunk", "@@ hidden @@"),
+            line(6, 6, "context", "six"),
+        ]);
+
+        assert!(expand_hunk_context_from_sources(
+            &mut diff,
+            1,
+            source,
+            source,
+            2,
+            HunkExpansionDirection::Down,
+        ));
+        assert!(expand_hunk_context_from_sources(
+            &mut diff,
+            3,
+            source,
+            source,
+            2,
+            HunkExpansionDirection::Up,
+        ));
+
+        assert_eq!(
+            diff.lines
+                .iter()
+                .map(|line| (line.old_line, line.new_line, line.content.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (1, 1, "one"),
+                (2, 2, "two"),
+                (3, 3, "three"),
+                (4, 4, "four"),
+                (5, 5, "five"),
+                (6, 6, "six"),
+            ]
+        );
+    }
+
+    #[test]
+    fn source_alignment_preserves_hidden_deletions_and_additions() {
+        let mut diff = file(vec![
+            line(1, 1, "context", "one"),
+            line(0, 0, "hunk", "@@ hidden @@"),
+            line(3, 3, "context", "tail"),
+        ]);
+
+        assert!(expand_hunk_context_from_sources(
+            &mut diff,
+            1,
+            "one\nold\ntail",
+            "one\nnew\ntail",
+            usize::MAX,
+            HunkExpansionDirection::All,
+        ));
+
+        assert_eq!(
+            diff.lines
+                .iter()
+                .map(|line| (
+                    line.old_line,
+                    line.new_line,
+                    line.kind.as_str(),
+                    line.content.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (1, 1, "context", "one"),
+                (2, 0, "deletion", "old"),
+                (0, 2, "addition", "new"),
+                (3, 3, "context", "tail"),
+            ]
+        );
+    }
+
+    #[test]
+    fn expand_all_includes_source_after_the_last_diff_hunk() {
+        let source = "one\ntwo\nthree\nfour\nfive\nsix";
+        let mut diff = file(vec![
+            line(1, 1, "context", "one"),
+            line(0, 0, "hunk", "@@ hidden @@"),
+            line(4, 4, "context", "four"),
+        ]);
+
+        assert!(expand_all_hunk_context_from_sources(&mut diff, source, source) > 0);
+        assert_eq!(
+            diff.lines
+                .iter()
+                .map(|line| line.new_line)
+                .collect::<Vec<_>>(),
+            [1, 2, 3, 4, 5, 6]
+        );
+        assert_eq!(diff.lines.last().unwrap().content, "six");
+    }
+
+    #[test]
+    fn full_source_projection_uses_the_surviving_side_line_numbers() {
+        let original = file(Vec::new());
+        let added = full_source_file(&original, "alpha\nbeta");
+        assert_eq!((added.lines[1].old_line, added.lines[1].new_line), (0, 2));
+
+        let mut deleted_file = original;
+        deleted_file.change_type = "deleted_file".to_string();
+        let deleted = full_source_file(&deleted_file, "alpha\nbeta");
+        assert_eq!(
+            (deleted.lines[1].old_line, deleted.lines[1].new_line),
+            (2, 0)
+        );
+    }
+}

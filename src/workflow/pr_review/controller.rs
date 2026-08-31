@@ -21,12 +21,12 @@ use usher_search::{SearchDirection, step_match_index};
 #[cfg(any(test, feature = "test-fixtures"))]
 use crate::git::PullRequestDiffLine;
 use crate::git::{
-    PullRequestActionState, PullRequestCommit, PullRequestDiffDetail, PullRequestDiffFile,
-    PullRequestMergeMethod, PullRequestReviewAction, dismiss_pull_request_review,
-    get_pull_request_action_state, get_pull_request_commit_range_diff, get_pull_request_commits,
-    get_pull_request_conversation, get_pull_request_diff, get_repository_file_text,
-    merge_pull_request, revert_pull_request, submit_pull_request_review,
-    supports_ignore_whitespace,
+    GitError, GitResult, PullRequestActionState, PullRequestCommit, PullRequestDiffDetail,
+    PullRequestDiffFile, PullRequestMergeMethod, PullRequestReviewAction,
+    dismiss_pull_request_review, get_pull_request_action_state, get_pull_request_commit_range_diff,
+    get_pull_request_commits, get_pull_request_conversation, get_pull_request_diff,
+    get_repository_file_text, merge_pull_request, provider_capabilities, revert_pull_request,
+    submit_pull_request_review,
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{
@@ -1353,21 +1353,36 @@ impl WorkflowPrReviewController {
 
             let result = match metadata {
                 Ok(metadata) => {
-                    let ignore_whitespace_supported = supports_ignore_whitespace(
-                        metadata.repo_type.as_str(),
-                        metadata.remote_repo.as_str(),
-                    );
-                    get_pull_request_diff(
+                    let capabilities = provider_capabilities(
                         metadata.repo_type.as_str(),
                         metadata.repo_project_id.as_str(),
                         metadata.remote_repo.as_str(),
-                        request.number.as_str(),
-                        request.ignore_whitespace && ignore_whitespace_supported,
-                    )
-                    .await
-                    .map(|detail| (metadata, detail, ignore_whitespace_supported))
+                    );
+                    match capabilities {
+                        Ok(capabilities) => {
+                            let ignore_whitespace_supported =
+                                capabilities.pull_request_ignore_whitespace;
+                            get_pull_request_diff(
+                                metadata.repo_type.as_str(),
+                                metadata.repo_project_id.as_str(),
+                                metadata.remote_repo.as_str(),
+                                request.number.as_str(),
+                                request.ignore_whitespace && ignore_whitespace_supported,
+                            )
+                            .await
+                            .map(|detail| {
+                                (
+                                    metadata,
+                                    detail,
+                                    ignore_whitespace_supported,
+                                    capabilities.merge_delete_source_branch,
+                                )
+                            })
+                        }
+                        Err(error) => Err(error),
+                    }
                 }
-                Err(error) => Err(error),
+                Err(error) => Err(GitError::configuration(error)),
             };
 
             let _ = slint::invoke_from_event_loop(move || {
@@ -1382,9 +1397,17 @@ impl WorkflowPrReviewController {
                 };
                 ui.set_workflow_pr_review_loading(false);
                 match result {
-                    Ok((metadata, detail, ignore_whitespace_supported)) => {
+                    Ok((
+                        metadata,
+                        detail,
+                        ignore_whitespace_supported,
+                        merge_delete_source_branch_supported,
+                    )) => {
                         ui.set_workflow_pr_review_ignore_whitespace_supported(
                             ignore_whitespace_supported,
+                        );
+                        ui.set_workflow_pr_merge_delete_source_branch_supported(
+                            merge_delete_source_branch_supported,
                         );
                         if !ignore_whitespace_supported {
                             ui.set_workflow_pr_review_ignore_whitespace(false);
@@ -1418,8 +1441,10 @@ impl WorkflowPrReviewController {
                     Err(error) => {
                         ui.set_workflow_pr_review_ignore_whitespace_supported(false);
                         ui.set_workflow_pr_review_ignore_whitespace(false);
+                        ui.set_workflow_pr_merge_delete_source_branch_supported(false);
                         log::warn!("[Workflow][PR Review] Failed to load diff: {error}");
-                        ui.set_workflow_pr_review_error(error.into());
+                        ui.set_workflow_pr_review_error(error.user_message().into());
+                        ui.set_workflow_pr_review_error_kind(error.error_kind().into());
                     }
                 }
             });
@@ -1481,7 +1506,7 @@ impl WorkflowPrReviewController {
                     )
                     .await
                 }
-                Err(error) => Err(error),
+                Err(error) => Err(GitError::configuration(error)),
             };
             match result {
                 Ok(items) => {
@@ -1606,7 +1631,7 @@ impl WorkflowPrReviewController {
                     )
                     .await
                 }
-                Err(error) => Err(error),
+                Err(error) => Err(GitError::configuration(error)),
             };
             match result {
                 Ok(commits) => {
@@ -1925,10 +1950,10 @@ impl WorkflowPrReviewController {
     fn run_action<T, F, C>(&self, ui: &MainWindow, future: F, completion: C)
     where
         T: Send + 'static,
-        F: Future<Output = Result<T, String>> + Send + 'static,
-        C: FnOnce(&WorkflowPrReviewController, &MainWindow, Result<T, String>) + Send + 'static,
+        F: Future<Output = GitResult<T>> + Send + 'static,
+        C: FnOnce(&WorkflowPrReviewController, &MainWindow, GitResult<T>) + Send + 'static,
     {
-        let generation = self.state.begin(ReviewRequestKind::RemoteAction);
+        let generation = self.state.begin(ReviewRequestKind::RemoteMutation);
         ui.set_workflow_pr_action_loading(true);
         let controller = self.clone();
         let ui_weak = ui.as_weak();
@@ -1937,7 +1962,7 @@ impl WorkflowPrReviewController {
             let _ = slint::invoke_from_event_loop(move || {
                 if !controller
                     .state
-                    .is_current(ReviewRequestKind::RemoteAction, generation)
+                    .is_current(ReviewRequestKind::RemoteMutation, generation)
                 {
                     return;
                 }
@@ -1961,31 +1986,44 @@ impl WorkflowPrReviewController {
                 "Waiting for the repository provider to calculate merge readiness.".into(),
             );
         }
-        self.run_action(
-            ui,
-            async move {
-                get_pull_request_action_state(
-                    metadata.repo_type.as_str(),
-                    metadata.repo_project_id.as_str(),
-                    metadata.remote_repo.as_str(),
-                    pull_request_iid.as_str(),
-                )
-                .await
-            },
-            |_controller, ui, result| match result {
-                Ok(state) => apply_action_state(ui, &state),
-                Err(error) => {
-                    log::warn!("[Workflow][PR Review] Failed to load remote action state: {error}");
-                    reset_action_capabilities(ui);
-                    ui.set_workflow_pr_merge_readiness_kind("unavailable".into());
-                    ui.set_workflow_pr_merge_readiness_label("Merge status unavailable".into());
-                    ui.set_workflow_pr_merge_readiness_detail(
-                        "The repository provider could not return merge readiness.".into(),
-                    );
-                    ui.set_workflow_pr_merge_block_reason(error.into());
+        let generation = self.state.begin(ReviewRequestKind::RemoteActionState);
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let result = get_pull_request_action_state(
+                metadata.repo_type.as_str(),
+                metadata.repo_project_id.as_str(),
+                metadata.remote_repo.as_str(),
+                pull_request_iid.as_str(),
+            )
+            .await;
+            let _ = slint::invoke_from_event_loop(move || {
+                if !controller
+                    .state
+                    .is_current(ReviewRequestKind::RemoteActionState, generation)
+                {
+                    return;
                 }
-            },
-        );
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                match result {
+                    Ok(state) => apply_action_state(&ui, &state),
+                    Err(error) => {
+                        log::warn!(
+                            "[Workflow][PR Review] Failed to load remote action state: {error}"
+                        );
+                        reset_action_capabilities(&ui);
+                        ui.set_workflow_pr_merge_readiness_kind("unavailable".into());
+                        ui.set_workflow_pr_merge_readiness_label("Merge status unavailable".into());
+                        ui.set_workflow_pr_merge_readiness_detail(
+                            "The repository provider could not return merge readiness.".into(),
+                        );
+                        ui.set_workflow_pr_merge_block_reason(error.user_message().into());
+                    }
+                }
+            });
+        });
     }
 
     fn submit_review(&self, ui: &MainWindow, action: &str, body: &str) {
@@ -2055,7 +2093,7 @@ impl WorkflowPrReviewController {
                 }
                 Err(error) => {
                     log::warn!("[Workflow][PR Review] Failed to submit review: {error}");
-                    show_error(ui, error.as_str());
+                    show_error(ui, error.user_message());
                 }
             },
         );
@@ -2096,7 +2134,7 @@ impl WorkflowPrReviewController {
                 }
                 Err(error) => {
                     log::warn!("[Workflow][PR Review] Failed to dismiss review: {error}");
-                    show_error(ui, error.as_str());
+                    show_error(ui, error.user_message());
                 }
             },
         );
@@ -2167,7 +2205,7 @@ impl WorkflowPrReviewController {
                 }
                 Err(error) => {
                     log::warn!("[Workflow][PR Review] Failed to merge pull request: {error}");
-                    show_error(ui, error.as_str());
+                    show_error(ui, error.user_message());
                     controller.refresh_action_state(ui);
                 }
             },
@@ -2219,7 +2257,7 @@ impl WorkflowPrReviewController {
                     }
                     Err(error) => {
                         log::warn!("[Workflow][PR Review] Revert action failed: {error}");
-                        show_error(ui, error.as_str());
+                        show_error(ui, error.user_message());
                     }
                 },
         );
@@ -2298,21 +2336,21 @@ impl WorkflowPrReviewController {
             })
             .await;
             let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_review_code_loading(false);
+                ui.set_workflow_pr_review_large_diff_loading(false);
                 if !controller
                     .state
                     .is_current(ReviewRequestKind::Highlight, generation)
                 {
                     return;
                 }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
                 if ui.get_workflow_pr_review_selected_file_path().as_str() != file.path {
                     return;
                 }
                 let Ok(highlighted) = highlighted else {
-                    ui.set_workflow_pr_review_code_loading(false);
-                    ui.set_workflow_pr_review_large_diff_loading(false);
                     ui.set_workflow_pr_review_error(
                         "Failed to render syntax highlighting for this file.".into(),
                     );
@@ -2323,8 +2361,6 @@ impl WorkflowPrReviewController {
                     cached.insert(file.path.clone(), highlighted.clone());
                 }
                 apply_highlighted_file(&ui, file, highlighted, reset_scroll);
-                ui.set_workflow_pr_review_code_loading(false);
-                ui.set_workflow_pr_review_large_diff_loading(false);
                 controller.log_memory_diagnostics("file_highlight.generated_and_applied");
             });
         });
@@ -2480,15 +2516,15 @@ impl WorkflowPrReviewController {
             let (base_result, head_result) = tokio::join!(base_future, head_future);
             let result = base_result.and_then(|base| head_result.map(|head| (base, head)));
             let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
                 if !controller
                     .state
                     .is_current(ReviewRequestKind::Expand, generation)
                 {
                     return;
                 }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
                 if ui.get_workflow_pr_review_selected_file_index() != selected_index as i32 {
                     return;
                 }
@@ -2628,15 +2664,16 @@ impl WorkflowPrReviewController {
             let (base_result, head_result) = tokio::join!(base_future, head_future);
             let result = base_result.and_then(|base| head_result.map(|head| (base, head)));
             let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_review_code_loading(false);
                 if !controller
                     .state
                     .is_current(ReviewRequestKind::Expand, generation)
                 {
                     return;
                 }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
                 if ui.get_workflow_pr_review_selected_file_index() != selected_index as i32 {
                     return;
                 }
@@ -2658,7 +2695,6 @@ impl WorkflowPrReviewController {
                         );
                     }
                     Err(error) => {
-                        ui.set_workflow_pr_review_code_loading(false);
                         log::warn!("[Workflow][PR Review] Failed to expand all hunks: {error}");
                     }
                 }
@@ -2768,15 +2804,16 @@ impl WorkflowPrReviewController {
             )
             .await;
             let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_review_code_loading(false);
                 if !controller
                     .state
                     .is_current(ReviewRequestKind::Expand, generation)
                 {
                     return;
                 }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
                 if ui.get_workflow_pr_review_selected_file_index() != selected_index as i32 {
                     return;
                 }
@@ -2788,7 +2825,6 @@ impl WorkflowPrReviewController {
                         controller.render_full_file(&ui, selected_index, file, source);
                     }
                     Err(error) => {
-                        ui.set_workflow_pr_review_code_loading(false);
                         log::warn!("[Workflow][PR Review] Failed to view file: {error}");
                         show_error(&ui, "Failed to load the complete file.");
                     }
@@ -2825,15 +2861,16 @@ impl WorkflowPrReviewController {
             })
             .await;
             let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                ui.set_workflow_pr_review_code_loading(false);
                 if !controller
                     .state
                     .is_current(ReviewRequestKind::Highlight, generation)
                 {
                     return;
                 }
-                let Some(ui) = ui_weak.upgrade() else {
-                    return;
-                };
                 if ui.get_workflow_pr_review_selected_file_index() != selected_index as i32
                     || !ui.get_workflow_pr_review_viewing_file()
                 {
@@ -2842,11 +2879,9 @@ impl WorkflowPrReviewController {
                 match highlighted {
                     Ok(highlighted) => {
                         apply_highlighted_file(&ui, full_file, Arc::new(highlighted), true);
-                        ui.set_workflow_pr_review_code_loading(false);
                         controller.log_memory_diagnostics("full_file.highlighted_and_applied");
                     }
                     Err(error) => {
-                        ui.set_workflow_pr_review_code_loading(false);
                         log::warn!("[Workflow][PR Review] Full-file highlighting failed: {error}");
                     }
                 }
@@ -3240,6 +3275,7 @@ fn apply_detail_summary(ui: &MainWindow, detail: &SharedDiffDetail) {
     ui.set_workflow_pr_review_too_many_commits(detail.too_many_commits);
     ui.set_workflow_pr_review_files_truncated(detail.files_truncated);
     ui.set_workflow_pr_review_error("".into());
+    ui.set_workflow_pr_review_error_kind("".into());
 }
 
 fn clear_selected_file(ui: &MainWindow) {

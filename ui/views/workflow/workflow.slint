@@ -37,6 +37,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     callback pr-open-ai-review(string);
     callback pr-cancel-ai-review(string);
     callback pr-set-ai-review-rule(string);
+    callback open-settings();
     callback copy-remote-repo(string) -> bool;
     callback open-local-repo(string);
     callback cd-start(string, string, string);
@@ -79,6 +80,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in property <string> pr-list-sort-filter: "newest";
     in property <bool> pr-list-loading: false;
     in property <string> pr-list-error: "";
+    in property <string> pr-list-error-kind: "";
     in property <[AiReviewRuleChoice]> ai-review-rule-options: [];
     in property <string> ai-review-project-rule-id: "";
     in property <string> ai-review-project-rule-name: "No preset";
@@ -265,6 +267,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 pr-sort-filter: root.pr-list-sort-filter;
                 pr-loading: root.pr-list-loading;
                 pr-error: root.pr-list-error;
+                pr-error-kind: root.pr-list-error-kind;
                 ai-review-rule-options: root.ai-review-rule-options;
                 ai-review-project-rule-id: root.ai-review-project-rule-id;
                 ai-review-project-rule-name: root.ai-review-project-rule-name;
@@ -283,6 +286,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 open-ai-review(task-id) => { root.pr-open-ai-review(task-id); }
                 cancel-ai-review(task-id) => { root.pr-cancel-ai-review(task-id); }
                 set-ai-review-rule(id) => { root.pr-set-ai-review-rule(id); }
+                open-settings => { root.open-settings(); }
             }
 
             tag-flow := GitHubTagFlow {

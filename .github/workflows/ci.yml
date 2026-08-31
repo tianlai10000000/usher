@@ -41,6 +41,12 @@ jobs:
       - name: Check architecture structure budgets
         run: ./scripts/check-architecture-structure.sh
 
+      - name: Check UI policy
+        run: ./scripts/check-ui-policy.sh
+
+      - name: Test benchmark threshold policy
+        run: python3 -m unittest scripts/tests/test_memory_benchmark_thresholds.py
+
       - name: Test workspace
         # The repository's documented baseline has one failing logger doctest;
         # keep unit and integration coverage blocking without making CI
@@ -54,3 +60,28 @@ jobs:
 
       - name: Check without default features
         run: cargo check --workspace --all-targets --no-default-features --features renderer-femtovg --locked
+
+  windows-check:
+    name: Check Windows workspace
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-check-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-check-
+
+      - name: Check workspace
+        run: cargo check --workspace --all-targets --locked

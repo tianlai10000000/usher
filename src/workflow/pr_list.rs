@@ -5,8 +5,9 @@ use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{MainWindow, WorkflowPullRequestItem};
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
+use super::pr_list_state::{PrListGenerationFacade, PrListRequestKind};
 
 const PAGE_SIZE: u32 = 10;
 const REVIEW_STATUS_FIXTURE: &str = "review-status-v1";
@@ -16,8 +17,7 @@ pub(crate) struct WorkflowPrListController {
     context: Arc<Mutex<Option<ProjectRepositoryMetadata>>>,
     visited_pages: Arc<Mutex<HashMap<u32, Vec<PullRequestItem>>>>,
     filters: Arc<Mutex<PullRequestFilters>>,
-    request_sequence: Arc<AtomicU64>,
-    count_sequence: Arc<AtomicU64>,
+    generations: PrListGenerationFacade,
     fixture_enabled: bool,
 }
 
@@ -26,8 +26,7 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
         context: Arc::new(Mutex::new(None)),
         visited_pages: Arc::new(Mutex::new(HashMap::new())),
         filters: Arc::new(Mutex::new(default_pull_request_filters())),
-        request_sequence: Arc::new(AtomicU64::new(0)),
-        count_sequence: Arc::new(AtomicU64::new(0)),
+        generations: PrListGenerationFacade::new(),
         fixture_enabled: review_status_fixture_enabled(),
     };
 
@@ -168,8 +167,7 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
 
 impl WorkflowPrListController {
     pub(crate) fn release_unreachable(&self, ui: &MainWindow) {
-        self.request_sequence.fetch_add(1, Ordering::SeqCst);
-        self.count_sequence.fetch_add(1, Ordering::SeqCst);
+        self.generations.invalidate_all();
         if let Ok(mut context) = self.context.lock() {
             *context = None;
         }
@@ -185,8 +183,8 @@ impl WorkflowPrListController {
     }
 
     pub(crate) fn select_project(&self, ui: &MainWindow, project_alias: String) {
-        let request = self.request_sequence.fetch_add(1, Ordering::SeqCst) + 1;
-        self.count_sequence.fetch_add(1, Ordering::SeqCst);
+        let request = self.generations.begin(PrListRequestKind::Page);
+        self.generations.invalidate(PrListRequestKind::Totals);
         if let Ok(mut context) = self.context.lock() {
             *context = None;
         }
@@ -215,7 +213,10 @@ impl WorkflowPrListController {
             .map_err(|error| format!("Failed to read project configuration: {error}"))
             .and_then(|result| result);
 
-            if controller.request_sequence.load(Ordering::SeqCst) != request {
+            if !controller
+                .generations
+                .is_current(PrListRequestKind::Page, request)
+            {
                 return;
             }
 
@@ -229,7 +230,10 @@ impl WorkflowPrListController {
                         let Some(ui) = ui_weak.upgrade() else {
                             return;
                         };
-                        if controller_for_ui.request_sequence.load(Ordering::SeqCst) != request {
+                        if !controller_for_ui
+                            .generations
+                            .is_current(PrListRequestKind::Page, request)
+                        {
                             return;
                         }
                         ui.set_workflow_pr_repo_project_id(metadata.repo_project_id.into());
@@ -245,6 +249,7 @@ impl WorkflowPrListController {
                         };
                         ui.set_workflow_pr_list_loading(false);
                         ui.set_workflow_pr_list_error(error.into());
+                        ui.set_workflow_pr_list_error_kind("configuration".into());
                     });
                 }
             }
@@ -277,11 +282,11 @@ impl WorkflowPrListController {
             .lock()
             .map(|filters| filters.clone())
             .unwrap_or_default();
-        let request = self.count_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let request = self.generations.begin(PrListRequestKind::Totals);
         ui.set_workflow_pr_list_open_total(-1);
         ui.set_workflow_pr_list_closed_total(-1);
 
-        let count_sequence = self.count_sequence.clone();
+        let generations = self.generations.clone();
         let ui_weak = ui.as_weak();
         crate::app_runtime::shared_runtime().spawn(async move {
             let open_request = get_pull_requests(
@@ -304,7 +309,7 @@ impl WorkflowPrListController {
             );
             let (open_result, closed_result) = tokio::join!(open_request, closed_request);
             let _ = slint::invoke_from_event_loop(move || {
-                if count_sequence.load(Ordering::SeqCst) != request {
+                if !generations.is_current(PrListRequestKind::Totals, request) {
                     return;
                 }
                 let Some(ui) = ui_weak.upgrade() else {
@@ -341,15 +346,17 @@ impl WorkflowPrListController {
         let Some(context) = context else {
             ui.set_workflow_pr_list_loading(false);
             ui.set_workflow_pr_list_error("Repository metadata is not available.".into());
+            ui.set_workflow_pr_list_error_kind("configuration".into());
             return;
         };
 
-        let request = self.request_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let request = self.generations.begin(PrListRequestKind::Page);
         ui.set_workflow_pr_list_loading(true);
         ui.set_workflow_pr_list_error("".into());
+        ui.set_workflow_pr_list_error_kind("".into());
         ui.set_workflow_pr_list_state(state.as_str().into());
 
-        let request_sequence = self.request_sequence.clone();
+        let generations = self.generations.clone();
         let visited_pages = self.visited_pages.clone();
         let filters = self
             .filters
@@ -369,7 +376,7 @@ impl WorkflowPrListController {
             )
             .await;
             let _ = slint::invoke_from_event_loop(move || {
-                if request_sequence.load(Ordering::SeqCst) != request {
+                if !generations.is_current(PrListRequestKind::Page, request) {
                     return;
                 }
                 let Some(ui) = ui_weak.upgrade() else {
@@ -396,7 +403,8 @@ impl WorkflowPrListController {
                     }
                     Err(error) => {
                         log::warn!("[Workflow] Failed to load pull requests: {error}");
-                        ui.set_workflow_pr_list_error(error.into());
+                        ui.set_workflow_pr_list_error(error.user_message().into());
+                        ui.set_workflow_pr_list_error_kind(error.error_kind().into());
                     }
                 }
             });
@@ -855,6 +863,7 @@ fn reset_ui(ui: &MainWindow) {
     ui.set_workflow_pr_list_assignee_filter("any".into());
     ui.set_workflow_pr_list_sort_filter("newest".into());
     ui.set_workflow_pr_list_error("".into());
+    ui.set_workflow_pr_list_error_kind("".into());
 }
 
 #[cfg(test)]

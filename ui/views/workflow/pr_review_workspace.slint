@@ -489,7 +489,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         // keystroke; Enter and the next/previous arrows flush it immediately.
         root.diff-find-index = -1;
         if (root.diff-find-open) {
-            diff-find-debounce.restart();
+            diff-find-debounce.start();
         }
     }
     changed review-dialog-open => {
@@ -2485,7 +2485,16 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 outline-color: root.github-border-default;
                 foreground-color: root.github-fg-default;
                 muted-color: root.github-fg-muted;
-                retry => { root.reload(root.ignore-whitespace); }
+                action-label: root.error-kind == "authentication" || root.error-kind == "configuration"
+                    ? "Open Settings"
+                    : "Try again";
+                retry => {
+                    if root.error-kind == "authentication" || root.error-kind == "configuration" {
+                        root.open-settings();
+                    } else {
+                        root.reload(root.ignore-whitespace);
+                    }
+                }
             }
 
             if !root.loading && root.error-text == "": diff-surface := Rectangle {
@@ -4235,7 +4244,12 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         primary-busy: root.action-loading;
         close-requested => { root.merge-dialog-open = false; }
         cancel-clicked => { root.merge-dialog-open = false; }
-        primary-clicked => { root.merge(root.selected-merge-method, root.remove-source-branch); }
+        primary-clicked => {
+            root.merge(
+                root.selected-merge-method,
+                root.merge-delete-source-branch-supported && root.remove-source-branch,
+            );
+        }
 
         if root.merge-dialog-open: Text {
             x: merge-dialog-frame.content-x + 16px;
@@ -4287,7 +4301,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 chosen => { root.selected-merge-method = "fast_forward"; }
             }
         }
-        if root.merge-dialog-open: Rectangle {
+        if root.merge-dialog-open && root.merge-delete-source-branch-supported: Rectangle {
             x: merge-dialog-frame.content-x + 16px;
             y: merge-dialog-frame.content-y + merge-dialog-frame.content-height - 42px;
             width: merge-dialog-frame.content-width - 32px;

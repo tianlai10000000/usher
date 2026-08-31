@@ -1,68 +1,110 @@
-use std::time::Duration;
-
 use slint::{ComponentHandle, Global, Weak};
 
-use crate::app_runtime::shared_runtime;
-use crate::http::{self, RequestOptions};
 use crate::{AppState, MainWindow};
 
-/// Check network connectivity using HTTP request (more reliable than raw TCP)
-fn check_online() -> bool {
-    let runtime = shared_runtime();
-
-    runtime.block_on(async {
-        // Try multiple connectivity check endpoints
-        let urls = [
-            "http://connectivitycheck.gstatic.com/generate_204",
-            "http://captive.apple.com/hotspot-detect.html",
-            "http://www.msftconnecttest.com/connecttest.txt",
-        ];
-
-        for url in urls {
-            if let Ok(resp) = http::send(
-                http::get(url),
-                RequestOptions::new("Check network connectivity")
-                    .timeout(Duration::from_secs(3))
-                    .allow_http_errors(),
-            )
-            .await
-            {
-                let status = resp.status().as_u16();
-                if status == 204 || status == 200 {
-                    return true;
-                }
-            }
+fn publish_network_state(ui_weak: &Weak<MainWindow>, online: bool) -> bool {
+    let ui_weak = ui_weak.clone();
+    slint::invoke_from_event_loop(move || {
+        if let Some(ui) = ui_weak.upgrade() {
+            AppState::get(&ui).set_network_online(online);
         }
-        false
     })
+    .is_ok()
 }
 
 pub fn setup_network_monitor(app: &MainWindow) {
-    // Optimistic initial value: the serial probe takes up to 9s offline, and it
-    // used to run on the main thread before `ui.show()`. The monitor thread's
-    // first iteration corrects the state within one probe round instead.
     AppState::get(app).set_network_online(true);
-
     let ui_weak: Weak<MainWindow> = app.as_weak();
 
+    setup_platform_monitor(ui_weak);
+}
+
+#[cfg(target_os = "macos")]
+fn setup_platform_monitor(ui_weak: Weak<MainWindow>) {
+    use core_foundation::runloop::{CFRunLoop, kCFRunLoopDefaultMode};
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+    use system_configuration::network_reachability::SCNetworkReachability;
+
     std::thread::spawn(move || {
-        let interval = Duration::from_secs(3);
+        let address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+        let mut reachability = SCNetworkReachability::from(address);
+        let online = reachability
+            .reachability()
+            .map(flags_are_online)
+            .unwrap_or(true);
+        if !publish_network_state(&ui_weak, online) {
+            return;
+        }
 
+        let callback_ui = ui_weak.clone();
+        if let Err(error) = reachability.set_callback(move |flags| {
+            if !publish_network_state(&callback_ui, flags_are_online(flags)) {
+                CFRunLoop::get_current().stop();
+            }
+        }) {
+            log::warn!("[Network] Failed to register reachability callback: {error}");
+            setup_backoff_monitor(ui_weak);
+            return;
+        }
+
+        let run_loop = CFRunLoop::get_current();
+        let scheduled =
+            unsafe { reachability.schedule_with_runloop(&run_loop, kCFRunLoopDefaultMode) };
+        if let Err(error) = scheduled {
+            log::warn!("[Network] Failed to schedule reachability callback: {error}");
+            setup_backoff_monitor(ui_weak);
+            return;
+        }
+        CFRunLoop::run_current();
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn flags_are_online(flags: system_configuration::network_reachability::ReachabilityFlags) -> bool {
+    use system_configuration::network_reachability::ReachabilityFlags;
+
+    flags.contains(ReachabilityFlags::REACHABLE)
+        && (!flags.contains(ReachabilityFlags::CONNECTION_REQUIRED)
+            || flags.intersects(
+                ReachabilityFlags::CONNECTION_ON_DEMAND | ReachabilityFlags::CONNECTION_ON_TRAFFIC,
+            ))
+        && !flags.contains(ReachabilityFlags::INTERVENTION_REQUIRED)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn setup_platform_monitor(ui_weak: Weak<MainWindow>) {
+    setup_backoff_monitor(ui_weak);
+}
+
+fn setup_backoff_monitor(ui_weak: Weak<MainWindow>) {
+    use std::time::Duration;
+
+    std::thread::spawn(move || {
+        let mut retry_delay = Duration::from_secs(3);
         loop {
-            let online = check_online();
-
-            let ui_weak2 = ui_weak.clone();
-            let result = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = ui_weak2.upgrade() {
-                    AppState::get(&ui).set_network_online(online);
-                }
-            });
-
-            if result.is_err() {
+            let online = has_default_route();
+            if !publish_network_state(&ui_weak, online) {
                 break;
             }
-
-            std::thread::sleep(interval);
+            std::thread::sleep(if online {
+                retry_delay = Duration::from_secs(3);
+                Duration::from_secs(10)
+            } else {
+                let delay = retry_delay;
+                retry_delay = (retry_delay * 2).min(Duration::from_secs(300));
+                delay
+            });
         }
     });
+}
+
+fn has_default_route() -> bool {
+    use std::net::UdpSocket;
+
+    UdpSocket::bind("0.0.0.0:0")
+        .and_then(|socket| {
+            socket.connect("1.1.1.1:53")?;
+            socket.local_addr()
+        })
+        .is_ok_and(|address| !address.ip().is_unspecified())
 }

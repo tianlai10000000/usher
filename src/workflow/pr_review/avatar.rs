@@ -16,10 +16,9 @@ const MAX_AVATAR_DOWNLOADS: usize = 32;
 /// Per-URL budget. A slow or stalled avatar host no longer discards the
 /// already-decoded results of its siblings.
 const AVATAR_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(3);
-/// Process-wide decoded-avatar budget. 128 URLs × 80×80 RGBA (≈25 KiB each)
-/// caps the cache near 3 MiB while covering the conversation and commit author
-/// sets of the last handful of reviewed pull requests.
-const AVATAR_CACHE_CAPACITY: usize = 128;
+/// Process-wide decoded-avatar budget. The UI-side image cache retains a wider
+/// working set; this Send pixel cache only bridges recent background decodes.
+const AVATAR_CACHE_CAPACITY: usize = 16;
 
 pub(super) struct ConversationAvatarPixels {
     pub(super) width: u32,
@@ -117,7 +116,7 @@ async fn load_conversation_avatar(url: &str) -> Option<ConversationAvatarPixels>
 
     let mut response = http::send(
         http::get(url),
-        RequestOptions::new("Load pull request conversation avatar"),
+        RequestOptions::new("Load pull request conversation avatar").no_retry(),
     )
     .await
     .ok()?;

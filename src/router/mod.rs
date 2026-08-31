@@ -1,5 +1,6 @@
 use crate::{MainWindow, Route};
 use slint::Weak;
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -68,18 +69,89 @@ pub fn route_for_navigation_index(index: i32) -> Option<Route> {
 pub struct Router {
     window: Weak<MainWindow>,
     history: Arc<Mutex<NavigationHistory>>,
-    workflow_reachable_ab: Option<Arc<Mutex<bool>>>,
-    lifecycle_hook: RouteLifecycleHook,
+    lifecycle_hooks: RouteLifecycleHooks,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct RouteLifecycleEvent {
     pub(crate) previous: Route,
     pub(crate) current: Route,
-    pub(crate) workflow_became_unreachable: bool,
 }
 
-type RouteLifecycleHook = Rc<dyn Fn(&MainWindow, RouteLifecycleEvent)>;
+type RouteTransitionHook = Rc<dyn Fn(&MainWindow, RouteLifecycleEvent)>;
+type RouteScopePredicate = Rc<dyn Fn(Route) -> bool>;
+type RouteScopeHook = Rc<dyn Fn(&MainWindow, RouteLifecycleEvent)>;
+
+struct RouteScopeLifecycle {
+    name: &'static str,
+    contains: RouteScopePredicate,
+    reachable: bool,
+    on_unreachable: RouteScopeHook,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct RouteLifecycleHooks {
+    transition_hooks: Rc<RefCell<Vec<RouteTransitionHook>>>,
+    scopes: Rc<RefCell<Vec<RouteScopeLifecycle>>>,
+}
+
+impl RouteLifecycleHooks {
+    pub(crate) fn on_transition(&self, hook: RouteTransitionHook) {
+        self.transition_hooks.borrow_mut().push(hook);
+    }
+
+    pub(crate) fn on_scope_unreachable(
+        &self,
+        name: &'static str,
+        initial_route: Route,
+        contains: RouteScopePredicate,
+        hook: RouteScopeHook,
+    ) {
+        let reachable = contains(initial_route);
+        self.scopes.borrow_mut().push(RouteScopeLifecycle {
+            name,
+            contains,
+            reachable,
+            on_unreachable: hook,
+        });
+    }
+
+    fn scope_reachability(&self, current: Route, history: &NavigationHistory) -> Vec<bool> {
+        self.scopes
+            .borrow()
+            .iter()
+            .map(|scope| history.scope_reachable_from(current, scope.contains.as_ref()))
+            .collect()
+    }
+
+    fn dispatch(&self, window: &MainWindow, event: RouteLifecycleEvent, reachable: &[bool]) {
+        let transition_hooks = self.transition_hooks.borrow().clone();
+        for hook in transition_hooks {
+            hook(window, event);
+        }
+        let unreachable_hooks = {
+            let mut scopes = self.scopes.borrow_mut();
+            scopes
+                .iter_mut()
+                .zip(reachable.iter().copied())
+                .filter_map(|(scope, reachable)| {
+                    let became_unreachable = scope.reachable && !reachable;
+                    scope.reachable = reachable;
+                    became_unreachable.then(|| (scope.name, scope.on_unreachable.clone()))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (name, hook) in unreachable_hooks {
+            log::debug!(
+                "[Lifecycle] Route scope '{}' became unreachable after {:?} -> {:?}",
+                name,
+                event.previous,
+                event.current
+            );
+            hook(window, event);
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 struct NavigationHistory {
@@ -137,29 +209,25 @@ impl NavigationHistory {
         !self.forward_entries.is_empty()
     }
 
-    fn contains_workflow_route(&self) -> bool {
+    fn contains_route(&self, predicate: &dyn Fn(Route) -> bool) -> bool {
         self.back_entries
             .iter()
             .chain(self.forward_entries.iter())
             .copied()
-            .any(is_workflow_route)
+            .any(predicate)
     }
 
-    fn workflow_reachable_from(&self, current: Route) -> bool {
-        is_workflow_route(current) || self.contains_workflow_route()
+    fn scope_reachable_from(&self, current: Route, predicate: &dyn Fn(Route) -> bool) -> bool {
+        predicate(current) || self.contains_route(predicate)
     }
 }
 
 impl Router {
-    pub fn new(window: Weak<MainWindow>, lifecycle_hook: RouteLifecycleHook) -> Self {
+    pub fn new(window: Weak<MainWindow>, lifecycle_hooks: RouteLifecycleHooks) -> Self {
         Self {
             window,
             history: Arc::new(Mutex::new(NavigationHistory::default())),
-            workflow_reachable_ab: std::env::var("USHER_MEMORY_WORKFLOW_LIFECYCLE")
-                .ok()
-                .filter(|value| matches!(value.as_str(), "retain" | "clear"))
-                .map(|_| Arc::new(Mutex::new(false))),
-            lifecycle_hook,
+            lifecycle_hooks,
         }
     }
 
@@ -229,42 +297,23 @@ impl Router {
         win.set_navigation_can_go_forward(can_go_forward);
         let state = Self::apply_route_ui_state(win, route);
 
-        // Keep Workflow/PR state while a route remains reachable through Back.
-        // Once navigation leaves the workflow domain with no workflow entry in
-        // history, its large logs and models can be released.
-        let workflow_reachable = self
+        let event = RouteLifecycleEvent {
+            previous,
+            current: route,
+        };
+        let reachable = self
             .history
             .lock()
-            .map(|history| history.workflow_reachable_from(route))
-            .unwrap_or_else(|_| is_workflow_route(route));
-        let workflow_became_unreachable = self.workflow_reachable_ab.as_ref().map_or_else(
-            || is_workflow_route(previous) && !workflow_reachable,
-            |reachable| {
-                reachable
-                    .lock()
-                    .map(|mut previous_reachable| {
-                        let became_unreachable = *previous_reachable && !workflow_reachable;
-                        *previous_reachable = workflow_reachable;
-                        became_unreachable
-                    })
-                    .unwrap_or(false)
-            },
-        );
-        (self.lifecycle_hook)(
-            win,
-            RouteLifecycleEvent {
-                previous,
-                current: route,
-                workflow_became_unreachable,
-            },
-        );
+            .map(|history| self.lifecycle_hooks.scope_reachability(route, &history))
+            .unwrap_or_default();
+        self.lifecycle_hooks.dispatch(win, event, &reachable);
         crate::platform::update_titlebar_navigation_controls(win);
         log::debug!("→ Navigate to: {:?}", route);
         state
     }
 }
 
-fn is_workflow_route(route: Route) -> bool {
+pub(crate) fn is_workflow_route(route: Route) -> bool {
     matches!(route, Route::Workflow | Route::PrReview)
 }
 
@@ -402,18 +451,18 @@ mod tests {
         let mut history = NavigationHistory::default();
         history.record_navigation(Route::Home, Route::Workflow);
         history.record_navigation(Route::Workflow, Route::Settings);
-        assert!(history.workflow_reachable_from(Route::Settings));
+        assert!(history.scope_reachable_from(Route::Settings, &is_workflow_route));
 
         assert_eq!(
             history.take_back_target(Route::Settings),
             Some(Route::Workflow)
         );
-        assert!(history.workflow_reachable_from(Route::Workflow));
+        assert!(history.scope_reachable_from(Route::Workflow, &is_workflow_route));
         assert_eq!(
             history.take_forward_target(Route::Workflow),
             Some(Route::Settings)
         );
-        assert!(history.workflow_reachable_from(Route::Settings));
+        assert!(history.scope_reachable_from(Route::Settings, &is_workflow_route));
     }
 
     #[test]
@@ -426,10 +475,10 @@ mod tests {
             Some(Route::Workflow)
         );
         assert_eq!(history.take_back_target(Route::Workflow), Some(Route::Home));
-        assert!(history.workflow_reachable_from(Route::Home));
+        assert!(history.scope_reachable_from(Route::Home, &is_workflow_route));
 
         history.record_navigation(Route::Home, Route::About);
-        assert!(!history.workflow_reachable_from(Route::About));
+        assert!(!history.scope_reachable_from(Route::About, &is_workflow_route));
     }
 
     #[test]
@@ -437,7 +486,7 @@ mod tests {
         let mut history = NavigationHistory::default();
         history.record_navigation(Route::Home, Route::PrReview);
         history.record_navigation(Route::PrReview, Route::About);
-        assert!(history.workflow_reachable_from(Route::About));
+        assert!(history.scope_reachable_from(Route::About, &is_workflow_route));
 
         let mut current = Route::About;
         for index in 0..MAX_ROUTE_HISTORY {
@@ -450,6 +499,6 @@ mod tests {
             current = target;
         }
 
-        assert!(!history.workflow_reachable_from(current));
+        assert!(!history.scope_reachable_from(current, &is_workflow_route));
     }
 }

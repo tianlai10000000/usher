@@ -1,9 +1,11 @@
 use slint::{ComponentHandle, Global, Model, ModelRc, SharedVector, Timer, VecModel, Weak};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::{
     Arc, Mutex, RwLock,
-    atomic::{AtomicI32, Ordering},
+    atomic::{AtomicI32, AtomicU64, Ordering},
 };
 use std::time::Duration;
 
@@ -19,14 +21,17 @@ use usher_messages::{
 lazy_static::lazy_static! {
     // Keeps the Inbox→Banner reconciliation subscription alive for the process.
     static ref BANNER_MESSAGE_SYNC: Mutex<Option<Subscription>> = Mutex::new(None);
+    static ref BANNER_MESSAGE_IDS: RwLock<HashSet<String>> = RwLock::new(HashSet::new());
 }
 
 // Global counter for generating unique IDs
-static NOTIFICATION_ID_COUNTER: AtomicI32 = AtomicI32::new(0);
+static NOTIFICATION_ID_COUNTER: AtomicI32 = AtomicI32::new(1);
+static NOTIFICATION_TIMER_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 // Global hover state tracking (avoid modifying Notification struct triggering re-render)
 lazy_static::lazy_static! {
     static ref HOVER_STATE: RwLock<HashMap<i32, bool>> = RwLock::new(HashMap::new());
+    static ref AUTO_CLOSE_GENERATIONS: Mutex<HashMap<i32, u64>> = Mutex::new(HashMap::new());
 }
 
 // Generate next unique ID
@@ -45,6 +50,7 @@ const DEFAULT_DURATION_ERROR: i32 = 5000;
 /// index 0 is the visible head. Older tails are dropped from the transient
 /// overlay only; durable Inbox rows remain via `record_message`.
 const MAX_BANNER_QUEUE: usize = 3;
+const DISMISS_ANIMATION_DURATION: Duration = Duration::from_millis(180);
 
 // Default message constants
 const DEFAULT_MESSAGE_INFO: &str = "Info";
@@ -204,8 +210,44 @@ fn create_notification_with_defaults(
 #[derive(Default, Clone)]
 pub struct SharedQueue(pub SharedVector<Notification>);
 
+thread_local! {
+    static BANNER_QUEUE_MODEL: RefCell<Option<Rc<VecModel<Notification>>>> = const { RefCell::new(None) };
+}
+
+fn banner_queue_model(manager: &NotificationManager) -> Rc<VecModel<Notification>> {
+    BANNER_QUEUE_MODEL.with(|slot| {
+        if let Some(model) = slot.borrow().as_ref() {
+            return model.clone();
+        }
+        let model = Rc::new(VecModel::default());
+        manager.set_queue(ModelRc::from(model.clone()));
+        *slot.borrow_mut() = Some(model.clone());
+        model
+    })
+}
+
+fn queue_snapshot(model: &VecModel<Notification>) -> Vec<Notification> {
+    (0..model.row_count())
+        .filter_map(|index| model.row_data(index))
+        .collect()
+}
+
+fn sync_banner_message_ids(model: &VecModel<Notification>) {
+    let ids = (0..model.row_count())
+        .filter_map(|index| model.row_data(index))
+        .filter_map(|item| {
+            let id = item.message_id.as_str();
+            (!id.is_empty()).then(|| id.to_owned())
+        })
+        .collect();
+    if let Ok(mut current) = BANNER_MESSAGE_IDS.write() {
+        *current = ids;
+    }
+}
+
 /// Newest-first enqueue with a hard cap. Returns retained items plus any
 /// oldest tails that fell off the overlay.
+#[cfg(test)]
 fn prepend_capped<T>(mut items: Vec<T>, item: T, cap: usize) -> (Vec<T>, Vec<T>) {
     items.insert(0, item);
     let mut dropped = Vec::new();
@@ -228,19 +270,16 @@ fn push_notification(
         notification.message_id = message_id.into();
     }
 
-    // First collect all data into a Vec, avoid holding queue_model borrow
-    let mut items = Vec::new();
-    {
-        let queue_model: ModelRc<Notification> = manager.get_queue();
-        let row_count = queue_model.row_count();
-        for i in 0..row_count {
-            if let Some(item) = queue_model.row_data(i) {
-                items.push(item);
-            }
+    let model = banner_queue_model(manager);
+    model.insert(0, notification.clone());
+    let mut dropped = Vec::new();
+    while model.row_count() > MAX_BANNER_QUEUE {
+        let index = model.row_count() - 1;
+        if let Some(item) = model.row_data(index) {
+            dropped.push(item);
         }
-    } // queue_model is dropped here, releasing all borrows
-
-    let (items, dropped) = prepend_capped(items, notification.clone(), MAX_BANNER_QUEUE);
+        model.remove(index);
+    }
     for dropped in &dropped {
         if let Ok(mut state) = HOVER_STATE.write() {
             state.remove(&dropped.id);
@@ -251,12 +290,9 @@ fn push_notification(
             dropped.message_id
         );
     }
+    sync_banner_message_ids(&model);
 
-    let new_vec = VecModel::default();
-    for item in &items {
-        new_vec.push(item.clone());
-    }
-    manager.set_queue(ModelRc::new(new_vec));
+    let items = queue_snapshot(&model);
 
     // Optional: update shared queue (same cap)
     if let Some(queue) = shared_queue
@@ -315,7 +351,15 @@ fn clear_banner_queue(
     if let Ok(mut state) = HOVER_STATE.write() {
         state.clear();
     }
-    manager.set_queue(ModelRc::new(VecModel::default()));
+    AUTO_CLOSE_GENERATIONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+    let model = banner_queue_model(manager);
+    while model.row_count() > 0 {
+        model.remove(model.row_count() - 1);
+    }
+    sync_banner_message_ids(&model);
     if let Some(queue) = shared_queue
         && let Ok(mut shared) = queue.write()
     {
@@ -328,38 +372,33 @@ fn clear_banner_queue(
 /// Must run on the Slint event loop. Only Send data (alive ids) may cross
 /// `invoke_from_event_loop` — the banner queue holds non-Send `Image` handles.
 fn prune_banners_for_alive_messages(manager: &NotificationManager, alive: &HashSet<String>) {
-    let mut kept = Vec::new();
+    let model = banner_queue_model(manager);
     let mut removed = 0usize;
-    {
-        let queue_model: ModelRc<Notification> = manager.get_queue();
-        for index in 0..queue_model.row_count() {
-            let Some(item) = queue_model.row_data(index) else {
-                continue;
-            };
+    for index in (0..model.row_count()).rev() {
+        if let Some(item) = model.row_data(index) {
             let message_id = item.message_id.as_str();
             if !message_id.is_empty() && !alive.contains(message_id) {
                 removed += 1;
                 if let Ok(mut state) = HOVER_STATE.write() {
                     state.remove(&item.id);
                 }
-                continue;
+                AUTO_CLOSE_GENERATIONS
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove(&item.id);
+                model.remove(index);
             }
-            kept.push(item);
         }
     }
     if removed == 0 {
         return;
     }
+    sync_banner_message_ids(&model);
 
     log::info!(
         "[Messages] pruned {removed} banner(s) after Inbox change; remaining={}",
-        kept.len()
+        model.row_count()
     );
-    let new_vec = VecModel::default();
-    for item in kept {
-        new_vec.push(item);
-    }
-    manager.set_queue(ModelRc::new(new_vec));
 }
 
 // Helper function: remove notification by notification ID (exact match, avoid index misalignment issues)
@@ -368,32 +407,24 @@ fn remove_notification_by_id(
     target_id: i32,
     shared_queue: &Option<Arc<RwLock<SharedQueue>>>,
 ) {
+    AUTO_CLOSE_GENERATIONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&target_id);
     // Clean up hover state
     if let Ok(mut state) = HOVER_STATE.write() {
         state.remove(&target_id);
     }
 
-    // First collect all data into a Vec, avoid holding queue_model borrow
-    let mut items = Vec::new();
-    {
-        let queue_model: ModelRc<Notification> = manager.get_queue();
-        let row_count = queue_model.row_count();
-        for i in 0..row_count {
-            if let Some(item) = queue_model.row_data(i) {
-                // Exact match by ID, ensure each notification's timer only deletes itself
-                if item.id != target_id {
-                    items.push(item);
-                }
-            }
-        }
-    } // queue_model is dropped here, releasing all borrows
-
-    // Create new VecModel, excluding notification with matching ID
-    let new_vec = VecModel::default();
-    for item in items {
-        new_vec.push(item);
+    let model = banner_queue_model(manager);
+    if let Some(index) = (0..model.row_count()).find(|index| {
+        model
+            .row_data(*index)
+            .is_some_and(|item| item.id == target_id)
+    }) {
+        model.remove(index);
+        sync_banner_message_ids(&model);
     }
-    manager.set_queue(ModelRc::new(new_vec));
 
     // Optional: update shared queue
     if let Some(queue) = shared_queue
@@ -416,27 +447,16 @@ fn dismiss_notification_by_id(
     target_id: i32,
     _shared_queue: &Option<Arc<RwLock<SharedQueue>>>,
 ) {
-    // Collect all data, modify dismissed field of notification with matching ID
-    let mut items = Vec::new();
-    {
-        let queue_model: ModelRc<Notification> = manager.get_queue();
-        let row_count = queue_model.row_count();
-        for i in 0..row_count {
-            if let Some(mut item) = queue_model.row_data(i) {
-                if item.id == target_id {
-                    item.dismissed = true;
-                }
-                items.push(item);
-            }
+    let model = banner_queue_model(manager);
+    for index in 0..model.row_count() {
+        if let Some(mut item) = model.row_data(index)
+            && item.id == target_id
+        {
+            item.dismissed = true;
+            model.set_row_data(index, item);
+            break;
         }
     }
-
-    // Create new VecModel
-    let new_vec = VecModel::default();
-    for item in items {
-        new_vec.push(item);
-    }
-    manager.set_queue(ModelRc::new(new_vec));
 }
 
 // Helper function: set notification hover state (use global HashMap, avoid triggering UI re-render)
@@ -500,10 +520,22 @@ fn start_auto_close_timer(
     duration: Duration,
     shared_queue: Option<Arc<RwLock<SharedQueue>>>,
 ) {
+    let generation = NOTIFICATION_TIMER_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+    AUTO_CLOSE_GENERATIONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(notification_id, generation);
     let ui_weak_clone = ui_weak.clone();
-    let shared_queue_clone = shared_queue.clone();
 
     Timer::single_shot(duration, move || {
+        let current = AUTO_CLOSE_GENERATIONS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&notification_id)
+            .copied();
+        if current != Some(generation) {
+            return;
+        }
         if let Some(ui) = ui_weak_clone.upgrade() {
             let manager = NotificationManager::get(&ui);
 
@@ -514,16 +546,11 @@ fn start_auto_close_timer(
 
             // Check if notification is in hover state
             if is_notification_hovered(&manager, notification_id) {
-                // If hovered, continue waiting (check every 200ms)
-                start_auto_close_timer(
-                    ui_weak,
-                    notification_id,
-                    Duration::from_millis(200),
-                    shared_queue_clone,
-                );
+                // Hover exit starts a fresh full-duration generation. Do not
+                // build a polling timer chain while the pointer is stationary.
             } else {
                 // Not hovered, remove notification
-                remove_notification_by_id(&manager, notification_id, &shared_queue_clone);
+                remove_notification_by_id(&manager, notification_id, &shared_queue);
             }
         }
     });
@@ -807,25 +834,20 @@ pub fn setup_notifications(
     manager.on_remove(move |index| {
         if let Some(ui) = ui_weak_remove.upgrade() {
             let manager = NotificationManager::get(&ui);
-            // First collect all data into a Vec, avoid holding queue_model borrow
-            let mut items = Vec::new();
-            {
-                let queue_model: ModelRc<Notification> = manager.get_queue();
-                let row_count = queue_model.row_count();
-                for i in 0..row_count {
-                    if i != index as usize
-                        && let Some(item) = queue_model.row_data(i)
-                    {
-                        items.push(item);
+            let model = banner_queue_model(&manager);
+            if index >= 0 && (index as usize) < model.row_count() {
+                if let Some(item) = model.row_data(index as usize) {
+                    if let Ok(mut state) = HOVER_STATE.write() {
+                        state.remove(&item.id);
                     }
+                    AUTO_CLOSE_GENERATIONS
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .remove(&item.id);
                 }
-            } // queue_model is dropped here, releasing all borrows
-            // Create new VecModel
-            let new_vec = VecModel::default();
-            for item in items {
-                new_vec.push(item);
+                model.remove(index as usize);
+                sync_banner_message_ids(&model);
             }
-            manager.set_queue(ModelRc::new(new_vec));
 
             // Optional: sync shared queue
             if let Some(queue) = &shared_queue_clone
@@ -867,11 +889,11 @@ pub fn setup_notifications(
             // First mark as dismissed (triggers UI animation)
             dismiss_notification_by_id(&manager, id, &shared_queue);
 
-            // After animation delay, remove from queue to update count
-            // Animation duration is typically around 200-300ms, use 350ms to be safe
+            // Keep the row mounted for the declared Slint height animation,
+            // then remove it from the queue.
             let ui_weak_for_remove = ui_weak.clone();
             let shared_queue_for_remove = shared_queue.clone();
-            Timer::single_shot(Duration::from_millis(350), move || {
+            Timer::single_shot(DISMISS_ANIMATION_DURATION, move || {
                 if let Some(ui) = ui_weak_for_remove.upgrade() {
                     let manager = NotificationManager::get(&ui);
                     remove_notification_by_id(&manager, id, &shared_queue_for_remove);
@@ -1036,7 +1058,7 @@ pub fn setup_notifications(
             // After animation delay, remove from queue to update count
             let ui_weak_for_remove = ui_weak_action.clone();
             let shared_queue_for_remove = shared_queue_clone.clone();
-            Timer::single_shot(Duration::from_millis(350), move || {
+            Timer::single_shot(DISMISS_ANIMATION_DURATION, move || {
                 if let Some(ui) = ui_weak_for_remove.upgrade() {
                     let manager = NotificationManager::get(&ui);
                     remove_notification_by_id(&manager, notification_id, &shared_queue_for_remove);
@@ -1051,9 +1073,14 @@ pub fn setup_notifications(
     let ui_weak_sync = ui.as_weak();
     let subscription = message_center.subscribe(Arc::new(move |snapshot| {
         let ui_weak = ui_weak_sync.clone();
+        let mounted = BANNER_MESSAGE_IDS
+            .read()
+            .map(|ids| ids.clone())
+            .unwrap_or_default();
         let alive = snapshot
             .messages
             .iter()
+            .filter(|message| mounted.contains(message.id.as_str()))
             .map(|message| message.id.clone())
             .collect::<HashSet<_>>();
         if let Err(error) = slint::invoke_from_event_loop(move || {

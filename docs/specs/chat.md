@@ -166,6 +166,14 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     JSONL without that lock, then commits the in-memory message. A persistence
     failure must not advance the message ID or send the network request; the UI
     restores the user's draft and exposes a retryable error.
+38. Older-page loading prepares an immutable store request while holding the
+    session lock, reads JSONL after releasing that lock, then reacquires it only
+    to validate the oldest message ID and commit the page. A stale page cannot
+    replace a newer prepend.
+39. AI and RAG keep separate composer drafts. Switching mode preserves the
+    current text and restores the destination mode's text. If user-message
+    persistence fails after a mode switch, the original text is restored to the
+    originating mode and the failure remains visible.
 
 1. Chat 历史继续使用 JSONL；缺少 `status` 字段的旧记录按普通消息兼容读取。
 2. 应用生成的错误/成功状态与正文分开保存，并使用矢量图标展示；禁止重新加入会触发彩色字体回退的固定 Emoji 前缀。
@@ -266,6 +274,10 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     消息长度，禁止记录消息正文。
 37. 发送消息时只在 Session 锁内准备下一条记录，释放锁后追加 JSONL，再回锁提交内存状态。
     持久化失败不得推进消息 ID 或发起网络请求；UI 必须恢复用户草稿并显示可重试错误。
+38. 加载更早分页时，只在 Session 锁内准备不可变 Store 请求；释放锁后读取 JSONL，
+    再回锁校验最早消息 ID 并提交。过期分页不得覆盖更新的 prepend 结果。
+39. AI 与 RAG 分别保存 composer 草稿。切换模式时保存当前文字并恢复目标模式文字；
+    若用户消息持久化失败时已经切换模式，原文字仍恢复到发起模式且失败提示保持可见。
 
 ## Regression checklist / 回归检查
 
@@ -283,6 +295,9 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 - While a request or history page is loading, leave Chat and verify the response persists without recreating the Chat component/model; re-enter and verify the completed content appears.
 - Switch AI Chat -> RAG while each mode has an in-flight request; verify responses,
   loading states, pagination, and persisted histories remain isolated.
+- Type distinct unsent drafts in AI and RAG and switch repeatedly; verify both
+  survive. Fail user-message persistence, switch mode before completion, then
+  return and verify the originating draft is restored with visible feedback.
 - Resize the window on a non-Chat route with existing Chat history and verify Chat delegates/text layout do not appear in the resize profile.
 - Resize repeatedly on Chat and verify the model-commit and Markdown-projection
   counters remain unchanged throughout width-only interaction.

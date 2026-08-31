@@ -2,14 +2,15 @@
 
 use std::sync::{Arc, Mutex};
 
+use anyhow::{Context, Result};
 use chrono::Local;
 use slint::{ComponentFactory, ComponentHandle, Global, Model, ModelRc, VecModel};
 use usher_messages::{
     AppState as MessagesAppState, GitHubMessagesPage, MessageCenter, MessageLevel, MessageListItem,
-    MessageSeverity, MessageSnapshot, Subscription,
+    MessageSeverity, MessageSnapshot, NotifyRustDesktopNotifier, Subscription,
 };
 
-use crate::{AppState, MainWindow};
+use crate::{AppState, MainWindow, app_paths, app_runtime, startup};
 
 #[derive(Clone)]
 pub(crate) struct MessagePageBridge {
@@ -19,6 +20,39 @@ pub(crate) struct MessagePageBridge {
 }
 
 impl MessagePageBridge {
+    pub(crate) fn open_deferred(
+        timeline: &startup::StartupTimeline,
+    ) -> Result<(MessageCenter, Self)> {
+        let center = if let Some(path) = app_paths::message_store_path() {
+            MessageCenter::open_deferred_with(path, Arc::new(NotifyRustDesktopNotifier))
+        } else {
+            MessageCenter::open_default_deferred()
+        }
+        .context("Failed to initialize message center")?;
+        timeline.checkpoint("message_center_ready");
+
+        let center_for_hydration = center.clone();
+        let timeline_for_messages = timeline.clone();
+        startup::run_after_first_frame(move || {
+            app_runtime::shared_runtime().spawn(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    center_for_hydration.hydrate_from_storage()
+                })
+                .await;
+                match result {
+                    Ok(Ok(count)) => {
+                        log::info!("[Messages] Deferred hydration loaded {count} messages");
+                        timeline_for_messages.checkpoint("messages_hydrated");
+                    }
+                    Ok(Err(error)) => log::error!("[Messages] Deferred hydration failed: {error}"),
+                    Err(error) => log::error!("[Messages] Hydration worker failed: {error}"),
+                }
+            });
+        });
+
+        Ok((center.clone(), Self::new(center)))
+    }
+
     pub(crate) fn new(center: MessageCenter) -> Self {
         Self {
             center,

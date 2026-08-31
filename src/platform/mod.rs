@@ -39,19 +39,22 @@ pub use macos::is_window_interacting;
 
 #[cfg(target_os = "macos")]
 pub(crate) use macos::{
-    detect_system_dark_mode, follow_system_appearance, install_artifact_preview_live_resize,
-    install_artifact_preview_titlebar_actions, install_memory_benchmark_window_control,
-    install_shortcut_input_bridge, install_titlebar_settings_button, play_ui_click,
-    prepare_startup_reveal, set_app_appearance, set_startup_presentation_hidden,
-    set_title_bar_color, setup_pr_review_fonts, startup_native_chrome_ready,
-    update_titlebar_navigation_controls,
+    activate_main_window, detect_system_dark_mode, follow_system_appearance,
+    install_artifact_preview_live_resize, install_artifact_preview_titlebar_actions,
+    install_memory_benchmark_window_control, install_shortcut_input_bridge,
+    install_titlebar_settings_button, play_ui_click, prepare_startup_reveal, set_app_appearance,
+    set_startup_presentation_hidden, set_title_bar_color, setup_pr_review_fonts,
+    startup_native_chrome_ready, update_titlebar_navigation_controls,
 };
 
 #[cfg(target_os = "windows")]
-pub(crate) use windows::{detect_system_dark_mode, play_ui_click};
+pub(crate) use windows::{detect_system_dark_mode, play_ui_click, show_startup_error};
 
 #[cfg(target_os = "linux")]
-pub(crate) use linux::{detect_system_dark_mode, play_ui_click};
+pub(crate) use linux::{detect_system_dark_mode, play_ui_click, show_startup_error};
+
+#[cfg(target_os = "macos")]
+pub(crate) use macos::show_startup_error;
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub(crate) fn detect_system_dark_mode() -> bool {
@@ -102,6 +105,14 @@ pub(crate) fn install_shortcut_input_bridge(_window: &MainWindow) -> bool {
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn update_titlebar_navigation_controls(_window: &MainWindow) {}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn activate_main_window(_window: &MainWindow) {}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+pub(crate) fn show_startup_error(message: &str) {
+    eprintln!("Usher could not start: {message}");
+}
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub(crate) fn play_ui_click() {

@@ -62,10 +62,12 @@ reqwest client，也没有发现 `src/app_runtime.rs` 外创建 Tokio runtime。
 唯一创建位置。PR CI 执行该脚本。预算触发时应优先拆出已有独立变化原因；确需增长时，
 必须在同一改动中说明所有权并更新本审计基线，不能静默抬高数字。
 
-本轮 P3 已完成共享 Provider JSON helper 与对象安全 Provider adapter、PR Review 六类
+本轮 P3 已完成共享 Provider JSON helper 与对象安全 Provider adapter；其 PR Review 六类
 state-store generation、AI Review enabled/disabled 公共 contract、生成体积工具的
 `@ai-review` 注册，以及任务驱逐后的 session 文件清理。独立 PR Review 生成 crate、
 完整 objc2 迁移和剩余传递依赖去重仍是独立高风险阶段，必须分别建立回归护栏后推进。
+P4-A 随后把远端 action-state 读取与 mutation 拆分，使 PR Review 当前使用七类独立
+generation，避免只读刷新作废已提交的远端写操作。
 
 ## 2026-07 已完成的结构调整（历史基线）
 

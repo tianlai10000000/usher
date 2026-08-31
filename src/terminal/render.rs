@@ -411,3 +411,52 @@ fn cube_component(value: u8) -> u8 {
         _ => 55 + value * 40,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TerminalRenderState;
+
+    #[test]
+    fn renders_styled_and_wide_cells_without_trailing_blank_spans() {
+        let mut state = TerminalRenderState::new(2, 24, 16);
+        state.process_with_replies(b"plain \x1b[31;1mred\x1b[0m");
+        state.process_with_replies("界".as_bytes());
+
+        let mut lines = Vec::new();
+        state.rendered_lines_into(&mut lines);
+        let first = &lines[0].spans;
+
+        assert_eq!(
+            first
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "plain red界"
+        );
+        assert_eq!(first.iter().map(|span| span.cells).sum::<i32>(), 11);
+        assert!(first.iter().any(|span| span.text == "red" && span.bold));
+        assert!(lines[1].spans.is_empty());
+    }
+
+    #[test]
+    fn responds_to_terminal_capability_queries_at_the_current_cursor() {
+        let mut state = TerminalRenderState::new(4, 20, 8);
+        let replies = state.process_with_replies(b"abc\x1b[6n\x1b[c");
+
+        assert_eq!(replies, [b"\x1b[1;4R".to_vec(), b"\x1b[?1;2c".to_vec()]);
+        assert_eq!(state.rendered_text().lines().next(), Some("abc"));
+    }
+
+    #[test]
+    fn detects_clear_scrollback_only_for_the_complete_escape() {
+        assert!(TerminalRenderState::contains_clear_scrollback_escape(
+            b"before\x1b[3Jafter"
+        ));
+        assert!(!TerminalRenderState::contains_clear_scrollback_escape(
+            b"before\x1b[2Jafter"
+        ));
+        assert!(!TerminalRenderState::contains_clear_scrollback_escape(
+            b"\x1b[3"
+        ));
+    }
+}

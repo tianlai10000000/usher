@@ -1,8 +1,7 @@
 //! GitLab repository operations.
 
-use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures_util::{StreamExt, stream};
 use reqwest::header::{ACCEPT, HeaderMap};
@@ -15,12 +14,13 @@ use crate::http::{self, RequestOptions};
 use super::json::{
     fallback_total, header_u32, nested_string, string_field, value_to_id, value_u32,
 };
+use super::prefix_cache::PrefixCache;
 use super::{
     PageCollector, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
     PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters, PullRequestItem,
     PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
-    PullRequestReviewAction, PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType,
-    commit_count_from_detail, configured_api_base_url, configured_token,
+    PullRequestRevertResult, PullRequestReviewAction, PullRequestReviewStatus, PullRequestState,
+    RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url, configured_token,
     conversation_body_to_plain_text, conversation_commit_batch_items,
     conversation_commit_batch_items_for_actor, conversation_count_from_detail,
     conversation_merged_item, finalize_conversation_timeline, is_configured_enterprise_host,
@@ -54,58 +54,11 @@ struct PrefixCacheEntry {
     total: u32,
     total_exact: bool,
     exhausted: bool,
-    updated_at: Instant,
 }
 
-#[derive(Default)]
-struct PrefixCache {
-    entries: HashMap<PrefixCacheKey, PrefixCacheEntry>,
-    order: VecDeque<PrefixCacheKey>,
-}
-
-impl PrefixCache {
-    fn get(&mut self, key: &PrefixCacheKey, now: Instant) -> Option<PrefixCacheEntry> {
-        let entry = self.entries.get(key)?.clone();
-        if now.duration_since(entry.updated_at) > PREFIX_CACHE_TTL {
-            self.entries.remove(key);
-            self.order.retain(|candidate| candidate != key);
-            return None;
-        }
-        self.order.retain(|candidate| candidate != key);
-        self.order.push_back(key.clone());
-        Some(entry)
-    }
-
-    fn insert(&mut self, key: PrefixCacheKey, entry: PrefixCacheEntry) {
-        self.order.retain(|candidate| candidate != &key);
-        self.entries.remove(&key);
-        while self.entries.len() >= PREFIX_CACHE_CAPACITY {
-            let Some(oldest) = self.order.pop_front() else {
-                self.entries.clear();
-                break;
-            };
-            self.entries.remove(&oldest);
-        }
-        self.order.push_back(key.clone());
-        self.entries.insert(key, entry);
-    }
-
-    fn remove(&mut self, key: &PrefixCacheKey) {
-        self.entries.remove(key);
-        self.order.retain(|candidate| candidate != key);
-    }
-
-    fn invalidate_project(&mut self, api_base_url: &str, project_id: &str) {
-        self.entries
-            .retain(|key, _| key.api_base_url != api_base_url || key.project_id != project_id);
-        self.order
-            .retain(|key| key.api_base_url != api_base_url || key.project_id != project_id);
-    }
-}
-
-fn prefix_cache() -> &'static Mutex<PrefixCache> {
-    static CACHE: OnceLock<Mutex<PrefixCache>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(PrefixCache::default()))
+fn prefix_cache() -> &'static Mutex<PrefixCache<PrefixCacheKey, PrefixCacheEntry>> {
+    static CACHE: OnceLock<Mutex<PrefixCache<PrefixCacheKey, PrefixCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(PrefixCache::new(PREFIX_CACHE_CAPACITY, PREFIX_CACHE_TTL)))
 }
 
 fn prefix_cache_key(
@@ -128,10 +81,12 @@ fn prefix_cache_key(
 }
 
 fn invalidate_prefix_cache(locator: &RepoLocator, repo_project_id: &str) {
+    let api_base_url = api_base_url(locator);
+    let project_id = repo_project_id.trim();
     prefix_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .invalidate_project(api_base_url(locator).as_str(), repo_project_id.trim());
+        .invalidate_where(|key| key.api_base_url == api_base_url && key.project_id == project_id);
 }
 
 pub(super) async fn get_repo_detail(locator: &RepoLocator) -> Result<String, String> {
@@ -353,27 +308,38 @@ async fn load_gitlab_state_prefix(
             cache.remove(&key);
             None
         } else {
-            cache.get(&key, Instant::now())
+            cache.get(&key)
         }
     };
-    let mut entry = cached.unwrap_or_else(|| PrefixCacheEntry {
-        items: Vec::new(),
-        total: 0,
-        total_exact: false,
-        exhausted: false,
-        updated_at: Instant::now(),
-    });
-    if entry.items.len() >= prefix_len as usize || entry.exhausted {
-        entry.items.truncate(prefix_len as usize);
-        return Ok((entry.items, entry.total, entry.total_exact));
+    if let Some(entry) = cached.as_ref()
+        && (entry.items.len() >= prefix_len as usize || entry.exhausted)
+    {
+        return Ok((
+            entry
+                .items
+                .iter()
+                .take(prefix_len as usize)
+                .cloned()
+                .collect(),
+            entry.total,
+            entry.total_exact,
+        ));
     }
 
+    let mut entry = cached
+        .as_deref()
+        .cloned()
+        .unwrap_or_else(|| PrefixCacheEntry {
+            items: Vec::new(),
+            total: 0,
+            total_exact: false,
+            exhausted: false,
+        });
     let first_missing_page = (entry.items.len() as u32)
         .div_ceil(page_size)
         .saturating_add(1);
-    let page_limit = prefix_len.div_ceil(page_size).max(1);
-
-    for page in first_missing_page..=page_limit {
+    let mut page = first_missing_page;
+    while entry.items.len() < prefix_len as usize && !entry.exhausted {
         let result = get_gitlab_pull_request_server_page(
             locator,
             repo_project_id,
@@ -392,16 +358,18 @@ async fn load_gitlab_state_prefix(
         merge_gitlab_prefix_items(&mut entry.items, result.items);
         if batch_len < page_size as usize {
             entry.exhausted = true;
-            break;
         }
+        let Some(next_page) = page.checked_add(1) else {
+            break;
+        };
+        page = next_page;
     }
-    entry.updated_at = Instant::now();
     prefix_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .insert(key, entry.clone());
-    entry.items.truncate(prefix_len as usize);
-    Ok((entry.items, entry.total, entry.total_exact))
+    let items = entry.items.into_iter().take(prefix_len as usize).collect();
+    Ok((items, entry.total, entry.total_exact))
 }
 
 fn merge_gitlab_prefix_items(existing: &mut Vec<PullRequestItem>, incoming: Vec<PullRequestItem>) {
@@ -841,6 +809,14 @@ pub(super) async fn merge_pull_request(
     Ok(())
 }
 
+pub(super) async fn revert_pull_request(
+    _locator: &RepoLocator,
+    _repo_project_id: &str,
+    _pull_request_iid: &str,
+) -> Result<PullRequestRevertResult, String> {
+    Err("GitLab does not expose the server-side revert contract used by Usher.".to_string())
+}
+
 pub(super) async fn get_pull_request_conversation(
     locator: &RepoLocator,
     repo_project_id: &str,
@@ -1147,7 +1123,11 @@ fn commit_sha_references(body: &str) -> Vec<String> {
     let mut references = Vec::new();
     let mut candidate = String::new();
     let flush = |candidate: &mut String, references: &mut Vec<String>| {
-        if (7..=40).contains(&candidate.len()) {
+        if (7..=40).contains(&candidate.len())
+            && candidate
+                .bytes()
+                .any(|byte| matches!(byte.to_ascii_lowercase(), b'a'..=b'f'))
+        {
             references.push(candidate.to_ascii_lowercase());
         }
         candidate.clear();
@@ -1735,12 +1715,22 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        PREFIX_CACHE_CAPACITY, PREFIX_CACHE_TTL, PrefixCache, PrefixCacheEntry, PrefixCacheKey,
-        gitlab_action_state, gitlab_approval_review_status, gitlab_approval_summaries,
-        gitlab_commit_batch_activity, gitlab_list_review_status, gitlab_list_sort,
-        gitlab_merge_actor, gitlab_merge_methods, gitlab_merge_payload, gitlab_merge_readiness,
-        is_gitlab_review_system_note, merge_gitlab_prefix_items, sort_gitlab_items,
+        PREFIX_CACHE_CAPACITY, PREFIX_CACHE_TTL, PrefixCacheEntry, PrefixCacheKey,
+        commit_sha_references, gitlab_action_state, gitlab_approval_review_status,
+        gitlab_approval_summaries, gitlab_commit_batch_activity, gitlab_list_review_status,
+        gitlab_list_sort, gitlab_merge_actor, gitlab_merge_methods, gitlab_merge_payload,
+        gitlab_merge_readiness, is_gitlab_review_system_note, merge_gitlab_prefix_items,
+        sort_gitlab_items,
     };
+    use crate::git::prefix_cache::PrefixCache;
+
+    #[test]
+    fn commit_sha_references_reject_pure_numeric_ids_and_timestamps() {
+        assert_eq!(
+            commit_sha_references("added abc1234 and 0123456789 at 20260830010101"),
+            vec!["abc1234"]
+        );
+    }
     use crate::git::{
         PullRequestCommit, PullRequestItem, PullRequestMergeMethod, PullRequestReadinessKind,
         PullRequestReviewStatus,
@@ -1790,33 +1780,33 @@ mod tests {
         }
     }
 
-    fn prefix_entry(updated_at: Instant) -> PrefixCacheEntry {
+    fn prefix_entry() -> PrefixCacheEntry {
         PrefixCacheEntry {
             items: Vec::new(),
             total: 0,
             total_exact: true,
             exhausted: false,
-            updated_at,
         }
     }
 
     #[test]
     fn gitlab_prefix_cache_is_bounded_and_refreshes_existing_keys() {
         let now = Instant::now();
-        let mut cache = PrefixCache::default();
+        let mut cache = PrefixCache::new(PREFIX_CACHE_CAPACITY, PREFIX_CACHE_TTL);
         for index in 0..=PREFIX_CACHE_CAPACITY {
-            cache.insert(
+            cache.insert_at(
                 prefix_key(format!("project-{index}").as_str()),
-                prefix_entry(now),
+                prefix_entry(),
+                now,
             );
         }
-        assert_eq!(cache.entries.len(), PREFIX_CACHE_CAPACITY);
-        assert!(!cache.entries.contains_key(&prefix_key("project-0")));
+        assert_eq!(cache.len(), PREFIX_CACHE_CAPACITY);
+        assert!(!cache.contains_key(&prefix_key("project-0")));
 
         let newest = prefix_key(format!("project-{PREFIX_CACHE_CAPACITY}").as_str());
-        cache.insert(newest.clone(), prefix_entry(now));
-        assert_eq!(cache.entries.len(), PREFIX_CACHE_CAPACITY);
-        assert_eq!(cache.order.back(), Some(&newest));
+        cache.insert_at(newest.clone(), prefix_entry(), now);
+        assert_eq!(cache.len(), PREFIX_CACHE_CAPACITY);
+        assert_eq!(cache.newest_key(), Some(&newest));
     }
 
     #[test]
@@ -1843,21 +1833,50 @@ mod tests {
     }
 
     #[test]
+    fn deduplicated_prefix_stays_incomplete_until_unique_target_is_reached() {
+        let mut items = vec![
+            list_item("4", "2026-01-04", "old"),
+            list_item("3", "2026-01-03", "old"),
+        ];
+        merge_gitlab_prefix_items(
+            &mut items,
+            vec![
+                list_item("3", "2026-01-03", "new"),
+                list_item("2", "2026-01-02", "new"),
+            ],
+        );
+
+        assert_eq!(items.len(), 3);
+        assert!(items.len() < 4);
+    }
+
+    #[test]
     fn gitlab_prefix_cache_expires_and_invalidates_one_project() {
         let now = Instant::now();
-        let mut cache = PrefixCache::default();
+        let mut cache = PrefixCache::new(PREFIX_CACHE_CAPACITY, PREFIX_CACHE_TTL);
         let expired = prefix_key("expired");
-        cache.insert(
+        cache.insert_at(
             expired.clone(),
-            prefix_entry(now - PREFIX_CACHE_TTL - Duration::from_secs(1)),
+            prefix_entry(),
+            now - PREFIX_CACHE_TTL - Duration::from_secs(1),
         );
-        assert!(cache.get(&expired, now).is_none());
+        assert!(cache.get_at(&expired, now).is_none());
 
-        cache.insert(prefix_key("one"), prefix_entry(now));
-        cache.insert(prefix_key("two"), prefix_entry(now));
-        cache.invalidate_project("https://gitlab.example/api/v4", "one");
-        assert!(!cache.entries.contains_key(&prefix_key("one")));
-        assert!(cache.entries.contains_key(&prefix_key("two")));
+        let stable_timestamp = now - PREFIX_CACHE_TTL + Duration::from_secs(1);
+        let stable = prefix_key("stable");
+        cache.insert_at(stable.clone(), prefix_entry(), stable_timestamp);
+        assert!(cache.get_at(&stable, now).is_some());
+        assert!(
+            cache
+                .get_at(&stable, now + Duration::from_secs(2))
+                .is_none()
+        );
+
+        cache.insert_at(prefix_key("one"), prefix_entry(), now);
+        cache.insert_at(prefix_key("two"), prefix_entry(), now);
+        cache.invalidate_where(|key| key.project_id == "one");
+        assert!(!cache.contains_key(&prefix_key("one")));
+        assert!(cache.contains_key(&prefix_key("two")));
     }
 
     #[test]

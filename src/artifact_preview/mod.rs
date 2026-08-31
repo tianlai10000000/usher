@@ -1163,7 +1163,7 @@ fn switch_mode(ui: &MainWindow, mode: PresentationMode) {
     });
 }
 
-#[cfg(feature = "ai-code-review")]
+#[cfg(all(feature = "ai-code-review", any(test, feature = "test-fixtures")))]
 pub(crate) fn set_memory_benchmark_presentation_mode(ui: &MainWindow, detached: bool) {
     if !crate::memory_diagnostics::diagnostics_enabled() {
         return;

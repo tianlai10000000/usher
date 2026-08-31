@@ -1,17 +1,18 @@
 //! Project logo ownership boundary.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
 use slint::ComponentHandle;
 
 use crate::MainWindow;
 use crate::http::{self, RequestOptions};
+
+use super::state::ProjectStateFacade;
 
 const PROJECT_LOGO_RASTER_MAX_SIDE: u32 = 128;
 
@@ -276,9 +277,12 @@ pub(super) fn find_cached_remote_logo_path(url: &str) -> Option<PathBuf> {
 }
 
 pub(super) async fn download_remote_logo_to_cache(url: &str) -> Option<PathBuf> {
-    let response = http::send(http::get(url), RequestOptions::new("Download project logo"))
-        .await
-        .ok()?;
+    let response = http::send(
+        http::get(url),
+        RequestOptions::new("Download project logo").no_retry(),
+    )
+    .await
+    .ok()?;
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -296,11 +300,7 @@ pub(super) async fn download_remote_logo_to_cache(url: &str) -> Option<PathBuf> 
     Some(cache_path)
 }
 
-pub(super) fn refresh_logo_preview(
-    ui: &MainWindow,
-    pending_remote_logos: &Arc<Mutex<HashSet<String>>>,
-    logo: &str,
-) {
+pub(super) fn refresh_logo_preview(ui: &MainWindow, state: &ProjectStateFacade, logo: &str) {
     let trimmed = logo.trim();
     let normalized = normalize_project_logo(logo);
     ui.set_project_logo_preview_status(preview_logo_status(trimmed).into());
@@ -316,23 +316,17 @@ pub(super) fn refresh_logo_preview(
         return;
     }
 
-    let mut should_spawn = false;
-    if let Ok(mut guard) = pending_remote_logos.lock() {
-        should_spawn = guard.insert(normalized.clone());
-    }
-    if !should_spawn {
+    if !state.begin_remote_logo(normalized.clone()) {
         return;
     }
 
     let ui_weak = ui.as_weak();
-    let pending_task = pending_remote_logos.clone();
+    let state = state.clone();
     crate::app_runtime::shared_runtime().spawn(async move {
         let downloaded = download_remote_logo_to_cache(normalized.as_str())
             .await
             .is_some();
-        if let Ok(mut guard) = pending_task.lock() {
-            guard.remove(normalized.as_str());
-        }
+        state.finish_remote_logo(normalized.clone());
         if !downloaded {
             return;
         }

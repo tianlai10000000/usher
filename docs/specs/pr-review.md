@@ -35,7 +35,7 @@ The current product supports the following workflow:
    Activity ordering parses RFC3339 offsets and compares normalized instants. Blocks with missing or invalid timestamps remain stable and sort after timestamped activity; an empty review-summary time inherits its paired review row's time. Provider file pagination is bounded, and a full final page sets `files_truncated`; Files changed must show an explicit incomplete-diff banner instead of silently presenting the partial list as complete.
 4. The Files changed toolbar can open a GitHub-style commit selector and switch between the complete PR diff and a contiguous commit range. The selector reuses the newest→oldest Commits model; the controller maps selected display indices back onto the provider-neutral oldest→newest list before range selection. Provider adapters normalize commit collections from oldest to newest for that math. Selecting the chronologically first PR commit uses the PR base SHA; any later starting commit uses the preceding PR commit as the comparison base, so the first selected commit remains included. A single-commit selection adds one compact summary row to the Files changed toolbar with its title, previous/next commit navigation, author/time, short SHA, and full-SHA copy action. The summary starts exactly at the file-tree right divider, keeps its title left-aligned in the Diff region, and must not consume vertical diff space; the intentionally omitted Browse files action must not be added. Previously loaded ranges are cached for the active PR. The selected file toolbar can copy the file path, toggle between expanding all hidden lines and collapsing non-diff lines, or switch between the diff and the complete immutable file source. Expanding all lines reconstructs through source EOF, including trailing source after the final diff hunk. Hidden diff context can also be expanded in bounded 20-line increments. The in-diff Ctrl/Cmd+F search must recompute after every replacement of the selected file's line model, including same-file context expansion, without turning that content refresh into a viewport reset.
 5. `Review changes` opens one GitHub-style dialog for Comment, Approve, or Request changes. The selected provider capability controls which choices are enabled, and submission writes to the remote provider. Conversation follows GitHub's per-review dismissal interaction: an eligible `review_summary` row has a trailing kebab whose `Dismiss review` action opens a required-reason dialog; the aggregate header `Approved` state remains status-only. The open kebab uses Primer's selected trigger state, and a click on non-interactive timeline content closes its ActionMenu. GitHub exposes the action for active approved/request-changes reviews when repository permissions include admin, maintain, or push and dismisses the selected review id. GitLab and Gitee Enterprise expose it only on the authenticated user's own active review; GitLab writes the reason as an MR note before unapproving. Gitee Enterprise first posts `{"state":"initialized"}` to `/api/code/api/{full_path}/-/pull_requests/{iid}/reviews`, silently falls back to the documented v8 reviews route with the same payload, and adds the required reason as a best-effort MR note after a successful withdrawal. Gitee public v5 exposes no dismissal action. Every PR dialog surface is horizontally and vertically centered against the complete application window, independent of the docked sidebar width; its backdrop is continuous across the sidebar boundary and through the macOS native-title-bar inset without a one-pixel seam. AppKit's close/minimize/zoom traffic lights remain clickable above it, while the application-owned sidebar/back/forward title-bar accessories are shielded from hover, Tooltip, and click input. The Conversation tab also has a GitHub-style plain-text comment composer at the bottom (`Write` + green `Comment`). GitHub Conversation comments post as issue comments so they remain available on open, closed, and merged PRs; Approve and Request changes stay open-PR only. Gitee Conversation Comment continues to use the provider note/comment endpoint with the same open/closed/merged availability when a token is configured.
-6. Review submission never merges automatically. After a successful review the controller refreshes remote action state; only a server-reported mergeable PR enables `Merge pull request`, whose confirmation dialog offers only provider/repository-supported methods and optional source-branch deletion. Review/approval read failures are fail-closed: all write capabilities, especially Merge, stay disabled and readiness is shown as unavailable. A successful review or merge invalidates the cached Conversation timeline and reloads it immediately when Conversation is the active tab, so remote review and merged activity are visible without switching tabs. Manual Reload and ignore-whitespace changes invalidate every diff/highlight/expand/action/Conversation/Commits request generation, bypass the diff cache, clear lazy tab models, and reload the active tab. Ordinary remote branch updates do not start page-resident polling. Leaving PR detail clears its detail, Conversation, Commits, diff, and commit-range state; reopening the PR from the list performs fresh provider reads so new batches, commits, and file changes appear. A successful merge also invalidates the retained PR list; returning to the list reloads page one of the active state/filter and its state totals, so the merged request is absent from Open.
+6. Review submission never merges automatically. After a successful review the controller refreshes remote action state; only a server-reported mergeable PR enables `Merge pull request`, whose confirmation dialog offers only provider/repository-supported methods and optional source-branch deletion. Review/approval read failures are fail-closed: all write capabilities, especially Merge, stay disabled and readiness is shown as unavailable. A successful review or merge invalidates the cached Conversation timeline and reloads it immediately when Conversation is the active tab, so remote review and merged activity are visible without switching tabs. Manual Reload and ignore-whitespace changes invalidate all seven diff/highlight/expand/action-state/mutation/Conversation/Commits request generations, bypass the diff cache, clear lazy tab models, and reload the active tab. Ordinary remote branch updates do not start page-resident polling. Leaving PR detail clears its detail, Conversation, Commits, diff, and commit-range state; reopening the PR from the list performs fresh provider reads so new batches, commits, and file changes appear. A successful merge also invalidates the retained PR list; returning to the list reloads page one of the active state/filter and its state totals, so the merged request is absent from Open.
 7. A merged or closed PR hides header Review and Merge controls. The Conversation composer stays enabled when provider credentials are configured, matching GitHub's timeline comment box. When the adapter reports a safe server-side revert capability on a merged request, the header exposes a visible secondary revert button and a provider-specific confirmation. GitHub creates a separate revert PR. Gitee Enterprise writes a revert commit directly to the target branch only when the PR has a merge/squash commit and `GET /projects/:id/repository/commits/:sha/refs` reports both `merge_commit_by_pr=true` and `can_revert=true`; rebase and fast-forward merges remain unavailable. Public Gitee and GitLab do not expose this command.
 8. AI Code Review is an optional task action, not a fourth PR tab or a standalone route. The PR list starts a background task without navigating. A completed task opens PR detail on Files changed and mounts a right-side Primer panel while the file tree/diff remains visible on the left. Findings reveal their changed file/line; review-scoped questions and Review again remain in the panel. See [AI Code Review](ai-code-review.md).
 
@@ -50,7 +50,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
    活动排序必须解析 RFC3339 时区偏移并按归一化时刻比较。时间缺失或无效的 block 保持稳定顺序并排在有效时间活动之后；`review_summary` 时间为空时继承其配对 review 行的时间。Provider 文件分页有明确上限，最后一页仍满时设置 `files_truncated`；Files changed 必须显示 diff 不完整横幅，不能把部分文件静默伪装成完整结果。
 4. Files changed 工具栏可打开 GitHub 风格的 commit 选择器，在完整 PR Diff 与连续 commit 范围之间切换。选择器复用 Commits 的从新到旧展示 model；控制器在计算范围前把选中的展示索引映射回 Provider-neutral 的从旧到新列表。Provider adapter 仍把 commit 集合归一为从旧到新以供该计算使用。范围从时间线上第一个 PR commit 开始时使用 PR base SHA；从后续 commit 开始时使用其前一个 PR commit 作为比较基准，因此不会漏掉首个选中 commit。单 commit 状态把标题、前后 commit 导航、作者/时间、短 SHA 和完整 SHA 复制操作压缩成一行；该行从文件树右侧分隔线的位置准确起始，标题在 Diff 区域内左对齐，不额外占用垂直空间；明确不加入 Browse files。已加载范围在当前 PR 内缓存。选中文件工具栏支持复制文件路径、在“展开全部隐藏行”和“收起非 diff 行”之间切换，以及在 diff 与固定提交的完整文件源码之间切换；“展开全部”必须重建到源文件 EOF，包括最后一个 diff hunk 之后的尾部源码。方向展开按 GitHub 登录后的新版 `/changes/{commit}` 行为每次补充 21 个主侧源码行。Diff 内 Ctrl/Cmd+F 搜索必须在选中文件的行 model 每次被替换后重新计算，包括同一文件内的上下文展开；该内容刷新不得被当作 viewport 重置。
 5. `Review changes` 使用一个 GitHub 风格弹窗承载 Comment、Approve、Request changes；Provider 能力决定选项是否可用，提交会写入远端。Conversation 严格采用 GitHub 的逐条评审撤回交互：符合条件的 `review_summary` 行尾显示 kebab，其中 `Dismiss review` 打开必填原因弹窗；页头聚合 `Approved` 只展示状态。kebab 展开时使用 Primer selected 触发器状态，点击时间线中的非交互内容必须关闭 ActionMenu。GitHub 在仓库权限包含 admin、maintain 或 push 时，为 active 的 approved/request-changes 评审开放此操作，并按选中的 review id 撤回。GitLab 与 Gitee 企业版只允许撤回当前 Token 用户本人的 active 评审；GitLab 先把原因写为 MR note 再 unapprove。Gitee 企业版先向 `/api/code/api/{full_path}/-/pull_requests/{iid}/reviews` 提交 `{"state":"initialized"}`，失败时以相同 payload 静默回退到文档规定的 v8 reviews 路由，撤回成功后再以 best-effort MR note 写入必填原因。Gitee 公有版 v5 不显示撤回操作。所有 PR 弹窗表面必须相对完整应用窗口水平、垂直居中，不受固定侧栏宽度影响；遮罩跨侧栏边界连续绘制并延伸覆盖 macOS 原生标题栏 inset，不得出现 1px 接缝。AppKit 的关闭/最小化/缩放交通灯保持在遮罩之上且可点击，应用自有的侧栏/后退/前进标题栏附件位于遮罩之下，遮罩显示期间不得响应 Hover、Tooltip 或点击。Conversation Tab 底部另有 GitHub 风格纯文本评论框（`Write` + 绿色 `Comment`）。GitHub Conversation 评论按 issue comment 写入，因此在 open、closed、merged 状态下仍可用；Approve / Request changes 仅对未关闭 PR 开放。Gitee Conversation Comment 继续走 note/comment 接口，在已配置 Token 时同样对 open/closed/merged 可用。
-6. 评审成功后不会自动合并。控制器会刷新远端 action state；只有服务端报告可合并时才启用 `Merge pull request`，确认弹窗只列出 Provider/仓库允许的策略，并可选择删除源分支。Review/approval 读取失败必须 fail-closed：所有写能力，尤其 Merge，保持禁用，并把 readiness 显示为不可用。Review 或 merge 成功后必须使 Conversation 时间线缓存失效；如果当前正处于 Conversation Tab，则立即重新加载，使远端 Review 与 merged 活动无需切换 Tab 即可出现。手动 Reload 和 ignore-whitespace 变更必须统一使 diff/highlight/expand/action/Conversation/Commits 六类请求代际失效，绕过 diff 缓存，清空惰性 Tab model，并重新加载当前 Tab。普通远端分支更新不启动页面驻留轮询；离开 PR 详情时清除 detail、Conversation、Commits、diff 和 commit-range 状态，从列表重新打开该 PR 时必须重新请求 Provider，以获取新批次、新 commit 和新文件改动。Merge 成功还必须使保留的 PR 列表失效；返回列表时重新加载当前状态/筛选的第一页及状态总数，确保已合并请求不再出现在 Open 列表中。
+6. 评审成功后不会自动合并。控制器会刷新远端 action state；只有服务端报告可合并时才启用 `Merge pull request`，确认弹窗只列出 Provider/仓库允许的策略，并可选择删除源分支。Review/approval 读取失败必须 fail-closed：所有写能力，尤其 Merge，保持禁用，并把 readiness 显示为不可用。Review 或 merge 成功后必须使 Conversation 时间线缓存失效；如果当前正处于 Conversation Tab，则立即重新加载，使远端 Review 与 merged 活动无需切换 Tab 即可出现。手动 Reload 和 ignore-whitespace 变更必须统一使 diff/highlight/expand/action-state/mutation/Conversation/Commits 七类请求代际失效，绕过 diff 缓存，清空惰性 Tab model，并重新加载当前 Tab。普通远端分支更新不启动页面驻留轮询；离开 PR 详情时清除 detail、Conversation、Commits、diff 和 commit-range 状态，从列表重新打开该 PR 时必须重新请求 Provider，以获取新批次、新 commit 和新文件改动。Merge 成功还必须使保留的 PR 列表失效；返回列表时重新加载当前状态/筛选的第一页及状态总数，确保已合并请求不再出现在 Open 列表中。
 7. PR 已合并或已关闭后隐藏页头 Review 与 Merge 控件。在已配置 Provider 凭据时，Conversation 评论框保持可用，与 GitHub 时间线评论行为一致。只有 adapter 报告安全的服务端回退能力时，已合并请求的页头才显示明确可见的次级回退按钮，并展示 Provider 专属确认说明。GitHub 创建独立的反向 PR；Gitee 企业版仅在 PR 存在 merge/squash commit，且 `GET /projects/:id/repository/commits/:sha/refs` 同时返回 `merge_commit_by_pr=true` 与 `can_revert=true` 时，直接向目标分支写入回退提交；rebase 和 fast-forward 合并保持不可用。Gitee 公有版与 GitLab 不开放该命令。
 8. AI Code Review 是可选任务操作，不新增第四个 PR Tab 或独立路由。从 PR 列表启动时后台执行且不跳转；打开完成任务时进入 PR 详情 Files changed，在左侧文件树/diff 仍可见的同时挂载右侧 Primer 面板。Finding 可揭示变更文件/行；Review 专属追问和 Review again 留在该面板。详见 [AI Code Review](ai-code-review.md)。
 
@@ -70,7 +70,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/git/model.rs`, `locator.rs`, and `diff.rs` own provider-neutral models, remote location, and unified-diff parsing. Provider modules own request/response handling; Gitee authentication/endpoints, decoding, Conversation/Commit normalization, readiness, and revert capability are isolated under `src/git/gitee/`.
 - `src/codereview/api/` owns provider endpoint URL templates only.
 - `ui/features/pr_review/` owns the stable page-package entry and public protocol. Default/release builds map `@pr-review` to the complete `ui/views/workflow/pr_review_workspace.slint` implementation; the explicit `dev-shell` build maps the whole package to a protocol-compatible empty implementation and makes the route unavailable. The complete implementation owns cross-region state, review layout, and user interaction. `ui/components/pr_review/shell.slint` owns public structs and shell controls; `content.slint` owns reusable file-tree and diff content controls. Routes and future entry points consume the package rather than own it.
-- `src/workflow/pr_list.rs` owns list-page selection, list request sequencing, pagination presentation, and UTC+08:00 timestamp formatting.
+- `src/workflow/pr_list.rs` owns list-page selection, pagination presentation, and UTC+08:00 timestamp formatting; `pr_list_state.rs` owns independent typed generations for Page and Totals requests.
 - `src/workflow/bindings.rs` supplies the selected project context, remote-URL copy, local-folder reveal via `src/platform/`, and the optional `fat`/`uat`/`prod` count refresh.
 - `src/ai_review/` owns optional AI task execution and result projection; PR list/detail only emit actions and consume task/result models.
 - `src/git/overview.rs` owns provider-neutral `fat`/`uat`/`prod` count aggregation; Provider selection, authentication, requests, and response normalization remain in the Git façade and adapters.
@@ -87,7 +87,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/git/model.rs`、`locator.rs`、`diff.rs` 分别负责 Provider-neutral 模型、remote 定位和 unified diff 解析。Provider 模块负责请求/响应；Gitee 的鉴权/endpoint、解码、Conversation/Commit 归一化、readiness 和 revert capability 分别隔离在 `src/git/gitee/` 下。
 - `src/codereview/api/` 只负责 Provider endpoint URL 模板。
 - `ui/features/pr_review/` 负责稳定的页面包入口和公开协议。默认/Release 构建把 `@pr-review` 映射到完整的 `ui/views/workflow/pr_review_workspace.slint` 实现；显式 `dev-shell` 构建把整个包映射到协议兼容的空实现，并让该路由不可用。完整实现负责跨区域状态、审核布局和交互；`ui/components/pr_review/shell.slint` 负责公开 struct 与外壳控件，`content.slint` 负责可复用文件树和 Diff 内容控件。路由及后续入口只消费该包，不拥有它。
-- `src/workflow/pr_list.rs` 负责列表页选择、列表请求序列、防止旧响应覆盖、分页展示和东八区时间格式化。
+- `src/workflow/pr_list.rs` 负责列表页选择、分页展示和东八区时间格式化；`pr_list_state.rs` 负责 Page 与 Totals 请求相互独立的强类型代际。
 - `src/workflow/bindings.rs` 提供当前项目上下文、远程 URL 复制、经 `src/platform/` 打开本地目录，以及可选的 `fat`/`uat`/`prod` 数量刷新。
 - `src/ai_review/` 负责可选 AI 任务执行和结果投影；PR 列表/详情只发出动作并消费任务/结果 model。
 - `src/git/overview.rs` 负责 Provider-neutral 的 `fat`/`uat`/`prod` 计数聚合；Provider 选择、鉴权、请求和响应归一化继续由 Git façade 与 adapter 负责。
@@ -178,7 +178,7 @@ project selected
   -> when a merged request reports can-revert, confirm the provider-specific effect and send a separate revert command
 ```
 
-Every asynchronous boundary needs a monotonically increasing request sequence (separate sequences for list, conversation, commits, diff, syntax highlighting, and hunk expansion are recommended). A result may update the visible state only if its sequence, selected project, selected PR, and selected file still match. Closing the review or switching projects invalidates all in-flight work and clears review caches. Never let a stale result navigate back to the review route or replace a newer page.
+Every asynchronous boundary needs a monotonically increasing request generation. PR Review keeps independent typed generations for diff, syntax highlighting, hunk expansion, remote action-state reads, remote mutations, Conversation, and Commits. The PR list uses separate typed Page and Totals generations, so a state-count refresh cannot invalidate a page load or vice versa. A result may update the visible state only if its generation, selected project, selected PR, and selected file still match. Closing the review or switching projects invalidates all in-flight work and clears review caches. Never let a stale result navigate back to the review route or replace a newer page.
 
 ```text
 选择项目
@@ -187,7 +187,7 @@ Every asynchronous boundary needs a monotonically increasing request sequence (s
   -> 通过一个 Provider adapter 获取当前选中的列表页
   -> 归一化记录，且仅在列表序列仍为最新时回写
   -> 用户打开某一行
-  -> 使用相互独立的旧响应序列获取归一化 diff 与远端 action state
+  -> 使用相互独立的强类型代际获取归一化 diff 与远端 action state
   -> 按项目 + 请求 + 空白模式缓存一份共享且不可变的基础数据
   -> 构建本地文件树，选择并高亮第一个文件
   -> 可选的 hunk 展开只获取一次固定源码，再只创建或修改该文件的写时复制 override
@@ -198,7 +198,7 @@ Every asynchronous boundary needs a monotonically increasing request sequence (s
   -> 已合并请求报告可回退时，确认 Provider 专属效果并发送独立 revert 命令
 ```
 
-每个异步边界都需要单调递增的请求序列（建议列表、Conversation、Commits、diff、语法高亮和 hunk 展开各自独立）。只有当序列、当前项目、当前 PR 和当前文件仍匹配时，结果才可更新可见状态。关闭审核或切换项目会使所有在途任务失效并清理审核缓存；旧结果绝不能重新导航回审核路由或覆盖新页。
+每个异步边界都需要单调递增的强类型请求代际。PR Review 为 diff、语法高亮、hunk 展开、远端 action-state 读取、远端 mutation、Conversation 和 Commits 分别保留独立代际；PR 列表也把 Page 与 Totals 代际分开，使状态总数刷新不会使页面加载失效，反之亦然。只有当代际、当前项目、当前 PR 和当前文件仍匹配时，结果才可更新可见状态。关闭审核或切换项目会使所有在途任务失效并清理审核缓存；旧结果绝不能重新导航回审核路由或覆盖新页。
 
 ## Invariants / 不变量
 
@@ -421,11 +421,11 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
   Slint rows. Query changes debounce for 180 ms, and one query-scoped row table
   supplies mounted-row paint models without rescanning the complete diff.
 - Avatar downloads have an independent three-second timeout and a 2 MiB size
-  limit. A process-level bounded cache retains send-safe RGBA pixels; the Slint
+  limit. A process-level cache retains at most 16 send-safe RGBA pixel entries; the Slint
   event loop separately reuses up to 128 `slint::Image` values across
   Conversation and Commits model rebuilds. Conversation and Commits text is
   committed immediately after provider data arrives; avatar completion may
-  only patch the already-visible model and never owns loading/error state.
+  only patch changed rows in the already-visible model and never owns loading/error state.
 - Hidden per-row wrapped `TextInput` delegates are conditionally mounted only
   for their active presentation path. Artifact Preview and AI Review hidden
   heavy subtrees follow the same conditional-mount rule; opacity alone must not
@@ -433,10 +433,10 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
 
 - Diff Find 直接扫描不可变的原始 diff 投影，不扫描已物化的 Slint 行；查询变化使用
   180 ms 去抖，并由查询级 row table 为已挂载行提供绘制 model，禁止逐行重复全量扫描。
-- 头像下载各自使用三秒超时与 2 MiB 上限；进程级有界缓存保存可跨线程的 RGBA 像素，
+- 头像下载各自使用三秒超时与 2 MiB 上限；进程级缓存最多保存 16 条可跨线程的 RGBA 像素，
   Slint event loop 另复用最多 128 个 `slint::Image`，供 Conversation/Commits model
   重建共同使用。Provider 数据到达后必须立即提交 Conversation/Commits 正文；头像完成
-  只能补丁已显示的 model，不得控制正文的 loading/error 状态。
+  只能补丁已显示 model 中真正变化的行，不得控制正文的 loading/error 状态。
 - 每行隐藏的换行 `TextInput` 只在对应展示路径活跃时条件挂载。Artifact Preview 与
   AI Review 的隐藏重型子树遵循同一规则，不得只靠 opacity 保留组件树。
 
@@ -459,6 +459,12 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
 - 远端 review 提交、review 撤回、merge 和 revert 必须建模为显式命令，拥有独立的能力、确认、旧响应防护和错误行为。
 
 ## Regression checklist / 回归清单
+
+- Run `cargo test --test pr_review_core_journeys --locked`; the root UI contract
+  must preserve PR-open context, ordered Files-changed commands, and the rule
+  that review submission never implicitly invokes merge. / 运行该命令后，根 UI
+  契约必须保留打开 PR 的上下文与 Files changed 命令顺序，并保证提交 Review
+  绝不会隐式触发 Merge。
 
 - Open a PR row and verify title, branches, author, file counts, and first file diff.
 - On the Workflow PR list, verify long Branch pairs and Updated timestamps wrap fully with no ellipsis, that wrapped Branch rows are not clipped at the top or bottom, and that narrowing the window below the table floor width reveals a horizontal scrollbar instead of hiding Branch/Author columns.
