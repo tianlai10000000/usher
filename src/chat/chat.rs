@@ -67,23 +67,16 @@ pub(crate) async fn send_message_to_server(user_message: &str) -> Result<String,
 pub(crate) fn handle_api_error(error: &HttpError) -> String {
     log::error!("[Chat] API error: {}", error);
 
-    match (error.kind, error.status.map(|status| status.as_u16())) {
-        (HttpErrorKind::Build, _) => {
-            "Chat service needs a valid HTTPS endpoint. Set ai.chat.rag_api_url in the settings file or USHER_RAG_API_URL.".to_string()
-        }
-        (HttpErrorKind::Timeout | HttpErrorKind::Connect, _) => {
-            "Network connection failed. Check your network settings and try again.".to_string()
-        }
-        (HttpErrorKind::Status, Some(429)) => "Too many requests. Try again shortly.".to_string(),
-        (HttpErrorKind::Status, Some(401 | 403)) => {
-            "Authentication failed. Check the API key or access permissions.".to_string()
-        }
-        (HttpErrorKind::Status, Some(500..=599)) => {
-            "The service is unavailable. Try again later.".to_string()
-        }
-        (HttpErrorKind::Decode, _) => "The service returned an unreadable response.".to_string(),
-        _ => "The message could not be sent. Try again.".to_string(),
-    }
+    let key = match (error.kind, error.status.map(|status| status.as_u16())) {
+        (HttpErrorKind::Build, _) => "chat.endpoint_invalid",
+        (HttpErrorKind::Timeout | HttpErrorKind::Connect, _) => "chat.network_failed",
+        (HttpErrorKind::Status, Some(429)) => "chat.rate_limited",
+        (HttpErrorKind::Status, Some(401 | 403)) => "chat.authentication_failed",
+        (HttpErrorKind::Status, Some(500..=599)) => "chat.service_unavailable",
+        (HttpErrorKind::Decode, _) => "chat.response_unreadable",
+        _ => "chat.send_failed",
+    };
+    crate::i18n::tr(key).into_owned()
 }
 
 fn validate_rag_api_url(value: &str) -> Result<reqwest::Url, &'static str> {

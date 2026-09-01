@@ -1,4 +1,4 @@
-use super::updater::{UpdateState, check_for_update};
+use super::updater::{UpdateState, check_for_update, update_check_error_message_key};
 use self_update::cargo_crate_version;
 use slint::{ComponentHandle, Global, ModelRc, SharedString, Timer, TimerMode, VecModel, Weak};
 use std::cell::RefCell;
@@ -64,7 +64,8 @@ fn perform_startup_check(
                     let current_version = cargo_crate_version!().to_string();
                     log::info!(
                         "[AUTO-UPDATE] Update available: {} -> {}",
-                        current_version, new_version
+                        current_version,
+                        new_version
                     );
 
                     let ui_weak_for_notification = ui_weak.clone();
@@ -79,18 +80,23 @@ fn perform_startup_check(
                             // Using ActionsNotify component template
                             let actions: ModelRc<SharedString> =
                                 ModelRc::new(Rc::new(VecModel::from(vec![
-                                    SharedString::from("Cancel"),
-                                    SharedString::from("Update Now"),
+                                    SharedString::from(crate::i18n::tr("common.cancel").as_ref()),
+                                    SharedString::from(
+                                        crate::i18n::tr("update.update_now").as_ref(),
+                                    ),
                                 ])));
 
                             let manager = NotificationManager::get(&ui);
                             manager.invoke_info(NotificationOptions {
-                                message: format!(
-                                    "New version {} is available (current: {})",
-                                    new_version_clone, current_version
+                                message: crate::i18n::tr_args(
+                                    "update.available_message",
+                                    &[
+                                        ("new_version", new_version_clone.as_str()),
+                                        ("current_version", current_version.as_str()),
+                                    ],
                                 )
                                 .into(),
-                                title: "Update Available".into(),
+                                title: crate::i18n::tr("update.available_title").as_ref().into(),
                                 duration: 0, // Permanent until user clicks
                                 icon: "".into(),
                                 component: CustomComponentType::ActionsNotify,
@@ -111,23 +117,15 @@ fn perform_startup_check(
                 let error_msg = e.to_string();
                 log::info!("[AUTO-UPDATE] Startup check failed: {}", error_msg);
 
-                // Show error notification to user
-                let friendly_msg = if error_msg.contains("404") || error_msg.contains("Not Found") {
-                    "Repository not found or no releases available. Please check if the repository exists.".to_string()
-                } else if error_msg.contains("NetworkError") || error_msg.contains("network") 
-                    || error_msg.contains("ReqwestError") || error_msg.contains("error sending request") {
-                    "Network connection failed. Please check your network and try again.".to_string()
-                } else {
-                    format!("Update check failed: {}", error_msg)
-                };
+                let friendly_message_key = update_check_error_message_key(&error_msg);
 
                 let ui_weak_for_error = ui_weak.clone();
                 slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak_for_error.upgrade() {
                         let manager = NotificationManager::get(&ui);
                         manager.invoke_error(NotificationOptions {
-                            message: friendly_msg.into(),
-                            title: "Update Check Failed".into(),
+                            message: crate::i18n::tr(friendly_message_key).as_ref().into(),
+                            title: crate::i18n::tr("update.check_failed_title").as_ref().into(),
                             duration: 5000,
                             icon: "".into(),
                             component: CustomComponentType::None,
@@ -138,7 +136,8 @@ fn perform_startup_check(
                             native_delivery: NotificationDelivery::WhenUnfocused,
                         });
                     }
-                }).ok();
+                })
+                .ok();
             }
         }
     });
@@ -209,26 +208,16 @@ pub fn start_auto_update(
                             s.error = error_msg.clone();
                         }
 
-                        // Show error notification to user
-                        let friendly_msg =
-                            if error_msg.contains("404") || error_msg.contains("Not Found") {
-                                "Repository not found or no releases available.".to_string()
-                            } else if error_msg.contains("NetworkError")
-                                || error_msg.contains("network")
-                                || error_msg.contains("ReqwestError")
-                                || error_msg.contains("error sending request")
-                            {
-                                "Network connection failed. Please check your network.".to_string()
-                            } else {
-                                format!("Update check failed: {}", error_msg)
-                            };
+                        let friendly_message_key = update_check_error_message_key(&error_msg);
 
                         slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_weak.upgrade() {
                                 let manager = NotificationManager::get(&ui);
                                 manager.invoke_error(NotificationOptions {
-                                    message: friendly_msg.into(),
-                                    title: "Update Check Failed".into(),
+                                    message: crate::i18n::tr(friendly_message_key).as_ref().into(),
+                                    title: crate::i18n::tr("update.check_failed_title")
+                                        .as_ref()
+                                        .into(),
                                     duration: 5000,
                                     icon: "".into(),
                                     component: CustomComponentType::None,

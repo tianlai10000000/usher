@@ -6,6 +6,7 @@ import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../state/tooltip
 import { GitHubActionMenu } from "./github_action_menu.slint";
 import { GitHubProgressBar } from "./github_progress_bar.slint";
 import { GitHubCounterLabel, GitHubCounterScheme } from "./label/github_counter_label.slint";
+import { I18n } from "@i18n";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 
 // Enum to identify which popup is active
@@ -301,8 +302,8 @@ export component GitHubStatusBar inherits Rectangle {
 
                 // Update check status
                 update-check-item := GitHubStatusBarItem {
-                    label: UpdateLogic.checking-update ? "Update Checking..." : "";
-                    tooltip-text: "Checking for updates...";
+                    label: UpdateLogic.checking-update ? I18n.tooltip-checking-for-updates : "";
+                    tooltip-text: I18n.tooltip-checking-for-updates;
                     active: UpdateLogic.checking-update;
                     visible: UpdateLogic.checking-update;
                     
@@ -310,8 +311,8 @@ export component GitHubStatusBar inherits Rectangle {
                         if (root.active-popup == ActivePopup.UpdateCheck) {
                             root.active-popup = ActivePopup.None;
                         } else {
-                            root.popup-title = "Update Check";
-                            root.popup-content = "Checking if an update is available, please wait...";
+                            root.popup-title = I18n.status-update-check;
+                            root.popup-content = I18n.status-checking-update;
                             root.active-popup = ActivePopup.UpdateCheck;
                         }
                     }
@@ -336,10 +337,10 @@ export component GitHubStatusBar inherits Rectangle {
                             if (root.active-popup == ActivePopup.DownloadProgress) {
                                 root.active-popup = ActivePopup.None;
                             } else {
-                                root.popup-title = "Download Progress";
-                                root.popup-content = "Downloading: " + UpdateLogic.new-version + "\n" +
-                                    "Progress: " + Math.round(UpdateLogic.download-progress * 100) + "%\n" +
-                                    "Status: " + UpdateLogic.download-status;
+                                root.popup-title = I18n.status-download-progress;
+                                root.popup-content = I18n.status-downloading + ": " + UpdateLogic.new-version + "\n" +
+                                    I18n.common-progress + ": " + Math.round(UpdateLogic.download-progress * 100) + "%\n" +
+                                    I18n.status-status + ": " + UpdateLogic.download-status;
                                 root.active-popup = ActivePopup.DownloadProgress;
                             }
                         }
@@ -351,7 +352,7 @@ export component GitHubStatusBar inherits Rectangle {
                         padding-right: 8px;
                         
                         Text {
-                            text: "Downloading " + Math.round(UpdateLogic.download-progress * 100) + "%";
+                            text: I18n.update-downloading + " " + Math.round(UpdateLogic.download-progress * 100) + "%";
                             font-size: 12px;
                             color: root.accent-fg;
                             vertical-alignment: center;
@@ -369,7 +370,7 @@ export component GitHubStatusBar inherits Rectangle {
                         preferred-placement: GitHubTooltipPlacement.Top;
                         alignment: GitHubTooltipAlignment.Start;
                         text: hover-area.has-hover
-                            ? "Download progress: " + Math.round(UpdateLogic.download-progress * 100) + "%\n"
+                            ? I18n.status-download-progress + ": " + Math.round(UpdateLogic.download-progress * 100) + "%\n"
                                 + UpdateLogic.download-status
                             : "";
                     }
@@ -400,8 +401,8 @@ export component GitHubStatusBar inherits Rectangle {
                     fixed-width: root.shortcut-status-width;
                     label: "";
                     tooltip-text: root.shortcut-initialization-failed
-                        ? "Shortcut initialization failed"
-                        : "Shortcuts ready";
+                        ? I18n.status-shortcut-failed
+                        : I18n.status-shortcuts-ready;
                     tooltip-align-end: true;
                     active: root.active-popup == ActivePopup.Shortcut;
                     visible: root.shortcut-initialization-visible
@@ -417,7 +418,7 @@ export component GitHubStatusBar inherits Rectangle {
                         if (root.active-popup == ActivePopup.Shortcut) {
                             root.active-popup = ActivePopup.None;
                         } else {
-                            root.popup-title = "Shortcut Status";
+                            root.popup-title = I18n.status-shortcut-status;
                             root.popup-content = root.shortcut-initialization-detail;
                             root.active-popup = ActivePopup.Shortcut;
                         }
@@ -429,8 +430,8 @@ export component GitHubStatusBar inherits Rectangle {
                     fixed-width: root.notification-status-width;
                     label: "";
                     tooltip-text: root.unread-message-count > 0
-                        ? (root.unread-message-count + " unread notifications")
-                        : "No notifications";
+                        ? (root.unread-message-count + " " + I18n.status-unread-notifications)
+                        : I18n.status-no-notifications;
                     tooltip-align-end: true;
                     active: root.messages-route-active;
                     visible: true;
@@ -455,7 +456,9 @@ export component GitHubStatusBar inherits Rectangle {
                         + root.status-item-gap;
                     fixed-width: root.network-status-width;
                     label: "";
-                    tooltip-text: AppState.network-online ? "Network connected" : "Network disconnected";
+                    tooltip-text: AppState.network-online
+                        ? I18n.status-network-connected
+                        : I18n.status-network-disconnected;
                     tooltip-align-end: true;
                     active: root.active-popup == ActivePopup.Network;
                     visible: true;
@@ -469,8 +472,10 @@ export component GitHubStatusBar inherits Rectangle {
                         if (root.active-popup == ActivePopup.Network) {
                             root.active-popup = ActivePopup.None;
                         } else {
-                            root.popup-title = "Network Status";
-                            root.popup-content = AppState.network-online ? "Network connected" : "Network disconnected";
+                            root.popup-title = I18n.status-network-status;
+                            root.popup-content = AppState.network-online
+                                ? I18n.status-network-connected
+                                : I18n.status-network-disconnected;
                             root.active-popup = ActivePopup.Network;
                         }
                     }
@@ -486,7 +491,7 @@ export component GitHubStatusBar inherits Rectangle {
                         + root.status-item-gap;
                     fixed-width: root.version-status-width;
                     label: "v" + AppState.version;
-                    tooltip-text: "Version: " + AppState.version;
+                    tooltip-text: I18n.common-version + ": " + AppState.version;
                     tooltip-align-end: true;
                     active: root.active-popup == ActivePopup.Version;
                     visible: AppState.version != "";
@@ -496,8 +501,8 @@ export component GitHubStatusBar inherits Rectangle {
                         if (root.active-popup == ActivePopup.Version) {
                             root.active-popup = ActivePopup.None;
                         } else {
-                            root.popup-title = "Version: ";
-                            root.popup-content = "Version: " + AppState.version;
+                            root.popup-title = I18n.common-version;
+                            root.popup-content = I18n.common-version + ": " + AppState.version;
                             root.active-popup = ActivePopup.Version;
                         }
                     }

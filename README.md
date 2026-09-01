@@ -14,6 +14,7 @@ Usher is an alpha-stage desktop workspace for managing local Git projects and re
 - Run up to eight configurable concurrent AI code reviews; inspect findings beside the PR diff and chat with the configured AI Agent using the current pull request as context.
 - Receive durable in-app messages plus native OS notifications, alongside toast, tray, update, and network-status feedback.
 - Switch between light, dark, and system theme modes.
+- Switch the UI language at runtime using the system locale or any packaged catalog.
 - Route all application HTTP traffic through a shared reqwest-based interception pipeline.
 
 > Usher is under active development; several secondary routes are development surfaces rather than finished product features.
@@ -210,6 +211,7 @@ GitHub, GitLab, and Gitee tokens can be managed from Settings. Gitee public and 
 src/main.rs
   -> src/lib.rs                application composition and callback bindings
      -> crates/usher-ui/       generated Slint API boundary
+     -> crates/usher-i18n/     locale registry and shared Rust/Slint catalogs
         -> ui/main.slint       root window and exported UI contract
            -> ui/views/        page-level views
            -> ui/components/   reusable application components

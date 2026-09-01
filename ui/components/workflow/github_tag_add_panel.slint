@@ -1,5 +1,6 @@
 import { GitHubTagField, GitHubTagReadonlyField } from "./fields.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 import { GitHubTagActionButton } from "./tag_controls.slint";
 import {
     GitHubSegmentedControl,
@@ -41,7 +42,7 @@ export component GitHubTagAddPanel {
 
             Text {
                 height: 28px;
-                text: "Bump";
+                text: I18n.tag-bump;
                 font-size: 12px;
                 font-weight: 600;
                 color: GitHubTheme.fg-muted;
@@ -50,10 +51,10 @@ export component GitHubTagAddPanel {
             }
 
             GitHubSegmentedControl {
-                group-label: "Semantic version bump";
+                group-label: I18n.tag-semantic-bump;
 
                 GitHubSegmentedControlItem {
-                    label: "Patch";
+                    label: I18n.tag-patch;
                     selected: root.version-mode == "patch";
                     item-enabled: !root.running && !root.initializing;
                     clicked => {
@@ -62,7 +63,7 @@ export component GitHubTagAddPanel {
                 }
                 GitHubSegmentedControlDivider { }
                 GitHubSegmentedControlItem {
-                    label: "Minor";
+                    label: I18n.tag-minor;
                     selected: root.version-mode == "minor";
                     item-enabled: !root.running && !root.initializing;
                     clicked => {
@@ -71,7 +72,7 @@ export component GitHubTagAddPanel {
                 }
                 GitHubSegmentedControlDivider { }
                 GitHubSegmentedControlItem {
-                    label: "Major";
+                    label: I18n.tag-major;
                     selected: root.version-mode == "major";
                     item-enabled: !root.running && !root.initializing;
                     clicked => {
@@ -87,13 +88,13 @@ export component GitHubTagAddPanel {
 
             GitHubTagReadonlyField {
                 width: parent.width / 2;
-                label: "Current tag version";
+                label: I18n.tag-current-version;
                 value: root.current-version;
             }
 
             GitHubTagField {
                 width: parent.width / 2;
-                label: "New tag version";
+                label: I18n.tag-new-version;
                 value <=> root.next-version;
                 placeholder: "v1.2.3";
                 enabled: !root.running && !root.initializing;
@@ -107,13 +108,13 @@ export component GitHubTagAddPanel {
 
             GitHubTagReadonlyField {
                 width: parent.width;
-                label: "Current tag version";
+                label: I18n.tag-current-version;
                 value: root.current-version;
             }
 
             GitHubTagField {
                 width: parent.width;
-                label: "New tag version";
+                label: I18n.tag-new-version;
                 value <=> root.next-version;
                 placeholder: "v1.2.3";
                 enabled: !root.running && !root.initializing;
@@ -123,7 +124,7 @@ export component GitHubTagAddPanel {
 
         GitHubTagField {
             width: 100%;
-            label: "Tag description";
+            label: I18n.tag-description;
             value <=> root.description;
             placeholder: "";
             enabled: !root.running && !root.initializing;
@@ -141,14 +142,14 @@ export component GitHubTagAddPanel {
             GitHubTagActionButton {
                 enabled: !root.running && !root.initializing;
                 loading: root.initializing;
-                label: root.initializing ? "Loading…" : "Create tag";
+                label: root.initializing ? I18n.tag-loading : I18n.tag-create;
                 clicked => {
                     root.run(root.next-version, root.description);
                 }
             }
 
             if root.has-run: GitHubTagActionButton {
-                label: root.running ? "View running job" : "View latest job";
+                label: root.running ? I18n.tag-view-running-job : I18n.tag-view-latest-job;
                 action-primary: false;
                 clicked => {
                     root.view-run();

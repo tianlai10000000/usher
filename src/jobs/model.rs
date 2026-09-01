@@ -1,5 +1,6 @@
 //! Application-wide reusable Job definitions and runtime snapshots.
 
+use crate::i18n::LocalizedText;
 use crate::{JobLogLineItem, JobStepItem};
 use slint::{ModelRc, SharedString, VecModel};
 use std::time::Duration;
@@ -59,12 +60,12 @@ impl JobStepStatus {
 /// through shell interpolation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct JobStepDefinition {
-    pub(crate) name: String,
+    pub(crate) name: LocalizedText,
     pub(crate) command: Vec<String>,
 }
 
 impl JobStepDefinition {
-    pub(crate) fn new(name: impl Into<String>, command: Vec<String>) -> Self {
+    pub(crate) fn new(name: impl Into<LocalizedText>, command: Vec<String>) -> Self {
         Self {
             name: name.into(),
             command,
@@ -83,7 +84,7 @@ pub(crate) struct JobStepData {
     pub(crate) definition: JobStepDefinition,
     pub(crate) status: JobStepStatus,
     pub(crate) conclusion: Option<JobConclusion>,
-    pub(crate) detail: String,
+    pub(crate) detail: LocalizedText,
     pub(crate) log: String,
     pub(crate) duration: String,
     pub(crate) default_expanded: bool,
@@ -93,7 +94,7 @@ pub(crate) struct JobStepData {
 }
 
 impl JobStepData {
-    pub(crate) fn queued(definition: JobStepDefinition, detail: impl Into<String>) -> Self {
+    pub(crate) fn queued(definition: JobStepDefinition, detail: impl Into<LocalizedText>) -> Self {
         Self {
             definition,
             status: JobStepStatus::Queued,
@@ -114,7 +115,7 @@ impl JobStepData {
             self.log.lines().map(parse_log_line).collect()
         };
         JobStepItem {
-            name: self.definition.name.as_str().into(),
+            name: self.definition.name.resolve().into(),
             command: self.definition.rendered_command().into(),
             status: self.status.as_str().into(),
             conclusion: self
@@ -122,7 +123,7 @@ impl JobStepData {
                 .map(JobConclusion::as_str)
                 .unwrap_or_default()
                 .into(),
-            detail: self.detail.as_str().into(),
+            detail: self.detail.resolve().into(),
             // Keep the public field for declarative/static consumers without
             // copying backend output into Slint before it is requested.
             log: if materialize_log {

@@ -2,6 +2,7 @@ import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubActionsJob, JobStepItem } from "../jobs/job.slint";
 import { GitHubTagField } from "./fields.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 export component GitHubCdFlow {
     in property <bool> running;
@@ -60,7 +61,7 @@ export component GitHubCdFlow {
             : "success";
     private property <[JobStepItem]> cd-steps: [
         {
-            name: "Build",
+            name: I18n.cd-build,
             command: "build",
             status: root.build-step-status == "pending" ? "queued"
                 : root.build-step-status == "running" ? "in_progress"
@@ -78,7 +79,7 @@ export component GitHubCdFlow {
             default-expanded: false,
         },
         {
-            name: "Test",
+            name: I18n.cd-test,
             command: "test",
             status: root.test-step-status == "pending" ? "queued"
                 : root.test-step-status == "running" ? "in_progress"
@@ -96,7 +97,7 @@ export component GitHubCdFlow {
             default-expanded: false,
         },
         {
-            name: "Deploy",
+            name: I18n.cd-deploy,
             command: "deploy",
             status: root.deploy-step-status == "pending" ? "queued"
                 : root.deploy-step-status == "running" ? "in_progress"
@@ -114,7 +115,7 @@ export component GitHubCdFlow {
             default-expanded: false,
         },
         {
-            name: "Verify",
+            name: I18n.cd-verify,
             command: "verify",
             status: root.verify-step-status == "pending" ? "queued"
                 : root.verify-step-status == "running" ? "in_progress"
@@ -143,7 +144,7 @@ export component GitHubCdFlow {
 
         Text {
             width: parent.width;
-            text: "Run a staged deployment and inspect its build, test, deploy, and verification steps.";
+            text: I18n.cd-description;
             wrap: word-wrap;
             font-size: GitHubMetrics.text-medium;
             color: GitHubTheme.fg-muted;
@@ -155,7 +156,7 @@ export component GitHubCdFlow {
 
             GitHubTagField {
                 width: 180px;
-                label: "Environment";
+                label: I18n.cd-environment;
                 value <=> root.environment-name;
                 placeholder: "production";
                 enabled: !root.running;
@@ -163,7 +164,7 @@ export component GitHubCdFlow {
 
             GitHubTagField {
                 width: 220px;
-                label: "Release";
+                label: I18n.cd-release;
                 value <=> root.release-name;
                 placeholder: "2026.03.09";
                 enabled: !root.running;
@@ -171,7 +172,7 @@ export component GitHubCdFlow {
 
             GitHubTagField {
                 width: 220px;
-                label: "Commit";
+                label: I18n.cd-commit;
                 value <=> root.commit-hash;
                 placeholder: "abcdef1";
                 enabled: !root.running;
@@ -185,7 +186,7 @@ export component GitHubCdFlow {
 
             GitHubTagField {
                 width: parent.width;
-                label: "Environment";
+                label: I18n.cd-environment;
                 value <=> root.environment-name;
                 placeholder: "production";
                 enabled: !root.running;
@@ -193,7 +194,7 @@ export component GitHubCdFlow {
 
             GitHubTagField {
                 width: parent.width;
-                label: "Release";
+                label: I18n.cd-release;
                 value <=> root.release-name;
                 placeholder: "2026.03.09";
                 enabled: !root.running;
@@ -201,7 +202,7 @@ export component GitHubCdFlow {
 
             GitHubTagField {
                 width: parent.width;
-                label: "Commit";
+                label: I18n.cd-commit;
                 value <=> root.commit-hash;
                 placeholder: "abcdef1";
                 enabled: !root.running;
@@ -209,7 +210,7 @@ export component GitHubCdFlow {
         }
 
         GitHubButton {
-            text: root.running ? "Deployment running…" : "Start deployment";
+            text: root.running ? I18n.cd-deployment-running : I18n.cd-start-deployment;
             primary: true;
             busy: root.running;
             disabled: root.running;
@@ -256,7 +257,7 @@ export component GitHubCdFlow {
 
                 Text {
                     width: parent.width;
-                    text: "Rollback";
+                    text: I18n.cd-rollback;
                     font-size: GitHubMetrics.text-medium;
                     font-weight: 600;
                     color: GitHubTheme.fg-default;
@@ -264,7 +265,7 @@ export component GitHubCdFlow {
 
                 Text {
                     width: parent.width;
-                    text: "Return the active deployment to a previously verified commit.";
+                    text: I18n.cd-rollback-description;
                     wrap: word-wrap;
                     font-size: GitHubMetrics.text-small;
                     color: GitHubTheme.fg-muted;
@@ -277,14 +278,14 @@ export component GitHubCdFlow {
 
                     GitHubTagField {
                         width: 280px;
-                        label: "Rollback commit";
+                        label: I18n.cd-rollback-commit;
                         value <=> root.rollback-commit;
-                        placeholder: "previous stable hash";
+                        placeholder: I18n.cd-stable-hash-placeholder;
                         enabled: !root.running;
                     }
 
                     GitHubButton {
-                        text: "Start rollback";
+                        text: I18n.cd-start-rollback;
                         danger: true;
                         disabled: root.running;
                         clicked => {
@@ -301,14 +302,14 @@ export component GitHubCdFlow {
 
                     GitHubTagField {
                         width: parent.width;
-                        label: "Rollback commit";
+                        label: I18n.cd-rollback-commit;
                         value <=> root.rollback-commit;
-                        placeholder: "previous stable hash";
+                        placeholder: I18n.cd-stable-hash-placeholder;
                         enabled: !root.running;
                     }
 
                     GitHubButton {
-                        text: "Start rollback";
+                        text: I18n.cd-start-rollback;
                         danger: true;
                         disabled: root.running;
                         clicked => {
@@ -322,7 +323,7 @@ export component GitHubCdFlow {
 
         if root.show-steps: GitHubActionsJob {
             width: parent.width;
-            title: "CD workflow";
+            title: I18n.cd-workflow;
             summary: root.summary;
             execution-status: root.job-status;
             conclusion: root.job-conclusion;
@@ -343,7 +344,7 @@ export component GitHubCdFlow {
                 x: GitHubMetrics.size-12;
                 width: parent.width - GitHubMetrics.size-24;
                 height: parent.height;
-                text: "Workflow steps will appear after deployment or rollback starts.";
+                text: I18n.cd-empty-steps;
                 color: GitHubTheme.fg-muted;
                 font-size: GitHubMetrics.text-small;
                 vertical-alignment: center;

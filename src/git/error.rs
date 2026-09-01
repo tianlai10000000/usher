@@ -77,6 +77,7 @@ impl GitError {
         self.kind.as_str()
     }
 
+    #[cfg(test)]
     pub(crate) const fn user_message(&self) -> &'static str {
         match self.kind {
             GitErrorKind::Configuration => {
@@ -106,6 +107,22 @@ impl GitError {
                 "This operation is not supported by the configured provider."
             }
             GitErrorKind::Unknown => "The provider operation failed. Try again.",
+        }
+    }
+
+    pub(crate) const fn user_message_key(&self) -> &'static str {
+        match self.kind {
+            GitErrorKind::Configuration => "git_error.configuration",
+            GitErrorKind::Authentication => "git_error.authentication",
+            GitErrorKind::Permission => "git_error.permission",
+            GitErrorKind::NotFound => "git_error.not_found",
+            GitErrorKind::Conflict => "git_error.conflict",
+            GitErrorKind::RateLimited => "git_error.rate_limited",
+            GitErrorKind::Network => "git_error.network",
+            GitErrorKind::Timeout => "git_error.timeout",
+            GitErrorKind::InvalidResponse => "git_error.invalid_response",
+            GitErrorKind::Unsupported => "git_error.unsupported",
+            GitErrorKind::Unknown => "git_error.unknown",
         }
     }
 }

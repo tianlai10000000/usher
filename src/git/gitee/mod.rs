@@ -19,13 +19,14 @@ use super::json::{
 use super::{
     GiteeApiProfile, PageCollector, PullRequestActionState, PullRequestCommit,
     PullRequestConversationItem, PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters,
-    PullRequestItem, PullRequestMergeMethod, PullRequestPage, PullRequestReadiness,
-    PullRequestReadinessKind, PullRequestRevertResult, PullRequestReviewAction,
-    PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType, commit_count_from_detail,
-    configured_api_base_url, configured_enterprise, configured_gitee_token,
-    conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
-    finalize_conversation_timeline, gitee_api_profile, is_redundant_commit_system_note,
-    is_redundant_merge_system_note, percent_encode_path,
+    PullRequestItem, PullRequestMergeBlockKind, PullRequestMergeMethod, PullRequestPage,
+    PullRequestReadiness, PullRequestReadinessKind, PullRequestRevertResult,
+    PullRequestRevertStrategy, PullRequestReviewAction, PullRequestReviewStatus, PullRequestState,
+    RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url,
+    configured_enterprise, configured_gitee_token, conversation_commit_batch_items,
+    conversation_count_from_detail, conversation_merged_item, finalize_conversation_timeline,
+    gitee_api_profile, is_redundant_commit_system_note, is_redundant_merge_system_note,
+    percent_encode_path,
 };
 
 mod conversation;
@@ -741,16 +742,8 @@ async fn get_enterprise_pull_request_action_state(
                 PullRequestReadinessKind::Unavailable,
                 "Configure a Gitee Enterprise Token to load the enterprise merge conditions.",
             ),
-            merge_block_reason:
-                "Configure a Gitee Enterprise Token in Settings to review or merge this pull request."
-                    .to_string(),
-            revert_block_reason:
-                "Configure a Gitee Enterprise Token in Settings to inspect and revert a supported merged pull request."
-                    .to_string(),
-            revert_action_label: "Revert pull request".to_string(),
-            revert_confirmation:
-                "Gitee Enterprise will add a revert commit directly to the target branch. The original pull request remains merged."
-                    .to_string(),
+            merge_block_kind: PullRequestMergeBlockKind::ConfigureProvider,
+            revert_strategy: PullRequestRevertStrategy::DirectCommit,
             allowed_merge_methods: Vec::new(),
         });
     }
@@ -817,15 +810,14 @@ async fn get_enterprise_pull_request_action_state(
             PullRequestMergeMethod::FastForward,
         ];
     }
-    let merge_block_reason = if !has_token {
-        "Configure a Gitee Enterprise Token in Settings to review or merge this pull request."
-            .to_string()
+    let merge_block_kind = if !has_token {
+        PullRequestMergeBlockKind::ConfigureProvider
     } else if can_merge {
-        String::new()
+        PullRequestMergeBlockKind::None
     } else {
-        readiness.detail.clone()
+        PullRequestMergeBlockKind::Readiness
     };
-    let (can_revert, revert_block_reason) = if readiness.kind == PullRequestReadinessKind::Merged {
+    let can_revert = if readiness.kind == PullRequestReadinessKind::Merged {
         match enterprise_revert_context_from_detail(
             repo_project_id,
             pull_request_iid,
@@ -833,14 +825,14 @@ async fn get_enterprise_pull_request_action_state(
         )
         .await
         {
-            Ok(_) => (true, String::new()),
-            Err(reason) => (false, reason),
+            Ok(_) => true,
+            Err(reason) => {
+                log::warn!("[Gitee] Enterprise revert is unavailable: {reason}");
+                false
+            }
         }
     } else {
-        (
-            false,
-            "Only a merged pull request can be reverted.".to_string(),
-        )
+        false
     };
 
     Ok(PullRequestActionState {
@@ -853,12 +845,8 @@ async fn get_enterprise_pull_request_action_state(
         can_revert,
         review_state,
         readiness,
-        merge_block_reason,
-        revert_block_reason,
-        revert_action_label: "Revert pull request".to_string(),
-        revert_confirmation:
-            "Gitee Enterprise will add a revert commit directly to the target branch. This changes the branch immediately; it does not create a new pull request, and the original pull request remains merged."
-                .to_string(),
+        merge_block_kind,
+        revert_strategy: PullRequestRevertStrategy::DirectCommit,
         allowed_merge_methods,
     })
 }
@@ -882,11 +870,12 @@ async fn get_public_pull_request_action_state(
     let has_token = configured_gitee_token(GiteeApiProfile::PublicV5).is_some();
     let readiness = gitee_public_merge_readiness(&detail);
     let can_merge = has_token && readiness.kind == PullRequestReadinessKind::Ready;
-    let merge_block_reason = if !has_token {
-        "Configure a Gitee Public Token in Settings to comment or merge this pull request."
-            .to_string()
+    let merge_block_kind = if !has_token {
+        PullRequestMergeBlockKind::ConfigureProvider
+    } else if can_merge {
+        PullRequestMergeBlockKind::None
     } else {
-        readiness.detail.clone()
+        PullRequestMergeBlockKind::Readiness
     };
     Ok(PullRequestActionState {
         can_comment: has_token,
@@ -897,13 +886,8 @@ async fn get_public_pull_request_action_state(
         can_revert: false,
         review_state: String::new(),
         readiness,
-        merge_block_reason,
-        revert_block_reason:
-            "Automated revert is not supported by the configured Gitee Public provider.".to_string(),
-        revert_action_label: "Revert changes".to_string(),
-        revert_confirmation:
-            "This provider does not currently expose a supported automatic revert operation."
-                .to_string(),
+        merge_block_kind,
+        revert_strategy: PullRequestRevertStrategy::Unsupported,
         allowed_merge_methods: vec![
             PullRequestMergeMethod::Merge,
             PullRequestMergeMethod::Squash,
@@ -1061,7 +1045,7 @@ pub(super) async fn get_pull_request_conversation(
             .or_else(|| nested_string(detail, "author", "username"))
             .or_else(|| nested_string(detail, "user", "login"))
             .or_else(|| nested_string(detail, "user", "name"))
-            .unwrap_or_else(|| "Unknown author".to_string()),
+            .unwrap_or_default(),
         avatar_url: nested_string(detail, "author", "avatar_url")
             .or_else(|| nested_string(detail, "author", "avatar"))
             .or_else(|| nested_string(detail, "user", "avatar_url"))
@@ -2485,12 +2469,12 @@ fn to_pull_request_item(value: &Value) -> PullRequestItem {
         number: string_field(value, "iid")
             .or_else(|| string_field(value, "number"))
             .unwrap_or_else(|| "—".to_string()),
-        title: string_field(value, "title").unwrap_or_else(|| "Untitled pull request".to_string()),
+        title: string_field(value, "title").unwrap_or_default(),
         state: string_field(value, "state").unwrap_or_else(|| "open".to_string()),
         author: nested_string(value, "author", "name")
             .or_else(|| nested_string(value, "author", "username"))
             .or_else(|| nested_string(value, "user", "login"))
-            .unwrap_or_else(|| "Unknown author".to_string()),
+            .unwrap_or_default(),
         source_branch: string_field(value, "source_branch")
             .or_else(|| nested_string(value, "head", "label"))
             .unwrap_or_else(|| "—".to_string()),
@@ -2500,8 +2484,7 @@ fn to_pull_request_item(value: &Value) -> PullRequestItem {
         review_status: gitee_list_review_status(value),
         conversation_count: conversation_count_from_detail(value),
         created_at: string_field(value, "created_at").unwrap_or_default(),
-        updated_at: string_field(value, "updated_at")
-            .unwrap_or_else(|| "Unknown update time".to_string()),
+        updated_at: string_field(value, "updated_at").unwrap_or_default(),
         web_url: string_field(value, "web_url")
             .or_else(|| string_field(value, "html_url"))
             .unwrap_or_default(),
@@ -3153,7 +3136,7 @@ mod tests {
             None,
         );
 
-        assert_eq!(event.author, "Unknown merger");
+        assert_eq!(event.author, "");
     }
 
     #[test]

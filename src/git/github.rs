@@ -14,9 +14,10 @@ use super::json::{nested_string, string_field, value_to_id, value_u32};
 use super::{
     PageCollector, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
     PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters, PullRequestItem,
-    PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
-    PullRequestRevertResult, PullRequestReviewAction, PullRequestReviewStatus, PullRequestState,
-    RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url, configured_token,
+    PullRequestMergeBlockKind, PullRequestMergeMethod, PullRequestPage, PullRequestReadiness,
+    PullRequestReadinessKind, PullRequestRevertResult, PullRequestRevertStrategy,
+    PullRequestReviewAction, PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType,
+    commit_count_from_detail, configured_api_base_url, configured_token,
     conversation_commit_batch_items, conversation_count_from_detail, conversation_merged_item,
     conversation_system_event_item, finalize_conversation_timeline, is_configured_enterprise_host,
     parse_unified_diff, percent_encode_path, unavailable_diff_file,
@@ -124,8 +125,7 @@ pub(super) async fn get_pull_requests(
         .iter()
         .map(|value| PullRequestItem {
             number: string_field(value, "number").unwrap_or_else(|| "—".to_string()),
-            title: string_field(value, "title")
-                .unwrap_or_else(|| "Untitled pull request".to_string()),
+            title: string_field(value, "title").unwrap_or_default(),
             state: if value
                 .pointer("/pull_request/merged_at")
                 .is_some_and(|merged_at| !merged_at.is_null())
@@ -134,15 +134,13 @@ pub(super) async fn get_pull_requests(
             } else {
                 string_field(value, "state").unwrap_or_else(|| "open".to_string())
             },
-            author: nested_string(value, "user", "login")
-                .unwrap_or_else(|| "Unknown author".to_string()),
+            author: nested_string(value, "user", "login").unwrap_or_default(),
             source_branch: "—".to_string(),
             target_branch: "—".to_string(),
             review_status: PullRequestReviewStatus::None,
             conversation_count: conversation_count_from_detail(value),
             created_at: string_field(value, "created_at").unwrap_or_default(),
-            updated_at: string_field(value, "updated_at")
-                .unwrap_or_else(|| "Unknown update time".to_string()),
+            updated_at: string_field(value, "updated_at").unwrap_or_default(),
             web_url: string_field(value, "html_url").unwrap_or_default(),
         })
         .collect::<Vec<_>>();
@@ -493,21 +491,12 @@ pub(super) async fn get_pull_request_action_state(
     let can_revert = has_token
         && readiness.kind == PullRequestReadinessKind::Merged
         && !pull_request_node_id.is_empty();
-    let merge_block_reason = if !has_token {
-        "Configure a GitHub Token in Settings to review or merge this pull request.".to_string()
-    } else if readiness.kind != PullRequestReadinessKind::Ready {
-        readiness.detail.clone()
+    let merge_block_kind = if !has_token {
+        PullRequestMergeBlockKind::ConfigureProvider
+    } else if can_merge {
+        PullRequestMergeBlockKind::None
     } else {
-        String::new()
-    };
-    let revert_block_reason = if !has_token {
-        "Configure a GitHub Token in Settings to create a revert pull request.".to_string()
-    } else if readiness.kind != PullRequestReadinessKind::Merged {
-        "Only a merged pull request can be reverted.".to_string()
-    } else if pull_request_node_id.is_empty() {
-        "GitHub did not return the pull request node identifier required for a revert.".to_string()
-    } else {
-        String::new()
+        PullRequestMergeBlockKind::Readiness
     };
 
     let mut allowed_merge_methods = Vec::new();
@@ -543,12 +532,8 @@ pub(super) async fn get_pull_request_action_state(
         can_revert,
         review_state,
         readiness,
-        merge_block_reason,
-        revert_block_reason,
-        revert_action_label: "Create revert PR".to_string(),
-        revert_confirmation:
-            "GitHub will create a separate pull request that reverses the merged changes. The original pull request remains merged."
-                .to_string(),
+        merge_block_kind,
+        revert_strategy: PullRequestRevertStrategy::PullRequest,
         allowed_merge_methods,
     })
 }
@@ -645,8 +630,7 @@ pub(super) async fn get_pull_request_conversation(
     let description = PullRequestConversationItem {
         id: format!("description-{pull_request_number}"),
         kind: "description".to_string(),
-        author: nested_string(&detail, "user", "login")
-            .unwrap_or_else(|| "Unknown author".to_string()),
+        author: nested_string(&detail, "user", "login").unwrap_or_default(),
         avatar_url: nested_string(&detail, "user", "avatar_url").unwrap_or_default(),
         author_association: string_field(&detail, "author_association").unwrap_or_default(),
         body: string_field(&detail, "body").unwrap_or_default(),
@@ -664,8 +648,7 @@ pub(super) async fn get_pull_request_conversation(
             .map(|value| PullRequestConversationItem {
                 id: string_field(&value, "id").unwrap_or_default(),
                 kind: "comment".to_string(),
-                author: nested_string(&value, "user", "login")
-                    .unwrap_or_else(|| "Unknown author".to_string()),
+                author: nested_string(&value, "user", "login").unwrap_or_default(),
                 avatar_url: nested_string(&value, "user", "avatar_url").unwrap_or_default(),
                 author_association: string_field(&value, "author_association").unwrap_or_default(),
                 body: string_field(&value, "body").unwrap_or_default(),
@@ -684,8 +667,7 @@ pub(super) async fn get_pull_request_conversation(
             return Vec::new();
         }
         let id = string_field(&value, "id").unwrap_or_default();
-        let author = nested_string(&value, "user", "login")
-            .unwrap_or_else(|| "Unknown reviewer".to_string());
+        let author = nested_string(&value, "user", "login").unwrap_or_default();
         let avatar_url = nested_string(&value, "user", "avatar_url").unwrap_or_default();
         let author_association = string_field(&value, "author_association").unwrap_or_default();
         let created_at = string_field(&value, "submitted_at").unwrap_or_default();
@@ -764,7 +746,7 @@ fn decode_github_timeline_activity(
                     message,
                     author: nested_string(event, "author", "name")
                         .or_else(|| nested_string(event, "committer", "name"))
-                        .unwrap_or_else(|| "Unknown author".to_string()),
+                        .unwrap_or_default(),
                     avatar_url: nested_string(event, "author", "avatar_url")
                         .or_else(|| nested_string(event, "committer", "avatar_url"))
                         .unwrap_or_default(),
@@ -773,7 +755,7 @@ fn decode_github_timeline_activity(
                         .unwrap_or_default(),
                     committer: nested_string(event, "committer", "name")
                         .or_else(|| nested_string(event, "author", "name"))
-                        .unwrap_or_else(|| "Unknown committer".to_string()),
+                        .unwrap_or_default(),
                     committer_avatar_url: nested_string(event, "committer", "avatar_url")
                         .unwrap_or_default(),
                     committed_at: nested_string(event, "committer", "date")
@@ -788,8 +770,7 @@ fn decode_github_timeline_activity(
             }
             "merged" => {
                 flush_commits(&mut pending_commits, &mut items);
-                let author = nested_string(event, "actor", "login")
-                    .unwrap_or_else(|| "Unknown author".to_string());
+                let author = nested_string(event, "actor", "login").unwrap_or_default();
                 let sha = string_field(event, "commit_id").unwrap_or_default();
                 let created_at = string_field(event, "created_at").unwrap_or_default();
                 if !sha.trim().is_empty() {
@@ -807,8 +788,7 @@ fn decode_github_timeline_activity(
             }
             "review_requested" => {
                 flush_commits(&mut pending_commits, &mut items);
-                let author = nested_string(event, "actor", "login")
-                    .unwrap_or_else(|| "Unknown author".to_string());
+                let author = nested_string(event, "actor", "login").unwrap_or_default();
                 let reviewer = nested_string(event, "requested_reviewer", "login")
                     .or_else(|| nested_string(event, "requested_team", "name"))
                     .or_else(|| nested_string(event, "requested_team", "slug"));
@@ -845,18 +825,35 @@ fn decode_github_timeline_activity(
                     continue;
                 }
                 flush_commits(&mut pending_commits, &mut items);
-                let author = nested_string(event, "actor", "login")
-                    .unwrap_or_else(|| "Unknown author".to_string());
+                let author = nested_string(event, "actor", "login").unwrap_or_default();
                 let created_at = string_field(event, "created_at").unwrap_or_default();
-                let body = match event_kind.as_str() {
-                    "closed" => "closed this pull request",
-                    "reopened" => "reopened this pull request",
-                    "head_ref_force_pushed" => "force-pushed the branch",
-                    "ready_for_review" => "marked this pull request as ready for review",
-                    "convert_to_draft" => "converted this pull request to draft",
-                    _ => "updated this pull request",
+                let (body, message_key) = match event_kind.as_str() {
+                    "closed" => (
+                        "closed this pull request",
+                        "pr_review.timeline.event.closed",
+                    ),
+                    "reopened" => (
+                        "reopened this pull request",
+                        "pr_review.timeline.event.reopened",
+                    ),
+                    "head_ref_force_pushed" => (
+                        "force-pushed the branch",
+                        "pr_review.timeline.event.force_pushed",
+                    ),
+                    "ready_for_review" => (
+                        "marked this pull request as ready for review",
+                        "pr_review.timeline.event.ready_for_review",
+                    ),
+                    "convert_to_draft" => (
+                        "converted this pull request to draft",
+                        "pr_review.timeline.event.converted_to_draft",
+                    ),
+                    _ => (
+                        "updated this pull request",
+                        "pr_review.timeline.event.updated",
+                    ),
                 };
-                items.push(conversation_system_event_item(
+                let mut item = conversation_system_event_item(
                     format!(
                         "event-{}-{}",
                         event_kind,
@@ -865,7 +862,9 @@ fn decode_github_timeline_activity(
                     author.as_str(),
                     body,
                     created_at.as_str(),
-                ));
+                );
+                item.state = message_key.to_string();
+                items.push(item);
             }
             // Comments/reviews are loaded from dedicated endpoints to keep bodies complete.
             _ => flush_commits(&mut pending_commits, &mut items),
@@ -989,7 +988,7 @@ fn decode_commit(value: &Value) -> PullRequestCommit {
                     .get("commit")
                     .and_then(|commit| nested_string(commit, "author", "name"))
             })
-            .unwrap_or_else(|| "Unknown author".to_string()),
+            .unwrap_or_default(),
         avatar_url: nested_string(value, "author", "avatar_url").unwrap_or_default(),
         authored_at: value
             .get("commit")

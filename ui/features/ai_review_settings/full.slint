@@ -1,4 +1,5 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 import { GitHubButton } from "../../components/settings/github_settings_controls.slint";
 import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
 import { GitHubSpinner } from "../../components/github_spinner.slint";
@@ -104,14 +105,14 @@ component AiReviewRuleFieldBase inherits Rectangle {
 // its literal placeholder node so Slint 1.17.1 cannot reuse the sibling's stale
 // placeholder paint binding after focus changes.
 component AiReviewRuleNameField inherits AiReviewRuleFieldBase {
-    label: "Rule name";
+    label: I18n.settings-ai-review-rule-name;
 
     if root.text == "" && !root.input-has-focus: Text {
         x: 12px;
         y: 26px;
         width: parent.width - 24px;
         height: 32px;
-        text: "e.g. Security review";
+        text: I18n.settings-ai-review-rule-name-placeholder;
         font-size: 14px;
         color: GitHubTheme.fg-muted;
         vertical-alignment: center;
@@ -120,8 +121,8 @@ component AiReviewRuleNameField inherits AiReviewRuleFieldBase {
 }
 
 component AiReviewRulePathField inherits AiReviewRuleFieldBase {
-    label: "Markdown file";
-    caption: "Local .md file, up to 512 KiB.";
+    label: I18n.settings-ai-review-markdown-file;
+    caption: I18n.settings-ai-review-markdown-caption;
 
     if root.text == "" && !root.input-has-focus: Text {
         x: 12px;
@@ -169,7 +170,7 @@ export component GitHubAiReviewSettingsSection inherits VerticalLayout {
 
     Text {
         width: parent.width;
-        text: "Concurrent reviews";
+        text: I18n.settings-ai-review-concurrent;
         font-size: 16px;
         font-weight: 600;
         color: GitHubTheme.fg-default;
@@ -182,7 +183,7 @@ export component GitHubAiReviewSettingsSection inherits VerticalLayout {
         GitHubIconButton {
             control-size: GitHubMetrics.size-32;
             icon: @image-url("../../assets/icons/octicon-dash-16.svg");
-            tooltip-text: "Decrease concurrent reviews";
+            tooltip-text: I18n.settings-ai-review-decrease-concurrent;
             button-enabled: root.max-concurrent-tasks > 1;
             clicked => { root.set-max-concurrent-tasks(root.max-concurrent-tasks - 1); }
         }
@@ -199,14 +200,14 @@ export component GitHubAiReviewSettingsSection inherits VerticalLayout {
         GitHubIconButton {
             control-size: GitHubMetrics.size-32;
             icon: @image-url("../../assets/icons/octicon-plus-16.svg");
-            tooltip-text: "Increase concurrent reviews";
+            tooltip-text: I18n.settings-ai-review-increase-concurrent;
             button-enabled: root.max-concurrent-tasks < 8;
             clicked => { root.set-max-concurrent-tasks(root.max-concurrent-tasks + 1); }
         }
         Text {
             horizontal-stretch: 1;
             height: parent.height;
-            text: "Applies to queued tasks immediately; running tasks are not interrupted.";
+            text: I18n.settings-ai-review-concurrent-description;
             vertical-alignment: center;
             font-size: 12px;
             color: GitHubTheme.fg-muted;
@@ -218,14 +219,14 @@ export component GitHubAiReviewSettingsSection inherits VerticalLayout {
 
     Text {
         width: parent.width;
-        text: "Review rules";
+        text: I18n.settings-ai-review-rules;
         font-size: 16px;
         font-weight: 600;
         color: GitHubTheme.fg-default;
     }
     Text {
         width: parent.width;
-        text: "Markdown files are read only when a review starts.";
+        text: I18n.settings-ai-review-rules-description;
         font-size: 13px;
         color: GitHubTheme.fg-muted;
     }
@@ -262,7 +263,7 @@ export component GitHubAiReviewSettingsSection inherits VerticalLayout {
             x: parent.width - 150px;
             y: 12px;
             width: 100px;
-            text: rule.is-default ? "Default" : "Set default";
+            text: rule.is-default ? I18n.common-default : I18n.common-set-default;
             disabled: rule.is-default;
             clicked => { root.set-default-rule(rule.id); }
         }
@@ -271,7 +272,7 @@ export component GitHubAiReviewSettingsSection inherits VerticalLayout {
             y: 12px;
             control-size: GitHubMetrics.size-32;
             icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-            tooltip-text: "Delete review rule";
+            tooltip-text: I18n.settings-ai-review-delete-rule;
             danger: true;
             clicked => { root.delete-rule(rule.id); }
         }
@@ -298,7 +299,7 @@ export component GitHubAiReviewSettingsSection inherits VerticalLayout {
         height: GitHubMetrics.size-32;
         alignment: end;
         GitHubButton {
-            text: "Add rule";
+            text: I18n.settings-ai-review-add-rule;
             primary: true;
             busy: root.rule-add-pending;
             disabled: root.rule-add-pending

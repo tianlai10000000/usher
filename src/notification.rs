@@ -12,7 +12,7 @@ use std::time::Duration;
 // Use types re-exported from crate root
 use crate::{
     MainWindow, Notification, NotificationDelivery, NotificationIcons, NotificationManager,
-    NotificationOptions, NotificationType, UpdateLogic,
+    NotificationOptions, NotificationType, UpdateLogic, i18n,
 };
 use usher_messages::{
     MessageCenter, MessageDraft, MessageSeverity, NativeDelivery, Subscription, categories,
@@ -52,11 +52,15 @@ const DEFAULT_DURATION_ERROR: i32 = 5000;
 const MAX_BANNER_QUEUE: usize = 3;
 const DISMISS_ANIMATION_DURATION: Duration = Duration::from_millis(180);
 
-// Default message constants
-const DEFAULT_MESSAGE_INFO: &str = "Info";
-const DEFAULT_MESSAGE_SUCCESS: &str = "Success";
-const DEFAULT_MESSAGE_WARNING: &str = "Warning";
-const DEFAULT_MESSAGE_ERROR: &str = "Error";
+// Default copy stays semantic until the Notification is presented or recorded.
+const DEFAULT_MESSAGE_INFO_KEY: &str = "notification.default.info";
+const DEFAULT_MESSAGE_SUCCESS_KEY: &str = "notification.default.success";
+const DEFAULT_MESSAGE_WARNING_KEY: &str = "notification.default.warning";
+const DEFAULT_MESSAGE_ERROR_KEY: &str = "notification.default.error";
+const DEFAULT_TITLE_INFO_KEY: &str = "notification.default_title.info";
+const DEFAULT_TITLE_SUCCESS_KEY: &str = "notification.default_title.success";
+const DEFAULT_TITLE_WARNING_KEY: &str = "notification.default_title.warning";
+const DEFAULT_TITLE_ERROR_KEY: &str = "notification.default_title.error";
 
 // Global UI reference (for getting embedded icons)
 lazy_static::lazy_static! {
@@ -118,16 +122,9 @@ fn create_notification_with_defaults(
         NotificationType::Error => DEFAULT_DURATION_ERROR,
     };
 
-    let default_message = match notification_type {
-        NotificationType::Info => DEFAULT_MESSAGE_INFO,
-        NotificationType::Success => DEFAULT_MESSAGE_SUCCESS,
-        NotificationType::Warning => DEFAULT_MESSAGE_WARNING,
-        NotificationType::Error => DEFAULT_MESSAGE_ERROR,
-    };
-
     // If message is empty string, use default message
     let final_message = if options.message.is_empty() {
-        slint::SharedString::from(default_message)
+        slint::SharedString::from(i18n::tr(default_message_key(notification_type)).as_ref())
     } else {
         options.message
     };
@@ -204,6 +201,24 @@ fn create_notification_with_defaults(
         native_delivery: options.native_delivery,
         dismissed: false, // Initially not dismissed
         hovered: false,   // Initially not hovered
+    }
+}
+
+fn default_message_key(notification_type: NotificationType) -> &'static str {
+    match notification_type {
+        NotificationType::Info => DEFAULT_MESSAGE_INFO_KEY,
+        NotificationType::Success => DEFAULT_MESSAGE_SUCCESS_KEY,
+        NotificationType::Warning => DEFAULT_MESSAGE_WARNING_KEY,
+        NotificationType::Error => DEFAULT_MESSAGE_ERROR_KEY,
+    }
+}
+
+fn default_title_key(notification_type: NotificationType) -> &'static str {
+    match notification_type {
+        NotificationType::Info => DEFAULT_TITLE_INFO_KEY,
+        NotificationType::Success => DEFAULT_TITLE_SUCCESS_KEY,
+        NotificationType::Warning => DEFAULT_TITLE_WARNING_KEY,
+        NotificationType::Error => DEFAULT_TITLE_ERROR_KEY,
     }
 }
 
@@ -313,14 +328,9 @@ fn record_message(message_center: &MessageCenter, notification: &Notification) -
         NotificationType::Warning => MessageSeverity::Warning,
         NotificationType::Error => MessageSeverity::Error,
     };
-    let fallback_title = match notification.r#type {
-        NotificationType::Info => "Information",
-        NotificationType::Success => "Completed",
-        NotificationType::Warning => "Attention",
-        NotificationType::Error => "Failed",
-    };
+    let fallback_title = i18n::tr(default_title_key(notification.r#type));
     let title = if notification.title.is_empty() {
-        fallback_title
+        fallback_title.as_ref()
     } else {
         notification.title.as_str()
     };
@@ -369,15 +379,25 @@ fn clear_banner_queue(
 }
 
 /// Drops queued banners whose durable Inbox rows were deleted or cleared.
-/// Must run on the Slint event loop. Only Send data (alive ids) may cross
+/// Must run on the Slint event loop. Only Send data (deleted ids) may cross
 /// `invoke_from_event_loop` — the banner queue holds non-Send `Image` handles.
-fn prune_banners_for_alive_messages(manager: &NotificationManager, alive: &HashSet<String>) {
+fn deleted_mounted_message_ids(
+    mounted: &HashSet<String>,
+    snapshot_ids: &HashSet<String>,
+) -> HashSet<String> {
+    mounted.difference(snapshot_ids).cloned().collect()
+}
+
+fn prune_banners_for_deleted_messages(manager: &NotificationManager, deleted: &HashSet<String>) {
+    if deleted.is_empty() {
+        return;
+    }
     let model = banner_queue_model(manager);
     let mut removed = 0usize;
     for index in (0..model.row_count()).rev() {
         if let Some(item) = model.row_data(index) {
             let message_id = item.message_id.as_str();
-            if !message_id.is_empty() && !alive.contains(message_id) {
+            if deleted.contains(message_id) {
                 removed += 1;
                 if let Ok(mut state) = HOVER_STATE.write() {
                     state.remove(&item.id);
@@ -1077,18 +1097,22 @@ pub fn setup_notifications(
             .read()
             .map(|ids| ids.clone())
             .unwrap_or_default();
-        let alive = snapshot
+        let snapshot_ids = snapshot
             .messages
             .iter()
-            .filter(|message| mounted.contains(message.id.as_str()))
             .map(|message| message.id.clone())
             .collect::<HashSet<_>>();
+        // Only reconcile banners that were mounted when this snapshot was
+        // observed. A notification publish updates the message center before
+        // its Banner is inserted, so a queued stale snapshot must not remove
+        // that newly inserted Banner.
+        let deleted = deleted_mounted_message_ids(&mounted, &snapshot_ids);
         if let Err(error) = slint::invoke_from_event_loop(move || {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
             let manager = NotificationManager::get(&ui);
-            prune_banners_for_alive_messages(&manager, &alive);
+            prune_banners_for_deleted_messages(&manager, &deleted);
         }) {
             log::debug!("[Messages] Banner sync dropped during shutdown: {error}");
         }
@@ -1100,7 +1124,11 @@ pub fn setup_notifications(
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_BANNER_QUEUE, prepend_capped};
+    use super::{
+        MAX_BANNER_QUEUE, NotificationType, default_message_key, default_title_key,
+        deleted_mounted_message_ids, prepend_capped,
+    };
+    use std::collections::HashSet;
 
     #[test]
     fn banner_queue_keeps_newest_first_within_cap() {
@@ -1115,5 +1143,63 @@ mod tests {
         let (queue, dropped) = prepend_capped(queue, 5, MAX_BANNER_QUEUE);
         assert_eq!(queue, vec![5, 4, 3]);
         assert_eq!(dropped, vec![1]);
+    }
+
+    #[test]
+    fn stale_message_snapshot_only_prunes_banners_known_when_it_was_observed() {
+        let mounted = HashSet::from(["deleted".to_string(), "still-alive".to_string()]);
+        let snapshot_ids = HashSet::from(["still-alive".to_string(), "new-message".to_string()]);
+
+        assert_eq!(
+            deleted_mounted_message_ids(&mounted, &snapshot_ids),
+            HashSet::from(["deleted".to_string()])
+        );
+    }
+
+    #[test]
+    fn default_copy_is_resolved_from_each_locale_catalog() {
+        let cases = [
+            (
+                NotificationType::Info,
+                "Info",
+                "Information",
+                "信息",
+                "信息",
+            ),
+            (
+                NotificationType::Success,
+                "Success",
+                "Completed",
+                "成功",
+                "已完成",
+            ),
+            (
+                NotificationType::Warning,
+                "Warning",
+                "Attention",
+                "警告",
+                "注意",
+            ),
+            (NotificationType::Error, "Error", "Failed", "错误", "失败"),
+        ];
+
+        for (notification_type, message_en, title_en, message_zh, title_zh) in cases {
+            assert_eq!(
+                usher_i18n::translate_for("en", default_message_key(notification_type)),
+                message_en
+            );
+            assert_eq!(
+                usher_i18n::translate_for("en", default_title_key(notification_type)),
+                title_en
+            );
+            assert_eq!(
+                usher_i18n::translate_for("zh-CN", default_message_key(notification_type)),
+                message_zh
+            );
+            assert_eq!(
+                usher_i18n::translate_for("zh-CN", default_title_key(notification_type)),
+                title_zh
+            );
+        }
     }
 }

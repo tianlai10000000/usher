@@ -3,6 +3,7 @@ import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubActionListItem, GitHubActionMenu, GitHubActionMenuTriggerArea } from "../github_action_menu.slint";
 import { NotificationType } from "notification.slint";
+import { I18n } from "@i18n";
 
 // A floating application notification is an overlay surface, not an inline
 // Primer Banner. Keep its canvas and border neutral so it cannot merge with
@@ -256,7 +257,7 @@ export component GitHubNotificationBanner inherits Rectangle {
                         ? GitHubTheme.control-default-hover
                         : transparent);
             accessible-role: button;
-            accessible-label: "More notification actions";
+            accessible-label: I18n.messages-more-actions;
 
             Rectangle { x: 10px; y: 5px; width: 3px; height: 3px; border-radius: 1.5px; background: root.muted-foreground; }
             Rectangle { x: 10px; y: 10.5px; width: 3px; height: 3px; border-radius: 1.5px; background: root.muted-foreground; }
@@ -300,7 +301,7 @@ export component GitHubNotificationBanner inherits Rectangle {
             alignment: start;
 
             GitHubActionListItem {
-                text: "View all notifications";
+                text: I18n.messages-view-all;
                 icon: @image-url("../../assets/icons/octicon-link-external-16.svg");
                 activated => {
                     root.queue-menu-open = false;
@@ -309,7 +310,7 @@ export component GitHubNotificationBanner inherits Rectangle {
             }
 
             GitHubActionListItem {
-                text: "Dismiss all";
+                text: I18n.messages-dismiss-all;
                 icon: @image-url("../../assets/icons/octicon-trash-16.svg");
                 activated => {
                     root.queue-menu-open = false;
@@ -323,7 +324,7 @@ export component GitHubNotificationBanner inherits Rectangle {
         x: parent.width - 40px;
         y: 8px;
         icon: @image-url("../../assets/icons/octicon-x-16.svg");
-        tooltip-text: "Dismiss notification";
+        tooltip-text: I18n.tooltip-dismiss-notification;
         show-tooltip: false;
         tooltip-align-right: true;
         tooltip-above: false;

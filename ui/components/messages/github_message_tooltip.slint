@@ -4,6 +4,7 @@ import {
     GitHubTooltipAlignment,
     GitHubTooltipPlacement,
 } from "../../state/tooltip_overlay_state.slint";
+import { I18n } from "@i18n";
 import {
     MessageTooltipKind,
     MessageTooltipOverlayState,
@@ -211,7 +212,7 @@ export component GitHubMessageTooltipOverlayHost inherits Rectangle {
         anchor-gap: root.anchor-gap;
 
         mark-read-surface := GitHubTooltipSurface {
-            text: "Mark as read";
+            text: I18n.messages-mark-as-read;
             viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
             viewport-max-height: max(0px, root.height - root.boundary-padding * 2);
         }
@@ -231,7 +232,7 @@ export component GitHubMessageTooltipOverlayHost inherits Rectangle {
         anchor-gap: root.anchor-gap;
 
         mark-unread-surface := GitHubTooltipSurface {
-            text: "Mark as unread";
+            text: I18n.messages-mark-as-unread;
             viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
             viewport-max-height: max(0px, root.height - root.boundary-padding * 2);
         }
@@ -251,7 +252,7 @@ export component GitHubMessageTooltipOverlayHost inherits Rectangle {
         anchor-gap: root.anchor-gap;
 
         delete-surface := GitHubTooltipSurface {
-            text: "Delete";
+            text: I18n.common-delete;
             viewport-max-width: max(0px, root.width - root.boundary-padding * 2);
             viewport-max-height: max(0px, root.height - root.boundary-padding * 2);
         }

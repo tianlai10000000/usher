@@ -1,6 +1,7 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubLink } from "../github_link.slint";
 import { GitHubMarkdownMetrics } from "../markdown/github_markdown_typography.slint";
+import { I18n } from "@i18n";
 
 export enum AgentResponseBlockKind {
     Heading1,
@@ -363,7 +364,7 @@ export component GitHubAgentResponse inherits Rectangle {
                 y: (parent.height - self.height) / 2;
                 text-max-width: max(0px, parent.width - self.x);
                 text: root.preview-title == ""
-                    ? (root.truncated ? "Open full response" : "Open formatted response")
+                    ? (root.truncated ? I18n.preview-open-full-response : I18n.preview-open-formatted-response)
                     : root.preview-title;
                 inline: true;
                 clicked => { root.open-full-response(); }

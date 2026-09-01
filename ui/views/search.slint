@@ -1,19 +1,20 @@
 import { Route } from "../route/routeMap.slint";
 import { GitHubBlankslate } from "../components/github_blankslate.slint";
 import { GitHubPageView } from "../components/page/page_view.slint";
+import { I18n } from "@i18n";
 
 export component GitHubSearchPage inherits GitHubPageView {
-    page-title: "Search";
-    page-description: "Find a registered repository by project name or alias.";
+    page-title: I18n.common-search;
+    page-description: I18n.search-description;
     page-icon: @image-url("../assets/icons/octicon-search-16.svg");
 
     GitHubBlankslate {
         bordered: true;
         narrow: true;
         icon: @image-url("../assets/icons/octicon-repo-16.svg");
-        heading: "Project search has moved";
-        description: "Use the search field on the Projects page to filter the complete repository list.";
-        primary-label: "Search projects";
+        heading: I18n.search-moved;
+        description: I18n.search-empty-description;
+        primary-label: I18n.search-projects;
         primary-clicked => { root.navigate(Route.Project); }
     }
 }

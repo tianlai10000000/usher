@@ -1,11 +1,12 @@
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 // Primer-style progress track for determinate and indeterminate operations.
 export component GitHubProgressBar inherits Rectangle {
     in property <float> progress: 0;
     in property <bool> indeterminate: false;
     in property <color> foreground: GitHubTheme.accent-emphasis;
-    in property <string> status-label: "Progress";
+    in property <string> status-label: I18n.common-progress;
 
     private property <float> clamped-progress:
         max(0, min(1, root.progress));

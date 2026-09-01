@@ -55,6 +55,25 @@ impl UpdateChannel {
     }
 }
 
+pub(super) fn update_check_error_message_key(error: &str) -> &'static str {
+    let normalized = error.to_ascii_lowercase();
+    if normalized.contains("404")
+        || normalized.contains("not found")
+        || normalized.contains("no available release")
+    {
+        "update.release_not_found"
+    } else if normalized.contains("network")
+        || normalized.contains("reqwest")
+        || normalized.contains("connect")
+        || normalized.contains("timed out")
+        || normalized.contains("error sending request")
+    {
+        "update.network_failed"
+    } else {
+        "update.check_failed"
+    }
+}
+
 fn create_updater() -> Result<Box<dyn self_update::update::ReleaseUpdate>> {
     log::debug!(
         "Creating updater, repo: tianlai10000000/usher, current version: {}",
@@ -203,10 +222,15 @@ pub async fn perform_update_with_progress(
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         s.is_downloading = true;
         s.download_progress = 0.0;
-        s.download_status = "Preparing...".to_string();
+        s.download_status = crate::i18n::tr("update.preparing_download").into_owned();
     }
 
-    progress_callback(0.0, 0, 0, "Preparing download...");
+    progress_callback(
+        0.0,
+        0,
+        0,
+        crate::i18n::tr("update.preparing_download").as_ref(),
+    );
 
     // Check if cancelled
     if cancel_flag.load(Ordering::Relaxed) {
@@ -225,11 +249,21 @@ pub async fn perform_update_with_progress(
         .clone();
     let release_info =
         tokio::task::spawn_blocking(move || -> Result<(String, String), anyhow::Error> {
-            progress_callback_clone(0.05, 0, 0, "Connecting to server...");
+            progress_callback_clone(
+                0.05,
+                0,
+                0,
+                crate::i18n::tr("update.connecting").as_ref(),
+            );
 
             let updater = create_updater()?;
 
-            progress_callback_clone(0.1, 0, 0, "Fetching release info...");
+            progress_callback_clone(
+                0.1,
+                0,
+                0,
+                crate::i18n::tr("update.fetching_release").as_ref(),
+            );
 
             let releases = updater.get_latest_releases(cargo_crate_version!())?;
             let latest_release = if selected_version.is_empty() {
@@ -329,7 +363,11 @@ pub async fn perform_update_with_progress(
         return Err(anyhow::anyhow!("Download cancelled"));
     }
 
-    progress_callback(0.15, 0, 0, &format!("Downloading v{}...", version));
+    let downloading_version = crate::i18n::tr_args(
+        "update.downloading_release",
+        &[("version", version.as_str())],
+    );
+    progress_callback(0.15, 0, 0, &downloading_version);
 
     // Use the shared HTTP pipeline while retaining reqwest streaming.
     let mut response = http::send(
@@ -386,12 +424,21 @@ pub async fn perform_update_with_progress(
         };
 
         // Format downloaded size
-        let downloaded_mb = downloaded as f64 / 1_048_576.0;
-        let total_mb = total_size as f64 / 1_048_576.0;
+        let downloaded_mb = format!("{:.1}", downloaded as f64 / 1_048_576.0);
+        let total_mb = format!("{:.1}", total_size as f64 / 1_048_576.0);
         let status = if total_size > 0 {
-            format!("Downloading... {:.1} / {:.1} MB", downloaded_mb, total_mb)
+            crate::i18n::tr_args(
+                "update.downloading_progress",
+                &[
+                    ("downloaded_mb", downloaded_mb.as_str()),
+                    ("total_mb", total_mb.as_str()),
+                ],
+            )
         } else {
-            format!("Downloading... {:.1} MB", downloaded_mb)
+            crate::i18n::tr_args(
+                "update.downloading_amount",
+                &[("downloaded_mb", downloaded_mb.as_str())],
+            )
         };
 
         progress_callback(progress, downloaded, total_size, &status);
@@ -416,7 +463,7 @@ pub async fn perform_update_with_progress(
         0.85,
         downloaded,
         total_size,
-        "Download complete, installing...",
+        crate::i18n::tr("update.download_installing").as_ref(),
     );
 
     // Check if cancelled
@@ -431,7 +478,12 @@ pub async fn perform_update_with_progress(
     let state_for_install = state_clone.clone();
 
     let install_result = tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
-        progress_callback_for_install(0.90, downloaded, total_size, "Extracting update...");
+        progress_callback_for_install(
+            0.90,
+            downloaded,
+            total_size,
+            crate::i18n::tr("update.extracting").as_ref(),
+        );
 
         // Record current executable path (for debugging)
         let current_exe =
@@ -566,7 +618,12 @@ pub async fn perform_update_with_progress(
                 .context("Failed to set executable permissions")?;
         }
 
-        progress_callback_for_install(0.95, downloaded, total_size, "Installing update...");
+        progress_callback_for_install(
+            0.95,
+            downloaded,
+            total_size,
+            crate::i18n::tr("update.installing").as_ref(),
+        );
 
         // Replace current executable file
         // Use self_replace to safely replace executable file
@@ -580,7 +637,12 @@ pub async fn perform_update_with_progress(
             log::debug!("After update, executable file path: {:?}", updated_exe);
         }
 
-        progress_callback_for_install(1.0, downloaded, total_size, "Update complete!");
+        progress_callback_for_install(
+            1.0,
+            downloaded,
+            total_size,
+            crate::i18n::tr("update.complete").as_ref(),
+        );
 
         // Update state
         {
@@ -588,7 +650,7 @@ pub async fn perform_update_with_progress(
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             s.download_progress = 1.0;
-            s.download_status = "Update complete! Restarting...".to_string();
+            s.download_status = crate::i18n::tr("update.complete_restarting").into_owned();
         }
 
         // TempDir removes the extraction directory when this worker exits.
@@ -597,7 +659,12 @@ pub async fn perform_update_with_progress(
         // Brief delay to let user see completion status
         std::thread::sleep(std::time::Duration::from_millis(800));
 
-        progress_callback_for_install(1.0, downloaded, total_size, "Restarting application...");
+        progress_callback_for_install(
+            1.0,
+            downloaded,
+            total_size,
+            crate::i18n::tr("update.restarting").as_ref(),
+        );
 
         // Restart application
         restart_application()?;
@@ -798,10 +865,7 @@ pub fn setup_updater(
 
             log::debug!(" Calling check_for_update...");
             let result = check_for_update(&state).await;
-            log::debug!(
-                "check_for_update completed, result: {:?}",
-                result.is_ok()
-            );
+            log::debug!("check_for_update completed, result: {:?}", result.is_ok());
             let (is_up_to_date, version) = {
                 match &result {
                     Ok(up_to_date) => {
@@ -825,7 +889,8 @@ pub fn setup_updater(
                     let version_clone = version.clone();
                     log::debug!(
                         "Processing result: is_up_to_date={}, version={}",
-                        is_up_to_date, version_clone
+                        is_up_to_date,
+                        version_clone
                     );
 
                     if is_up_to_date {
@@ -842,13 +907,14 @@ pub fn setup_updater(
                             // Clear busy before feedback so the control is
                             // interactive when Notify appears.
                             mirror_update_checking(&ui, &settings_page_for_completion, false);
+                            let version = cargo_crate_version!();
                             NotificationManager::get(&ui).invoke_success(NotificationOptions {
-                                message: format!(
-                                    "Usher {} is the latest version.",
-                                    cargo_crate_version!()
+                                message: crate::i18n::tr_args(
+                                    "update.latest_message",
+                                    &[("version", version)],
                                 )
                                 .into(),
-                                title: "You're up to date".into(),
+                                title: crate::i18n::tr("update.latest_title").as_ref().into(),
                                 duration: 4000,
                                 icon: "".into(),
                                 component: CustomComponentType::None,
@@ -902,14 +968,19 @@ pub fn setup_updater(
                             let current_version = cargo_crate_version!();
                             let actions: ModelRc<SharedString> =
                                 ModelRc::new(Rc::new(VecModel::from(vec![
-                                    SharedString::from("Later"),
-                                    SharedString::from("Update now"),
+                                    SharedString::from(crate::i18n::tr("update.later").as_ref()),
+                                    SharedString::from(
+                                        crate::i18n::tr("update.update_now").as_ref(),
+                                    ),
                                 ])));
                             NotificationManager::get(&ui).invoke_info(NotificationOptions {
-                                title: "Update available".into(),
-                                message: format!(
-                                    "Usher {} is available. You’re currently using {}.",
-                                    version_for_all, current_version
+                                title: crate::i18n::tr("update.available_title").as_ref().into(),
+                                message: crate::i18n::tr_args(
+                                    "update.available_message",
+                                    &[
+                                        ("new_version", version_for_all.as_str()),
+                                        ("current_version", current_version),
+                                    ],
                                 )
                                 .into(),
                                 duration: 0,
@@ -930,19 +1001,7 @@ pub fn setup_updater(
                     log::debug!(" Update check error: {}", error_msg);
                     // Keep technical details in the log. The Notify uses a
                     // concise, provider-neutral recovery message.
-                    let friendly_msg = if error_msg.contains("404")
-                        || error_msg.contains("Not Found")
-                    {
-                        "No release information was found for this repository.".to_string()
-                    } else if error_msg.contains("NetworkError")
-                        || error_msg.contains("network")
-                        || error_msg.contains("ReqwestError")
-                        || error_msg.contains("error sending request")
-                    {
-                        "We couldn’t connect to the update service. Check your network connection and try again.".to_string()
-                    } else {
-                        "We couldn’t check for updates. Try again in a moment.".to_string()
-                    };
+                    let friendly_message_key = update_check_error_message_key(&error_msg);
                     let ui_weak_for_completion = ui_weak.clone();
                     let ui_weak_for_logic = ui_weak.clone();
                     let settings_page_for_completion = settings_page.clone();
@@ -954,8 +1013,8 @@ pub fn setup_updater(
                         };
                         mirror_update_checking(&ui, &settings_page_for_completion, false);
                         NotificationManager::get(&ui).invoke_error(NotificationOptions {
-                            message: friendly_msg.into(),
-                            title: "Couldn’t check for updates".into(),
+                            message: crate::i18n::tr(friendly_message_key).as_ref().into(),
+                            title: crate::i18n::tr("update.check_failed_title").as_ref().into(),
                             duration: 8000,
                             icon: "".into(),
                             component: CustomComponentType::None,
@@ -1010,7 +1069,7 @@ pub fn setup_updater(
                 let logic = ui.global::<UpdateLogic>();
                 logic.set_is_downloading(true);
                 logic.set_download_progress(0.0);
-                logic.set_download_status("Preparing...".into());
+                logic.set_download_status(crate::i18n::tr("update.preparing").into_owned().into());
                 log::debug!(" Download progress modal shown");
             }
 
@@ -1067,7 +1126,9 @@ pub fn setup_updater(
                                     // Only show error notification for non-cancelled cases
                                     let manager = NotificationManager::get(&ui);
                                     manager.invoke_error(NotificationOptions {
-                                        message: format!("Update failed: {}", error_msg).into(),
+                                        message: crate::i18n::tr("update.install_failed")
+                                            .as_ref()
+                                            .into(),
                                         title: "".into(),
                                         duration: 5000,
                                         icon: "".into(),
@@ -1114,7 +1175,7 @@ pub fn setup_updater(
                 // Show cancel notification
                 let manager = NotificationManager::get(&ui);
                 manager.invoke_info(NotificationOptions {
-                    message: "Update cancelled".into(),
+                    message: crate::i18n::tr("update.cancelled").as_ref().into(),
                     title: "".into(),
                     duration: 3000,
                     icon: "".into(),

@@ -1,6 +1,7 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubLink } from "../github_link.slint";
+import { I18n } from "@i18n";
 
 
 export enum MessageRole {
@@ -301,7 +302,7 @@ export component GitHubMessageBubble inherits Rectangle {
                         }
 
                         Text {
-                            text: "Thinking" + (root.elapsed == "" ? "" : " · " + root.elapsed);
+                            text: I18n.chat-thinking + (root.elapsed == "" ? "" : " · " + root.elapsed);
                             color: GitHubTheme.fg-muted;
                             font-size: 14px;
                         }
@@ -390,12 +391,12 @@ export component GitHubMessageBubble inherits Rectangle {
 }
 
 export component GitHubChatWelcomeView inherits Rectangle {
-    in property <string> title: "Welcome to Usher Chat";
-    in property <string> description: "Start a conversation by typing a message below.";
+    in property <string> title: I18n.chat-welcome-title;
+    in property <string> description: I18n.chat-welcome-description;
     in property <[string]> suggestions: [
-        "What can you help me with?",
-        "Tell me a joke",
-        "Explain quantum computing",
+        I18n.chat-default-help,
+        I18n.chat-default-joke,
+        I18n.chat-default-quantum,
     ];
 
     callback suggestion-clicked(string);
@@ -436,7 +437,7 @@ export component GitHubChatWelcomeView inherits Rectangle {
                 padding-top: GitHubMetrics.size-16;
 
                 Text {
-                    text: "Try asking:";
+                    text: I18n.chat-try-asking;
                     color: GitHubTheme.fg-muted;
                     font-size: 12px;
                     horizontal-alignment: center;

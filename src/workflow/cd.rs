@@ -1,4 +1,5 @@
 use crate::app_runtime::shared_runtime;
+use crate::i18n::LocalizedText;
 use crate::workflow::bindings::{show_error, show_success};
 use crate::workflow::state::SharedWorkflowState;
 use crate::{
@@ -17,41 +18,41 @@ pub(crate) struct CdRequest {
 #[derive(Debug, Clone)]
 pub(crate) struct CdSnapshot {
     pub(crate) running: bool,
-    pub(crate) summary: String,
+    pub(crate) summary: LocalizedText,
     pub(crate) build_status: String,
-    pub(crate) build_detail: String,
+    pub(crate) build_detail: LocalizedText,
     pub(crate) test_status: String,
-    pub(crate) test_detail: String,
+    pub(crate) test_detail: LocalizedText,
     pub(crate) deploy_status: String,
-    pub(crate) deploy_detail: String,
+    pub(crate) deploy_detail: LocalizedText,
     pub(crate) verify_status: String,
-    pub(crate) verify_detail: String,
+    pub(crate) verify_detail: LocalizedText,
 }
 
 pub(crate) fn default_cd_snapshot() -> CdSnapshot {
     CdSnapshot {
         running: false,
-        summary: "No deployment started.".to_string(),
+        summary: LocalizedText::message("cd.no_deployment"),
         build_status: "pending".to_string(),
-        build_detail: "Waiting to start.".to_string(),
+        build_detail: LocalizedText::message("cd.waiting_to_start"),
         test_status: "pending".to_string(),
-        test_detail: "Waiting to start.".to_string(),
+        test_detail: LocalizedText::message("cd.waiting_to_start"),
         deploy_status: "pending".to_string(),
-        deploy_detail: "Waiting to start.".to_string(),
+        deploy_detail: LocalizedText::message("cd.waiting_to_start"),
         verify_status: "pending".to_string(),
-        verify_detail: "Waiting to start.".to_string(),
+        verify_detail: LocalizedText::message("cd.waiting_to_start"),
     }
 }
 
 pub(crate) fn validate_cd_request(req: &CdRequest) -> Result<(), String> {
     if req.environment.trim().is_empty() {
-        return Err("Environment is required.".to_string());
+        return Err(crate::i18n::tr("cd.environment_required").into_owned());
     }
     if req.release.trim().is_empty() {
-        return Err("Release name is required.".to_string());
+        return Err(crate::i18n::tr("cd.release_required").into_owned());
     }
     if req.commit.trim().is_empty() {
-        return Err("Commit hash is required.".to_string());
+        return Err(crate::i18n::tr("cd.commit_required").into_owned());
     }
     Ok(())
 }
@@ -59,54 +60,61 @@ pub(crate) fn validate_cd_request(req: &CdRequest) -> Result<(), String> {
 pub(crate) fn deployment_snapshot(req: &CdRequest, stage: &str) -> CdSnapshot {
     let mut snapshot = default_cd_snapshot();
     snapshot.running = true;
-    snapshot.summary = format!(
-        "Deploying release '{}' to '{}' from commit '{}'.",
-        req.release, req.environment, req.commit
+    snapshot.summary = LocalizedText::message_with(
+        "cd.deploying_summary",
+        [
+            ("release", req.release.clone()),
+            ("environment", req.environment.clone()),
+            ("commit", req.commit.clone()),
+        ],
     );
 
     match stage {
         "build" => {
             snapshot.build_status = "running".to_string();
-            snapshot.build_detail = "Compiling build artifacts.".to_string();
+            snapshot.build_detail = LocalizedText::message("cd.compiling_artifacts");
         }
         "test" => {
             snapshot.build_status = "success".to_string();
-            snapshot.build_detail = "Artifacts compiled successfully.".to_string();
+            snapshot.build_detail = LocalizedText::message("cd.artifacts_compiled");
             snapshot.test_status = "running".to_string();
-            snapshot.test_detail = "Executing smoke and integration tests.".to_string();
+            snapshot.test_detail = LocalizedText::message("cd.executing_tests");
         }
         "deploy" => {
             snapshot.build_status = "success".to_string();
-            snapshot.build_detail = "Artifacts compiled successfully.".to_string();
+            snapshot.build_detail = LocalizedText::message("cd.artifacts_compiled");
             snapshot.test_status = "success".to_string();
-            snapshot.test_detail = "Smoke and integration tests passed.".to_string();
+            snapshot.test_detail = LocalizedText::message("cd.tests_passed");
             snapshot.deploy_status = "running".to_string();
-            snapshot.deploy_detail = "Rolling out the selected release.".to_string();
+            snapshot.deploy_detail = LocalizedText::message("cd.rolling_out");
         }
         "verify" => {
             snapshot.build_status = "success".to_string();
-            snapshot.build_detail = "Artifacts compiled successfully.".to_string();
+            snapshot.build_detail = LocalizedText::message("cd.artifacts_compiled");
             snapshot.test_status = "success".to_string();
-            snapshot.test_detail = "Smoke and integration tests passed.".to_string();
+            snapshot.test_detail = LocalizedText::message("cd.tests_passed");
             snapshot.deploy_status = "success".to_string();
-            snapshot.deploy_detail = "Release promoted to target environment.".to_string();
+            snapshot.deploy_detail = LocalizedText::message("cd.release_promoted");
             snapshot.verify_status = "running".to_string();
-            snapshot.verify_detail = "Checking post-deploy health and key paths.".to_string();
+            snapshot.verify_detail = LocalizedText::message("cd.verifying_deployment");
         }
         "done" => {
             snapshot.running = false;
-            snapshot.summary = format!(
-                "Deployment finished: release '{}' is live in '{}'.",
-                req.release, req.environment
+            snapshot.summary = LocalizedText::message_with(
+                "cd.deployment_finished",
+                [
+                    ("release", req.release.clone()),
+                    ("environment", req.environment.clone()),
+                ],
             );
             snapshot.build_status = "success".to_string();
-            snapshot.build_detail = "Artifacts compiled successfully.".to_string();
+            snapshot.build_detail = LocalizedText::message("cd.artifacts_compiled");
             snapshot.test_status = "success".to_string();
-            snapshot.test_detail = "Smoke and integration tests passed.".to_string();
+            snapshot.test_detail = LocalizedText::message("cd.tests_passed");
             snapshot.deploy_status = "success".to_string();
-            snapshot.deploy_detail = "Release promoted to target environment.".to_string();
+            snapshot.deploy_detail = LocalizedText::message("cd.release_promoted");
             snapshot.verify_status = "success".to_string();
-            snapshot.verify_detail = "Health checks and verification passed.".to_string();
+            snapshot.verify_detail = LocalizedText::message("cd.deployment_verified");
         }
         _ => {}
     }
@@ -117,30 +125,36 @@ pub(crate) fn deployment_snapshot(req: &CdRequest, stage: &str) -> CdSnapshot {
 pub(crate) fn rollback_snapshot(commit: &str, stage: &str) -> CdSnapshot {
     let mut snapshot = default_cd_snapshot();
     snapshot.running = true;
-    snapshot.summary = format!("Rolling back deployment to commit '{}'.", commit.trim());
+    snapshot.summary = LocalizedText::message_with(
+        "cd.rolling_back_summary",
+        [("commit", commit.trim().to_string())],
+    );
     snapshot.build_status = "success".to_string();
-    snapshot.build_detail = "Using previously verified artifacts.".to_string();
+    snapshot.build_detail = LocalizedText::message("cd.using_verified_artifacts");
     snapshot.test_status = "success".to_string();
-    snapshot.test_detail = "Reusing the last known stable test result.".to_string();
+    snapshot.test_detail = LocalizedText::message("cd.reusing_stable_test");
 
     match stage {
         "deploy" => {
             snapshot.deploy_status = "running".to_string();
-            snapshot.deploy_detail = "Switching traffic back to the selected commit.".to_string();
+            snapshot.deploy_detail = LocalizedText::message("cd.switching_traffic");
         }
         "verify" => {
             snapshot.deploy_status = "rolled_back".to_string();
-            snapshot.deploy_detail = "Traffic moved back to the selected commit.".to_string();
+            snapshot.deploy_detail = LocalizedText::message("cd.traffic_restored");
             snapshot.verify_status = "running".to_string();
-            snapshot.verify_detail = "Verifying rollback health signals.".to_string();
+            snapshot.verify_detail = LocalizedText::message("cd.verifying_rollback");
         }
         "done" => {
             snapshot.running = false;
-            snapshot.summary = format!("Rollback finished. Active commit is '{}'.", commit.trim());
+            snapshot.summary = LocalizedText::message_with(
+                "cd.rollback_finished",
+                [("commit", commit.trim().to_string())],
+            );
             snapshot.deploy_status = "rolled_back".to_string();
-            snapshot.deploy_detail = "Traffic moved back to the selected commit.".to_string();
+            snapshot.deploy_detail = LocalizedText::message("cd.traffic_restored");
             snapshot.verify_status = "success".to_string();
-            snapshot.verify_detail = "Rollback verification passed.".to_string();
+            snapshot.verify_detail = LocalizedText::message("cd.rollback_verified");
         }
         _ => {}
     }
@@ -150,15 +164,15 @@ pub(crate) fn rollback_snapshot(commit: &str, stage: &str) -> CdSnapshot {
 
 pub(crate) fn apply_cd_snapshot(ui: &MainWindow, snapshot: &CdSnapshot) {
     ui.set_workflow_cd_running(snapshot.running);
-    ui.set_workflow_cd_summary(snapshot.summary.clone().into());
+    ui.set_workflow_cd_summary(snapshot.summary.resolve().into());
     ui.set_workflow_cd_build_status(snapshot.build_status.clone().into());
-    ui.set_workflow_cd_build_detail(snapshot.build_detail.clone().into());
+    ui.set_workflow_cd_build_detail(snapshot.build_detail.resolve().into());
     ui.set_workflow_cd_test_status(snapshot.test_status.clone().into());
-    ui.set_workflow_cd_test_detail(snapshot.test_detail.clone().into());
+    ui.set_workflow_cd_test_detail(snapshot.test_detail.resolve().into());
     ui.set_workflow_cd_deploy_status(snapshot.deploy_status.clone().into());
-    ui.set_workflow_cd_deploy_detail(snapshot.deploy_detail.clone().into());
+    ui.set_workflow_cd_deploy_detail(snapshot.deploy_detail.resolve().into());
     ui.set_workflow_cd_verify_status(snapshot.verify_status.clone().into());
-    ui.set_workflow_cd_verify_detail(snapshot.verify_detail.clone().into());
+    ui.set_workflow_cd_verify_detail(snapshot.verify_detail.resolve().into());
 }
 
 fn show_completion(ui: &MainWindow, title: &str, message: &str) {
@@ -203,7 +217,7 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 return;
             };
             if guard.cd_running {
-                show_error(&ui, "A CD workflow is already running.");
+                show_error(&ui, crate::i18n::tr("cd.already_running").as_ref());
                 return;
             }
             guard.cd_running = true;
@@ -217,7 +231,7 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
             guard.upsert_current(|view| view.cd = first_snapshot.clone());
         }
         apply_cd_snapshot(&ui, &first_snapshot);
-        show_success(&ui, "CD workflow started.");
+        show_success(&ui, crate::i18n::tr("cd.started").as_ref());
 
         let ui_weak_task = ui_weak.clone();
         let state_task = state_start.clone();
@@ -248,7 +262,12 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         if let Some(ui) = ui_weak_task.upgrade() {
                             apply_cd_snapshot(&ui, &snapshot);
                             if completed {
-                                show_completion(&ui, "CD workflow completed", &snapshot.summary);
+                                let summary = snapshot.summary.resolve();
+                                show_completion(
+                                    &ui,
+                                    crate::i18n::tr("cd.completed").as_ref(),
+                                    summary.as_str(),
+                                );
                             }
                         }
                     }
@@ -269,7 +288,7 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
         };
         let commit = commit.to_string();
         if commit.trim().is_empty() {
-            show_error(&ui, "Rollback commit is required.");
+            show_error(&ui, crate::i18n::tr("cd.rollback_required").as_ref());
             return;
         }
 
@@ -278,7 +297,7 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 return;
             };
             if guard.cd_running {
-                show_error(&ui, "CD workflow is running. Finish it before rollback.");
+                show_error(&ui, crate::i18n::tr("cd.finish_before_rollback").as_ref());
                 return;
             }
             guard.cd_running = true;
@@ -292,7 +311,7 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
             guard.upsert_current(|view| view.cd = first_snapshot.clone());
         }
         apply_cd_snapshot(&ui, &first_snapshot);
-        show_success(&ui, "Rollback started.");
+        show_success(&ui, crate::i18n::tr("cd.rollback_started").as_ref());
 
         let ui_weak_task = ui_weak.clone();
         let state_task = state_rollback.clone();
@@ -322,7 +341,12 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         if let Some(ui) = ui_weak_task.upgrade() {
                             apply_cd_snapshot(&ui, &snapshot);
                             if completed {
-                                show_completion(&ui, "CD rollback completed", &snapshot.summary);
+                                let summary = snapshot.summary.resolve();
+                                show_completion(
+                                    &ui,
+                                    crate::i18n::tr("cd.rollback_completed").as_ref(),
+                                    summary.as_str(),
+                                );
                             }
                         }
                     }

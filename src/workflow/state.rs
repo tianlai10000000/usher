@@ -1,4 +1,5 @@
 use crate::MainWindow;
+use crate::i18n::LocalizedText;
 use crate::jobs::{JobRunDescriptor, JobSnapshot, JobStepData, JobStepDefinition, apply_job_run};
 use crate::workflow::cd::{CdSnapshot, apply_cd_snapshot, default_cd_snapshot};
 use std::collections::HashMap;
@@ -82,8 +83,8 @@ impl Default for WorkflowProjectContext {
 
 #[derive(Debug, Clone)]
 pub(crate) struct WorkflowViewState {
-    pub(crate) branch_result: String,
-    pub(crate) tag_result: String,
+    pub(crate) branch_result: LocalizedText,
+    pub(crate) tag_result: LocalizedText,
     pub(crate) tag_selected_tab: i32,
     pub(crate) tag_mode: String,
     pub(crate) tag_version_mode: String,
@@ -105,8 +106,8 @@ pub(crate) struct WorkflowViewState {
 impl Default for WorkflowViewState {
     fn default() -> Self {
         Self {
-            branch_result: "Ready to recreate branches.".to_string(),
-            tag_result: "Ready to add or remove a tag.".to_string(),
+            branch_result: LocalizedText::message("workflow.ready_branches"),
+            tag_result: LocalizedText::message("workflow.ready_tags"),
             tag_selected_tab: 0,
             tag_mode: "local".to_string(),
             tag_version_mode: "patch".to_string(),
@@ -166,11 +167,12 @@ pub(crate) fn clear_current_project_heavy_state() {
 fn clear_heavy_view_state(view: &mut WorkflowViewState) {
     // Tag execution history is user-visible workflow state, not a disposable
     // cache. Only release reconstructable CD details here.
-    view.cd.summary = "Workflow state cleared after leaving the page.".to_string();
-    view.cd.build_detail = "Re-open Workflow to inspect the latest CD step details.".to_string();
-    view.cd.test_detail = "Re-open Workflow to inspect the latest CD step details.".to_string();
-    view.cd.deploy_detail = "Re-open Workflow to inspect the latest CD step details.".to_string();
-    view.cd.verify_detail = "Re-open Workflow to inspect the latest CD step details.".to_string();
+    view.cd.summary = LocalizedText::message("cd.state_cleared");
+    let detail = LocalizedText::message("cd.reopen_for_details");
+    view.cd.build_detail = detail.clone();
+    view.cd.test_detail = detail.clone();
+    view.cd.deploy_detail = detail.clone();
+    view.cd.verify_detail = detail;
 }
 
 pub(crate) fn initialize_current_ui(ui: &MainWindow, shared_state: &SharedWorkflowState) {
@@ -184,25 +186,43 @@ pub(crate) fn initialize_current_ui(ui: &MainWindow, shared_state: &SharedWorkfl
     initialize_ui(ui, &guard.current_project, state);
 }
 
+pub(crate) fn reproject_registered_ui(ui: &MainWindow) {
+    if let Some(shared_state) = WORKFLOW_SHARED_STATE.get() {
+        initialize_current_ui(ui, shared_state);
+    }
+}
+
 pub(crate) fn initialize_ui(
     ui: &MainWindow,
     context: &WorkflowProjectContext,
     state: &WorkflowViewState,
 ) {
     ui.set_workflow_project_id(context.id.clone().into());
-    ui.set_workflow_project_name(context.name.clone().into());
+    let project_name = if context.id == "default" {
+        crate::i18n::tr("projects.default_project").into_owned()
+    } else {
+        context.name.clone()
+    };
+    ui.set_workflow_project_name(project_name.into());
     ui.set_workflow_project_alias(context.alias.clone().into());
     ui.set_workflow_project_local_repo(context.local_repo.clone().into());
     ui.set_workflow_project_remote_repo(context.remote_repo.clone().into());
     ui.set_workflow_project_logo(context.logo.clone().into());
-    ui.set_workflow_branch_result(state.branch_result.clone().into());
-    ui.set_workflow_tag_result(state.tag_result.clone().into());
+    ui.set_workflow_branch_result(state.branch_result.resolve().into());
+    ui.set_workflow_tag_result(state.tag_result.resolve().into());
     ui.set_workflow_tag_selected_tab(state.tag_selected_tab);
     ui.set_workflow_tag_mode(state.tag_mode.clone().into());
     ui.set_workflow_tag_version_mode(state.tag_version_mode.clone().into());
-    ui.set_workflow_tag_current_version(state.tag_current_version.clone().into());
-    ui.set_workflow_tag_next_version(state.tag_next_version.clone().into());
-    ui.set_workflow_tag_remove_target(state.tag_remove_target.clone().into());
+    if state.tag_mode == "remote" {
+        let unavailable = crate::i18n::tr("common.unavailable").into_owned();
+        ui.set_workflow_tag_current_version(unavailable.clone().into());
+        ui.set_workflow_tag_next_version(unavailable.clone().into());
+        ui.set_workflow_tag_remove_target(unavailable.into());
+    } else {
+        ui.set_workflow_tag_current_version(state.tag_current_version.clone().into());
+        ui.set_workflow_tag_next_version(state.tag_next_version.clone().into());
+        ui.set_workflow_tag_remove_target(state.tag_remove_target.clone().into());
+    }
     ui.set_workflow_tag_add_initializing(state.tag_add_initializing);
     ui.set_workflow_tag_remove_initializing(state.tag_remove_initializing);
     ui.set_workflow_tag_running(state.tag_running);
@@ -245,56 +265,60 @@ pub(crate) fn normalize_project_alias(value: &str) -> String {
 pub(crate) fn default_tag_steps() -> Vec<JobStepData> {
     vec![
         queued_step(
-            "Enter local repository",
+            "tag.step.enter_repository",
             &["git", "rev-parse", "--show-toplevel"],
-            "Resolve the configured local repository path.",
+            "tag.step.enter_repository_detail",
         ),
         queued_step(
-            "Checkout release",
+            "tag.step.checkout_release",
             &["git", "checkout", "release"],
-            "Switch to the release branch.",
+            "tag.step.checkout_release_detail",
         ),
         queued_step(
-            "Pull release",
+            "tag.step.pull_release",
             &["git", "pull", "origin", "release"],
-            "Pull the latest release branch changes.",
+            "tag.step.pull_release_detail",
         ),
         queued_step(
-            "Checkout main",
+            "tag.step.checkout_main",
             &["git", "checkout", "main"],
-            "Switch back to the main branch.",
+            "tag.step.checkout_main_detail",
         ),
         queued_step(
-            "Rebase main on release",
+            "tag.step.rebase_main",
             &["git", "rebase", "release"],
-            "Rebase main onto release.",
+            "tag.step.rebase_main_detail",
         ),
         queued_step(
-            "Push main",
+            "tag.step.push_main",
             &["git", "push", "origin", "main"],
-            "Push rebased main to the remote.",
+            "tag.step.push_main_detail",
         ),
         queued_step(
-            "Create annotated tag",
+            "tag.step.create_annotated",
             &["git", "tag", "-a", "<version>"],
-            "Create the new annotated semantic version tag.",
+            "tag.step.create_annotated_detail",
         ),
         queued_step(
-            "Push tag",
+            "tag.step.push_tag",
             &["git", "push", "origin", "<version>"],
-            "Push the new tag to the remote.",
+            "tag.step.push_tag_detail",
         ),
-        queued_step("Complete", &["complete"], "Finish the local tag workflow."),
+        queued_step(
+            "tag.step.complete",
+            &["complete"],
+            "tag.step.complete_detail",
+        ),
     ]
 }
 
-fn queued_step(name: &str, command: &[&str], detail: &str) -> JobStepData {
+fn queued_step(name_key: &'static str, command: &[&str], detail_key: &'static str) -> JobStepData {
     JobStepData::queued(
         JobStepDefinition::new(
-            name,
+            LocalizedText::message(name_key),
             command.iter().map(|part| (*part).to_string()).collect(),
         ),
-        detail,
+        LocalizedText::message(detail_key),
     )
 }
 
@@ -307,7 +331,7 @@ mod tests {
     fn route_cleanup_preserves_tag_execution_history() {
         let mut view = WorkflowViewState {
             tag_selected_tab: 1,
-            tag_result: "Tag workflow failed at step 2.".to_string(),
+            tag_result: "Tag workflow failed at step 2.".into(),
             ..WorkflowViewState::default()
         };
         view.tag_job.steps[0].status = JobStepStatus::Completed;
@@ -320,7 +344,10 @@ mod tests {
         clear_heavy_view_state(&mut view);
 
         assert_eq!(view.tag_selected_tab, 1);
-        assert_eq!(view.tag_result, "Tag workflow failed at step 2.");
+        assert_eq!(
+            view.tag_result.source_text(),
+            "Tag workflow failed at step 2."
+        );
         assert_eq!(view.tag_job.steps[0].status, JobStepStatus::Completed);
         assert_eq!(
             view.tag_job.steps[0].conclusion,

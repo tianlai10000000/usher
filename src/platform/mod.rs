@@ -235,19 +235,19 @@ pub(crate) fn publish_system_theme_if_changed() {
     });
 }
 
-/// GitHub Desktop wording for revealing a folder in the OS file manager.
-pub(crate) fn open_directory_tooltip() -> &'static str {
+/// Semantic message key for revealing a folder in the OS file manager.
+pub(crate) fn open_directory_tooltip_key() -> &'static str {
     #[cfg(target_os = "macos")]
     {
-        "Show in Finder"
+        "workflow.show_in_finder"
     }
     #[cfg(target_os = "windows")]
     {
-        "Show in Explorer"
+        "workflow.show_in_explorer"
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        "Show in file manager"
+        "workflow.show_in_file_manager"
     }
 }
 
@@ -326,7 +326,9 @@ pub(crate) fn open_file_with_system_application(path: &Path) -> Result<(), Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{THEME_MODE_DARK, THEME_MODE_LIGHT, effective_dark_mode, open_directory_tooltip};
+    use super::{
+        THEME_MODE_DARK, THEME_MODE_LIGHT, effective_dark_mode, open_directory_tooltip_key,
+    };
 
     #[test]
     fn resolves_explicit_theme_modes_without_platform_state() {
@@ -337,7 +339,16 @@ mod tests {
     }
 
     #[test]
-    fn open_directory_tooltip_is_non_empty() {
-        assert!(!open_directory_tooltip().is_empty());
+    fn open_directory_tooltip_uses_a_registered_message_key() {
+        assert!(usher_i18n::source_message(open_directory_tooltip_key()).is_some());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn open_directory_tooltip_uses_the_chinese_finder_copy() {
+        assert_eq!(
+            usher_i18n::translate_for("zh-CN", open_directory_tooltip_key()),
+            "在Finder中打开"
+        );
     }
 }

@@ -1,0 +1,3867 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Usher 0.0.8-alpha.1\n"
+"Language: zh-CN\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgctxt "common.add_rule"
+msgid "Add rule"
+msgstr "添加规则"
+
+msgctxt "common.auto"
+msgid "Auto"
+msgstr "自动"
+
+msgctxt "common.check_for_updates"
+msgid "Check for updates"
+msgstr "检查更新"
+
+msgctxt "common.checking"
+msgid "Checking…"
+msgstr "正在检查…"
+
+msgctxt "common.close_menu"
+msgid "Close menu"
+msgstr "关闭菜单"
+
+msgctxt "common.custom"
+msgid "Custom"
+msgstr "自定义"
+
+msgctxt "common.default"
+msgid "Default"
+msgstr "默认"
+
+msgctxt "common.disable_all"
+msgid "Disable all"
+msgstr "全部禁用"
+
+msgctxt "common.enable_all"
+msgid "Enable all"
+msgstr "全部启用"
+
+msgctxt "common.off"
+msgid "Off"
+msgstr "关"
+
+msgctxt "common.on"
+msgid "On"
+msgstr "开"
+
+msgctxt "common.save"
+msgid "Save"
+msgstr "保存"
+
+msgctxt "common.saved"
+msgid "Saved"
+msgstr "已保存"
+
+msgctxt "common.set_default"
+msgid "Set default"
+msgstr "设为默认"
+
+msgctxt "common.show_api_key"
+msgid "Show API key"
+msgstr "显示 API Key"
+
+msgctxt "common.show_tokens"
+msgid "Show tokens"
+msgstr "显示 Token"
+
+msgctxt "common.test_connection"
+msgid "Test connection"
+msgstr "测试连接"
+
+msgctxt "common.testing"
+msgid "Testing…"
+msgstr "正在测试…"
+
+msgctxt "language.description"
+msgid "Choose the language used by Usher. System default follows your operating system locale."
+msgstr "选择 Usher 使用的语言。系统默认会跟随操作系统的语言设置。"
+
+msgctxt "language.system_default"
+msgid "System default"
+msgstr "跟随系统"
+
+msgctxt "language.title"
+msgid "Language"
+msgstr "语言"
+
+msgctxt "settings.ai_agent.api_key"
+msgid "API key"
+msgstr "API Key"
+
+msgctxt "settings.ai_agent.api_key_visible"
+msgid "API key is visible"
+msgstr "API Key 当前可见"
+
+msgctxt "settings.ai_agent.base_url"
+msgid "Base URL"
+msgstr "基础 URL"
+
+msgctxt "settings.ai_agent.description"
+msgid "Connect an OpenAI-compatible provider for workflow assistance."
+msgstr "连接兼容 OpenAI 的服务，为 Workflow 提供辅助。"
+
+msgctxt "settings.ai_agent.model"
+msgid "Model"
+msgstr "模型"
+
+msgctxt "settings.ai_agent.model_caption"
+msgid "For example: deepseek-v4-flash or gpt-4o-mini."
+msgstr "例如：deepseek-v4-flash 或 gpt-4o-mini。"
+
+msgctxt "settings.ai_agent.model_placeholder"
+msgid "Model name"
+msgstr "模型名称"
+
+msgctxt "settings.ai_agent.provider"
+msgid "Provider"
+msgstr "Provider"
+
+msgctxt "settings.ai_agent.provider_api_caption"
+msgid "The provider's OpenAI-compatible API root."
+msgstr "Provider 的 OpenAI-compatible API 根地址。"
+
+msgctxt "settings.ai_agent.save"
+msgid "Save AI Agent"
+msgstr "保存 AI Agent"
+
+msgctxt "settings.ai_agent.title"
+msgid "AI Agent"
+msgstr "AI Agent"
+
+msgctxt "settings.ai_review.add_rule"
+msgid "Add rule"
+msgstr "添加规则"
+
+msgctxt "settings.ai_review.concurrent"
+msgid "Concurrent reviews"
+msgstr "并发 Review 数"
+
+msgctxt "settings.ai_review.concurrent_description"
+msgid "Applies to queued tasks immediately; running tasks are not interrupted."
+msgstr "立即应用于排队中的任务；不会中断正在运行的任务。"
+
+msgctxt "settings.ai_review.decrease_concurrent"
+msgid "Decrease concurrent reviews"
+msgstr "减少并发 Review 数"
+
+msgctxt "settings.ai_review.delete_rule"
+msgid "Delete review rule"
+msgstr "删除 Review 规则"
+
+msgctxt "settings.ai_review.description"
+msgid "Configure review concurrency and reusable Markdown rule presets."
+msgstr "配置 Review 并发数和可复用的 Markdown 规则预设。"
+
+msgctxt "settings.ai_review.disabled"
+msgid "AI Code Review is not included in this build."
+msgstr "此构建不包含 AI Code Review。"
+
+msgctxt "settings.ai_review.increase_concurrent"
+msgid "Increase concurrent reviews"
+msgstr "增加并发 Review 数"
+
+msgctxt "settings.ai_review.markdown_caption"
+msgid "Local .md file, up to 512 KiB."
+msgstr "本地 .md 文件，最大 512 KiB。"
+
+msgctxt "settings.ai_review.markdown_file"
+msgid "Markdown file"
+msgstr "Markdown 文件"
+
+msgctxt "settings.ai_review.rules"
+msgid "Review rules"
+msgstr "Review 规则"
+
+msgctxt "settings.ai_review.rules_description"
+msgid "Markdown files are read only when a review starts."
+msgstr "仅在 Review 开始时读取 Markdown 文件。"
+
+msgctxt "settings.ai_review.rule_name"
+msgid "Rule name"
+msgstr "规则名称"
+
+msgctxt "settings.ai_review.rule_name_placeholder"
+msgid "e.g. Security review"
+msgstr "例如：Security Review"
+
+msgctxt "settings.ai_review.title"
+msgid "AI Review"
+msgstr "AI Review"
+
+msgctxt "settings.ai_review.validation.empty_path"
+msgid "Enter the Markdown file path."
+msgstr "请输入 Markdown 文件路径。"
+
+msgctxt "settings.ai_review.validation.relative_path"
+msgid "Use an absolute file path."
+msgstr "请使用绝对文件路径。"
+
+msgctxt "settings.ai_review.validation.not_markdown"
+msgid "Choose a .md or .markdown file."
+msgstr "请选择 .md 或 .markdown 文件。"
+
+msgctxt "settings.ai_review.validation.not_found"
+msgid "Choose an existing Markdown file."
+msgstr "请选择已存在的 Markdown 文件。"
+
+msgctxt "settings.ai_review.validation.not_a_file"
+msgid "The path must point to a file."
+msgstr "该路径必须指向一个文件。"
+
+msgctxt "settings.ai_review.validation.too_large"
+msgid "The Markdown file must be 512 KiB or smaller."
+msgstr "Markdown 文件大小不得超过 512 KiB。"
+
+msgctxt "settings.ai_review.validation.inaccessible"
+msgid "The Markdown file cannot be accessed."
+msgstr "无法访问该 Markdown 文件。"
+
+msgctxt "settings.ai_review.validation.duplicate_name"
+msgid "A rule with this name already exists."
+msgstr "已存在同名规则。"
+
+msgctxt "settings.ai_review.validation.invalid_name"
+msgid "Enter a non-empty, unique rule name."
+msgstr "请输入非空且唯一的规则名称。"
+
+msgctxt "settings.ai_review.validation.worker_failed"
+msgid "The Markdown file could not be validated."
+msgstr "无法校验该 Markdown 文件。"
+
+msgctxt "settings.code_hosting.api_base_url"
+msgid "API base URL"
+msgstr "API 基础 URL"
+
+msgctxt "settings.code_hosting.description"
+msgid "Configure credentials and enterprise API endpoints."
+msgstr "配置凭据和企业版 API 端点。"
+
+msgctxt "settings.code_hosting.enterprise"
+msgid "Enterprise"
+msgstr "企业标识"
+
+msgctxt "settings.code_hosting.enterprise_api"
+msgid "Enterprise API configuration"
+msgstr "企业版 API 配置"
+
+msgctxt "settings.code_hosting.enterprise_api_description"
+msgid "Enter a service host or a complete REST API root. Provider version paths are added when omitted."
+msgstr "输入服务主机或完整的 REST API 根地址；省略版本路径时会由服务适配器自动补充。"
+
+msgctxt "settings.code_hosting.gitee_enterprise_token"
+msgid "Gitee Enterprise token"
+msgstr "Gitee 企业版 Token"
+
+msgctxt "settings.code_hosting.gitee_public_token"
+msgid "Gitee public token"
+msgstr "Gitee 公有版 Token"
+
+msgctxt "settings.code_hosting.github_token"
+msgid "GitHub token"
+msgstr "GitHub Token"
+
+msgctxt "settings.code_hosting.gitlab_token"
+msgid "GitLab token"
+msgstr "GitLab Token"
+
+msgctxt "settings.code_hosting.personal_access_tokens"
+msgid "Personal access tokens"
+msgstr "个人访问 Token"
+
+msgctxt "settings.code_hosting.save_api_configuration"
+msgid "Save API configuration"
+msgstr "保存 API 配置"
+
+msgctxt "settings.code_hosting.save_tokens"
+msgid "Save tokens"
+msgstr "保存 Token"
+
+msgctxt "settings.code_hosting.title"
+msgid "Code hosting"
+msgstr "代码托管"
+
+msgctxt "settings.code_hosting.tokens_description"
+msgid "Tokens are stored locally and used for pull request summaries and workflows."
+msgstr "Token 保存在本地，用于 Pull Request 概览和 Workflow。"
+
+msgctxt "settings.code_hosting.tokens_visible"
+msgid "Tokens are visible"
+msgstr "Token 当前可见"
+
+msgctxt "settings.diagnostics.application_file_description"
+msgid "Write plain-text application logs to usher.log."
+msgstr "将纯文本应用日志写入 usher.log。"
+
+msgctxt "settings.diagnostics.application_file_logs"
+msgid "Application file logs"
+msgstr "应用文件日志"
+
+msgctxt "settings.diagnostics.console_description"
+msgid "Write application logs to the process standard output."
+msgstr "将应用日志写入进程标准输出。"
+
+msgctxt "settings.diagnostics.console_output"
+msgid "Console output"
+msgstr "控制台输出"
+
+msgctxt "settings.diagnostics.description"
+msgid "Choose where application logs are written and which detailed diagnostics are included."
+msgstr "选择应用日志的写入位置以及需要包含的详细诊断信息。"
+
+msgctxt "settings.diagnostics.detailed"
+msgid "Detailed diagnostics"
+msgstr "详细诊断"
+
+msgctxt "settings.diagnostics.export"
+msgid "Export diagnostics"
+msgstr "导出诊断包"
+
+msgctxt "settings.diagnostics.log_destinations"
+msgid "Log destinations"
+msgstr "日志输出位置"
+
+msgctxt "settings.diagnostics.logging_controls"
+msgid "Logging controls"
+msgstr "日志控制"
+
+msgctxt "settings.diagnostics.memory"
+msgid "Memory diagnostics"
+msgstr "内存诊断"
+
+msgctxt "settings.diagnostics.memory_description"
+msgid "Include periodic process memory and retained UI model measurements."
+msgstr "包含定期采集的进程内存和 UI 模型保留量。"
+
+msgctxt "settings.diagnostics.open_logs"
+msgid "Open logs"
+msgstr "打开日志目录"
+
+msgctxt "settings.diagnostics.simulate_crash"
+msgid "Simulate a crash"
+msgstr "模拟崩溃"
+
+msgctxt "settings.diagnostics.simulate_crash_description"
+msgid "Verify crash reporting. This immediately terminates the application."
+msgstr "用于验证崩溃报告；此操作会立即终止应用。"
+
+msgctxt "settings.diagnostics.structured_tracing"
+msgid "Structured tracing file"
+msgstr "结构化追踪文件"
+
+msgctxt "settings.diagnostics.structured_tracing_description"
+msgid "Write structured tracing events to usher_tracing.log."
+msgstr "将结构化追踪事件写入 usher_tracing.log。"
+
+msgctxt "settings.diagnostics.terminal_verbose"
+msgid "Terminal verbose diagnostics"
+msgstr "Terminal 详细诊断"
+
+msgctxt "settings.diagnostics.terminal_verbose_description"
+msgid "Include input, PTY output, viewport, and render details in enabled outputs."
+msgstr "在已启用的输出中包含输入、PTY 输出、视口和渲染明细。"
+
+msgctxt "settings.diagnostics.title"
+msgid "Diagnostics"
+msgstr "诊断"
+
+msgctxt "settings.general.appearance"
+msgid "Appearance"
+msgstr "外观"
+
+msgctxt "settings.general.appearance_description"
+msgid "Choose how Usher looks. Auto follows your system appearance."
+msgstr "选择 Usher 的外观；自动模式会跟随系统外观。"
+
+msgctxt "settings.general.automatic_updates"
+msgid "Automatic updates"
+msgstr "自动更新"
+
+msgctxt "settings.general.automatic_updates_description"
+msgid "Download and install new versions automatically."
+msgstr "自动下载并安装新版本。"
+
+msgctxt "settings.general.dark"
+msgid "Dark"
+msgstr "深色"
+
+msgctxt "settings.general.description"
+msgid "Manage appearance, language, and update preferences."
+msgstr "管理外观、语言和更新偏好。"
+
+msgctxt "settings.general.file_preview"
+msgid "File preview"
+msgstr "文件预览"
+
+msgctxt "settings.general.file_preview_description"
+msgid "Choose where artifacts open and which file providers may parse content."
+msgstr "选择制品的打开位置，以及允许解析内容的文件提供器。"
+
+msgctxt "settings.general.images"
+msgid "Images"
+msgstr "图片"
+
+msgctxt "settings.general.images_description"
+msgid "Decode supported local image files on demand."
+msgstr "按需解码支持的本地图片文件。"
+
+msgctxt "settings.general.light"
+msgid "Light"
+msgstr "浅色"
+
+msgctxt "settings.general.markdown"
+msgid "Markdown"
+msgstr "Markdown"
+
+msgctxt "settings.general.markdown_description"
+msgid "Render Markdown documents in the shared preview surface."
+msgstr "在共享预览区域中渲染 Markdown 文档。"
+
+msgctxt "settings.general.plain_text"
+msgid "Plain text"
+msgstr "纯文本"
+
+msgctxt "settings.general.plain_text_description"
+msgid "Preview UTF-8 text and source files."
+msgstr "预览 UTF-8 文本和源代码文件。"
+
+msgctxt "settings.general.release_channel"
+msgid "Release channel"
+msgstr "发布通道"
+
+msgctxt "settings.general.right_panel"
+msgid "Right panel"
+msgstr "右侧面板"
+
+msgctxt "settings.general.separate_window"
+msgid "Separate window"
+msgstr "独立窗口"
+
+msgctxt "settings.general.sound"
+msgid "Sound"
+msgstr "声音"
+
+msgctxt "settings.general.title"
+msgid "General"
+msgstr "通用"
+
+msgctxt "settings.general.ui_sound_effects"
+msgid "UI sound effects"
+msgstr "界面音效"
+
+msgctxt "settings.general.ui_sound_effects_description"
+msgid "Play a system click when using the page Back button."
+msgstr "使用页面返回按钮时播放系统点击音。"
+
+msgctxt "settings.general.updates"
+msgid "Updates"
+msgstr "更新"
+
+msgctxt "settings.general.version_prefix"
+msgid "Current version"
+msgstr "当前版本"
+
+msgctxt "settings.feedback.ai_agent_connected"
+msgid "AI Agent connected; the selected model is available."
+msgstr "AI Agent 已连接，所选模型可用。"
+
+msgctxt "settings.feedback.ai_agent_connected_model_unlisted"
+msgid "AI Agent connected. The provider did not list the selected model."
+msgstr "AI Agent 已连接，但 Provider 返回的列表中没有所选模型。"
+
+msgctxt "settings.feedback.ai_agent_save_failed"
+msgid "AI Agent settings could not be saved."
+msgstr "无法保存 AI Agent 设置。"
+
+msgctxt "settings.feedback.ai_agent_saved"
+msgid "AI Agent settings saved."
+msgstr "AI Agent 设置已保存。"
+
+msgctxt "settings.feedback.hosting_api_save_failed"
+msgid "Code hosting API configuration could not be saved."
+msgstr "无法保存代码托管 API 配置。"
+
+msgctxt "settings.feedback.hosting_api_saved"
+msgid "Code hosting API configuration saved."
+msgstr "代码托管 API 配置已保存。"
+
+msgctxt "settings.feedback.tokens_save_failed"
+msgid "Code hosting tokens could not be saved."
+msgstr "无法保存代码托管 Token。"
+
+msgctxt "settings.feedback.tokens_saved"
+msgid "Code hosting tokens saved."
+msgstr "代码托管 Token 已保存。"
+
+msgctxt "settings.release.alpha"
+msgid "Alpha"
+msgstr "Alpha"
+
+msgctxt "settings.release.stable"
+msgid "Stable"
+msgstr "稳定版"
+
+msgctxt "settings.title"
+msgid "Settings"
+msgstr "设置"
+
+msgctxt "common.about"
+msgid "About"
+msgstr "关于"
+
+msgctxt "common.all"
+msgid "All"
+msgstr "全部"
+
+msgctxt "common.author"
+msgid "Author"
+msgstr "作者"
+
+msgctxt "common.back"
+msgid "Back"
+msgstr "返回"
+
+msgctxt "common.cancel"
+msgid "Cancel"
+msgstr "取消"
+
+msgctxt "common.close"
+msgid "Close"
+msgstr "关闭"
+
+msgctxt "common.contact"
+msgid "Contact"
+msgstr "联系方式"
+
+msgctxt "common.copy_to_clipboard"
+msgid "Copy to clipboard"
+msgstr "复制到剪贴板"
+
+msgctxt "common.delete"
+msgid "Delete"
+msgstr "删除"
+
+msgctxt "common.dismiss"
+msgid "Dismiss"
+msgstr "关闭"
+
+msgctxt "common.job_run"
+msgid "Job run"
+msgstr "Job 运行"
+
+msgctxt "common.license"
+msgid "License"
+msgstr "许可证"
+
+msgctxt "common.load_more"
+msgid "Load more"
+msgstr "加载更多"
+
+msgctxt "common.loading"
+msgid "Loading"
+msgstr "加载中"
+
+msgctxt "common.notifications"
+msgid "Notifications"
+msgstr "通知"
+
+msgctxt "common.preview"
+msgid "Preview"
+msgstr "预览"
+
+msgctxt "common.projects"
+msgid "Projects"
+msgstr "项目"
+
+msgctxt "common.read"
+msgid "Read"
+msgstr "已读"
+
+msgctxt "common.search"
+msgid "Search"
+msgstr "搜索"
+
+msgctxt "common.select"
+msgid "Select"
+msgstr "选择"
+
+msgctxt "common.settings"
+msgid "Settings"
+msgstr "设置"
+
+msgctxt "common.terminal"
+msgid "Terminal"
+msgstr "Terminal"
+
+msgctxt "common.try_again"
+msgid "Try again"
+msgstr "重试"
+
+msgctxt "common.unread"
+msgid "Unread"
+msgstr "未读"
+
+msgctxt "common.version"
+msgid "Version"
+msgstr "版本"
+
+msgctxt "common.workflow"
+msgid "Workflow"
+msgstr "Workflow"
+
+msgctxt "navigation.about_usher"
+msgid "About Usher"
+msgstr "关于 Usher"
+
+msgctxt "navigation.chat"
+msgid "Chat"
+msgstr "Chat"
+
+msgctxt "navigation.home"
+msgid "Home"
+msgstr "首页"
+
+msgctxt "navigation.primary"
+msgid "Primary navigation"
+msgstr "主导航"
+
+msgctxt "navigation.ui_components"
+msgid "UI Components"
+msgstr "UI Components"
+
+msgctxt "tooltip.back_to_top"
+msgid "Back to top"
+msgstr "返回顶部"
+
+msgctxt "tooltip.checking_for_updates"
+msgid "Checking for updates…"
+msgstr "正在检查更新…"
+
+msgctxt "tooltip.clear_search"
+msgid "Clear search"
+msgstr "清除搜索"
+
+msgctxt "tooltip.close_preview"
+msgid "Close preview"
+msgstr "关闭预览"
+
+msgctxt "tooltip.close_terminal"
+msgid "Close Terminal"
+msgstr "关闭 Terminal"
+
+msgctxt "tooltip.copy_full_sha"
+msgid "Copy full SHA"
+msgstr "复制完整 SHA"
+
+msgctxt "tooltip.copy_preview"
+msgid "Copy preview"
+msgstr "复制预览内容"
+
+msgctxt "tooltip.dismiss_notification"
+msgid "Dismiss notification"
+msgstr "关闭通知"
+
+msgctxt "tooltip.edit_project"
+msgid "Edit project"
+msgstr "编辑项目"
+
+msgctxt "tooltip.forward"
+msgid "Forward"
+msgstr "前进"
+
+msgctxt "tooltip.grid_view"
+msgid "Grid view"
+msgstr "网格视图"
+
+msgctxt "tooltip.list_view"
+msgid "List view"
+msgstr "列表视图"
+
+msgctxt "tooltip.open_system_application"
+msgid "Open with system application"
+msgstr "使用系统应用打开"
+
+msgctxt "tooltip.open_terminal"
+msgid "Open Terminal"
+msgstr "打开 Terminal"
+
+msgctxt "tooltip.reload_projects"
+msgid "Reload projects"
+msgstr "重新加载项目"
+
+msgctxt "tooltip.show_sidebar"
+msgid "Show sidebar"
+msgstr "显示侧边栏"
+
+msgctxt "home.description"
+msgid "Git projects, pull requests, and delivery workflows"
+msgstr "Git 项目、Pull Request 与交付 Workflow"
+
+msgctxt "home.empty_description"
+msgid "Add a local Git repository, inspect pull request activity, and open project-aware workflows from one place."
+msgstr "添加本地 Git 仓库、查看 Pull Request 活动，并在一处打开项目相关 Workflow。"
+
+msgctxt "home.open_projects"
+msgid "Open projects"
+msgstr "打开项目"
+
+msgctxt "home.configure_settings"
+msgid "Configure settings"
+msgstr "配置设置"
+
+msgctxt "search.description"
+msgid "Find a registered repository by project name or alias."
+msgstr "按项目名称或别名查找已注册仓库。"
+
+msgctxt "search.empty_description"
+msgid "Use the search field on the Projects page to filter the complete repository list."
+msgstr "使用项目页面的搜索框筛选完整仓库列表。"
+
+msgctxt "search.projects"
+msgid "Search projects"
+msgstr "搜索项目"
+
+msgctxt "about.tagline"
+msgid "A desktop workspace for local Git projects and repeatable delivery workflows."
+msgstr "面向本地 Git 项目与可重复交付 Workflow 的桌面工作空间。"
+
+msgctxt "about.description"
+msgid "Usher brings project metadata, pull request summaries, guided Git workflows, an embedded Terminal, update management, and desktop notifications into one focused application."
+msgstr "Usher 集中整合项目元数据、Pull Request 摘要、引导式 Git Workflow、内置 Terminal、更新管理和桌面通知。"
+
+msgctxt "about.application_information"
+msgid "Application information"
+msgstr "应用信息"
+
+msgctxt "about.development_notice"
+msgid "Usher is under active development."
+msgstr "Usher 正在积极开发中。"
+
+msgctxt "projects.description"
+msgid "Manage local repositories and open their delivery workflows."
+msgstr "管理本地仓库并打开对应的交付 Workflow。"
+
+msgctxt "projects.new_project"
+msgid "New project"
+msgstr "新建项目"
+
+msgctxt "projects.loading_registry"
+msgid "Reading the local project registry."
+msgstr "正在读取本地项目注册表。"
+
+msgctxt "projects.find_placeholder"
+msgid "Find a project…"
+msgstr "查找项目…"
+
+msgctxt "projects.pull_requests"
+msgid "Pull requests"
+msgstr "Pull Requests"
+
+msgctxt "projects.repository_provider"
+msgid "Repository provider"
+msgstr "仓库 Provider"
+
+msgctxt "projects.open_project"
+msgid "Open project"
+msgstr "打开项目"
+
+msgctxt "projects.delete_project"
+msgid "Delete project"
+msgstr "删除项目"
+
+msgctxt "projects.project_name"
+msgid "Project name"
+msgstr "项目名称"
+
+msgctxt "projects.project_name_placeholder"
+msgid "e.g. Atlas"
+msgstr "例如：Atlas"
+
+msgctxt "projects.project_alias"
+msgid "Project alias"
+msgstr "项目别名"
+
+msgctxt "projects.project_alias_placeholder"
+msgid "e.g. atlas"
+msgstr "例如：atlas"
+
+msgctxt "projects.local_repository"
+msgid "Local repository"
+msgstr "本地仓库"
+
+msgctxt "projects.remote_repository"
+msgid "Remote repository"
+msgstr "远程仓库"
+
+msgctxt "projects.logo"
+msgid "Logo"
+msgstr "Logo"
+
+msgctxt "projects.logo_placeholder"
+msgid "Local path, HTTPS URL, or data URI"
+msgstr "本地路径、HTTPS URL 或 data URI"
+
+msgctxt "projects.logo_caption"
+msgid "Optional. Used in the project list and workflow header."
+msgstr "可选。用于项目列表和 Workflow 标题。"
+
+msgctxt "projects.type_tags"
+msgid "Project type tags"
+msgstr "项目类型标签"
+
+msgctxt "projects.type_tags_caption"
+msgid "Optional. Separate multiple labels with commas."
+msgstr "可选。多个标签请用逗号分隔。"
+
+msgctxt "projects.auto_refresh_pr_counts"
+msgid "Auto-refresh pull request counts"
+msgstr "自动刷新 Pull Request 数量"
+
+msgctxt "projects.auto_refresh_pr_counts_description"
+msgid "Fetch FAT, UAT, and PROD counts when this list loads."
+msgstr "列表加载时获取 FAT、UAT 和 PROD 数量。"
+
+msgctxt "projects.logo_preview"
+msgid "Logo preview"
+msgstr "Logo 预览"
+
+msgctxt "chat.mode"
+msgid "Chat mode"
+msgstr "Chat 模式"
+
+msgctxt "chat.loading_history"
+msgid "Loading Chat history"
+msgstr "正在加载 Chat 历史"
+
+msgctxt "chat.thinking"
+msgid "Thinking"
+msgstr "思考中"
+
+msgctxt "chat.welcome_title"
+msgid "Welcome to Usher Chat"
+msgstr "欢迎使用 Usher Chat"
+
+msgctxt "chat.welcome_description"
+msgid "Start a conversation by typing a message below."
+msgstr "在下方输入消息以开始对话。"
+
+msgctxt "chat.try_asking"
+msgid "Try asking:"
+msgstr "可以试着问："
+
+msgctxt "messages.caught_up"
+msgid "You're all caught up."
+msgstr "所有通知都已处理。"
+
+msgctxt "messages.mark_all_read"
+msgid "Mark all as read"
+msgstr "全部标为已读"
+
+msgctxt "messages.filter"
+msgid "Notification filter"
+msgstr "通知筛选"
+
+msgctxt "messages.mark_as_read"
+msgid "Mark as read"
+msgstr "标为已读"
+
+msgctxt "messages.mark_as_unread"
+msgid "Mark as unread"
+msgstr "标为未读"
+
+msgctxt "messages.more_actions"
+msgid "More notification actions"
+msgstr "更多通知操作"
+
+msgctxt "messages.view_all"
+msgid "View all notifications"
+msgstr "查看全部通知"
+
+msgctxt "messages.dismiss_all"
+msgid "Dismiss all"
+msgstr "关闭全部通知"
+
+msgctxt "update.available"
+msgid "Update available"
+msgstr "有可用更新"
+
+msgctxt "update.downloading"
+msgid "Downloading update"
+msgstr "正在下载更新"
+
+msgctxt "update.downloading_version"
+msgid "Downloading version"
+msgstr "正在下载版本"
+
+msgctxt "update.cancel_download"
+msgid "Cancel download"
+msgstr "取消下载"
+
+msgctxt "preview.preparing"
+msgid "Preparing preview"
+msgstr "正在准备预览"
+
+msgctxt "preview.unavailable"
+msgid "Preview unavailable"
+msgstr "预览不可用"
+
+msgctxt "jobs.stop"
+msgid "Stop Job"
+msgstr "停止 Job"
+
+msgctxt "jobs.title"
+msgid "Jobs"
+msgstr "Jobs"
+
+msgctxt "jobs.steps"
+msgid "Workflow steps"
+msgstr "Workflow 步骤"
+
+msgctxt "jobs.empty_steps"
+msgid "No Workflow steps yet."
+msgstr "暂无 Workflow 步骤。"
+
+msgctxt "jobs.loading_logs"
+msgid "Loading logs…"
+msgstr "正在加载日志…"
+
+msgctxt "workflow.sections"
+msgid "Workflow sections"
+msgstr "Workflow 分区"
+
+msgctxt "workflow.pull_requests"
+msgid "Pull requests"
+msgstr "Pull Requests"
+
+msgctxt "workflow.tags"
+msgid "Tags"
+msgstr "Tags"
+
+msgctxt "workflow.branch"
+msgid "Branch"
+msgstr "Branch"
+
+msgctxt "workflow.cd"
+msgid "CD"
+msgstr "CD"
+
+msgctxt "workflow.remote"
+msgid "Remote"
+msgstr "远程"
+
+msgctxt "workflow.local"
+msgid "Local"
+msgstr "本地"
+
+msgctxt "workflow.show_in_file_manager"
+msgid "Show in file manager"
+msgstr "在文件管理器中显示"
+
+msgctxt "workflow.show_in_finder"
+msgid "Show in Finder"
+msgstr "在Finder中打开"
+
+msgctxt "workflow.show_in_explorer"
+msgid "Show in Explorer"
+msgstr "在资源管理器中打开"
+
+msgctxt "workflow.copy_remote_url"
+msgid "Copy remote URL"
+msgstr "复制远程 URL"
+
+msgctxt "pr_list.search_placeholder"
+msgid "Search all pull requests"
+msgstr "搜索全部 Pull Request"
+
+msgctxt "pr_list.clear_filters"
+msgid "Clear current search query, filters, and sorts"
+msgstr "清除当前搜索、筛选和排序"
+
+msgctxt "pr_list.more_filters"
+msgid "More filters"
+msgstr "更多筛选"
+
+msgctxt "pr_list.all_reviews"
+msgid "All reviews"
+msgstr "全部 Review"
+
+msgctxt "pr_list.review_required"
+msgid "Review required"
+msgstr "需要 Review"
+
+msgctxt "pr_list.approved_review"
+msgid "Approved review"
+msgstr "已批准的 Review"
+
+msgctxt "pr_list.changes_requested"
+msgid "Changes requested"
+msgstr "已请求修改"
+
+msgctxt "pr_list.anyone"
+msgid "Anyone"
+msgstr "任何人"
+
+msgctxt "pr_list.assigned_nobody"
+msgid "Assigned to nobody"
+msgstr "未分配"
+
+msgctxt "pr_list.assigned_me"
+msgid "Assigned to me"
+msgstr "分配给我"
+
+msgctxt "pr_list.newest"
+msgid "Newest"
+msgstr "最新"
+
+msgctxt "pr_list.oldest"
+msgid "Oldest"
+msgstr "最早"
+
+msgctxt "pr_list.recently_updated"
+msgid "Recently updated"
+msgstr "最近更新"
+
+msgctxt "pr_list.least_recently_updated"
+msgid "Least recently updated"
+msgstr "最早更新"
+
+msgctxt "pr_list.filter_by_reviews"
+msgid "Filter by reviews"
+msgstr "按 Review 筛选"
+
+msgctxt "pr_list.sort_by"
+msgid "Sort by"
+msgstr "排序方式"
+
+msgctxt "pr_list.retry_request"
+msgid "Retry request"
+msgstr "重试请求"
+
+msgctxt "pr_list.open"
+msgid "Open"
+msgstr "开启"
+
+msgctxt "pr_list.closed"
+msgid "Closed"
+msgstr "已关闭"
+
+msgctxt "pr_list.total"
+msgid "Total"
+msgstr "总计"
+
+msgctxt "pr_list.ai_rule"
+msgid "AI rule"
+msgstr "AI 规则"
+
+msgctxt "pr_list.reviews"
+msgid "Reviews"
+msgstr "Reviews"
+
+msgctxt "pr_list.assignee"
+msgid "Assignee"
+msgstr "Assignee"
+
+msgctxt "pr_list.sort"
+msgid "Sort"
+msgstr "排序"
+
+msgctxt "pr_list.loading"
+msgid "Loading pull requests…"
+msgstr "正在加载 Pull Request…"
+
+msgctxt "pr_list.unable_to_load"
+msgid "Unable to load pull requests"
+msgstr "无法加载 Pull Request"
+
+msgctxt "pr_list.load_error_description"
+msgid "Check your code hosting configuration or connection, then try again."
+msgstr "请检查代码托管配置或网络连接后重试。"
+
+msgctxt "pr_list.empty_filter_description"
+msgid "Try another status filter."
+msgstr "请尝试其他状态筛选条件。"
+
+msgctxt "pr_list.cancel_review"
+msgid "Cancel AI Review"
+msgstr "取消 AI Review"
+
+msgctxt "common.previous"
+msgid "Previous"
+msgstr "上一页"
+
+msgctxt "common.next"
+msgid "Next"
+msgstr "下一页"
+
+msgctxt "tag.scope"
+msgid "Scope"
+msgstr "范围"
+
+msgctxt "tag.repository_scope"
+msgid "Tag repository scope"
+msgstr "Tag 仓库范围"
+
+msgctxt "tag.operations"
+msgid "Tag operations"
+msgstr "Tag 操作"
+
+msgctxt "tag.add"
+msgid "Add Tag"
+msgstr "添加 Tag"
+
+msgctxt "tag.remove"
+msgid "Remove Tag"
+msgstr "删除 Tag"
+
+msgctxt "tag.bump"
+msgid "Bump"
+msgstr "版本递增"
+
+msgctxt "tag.semantic_bump"
+msgid "Semantic version bump"
+msgstr "语义化版本递增"
+
+msgctxt "tag.patch"
+msgid "Patch"
+msgstr "Patch"
+
+msgctxt "tag.minor"
+msgid "Minor"
+msgstr "Minor"
+
+msgctxt "tag.major"
+msgid "Major"
+msgstr "Major"
+
+msgctxt "tag.current_version"
+msgid "Current Tag version"
+msgstr "当前 Tag 版本"
+
+msgctxt "tag.new_version"
+msgid "New Tag version"
+msgstr "新 Tag 版本"
+
+msgctxt "tag.description"
+msgid "Tag description"
+msgstr "Tag 描述"
+
+msgctxt "tag.to_remove"
+msgid "Tag to remove"
+msgstr "要删除的 Tag"
+
+msgctxt "branch.description"
+msgid "Validate a clean source and target Branch before recreating the Branch plan."
+msgstr "重新创建 Branch 计划前，验证源 Branch 与目标 Branch 状态干净。"
+
+msgctxt "branch.source"
+msgid "Source Branch"
+msgstr "源 Branch"
+
+msgctxt "branch.target"
+msgid "Target Branch"
+msgstr "目标 Branch"
+
+msgctxt "branch.recreate_remote_tracking"
+msgid "Recreate remote tracking"
+msgstr "重新创建远程跟踪"
+
+msgctxt "branch.remote_tracking_description"
+msgid "Include the remote tracking Branch in the validated plan."
+msgstr "在验证计划中包含远程跟踪 Branch。"
+
+msgctxt "branch.validate_plan"
+msgid "Validate Branch plan"
+msgstr "验证 Branch 计划"
+
+msgctxt "branch.execution_plan"
+msgid "Execution plan"
+msgstr "执行计划"
+
+msgctxt "cd.description"
+msgid "Run a staged deployment and inspect its build, test, deploy, and verification steps."
+msgstr "运行分阶段部署并检查 build、test、deploy 和 verification 步骤。"
+
+msgctxt "cd.environment"
+msgid "Environment"
+msgstr "环境"
+
+msgctxt "cd.release"
+msgid "Release"
+msgstr "Release"
+
+msgctxt "cd.commit"
+msgid "Commit"
+msgstr "Commit"
+
+msgctxt "cd.rollback"
+msgid "Rollback"
+msgstr "Rollback"
+
+msgctxt "cd.rollback_description"
+msgid "Return the active deployment to a previously verified Commit."
+msgstr "将当前部署恢复到之前已验证的 Commit。"
+
+msgctxt "cd.rollback_commit"
+msgid "Rollback Commit"
+msgstr "Rollback Commit"
+
+msgctxt "cd.start_rollback"
+msgid "Start rollback"
+msgstr "开始 Rollback"
+
+msgctxt "cd.workflow"
+msgid "CD Workflow"
+msgstr "CD Workflow"
+
+msgctxt "cd.empty_steps"
+msgid "Workflow steps will appear after deployment or rollback starts."
+msgstr "部署或 Rollback 开始后会显示 Workflow 步骤。"
+
+msgctxt "pr_review.sections"
+msgid "Pull Request sections"
+msgstr "Pull Request 分区"
+
+msgctxt "pr_review.conversation"
+msgid "Conversation"
+msgstr "会话"
+
+msgctxt "pr_review.commits"
+msgid "Commits"
+msgstr "Commits"
+
+msgctxt "pr_review.files_changed"
+msgid "Files changed"
+msgstr "变更文件"
+
+msgctxt "pr_review.open_diff_settings"
+msgid "Open Diff view settings"
+msgstr "打开 Diff 视图设置"
+
+msgctxt "pr_review.prev"
+msgid "Prev"
+msgstr "上一个"
+
+msgctxt "pr_review.loading_conversation"
+msgid "Loading conversation…"
+msgstr "正在加载会话…"
+
+msgctxt "pr_review.no_conversation"
+msgid "No conversation activity was returned by this Provider."
+msgstr "该 Provider 未返回会话活动。"
+
+msgctxt "pr_review.merged_commit"
+msgid "merged Commit"
+msgstr "合并了 Commit"
+
+msgctxt "pr_review.into"
+msgid "into"
+msgstr "到"
+
+msgctxt "pr_review.review_actions"
+msgid "Review actions"
+msgstr "Review 操作"
+
+msgctxt "pr_review.no_description"
+msgid "No description provided."
+msgstr "未提供描述。"
+
+msgctxt "pr_review.write"
+msgid "Write"
+msgstr "编写"
+
+msgctxt "pr_review.leave_comment"
+msgid "Leave a comment"
+msgstr "发表评论"
+
+msgctxt "pr_review.loading_commits"
+msgid "Loading Commits…"
+msgstr "正在加载 Commits…"
+
+msgctxt "pr_review.commits_on"
+msgid "Commits on"
+msgstr "Commits 日期"
+
+msgctxt "pr_review.verified"
+msgid "Verified"
+msgstr "已验证"
+
+msgctxt "pr_review.no_commits"
+msgid "No Commits were returned by this Provider."
+msgstr "该 Provider 未返回 Commit。"
+
+msgctxt "pr_review.loading_files"
+msgid "Loading changed files…"
+msgstr "正在加载变更文件…"
+
+msgctxt "pr_review.copy_file_path"
+msgid "Copy file path"
+msgstr "复制文件路径"
+
+msgctxt "pr_review.previous_file"
+msgid "Previous file"
+msgstr "上一个文件"
+
+msgctxt "pr_review.next_file"
+msgid "Next file"
+msgstr "下一个文件"
+
+msgctxt "pr_review.dismiss_review"
+msgid "Dismiss review"
+msgstr "驳回 Review"
+
+msgctxt "pr_review.select_commits"
+msgid "Select Commits to view"
+msgstr "选择要查看的 Commit"
+
+msgctxt "pr_review.all_commits"
+msgid "All Commits"
+msgstr "全部 Commits"
+
+msgctxt "pr_review.changes_since_review"
+msgid "Changes since your last review"
+msgstr "上次 Review 后的变更"
+
+msgctxt "pr_review.no_previous_review"
+msgid "No previous review found"
+msgstr "未找到之前的 Review"
+
+msgctxt "pr_review.no_extension"
+msgid "No extension"
+msgstr "无扩展名"
+
+msgctxt "pr_review.select_commit_range"
+msgid "Select a range of Commits"
+msgstr "选择 Commit 范围"
+
+msgctxt "pr_review.dismiss_reason"
+msgid "Reason for dismissing"
+msgstr "Dismiss 原因"
+
+msgctxt "pr_review.review_changes"
+msgid "Review changes"
+msgstr "Review 变更"
+
+msgctxt "pr_review.review_summary"
+msgid "Review summary"
+msgstr "Review 摘要"
+
+msgctxt "pr_review.comment"
+msgid "Comment"
+msgstr "评论"
+
+msgctxt "pr_review.comment_description"
+msgid "Submit general feedback without explicit approval."
+msgstr "提交一般反馈，不明确表示批准。"
+
+msgctxt "pr_review.approve"
+msgid "Approve"
+msgstr "批准"
+
+msgctxt "pr_review.approve_description"
+msgid "Submit feedback and approve merging these changes."
+msgstr "提交反馈并批准合并这些变更。"
+
+msgctxt "pr_review.request_changes"
+msgid "Request changes"
+msgstr "请求修改"
+
+msgctxt "pr_review.merge_pull_request"
+msgid "Merge Pull Request"
+msgstr "Merge Pull Request"
+
+msgctxt "pr_review.merge_description_prefix"
+msgid "Choose how the Commits from"
+msgstr "选择如何将来自"
+
+msgctxt "pr_review.merge_description_infix"
+msgid "are added to"
+msgstr "的 Commit 添加到"
+
+msgctxt "pr_review.create_merge_commit"
+msgid "Create a merge Commit"
+msgstr "创建 merge Commit"
+
+msgctxt "pr_review.create_merge_commit_description"
+msgid "All Commits will be added with a merge Commit."
+msgstr "所有 Commit 将通过一个 merge Commit 添加。"
+
+msgctxt "pr_review.squash_merge"
+msgid "Squash and merge"
+msgstr "Squash and merge"
+
+msgctxt "pr_review.squash_merge_description"
+msgid "The Commits will be combined into one Commit."
+msgstr "所有 Commit 将合并为一个 Commit。"
+
+msgctxt "pr_review.rebase_merge"
+msgid "Rebase and merge"
+msgstr "Rebase and merge"
+
+msgctxt "pr_review.rebase_merge_description"
+msgid "The Commits will be rebased onto the base Branch."
+msgstr "Commit 将 rebase 到 base Branch。"
+
+msgctxt "pr_review.fast_forward_merge"
+msgid "Fast-forward and merge"
+msgstr "Fast-forward and merge"
+
+msgctxt "pr_review.fast_forward_merge_description"
+msgid "Move the base Branch directly to the Pull Request head."
+msgstr "将 base Branch 直接移动到 Pull Request head。"
+
+msgctxt "pr_review.delete_source_branch"
+msgid "Delete the source Branch after merging"
+msgstr "合并后删除源 Branch"
+
+msgctxt "pr_review.revert_pull_request"
+msgid "Revert Pull Request"
+msgstr "Revert Pull Request"
+
+msgctxt "pr_review.revert_confirmation"
+msgid "Reverse the changes introduced by this merged Pull Request?"
+msgstr "是否撤销此已合并 Pull Request 引入的变更？"
+
+msgctxt "pr_review.approved"
+msgid "Approved"
+msgstr "Approved"
+
+msgctxt "pr_review.copy_source_branch"
+msgid "Copy source Branch"
+msgstr "复制源 Branch"
+
+msgctxt "pr_review.reverse_changes"
+msgid "Reverse the changes from this merged Pull Request"
+msgstr "撤销此已合并 Pull Request 的变更"
+
+msgctxt "diff.view"
+msgid "Diff view"
+msgstr "Diff 视图"
+
+msgctxt "diff.unified"
+msgid "Unified"
+msgstr "Unified"
+
+msgctxt "diff.split"
+msgid "Split"
+msgstr "Split"
+
+msgctxt "diff.hide_whitespace"
+msgid "Hide whitespace"
+msgstr "隐藏空白字符"
+
+msgctxt "diff.apply_reload"
+msgid "Apply and reload"
+msgstr "应用并重新加载"
+
+msgctxt "diff.more_file_actions"
+msgid "More file actions"
+msgstr "更多文件操作"
+
+msgctxt "diff.rendering_code"
+msgid "Rendering code"
+msgstr "正在渲染代码"
+
+msgctxt "diff.load"
+msgid "Load Diff"
+msgstr "加载 Diff"
+
+msgctxt "diff.large_not_rendered"
+msgid "Large Diffs are not rendered by default."
+msgstr "默认不渲染大型 Diff。"
+
+msgctxt "diff.filter_files"
+msgid "Filter files…"
+msgstr "筛选文件…"
+
+msgctxt "diff.find"
+msgid "Find in Diff…"
+msgstr "在 Diff 中查找…"
+
+msgctxt "diff.file_extensions"
+msgid "File extensions"
+msgstr "文件扩展名"
+
+msgctxt "ai_review.elapsed"
+msgid "Elapsed"
+msgstr "耗时"
+
+msgctxt "ai_review.copilot_review"
+msgid "Copilot review"
+msgstr "Copilot Review"
+
+msgctxt "ai_review.worked_for"
+msgid "Worked for"
+msgstr "工作耗时"
+
+msgctxt "ai_review.title"
+msgid "AI Review"
+msgstr "AI Review"
+
+msgctxt "ai_review.close"
+msgid "Close AI Review"
+msgstr "关闭 AI Review"
+
+msgctxt "ai_review.composer_mode"
+msgid "AI Review composer mode"
+msgstr "AI Review 编辑模式"
+
+msgctxt "ai_review.ask"
+msgid "Ask"
+msgstr "提问"
+
+msgctxt "ai_review.review_again"
+msgid "Review again"
+msgstr "再次 Review"
+
+msgctxt "ai_review.ask_about_pr"
+msgid "Ask about this Pull Request"
+msgstr "询问此 Pull Request"
+
+msgctxt "ai_review.add_instructions"
+msgid "Add review instructions"
+msgstr "添加 Review 指令"
+
+msgctxt "common.page"
+msgid "Page"
+msgstr "页码"
+
+msgctxt "common.open_settings"
+msgid "Open Settings"
+msgstr "打开设置"
+
+msgctxt "common.uh_oh"
+msgid "Uh oh!"
+msgstr "出错了！"
+
+msgctxt "common.load_error_reload"
+msgid "There was an error while loading. Please reload this page."
+msgstr "加载时出错，请重新加载此页面。"
+
+msgctxt "common.thinking"
+msgid "Thinking"
+msgstr "正在思考"
+
+msgctxt "common.send"
+msgid "Send"
+msgstr "发送"
+
+msgctxt "common.cancel_response"
+msgid "Cancel response"
+msgstr "取消回复"
+
+msgctxt "common.working"
+msgid "Working…"
+msgstr "正在处理…"
+
+msgctxt "common.no_preset"
+msgid "No preset"
+msgstr "无预设"
+
+msgctxt "common.not_configured"
+msgid "Not configured"
+msgstr "未配置"
+
+msgctxt "common.untitled_project"
+msgid "Untitled project"
+msgstr "未命名项目"
+
+msgctxt "workflow.ready_branches"
+msgid "Ready to recreate Branches."
+msgstr "已准备好重新创建 Branch。"
+
+msgctxt "workflow.ready_tags"
+msgid "Ready to add or remove a Tag."
+msgstr "已准备好添加或删除 Tag。"
+
+msgctxt "workflow.no_remote_url"
+msgid "No remote URL"
+msgstr "无远程 URL"
+
+msgctxt "workflow.no_local_path"
+msgid "No local path"
+msgstr "无本地路径"
+
+msgctxt "workflow.repository_details"
+msgid "Repository details"
+msgstr "仓库详情"
+
+msgctxt "cd.no_deployment"
+msgid "No deployment started."
+msgstr "尚未开始部署。"
+
+msgctxt "cd.waiting_to_start"
+msgid "Waiting to start."
+msgstr "等待开始。"
+
+msgctxt "cd.build"
+msgid "Build"
+msgstr "构建"
+
+msgctxt "cd.test"
+msgid "Test"
+msgstr "测试"
+
+msgctxt "cd.deploy"
+msgid "Deploy"
+msgstr "部署"
+
+msgctxt "cd.verify"
+msgid "Verify"
+msgstr "验证"
+
+msgctxt "cd.deployment_running"
+msgid "Deployment running…"
+msgstr "正在部署…"
+
+msgctxt "cd.start_deployment"
+msgid "Start deployment"
+msgstr "开始部署"
+
+msgctxt "cd.stable_hash_placeholder"
+msgid "previous stable hash"
+msgstr "之前的稳定 hash"
+
+msgctxt "pr_list.empty_open"
+msgid "There aren’t any open pull requests."
+msgstr "没有处于 Open 状态的 Pull Request。"
+
+msgctxt "pr_list.empty_merged"
+msgid "There aren’t any merged pull requests."
+msgstr "没有已合并的 Pull Request。"
+
+msgctxt "pr_list.empty_closed"
+msgid "There aren’t any closed pull requests."
+msgstr "没有处于 Closed 状态的 Pull Request。"
+
+msgctxt "pr_list.pull_request"
+msgid "Pull Request"
+msgstr "Pull Request"
+
+msgctxt "pr_list.by"
+msgid "by"
+msgstr "由"
+
+msgctxt "pr_list.was_merged"
+msgid "was merged"
+msgstr "已合并"
+
+msgctxt "pr_list.was_closed"
+msgid "was closed"
+msgstr "已关闭"
+
+msgctxt "pr_list.was_opened"
+msgid "was opened"
+msgstr "已创建"
+
+msgctxt "pr_list.approving_review_tooltip"
+msgid "This Pull Request has an approving Review"
+msgstr "此 Pull Request 已通过 Review"
+
+msgctxt "pr_list.awaiting_review_tooltip"
+msgid "This Pull Request is awaiting a required Review"
+msgstr "此 Pull Request 正在等待必需的 Review"
+
+msgctxt "pr_list.changes_requested_tooltip"
+msgid "A reviewer requested changes"
+msgstr "Reviewer 请求了修改"
+
+msgctxt "pr_list.open_conversation"
+msgid "Open conversation"
+msgstr "打开会话"
+
+msgctxt "pr_list.ai_review_queued"
+msgid "AI Review queued"
+msgstr "AI Review 已排队"
+
+msgctxt "pr_list.ai_review_in_progress"
+msgid "AI Review in progress"
+msgstr "AI Review 进行中"
+
+msgctxt "pr_list.open_ai_review"
+msgid "Open AI Review"
+msgstr "打开 AI Review"
+
+msgctxt "pr_list.ai_review_failed"
+msgid "AI Review failed; start again"
+msgstr "AI Review 失败；重新开始"
+
+msgctxt "pr_list.review_with_ai"
+msgid "Review Pull Request with AI"
+msgstr "使用 AI Review Pull Request"
+
+msgctxt "pr_list.follows_settings_default"
+msgid "Follows the Settings default"
+msgstr "跟随设置中的默认值"
+
+msgctxt "pr_list.project_override"
+msgid "Project override"
+msgstr "项目覆盖值"
+
+msgctxt "pr_review.merged"
+msgid "Merged"
+msgstr "Merged"
+
+msgctxt "pr_review.wants_to_merge"
+msgid "wants to merge"
+msgstr "希望合并"
+
+msgctxt "pr_review.commit_into"
+msgid "Commit into"
+msgstr "个 Commit 到"
+
+msgctxt "pr_review.commits_into"
+msgid "Commits into"
+msgstr "个 Commits 到"
+
+msgctxt "pr_review.from"
+msgid "from"
+msgstr "，来源"
+
+msgctxt "pr_review.copy_full_sha"
+msgid "Copy full SHA"
+msgstr "复制完整 SHA"
+
+msgctxt "pr_review.copy_full_sha_for"
+msgid "Copy full SHA for"
+msgstr "复制完整 SHA："
+
+msgctxt "pr_review.dismiss_explanation_prefix"
+msgid "Dismiss"
+msgstr "驳回"
+
+msgctxt "pr_review.dismiss_explanation_suffix"
+msgid "Review and explain why. The reason will be added to the conversation."
+msgstr "的 Review 并说明原因。该原因会添加到会话中。"
+
+msgctxt "pr_review.comment_approve_request"
+msgid "Comment, approve, or request changes"
+msgstr "评论、批准或请求修改"
+
+msgctxt "pr_review.configure_provider"
+msgid "Configure Provider credentials to submit a Review"
+msgstr "配置 Provider 凭据以提交 Review"
+
+msgctxt "pr_review.choose_merge_method"
+msgid "Choose a merge method"
+msgstr "选择合并方式"
+
+msgctxt "ai_review.cancelled"
+msgid "Review cancelled."
+msgstr "Review 已取消。"
+
+msgctxt "ai_review.no_actionable_findings"
+msgid "No actionable findings"
+msgstr "没有可处理的发现"
+
+msgctxt "ai_review.completed"
+msgid "Review completed"
+msgstr "Review 已完成"
+
+msgctxt "ai_review.finding"
+msgid "finding"
+msgstr "项发现"
+
+msgctxt "ai_review.findings"
+msgid "findings"
+msgstr "项发现"
+
+msgctxt "ai_review.processing_chunk"
+msgid "Processing chunk"
+msgstr "正在处理分块"
+
+msgctxt "ai_review.reviewing_changes"
+msgid "Reviewing current changes"
+msgstr "正在 Review 当前变更"
+
+msgctxt "ai_review.review_current_again"
+msgid "Review current Commit again"
+msgstr "重新 Review 当前 Commit"
+
+msgctxt "common.progress"
+msgid "Progress"
+msgstr "进度"
+
+msgctxt "common.active_filter"
+msgid "active filter"
+msgstr "已启用筛选"
+
+msgctxt "home.heading"
+msgid "Manage your delivery workspace"
+msgstr "管理你的交付工作区"
+
+msgctxt "search.moved"
+msgid "Project search has moved"
+msgstr "项目搜索已迁移"
+
+msgctxt "projects.loading"
+msgid "Loading projects"
+msgstr "正在加载项目"
+
+msgctxt "projects.load_failed"
+msgid "Projects could not be loaded"
+msgstr "无法加载项目"
+
+msgctxt "projects.none"
+msgid "No projects yet"
+msgstr "还没有项目"
+
+msgctxt "projects.no_matches"
+msgid "No matching projects"
+msgstr "没有匹配的项目"
+
+msgctxt "projects.add_repository_to_start"
+msgid "Add a local Git repository to get started."
+msgstr "添加本地 Git 仓库以开始使用。"
+
+msgctxt "projects.try_another"
+msgid "Try another project name or alias."
+msgstr "尝试其他项目名称或别名。"
+
+msgctxt "projects.edit_project"
+msgid "Edit project"
+msgstr "编辑项目"
+
+msgctxt "projects.delete_project_question"
+msgid "Delete project?"
+msgstr "删除项目？"
+
+msgctxt "projects.edit_description"
+msgid "Update repository metadata and project options."
+msgstr "更新仓库元数据和项目选项。"
+
+msgctxt "projects.add_description"
+msgid "Add a local Git repository to Usher."
+msgstr "将本地 Git 仓库添加到 Usher。"
+
+msgctxt "projects.save_changes"
+msgid "Save changes"
+msgstr "保存更改"
+
+msgctxt "projects.add_project"
+msgid "Add project"
+msgstr "添加项目"
+
+msgctxt "projects.required_fields"
+msgid "Project name, alias, local repository, and remote repository are required."
+msgstr "项目名称、别名、本地仓库和远程仓库均为必填项。"
+
+msgctxt "projects.delete_confirmation_prefix"
+msgid "This will permanently delete"
+msgstr "此操作将从 Usher 中永久删除"
+
+msgctxt "projects.delete_confirmation_suffix"
+msgid "from Usher. Repository files on disk will not be removed."
+msgstr "。不会删除磁盘上的仓库文件。"
+
+msgctxt "jobs.started_manually"
+msgid "Started manually"
+msgstr "手动启动"
+
+msgctxt "jobs.in_progress"
+msgid "In progress"
+msgstr "进行中"
+
+msgctxt "jobs.success"
+msgid "Success"
+msgstr "成功"
+
+msgctxt "jobs.failure"
+msgid "Failure"
+msgstr "失败"
+
+msgctxt "jobs.cancelled"
+msgid "Cancelled"
+msgstr "已取消"
+
+msgctxt "jobs.queued"
+msgid "Queued"
+msgstr "已排队"
+
+msgctxt "chat.ai_not_configured"
+msgid "AI Agent not configured"
+msgstr "未配置 AI Agent"
+
+msgctxt "chat.repository_knowledge"
+msgid "Repository knowledge"
+msgstr "仓库知识库"
+
+msgctxt "chat.ai_title"
+msgid "AI Chat"
+msgstr "AI Chat"
+
+msgctxt "chat.rag_title"
+msgid "RAG Chat"
+msgstr "RAG Chat"
+
+msgctxt "chat.ai_description"
+msgid "Ask the configured AI model for help with code, design, or delivery."
+msgstr "向已配置的 AI 模型询问代码、设计或交付问题。"
+
+msgctxt "chat.rag_description"
+msgid "Ask questions grounded in the connected repository knowledge base."
+msgstr "基于已连接的仓库知识库提问。"
+
+msgctxt "chat.suggestion_implementation"
+msgid "Review this implementation approach"
+msgstr "Review 此实现方案"
+
+msgctxt "chat.suggestion_rust"
+msgid "Explain a Rust concept"
+msgstr "解释一个 Rust 概念"
+
+msgctxt "chat.suggestion_performance"
+msgid "Help me debug a performance issue"
+msgstr "帮我调试性能问题"
+
+msgctxt "chat.suggestion_architecture"
+msgid "Summarize the repository architecture"
+msgstr "总结仓库架构"
+
+msgctxt "chat.suggestion_feature"
+msgid "Where is this feature implemented?"
+msgstr "这个功能在哪里实现？"
+
+msgctxt "chat.suggestion_docs"
+msgid "Find related project documentation"
+msgstr "查找相关项目文档"
+
+msgctxt "chat.waiting_response"
+msgid "Waiting for response…"
+msgstr "正在等待回复…"
+
+msgctxt "chat.ask_ai"
+msgid "Ask AI…"
+msgstr "询问 AI…"
+
+msgctxt "chat.ask_repository"
+msgid "Ask the repository…"
+msgstr "询问仓库…"
+
+msgctxt "chat.sending_message"
+msgid "Sending message"
+msgstr "正在发送消息"
+
+msgctxt "chat.send_message"
+msgid "Send message"
+msgstr "发送消息"
+
+msgctxt "status.update_check"
+msgid "Update check"
+msgstr "更新检查"
+
+msgctxt "status.checking_update"
+msgid "Checking if an update is available, please wait…"
+msgstr "正在检查可用更新，请稍候…"
+
+msgctxt "status.download_progress"
+msgid "Download progress"
+msgstr "下载进度"
+
+msgctxt "status.downloading"
+msgid "Downloading"
+msgstr "正在下载"
+
+msgctxt "status.status"
+msgid "Status"
+msgstr "状态"
+
+msgctxt "status.shortcut_failed"
+msgid "Shortcut initialization failed"
+msgstr "快捷键初始化失败"
+
+msgctxt "status.shortcuts_ready"
+msgid "Shortcuts ready"
+msgstr "快捷键已就绪"
+
+msgctxt "status.shortcut_status"
+msgid "Shortcut status"
+msgstr "快捷键状态"
+
+msgctxt "status.unread_notifications"
+msgid "unread notifications"
+msgstr "条未读通知"
+
+msgctxt "status.no_notifications"
+msgid "No notifications"
+msgstr "没有通知"
+
+msgctxt "status.network_connected"
+msgid "Network connected"
+msgstr "网络已连接"
+
+msgctxt "status.network_disconnected"
+msgid "Network disconnected"
+msgstr "网络已断开"
+
+msgctxt "status.network_status"
+msgid "Network status"
+msgstr "网络状态"
+
+msgctxt "update.action"
+msgid "Update"
+msgstr "更新"
+
+msgctxt "update.new_version_prefix"
+msgid "A new version"
+msgstr "新版本"
+
+msgctxt "update.new_version_infix"
+msgid "is available. Current version:"
+msgstr "已可用。当前版本："
+
+msgctxt "update.new_version_suffix"
+msgid "Please update to the latest version."
+msgstr "请更新到最新版本。"
+
+msgctxt "messages.unread_notification"
+msgid "unread notification"
+msgstr "条未读通知"
+
+msgctxt "messages.category_general"
+msgid "General"
+msgstr "常规"
+
+msgctxt "messages.category_webhook"
+msgid "Webhook"
+msgstr "Webhook"
+
+msgctxt "messages.category_software_update"
+msgid "Software update"
+msgstr "软件更新"
+
+msgctxt "messages.category_cd_workflow"
+msgid "CD Workflow"
+msgstr "CD Workflow"
+
+msgctxt "shortcuts.loading"
+msgid "Loading shortcuts…"
+msgstr "正在加载快捷键…"
+
+msgctxt "shortcuts.loading_input"
+msgid "Loading shortcut input…"
+msgstr "正在加载快捷键输入…"
+
+msgctxt "diagnostics.exported"
+msgid "Diagnostic bundle exported."
+msgstr "诊断包已导出。"
+
+msgctxt "diagnostics.export_failed"
+msgid "Failed to export diagnostic bundle."
+msgstr "导出诊断包失败。"
+
+msgctxt "tag.already_running"
+msgid "Tag Workflow is already running."
+msgstr "Tag Workflow 已在运行。"
+
+msgctxt "tag.initializing"
+msgid "The Add Tag tab is still loading the latest Tag. Please wait."
+msgstr "Add Tag 标签页仍在加载最新 Tag，请稍候。"
+
+msgctxt "tag.remote_unavailable"
+msgid "Remote mode is not available yet."
+msgstr "Remote 模式暂不可用。"
+
+msgctxt "tag.invalid_version"
+msgid "The new Tag version must use a semantic version such as v1.2.3."
+msgstr "新 Tag 版本必须使用 v1.2.3 形式的语义化版本。"
+
+msgctxt "workflow.local_repository_empty"
+msgid "The local repository path is empty. Open a project first."
+msgstr "本地仓库路径为空，请先打开项目。"
+
+msgctxt "workflow.local_repository_missing"
+msgid "The local repository path does not exist."
+msgstr "本地仓库路径不存在。"
+
+msgctxt "tag.no_running_workflow"
+msgid "No running Tag Workflow to stop."
+msgstr "没有可停止的 Tag Workflow。"
+
+msgctxt "tag.stop_requested"
+msgid "Tag Workflow stop requested."
+msgstr "已请求停止 Tag Workflow。"
+
+msgctxt "workflow.copy_remote_failed"
+msgid "Failed to copy the remote URL."
+msgstr "复制远程 URL 失败。"
+
+msgctxt "workflow.open_local_repository_failed"
+msgid "The local repository could not be opened."
+msgstr "无法打开本地仓库。"
+
+msgctxt "pr_list.metadata_unavailable"
+msgid "Repository metadata is not available."
+msgstr "仓库元数据不可用。"
+
+msgctxt "pr_list.single_state_qualifier"
+msgid "Use only one PR state qualifier: is:open, is:closed, or is:merged."
+msgstr "只能使用一个 PR 状态限定符：is:open、is:closed 或 is:merged。"
+
+msgctxt "pr_list.merged_unmerged_conflict"
+msgid "is:merged and is:unmerged cannot be combined."
+msgstr "is:merged 与 is:unmerged 不能组合使用。"
+
+msgctxt "pr_list.unmerged_requires_state"
+msgid "Combine is:unmerged with is:closed or is:open for portable filtering."
+msgstr "请将 is:unmerged 与 is:closed 或 is:open 组合使用，以便跨 Provider 筛选。"
+
+msgctxt "cd.already_running"
+msgid "A CD Workflow is already running."
+msgstr "已有 CD Workflow 正在运行。"
+
+msgctxt "cd.started"
+msgid "CD Workflow started."
+msgstr "CD Workflow 已启动。"
+
+msgctxt "cd.completed"
+msgid "CD Workflow completed"
+msgstr "CD Workflow 已完成"
+
+msgctxt "cd.rollback_required"
+msgid "Rollback Commit is required."
+msgstr "必须填写 Rollback Commit。"
+
+msgctxt "cd.finish_before_rollback"
+msgid "The CD Workflow is running. Finish it before Rollback."
+msgstr "CD Workflow 正在运行，请完成后再执行 Rollback。"
+
+msgctxt "cd.rollback_started"
+msgid "Rollback started."
+msgstr "Rollback 已启动。"
+
+msgctxt "cd.rollback_completed"
+msgid "CD Rollback completed"
+msgstr "CD Rollback 已完成"
+
+msgctxt "update.preparing"
+msgid "Preparing…"
+msgstr "正在准备…"
+
+msgctxt "ai_review.stopping_response"
+msgid "Stopping response…"
+msgstr "正在停止回复…"
+
+msgctxt "ai_review.preparing_context"
+msgid "Preparing Pull Request context…"
+msgstr "正在准备 Pull Request 上下文…"
+
+msgctxt "ai_review.thinking"
+msgid "Thinking…"
+msgstr "正在思考…"
+
+msgctxt "ai_review.no_preset"
+msgid "No preset"
+msgstr "无预设"
+
+msgctxt "ai_review.default_rule"
+msgid "Default ({name})"
+msgstr "默认（{name}）"
+
+msgctxt "ai_review.failure.configure_base_url"
+msgid "Configure the AI Agent Base URL in Settings."
+msgstr "请在设置中配置 AI Agent Base URL。"
+
+msgctxt "ai_review.failure.configure_api_key"
+msgid "Configure the AI Agent API key in Settings."
+msgstr "请在设置中配置 AI Agent API key。"
+
+msgctxt "ai_review.failure.configure_model"
+msgid "Configure the AI Agent model in Settings."
+msgstr "请在设置中配置 AI Agent 模型。"
+
+msgctxt "ai_review.failure.no_diff"
+msgid "The current Commit has no Diff available for Review."
+msgstr "当前 Commit 没有可供 Review 的 Diff。"
+
+msgctxt "ai_review.failure.timeout"
+msgid "The AI Agent request timed out. Try again."
+msgstr "AI Agent 请求超时，请重试。"
+
+msgctxt "ai_review.failure.invalid_response"
+msgid "The AI Agent returned data in an invalid format."
+msgstr "AI Agent 返回的数据格式无效。"
+
+msgctxt "ai_review.failure.agent_request"
+msgid "The AI Agent request failed. Check its configuration and try again."
+msgstr "AI Agent 请求失败。请检查配置后重试。"
+
+msgctxt "ai_review.failure.context"
+msgid "The Pull Request context could not be loaded."
+msgstr "无法加载 Pull Request 上下文。"
+
+msgctxt "ai_review.failure.rule"
+msgid "The configured Markdown Review rule could not be read."
+msgstr "无法读取已配置的 Markdown Review 规则。"
+
+msgctxt "ai_review.failure.storage"
+msgid "The AI Review data could not be saved or loaded."
+msgstr "无法保存或加载 AI Review 数据。"
+
+msgctxt "ai_review.failure.interrupted"
+msgid "The Review was interrupted when the application exited."
+msgstr "应用退出时中断了 Review。"
+
+msgctxt "ai_review.failure.internal"
+msgid "The Review could not continue because its task state was unavailable."
+msgstr "Review 任务状态不可用，无法继续。"
+
+msgctxt "ai_review.failure.generic"
+msgid "The AI Review failed. Try again."
+msgstr "AI Review 失败，请重试。"
+
+msgctxt "ai_review.response_failed"
+msgid "Could not get a response: {reason}"
+msgstr "无法获取回复：{reason}"
+
+msgctxt "ai_review.response_stopped"
+msgid "Response stopped."
+msgstr "回复已停止。"
+
+msgctxt "ai_review.response_preview_title"
+msgid "AI Review response"
+msgstr "AI Review 回复"
+
+msgctxt "ai_review.notification.completed_title"
+msgid "AI Review completed for Pull Request #{number}"
+msgstr "Pull Request #{number} 的 AI Review 已完成"
+
+msgctxt "ai_review.notification.completed_body"
+msgid "Found {count} actionable issue(s)."
+msgstr "发现 {count} 个可操作问题。"
+
+msgctxt "ai_review.notification.failed_title"
+msgid "AI Review failed for Pull Request #{number}"
+msgstr "Pull Request #{number} 的 AI Review 失败"
+
+msgctxt "pr_review.copy_file_failed"
+msgid "Failed to copy the file path."
+msgstr "复制文件路径失败。"
+
+msgctxt "pr_review.copy_sha_failed"
+msgid "Failed to copy the Commit SHA."
+msgstr "复制 Commit SHA 失败。"
+
+msgctxt "pr_review.copy_branch_failed"
+msgid "Failed to copy the source Branch."
+msgstr "复制源 Branch 失败。"
+
+msgctxt "pr_review.commit_details_failed"
+msgid "The selected Commit details could not be loaded."
+msgstr "无法加载所选 Commit 的详情。"
+
+msgctxt "pr_review.commit_missing"
+msgid "The selected Commit is no longer in this Pull Request."
+msgstr "所选 Commit 已不在此 Pull Request 中。"
+
+msgctxt "pr_review.checking_mergeability"
+msgid "Checking mergeability…"
+msgstr "正在检查可合并性…"
+
+msgctxt "pr_review.mergeability_waiting"
+msgid "Waiting for the repository Provider to calculate merge readiness."
+msgstr "正在等待仓库 Provider 计算合并就绪状态。"
+
+msgctxt "pr_review.merge_status_unavailable"
+msgid "Merge status unavailable"
+msgstr "合并状态不可用"
+
+msgctxt "pr_review.mergeability_unavailable"
+msgid "The repository Provider could not return merge readiness."
+msgstr "仓库 Provider 无法返回合并就绪状态。"
+
+msgctxt "pr_review.invalid_review_action"
+msgid "Choose a valid Review action."
+msgstr "请选择有效的 Review 操作。"
+
+msgctxt "pr_review.comment_required"
+msgid "Enter a Review comment before submitting."
+msgstr "提交前请输入 Review 评论。"
+
+msgctxt "pr_review.repository_context_unavailable"
+msgid "The Pull Request repository context is unavailable."
+msgstr "Pull Request 仓库上下文不可用。"
+
+msgctxt "pr_review.dismiss_reason_required"
+msgid "Enter a reason before dismissing the Review."
+msgstr "Dismiss Review 前请输入原因。"
+
+msgctxt "pr_review.dismissed"
+msgid "Review dismissed on the remote repository."
+msgstr "已在远程仓库 Dismiss Review。"
+
+msgctxt "pr_review.invalid_merge_method"
+msgid "Choose a valid merge method."
+msgstr "请选择有效的合并方式。"
+
+msgctxt "pr_review.merge_method_disabled"
+msgid "That merge method is disabled for this repository."
+msgstr "此仓库已禁用该合并方式。"
+
+msgctxt "pr_review.merged_successfully"
+msgid "Pull Request merged successfully."
+msgstr "Pull Request 合并成功。"
+
+msgctxt "pr_review.source_reference_missing"
+msgid "This file has no immutable source reference."
+msgstr "此文件没有不可变的源引用。"
+
+msgctxt "pr_review.load_complete_file_failed"
+msgid "Failed to load the complete file."
+msgstr "加载完整文件失败。"
+
+msgctxt "projects.fill_all_fields"
+msgid "Please fill in all fields."
+msgstr "请填写所有字段。"
+
+msgctxt "projects.alias_exists"
+msgid "Project alias already exists."
+msgstr "项目别名已存在。"
+
+msgctxt "projects.original_alias_missing"
+msgid "The original project alias is missing."
+msgstr "缺少原项目别名。"
+
+msgctxt "projects.not_found"
+msgid "Project not found."
+msgstr "未找到项目。"
+
+msgctxt "projects.alias_missing"
+msgid "Project alias is missing."
+msgstr "缺少项目别名。"
+
+msgctxt "projects.reload_failed"
+msgid "Failed to reload projects."
+msgstr "重新加载项目失败。"
+
+msgctxt "projects.reloaded"
+msgid "Projects reloaded."
+msgstr "项目已重新加载。"
+
+msgctxt "projects.added"
+msgid "Project added."
+msgstr "项目已添加。"
+
+msgctxt "projects.updated"
+msgid "Project updated."
+msgstr "项目已更新。"
+
+msgctxt "projects.deleted"
+msgid "Project deleted."
+msgstr "项目已删除。"
+
+msgctxt "projects.registry_action_failed"
+msgid "The project registry action could not be completed."
+msgstr "无法完成项目列表操作。"
+
+msgctxt "projects.save_in_progress"
+msgid "A save for this project is already in progress."
+msgstr "此项目已有保存操作正在进行。"
+
+msgctxt "projects.using_default_logo"
+msgid "Using app default logo"
+msgstr "正在使用应用默认 Logo"
+
+msgctxt "branch.validated"
+msgid "Branch Workflow validated."
+msgstr "Branch Workflow 验证通过。"
+
+msgctxt "common.unavailable"
+msgid "Unavailable"
+msgstr "不可用"
+
+msgctxt "tag.remove_initializing"
+msgid "The Remove Tag tab is still loading the latest Tag. Please wait."
+msgstr "Remove Tag 标签页仍在加载最新 Tag，请稍候。"
+
+msgctxt "tag.invalid_remove_version"
+msgid "The Tag to remove must use a semantic version such as v1.2.3."
+msgstr "要删除的 Tag 必须使用 v1.2.3 形式的语义化版本。"
+
+msgctxt "tooltip.hide_sidebar"
+msgid "Hide sidebar"
+msgstr "隐藏侧边栏"
+
+msgctxt "common.copied"
+msgid "Copied!"
+msgstr "已复制！"
+
+msgctxt "common.no_results"
+msgid "No results"
+msgstr "无结果"
+
+msgctxt "messages.confirm_clear"
+msgid "Confirm clear"
+msgstr "确认清空"
+
+msgctxt "messages.clear_all"
+msgid "Clear all"
+msgstr "清空全部"
+
+msgctxt "messages.no_unread"
+msgid "No unread notifications"
+msgstr "没有未读通知"
+
+msgctxt "messages.no_read"
+msgid "No read notifications"
+msgstr "没有已读通知"
+
+msgctxt "messages.none_yet"
+msgid "No notifications yet"
+msgstr "还没有通知"
+
+msgctxt "projects.pull_requests_loading"
+msgid "Pull requests loading"
+msgstr "正在加载 Pull Request"
+
+msgctxt "projects.pull_requests_unavailable"
+msgid "Pull requests unavailable"
+msgstr "Pull Request 不可用"
+
+msgctxt "projects.invalid_logo_default"
+msgid "Invalid input, using default logo"
+msgstr "输入无效，正在使用默认 Logo"
+
+msgctxt "terminal.connected"
+msgid "Connected"
+msgstr "已连接"
+
+msgctxt "terminal.starting"
+msgid "Starting"
+msgstr "正在启动"
+
+msgctxt "terminal.idle"
+msgid "Idle"
+msgstr "空闲"
+
+msgctxt "terminal.exit_fullscreen"
+msgid "Exit fullscreen"
+msgstr "退出全屏"
+
+msgctxt "terminal.fullscreen"
+msgid "Fullscreen"
+msgstr "全屏"
+
+msgctxt "terminal.ready"
+msgid "Terminal ready."
+msgstr "Terminal 已就绪。"
+
+msgctxt "terminal.session_closed"
+msgid "[Terminal session closed]"
+msgstr "[Terminal 会话已关闭]"
+
+msgctxt "terminal.start_failed"
+msgid "The Terminal session could not be started. Check the logs for details."
+msgstr "无法启动 Terminal 会话。请查看日志了解详情。"
+
+msgctxt "terminal.write_failed"
+msgid "[Terminal input could not be sent. Check the logs for details.]"
+msgstr "[无法发送 Terminal 输入。请查看日志了解详情。]"
+
+msgctxt "ai_review.severity_high"
+msgid "High"
+msgstr "高"
+
+msgctxt "ai_review.severity_medium"
+msgid "Medium"
+msgstr "中"
+
+msgctxt "ai_review.severity_low"
+msgid "Low"
+msgstr "低"
+
+msgctxt "pr_review.commenting"
+msgid "Commenting…"
+msgstr "正在评论…"
+
+msgctxt "pr_review.write_comment"
+msgid "Write a comment before submitting"
+msgstr "提交前请输入评论"
+
+msgctxt "pr_review.add_comment"
+msgid "Add a comment on this Pull Request"
+msgstr "在此 Pull Request 中添加评论"
+
+msgctxt "pr_review.configure_to_comment"
+msgid "Configure Provider credentials to comment"
+msgstr "配置 Provider 凭据以发表评论"
+
+msgctxt "pr_review.view_commit_details"
+msgid "View Commit details"
+msgstr "查看 Commit 详情"
+
+msgctxt "pr_review.no_changed_files"
+msgid "No changed files"
+msgstr "没有变更文件"
+
+msgctxt "pr_review.no_matching_files"
+msgid "No matching files"
+msgstr "没有匹配的文件"
+
+msgctxt "pr_review.select_changed_file"
+msgid "Select a changed file"
+msgstr "选择变更文件"
+
+msgctxt "pr_review.collapse_non_diff"
+msgid "Collapse non-Diff lines"
+msgstr "折叠非 Diff 行"
+
+msgctxt "pr_review.expand_all_lines"
+msgid "Expand all lines"
+msgstr "展开所有行"
+
+msgctxt "pr_review.dismissing"
+msgid "Dismissing…"
+msgstr "正在驳回…"
+
+msgctxt "pr_review.submitting"
+msgid "Submitting…"
+msgstr "正在提交…"
+
+msgctxt "pr_review.submit_review"
+msgid "Submit Review"
+msgstr "提交 Review"
+
+msgctxt "pr_review.merging"
+msgid "Merging…"
+msgstr "正在合并…"
+
+msgctxt "pr_review.confirm_merge"
+msgid "Confirm merge"
+msgstr "确认合并"
+
+msgctxt "diff.hide_commit_description"
+msgid "Hide Commit description"
+msgstr "隐藏 Commit 描述"
+
+msgctxt "diff.show_commit_description"
+msgid "Show Commit description"
+msgstr "显示 Commit 描述"
+
+msgctxt "diff.hide_file_tree"
+msgid "Hide file tree"
+msgstr "隐藏文件树"
+
+msgctxt "diff.show_file_tree"
+msgid "Show file tree"
+msgstr "显示文件树"
+
+msgctxt "diff.view_diff"
+msgid "View Diff"
+msgstr "查看 Diff"
+
+msgctxt "diff.view_file"
+msgid "View file"
+msgstr "查看文件"
+
+msgctxt "diff.only_manifest_files"
+msgid "Only manifest files"
+msgstr "仅 manifest 文件"
+
+msgctxt "diff.viewed_files"
+msgid "Viewed files"
+msgstr "已查看文件"
+
+msgctxt "preview.open_full_response"
+msgid "Open full response"
+msgstr "打开完整回复"
+
+msgctxt "preview.open_formatted_response"
+msgid "Open formatted response"
+msgstr "打开格式化回复"
+
+msgctxt "pr_list.count_unavailable"
+msgid "Count unavailable"
+msgstr "数量不可用"
+
+msgctxt "pr_list.filter_by_assignee"
+msgid "Filter by assignee"
+msgstr "按 Assignee 筛选"
+
+msgctxt "tag.loading"
+msgid "Loading…"
+msgstr "正在加载…"
+
+msgctxt "tag.create"
+msgid "Create Tag"
+msgstr "创建 Tag"
+
+msgctxt "tag.view_running_job"
+msgid "View running Job"
+msgstr "查看正在运行的 Job"
+
+msgctxt "tag.view_latest_job"
+msgid "View latest Job"
+msgstr "查看最新 Job"
+
+msgctxt "update.preparing_download"
+msgid "Preparing download…"
+msgstr "正在准备下载…"
+
+msgctxt "chat.default_help"
+msgid "What can you help me with?"
+msgstr "你能帮我做什么？"
+
+msgctxt "chat.default_joke"
+msgid "Tell me a joke"
+msgstr "讲个笑话"
+
+msgctxt "chat.default_quantum"
+msgid "Explain quantum computing"
+msgstr "解释量子计算"
+
+msgctxt "projects.default_project"
+msgid "Default project"
+msgstr "默认项目"
+
+msgctxt "projects.logo_local_file"
+msgid "Local file"
+msgstr "本地文件"
+
+msgctxt "projects.logo_base64_image"
+msgid "Base64 image"
+msgstr "Base64 图片"
+
+msgctxt "projects.logo_remote_url"
+msgid "Remote URL"
+msgstr "远程 URL"
+
+msgctxt "projects.logo_remote_loading"
+msgid "Remote URL, loading preview…"
+msgstr "远程 URL，正在加载预览…"
+
+msgctxt "update.available_title"
+msgid "Update available"
+msgstr "有可用更新"
+
+msgctxt "update.available_message"
+msgid "Usher {new_version} is available. You are currently using {current_version}."
+msgstr "Usher {new_version} 已可用。当前使用的是 {current_version}。"
+
+msgctxt "update.latest_title"
+msgid "You're up to date"
+msgstr "已是最新版本"
+
+msgctxt "update.latest_message"
+msgid "Usher {version} is the latest version."
+msgstr "Usher {version} 已是最新版本。"
+
+msgctxt "update.later"
+msgid "Later"
+msgstr "稍后"
+
+msgctxt "update.update_now"
+msgid "Update now"
+msgstr "立即更新"
+
+msgctxt "update.check_failed_title"
+msgid "Couldn't check for updates"
+msgstr "无法检查更新"
+
+msgctxt "update.release_not_found"
+msgid "No Release information was found for this repository."
+msgstr "未找到此仓库的 Release 信息。"
+
+msgctxt "update.network_failed"
+msgid "We couldn't connect to the update service. Check your network connection and try again."
+msgstr "无法连接更新服务。请检查网络连接后重试。"
+
+msgctxt "update.check_failed"
+msgid "We couldn't check for updates. Try again in a moment."
+msgstr "无法检查更新，请稍后重试。"
+
+msgctxt "update.cancelled"
+msgid "Update cancelled."
+msgstr "已取消更新。"
+
+msgctxt "update.install_failed"
+msgid "The update couldn't be installed. Please try again."
+msgstr "无法安装更新，请重试。"
+
+msgctxt "update.connecting"
+msgid "Connecting to the update service…"
+msgstr "正在连接更新服务…"
+
+msgctxt "update.fetching_release"
+msgid "Fetching Release information…"
+msgstr "正在获取 Release 信息…"
+
+msgctxt "update.downloading_release"
+msgid "Downloading v{version}…"
+msgstr "正在下载 v{version}…"
+
+msgctxt "update.downloading_progress"
+msgid "Downloading… {downloaded_mb} / {total_mb} MB"
+msgstr "正在下载… {downloaded_mb} / {total_mb} MB"
+
+msgctxt "update.downloading_amount"
+msgid "Downloading… {downloaded_mb} MB"
+msgstr "正在下载… {downloaded_mb} MB"
+
+msgctxt "update.download_installing"
+msgid "Download complete. Installing…"
+msgstr "下载完成，正在安装…"
+
+msgctxt "update.extracting"
+msgid "Extracting update…"
+msgstr "正在解压更新…"
+
+msgctxt "update.installing"
+msgid "Installing update…"
+msgstr "正在安装更新…"
+
+msgctxt "update.complete"
+msgid "Update complete."
+msgstr "更新完成。"
+
+msgctxt "update.complete_restarting"
+msgid "Update complete. Restarting…"
+msgstr "更新完成，正在重启…"
+
+msgctxt "update.restarting"
+msgid "Restarting Usher…"
+msgstr "正在重启 Usher…"
+
+msgctxt "diagnostics.previous_run_title"
+msgid "Previous run ended unexpectedly"
+msgstr "上次运行意外结束"
+
+msgctxt "diagnostics.previous_run_message"
+msgid "Open Settings > Diagnostics to export the relevant logs."
+msgstr "请打开设置 > 诊断，导出相关日志。"
+
+msgctxt "diagnostics.open_logs_failed"
+msgid "The log directory couldn't be opened."
+msgstr "无法打开日志目录。"
+
+msgctxt "chat.endpoint_invalid"
+msgid "Chat needs a valid HTTPS endpoint. Configure the RAG API URL in Settings."
+msgstr "Chat 需要有效的 HTTPS 端点。请在 Settings 中配置 RAG API URL。"
+
+msgctxt "chat.network_failed"
+msgid "Network connection failed. Check your network settings and try again."
+msgstr "网络连接失败。请检查网络设置后重试。"
+
+msgctxt "chat.rate_limited"
+msgid "Too many requests. Try again shortly."
+msgstr "请求过于频繁，请稍后重试。"
+
+msgctxt "chat.authentication_failed"
+msgid "Authentication failed. Check the API Key or access permissions."
+msgstr "身份验证失败。请检查 API Key 或访问权限。"
+
+msgctxt "chat.service_unavailable"
+msgid "The service is unavailable. Try again later."
+msgstr "服务不可用，请稍后重试。"
+
+msgctxt "chat.response_unreadable"
+msgid "The service returned an unreadable response."
+msgstr "服务返回了无法读取的响应。"
+
+msgctxt "chat.send_failed"
+msgid "The message couldn't be sent. Try again."
+msgstr "消息发送失败，请重试。"
+
+msgctxt "chat.storage_failed"
+msgid "The message couldn't be saved. Your draft was restored."
+msgstr "消息保存失败，已恢复草稿。"
+
+msgctxt "git_error.configuration"
+msgid "Repository settings are incomplete or do not match the remote URL."
+msgstr "仓库设置不完整，或与远程 URL 不匹配。"
+
+msgctxt "git_error.authentication"
+msgid "Authentication failed. Check the Provider Token in Settings."
+msgstr "身份验证失败。请在设置中检查 Provider Token。"
+
+msgctxt "git_error.permission"
+msgid "The Provider denied this operation for the current account."
+msgstr "Provider 拒绝当前账户执行此操作。"
+
+msgctxt "git_error.not_found"
+msgid "The repository or Pull Request couldn't be found."
+msgstr "未找到仓库或 Pull Request。"
+
+msgctxt "git_error.conflict"
+msgid "The repository changed and this operation can no longer be completed."
+msgstr "仓库已发生变化，无法继续完成此操作。"
+
+msgctxt "git_error.rate_limited"
+msgid "The Provider rate limit was reached. Wait a moment and try again."
+msgstr "已达到 Provider 速率限制，请稍后重试。"
+
+msgctxt "git_error.network"
+msgid "The Provider couldn't be reached. Check the network and try again."
+msgstr "无法连接 Provider。请检查网络后重试。"
+
+msgctxt "git_error.timeout"
+msgid "The Provider request timed out. Try again."
+msgstr "Provider 请求超时，请重试。"
+
+msgctxt "git_error.invalid_response"
+msgid "The Provider returned a response that Usher couldn't read."
+msgstr "Provider 返回了 Usher 无法读取的响应。"
+
+msgctxt "git_error.unsupported"
+msgid "This operation isn't supported by the configured Provider."
+msgstr "已配置的 Provider 不支持此操作。"
+
+msgctxt "git_error.unknown"
+msgid "The Provider operation failed. Try again."
+msgstr "Provider 操作失败，请重试。"
+
+msgctxt "projects.save_failed"
+msgid "The project couldn't be saved."
+msgstr "项目保存失败。"
+
+msgctxt "projects.registry_read_failed"
+msgid "The local project registry couldn't be read."
+msgstr "无法读取本地项目注册表。"
+
+msgctxt "projects.remote_details_failed"
+msgid "Remote project details couldn't be loaded. Check the remote URL and Provider Token."
+msgstr "无法加载远程项目详情。请检查远程 URL 和 Provider Token。"
+
+msgctxt "pr_review.project_context_missing"
+msgid "The current project has no repository context."
+msgstr "当前项目没有仓库上下文。"
+
+msgctxt "pr_review.conversation_load_failed"
+msgid "The Provider couldn't load this Pull Request conversation."
+msgstr "Provider 无法加载此 Pull Request 的会话。"
+
+msgctxt "pr_review.commits_load_failed"
+msgid "The Provider couldn't load this Pull Request's Commits."
+msgstr "Provider 无法加载此 Pull Request 的 Commit。"
+
+msgctxt "pr_review.load_commits_for_range"
+msgid "Load the Pull Request Commits before selecting a range."
+msgstr "请先加载 Pull Request 的 Commit，再选择范围。"
+
+msgctxt "pr_review.range_data_incomplete"
+msgid "The Provider didn't return enough Commit data for this range."
+msgstr "Provider 没有返回此范围所需的完整 Commit 数据。"
+
+msgctxt "pr_review.range_load_failed"
+msgid "The Provider couldn't load the selected Commit range."
+msgstr "Provider 无法加载所选 Commit 范围。"
+
+msgctxt "pr_review.review_action_unsupported"
+msgid "This repository Provider doesn't support that Review action."
+msgstr "此仓库 Provider 不支持该 Review 操作。"
+
+msgctxt "pr_review.comment_submitted"
+msgid "Comment submitted to the remote repository."
+msgstr "评论已提交到远程仓库。"
+
+msgctxt "pr_review.review_submitted"
+msgid "Review submitted to the remote repository."
+msgstr "Review 已提交到远程仓库。"
+
+msgctxt "pr_review.not_mergeable"
+msgid "This Pull Request isn't currently mergeable."
+msgstr "此 Pull Request 当前不可合并。"
+
+msgctxt "pr_review.merged_detail"
+msgid "This Pull Request has been merged successfully."
+msgstr "此 Pull Request 已成功合并。"
+
+msgctxt "pr_review.merged_block_reason"
+msgid "This Pull Request has been merged."
+msgstr "此 Pull Request 已合并。"
+
+msgctxt "pr_review.revert_not_available"
+msgid "This merged Pull Request can't be reverted automatically."
+msgstr "无法自动 Revert 此已合并的 Pull Request。"
+
+msgctxt "pr_review.revert_completed"
+msgid "The revert action already completed in this Review session."
+msgstr "当前 Review 会话已完成 Revert 操作。"
+
+msgctxt "pr_review.syntax_highlight_failed"
+msgid "Syntax highlighting couldn't be rendered for this file."
+msgstr "无法为此文件渲染语法高亮。"
+
+msgctxt "cd.environment_required"
+msgid "Environment is required."
+msgstr "必须填写环境。"
+
+msgctxt "cd.release_required"
+msgid "Release name is required."
+msgstr "必须填写 Release 名称。"
+
+msgctxt "cd.commit_required"
+msgid "Commit hash is required."
+msgstr "必须填写 Commit hash。"
+
+msgctxt "cd.deploying_summary"
+msgid "Deploying Release '{release}' to '{environment}' from Commit '{commit}'."
+msgstr "正在将 Commit '{commit}' 的 Release '{release}' 部署到 '{environment}'。"
+
+msgctxt "cd.compiling_artifacts"
+msgid "Compiling build artifacts."
+msgstr "正在编译构建制品。"
+
+msgctxt "cd.artifacts_compiled"
+msgid "Artifacts compiled successfully."
+msgstr "制品编译成功。"
+
+msgctxt "cd.executing_tests"
+msgid "Executing smoke and integration tests."
+msgstr "正在执行冒烟测试和集成测试。"
+
+msgctxt "cd.tests_passed"
+msgid "Smoke and integration tests passed."
+msgstr "冒烟测试和集成测试已通过。"
+
+msgctxt "cd.rolling_out"
+msgid "Rolling out the selected Release."
+msgstr "正在部署所选 Release。"
+
+msgctxt "cd.release_promoted"
+msgid "Release promoted to the target environment."
+msgstr "Release 已发布到目标环境。"
+
+msgctxt "cd.verifying_deployment"
+msgid "Checking post-deploy health and key paths."
+msgstr "正在检查部署后的健康状态和关键路径。"
+
+msgctxt "cd.deployment_verified"
+msgid "Health checks and verification passed."
+msgstr "健康检查和验证已通过。"
+
+msgctxt "cd.deployment_finished"
+msgid "Deployment finished: Release '{release}' is live in '{environment}'."
+msgstr "部署完成：Release '{release}' 已在 '{environment}' 上线。"
+
+msgctxt "cd.rolling_back_summary"
+msgid "Rolling back deployment to Commit '{commit}'."
+msgstr "正在将部署 Rollback 到 Commit '{commit}'。"
+
+msgctxt "cd.using_verified_artifacts"
+msgid "Using previously verified artifacts."
+msgstr "正在使用之前验证过的制品。"
+
+msgctxt "cd.reusing_stable_test"
+msgid "Reusing the last known stable test result."
+msgstr "正在复用上一次稳定的测试结果。"
+
+msgctxt "cd.switching_traffic"
+msgid "Switching traffic back to the selected Commit."
+msgstr "正在将流量切回所选 Commit。"
+
+msgctxt "cd.traffic_restored"
+msgid "Traffic moved back to the selected Commit."
+msgstr "流量已切回所选 Commit。"
+
+msgctxt "cd.verifying_rollback"
+msgid "Verifying rollback health signals."
+msgstr "正在验证 Rollback 后的健康信号。"
+
+msgctxt "cd.rollback_finished"
+msgid "Rollback finished. Active Commit is '{commit}'."
+msgstr "Rollback 完成。当前 Commit 为 '{commit}'。"
+
+msgctxt "cd.rollback_verified"
+msgid "Rollback verification passed."
+msgstr "Rollback 验证已通过。"
+
+msgctxt "cd.state_cleared"
+msgid "Workflow state was cleared after leaving the page."
+msgstr "离开页面后已清理 Workflow 状态。"
+
+msgctxt "cd.reopen_for_details"
+msgid "Reopen Workflow to inspect the latest CD step details."
+msgstr "请重新打开 Workflow，查看最新 CD 步骤详情。"
+
+msgctxt "preview.parser_loading"
+msgid "Loading the {display_name} Parser…"
+msgstr "正在加载 {display_name} Parser…"
+
+msgctxt "preview.parser_ready"
+msgid "The {display_name} Parser is ready. Preparing preview…"
+msgstr "{display_name} Parser 已就绪，正在准备预览…"
+
+msgctxt "preview.error.unsupported"
+msgid "No enabled Preview Provider supports this artifact."
+msgstr "没有已启用的 Preview Provider 支持此制品。"
+
+msgctxt "preview.error.too_large"
+msgid "This artifact is too large to preview."
+msgstr "此制品过大，无法预览。"
+
+msgctxt "preview.error.cancelled"
+msgid "Preview preparation was cancelled."
+msgstr "预览准备已取消。"
+
+msgctxt "preview.error.invalid_utf8"
+msgid "This text artifact is not valid UTF-8."
+msgstr "此文本制品不是有效的 UTF-8。"
+
+msgctxt "preview.error.io"
+msgid "This artifact could not be read."
+msgstr "无法读取此制品。"
+
+msgctxt "preview.error.decode"
+msgid "This artifact could not be decoded."
+msgstr "无法解码此制品。"
+
+msgctxt "shortcuts.status_loading"
+msgid "Loading"
+msgstr "正在加载"
+
+msgctxt "shortcuts.status_waiting"
+msgid "Waiting"
+msgstr "等待中"
+
+msgctxt "shortcuts.status_ready"
+msgid "Ready"
+msgstr "已就绪"
+
+msgctxt "shortcuts.status_failed"
+msgid "Failed"
+msgstr "失败"
+
+msgctxt "shortcuts.unavailable"
+msgid "Shortcuts unavailable"
+msgstr "快捷键不可用"
+
+msgctxt "shortcuts.detail"
+msgid "Registry & callbacks — {registry_status}\nPlatform input bridge — {platform_status}\n\n{toggle_sidebar_binding}  Toggle sidebar · Application — {command_status}\n{toggle_terminal_binding}  Toggle Terminal · Workflow, Project — {command_status}\n{back_binding}  Back · Application — {command_status}\n{forward_binding}  Forward · Application — {command_status}\n{settings_binding}  Open Settings · Application — {command_status}"
+msgstr "注册表与回调 — {registry_status}\n平台输入桥接 — {platform_status}\n\n{toggle_sidebar_binding}  切换侧边栏 · 应用 — {command_status}\n{toggle_terminal_binding}  切换 Terminal · Workflow、Project — {command_status}\n{back_binding}  后退 · 应用 — {command_status}\n{forward_binding}  前进 · 应用 — {command_status}\n{settings_binding}  打开设置 · 应用 — {command_status}"
+
+msgctxt "about.license_proprietary"
+msgid "Proprietary (non-open-source)"
+msgstr "专有软件（非开源）"
+
+msgctxt "projects.type_tags_placeholder"
+msgid "For example: H5, Web, RN"
+msgstr "例如：H5、Web、RN"
+
+msgctxt "messages.empty_unread_description"
+msgid "New notifications will appear here until you mark them as read."
+msgstr "新通知会显示在这里，直到你将其标记为已读。"
+
+msgctxt "messages.empty_read_description"
+msgid "Notifications you have reviewed will appear here."
+msgstr "你已查看的通知会显示在这里。"
+
+msgctxt "messages.empty_all_description"
+msgid "Application updates and completed background work will appear here."
+msgstr "应用更新和已完成的后台任务会显示在这里。"
+
+msgctxt "pr_review.files_truncated_warning"
+msgid "The Provider returned only part of the changed-file list; this Diff is incomplete."
+msgstr "Provider 仅返回了部分变更文件列表；此 Diff 不完整。"
+
+msgctxt "pr_review.too_many_commits_warning"
+msgid "This Pull Request exceeds the server Commit limit; the displayed Diff may be partial."
+msgstr "此 Pull Request 超出服务器 Commit 数量限制；当前 Diff 可能不完整。"
+
+msgctxt "pr_review.approved_changes"
+msgid "approved these changes"
+msgstr "批准了这些变更"
+
+msgctxt "pr_review.requested_changes"
+msgid "requested changes"
+msgstr "请求修改"
+
+msgctxt "pr_review.left_comment"
+msgid "left a comment"
+msgstr "留下了评论"
+
+msgctxt "pr_review.commented"
+msgid "commented"
+msgstr "发表了评论"
+
+msgctxt "pr_review.plain_text_comments_supported"
+msgid "Plain-text comments are supported."
+msgstr "支持纯文本评论。"
+
+msgctxt "pr_review.gitee_review_action_unavailable"
+msgid "Gitee public v5 doesn't provide this Review action."
+msgstr "Gitee 公有版 v5 不提供此 Review 操作。"
+
+msgctxt "pr_review.request_changes_description"
+msgid "Submit feedback that must be addressed before merging."
+msgstr "提交合并前必须处理的反馈。"
+
+msgctxt "jobs.default_run_title"
+msgid "Workflow run"
+msgstr "Workflow 运行"
+
+msgctxt "branch.source_target_required"
+msgid "Source Branch and target Branch are required."
+msgstr "必须填写源 Branch 和目标 Branch。"
+
+msgctxt "branch.source_target_different"
+msgid "Source Branch and target Branch must be different."
+msgstr "源 Branch 和目标 Branch 必须不同。"
+
+msgctxt "branch.recreate_plan_with_remote"
+msgid "Validated Branch recreation: use '{source}' as the clean source, archive or delete '{target}', then recreate '{target}' from '{source}'. The remote tracking Branch will be recreated after local validation."
+msgstr "Branch 重建方案已验证：以 '{source}' 作为干净源，归档或删除 '{target}'，再从 '{source}' 重建 '{target}'。本地验证后将重建远程跟踪 Branch。"
+
+msgctxt "branch.recreate_plan_without_remote"
+msgid "Validated Branch recreation: use '{source}' as the clean source, archive or delete '{target}', then recreate '{target}' from '{source}'. Remote tracking Branch recreation is disabled."
+msgstr "Branch 重建方案已验证：以 '{source}' 作为干净源，归档或删除 '{target}'，再从 '{source}' 重建 '{target}'。远程跟踪 Branch 重建已禁用。"
+
+msgctxt "tag.local_ready"
+msgid "Local mode is ready. The latest Tag is '{current_tag}', and the next {bump} version is prepared."
+msgstr "Local 模式已就绪。最新 Tag 为 '{current_tag}'，下一 {bump} 版本已准备好。"
+
+msgctxt "tag.loading_add"
+msgid "Loading the latest local Tag for project '{project}'."
+msgstr "正在为项目 '{project}' 加载最新本地 Tag。"
+
+msgctxt "tag.loading_remove"
+msgid "Loading the latest remote Tag for project '{project}'."
+msgstr "正在为项目 '{project}' 加载最新远程 Tag。"
+
+msgctxt "tag.loading_context"
+msgid "Loading the latest local Tag for the Tag Workflow."
+msgstr "正在为 Tag Workflow 加载最新本地 Tag。"
+
+msgctxt "tag.load_local_failed"
+msgid "The latest local Tag could not be loaded. Check the repository and try again."
+msgstr "无法加载最新本地 Tag。请检查仓库后重试。"
+
+msgctxt "tag.load_remote_failed"
+msgid "The latest remote Tag could not be loaded. Check the repository and network, then try again."
+msgstr "无法加载最新远程 Tag。请检查仓库和网络后重试。"
+
+msgctxt "tag.remove_ready"
+msgid "Remove mode is ready. The latest remote Tag is '{latest_tag}'."
+msgstr "Remove 模式已就绪。最新远程 Tag 为 '{latest_tag}'。"
+
+msgctxt "tag.select_project"
+msgid "Select a project to load the local repository context."
+msgstr "请选择项目以加载本地仓库上下文。"
+
+msgctxt "tag.running_create"
+msgid "Running the local Tag Workflow for project '{project}' in {mode} mode."
+msgstr "正在以 {mode} 模式为项目 '{project}' 运行本地 Tag Workflow。"
+
+msgctxt "tag.running_remove"
+msgid "Running the local Tag removal Workflow for project '{project}' in {mode} mode."
+msgstr "正在以 {mode} 模式为项目 '{project}' 运行本地 Tag 删除 Workflow。"
+
+msgctxt "tag.create_run_title"
+msgid "Create Tag {version}"
+msgstr "创建 Tag {version}"
+
+msgctxt "tag.remove_run_title"
+msgid "Remove Tag {tag}"
+msgstr "删除 Tag {tag}"
+
+msgctxt "tag.workflow_name"
+msgid "Tag Workflow"
+msgstr "Tag Workflow"
+
+msgctxt "tag.started_manually"
+msgid "Started manually from Tag"
+msgstr "从 Tag 页面手动启动"
+
+msgctxt "tag.stop_pausing"
+msgid "Stop requested. Cancelling the Workflow and pausing the remaining steps."
+msgstr "已请求停止。正在取消 Workflow 并暂停剩余步骤。"
+
+msgctxt "tag.cancel_waiting_for_command"
+msgid "Cancelled by the user. Waiting for the current command to stop."
+msgstr "用户已取消。正在等待当前命令停止。"
+
+msgctxt "tag.paused_after_cancel"
+msgid "Paused because cancellation was requested."
+msgstr "因收到取消请求而暂停。"
+
+msgctxt "tag.cancelled_before_step_detail"
+msgid "Cancelled before this step started."
+msgstr "此步骤启动前已取消。"
+
+msgctxt "tag.cancelled_paused_detail"
+msgid "Cancelled by the user. The Workflow is paused."
+msgstr "用户已取消，Workflow 已暂停。"
+
+msgctxt "tag.command_failed_detail"
+msgid "The command failed. Check the logs below."
+msgstr "命令执行失败。请查看下方日志。"
+
+msgctxt "tag.progress_running"
+msgid "Running step {current}/{total}."
+msgstr "正在运行步骤 {current}/{total}。"
+
+msgctxt "tag.progress_completed"
+msgid "Step {current}/{total} completed."
+msgstr "步骤 {current}/{total} 已完成。"
+
+msgctxt "tag.progress_failed"
+msgid "Step {current}/{total} failed."
+msgstr "步骤 {current}/{total} 失败。"
+
+msgctxt "tag.stop_paused_at"
+msgid "Stop requested. The Workflow paused at step {step}."
+msgstr "已请求停止。Workflow 已在步骤 {step} 暂停。"
+
+msgctxt "tag.cancelled_before_step"
+msgid "The Tag Workflow was cancelled before step {step}."
+msgstr "Tag Workflow 已在步骤 {step} 开始前取消。"
+
+msgctxt "tag.cancelled_at_step"
+msgid "The Tag Workflow was cancelled at step {step}."
+msgstr "Tag Workflow 已在步骤 {step} 取消。"
+
+msgctxt "tag.failed_at_step"
+msgid "The Tag Workflow failed at step {step}."
+msgstr "Tag Workflow 在步骤 {step} 失败。"
+
+msgctxt "tag.create_finished_detail"
+msgid "The local Tag Workflow finished successfully."
+msgstr "本地 Tag Workflow 已成功结束。"
+
+msgctxt "tag.create_finished"
+msgid "The local Tag Workflow finished successfully. The active Tag is '{tag}'."
+msgstr "本地 Tag Workflow 已成功结束。当前 Tag 为 '{tag}'。"
+
+msgctxt "tag.create_completed"
+msgid "The local Tag Workflow completed successfully. The active Tag is '{tag}'."
+msgstr "本地 Tag Workflow 已成功完成。当前 Tag 为 '{tag}'。"
+
+msgctxt "tag.cancelled_before_refresh_detail"
+msgid "Cancelled before refreshing the latest remote Tag."
+msgstr "刷新最新远程 Tag 前已取消。"
+
+msgctxt "tag.cancelled_before_refresh"
+msgid "The Tag removal Workflow was cancelled before refreshing the latest remote Tag."
+msgstr "Tag 删除 Workflow 已在刷新最新远程 Tag 前取消。"
+
+msgctxt "tag.cancelled_during_refresh"
+msgid "The Tag removal Workflow was cancelled while refreshing remote Tags."
+msgstr "Tag 删除 Workflow 已在刷新远程 Tag 时取消。"
+
+msgctxt "tag.refresh_remote_failed_detail"
+msgid "The latest remote Tag could not be refreshed."
+msgstr "无法刷新最新远程 Tag。"
+
+msgctxt "tag.remove_finished_detail"
+msgid "The local removal Workflow finished successfully. The input was updated to '{latest_tag}'."
+msgstr "本地删除 Workflow 已成功结束。输入已更新为 '{latest_tag}'。"
+
+msgctxt "tag.remove_finished"
+msgid "The local Tag removal Workflow finished successfully. Removed '{removed_tag}'; the latest Tag is '{latest_tag}'."
+msgstr "本地 Tag 删除 Workflow 已成功结束。已删除 '{removed_tag}'；最新 Tag 为 '{latest_tag}'。"
+
+msgctxt "tag.remove_completed"
+msgid "The local Tag removal Workflow completed successfully. Removed '{removed_tag}'; the latest remote Tag is '{latest_tag}'."
+msgstr "本地 Tag 删除 Workflow 已成功完成。已删除 '{removed_tag}'；最新远程 Tag 为 '{latest_tag}'。"
+
+msgctxt "tag.step.enter_repository"
+msgid "Enter local repository"
+msgstr "进入本地仓库"
+
+msgctxt "tag.step.enter_repository_detail"
+msgid "Resolve the configured local repository path."
+msgstr "解析已配置的本地仓库路径。"
+
+msgctxt "tag.step.using_repository"
+msgid "Use the local repository at '{repository}'."
+msgstr "使用位于 '{repository}' 的本地仓库。"
+
+msgctxt "tag.step.checkout_release"
+msgid "Checkout release"
+msgstr "Checkout release"
+
+msgctxt "tag.step.checkout_release_detail"
+msgid "Switch to the release Branch."
+msgstr "切换到 release Branch。"
+
+msgctxt "tag.step.pull_release"
+msgid "Pull release"
+msgstr "Pull release"
+
+msgctxt "tag.step.pull_release_detail"
+msgid "Pull the latest release Branch changes."
+msgstr "拉取 release Branch 的最新变更。"
+
+msgctxt "tag.step.checkout_main"
+msgid "Checkout main"
+msgstr "Checkout main"
+
+msgctxt "tag.step.checkout_main_detail"
+msgid "Switch back to the main Branch."
+msgstr "切换回 main Branch。"
+
+msgctxt "tag.step.rebase_main"
+msgid "Rebase main on release"
+msgstr "将 main Rebase 到 release"
+
+msgctxt "tag.step.rebase_main_detail"
+msgid "Rebase main onto release."
+msgstr "将 main Rebase 到 release。"
+
+msgctxt "tag.step.push_main"
+msgid "Push main"
+msgstr "Push main"
+
+msgctxt "tag.step.push_main_detail"
+msgid "Push the rebased main Branch to the remote."
+msgstr "将 Rebase 后的 main Branch Push 到远程。"
+
+msgctxt "tag.step.create_annotated"
+msgid "Create annotated Tag"
+msgstr "创建 annotated Tag"
+
+msgctxt "tag.step.create_annotated_detail"
+msgid "Create the new annotated semantic-version Tag."
+msgstr "创建新的 annotated 语义版本 Tag。"
+
+msgctxt "tag.step.create_annotated_version_detail"
+msgid "Create annotated Tag '{version}'."
+msgstr "创建 annotated Tag '{version}'。"
+
+msgctxt "tag.step.push_tag"
+msgid "Push Tag"
+msgstr "Push Tag"
+
+msgctxt "tag.step.push_tag_detail"
+msgid "Push the new Tag to the remote."
+msgstr "将新 Tag Push 到远程。"
+
+msgctxt "tag.step.push_tag_version_detail"
+msgid "Push Tag '{version}' to the remote."
+msgstr "将 Tag '{version}' Push 到远程。"
+
+msgctxt "tag.step.delete_local"
+msgid "Delete local Tag"
+msgstr "删除本地 Tag"
+
+msgctxt "tag.step.delete_local_detail"
+msgid "Delete the Tag from the local repository."
+msgstr "从本地仓库删除 Tag。"
+
+msgctxt "tag.step.delete_remote"
+msgid "Delete remote Tag"
+msgstr "删除远程 Tag"
+
+msgctxt "tag.step.delete_remote_detail"
+msgid "Delete the Tag from the origin remote."
+msgstr "从 origin 远程删除 Tag。"
+
+msgctxt "tag.step.refresh_remote"
+msgid "Refresh latest remote Tag"
+msgstr "刷新最新远程 Tag"
+
+msgctxt "tag.step.refresh_remote_detail"
+msgid "Fetch remote Tags and resolve the latest semantic-version Tag."
+msgstr "获取远程 Tag 并解析最新语义版本 Tag。"
+
+msgctxt "tag.step.complete"
+msgid "Complete"
+msgstr "完成"
+
+msgctxt "tag.step.complete_detail"
+msgid "Finish the local Tag Workflow."
+msgstr "结束本地 Tag Workflow。"
+
+msgctxt "tag.step.remove_complete_waiting"
+msgid "Waiting for the removal Workflow to complete."
+msgstr "等待删除 Workflow 完成。"
+
+msgctxt "tag.step.remove_target_resolved"
+msgid "Resolved the latest remote Tag for removal: '{latest_tag}'."
+msgstr "已解析待删除流程所需的最新远程 Tag：'{latest_tag}'。"
+
+msgctxt "tag.step.latest_remote_tag"
+msgid "The latest remote semantic-version Tag is now '{latest_tag}'."
+msgstr "最新远程语义版本 Tag 现为 '{latest_tag}'。"
+
+msgctxt "pr_review.readiness.checking"
+msgid "Checking mergeability…"
+msgstr "正在检查可合并状态…"
+
+msgctxt "pr_review.readiness.ready"
+msgid "Ready to merge"
+msgstr "可以合并"
+
+msgctxt "pr_review.readiness.conflicts"
+msgid "Conflicts"
+msgstr "存在冲突"
+
+msgctxt "pr_review.readiness.draft"
+msgid "Draft"
+msgstr "草稿"
+
+msgctxt "pr_review.readiness.review_required"
+msgid "Review required"
+msgstr "需要 Review"
+
+msgctxt "pr_review.readiness.changes_requested"
+msgid "Changes requested"
+msgstr "已请求修改"
+
+msgctxt "pr_review.readiness.checks_pending"
+msgid "Checks pending"
+msgstr "检查待完成"
+
+msgctxt "pr_review.readiness.checks_failed"
+msgid "Checks failed"
+msgstr "检查失败"
+
+msgctxt "pr_review.readiness.branch_out_of_date"
+msgid "Branch out of date"
+msgstr "Branch 已过期"
+
+msgctxt "pr_review.readiness.discussions_unresolved"
+msgid "Resolve conversations"
+msgstr "解决对话"
+
+msgctxt "pr_review.readiness.blocked"
+msgid "Merge blocked"
+msgstr "合并受阻"
+
+msgctxt "pr_review.readiness.merged"
+msgid "Merged"
+msgstr "已合并"
+
+msgctxt "pr_review.readiness.closed"
+msgid "Closed"
+msgstr "已关闭"
+
+msgctxt "pr_review.readiness.unavailable"
+msgid "Merge status unavailable"
+msgstr "合并状态不可用"
+
+msgctxt "pr_review.readiness_detail.checking"
+msgid "Merge conditions are still being checked."
+msgstr "仍在检查合并条件。"
+
+msgctxt "pr_review.readiness_detail.ready"
+msgid "All reported merge conditions are satisfied."
+msgstr "Provider 报告的所有合并条件均已满足。"
+
+msgctxt "pr_review.readiness_detail.conflicts"
+msgid "Resolve Branch conflicts before merging."
+msgstr "请在合并前解决 Branch 冲突。"
+
+msgctxt "pr_review.readiness_detail.draft"
+msgid "Mark this Pull Request as ready before merging."
+msgstr "请在合并前将此 Pull Request 标记为就绪。"
+
+msgctxt "pr_review.readiness_detail.review_required"
+msgid "Complete the required Review before merging."
+msgstr "请在合并前完成必需的 Review。"
+
+msgctxt "pr_review.readiness_detail.changes_requested"
+msgid "Address the requested changes before merging."
+msgstr "请在合并前处理已请求的修改。"
+
+msgctxt "pr_review.readiness_detail.checks_pending"
+msgid "Wait for the required checks to finish."
+msgstr "请等待必需的检查完成。"
+
+msgctxt "pr_review.readiness_detail.checks_failed"
+msgid "Fix the failing checks before merging."
+msgstr "请在合并前修复失败的检查。"
+
+msgctxt "pr_review.readiness_detail.branch_out_of_date"
+msgid "Update the source Branch before merging."
+msgstr "请在合并前更新源 Branch。"
+
+msgctxt "pr_review.readiness_detail.discussions_unresolved"
+msgid "Resolve all required conversations before merging."
+msgstr "请在合并前解决所有必需的对话。"
+
+msgctxt "pr_review.readiness_detail.blocked"
+msgid "The Provider reports that this Pull Request is blocked."
+msgstr "Provider 报告此 Pull Request 已被阻止。"
+
+msgctxt "pr_review.readiness_detail.merged"
+msgid "This Pull Request has already been merged."
+msgstr "此 Pull Request 已合并。"
+
+msgctxt "pr_review.readiness_detail.closed"
+msgid "This Pull Request is closed."
+msgstr "此 Pull Request 已关闭。"
+
+msgctxt "pr_review.readiness_detail.unavailable"
+msgid "The Provider did not return a usable merge status."
+msgstr "Provider 未返回可用的合并状态。"
+
+msgctxt "pr_review.configure_provider_for_merge"
+msgid "Configure this Provider in Settings to enable merge actions."
+msgstr "请在设置中配置此 Provider 以启用合并操作。"
+
+msgctxt "pr_review.merge_permission_required"
+msgid "The configured account does not have permission to merge this Pull Request."
+msgstr "已配置的账号没有合并此 Pull Request 的权限。"
+
+msgctxt "pr_review.create_revert_pr"
+msgid "Create revert PR"
+msgstr "创建 Revert PR"
+
+msgctxt "pr_review.revert_changes"
+msgid "Revert changes"
+msgstr "Revert 修改"
+
+msgctxt "pr_review.revert_confirmation_pull_request"
+msgid "A separate Pull Request will be created to reverse the merged changes. The original Pull Request remains merged."
+msgstr "将创建一个独立的 Pull Request 来反转已合并的修改。原 Pull Request 保持已合并状态。"
+
+msgctxt "pr_review.revert_confirmation_direct_commit"
+msgid "A Revert Commit will be added directly to the target Branch. This changes the Branch immediately and does not create a new Pull Request."
+msgstr "Revert Commit 将直接添加到目标 Branch。此操作会立即修改该 Branch，且不会创建新的 Pull Request。"
+
+msgctxt "pr_review.revert_confirmation_unsupported"
+msgid "This Provider does not expose a supported automatic Revert operation."
+msgstr "此 Provider 未提供受支持的自动 Revert 操作。"
+
+msgctxt "http.request_failed"
+msgid "Request failed"
+msgstr "请求失败"
+
+msgctxt "http.error.timeout"
+msgid "The request timed out. Please try again."
+msgstr "请求超时，请重试。"
+
+msgctxt "http.error.connect"
+msgid "Could not connect. Check your network and try again."
+msgstr "无法连接。请检查网络后重试。"
+
+msgctxt "http.error.authentication"
+msgid "The request was rejected. Check your credentials or permissions."
+msgstr "请求被拒绝。请检查凭据或权限。"
+
+msgctxt "http.error.rate_limited"
+msgid "The request was rate limited. Please try again later."
+msgstr "请求受到频率限制，请稍后重试。"
+
+msgctxt "http.error.server"
+msgid "The request failed because the server returned {code}."
+msgstr "请求失败，服务器返回了 {code}。"
+
+msgctxt "http.error.status"
+msgid "The request failed (HTTP {code})."
+msgstr "请求失败（HTTP {code}）。"
+
+msgctxt "http.error.decode"
+msgid "The server returned data in an unexpected format."
+msgstr "服务器返回了无法识别的数据格式。"
+
+msgctxt "http.error.request"
+msgid "The request failed. Please try again."
+msgstr "请求失败，请重试。"
+
+msgctxt "toast.default.text"
+msgid "Toast"
+msgstr "提示"
+
+msgctxt "toast.default.success"
+msgid "Operation successful!"
+msgstr "操作成功！"
+
+msgctxt "toast.default.error"
+msgid "Operation failed!"
+msgstr "操作失败！"
+
+msgctxt "toast.default.loading"
+msgid "Loading..."
+msgstr "加载中..."
+
+msgctxt "notification.default.info"
+msgid "Info"
+msgstr "信息"
+
+msgctxt "notification.default.success"
+msgid "Success"
+msgstr "成功"
+
+msgctxt "notification.default.warning"
+msgid "Warning"
+msgstr "警告"
+
+msgctxt "notification.default.error"
+msgid "Error"
+msgstr "错误"
+
+msgctxt "notification.default_title.info"
+msgid "Information"
+msgstr "信息"
+
+msgctxt "notification.default_title.success"
+msgid "Completed"
+msgstr "已完成"
+
+msgctxt "notification.default_title.warning"
+msgid "Attention"
+msgstr "注意"
+
+msgctxt "notification.default_title.error"
+msgid "Failed"
+msgstr "失败"
+
+msgctxt "terminal.project_title"
+msgid "{project} Terminal"
+msgstr "{project} Terminal"
+
+msgctxt "terminal.project_title_default"
+msgid "Project Terminal"
+msgstr "项目 Terminal"
+
+msgctxt "time.just_now"
+msgid "just now"
+msgstr "刚刚"
+
+msgctxt "time.minute_ago"
+msgid "1 minute ago"
+msgstr "1 分钟前"
+
+msgctxt "time.minutes_ago"
+msgid "{count} minutes ago"
+msgstr "{count} 分钟前"
+
+msgctxt "time.hour_ago"
+msgid "1 hour ago"
+msgstr "1 小时前"
+
+msgctxt "time.hours_ago"
+msgid "{count} hours ago"
+msgstr "{count} 小时前"
+
+msgctxt "time.yesterday"
+msgid "yesterday"
+msgstr "昨天"
+
+msgctxt "time.two_days_ago"
+msgid "two days ago"
+msgstr "前天"
+
+msgctxt "time.weekday.mon"
+msgid "Monday"
+msgstr "星期一"
+
+msgctxt "time.weekday.tue"
+msgid "Tuesday"
+msgstr "星期二"
+
+msgctxt "time.weekday.wed"
+msgid "Wednesday"
+msgstr "星期三"
+
+msgctxt "time.weekday.thu"
+msgid "Thursday"
+msgstr "星期四"
+
+msgctxt "time.weekday.fri"
+msgid "Friday"
+msgstr "星期五"
+
+msgctxt "time.weekday.sat"
+msgid "Saturday"
+msgstr "星期六"
+
+msgctxt "time.weekday.sun"
+msgid "Sunday"
+msgstr "星期日"
+
+msgctxt "time.relative_with_clock"
+msgid "{relative} {time}"
+msgstr "{relative} {time}"
+
+msgctxt "time.month_day_with_clock"
+msgid "{month} {day} {time}"
+msgstr "{month}{day}日 {time}"
+
+msgctxt "time.month_day_year_with_clock"
+msgid "{month} {day}, {year} {time}"
+msgstr "{year}年{month}{day}日 {time}"
+
+msgctxt "time.days_ago"
+msgid "{count} days ago"
+msgstr "{count} 天前"
+
+msgctxt "time.last_week"
+msgid "last week"
+msgstr "上周"
+
+msgctxt "time.weeks_ago"
+msgid "{count} weeks ago"
+msgstr "{count} 周前"
+
+msgctxt "time.on_month_day"
+msgid "on {month} {day}"
+msgstr "{month}{day}日"
+
+msgctxt "time.on_month_day_year"
+msgid "on {month} {day}, {year}"
+msgstr "{year}年{month}{day}日"
+
+msgctxt "time.month_day_year"
+msgid "{month} {day}, {year}"
+msgstr "{year}年{month}{day}日"
+
+msgctxt "time.absolute_tooltip"
+msgid "{month} {day}, {year}, {hour}:{minute} {meridiem} GMT+8"
+msgstr "{year}年{month}{day}日 {meridiem}{hour}:{minute} GMT+8"
+
+msgctxt "time.am"
+msgid "AM"
+msgstr "上午"
+
+msgctxt "time.pm"
+msgid "PM"
+msgstr "下午"
+
+msgctxt "time.month.jan"
+msgid "Jan"
+msgstr "1月"
+
+msgctxt "time.month.feb"
+msgid "Feb"
+msgstr "2月"
+
+msgctxt "time.month.mar"
+msgid "Mar"
+msgstr "3月"
+
+msgctxt "time.month.apr"
+msgid "Apr"
+msgstr "4月"
+
+msgctxt "time.month.may"
+msgid "May"
+msgstr "5月"
+
+msgctxt "time.month.jun"
+msgid "Jun"
+msgstr "6月"
+
+msgctxt "time.month.jul"
+msgid "Jul"
+msgstr "7月"
+
+msgctxt "time.month.aug"
+msgid "Aug"
+msgstr "8月"
+
+msgctxt "time.month.sep"
+msgid "Sep"
+msgstr "9月"
+
+msgctxt "time.month.oct"
+msgid "Oct"
+msgstr "10月"
+
+msgctxt "time.month.nov"
+msgid "Nov"
+msgstr "11月"
+
+msgctxt "time.month.dec"
+msgid "Dec"
+msgstr "12月"
+
+msgctxt "pr_review.commits_added.one"
+msgid "added 1 Commit"
+msgstr "添加了 1 个 Commit"
+
+msgctxt "pr_review.commits_added.many"
+msgid "added {count} Commits"
+msgstr "添加了 {count} 个 Commit"
+
+msgctxt "pr_review.commit_identity.authored_and_committed"
+msgid "{author} authored and {committer} committed"
+msgstr "{author} 创建、{committer} 提交了 Commit"
+
+msgctxt "pr_review.commit_identity.authored"
+msgid "{author} authored"
+msgstr "{author} 创建了 Commit"
+
+msgctxt "pr_review.commit_identity.committed"
+msgid "{committer} committed"
+msgstr "{committer} 提交了 Commit"
+
+msgctxt "pr_review.commit_identity.unknown"
+msgid "Unknown author committed"
+msgstr "未知作者提交了 Commit"
+
+msgctxt "pr_review.timeline.review.approved"
+msgid "approved these changes"
+msgstr "批准了这些更改"
+
+msgctxt "pr_review.timeline.review.changes_requested"
+msgid "requested changes"
+msgstr "请求了更改"
+
+msgctxt "pr_review.timeline.review.dismissed"
+msgid "had a Review dismissed"
+msgstr "有一条 Review 被驳回"
+
+msgctxt "pr_review.timeline.review.commented"
+msgid "commented"
+msgstr "发表了评论"
+
+msgctxt "pr_review.timeline.review_requested"
+msgid "requested a Review"
+msgstr "请求了 Review"
+
+msgctxt "pr_review.timeline.review_requested_from"
+msgid "requested a Review from"
+msgstr "请求 Review："
+
+msgctxt "pr_review.timeline.event.closed"
+msgid "closed this Pull Request"
+msgstr "关闭了此 Pull Request"
+
+msgctxt "pr_review.timeline.event.reopened"
+msgid "reopened this Pull Request"
+msgstr "重新打开了此 Pull Request"
+
+msgctxt "pr_review.timeline.event.force_pushed"
+msgid "force-pushed the Branch"
+msgstr "强制推送了 Branch"
+
+msgctxt "pr_review.timeline.event.ready_for_review"
+msgid "marked this Pull Request as ready for Review"
+msgstr "将此 Pull Request 标记为可 Review"
+
+msgctxt "pr_review.timeline.event.converted_to_draft"
+msgid "converted this Pull Request to draft"
+msgstr "将此 Pull Request 转为草稿"
+
+msgctxt "pr_review.timeline.event.updated"
+msgid "updated this Pull Request"
+msgstr "更新了此 Pull Request"
+
+msgctxt "common.unknown_author"
+msgid "Unknown author"
+msgstr "未知作者"
+
+msgctxt "common.unknown_reviewer"
+msgid "Unknown Reviewer"
+msgstr "未知 Reviewer"
+
+msgctxt "common.unknown_committer"
+msgid "Unknown Committer"
+msgstr "未知 Committer"
+
+msgctxt "common.unknown_merger"
+msgid "Unknown merger"
+msgstr "未知合并者"
+
+msgctxt "common.unknown_file"
+msgid "Unknown file"
+msgstr "未知文件"
+
+msgctxt "pr_list.untitled_pull_request"
+msgid "Untitled Pull Request"
+msgstr "未命名 Pull Request"
+
+msgctxt "tag.loading_add_default"
+msgid "Loading the latest local Tag for the default project."
+msgstr "正在加载默认项目的最新本地 Tag。"
+
+msgctxt "tag.loading_remove_default"
+msgid "Loading the latest remote Tag for the default project."
+msgstr "正在加载默认项目的最新远程 Tag。"

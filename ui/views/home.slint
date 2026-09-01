@@ -2,20 +2,21 @@ import { Route } from "../route/routeMap.slint";
 import { AppState } from "../state/app_state.slint";
 import { GitHubBlankslate } from "../components/github_blankslate.slint";
 import { GitHubPageView } from "../components/page/page_view.slint";
+import { I18n } from "@i18n";
 
 export component GitHubHomePage inherits GitHubPageView {
     page-title: "Usher";
-    page-description: "Git projects, pull requests, and delivery workflows · v" + AppState.version;
+    page-description: I18n.home-description + " · v" + AppState.version;
     page-icon: @image-url("../assets/icons/octicon-repo-16.svg");
 
     GitHubBlankslate {
         bordered: true;
         spacious: true;
         icon: @image-url("../assets/icons/octicon-repo-16.svg");
-        heading: "Manage your delivery workspace";
-        description: "Add a local Git repository, inspect pull request activity, and open project-aware workflows from one place.";
-        primary-label: "Open projects";
-        secondary-label: "Configure settings";
+        heading: I18n.home-heading;
+        description: I18n.home-empty-description;
+        primary-label: I18n.home-open-projects;
+        secondary-label: I18n.home-configure-settings;
         primary-clicked => { root.navigate(Route.Project); }
         secondary-clicked => { root.navigate(Route.Settings); }
     }

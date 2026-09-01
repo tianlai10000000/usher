@@ -1,0 +1,16 @@
+source_locale = "en"
+fallback_locale = "en"
+
+[[locales]]
+id = "en"
+native_name = "English"
+aliases = ["en-US", "en-GB"]
+minimum_coverage = 1.0
+segmented_count_suffix_offset = 0
+
+[[locales]]
+id = "zh-CN"
+native_name = "简体中文"
+aliases = ["zh", "zh-Hans", "zh-SG"]
+minimum_coverage = 1.0
+segmented_count_suffix_offset = 1

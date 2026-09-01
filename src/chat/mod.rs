@@ -25,3 +25,7 @@ pub fn setup_chat(ui: &MainWindow) {
 
     log::info!("[Chat] Chat module initialized successfully");
 }
+
+pub(crate) fn sync_language(ui: &MainWindow) {
+    interactive::sync_language(ui);
+}

@@ -2,6 +2,7 @@ import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
+import { I18n } from "@i18n";
 
 // Compact floating feedback surface built from the current Primer Banner
 // anatomy: semantic leading visual, concise text, optional dismiss action, and
@@ -185,7 +186,7 @@ export component GitHubToast inherits Rectangle {
             x: parent.width - GitHubMetrics.size-40;
             y: GitHubMetrics.size-8;
             icon: @image-url("../../assets/icons/octicon-x-16.svg");
-            tooltip-text: "Dismiss";
+            tooltip-text: I18n.common-dismiss;
             show-tooltip: false;
             tooltip-align-right: true;
             tooltip-above: root.position != "top";

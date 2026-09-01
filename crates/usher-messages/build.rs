@@ -3,11 +3,20 @@ use std::path::Path;
 
 fn main() {
     let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let i18n = usher_i18n::build_support::prepare_slint_bundle(
+        std::env::var_os("OUT_DIR").expect("Cargo must provide OUT_DIR"),
+        env!("CARGO_PKG_NAME"),
+    )
+    .expect("failed to prepare Slint translations");
     let config = slint_build::CompilerConfiguration::new()
-        .with_library_paths(HashMap::from([(
-            "material".to_string(),
-            repository_root.join("material-1.7.1-fixed/material.slint"),
-        )]))
+        .with_bundled_translations(i18n.translations_path)
+        .with_library_paths(HashMap::from([
+            (
+                "material".to_string(),
+                repository_root.join("material-1.7.1-fixed/material.slint"),
+            ),
+            ("i18n".to_string(), i18n.library_path),
+        ]))
         .as_library("usher_messages");
 
     // Keep the independently mounted page static for the same reason as

@@ -71,6 +71,7 @@ struct UiPayload {
     plain_text: slint::SharedString,
     image: slint::Image,
     error: slint::SharedString,
+    error_key: Option<&'static str>,
     can_copy: bool,
     can_open_external: bool,
     copy_content: slint::SharedString,
@@ -80,14 +81,15 @@ struct UiPayload {
 }
 
 impl UiPayload {
-    fn error(title: String, message: String) -> Self {
+    fn error(title: String, key: &'static str) -> Self {
         Self {
             title: title.into(),
             kind: ArtifactPreviewKind::Error,
             blocks: ModelRc::default(),
             plain_text: "".into(),
             image: slint::Image::default(),
-            error: message.into(),
+            error: crate::i18n::tr(key).into_owned().into(),
+            error_key: Some(key),
             can_copy: false,
             can_open_external: false,
             copy_content: "".into(),
@@ -104,6 +106,7 @@ struct PreviewUiRuntime {
     current: Option<UiPayload>,
     loading_title: Option<slint::SharedString>,
     loading_message: slint::SharedString,
+    loading_copy: crate::i18n::LocalizedText,
     detached: Option<ArtifactPreviewWindow>,
     docked_virtual_layout: Rc<RefCell<MarkdownVirtualLayoutBridge>>,
 }
@@ -115,7 +118,8 @@ impl Default for PreviewUiRuntime {
             context: ArtifactPreviewContext::Application,
             current: None,
             loading_title: None,
-            loading_message: "Preparing preview".into(),
+            loading_message: crate::i18n::tr("preview.preparing").as_ref().into(),
+            loading_copy: crate::i18n::LocalizedText::message("preview.preparing"),
             detached: None,
             docked_virtual_layout: Rc::new(RefCell::new(MarkdownVirtualLayoutBridge::default())),
         }
@@ -216,7 +220,7 @@ impl ArtifactPreviewHandle {
         let progress_service = self.service.clone();
         let progress_ui = self.ui.clone();
         cancellation.set_progress_handler(move |progress| {
-            let message = preparation_progress_message(progress);
+            let message = preparation_progress_text(progress);
             if !progress_service.is_current(generation) {
                 return;
             }
@@ -265,7 +269,7 @@ impl ArtifactPreviewHandle {
                 };
                 let payload = match result {
                     Ok(prepared) => prepared.into_ui_payload(),
-                    Err(error) => UiPayload::error(title, user_safe_error(&error)),
+                    Err(error) => UiPayload::error(title, user_safe_error_key(&error)),
                 };
                 crate::memory_diagnostics::log_checkpoint("artifact_preview.ui_payload_converted");
                 show_payload(&ui, payload);
@@ -515,15 +519,26 @@ fn validate_repository_markdown_path(
     }
 }
 
-fn preparation_progress_message(progress: PreviewPreparationProgress) -> String {
+fn preparation_progress_text(progress: PreviewPreparationProgress) -> crate::i18n::LocalizedText {
     match progress {
         PreviewPreparationProgress::ParserLoading { display_name, .. } => {
-            format!("Loading {display_name} parser...")
+            crate::i18n::LocalizedText::message_with(
+                "preview.parser_loading",
+                [("display_name", display_name)],
+            )
         }
         PreviewPreparationProgress::ParserReady { display_name, .. } => {
-            format!("{display_name} parser ready. Preparing preview...")
+            crate::i18n::LocalizedText::message_with(
+                "preview.parser_ready",
+                [("display_name", display_name)],
+            )
         }
     }
+}
+
+#[cfg(test)]
+fn preparation_progress_message(progress: PreviewPreparationProgress) -> String {
+    preparation_progress_text(progress).resolve()
 }
 
 pub(crate) fn setup(ui: &MainWindow, settings: &PreviewSettings) -> ArtifactPreviewHandle {
@@ -784,6 +799,7 @@ impl UiPreparedPayload {
             plain_text,
             image,
             error: "".into(),
+            error_key: None,
             can_copy: self.can_copy,
             can_open_external: self.can_open_external,
             copy_content: self.copy_content.into(),
@@ -1121,7 +1137,8 @@ fn show_loading(ui: &MainWindow, title: String) {
         let mut runtime = runtime.borrow_mut();
         runtime.current = None;
         runtime.loading_title = Some(title.into());
-        runtime.loading_message = "Preparing preview".into();
+        runtime.loading_copy = crate::i18n::LocalizedText::message("preview.preparing");
+        runtime.loading_message = runtime.loading_copy.resolve().into();
         present_runtime(ui, &mut runtime);
     });
 }
@@ -1131,14 +1148,30 @@ fn set_preview_context(ui: &MainWindow, context: ArtifactPreviewContext) {
     ui.set_artifact_preview_pr_side_context(context == ArtifactPreviewContext::PrReviewSidePanel);
 }
 
-fn update_loading_message(ui: &MainWindow, message: String) {
+fn update_loading_message(ui: &MainWindow, message: crate::i18n::LocalizedText) {
     PREVIEW_UI.with(|runtime| {
         let mut runtime = runtime.borrow_mut();
         if runtime.loading_title.is_none() || runtime.current.is_some() {
             return;
         }
-        runtime.loading_message = message.into();
+        runtime.loading_message = message.resolve().into();
+        runtime.loading_copy = message;
         present_runtime(ui, &mut runtime);
+    });
+}
+
+pub(crate) fn sync_language(ui: &MainWindow) {
+    PREVIEW_UI.with(|runtime| {
+        let mut runtime = runtime.borrow_mut();
+        runtime.loading_message = runtime.loading_copy.resolve().into();
+        if let Some(payload) = runtime.current.as_mut()
+            && let Some(key) = payload.error_key
+        {
+            payload.error = crate::i18n::tr(key).into_owned().into();
+        }
+        if runtime.loading_title.is_some() || runtime.current.is_some() {
+            present_runtime(ui, &mut runtime);
+        }
     });
 }
 
@@ -1146,7 +1179,8 @@ fn show_payload(ui: &MainWindow, payload: UiPayload) {
     PREVIEW_UI.with(|runtime| {
         let mut runtime = runtime.borrow_mut();
         runtime.loading_title = None;
-        runtime.loading_message = "Preparing preview".into();
+        runtime.loading_copy = crate::i18n::LocalizedText::message("preview.preparing");
+        runtime.loading_message = runtime.loading_copy.resolve().into();
         runtime.current = Some(payload);
         present_runtime(ui, &mut runtime);
     });
@@ -1405,7 +1439,8 @@ fn clear_hosts(ui: &MainWindow) {
         let animate_docked_close = runtime.mode == PresentationMode::Docked;
         runtime.current = None;
         runtime.loading_title = None;
-        runtime.loading_message = "Preparing preview".into();
+        runtime.loading_copy = crate::i18n::LocalizedText::message("preview.preparing");
+        runtime.loading_message = runtime.loading_copy.resolve().into();
         runtime.context = ArtifactPreviewContext::Application;
         if animate_docked_close {
             begin_main_host_close(ui, runtime.docked_virtual_layout.clone());
@@ -1488,18 +1523,14 @@ fn copy_to_clipboard(text: &str) -> bool {
     }
 }
 
-fn user_safe_error(error: &usher_preview::PreviewError) -> String {
+fn user_safe_error_key(error: &usher_preview::PreviewError) -> &'static str {
     match error {
-        usher_preview::PreviewError::Unsupported => {
-            "This file type is unsupported or its preview provider is disabled.".into()
-        }
-        usher_preview::PreviewError::SourceTooLarge { .. } => {
-            "This file is too large to preview safely.".into()
-        }
-        usher_preview::PreviewError::Cancelled => "Preview was cancelled.".into(),
-        usher_preview::PreviewError::InvalidUtf8 => "This file is not valid UTF-8 text.".into(),
-        usher_preview::PreviewError::Io(_) => "The file could not be read.".into(),
-        usher_preview::PreviewError::Decode(_) => "The file could not be decoded.".into(),
+        usher_preview::PreviewError::Unsupported => "preview.error.unsupported",
+        usher_preview::PreviewError::SourceTooLarge { .. } => "preview.error.too_large",
+        usher_preview::PreviewError::Cancelled => "preview.error.cancelled",
+        usher_preview::PreviewError::InvalidUtf8 => "preview.error.invalid_utf8",
+        usher_preview::PreviewError::Io(_) => "preview.error.io",
+        usher_preview::PreviewError::Decode(_) => "preview.error.decode",
     }
 }
 
@@ -1763,7 +1794,7 @@ mod tests {
                 loader_id: "typescript",
                 display_name: "TypeScript".to_string(),
             }),
-            "Loading TypeScript parser..."
+            "Loading the TypeScript Parser…"
         );
         assert_eq!(
             preparation_progress_message(PreviewPreparationProgress::ParserReady {
@@ -1771,7 +1802,7 @@ mod tests {
                 loader_id: "typescript",
                 display_name: "TypeScript".to_string(),
             }),
-            "TypeScript parser ready. Preparing preview..."
+            "The TypeScript Parser is ready. Preparing preview…"
         );
     }
 

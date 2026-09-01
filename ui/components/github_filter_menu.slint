@@ -1,6 +1,7 @@
 import { GitHubActionListItem, GitHubActionMenuTriggerArea } from "./github_action_menu.slint";
 import { GitHubIconButton } from "./button/github_icon_button.slint";
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 // Generic ActionMenu trigger for compact filter and sort choices.
 export component GitHubFilterMenuButton inherits FocusScope {
@@ -18,7 +19,7 @@ export component GitHubFilterMenuButton inherits FocusScope {
     height: GitHubMetrics.control-medium-size;
     accessible-role: button;
     accessible-enabled: true;
-    accessible-label: root.label + (root.selected ? ", active filter" : "");
+    accessible-label: root.label + (root.selected ? ", " + I18n.common-active-filter : "");
 
     key-pressed(event) => {
         root.keyboard-focus-visible = true;
@@ -150,7 +151,7 @@ export component GitHubFilterMenuFrame inherits Rectangle {
         control-size: GitHubMetrics.size-24;
         glyph-size: GitHubMetrics.icon-medium;
         icon: @image-url("../assets/icons/octicon-x-16.svg");
-        tooltip-text: "Close menu";
+        tooltip-text: I18n.common-close-menu;
         invisible: true;
         clicked => { root.close(); }
     }

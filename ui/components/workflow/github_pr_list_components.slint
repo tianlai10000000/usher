@@ -4,6 +4,7 @@ import { GitHubBlankslate } from "../github_blankslate.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubFilterMenuFrame, GitHubFilterMenuItem, GitHubFilterMenuSectionLabel } from "../github_filter_menu.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 
 export struct WorkflowPullRequestItem {
@@ -26,7 +27,7 @@ export struct WorkflowPullRequestItem {
 
 export component GitHubPullRequestSearchField inherits Rectangle {
     in property <string> text;
-    in property <string> placeholder: "Search all pull requests";
+    in property <string> placeholder: I18n.pr-list-search-placeholder;
     callback accepted(string);
 
     private property <string> draft-text: root.text;
@@ -84,7 +85,7 @@ export component GitHubPullRequestClearQueryButton inherits Rectangle {
     callback clicked();
 
     private property <bool> keyboard-focus-visible: false;
-    private property <string> label: "Clear current search query, filters, and sorts";
+    private property <string> label: I18n.pr-list-clear-filters;
     private property <length> label-width: max(32px, label-measure.preferred-width);
     width: 24px + root.label-width;
     height: 32px;
@@ -262,7 +263,7 @@ export component GitHubPullRequestStateButton inherits Rectangle {
         z: 20;
         preferred-placement: GitHubTooltipPlacement.Bottom;
         alignment: GitHubTooltipAlignment.Start;
-        text: root.count < 0 && state-touch.has-hover ? "Count unavailable" : "";
+        text: root.count < 0 && state-touch.has-hover ? I18n.pr-list-count-unavailable : "";
     }
 
     state-touch := TouchArea {
@@ -277,7 +278,7 @@ export component GitHubPullRequestStateButton inherits Rectangle {
 
 export component GitHubPullRequestFilterMoreButton inherits GitHubIconButton {
     icon: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
-    tooltip-text: "More filters";
+    tooltip-text: I18n.pr-list-more-filters;
     tooltip-above: false;
     tooltip-align-right: true;
     invisible: true;
@@ -304,8 +305,8 @@ export component GitHubPullRequestFilterMenu inherits Rectangle {
     GitHubFilterMenuFrame {
         width: parent.width;
         title: root.menu-type == "reviews"
-            ? "Filter by reviews"
-            : (root.menu-type == "assignee" ? "Filter by assignee" : "Sort by");
+            ? I18n.pr-list-filter-by-reviews
+            : (root.menu-type == "assignee" ? I18n.pr-list-filter-by-assignee : I18n.pr-list-sort-by);
         show-header: root.menu-type != "more";
         content-height: root.menu-type == "assignee"
             ? 96px
@@ -313,41 +314,41 @@ export component GitHubPullRequestFilterMenu inherits Rectangle {
         close => { root.close(); }
 
         if root.menu-type == "reviews": VerticalLayout {
-            GitHubFilterMenuItem { text: "All reviews"; value: "all"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
-            GitHubFilterMenuItem { text: "Review required"; value: "required"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
-            GitHubFilterMenuItem { text: "Approved review"; value: "approved"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
-            GitHubFilterMenuItem { text: "Changes requested"; value: "changes-requested"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-all-reviews; value: "all"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-review-required; value: "required"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-approved-review; value: "approved"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-changes-requested; value: "changes-requested"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
         }
 
         if root.menu-type == "assignee": VerticalLayout {
-            GitHubFilterMenuItem { text: "Anyone"; value: "any"; selected-value: root.assignee-selected-value; chosen(value) => { root.selected("assignee", value); } }
-            GitHubFilterMenuItem { text: "Assigned to nobody"; value: "none"; selected-value: root.assignee-selected-value; chosen(value) => { root.selected("assignee", value); } }
-            GitHubFilterMenuItem { text: "Assigned to me"; value: "me"; selected-value: root.assignee-selected-value; chosen(value) => { root.selected("assignee", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-anyone; value: "any"; selected-value: root.assignee-selected-value; chosen(value) => { root.selected("assignee", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-assigned-nobody; value: "none"; selected-value: root.assignee-selected-value; chosen(value) => { root.selected("assignee", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-assigned-me; value: "me"; selected-value: root.assignee-selected-value; chosen(value) => { root.selected("assignee", value); } }
         }
 
         if root.menu-type == "sort": VerticalLayout {
-            GitHubFilterMenuItem { text: "Newest"; value: "newest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
-            GitHubFilterMenuItem { text: "Oldest"; value: "oldest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
-            GitHubFilterMenuItem { text: "Recently updated"; value: "updated-desc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
-            GitHubFilterMenuItem { text: "Least recently updated"; value: "updated-asc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-newest; value: "newest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-oldest; value: "oldest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-recently-updated; value: "updated-desc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { text: I18n.pr-list-least-recently-updated; value: "updated-asc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
         }
 
         if root.menu-type == "more": Rectangle {
             width: parent.width;
             height: parent.height;
 
-            GitHubFilterMenuSectionLabel { x: 12px; y: 0px; width: parent.width - 24px; label: "Filter by reviews"; }
-            GitHubFilterMenuItem { y: 28px; width: parent.width; text: "All reviews"; value: "all"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
-            GitHubFilterMenuItem { y: 60px; width: parent.width; text: "Review required"; value: "required"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
-            GitHubFilterMenuItem { y: 92px; width: parent.width; text: "Approved review"; value: "approved"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
-            GitHubFilterMenuItem { y: 124px; width: parent.width; text: "Changes requested"; value: "changes-requested"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuSectionLabel { x: 12px; y: 0px; width: parent.width - 24px; label: I18n.pr-list-filter-by-reviews; }
+            GitHubFilterMenuItem { y: 28px; width: parent.width; text: I18n.pr-list-all-reviews; value: "all"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { y: 60px; width: parent.width; text: I18n.pr-list-review-required; value: "required"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { y: 92px; width: parent.width; text: I18n.pr-list-approved-review; value: "approved"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
+            GitHubFilterMenuItem { y: 124px; width: parent.width; text: I18n.pr-list-changes-requested; value: "changes-requested"; selected-value: root.review-selected-value; chosen(value) => { root.selected("reviews", value); } }
 
             Rectangle { y: 156px; width: parent.width; height: 1px; background: GitHubTheme.border-muted; }
-            GitHubFilterMenuSectionLabel { x: 12px; y: 157px; width: parent.width - 24px; label: "Sort by"; }
-            GitHubFilterMenuItem { y: 185px; width: parent.width; text: "Newest"; value: "newest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
-            GitHubFilterMenuItem { y: 217px; width: parent.width; text: "Oldest"; value: "oldest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
-            GitHubFilterMenuItem { y: 249px; width: parent.width; text: "Recently updated"; value: "updated-desc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
-            GitHubFilterMenuItem { y: 281px; width: parent.width; text: "Least recently updated"; value: "updated-asc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuSectionLabel { x: 12px; y: 157px; width: parent.width - 24px; label: I18n.pr-list-sort-by; }
+            GitHubFilterMenuItem { y: 185px; width: parent.width; text: I18n.pr-list-newest; value: "newest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { y: 217px; width: parent.width; text: I18n.pr-list-oldest; value: "oldest"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { y: 249px; width: parent.width; text: I18n.pr-list-recently-updated; value: "updated-desc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
+            GitHubFilterMenuItem { y: 281px; width: parent.width; text: I18n.pr-list-least-recently-updated; value: "updated-asc"; selected-value: root.sort-selected-value; chosen(value) => { root.selected("sort", value); } }
         }
     }
 }
@@ -357,7 +358,7 @@ export component GitHubPullRequestListStatePanel inherits Rectangle {
     in property <string> title;
     in property <string> description;
     in property <bool> show-action: false;
-    in property <string> action-label: "Retry request";
+    in property <string> action-label: I18n.pr-list-retry-request;
     callback action();
 
     height: 320px;

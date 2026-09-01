@@ -9,6 +9,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [HTTP pipeline](http.md) | Current / 当前 | `src/http/mod.rs`, all HTTP callers |
 | [Cross-page state store](state-store.md) | Current / 当前 | `crates/usher-state-store/`, all cross-page state owners and UI bridges |
 | [Shared search navigation](search.md) | Current / 当前 | `crates/usher-search/`, all feature Find adapters |
+| [Internationalization](i18n.md) | Implementation current; full-route visual QA pending / 实现当前，全路由视觉验收待完成 | `i18n/`, `crates/usher-i18n/`, `src/i18n.rs`, all user-facing copy |
 | [AI Agent configuration](ai-agent.md) | Current / 当前 | `src/settings.rs`, `src/ai/agent.rs`, `ui/views/settings.slint` |
 | [AI Code Review](ai-code-review.md) | Current / 当前 | `crates/usher-ai-review/`, `src/ai_review/`, `src/agent_response/`, PR list/detail and Settings bridges |
 | [Diagnostic logging](diagnostics.md) | Current / 当前 | `src/diagnostics.rs`, `src/logger/`, `src/memory_diagnostics.rs`, `src/terminal/`, Settings UI and bridges |

@@ -2,6 +2,7 @@ import { Route } from "../route/routeMap.slint";
 import { GitHubButton } from "../components/settings/github_settings_controls.slint";
 import { GitHubBlankslate } from "../components/github_blankslate.slint";
 import { GitHubPageHeader } from "../components/page/github_page_header.slint";
+import { I18n } from "@i18n";
 import {
     GitHubProjectGridCard,
     GitHubProjectIconButton,
@@ -51,7 +52,7 @@ export component GitHubProjectPage {
     in-out property <string> new-project-tags: "";
     in-out property <bool> new-project-pr-auto-update: false;
     in property <image> logo-preview-image: @image-url("../../logo.png");
-    in property <string> logo-preview-status: "Using app default logo";
+    in property <string> logo-preview-status: I18n.projects-using-default-logo;
     in-out property <string> add-error: "";
     in-out property <string> modal-mode: "add";
     in-out property <string> modal-original-alias: "";
@@ -100,15 +101,15 @@ export component GitHubProjectPage {
 
             GitHubPageHeader {
                 width: parent.width;
-                title: "Projects";
-                description: "Manage local repositories and open their delivery workflows.";
+                title: I18n.common-projects;
+                description: I18n.projects-description;
                 leading-icon: @image-url("../assets/icons/octicon-repo-16.svg");
                 actions-width: 120px;
 
                 GitHubButton {
                     x: parent.width - self.width;
                     y: 0px;
-                    text: "New project";
+                    text: I18n.projects-new-project;
                     primary: true;
                     clicked => {
                         root.modal-mode = "add";
@@ -157,7 +158,7 @@ export component GitHubProjectPage {
                     x: Math.floor((parent.width - 32px) / 1px) * 1px;
                     y: 0px;
                     icon: @image-url("../assets/icons/octicon-sync-16.svg");
-                    tooltip: "Reload projects";
+                    tooltip: I18n.tooltip-reload-projects;
                     loading: root.loading;
                     // Trailing toolbar edge: grow the tip left so it is not clipped.
                     tooltip-end: true;
@@ -190,8 +191,8 @@ export component GitHubProjectPage {
                     height: parent.height;
                     narrow: true;
                     loading: true;
-                    heading: "Loading projects";
-                    description: "Reading the local project registry.";
+                    heading: I18n.projects-loading;
+                    description: I18n.projects-loading-registry;
                 }
 
                 if !root.loading && root.load-error != "": GitHubBlankslate {
@@ -200,9 +201,9 @@ export component GitHubProjectPage {
                     narrow: true;
                     error: true;
                     icon: @image-url("../assets/icons/octicon-alert-16.svg");
-                    heading: "Projects could not be loaded";
+                    heading: I18n.projects-load-failed;
                     description: root.load-error;
-                    primary-label: "Try again";
+                    primary-label: I18n.common-try-again;
                     primary-clicked => { root.reload-projects(); }
                 }
 
@@ -213,11 +214,11 @@ export component GitHubProjectPage {
                     icon: root.search-query == ""
                         ? @image-url("../assets/icons/octicon-repo-16.svg")
                         : @image-url("../assets/icons/octicon-search-16.svg");
-                    heading: root.search-query == "" ? "No projects yet" : "No matching projects";
+                    heading: root.search-query == "" ? I18n.projects-none : I18n.projects-no-matches;
                     description: root.search-query == ""
-                        ? "Add a local Git repository to get started."
-                        : "Try another project name or alias.";
-                    primary-label: root.search-query == "" ? "New project" : "";
+                        ? I18n.projects-add-repository-to-start
+                        : I18n.projects-try-another;
+                    primary-label: root.search-query == "" ? I18n.projects-new-project : "";
                     primary-clicked => {
                         root.modal-mode = "add";
                         root.modal-original-alias = "";

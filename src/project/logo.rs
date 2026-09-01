@@ -303,7 +303,11 @@ pub(super) async fn download_remote_logo_to_cache(url: &str) -> Option<PathBuf> 
 pub(super) fn refresh_logo_preview(ui: &MainWindow, state: &ProjectStateFacade, logo: &str) {
     let trimmed = logo.trim();
     let normalized = normalize_project_logo(logo);
-    ui.set_project_logo_preview_status(preview_logo_status(trimmed).into());
+    ui.set_project_logo_preview_status(
+        crate::i18n::tr(preview_logo_status_key(trimmed))
+            .into_owned()
+            .into(),
+    );
     if is_valid_logo_remote_url(&normalized) && find_cached_remote_logo_path(&normalized).is_some()
     {
         // Re-read from disk so a previously cached pending-default cannot stick.
@@ -337,28 +341,32 @@ pub(super) fn refresh_logo_preview(ui: &MainWindow, state: &ProjectStateFacade, 
             };
             if ui.get_project_new_logo().as_str() == normalized {
                 invalidate_cached_logo_image(&logo_image_cache_key(&normalized));
-                ui.set_project_logo_preview_status("Remote URL".into());
+                ui.set_project_logo_preview_status(
+                    crate::i18n::tr("projects.logo_remote_url")
+                        .into_owned()
+                        .into(),
+                );
                 ui.set_project_logo_preview_image(resolve_project_logo_image(&normalized));
             }
         });
     });
 }
 
-pub(super) fn preview_logo_status(value: &str) -> &'static str {
+pub(super) fn preview_logo_status_key(value: &str) -> &'static str {
     if value.is_empty() {
-        "Using app default logo"
+        "projects.using_default_logo"
     } else if is_valid_logo_path(value) {
-        "Local file"
+        "projects.logo_local_file"
     } else if is_valid_logo_base64(value) {
-        "Base64 image"
+        "projects.logo_base64_image"
     } else if is_valid_logo_remote_url(value) {
         if find_cached_remote_logo_path(value).is_some() {
-            "Remote URL"
+            "projects.logo_remote_url"
         } else {
-            "Remote URL, loading preview..."
+            "projects.logo_remote_loading"
         }
     } else {
-        "Invalid input, using default logo"
+        "projects.invalid_logo_default"
     }
 }
 

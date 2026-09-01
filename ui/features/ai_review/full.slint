@@ -7,6 +7,7 @@ import { GitHubAiReviewFindingRow, GitHubAiReviewUserMessage } from "../../compo
 import { GitHubSegmentedControl, GitHubSegmentedControlDivider, GitHubSegmentedControlItem } from "../../components/github_segmented_control.slint";
 import { AgentResponseBlock, GitHubAgentResponse } from "../../components/agent_response/github_agent_response.slint";
 import { AiReviewPanelContract, AiReviewFindingItem, AiReviewConversationItem, AiReviewResponseVisualRow } from "./contract.slint";
+import { I18n } from "@i18n";
 
 export { AgentResponseBlockKind, AgentResponseBlock, AiReviewTaskItem, AiReviewRuleChoice, AiReviewFindingItem, AiReviewConversationItem, AiReviewResponseVisualRow } from "./contract.slint";
 
@@ -89,7 +90,7 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
                 y: 16px;
                 width: parent.width - 32px;
                 height: self.preferred-height;
-                text: root.status == "cancelled" ? "Review cancelled." : root.error-text;
+                text: root.status == "cancelled" ? I18n.ai-review-cancelled : root.error-text;
                 font-size: 13px;
                 color: GitHubTheme.fg-default;
                 wrap: word-wrap;
@@ -99,7 +100,7 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
                 y: virtual-error-message.y + virtual-error-message.height + 8px;
                 width: parent.width - 32px;
                 height: 16px;
-                text: "Elapsed " + root.elapsed-label;
+                text: I18n.ai-review-elapsed + " " + root.elapsed-label;
                 font-size: 11px;
                 color: GitHubTheme.fg-muted;
             }
@@ -127,7 +128,7 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
                     }
                 }
                 Text {
-                    text: "Copilot review";
+                    text: I18n.ai-review-copilot-review;
                     font-size: 13px;
                     font-weight: 600;
                     color: GitHubTheme.fg-default;
@@ -138,10 +139,10 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
                 width: parent.width;
                 height: self.preferred-height;
                 text: root.finding-count == 0
-                    ? "No actionable findings · " + root.elapsed-label
-                    : "Review completed · " + root.elapsed-label + " · "
-                        + root.finding-count + " finding"
-                        + (root.finding-count == 1 ? "" : "s");
+                    ? I18n.ai-review-no-actionable-findings + " · " + root.elapsed-label
+                    : I18n.ai-review-completed + " · " + root.elapsed-label + " · "
+                        + root.finding-count + " "
+                        + (root.finding-count == 1 ? I18n.ai-review-finding : I18n.ai-review-findings);
                 font-size: 14px;
                 font-weight: 600;
                 color: root.finding-count == 0
@@ -256,7 +257,7 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
                 && root.visual-row.message.elapsed != "": Text {
             width: parent.width;
             height: GitHubMetrics.size-20;
-            text: "Worked for " + root.visual-row.message.elapsed;
+            text: I18n.ai-review-worked-for + " " + root.visual-row.message.elapsed;
             font-size: GitHubMetrics.text-small;
             color: GitHubTheme.fg-muted;
             vertical-alignment: center;
@@ -270,7 +271,7 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
         width: root.response-message-width;
         spacing: 8px;
         accessible-role: progress-indicator;
-        accessible-label: root.chat-status == "" ? "Thinking" : root.chat-status;
+        accessible-label: root.chat-status == "" ? I18n.common-thinking : root.chat-status;
         if root.visual-row.kind == "chat-status" && root.chat-sending: HorizontalLayout {
             width: parent.width;
             height: 24px;
@@ -313,7 +314,7 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
                 }
             }
             Text {
-                text: (root.chat-status == "" ? "Thinking" : root.chat-status)
+                text: (root.chat-status == "" ? I18n.common-thinking : root.chat-status)
                     + " · " + root.chat-elapsed-label;
                 font-size: 13px;
                 color: GitHubTheme.fg-muted;
@@ -385,11 +386,11 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
             : 0;
     private property <string> review-progress-label:
         root.status == "queued"
-            ? "AI review queued · " + root.elapsed-label
+            ? I18n.pr-list-ai-review-queued + " · " + root.elapsed-label
             : root.total-chunks > 0
-                ? "Processing chunk " + root.current-chunk + "/" + root.total-chunks
+                ? I18n.ai-review-processing-chunk + " " + root.current-chunk + "/" + root.total-chunks
                     + " · " + root.elapsed-label + " · " + root.progress-percent + "%"
-                : "Reviewing current changes · " + root.elapsed-label + " · "
+                : I18n.ai-review-reviewing-changes + " · " + root.elapsed-label + " · "
                     + root.progress-percent + "%";
     private property <string> elapsed-label:
         root.elapsed-hours > 0
@@ -490,7 +491,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
             y: 7px;
             width: max(80px, parent.width - 146px);
             height: 24px;
-            text: "AI code review";
+            text: I18n.ai-review-title;
             font-size: 14px;
             font-weight: 600;
             color: GitHubTheme.fg-default;
@@ -501,7 +502,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
             y: 31px;
             width: max(80px, parent.width - 146px);
             height: 20px;
-            text: (root.rule-names == "" ? "No preset" : root.rule-names)
+            text: (root.rule-names == "" ? I18n.common-no-preset : root.rule-names)
                 + (root.model-name == "" ? "" : "  ·  " + root.model-name);
             font-size: 12px;
             color: GitHubTheme.fg-muted;
@@ -520,7 +521,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
             icon: root.running
                 ? @image-url("../../assets/icons/github-stop-square-fill-16.svg")
                 : @image-url("../../assets/icons/octicon-sync-16.svg");
-            tooltip-text: root.running ? "Cancel review" : "Review current commit again";
+            tooltip-text: root.running ? I18n.pr-list-cancel-review : I18n.ai-review-review-current-again;
             inverse: root.running;
             circular: root.running;
             button-enabled: root.task-id != "";
@@ -537,7 +538,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
             y: 16px;
             control-size: GitHubMetrics.size-32;
             icon: @image-url("../../assets/icons/octicon-x-16.svg");
-            tooltip-text: "Close AI review";
+            tooltip-text: I18n.ai-review-close;
             clicked => { root.close(); }
         }
     }
@@ -589,11 +590,11 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                 width: root.response-message-width;
                 height: 112px;
                 label: root.status == "queued"
-                    ? "AI review queued · " + root.elapsed-label
+                    ? I18n.pr-list-ai-review-queued + " · " + root.elapsed-label
                     : root.total-chunks > 0
-                        ? "Processing chunk " + root.current-chunk + "/" + root.total-chunks
+                        ? I18n.ai-review-processing-chunk + " " + root.current-chunk + "/" + root.total-chunks
                             + " · " + root.elapsed-label + " · " + root.progress-percent + "%"
-                        : "Reviewing current changes · " + root.elapsed-label
+                        : I18n.ai-review-reviewing-changes + " · " + root.elapsed-label
                             + " · " + root.progress-percent + "%";
             }
 
@@ -611,7 +612,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                     y: 16px;
                     width: parent.width - 32px;
                     height: self.preferred-height;
-                    text: root.status == "cancelled" ? "Review cancelled." : root.error-text;
+                    text: root.status == "cancelled" ? I18n.ai-review-cancelled : root.error-text;
                     font-size: 13px;
                     color: GitHubTheme.fg-default;
                     wrap: word-wrap;
@@ -621,7 +622,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                     y: error-message.y + error-message.height + 8px;
                     width: parent.width - 32px;
                     height: 16px;
-                    text: "Elapsed " + root.elapsed-label;
+                    text: I18n.ai-review-elapsed + " " + root.elapsed-label;
                     font-size: 11px;
                     color: GitHubTheme.fg-muted;
                 }
@@ -649,7 +650,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                         }
                     }
                     Text {
-                        text: "Copilot review";
+                        text: I18n.ai-review-copilot-review;
                         font-size: 13px;
                         font-weight: 600;
                         color: GitHubTheme.fg-default;
@@ -660,10 +661,10 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                     width: parent.width;
                     height: self.preferred-height;
                     text: root.findings.length == 0
-                        ? "No actionable findings · " + root.elapsed-label
-                        : "Review completed · " + root.elapsed-label + " · "
-                            + root.findings.length + " finding"
-                            + (root.findings.length == 1 ? "" : "s");
+                        ? I18n.ai-review-no-actionable-findings + " · " + root.elapsed-label
+                        : I18n.ai-review-completed + " · " + root.elapsed-label + " · "
+                            + root.findings.length + " "
+                            + (root.findings.length == 1 ? I18n.ai-review-finding : I18n.ai-review-findings);
                     font-size: 14px;
                     font-weight: 600;
                     color: root.findings.length == 0
@@ -763,7 +764,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                 if message.role != "user" && message.elapsed != "": Text {
                     width: parent.width;
                     height: GitHubMetrics.size-20;
-                    text: "Worked for " + message.elapsed;
+                    text: I18n.ai-review-worked-for + " " + message.elapsed;
                     font-size: GitHubMetrics.text-small;
                     color: GitHubTheme.fg-muted;
                     vertical-alignment: center;
@@ -774,7 +775,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                 width: root.response-message-width;
                 spacing: 8px;
                 accessible-role: progress-indicator;
-                accessible-label: root.chat-status == "" ? "Thinking" : root.chat-status;
+                accessible-label: root.chat-status == "" ? I18n.common-thinking : root.chat-status;
 
                 HorizontalLayout {
                     width: parent.width;
@@ -819,7 +820,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                         }
                     }
                     Text {
-                        text: (root.chat-status == "" ? "Thinking" : root.chat-status)
+                        text: (root.chat-status == "" ? I18n.common-thinking : root.chat-status)
                             + " · " + root.chat-elapsed-label;
                         font-size: 13px;
                         color: GitHubTheme.fg-muted;
@@ -992,15 +993,15 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
         GitHubSegmentedControl {
             x: 16px;
             y: 10px;
-            group-label: "AI review composer mode";
+            group-label: I18n.ai-review-composer-mode;
             GitHubSegmentedControlItem {
-                label: "Ask";
+                label: I18n.ai-review-ask;
                 selected: !root.review-again-mode;
                 clicked => { root.review-again-mode = false; }
             }
             GitHubSegmentedControlDivider {}
             GitHubSegmentedControlItem {
-                label: "Review again";
+                label: I18n.ai-review-review-again;
                 selected: root.review-again-mode;
                 clicked => { root.review-again-mode = true; }
             }
@@ -1026,7 +1027,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                 height: parent.height - 16px;
                 text <=> root.message-input;
                 enabled: !root.chat-sending && root.task-id != "";
-                accessible-label: "Ask about this pull request";
+                accessible-label: I18n.ai-review-ask-about-pr;
                 single-line: false;
                 wrap: word-wrap;
                 font-size: 13px;
@@ -1061,7 +1062,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                 x: 12px;
                 y: 9px;
                 width: parent.width - 60px;
-                text: "Ask about this pull request";
+                text: I18n.ai-review-ask-about-pr;
                 font-size: 13px;
                 color: GitHubTheme.fg-muted;
             }
@@ -1069,7 +1070,7 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                 x: 12px;
                 y: 9px;
                 width: parent.width - 60px;
-                text: "Add review instructions";
+                text: I18n.ai-review-add-instructions;
                 font-size: 13px;
                 color: GitHubTheme.fg-muted;
             }
@@ -1089,8 +1090,8 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                         ? @image-url("../../assets/icons/octicon-sync-16.svg")
                         : @image-url("../../assets/icons/octicon-arrow-up-16.svg"));
                 tooltip-text: root.review-again-mode
-                    ? (root.running ? "Cancel review" : "Review again")
-                    : (root.chat-sending ? "Cancel response" : "Send");
+                    ? (root.running ? I18n.pr-list-cancel-review : I18n.ai-review-review-again)
+                    : (root.chat-sending ? I18n.common-cancel-response : I18n.common-send);
                 primary: !root.composer-stopping;
                 inverse: root.composer-stopping;
                 circular: root.composer-stopping;

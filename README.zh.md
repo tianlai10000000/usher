@@ -14,6 +14,7 @@ Usher 是一个处于 Alpha 阶段的桌面 Git 项目工作台，用于管理�
 - 按设置并发执行最多 8 个 AI Code Review，在 PR diff 右侧查看 finding，并以当前 PR 为上下文和已配置 AI Agent 对话。
 - 提供可持久化应用内消息与操作系统原生通知，以及 Toast、托盘、更新和网络状态反馈。
 - 支持亮色、暗色和跟随系统主题。
+- 支持跟随系统或选择任意内置语言，并在运行时即时切换界面语言。
 - 通过统一的 reqwest HTTP 拦截管线发送应用网络请求。
 
 > Usher 正在持续开发；部分次要路由属于开发和演示界面，并非完整的产品功能。
@@ -198,6 +199,7 @@ GitHub、GitLab 和 Gitee Token 可在设置页面管理。Gitee 公有版与企
 src/main.rs
   -> src/lib.rs                应用装配和 callback 绑定
      -> crates/usher-ui/       Slint 生成 API 边界
+     -> crates/usher-i18n/     locale 注册表与 Rust/Slint 共用翻译 catalog
         -> ui/main.slint       根窗口和导出的 UI 契约
            -> ui/views/        页面级视图
            -> ui/components/   应用可复用组件

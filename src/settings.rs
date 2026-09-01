@@ -16,6 +16,10 @@ pub struct AppSettings {
     #[serde(default = "default_theme_mode")]
     pub theme_mode: i32,
 
+    /// UI language preference: `auto` or a locale id from i18n/manifest.toml.
+    #[serde(default = "default_language")]
+    pub language: String,
+
     /// Auto update enabled
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
@@ -183,6 +187,10 @@ fn default_theme_mode() -> i32 {
     0 // Default to light theme
 }
 
+fn default_language() -> String {
+    usher_i18n::AUTO_LANGUAGE.to_string()
+}
+
 fn default_auto_update() -> bool {
     true // Default to enabled
 }
@@ -239,6 +247,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme_mode: default_theme_mode(),
+            language: default_language(),
             auto_update: default_auto_update(),
             update_channel: default_update_channel(),
             application_console_logging: default_application_console_logging(),
@@ -411,6 +420,12 @@ impl SettingsManager {
     pub fn set_theme_mode(&self, mode: i32) {
         if let Ok(mut settings) = self.settings.write() {
             settings.theme_mode = mode;
+        }
+    }
+
+    pub fn set_language(&self, language: &str) {
+        if let Ok(mut settings) = self.settings.write() {
+            settings.language = language.to_string();
         }
     }
 
@@ -615,6 +630,11 @@ pub fn save_theme_mode(mode: i32) {
     schedule_settings_save();
 }
 
+pub fn save_language(language: &str) {
+    get_settings_manager().set_language(language);
+    schedule_settings_save();
+}
+
 /// Save auto update setting asynchronously
 pub fn save_auto_update(enabled: bool) {
     get_settings_manager().set_auto_update(enabled);
@@ -775,6 +795,7 @@ pub fn setup_settings(app: &MainWindow, settings: &AppSettings) {
     // Apply loaded settings to AppState
     let app_state = AppState::get(app);
     app_state.set_theme_mode(settings.theme_mode);
+    crate::i18n::sync_main_window(app, &settings.language);
     app_state.set_auto_update(settings.auto_update);
     app_state.set_update_channel(settings.update_channel.clone().into());
     app_state.set_application_console_logging(settings.application_console_logging);
@@ -892,6 +913,11 @@ mod tests {
     #[test]
     fn navigation_drawer_is_expanded_by_default() {
         assert!(AppSettings::default().navigation_drawer_expanded);
+    }
+
+    #[test]
+    fn language_defaults_to_system_preference() {
+        assert_eq!(AppSettings::default().language, usher_i18n::AUTO_LANGUAGE);
     }
 
     #[test]

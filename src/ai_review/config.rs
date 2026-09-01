@@ -26,15 +26,15 @@ pub(crate) enum RuleFileValidationError {
 }
 
 impl RuleFileValidationError {
-    pub(crate) const fn user_message(self) -> &'static str {
+    pub(crate) const fn message_key(self) -> &'static str {
         match self {
-            Self::EmptyPath => "Enter the Markdown file path.",
-            Self::RelativePath => "Use an absolute file path.",
-            Self::NotMarkdown => "Choose a .md or .markdown file.",
-            Self::NotFound => "Choose an existing Markdown file.",
-            Self::NotAFile => "The path must point to a file.",
-            Self::TooLarge => "The Markdown file must be 512 KiB or smaller.",
-            Self::Inaccessible => "The Markdown file cannot be accessed.",
+            Self::EmptyPath => "settings.ai_review.validation.empty_path",
+            Self::RelativePath => "settings.ai_review.validation.relative_path",
+            Self::NotMarkdown => "settings.ai_review.validation.not_markdown",
+            Self::NotFound => "settings.ai_review.validation.not_found",
+            Self::NotAFile => "settings.ai_review.validation.not_a_file",
+            Self::TooLarge => "settings.ai_review.validation.too_large",
+            Self::Inaccessible => "settings.ai_review.validation.inaccessible",
         }
     }
 }

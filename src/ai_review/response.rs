@@ -82,9 +82,14 @@ pub(super) fn conversation_item(
                 .into_iter()
                 .map(PreparedAgentResponseBlock::into_ui_block)
                 .collect::<Vec<_>>();
+            let preview_title = if projection.preview_available {
+                crate::i18n::tr("ai_review.response_preview_title").into_owned()
+            } else {
+                projection.preview_title
+            };
             (
                 ModelRc::new(Rc::new(VecModel::from(blocks))),
-                projection.preview_title,
+                preview_title,
                 projection.preview_available,
                 projection.truncated,
                 projection.projected_bytes,

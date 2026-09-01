@@ -256,7 +256,7 @@ impl ProjectStateFacade {
 fn mutation_output(output: ProjectOutput) -> Result<(), String> {
     match output {
         ProjectOutput::Mutation(result) => result,
-        _ => Err("Project registry action returned an incompatible result.".to_string()),
+        _ => Err("projects.registry_action_failed".to_string()),
     }
 }
 
@@ -286,7 +286,7 @@ fn reduce_project_state(
                 );
             }
             next.projects.push(project);
-            next.persistence_feedback = Some("Project added.");
+            next.persistence_feedback = Some("projects.added");
             Reduction::changed(next, ProjectOutput::Mutation(Ok(())))
         }
         ProjectAction::Update {
@@ -300,7 +300,7 @@ fn reduce_project_state(
             else {
                 return Reduction::unchanged(
                     current.clone(),
-                    ProjectOutput::Mutation(Err("Project not found.".to_string())),
+                    ProjectOutput::Mutation(Err("projects.not_found".to_string())),
                 );
             };
             if project.project_alias != original_alias
@@ -311,11 +311,11 @@ fn reduce_project_state(
             {
                 return Reduction::unchanged(
                     current.clone(),
-                    ProjectOutput::Mutation(Err("Project alias already exists.".to_string())),
+                    ProjectOutput::Mutation(Err("projects.alias_exists".to_string())),
                 );
             }
             next.projects[index] = project;
-            next.persistence_feedback = Some("Project updated.");
+            next.persistence_feedback = Some("projects.updated");
             Reduction::changed(next, ProjectOutput::Mutation(Ok(())))
         }
         ProjectAction::Delete(alias) => {
@@ -326,11 +326,11 @@ fn reduce_project_state(
             else {
                 return Reduction::unchanged(
                     current.clone(),
-                    ProjectOutput::Mutation(Err("Project not found.".to_string())),
+                    ProjectOutput::Mutation(Err("projects.not_found".to_string())),
                 );
             };
             next.projects.remove(index);
-            next.persistence_feedback = Some("Project deleted.");
+            next.persistence_feedback = Some("projects.deleted");
             Reduction::changed(next, ProjectOutput::Mutation(Ok(())))
         }
         ProjectAction::RollbackIfCurrent { expected, rollback } => {
@@ -457,7 +457,7 @@ mod tests {
         };
         let added = reduce_project_state(&initial, ProjectAction::Add(project("beta")));
         assert!(added.changed);
-        assert_eq!(added.state.persistence_feedback, Some("Project added."));
+        assert_eq!(added.state.persistence_feedback, Some("projects.added"));
         let ProjectOutput::Mutation(Ok(())) = added.output else {
             panic!("expected successful mutation");
         };

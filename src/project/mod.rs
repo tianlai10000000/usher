@@ -11,3 +11,7 @@ pub(crate) use controller::setup_project;
 pub(crate) use logo::resolve_project_logo_image;
 pub(crate) use model::ProjectRepositoryMetadata;
 pub(crate) use state::load_repository_metadata;
+
+pub(crate) fn sync_language(ui: &crate::MainWindow) {
+    controller::sync_language(ui);
+}

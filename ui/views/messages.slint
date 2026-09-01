@@ -1,5 +1,6 @@
 import { AppState } from "../state/app_state.slint";
 export { AppState } from "../state/app_state.slint";
+import { I18n } from "@i18n";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
 import { GitHubBlankslate } from "../components/github_blankslate.slint";
 import { GitHubButton } from "../components/settings/github_settings_controls.slint";
@@ -21,6 +22,10 @@ import { MessageTooltipOverlayState } from "../state/message_tooltip_overlay_sta
 export { MessageListItem, MessageLevel } from "../components/messages/github_message_components.slint";
 
 export component GitHubMessagesPage inherits Rectangle {
+    // Keep the shared translation catalog linked even before this page's copy
+    // migration is complete. All independently generated roots must expose the
+    // same bundle index table.
+    private property <string> i18n-catalog-sentinel: I18n.language-title;
     in-out property <length> viewport-width: 800px;
     in-out property <length> viewport-height: 768px;
     // The small static page shell survives route changes so ComponentFactory
@@ -34,9 +39,10 @@ export component GitHubMessagesPage inherits Rectangle {
     in property <int> total-count: 0;
     in property <int> unread-count: 0;
     in property <int> read-count: 0;
+    in property <int> filter-count-suffix-offset: 0;
     // Complete status sentence from Rust. Do not build this with unread-count
     // string concat here — that freezes after first paint on this factory page.
-    in property <string> status-description: "You're all caught up.";
+    in property <string> status-description: I18n.messages-caught-up;
     callback set-read(string, bool);
     callback mark-all-read();
     callback delete-message(string);
@@ -101,7 +107,7 @@ export component GitHubMessagesPage inherits Rectangle {
                 x: 0px;
                 y: GitHubMetrics.size-16;
                 width: parent.width;
-                title: "Notifications";
+                title: I18n.common-notifications;
                 description: root.status-description;
                 leading-icon: @image-url("../assets/icons/octicon-inbox-16.svg");
                 large-title: true;
@@ -117,13 +123,13 @@ export component GitHubMessagesPage inherits Rectangle {
                 alignment: start;
 
                 mark-read-button := GitHubButton {
-                    text: "Mark all as read";
+                    text: I18n.messages-mark-all-read;
                     disabled: root.unread-count == 0;
                     clicked => { root.mark-all-read(); }
                 }
 
                 clear-button := GitHubButton {
-                    text: root.clear-confirmation ? "Confirm clear" : "Clear all";
+                    text: root.clear-confirmation ? I18n.messages-confirm-clear : I18n.messages-clear-all;
                     danger: true;
                     disabled: root.total-count == 0;
                     clicked => {
@@ -140,25 +146,28 @@ export component GitHubMessagesPage inherits Rectangle {
             GitHubSegmentedControl {
                 x: 0px;
                 y: root.filters-y;
-                group-label: "Notification filter";
+                group-label: I18n.messages-filter;
 
                 GitHubSegmentedControlItem {
-                    label: "All";
+                    label: I18n.common-all;
                     count: root.total-count;
+                    count-suffix-offset: root.filter-count-suffix-offset;
                     selected: root.selected-filter == 0;
                     clicked => { root.selected-filter = 0; }
                 }
                 GitHubSegmentedControlDivider {}
                 GitHubSegmentedControlItem {
-                    label: "Unread";
+                    label: I18n.common-unread;
                     count: root.unread-count;
+                    count-suffix-offset: root.filter-count-suffix-offset;
                     selected: root.selected-filter == 1;
                     clicked => { root.selected-filter = 1; }
                 }
                 GitHubSegmentedControlDivider {}
                 GitHubSegmentedControlItem {
-                    label: "Read";
+                    label: I18n.common-read;
                     count: root.read-count;
+                    count-suffix-offset: root.filter-count-suffix-offset;
                     selected: root.selected-filter == 2;
                     clicked => { root.selected-filter = 2; }
                 }
@@ -174,13 +183,13 @@ export component GitHubMessagesPage inherits Rectangle {
                 if root.filtered-empty: GitHubBlankslate {
                     width: parent.width;
                     heading: root.unread-filter
-                        ? "No unread notifications"
-                        : (root.read-filter ? "No read notifications" : "No notifications yet");
+                        ? I18n.messages-no-unread
+                        : (root.read-filter ? I18n.messages-no-read : I18n.messages-none-yet);
                     description: root.unread-filter
-                        ? "New notifications will appear here until you mark them as read."
+                        ? I18n.messages-empty-unread-description
                         : (root.read-filter
-                            ? "Notifications you have reviewed will appear here."
-                            : "Application updates and completed background work will appear here.");
+                            ? I18n.messages-empty-read-description
+                            : I18n.messages-empty-all-description);
                     icon: @image-url("../assets/icons/octicon-inbox-16.svg");
                     bordered: true;
                     spacious: true;

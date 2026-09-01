@@ -1,5 +1,6 @@
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 // Shared controls for Settings and About.
 //
@@ -309,7 +310,7 @@ export component GitHubToggle inherits Rectangle {
         x: root.checked ? 5px : 21px;
         width: 20px;
         height: parent.height;
-        text: root.checked ? "On" : "Off";
+        text: root.checked ? I18n.common-on : I18n.common-off;
         font-size: 9px;
         font-weight: 600;
         color: root.checked ? GitHubTheme.fg-on-emphasis : (GitHubTheme.fg-muted);

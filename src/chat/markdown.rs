@@ -6,7 +6,7 @@ pub(super) const MAX_INLINE_PROJECTION_CHARS: usize = 1_200;
 pub(super) struct AssistantProjection {
     pub text: String,
     pub preview_available: bool,
-    pub preview_title: &'static str,
+    pub preview_title_key: Option<&'static str>,
     pub markdown: bool,
 }
 
@@ -21,12 +21,12 @@ pub(super) fn project_assistant_content(content: &str) -> AssistantProjection {
     AssistantProjection {
         text,
         preview_available: markdown || truncated,
-        preview_title: if markdown {
-            "Open formatted response"
+        preview_title_key: if markdown {
+            Some("preview.open_formatted_response")
         } else if truncated {
-            "Open full response"
+            Some("preview.open_full_response")
         } else {
-            ""
+            None
         },
         markdown,
     }
@@ -145,7 +145,10 @@ mod tests {
         );
         assert!(projection.preview_available);
         assert!(projection.markdown);
-        assert_eq!(projection.preview_title, "Open formatted response");
+        assert_eq!(
+            projection.preview_title_key,
+            Some("preview.open_formatted_response")
+        );
     }
 
     #[test]
@@ -154,7 +157,10 @@ mod tests {
         assert_eq!(projection.text.chars().count(), MAX_INLINE_PROJECTION_CHARS);
         assert!(projection.preview_available);
         assert!(!projection.markdown);
-        assert_eq!(projection.preview_title, "Open full response");
+        assert_eq!(
+            projection.preview_title_key,
+            Some("preview.open_full_response")
+        );
     }
 
     #[test]
@@ -162,6 +168,6 @@ mod tests {
         let projection = project_assistant_content("plain response");
         assert_eq!(projection.text, "plain response");
         assert!(!projection.preview_available);
-        assert_eq!(projection.preview_title, "");
+        assert_eq!(projection.preview_title_key, None);
     }
 }

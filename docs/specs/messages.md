@@ -183,6 +183,10 @@ Payload、凭据、签名与鉴权材料禁止进入消息元数据。本功能�
   individual delete, Mark all as read, and an explicit two-step Clear all action.
 - Every row displays its category label. The category key remains in the row
   model so future category filters do not require a storage migration.
+- Persisted application-authored diagnostic copy that exactly matches a known
+  packaged catalog value is re-projected in the active locale at the Inbox
+  presentation boundary. Recognition is additionally restricted by channel,
+  source, and category; remote, user-authored, and unknown copy remains verbatim.
 - A row activation marks an unread message read before forwarding an optional
   target. Target routing remains feature-owned and absent targets are valid.
 - Read state and deletions persist. Closing a transient Banner does not mark its

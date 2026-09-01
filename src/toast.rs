@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::{MainWindow, ToastManager, ToastOptions, ToastType};
+use crate::{MainWindow, ToastManager, ToastOptions, ToastType, i18n};
 
 lazy_static! {
     static ref UI_WEAK: Arc<Mutex<Option<slint::Weak<MainWindow>>>> = Arc::new(Mutex::new(None));
@@ -19,11 +19,11 @@ const DEFAULT_DURATION_ERROR: i32 = 3000;
 const DEFAULT_DURATION_LOADING: i32 = 0; // loading defaults to no auto-close
 // const DEFAULT_DURATION_GENERAL: i32 = 2500;
 
-// Default message constants
-const DEFAULT_MESSAGE_TEXT: &str = "Toast";
-const DEFAULT_MESSAGE_SUCCESS: &str = "Operation successful!";
-const DEFAULT_MESSAGE_ERROR: &str = "Operation failed!";
-const DEFAULT_MESSAGE_LOADING: &str = "Loading...";
+// Default messages stay semantic until the Toast is presented.
+const DEFAULT_MESSAGE_TEXT_KEY: &str = "toast.default.text";
+const DEFAULT_MESSAGE_SUCCESS_KEY: &str = "toast.default.success";
+const DEFAULT_MESSAGE_ERROR_KEY: &str = "toast.default.error";
+const DEFAULT_MESSAGE_LOADING_KEY: &str = "toast.default.loading";
 
 // Default position
 const DEFAULT_POSITION: &str = "middle";
@@ -67,16 +67,9 @@ fn create_toast_with_defaults(
     String,
     String,
 ) {
-    let default_message = match toast_type {
-        ToastType::Text => DEFAULT_MESSAGE_TEXT,
-        ToastType::Success => DEFAULT_MESSAGE_SUCCESS,
-        ToastType::Error => DEFAULT_MESSAGE_ERROR,
-        ToastType::Loading => DEFAULT_MESSAGE_LOADING,
-    };
-
     // If message is empty string, use default message
     let final_message = if options.message.is_empty() {
-        default_message.to_string()
+        i18n::tr(default_message_key(toast_type)).into_owned()
     } else {
         options.message.to_string()
     };
@@ -122,6 +115,15 @@ fn create_toast_with_defaults(
         final_loading_type,
         final_width,
     )
+}
+
+fn default_message_key(toast_type: ToastType) -> &'static str {
+    match toast_type {
+        ToastType::Text => DEFAULT_MESSAGE_TEXT_KEY,
+        ToastType::Success => DEFAULT_MESSAGE_SUCCESS_KEY,
+        ToastType::Error => DEFAULT_MESSAGE_ERROR_KEY,
+        ToastType::Loading => DEFAULT_MESSAGE_LOADING_KEY,
+    }
 }
 
 // Helper function: apply Toast configuration to UI
@@ -343,4 +345,25 @@ pub fn setup_toast(ui: &MainWindow) {
             manager.set_visible(false);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_messages_are_resolved_from_each_locale_catalog() {
+        let cases = [
+            (ToastType::Text, "Toast", "提示"),
+            (ToastType::Success, "Operation successful!", "操作成功！"),
+            (ToastType::Error, "Operation failed!", "操作失败！"),
+            (ToastType::Loading, "Loading...", "加载中..."),
+        ];
+
+        for (toast_type, english, chinese) in cases {
+            let key = default_message_key(toast_type);
+            assert_eq!(usher_i18n::translate_for("en", key), english);
+            assert_eq!(usher_i18n::translate_for("zh-CN", key), chinese);
+        }
+    }
 }

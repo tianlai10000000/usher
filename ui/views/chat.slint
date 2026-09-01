@@ -6,6 +6,7 @@ import { GitHubCenteredLoadingState } from "../components/github_spinner.slint";
 import { GitHubButton } from "../components/settings/github_settings_controls.slint";
 import { GitHubSegmentedControl, GitHubSegmentedControlDivider, GitHubSegmentedControlItem } from "../components/github_segmented_control.slint";
 import { GitHubMessageBubble, GitHubChatWelcomeView, MessageRole, MessageStatus, ChatMessage, ChatSelectionRect } from "../components/chat/github_chat_components.slint";
+import { I18n } from "@i18n";
 
 export { MessageRole, MessageStatus, ChatMessage, ChatSelectionRect } from "../components/chat/github_chat_components.slint";
 
@@ -215,10 +216,10 @@ export component GitHubChatPage inherits Rectangle {
             GitHubSegmentedControl {
                 x: GitHubMetrics.size-16;
                 y: (parent.height - self.height) / 2;
-                group-label: "Chat mode";
+                group-label: I18n.chat-mode;
 
                 GitHubSegmentedControlItem {
-                    label: "AI Chat";
+                    label: I18n.chat-ai-title;
                     selected: root.ai-mode;
                     clicked => { root.switch-mode(true); }
                 }
@@ -236,8 +237,8 @@ export component GitHubChatPage inherits Rectangle {
                 height: parent.height - GitHubMetrics.border-thin;
                 max-width: max(0px, parent.width - 216px);
                 text: root.ai-mode
-                    ? (root.ai-model-name == "" ? "AI Agent not configured" : root.ai-model-name)
-                    : "Repository knowledge";
+                    ? (root.ai-model-name == "" ? I18n.chat-ai-not-configured : root.ai-model-name)
+                    : I18n.chat-repository-knowledge;
                 color: GitHubTheme.fg-muted;
                 font-size: GitHubMetrics.text-small;
                 vertical-alignment: center;
@@ -264,20 +265,20 @@ export component GitHubChatPage inherits Rectangle {
                     && !root.is-sending;
                 width: 100%;
                 height: 100%;
-                title: root.ai-mode ? "AI Chat" : "RAG Chat";
+                title: root.ai-mode ? I18n.chat-ai-title : I18n.chat-rag-title;
                 description: root.ai-mode
-                    ? "Ask the configured AI model for help with code, design, or delivery."
-                    : "Ask questions grounded in the connected repository knowledge base.";
+                    ? I18n.chat-ai-description
+                    : I18n.chat-rag-description;
                 suggestions: root.ai-mode
                     ? [
-                        "Review this implementation approach",
-                        "Explain a Rust concept",
-                        "Help me debug a performance issue",
+                        I18n.chat-suggestion-implementation,
+                        I18n.chat-suggestion-rust,
+                        I18n.chat-suggestion-performance,
                     ]
                     : [
-                        "Summarize the repository architecture",
-                        "Where is this feature implemented?",
-                        "Find related project documentation",
+                        I18n.chat-suggestion-architecture,
+                        I18n.chat-suggestion-feature,
+                        I18n.chat-suggestion-docs,
                     ];
                 suggestion-clicked(text) => {
                     root.input-text = text;
@@ -288,7 +289,7 @@ export component GitHubChatPage inherits Rectangle {
             if root.history-restoring: GitHubCenteredLoadingState {
                 width: 100%;
                 height: 100%;
-                label: "Loading chat history";
+                label: I18n.chat-loading-history;
             }
 
             message-scroll-view := GitHubScrollView {
@@ -342,7 +343,7 @@ export component GitHubChatPage inherits Rectangle {
                             x: (parent.width - self.width) / 2;
                             y: GitHubMetrics.size-4;
                             height: GitHubMetrics.control-small-size;
-                            text: "Load more";
+                            text: I18n.common-load-more;
                             leading-icon: @image-url("../assets/icons/octicon-arrow-up-16.svg");
                             label-font-size: GitHubMetrics.text-small;
                             busy: root.loading-history;
@@ -512,10 +513,10 @@ export component GitHubChatPage inherits Rectangle {
                     width: parent.width - GitHubMetrics.size-64;
                     height: GitHubMetrics.size-20;
                     text: root.is-sending
-                        ? "Waiting for response..."
+                        ? I18n.chat-waiting-response
                         : root.ai-mode
-                            ? "Ask AI..."
-                            : "Ask the repository...";
+                            ? I18n.chat-ask-ai
+                            : I18n.chat-ask-repository;
                     font-size: GitHubMetrics.text-medium;
                     color: GitHubTheme.fg-muted;
                     vertical-alignment: center;
@@ -527,7 +528,7 @@ export component GitHubChatPage inherits Rectangle {
                     control-size: GitHubMetrics.size-32;
                     glyph-size: GitHubMetrics.icon-medium;
                     icon: @image-url("../assets/icons/octicon-arrow-up-16.svg");
-                    tooltip-text: root.is-sending ? "Sending message" : "Send message";
+                    tooltip-text: root.is-sending ? I18n.chat-sending-message : I18n.chat-send-message;
                     tooltip-above: true;
                     tooltip-align-right: true;
                     primary: true;

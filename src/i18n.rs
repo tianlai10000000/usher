@@ -1,0 +1,262 @@
+//! Application facade for locale selection and Slint translation state.
+//!
+//! Catalog parsing, locale aliases, and fallback policy belong to
+//! `usher-i18n`. This facade owns the application-specific Slint bridge so the
+//! domain crate never depends on a concrete generated UI engine.
+
+use anyhow::{Context, Result};
+use slint::{Global, Model, ModelRc, VecModel};
+use std::borrow::Cow;
+use std::fmt;
+#[cfg(test)]
+use std::sync::{Mutex, MutexGuard};
+
+use crate::{AppState, LanguageOption, MainWindow};
+
+#[cfg(test)]
+static TEST_LOCALE_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn test_locale_guard() -> MutexGuard<'static, ()> {
+    TEST_LOCALE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// User-facing copy that stays semantic until it reaches a presentation
+/// boundary. Long-lived workflow state stores this type instead of freezing a
+/// translation into a `String`, so changing locale can re-project existing
+/// state without reconstructing or matching its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LocalizedText {
+    Literal(String),
+    Message {
+        key: &'static str,
+        arguments: Vec<(&'static str, String)>,
+    },
+}
+
+impl LocalizedText {
+    pub(crate) fn empty() -> Self {
+        Self::Literal(String::new())
+    }
+
+    pub(crate) fn message(key: &'static str) -> Self {
+        Self::Message {
+            key,
+            arguments: Vec::new(),
+        }
+    }
+
+    pub(crate) fn message_with<const N: usize>(
+        key: &'static str,
+        arguments: [(&'static str, String); N],
+    ) -> Self {
+        Self::Message {
+            key,
+            arguments: arguments.into(),
+        }
+    }
+
+    pub(crate) fn resolve(&self) -> String {
+        self.resolve_for(usher_i18n::active_locale().id)
+    }
+
+    pub(crate) fn source_text(&self) -> String {
+        self.resolve_for(usher_i18n::source_locale().id)
+    }
+
+    fn resolve_for(&self, locale: &str) -> String {
+        match self {
+            Self::Literal(value) => value.clone(),
+            Self::Message { key, arguments } => {
+                let arguments = arguments
+                    .iter()
+                    .map(|(name, value)| (*name, value.as_str()))
+                    .collect::<Vec<_>>();
+                usher_i18n::translate_for_with(locale, key, arguments.as_slice())
+            }
+        }
+    }
+}
+
+impl Default for LocalizedText {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl From<String> for LocalizedText {
+    fn from(value: String) -> Self {
+        Self::Literal(value)
+    }
+}
+
+impl From<&str> for LocalizedText {
+    fn from(value: &str) -> Self {
+        Self::Literal(value.to_string())
+    }
+}
+
+impl fmt::Display for LocalizedText {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.source_text().as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LanguageChoice {
+    pub id: String,
+    pub label: String,
+}
+
+pub(crate) fn initialize(app: &MainWindow, preference: &str) -> Result<()> {
+    apply_preference(preference).context("Failed to select the initial UI language")?;
+    sync_main_window(app, preference);
+    Ok(())
+}
+
+pub(crate) fn apply_preference(preference: &str) -> Result<&'static str> {
+    let locale = usher_i18n::resolve_preference(preference);
+    slint::select_bundled_translation(locale.id)
+        .with_context(|| format!("Failed to select bundled locale {}", locale.id))?;
+    usher_i18n::activate_locale(locale.id)
+        .with_context(|| format!("Resolved locale {} is not registered", locale.id))?;
+    Ok(usher_i18n::canonical_preference(preference))
+}
+
+pub(crate) fn sync_main_window(app: &MainWindow, preference: &str) {
+    let state = AppState::get(app);
+    let canonical = usher_i18n::canonical_preference(preference);
+    let choices = language_choices();
+    let selected_label = choices
+        .iter()
+        .find(|choice| choice.id == canonical)
+        .map(|choice| choice.label.as_str())
+        .unwrap_or(canonical);
+    state.set_language_selection(LanguageOption {
+        id: canonical.into(),
+        label: selected_label.into(),
+    });
+    let options = choices
+        .into_iter()
+        .map(|choice| LanguageOption {
+            id: choice.id.into(),
+            label: choice.label.into(),
+        })
+        .collect::<Vec<_>>();
+    let current = state.get_language_options();
+    if let Some(model) = current.as_any().downcast_ref::<VecModel<LanguageOption>>() {
+        model.set_vec(options);
+    } else {
+        state.set_language_options(ModelRc::new(VecModel::from(options)));
+    }
+}
+
+pub(crate) fn language_choices() -> Vec<LanguageChoice> {
+    let mut choices = Vec::with_capacity(usher_i18n::available_locales().len() + 1);
+    choices.push(LanguageChoice {
+        id: usher_i18n::AUTO_LANGUAGE.to_string(),
+        label: usher_i18n::translate("language.system_default").into_owned(),
+    });
+    choices.extend(
+        usher_i18n::available_locales()
+            .iter()
+            .map(|locale| LanguageChoice {
+                id: locale.id.to_string(),
+                label: locale.native_name.to_string(),
+            }),
+    );
+    choices
+}
+
+pub(crate) fn tr(key: &str) -> Cow<'_, str> {
+    usher_i18n::translate(key)
+}
+
+pub(crate) fn tr_args(key: &str, arguments: &[(&str, &str)]) -> String {
+    usher_i18n::translate_with(key, arguments)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use i_slint_backend_testing::ElementHandle;
+    use usher_messages::AppState as MessagesAppState;
+    use usher_ui_settings::{AppState as SettingsAppState, GitHubSettingsPage};
+
+    #[test]
+    fn language_choices_are_manifest_driven_and_include_system_default() {
+        let _locale_guard = test_locale_guard();
+        usher_i18n::activate_preference("en");
+        let choices = language_choices();
+        assert_eq!(choices[0].id, usher_i18n::AUTO_LANGUAGE);
+        assert_eq!(choices.len(), usher_i18n::available_locales().len() + 1);
+        for locale in usher_i18n::available_locales() {
+            assert!(choices.iter().any(|choice| choice.id == locale.id));
+        }
+    }
+
+    #[test]
+    fn localized_text_resolves_against_the_current_catalog() {
+        let _locale_guard = test_locale_guard();
+        let text = LocalizedText::message_with(
+            "update.latest_message",
+            [("version", "v1.2.3".to_string())],
+        );
+        usher_i18n::activate_preference("en");
+        assert_eq!(text.resolve(), "Usher v1.2.3 is the latest version.");
+        usher_i18n::activate_preference("zh-CN");
+        assert_eq!(text.resolve(), "Usher v1.2.3 已是最新版本。");
+        usher_i18n::activate_preference(usher_i18n::fallback_locale().id);
+    }
+
+    #[test]
+    fn independent_ui_roots_share_the_same_translation_indexes() {
+        let _locale_guard = test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let window = MainWindow::new().expect("main window");
+        let settings = GitHubSettingsPage::new().expect("settings page");
+        let messages = usher_messages::GitHubMessagesPage::new().expect("messages page");
+
+        apply_preference(usher_i18n::source_locale().id).expect("select source language");
+        window.set_current_route(crate::Route::Workflow);
+        for label in ["Pull requests", "Tags", "Branch", "CD"] {
+            assert!(
+                ElementHandle::find_by_accessible_label(&window, label)
+                    .next()
+                    .is_some(),
+                "source-language Workflow navigation must retain {label:?}"
+            );
+        }
+
+        for locale in usher_i18n::available_locales()
+            .iter()
+            .filter(|locale| locale.id != usher_i18n::source_locale().id)
+        {
+            apply_preference(locale.id).expect("select packaged locale");
+            let expected = usher_i18n::translate_for(locale.id, "language.title");
+            assert_eq!(AppState::get(&window).get_i18n_catalog_sentinel(), expected);
+            assert_eq!(
+                SettingsAppState::get(&settings).get_i18n_catalog_sentinel(),
+                expected
+            );
+            assert_eq!(
+                MessagesAppState::get(&messages).get_i18n_catalog_sentinel(),
+                expected
+            );
+
+            for key in ["navigation.home", "common.projects", "workflow.sections"] {
+                let label = usher_i18n::translate_for(locale.id, key);
+                assert!(
+                    ElementHandle::find_by_accessible_label(&window, label.as_ref())
+                        .next()
+                        .is_some(),
+                    "runtime locale switch must repaint visible MainWindow copy for {key:?}"
+                );
+            }
+        }
+
+        apply_preference(usher_i18n::source_locale().id).expect("restore source language");
+    }
+}

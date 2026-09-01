@@ -2,14 +2,15 @@ import { GitHubPageView } from "../components/page/page_view.slint";
 import { GitHubJobRunSurface } from "../components/jobs/github_job_run.slint";
 import { JobStepItem } from "../components/jobs/job.slint";
 import { GitHubMetrics } from "../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 // Application-level run route. Any feature may provide the active source.
 export component GitHubJobRunPage inherits GitHubPageView {
-    in property <string> run-title: "Workflow run";
+    in property <string> run-title: I18n.common-job-run;
     in property <string> workflow-name: "Workflow";
     in property <string> context-name: "Usher";
     in property <string> job-name: "job";
-    in property <string> trigger-detail: "Started manually";
+    in property <string> trigger-detail: I18n.jobs-started-manually;
     in property <string> summary: "";
     in property <string> execution-status: "queued";
     in property <string> conclusion: "";

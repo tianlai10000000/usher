@@ -7,13 +7,14 @@
 
 use std::sync::{Arc, Mutex};
 
-use slint::{ComponentFactory, ComponentHandle, Global};
-#[cfg(feature = "ai-code-review")]
-use slint::{Model, ModelRc, VecModel};
+use slint::Model;
+use slint::{ComponentFactory, ComponentHandle, Global, ModelRc, VecModel};
 use usher_preview::{IMAGE_PROVIDER_ID, MARKDOWN_PROVIDER_ID, PLAIN_TEXT_PROVIDER_ID};
 #[cfg(feature = "ai-code-review")]
 use usher_ui_settings::AiReviewRuleItem;
-use usher_ui_settings::{AppState as SettingsAppState, GitHubSettingsPage};
+use usher_ui_settings::{
+    AppState as SettingsAppState, GitHubSettingsPage, LanguageOption as SettingsLanguageOption,
+};
 
 use crate::{AppState, MainWindow, UpdateLogic};
 
@@ -21,6 +22,13 @@ use crate::{AppState, MainWindow, UpdateLogic};
 enum AddReviewRuleError {
     Name(&'static str),
     Path(&'static str),
+}
+
+#[cfg(feature = "ai-code-review")]
+#[derive(Default)]
+struct AiReviewValidationErrors {
+    name_key: Option<&'static str>,
+    path_key: Option<&'static str>,
 }
 
 /// Dual-write a host-owned update-checking busy flag onto the isolated Settings
@@ -42,6 +50,8 @@ pub(crate) struct SettingsPageBridge {
     page: Arc<Mutex<Option<slint::Weak<GitHubSettingsPage>>>>,
     #[cfg(feature = "ai-code-review")]
     ai_review_config: Arc<Mutex<Option<crate::ai_review::ReviewConfigFacade>>>,
+    #[cfg(feature = "ai-code-review")]
+    ai_review_validation_errors: Arc<Mutex<AiReviewValidationErrors>>,
 }
 
 impl SettingsPageBridge {
@@ -49,6 +59,8 @@ impl SettingsPageBridge {
         let page_slot = self.page.clone();
         #[cfg(feature = "ai-code-review")]
         let ai_review_config = self.ai_review_config.clone();
+        #[cfg(feature = "ai-code-review")]
+        let ai_review_validation_errors = self.ai_review_validation_errors.clone();
         let window_weak = window.as_weak();
 
         window.set_settings_page_factory(ComponentFactory::new(move |_| {
@@ -70,7 +82,16 @@ impl SettingsPageBridge {
                 .clone()
             {
                 apply_ai_review_snapshot(&page, config.snapshot().state());
-                bind_ai_review_callbacks(&window, &page, config);
+                *ai_review_validation_errors
+                    .lock()
+                    .expect("AI review validation state poisoned") =
+                    AiReviewValidationErrors::default();
+                bind_ai_review_callbacks(
+                    &window,
+                    &page,
+                    config,
+                    ai_review_validation_errors.clone(),
+                );
             }
             *page_slot.lock().expect("settings page bridge poisoned") = Some(page.as_weak());
             Some(page)
@@ -119,6 +140,14 @@ impl SettingsPageBridge {
             let state = SettingsAppState::get(page);
             state.set_theme_mode(mode);
             state.set_effective_dark_mode(effective_dark_mode);
+        });
+    }
+
+    pub(crate) fn sync_language(&self, preference: &str) {
+        self.with_page(|page| {
+            sync_language_state(page, preference);
+            #[cfg(feature = "ai-code-review")]
+            apply_ai_review_validation_errors(page, &self.ai_review_validation_errors);
         });
     }
 
@@ -218,6 +247,7 @@ fn bind_ai_review_callbacks(
     _window: &MainWindow,
     page: &GitHubSettingsPage,
     config: crate::ai_review::ReviewConfigFacade,
+    validation_errors: Arc<Mutex<AiReviewValidationErrors>>,
 ) {
     let config_max = config.clone();
     page.on_ai_review_set_max_concurrent_tasks(move |value| {
@@ -233,6 +263,7 @@ fn bind_ai_review_callbacks(
     page.on_ai_review_add_rule(move |name, path| {
         let config = config_add.clone();
         let page = page_weak.clone();
+        let validation_errors = validation_errors.clone();
         let name = name.to_string();
         let path = std::path::PathBuf::from(path.as_str().trim());
         crate::app_runtime::shared_runtime().spawn(async move {
@@ -256,24 +287,45 @@ fn bind_ai_review_callbacks(
                             Ok(())
                         }
                         Err(usher_ai_review::ReviewConfigError::DuplicateName) => Err(
-                            AddReviewRuleError::Name("A rule with this name already exists."),
+                            AddReviewRuleError::Name(
+                                "settings.ai_review.validation.duplicate_name",
+                            ),
                         ),
                         Err(error) => {
                             log::warn!("[AI Review][Settings] Failed to add rule: {error:?}");
                             Err(AddReviewRuleError::Name(
-                                "Enter a non-empty, unique rule name.",
+                                "settings.ai_review.validation.invalid_name",
                             ))
                         }
                     }
                 }
-                Ok(Err(error)) => Err(AddReviewRuleError::Path(error.user_message())),
+                Ok(Err(error)) => Err(AddReviewRuleError::Path(error.message_key())),
                 Err(error) => {
                     log::warn!("[AI Review][Settings] Rule validation worker failed: {error}");
                     Err(AddReviewRuleError::Path(
-                        "The Markdown file could not be validated.",
+                        "settings.ai_review.validation.worker_failed",
                     ))
                 }
             };
+            {
+                let mut errors = validation_errors
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                match result {
+                    Ok(()) => {
+                        errors.name_key = None;
+                        errors.path_key = None;
+                    }
+                    Err(AddReviewRuleError::Name(key)) => {
+                        errors.name_key = Some(key);
+                        errors.path_key = None;
+                    }
+                    Err(AddReviewRuleError::Path(key)) => {
+                        errors.name_key = None;
+                        errors.path_key = Some(key);
+                    }
+                }
+            }
             let _ = slint::invoke_from_event_loop(move || {
                 let Some(page) = page.upgrade() else {
                     return;
@@ -283,13 +335,13 @@ fn bind_ai_review_callbacks(
                         page.set_ai_review_rule_name_error("".into());
                         page.set_ai_review_rule_path_error("".into());
                     }
-                    Err(AddReviewRuleError::Name(message)) => {
-                        page.set_ai_review_rule_name_error(message.into());
+                    Err(AddReviewRuleError::Name(key)) => {
+                        page.set_ai_review_rule_name_error(crate::i18n::tr(key).as_ref().into());
                         page.set_ai_review_rule_path_error("".into());
                     }
-                    Err(AddReviewRuleError::Path(message)) => {
+                    Err(AddReviewRuleError::Path(key)) => {
                         page.set_ai_review_rule_name_error("".into());
-                        page.set_ai_review_rule_path_error(message.into());
+                        page.set_ai_review_rule_path_error(crate::i18n::tr(key).as_ref().into());
                     }
                 }
                 page.set_ai_review_rule_add_pending(false);
@@ -311,12 +363,37 @@ fn bind_ai_review_callbacks(
     });
 }
 
+#[cfg(feature = "ai-code-review")]
+fn apply_ai_review_validation_errors(
+    page: &GitHubSettingsPage,
+    validation_errors: &Arc<Mutex<AiReviewValidationErrors>>,
+) {
+    let errors = validation_errors
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    page.set_ai_review_rule_name_error(
+        errors
+            .name_key
+            .map(|key| crate::i18n::tr(key).into_owned())
+            .unwrap_or_default()
+            .into(),
+    );
+    page.set_ai_review_rule_path_error(
+        errors
+            .path_key
+            .map(|key| crate::i18n::tr(key).into_owned())
+            .unwrap_or_default()
+            .into(),
+    );
+}
+
 fn sync_state_from_window(window: &MainWindow, page: &GitHubSettingsPage) {
     let source = AppState::get(window);
     let target = SettingsAppState::get(page);
 
     target.set_theme_mode(source.get_theme_mode());
     target.set_effective_dark_mode(source.get_effective_dark_mode());
+    sync_language_state(page, source.get_language_selection().id.as_str());
     target.set_version(source.get_version());
     target.set_auto_update(source.get_auto_update());
     target.set_update_channel(source.get_update_channel());
@@ -356,6 +433,37 @@ fn sync_state_from_window(window: &MainWindow, page: &GitHubSettingsPage) {
     page.set_viewport_height(window.get_settings_page_viewport_height());
 }
 
+fn sync_language_state(page: &GitHubSettingsPage, preference: &str) {
+    let target = SettingsAppState::get(page);
+    let canonical = usher_i18n::canonical_preference(preference);
+    let choices = crate::i18n::language_choices();
+    let selected_label = choices
+        .iter()
+        .find(|choice| choice.id == canonical)
+        .map(|choice| choice.label.as_str())
+        .unwrap_or(canonical);
+    target.set_language_selection(SettingsLanguageOption {
+        id: canonical.into(),
+        label: selected_label.into(),
+    });
+    let options = choices
+        .into_iter()
+        .map(|choice| SettingsLanguageOption {
+            id: choice.id.into(),
+            label: choice.label.into(),
+        })
+        .collect::<Vec<_>>();
+    let current = target.get_language_options();
+    if let Some(model) = current
+        .as_any()
+        .downcast_ref::<VecModel<SettingsLanguageOption>>()
+    {
+        model.set_vec(options);
+    } else {
+        target.set_language_options(ModelRc::new(VecModel::from(options)));
+    }
+}
+
 fn bind_callbacks(window: &MainWindow, page: &GitHubSettingsPage) {
     let window_weak = window.as_weak();
     page.on_check_update(move || {
@@ -386,6 +494,13 @@ fn bind_callbacks(window: &MainWindow, page: &GitHubSettingsPage) {
     });
 
     let state = SettingsAppState::get(page);
+
+    let window_weak = window.as_weak();
+    state.on_set_language(move |language| {
+        if let Some(window) = window_weak.upgrade() {
+            AppState::get(&window).invoke_set_language(language);
+        }
+    });
 
     let page_weak = page.as_weak();
     let window_weak = window.as_weak();
@@ -576,17 +691,272 @@ fn bind_callbacks(window: &MainWindow, page: &GitHubSettingsPage) {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
+    use std::time::Duration;
 
-    use slint::Global;
+    use i_slint_backend_testing::ElementHandle;
     #[cfg(feature = "ai-code-review")]
     use slint::Model;
+    use slint::platform::PointerEventButton;
+    use slint::{ComponentHandle, Global};
     use usher_preview::IMAGE_PROVIDER_ID;
     use usher_ui_settings::{AppState as SettingsAppState, GitHubSettingsPage};
 
     #[cfg(feature = "ai-code-review")]
     use super::apply_ai_review_snapshot;
-    use super::{bind_callbacks, sync_state_from_window};
-    use crate::{AppState, MainWindow};
+    use super::{SettingsPageBridge, bind_callbacks, sync_language_state, sync_state_from_window};
+    use crate::{AppState, MainWindow, Route};
+
+    fn language_rows(page: &GitHubSettingsPage) -> Vec<(String, bool)> {
+        let mut rows = ["System default", "跟随系统", "English", "简体中文"]
+            .into_iter()
+            .flat_map(|label| ElementHandle::find_by_accessible_label(page, label))
+            .filter_map(|element| {
+                Some((
+                    element.absolute_position().y,
+                    element.accessible_label().unwrap().to_string(),
+                    element.accessible_checked()?,
+                ))
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.0.total_cmp(&right.0));
+        rows.into_iter()
+            .map(|(_, label, checked)| (label, checked))
+            .collect()
+    }
+
+    fn language_model_rows(page: &GitHubSettingsPage) -> Vec<(String, String)> {
+        SettingsAppState::get(page)
+            .get_language_options()
+            .iter()
+            .map(|option| (option.id.to_string(), option.label.to_string()))
+            .collect()
+    }
+
+    fn open_language_picker(page: &GitHubSettingsPage) {
+        let picker =
+            ElementHandle::find_by_element_id(page, "GitHubSettingsSectionMenuButton::menu-touch")
+                .max_by(|left, right| {
+                    left.absolute_position()
+                        .y
+                        .total_cmp(&right.absolute_position().y)
+                })
+                .expect("language picker button");
+        picker.mock_single_click(PointerEventButton::Left);
+    }
+
+    fn open_section_picker(page: &GitHubSettingsPage) {
+        let picker =
+            ElementHandle::find_by_element_id(page, "GitHubSettingsSectionMenuButton::menu-touch")
+                .min_by(|left, right| {
+                    left.absolute_position()
+                        .y
+                        .total_cmp(&right.absolute_position().y)
+                })
+                .expect("settings section picker button");
+        picker.mock_single_click(PointerEventButton::Left);
+    }
+
+    fn mounted_page(bridge: &SettingsPageBridge) -> GitHubSettingsPage {
+        bridge
+            .page
+            .lock()
+            .expect("settings page bridge poisoned")
+            .clone()
+            .and_then(|page| page.upgrade())
+            .expect("mounted settings page")
+    }
+
+    fn select_language(page: &GitHubSettingsPage, label: &str) {
+        ElementHandle::find_by_accessible_label(page, label)
+            .find(|element| element.accessible_checked().is_some())
+            .unwrap_or_else(|| panic!("language option {label:?}"))
+            .mock_single_click(PointerEventButton::Left);
+    }
+
+    fn expected_language_rows(system_label: &str, selected_label: &str) -> Vec<(String, bool)> {
+        vec![
+            (system_label.to_string(), system_label == selected_label),
+            ("English".to_string(), selected_label == "English"),
+            ("简体中文".to_string(), selected_label == "简体中文"),
+        ]
+    }
+
+    #[test]
+    fn language_picker_rows_keep_labels_and_selection_aligned_after_switching() {
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let page = GitHubSettingsPage::new().expect("settings page");
+        page.set_viewport_width(550.0);
+        page.set_viewport_height(600.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        crate::i18n::apply_preference("en").expect("select English");
+        sync_language_state(&page, "en");
+
+        let page_weak = page.as_weak();
+        SettingsAppState::get(&page).on_set_language(move |preference| {
+            let canonical = crate::i18n::apply_preference(preference.as_str())
+                .expect("select requested language");
+            if let Some(page) = page_weak.upgrade() {
+                sync_language_state(&page, canonical);
+            }
+        });
+
+        open_language_picker(&page);
+        assert_eq!(
+            language_rows(&page),
+            expected_language_rows("System default", "English")
+        );
+
+        select_language(&page, "简体中文");
+        open_language_picker(&page);
+        assert_eq!(
+            language_rows(&page),
+            expected_language_rows("跟随系统", "简体中文")
+        );
+
+        select_language(&page, "跟随系统");
+        let system_label = usher_i18n::translate("language.system_default").into_owned();
+        open_language_picker(&page);
+        assert_eq!(
+            language_rows(&page),
+            expected_language_rows(system_label.as_str(), system_label.as_str())
+        );
+
+        select_language(&page, system_label.as_str());
+        open_language_picker(&page);
+        select_language(&page, "English");
+        open_language_picker(&page);
+        assert_eq!(
+            language_rows(&page),
+            expected_language_rows("System default", "English")
+        );
+
+        select_language(&page, "简体中文");
+        let recreated = GitHubSettingsPage::new().expect("recreated settings page");
+        recreated.set_viewport_width(550.0);
+        recreated.set_viewport_height(600.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        sync_language_state(&recreated, "zh-CN");
+        open_language_picker(&recreated);
+        assert_eq!(
+            language_rows(&recreated),
+            expected_language_rows("跟随系统", "简体中文")
+        );
+
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id)
+            .expect("restore fallback language");
+    }
+
+    #[test]
+    fn language_option_model_identity_is_stable_across_locale_switches() {
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let page = GitHubSettingsPage::new().expect("settings page");
+        sync_language_state(&page, "en");
+        let initial = SettingsAppState::get(&page).get_language_options();
+
+        crate::i18n::apply_preference("zh-CN").expect("select Chinese");
+        sync_language_state(&page, "zh-CN");
+        assert_eq!(
+            SettingsAppState::get(&page).get_language_options(),
+            initial,
+            "locale changes must update the existing model instead of replacing it"
+        );
+
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id)
+            .expect("restore fallback language");
+    }
+
+    #[test]
+    fn language_and_section_menus_stay_aligned_across_the_real_factory_lifecycle() {
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let window = MainWindow::new().expect("main window");
+        let bridge = SettingsPageBridge::default();
+        crate::i18n::apply_preference("zh-CN").expect("select Chinese");
+        crate::i18n::sync_main_window(&window, "zh-CN");
+        bridge.install(&window);
+
+        let window_weak = window.as_weak();
+        let bridge_for_language = bridge.clone();
+        AppState::get(&window).on_set_language(move |preference| {
+            let window = window_weak.upgrade().expect("main window");
+            let canonical = crate::i18n::apply_preference(preference.as_str())
+                .expect("select requested language");
+            crate::i18n::sync_main_window(&window, canonical);
+            bridge_for_language.sync_language(canonical);
+        });
+
+        window.set_current_route(Route::Settings);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let page = mounted_page(&bridge);
+        page.set_viewport_width(550.0);
+        page.set_viewport_height(600.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        assert_eq!(
+            language_model_rows(&page),
+            vec![
+                ("auto".to_string(), "跟随系统".to_string()),
+                ("en".to_string(), "English".to_string()),
+                ("zh-CN".to_string(), "简体中文".to_string()),
+            ]
+        );
+        open_language_picker(&page);
+        assert_eq!(
+            language_rows(&page),
+            expected_language_rows("跟随系统", "简体中文")
+        );
+
+        select_language(&page, "English");
+        open_section_picker(&page);
+        for label in [
+            "General",
+            "Code hosting",
+            "AI Agent",
+            "AI Review",
+            "Diagnostics",
+        ] {
+            assert!(
+                ElementHandle::find_by_accessible_label(&page, label)
+                    .any(|element| element.accessible_checked().is_some()),
+                "English section menu must contain {label:?}"
+            );
+        }
+        open_section_picker(&page);
+        open_language_picker(&page);
+        assert_eq!(
+            language_rows(&page),
+            expected_language_rows("System default", "English")
+        );
+        select_language(&page, "简体中文");
+        drop(page);
+        window.set_current_route(Route::Home);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        window.set_current_route(Route::Settings);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+
+        let page = mounted_page(&bridge);
+        page.set_viewport_width(550.0);
+        page.set_viewport_height(600.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        open_section_picker(&page);
+        for label in ["通用", "代码托管", "AI Agent", "AI Review", "诊断"] {
+            assert!(
+                ElementHandle::find_by_accessible_label(&page, label)
+                    .any(|element| element.accessible_checked().is_some()),
+                "rebuilt section menu must contain {label:?}"
+            );
+        }
+        open_section_picker(&page);
+        open_language_picker(&page);
+        assert_eq!(
+            language_rows(&page),
+            expected_language_rows("跟随系统", "简体中文")
+        );
+
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id)
+            .expect("restore fallback language");
+    }
 
     #[test]
     fn preview_state_and_callbacks_cross_the_settings_factory_boundary() {

@@ -1,5 +1,6 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubMarkdownMetrics } from "../markdown/github_markdown_typography.slint";
+import { I18n } from "@i18n";
 
 // Codex-style user turn: compact content-sized prose aligned to the trailing
 // edge. Assistant identity and structured Markdown remain separate concerns.
@@ -49,8 +50,8 @@ export component GitHubAiReviewSeverityLabel inherits Rectangle {
     in property <string> severity: "low";
 
     private property <string> label: root.severity == "high"
-        ? "High"
-        : (root.severity == "medium" ? "Medium" : "Low");
+        ? I18n.ai-review-severity-high
+        : (root.severity == "medium" ? I18n.ai-review-severity-medium : I18n.ai-review-severity-low);
     label-measure := Text {
         visible: false;
         text: root.label;

@@ -13,6 +13,7 @@ import { GitHubCenteredLoadingState } from "../../components/github_spinner.slin
 import { GitHubVirtualListScrollbar } from "../../components/github_scroll_view.slint";
 import { GitHubActionListItem, GitHubActionMenu, GitHubActionMenuTriggerArea } from "../../components/github_action_menu.slint";
 import { PullRequestReviewPageContract } from "../../features/pr_review/contract.slint";
+import { I18n } from "@i18n";
 export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContract {
     // This route intentionally spans the full window so its Dialogs can cover
     // the docked AI Review panel. Do not let the root FocusScope consume a
@@ -852,7 +853,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             height: 48px;
             background: root.github-bg-default;
             accessible-role: tab-list;
-            accessible-label: "Pull request sections";
+            accessible-label: I18n.pr-review-sections;
             private property <bool> show-aggregate-diffstat: root.content-width >= 840px;
             HorizontalLayout {
                 x: 16px;
@@ -860,7 +861,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 spacing: 4px;
                 alignment: start;
                 GitHubPullRequestTabButton {
-                    label: "Conversation";
+                    label: I18n.pr-review-conversation;
                     // Badge summaries load with the PR detail. Keep them independent
                     // from the lazily mounted Conversation payload.
                     count: root.conversation-count;
@@ -873,7 +874,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     }
                 }
                 GitHubPullRequestTabButton {
-                    label: "Commits";
+                    label: I18n.pr-review-commits;
                     // Loading this tab must not be what makes its badge appear.
                     count: root.commit-count;
                     icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
@@ -885,7 +886,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     }
                 }
                 GitHubPullRequestTabButton {
-                    label: "Files changed";
+                    label: I18n.pr-review-files-changed;
                     count: root.files.length;
                     icon: @image-url("../../assets/icons/octicon-file-diff-16.svg");
                     selected: root.selected-tab == 2;
@@ -973,7 +974,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             icon-source: @image-url("../../assets/icons/octicon-gear-16.svg");
                             selected: root.active-popover == "diff-settings";
                             outlined: true;
-                            tooltip-text: "Open diff view settings";
+                            tooltip-text: I18n.pr-review-open-diff-settings;
                             clicked => {
                                 if root.active-popover == "diff-settings" {
                                     root.active-popover = "";
@@ -1020,7 +1021,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         GitHubCommitSummaryNavButton {
                             x: 0px;
                             width: 56px;
-                            text: "Prev";
+                            text: I18n.pr-review-prev;
                             icon-source: @image-url("../../assets/icons/octicon-chevron-left-16.svg");
                             button-enabled: root.commit-range-start + 1 < root.commits.length;
                             clicked => {
@@ -1033,7 +1034,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         GitHubCommitSummaryNavButton {
                             x: 56px;
                             width: 56px;
-                            text: "Next";
+                            text: I18n.common-next;
                             icon-source: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
                             icon-after: true;
                             draw-divider: true;
@@ -1076,7 +1077,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         vertical-alignment: center;
                     }
                     GitHubCopyButton {
-                        tooltip-text: "Copy full SHA for "
+                        tooltip-text: I18n.pr-review-copy-full-sha-for + " "
                             + root.commits[root.commit-range-start].short-sha;
                         tooltip-align-right: true;
                         copy-requested => {
@@ -1097,8 +1098,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         selected: root.ai-review-panel-visible;
                         loading: root.ai-review-status == "running";
                         tooltip-text: root.ai-review-panel-visible
-                            ? "Close AI code review"
-                            : "Review this pull request with AI";
+                            ? I18n.ai-review-close
+                            : I18n.pr-list-review-with-ai;
                         tooltip-align-right: true;
                         button-enabled: true;
                         clicked => { root.toggle-ai-review(); }
@@ -1145,8 +1146,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 width: parent.width - 36px;
                 height: parent.height;
                 text: root.files-truncated
-                    ? "The provider returned only part of the changed-file list; this diff is incomplete."
-                    : "This pull request exceeds the server commit limit; the displayed diff may be partial.";
+                    ? I18n.pr-review-files-truncated-warning
+                    : I18n.pr-review-too-many-commits-warning;
                 vertical-alignment: center;
                 font-size: 11px;
                 color: GitHubTheme.done-fg;
@@ -1161,7 +1162,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             if root.conversation-loading: GitHubCenteredLoadingState {
                 width: parent.width;
                 height: parent.height;
-                label: "Loading conversation…";
+                label: I18n.pr-review-loading-conversation;
                 foreground: root.github-fg-muted;
             }
             if !root.conversation-loading && root.conversation-error != "": GitHubCenteredErrorState {
@@ -1202,7 +1203,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     Text {
                         width: parent.width;
                         height: parent.height;
-                        text: "No conversation activity was returned by this provider.";
+                        text: I18n.pr-review-no-conversation;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                         color: root.github-fg-muted;
@@ -1470,7 +1471,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             }
                             Text {
                                 width: self.preferred-width;
-                                text: "merged commit";
+                                text: I18n.pr-review-merged-commit;
                                 font-size: 13px;
                                 color: root.github-fg-muted;
                                 vertical-alignment: center;
@@ -1485,7 +1486,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             }
                             Text {
                                 width: self.preferred-width;
-                                text: "into";
+                                text: I18n.pr-review-into;
                                 font-size: 13px;
                                 color: root.github-fg-muted;
                                 vertical-alignment: center;
@@ -1651,7 +1652,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                     menu-open: review-actions-button.menu-open;
                                     trigger-enabled: item.can-dismiss && !root.action-loading;
                                     accessible-role: button;
-                                    accessible-label: "Review actions";
+                                    accessible-label: I18n.pr-review-review-actions;
                                     request-open => {
                                         root.dismiss-review-id = item.review-id;
                                         root.dismiss-review-author = item.author;
@@ -1775,11 +1776,11 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                             width: self.preferred-width;
                                             text: item.kind == "review" && item.state != ""
                                                 ? (item.state == "approved"
-                                                    ? "approved these changes"
+                                                    ? I18n.pr-review-approved-changes
                                                     : (item.state == "changes_requested" || item.state == "rejected"
-                                                        ? "requested changes"
-                                                        : "left a comment"))
-                                                : "commented";
+                                                        ? I18n.pr-review-requested-changes
+                                                        : I18n.pr-review-left-comment))
+                                                : I18n.pr-review-commented;
                                             font-size: 12px;
                                             color: root.github-fg-muted;
                                             vertical-alignment: center;
@@ -1802,7 +1803,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                             Text {
                                                 width: parent.width;
                                                 height: parent.height;
-                                                text: "Author";
+                                                text: I18n.common-author;
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
                                                 font-size: 10px;
@@ -1822,7 +1823,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         y: 10px;
                                         width: parent.width - 28px;
                                         height: 20px;
-                                        text: "No description provided.";
+                                        text: I18n.pr-review-no-description;
                                         wrap: word-wrap;
                                         overflow: clip;
                                         font-size: 13px;
@@ -1913,7 +1914,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                     Text {
                                         width: parent.width;
                                         height: parent.height - 1px;
-                                        text: "Write";
+                                        text: I18n.pr-review-write;
                                         font-size: 12px;
                                         font-weight: 600;
                                         color: root.github-fg-default;
@@ -1944,7 +1945,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         y: 10px;
                                         width: parent.width - 24px;
                                         height: 20px;
-                                        text: "Leave a comment";
+                                        text: I18n.pr-review-leave-comment;
                                         font-size: 14px;
                                         color: root.github-fg-muted;
                                     }
@@ -1979,8 +1980,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                     width: parent.width - 140px;
                                     height: parent.height - 1px;
                                     text: root.can-comment
-                                        ? "Plain text comments are supported."
-                                        : "Configure provider credentials to comment.";
+                                        ? I18n.pr-review-plain-text-comments-supported
+                                        : I18n.pr-review-configure-to-comment;
                                     font-size: 12px;
                                     color: root.github-fg-muted;
                                     vertical-alignment: center;
@@ -1990,13 +1991,13 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                     y: 10px;
                                     width: 96px;
                                     height: 32px;
-                                    text: root.action-loading ? "Commenting…" : "Comment";
+                                    text: root.action-loading ? I18n.pr-review-commenting : I18n.pr-review-comment;
                                     button-enabled: root.can-comment && !root.action-loading && root.conversation-comment-body != "";
                                     tooltip-text: root.can-comment
                                         ? (root.conversation-comment-body == ""
-                                            ? "Write a comment before submitting"
-                                            : "Add a comment on this pull request")
-                                        : "Configure provider credentials to comment";
+                                            ? I18n.pr-review-write-comment
+                                            : I18n.pr-review-add-comment)
+                                        : I18n.pr-review-configure-to-comment;
                                     clicked => {
                                         root.pending-conversation-comment = root.conversation-comment-body;
                                         root.submit-review("comment", root.conversation-comment-body);
@@ -2017,7 +2018,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             if root.commits-loading: GitHubCenteredLoadingState {
                 width: parent.width;
                 height: parent.height;
-                label: "Loading commits…";
+                label: I18n.pr-review-loading-commits;
                 foreground: root.github-fg-muted;
             }
             if !root.commits-loading && root.commits-error != "": GitHubCenteredErrorState {
@@ -2103,7 +2104,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                         y: (root.commit-tab-group-header-height - self.height) / 2;
                         width: parent.width - 66px;
                         height: 24px;
-                        text: "Commits on " + commit.date-label;
+                        text: I18n.pr-review-commits-on + " " + commit.date-label;
                         vertical-alignment: center;
                         font-size: 14px;
                         font-weight: 600;
@@ -2369,7 +2370,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             y: 0px;
                             width: 64px;
                             height: root.commit-tab-row-height;
-                            text: "Verified";
+                            text: I18n.pr-review-verified;
                             font-size: 11px;
                             font-weight: 600;
                             color: root.github-success-fg;
@@ -2417,13 +2418,13 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             GitHubTooltip {
                                 preferred-placement: GitHubTooltipPlacement.Top;
                                 alignment: GitHubTooltipAlignment.End;
-                                text: commit-row.sha-hovered ? "View commit details" : "";
+                                text: commit-row.sha-hovered ? I18n.pr-review-view-commit-details : "";
                             }
                         }
                         copy-sha-button := GitHubCopyButton {
                             x: parent.width - 44px;
                             y: (parent.height - self.height) / 2;
-                            tooltip-text: "Copy full SHA";
+                            tooltip-text: I18n.pr-review-copy-full-sha;
                             tooltip-align-right: true;
                             copy-requested => { root.copy-commit-sha(commit.sha) }
                         }
@@ -2456,7 +2457,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             if !root.commits-loading && root.commits-error == "" && root.commits.length == 0: Text {
                 width: parent.width;
                 height: parent.height;
-                text: "No commits were returned by this provider.";
+                text: I18n.pr-review-no-commits;
                 horizontal-alignment: center;
                 vertical-alignment: center;
                 color: root.github-fg-muted;
@@ -2474,7 +2475,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             if root.loading: GitHubCenteredLoadingState {
                 width: parent.width;
                 height: parent.height;
-                label: "Loading changed files…";
+                label: I18n.pr-review-loading-files;
                 foreground: root.github-fg-muted;
             }
 
@@ -2486,8 +2487,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 foreground-color: root.github-fg-default;
                 muted-color: root.github-fg-muted;
                 action-label: root.error-kind == "authentication" || root.error-kind == "configuration"
-                    ? "Open Settings"
-                    : "Try again";
+                    ? I18n.common-open-settings
+                    : I18n.common-try-again;
                 retry => {
                     if root.error-kind == "authentication" || root.error-kind == "configuration" {
                         root.open-settings();
@@ -2879,7 +2880,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             if root.tree-items.length == 0: Text {
                                 width: parent.width;
                                 height: 72px;
-                                text: root.file-filter == "" ? "No changed files" : "No matching files";
+                                text: root.file-filter == ""
+                                    ? I18n.pr-review-no-changed-files
+                                    : I18n.pr-review-no-matching-files;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                                 font-family: root.tree-font-family;
@@ -2953,7 +2956,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         Text {
                                             horizontal-stretch: 1;
                                             height: parent.height;
-                                            text: root.selected-file-path == "" ? "Select a changed file" : root.selected-file-path;
+                                            text: root.selected-file-path == ""
+                                                ? I18n.pr-review-select-changed-file
+                                                : root.selected-file-path;
                                             font-size: 12px;
                                             font-weight: 600;
                                             color: GitHubTheme.fg-default;
@@ -2962,7 +2967,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                         }
                                         GitHubCopyButton {
                                             button-enabled: root.selected-file-path != "";
-                                            tooltip-text: "Copy file path";
+                                            tooltip-text: I18n.pr-review-copy-file-path;
                                             // An above-tooltip would leave this toolbar's
                                             // stacking context. Show it over the diff body.
                                             tooltip-above: false;
@@ -2973,7 +2978,9 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                                 ? @image-url("../../assets/icons/octicon-fold-16.svg")
                                                 : @image-url("../../assets/icons/octicon-unfold-16.svg");
                                             button-enabled: (root.has-expandable-hunks || root.context-expanded) && !root.viewing-file && !root.code-loading;
-                                            tooltip-text: root.context-expanded ? "Collapse non-diff lines" : "Expand all lines";
+                                            tooltip-text: root.context-expanded
+                                                ? I18n.pr-review-collapse-non-diff
+                                                : I18n.pr-review-expand-all-lines;
                                             clicked => {
                                                 if root.context-expanded { root.collapse-non-diff-lines(); }
                                                 else { root.expand-all-hunks(); }
@@ -3032,13 +3039,13 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                 if !root.diff-find-open: GitHubFileToolbarButton {
                                     icon-source: @image-url("../../assets/icons/octicon-chevron-left-16.svg");
                                     button-enabled: root.selected-file-index > 0 && !root.code-loading;
-                                    tooltip-text: "Previous file";
+                                    tooltip-text: I18n.pr-review-previous-file;
                                     clicked => { root.select-relative-file(-1); }
                                 }
                                 if !root.diff-find-open: GitHubFileToolbarButton {
                                     icon-source: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
                                     button-enabled: root.selected-file-index >= 0 && root.selected-file-index + 1 < root.files.length && !root.code-loading;
-                                    tooltip-text: "Next file";
+                                    tooltip-text: I18n.pr-review-next-file;
                                     tooltip-align-right: true;
                                     clicked => { root.select-relative-file(1); }
                                 }
@@ -3796,7 +3803,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             x: 4px;
             y: 4px;
             width: parent.width - 8px;
-            text: "Dismiss review";
+            text: I18n.pr-review-dismiss-review;
             danger: true;
             item-enabled: !root.action-loading;
             activated => {
@@ -3838,12 +3845,12 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         backdrop-height: root.dialog-viewport-height;
         dialog-visible: root.commit-range-dialog-open;
         modal: false;
-        title: "Select commits to view";
+        title: I18n.pr-review-select-commits;
         dialog-width: 640px;
         dialog-height: min(720px, root.dialog-viewport-height - 32px);
         body-padding: 0px;
         close-enabled: !root.loading;
-        primary-label: "Save";
+        primary-label: I18n.common-save;
         primary-success: true;
         primary-enabled: !root.commits-loading && !root.loading;
         close-requested => { root.commit-range-dialog-open = false; }
@@ -3886,7 +3893,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             y: 5px;
                             width: parent.width - 80px;
                             height: 24px;
-                            text: "All commits";
+                            text: I18n.pr-review-all-commits;
                             font-size: 15px;
                             font-weight: 600;
                             color: root.github-fg-default;
@@ -3920,7 +3927,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             y: 7px;
                             width: parent.width - 80px;
                             height: 25px;
-                            text: "Changes since your last review";
+                            text: I18n.pr-review-changes-since-review;
                             font-size: 15px;
                             font-weight: 600;
                             color: root.github-fg-muted;
@@ -3931,7 +3938,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             y: 35px;
                             width: parent.width - 80px;
                             height: 22px;
-                            text: "No previous review found";
+                            text: I18n.pr-review-no-previous-review;
                             font-size: 13px;
                             color: root.github-fg-muted;
                             vertical-alignment: center;
@@ -3948,7 +3955,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                             x: 24px;
                             width: parent.width - 48px;
                             height: parent.height;
-                            text: "Select a range of commits";
+                            text: I18n.pr-review-select-commit-range;
                             font-size: 13px;
                             font-weight: 600;
                             color: root.github-fg-muted;
@@ -3959,7 +3966,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     if root.commits-loading: GitHubCenteredLoadingState {
                         width: parent.width;
                         height: 180px;
-                        label: "Loading commits…";
+                        label: I18n.pr-review-loading-commits;
                         foreground: root.github-fg-muted;
                     }
                     if !root.commits-loading && root.commits-error != "": Rectangle {
@@ -4068,12 +4075,12 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         backdrop-height: root.dialog-viewport-height;
         dialog-visible: root.dismiss-review-dialog-open;
         modal: false;
-        title: "Dismiss review";
+        title: I18n.pr-review-dismiss-review;
         dialog-width: 480px;
         dialog-height: 324px;
         body-padding: 0px;
         close-enabled: !root.action-loading;
-        primary-label: root.action-loading ? "Dismissing…" : "Dismiss review";
+        primary-label: root.action-loading ? I18n.pr-review-dismissing : I18n.pr-review-dismiss-review;
         primary-danger: true;
         primary-enabled: !root.action-loading && root.dismiss-review-reason != "";
         primary-busy: root.action-loading;
@@ -4089,7 +4096,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             width: dismiss-review-dialog-frame.content-width - 32px;
             height: 42px;
             z: 3100;
-            text: "Dismiss " + root.dismiss-review-author + "'s review and explain why. The reason will be added to the conversation.";
+            text: I18n.pr-review-dismiss-explanation-prefix + " " + root.dismiss-review-author
+                + " " + I18n.pr-review-dismiss-explanation-suffix;
             font-size: 12px;
             color: root.github-fg-muted;
             wrap: word-wrap;
@@ -4101,7 +4109,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             width: dismiss-review-dialog-frame.content-width - 32px;
             height: 20px;
             z: 3100;
-            text: "Reason for dismissing";
+            text: I18n.pr-review-dismiss-reason;
             font-size: 12px;
             font-weight: 600;
             color: root.github-fg-default;
@@ -4142,12 +4150,12 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         backdrop-height: root.dialog-viewport-height;
         dialog-visible: root.review-dialog-open;
         modal: false;
-        title: "Review changes";
+        title: I18n.pr-review-review-changes;
         dialog-width: 480px;
         dialog-height: min(500px, root.dialog-viewport-height - 32px);
         body-padding: 0px;
         close-enabled: !root.action-loading;
-        primary-label: root.action-loading ? "Submitting…" : "Submit review";
+        primary-label: root.action-loading ? I18n.pr-review-submitting : I18n.pr-review-submit-review;
         primary-success: true;
         primary-enabled: !root.action-loading;
         primary-busy: root.action-loading;
@@ -4161,7 +4169,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             width: review-dialog-frame.content-width - 32px;
             height: 20px;
             z: 3100;
-            text: "Review summary";
+            text: I18n.pr-review-review-summary;
             font-size: 12px;
             font-weight: 600;
             color: root.github-fg-default;
@@ -4197,26 +4205,26 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             spacing: 0px;
             GitHubReviewChoice {
                 width: parent.width;
-                title: "Comment";
-                description: "Submit general feedback without explicit approval.";
+                title: I18n.pr-review-comment;
+                description: I18n.pr-review-comment-description;
                 selected: root.selected-review-action == "comment";
                 choice-enabled: root.can-comment && !root.action-loading;
                 chosen => { root.selected-review-action = "comment"; }
             }
             GitHubReviewChoice {
                 width: parent.width;
-                title: "Approve";
-                description: "Submit feedback and approve merging these changes.";
+                title: I18n.pr-review-approve;
+                description: I18n.pr-review-approve-description;
                 selected: root.selected-review-action == "approve";
                 choice-enabled: root.can-approve && !root.action-loading;
                 chosen => { root.selected-review-action = "approve"; }
             }
             GitHubReviewChoice {
                 width: parent.width;
-                title: "Request changes";
+                title: I18n.pr-review-request-changes;
                 description: root.provider == "gitee" && !root.can-request-changes
-                    ? "Gitee public v5 does not provide this review action."
-                    : "Submit feedback that must be addressed before merging.";
+                    ? I18n.pr-review-gitee-review-action-unavailable
+                    : I18n.pr-review-request-changes-description;
                 selected: root.selected-review-action == "request_changes";
                 choice-enabled: root.can-request-changes && !root.action-loading;
                 chosen => { root.selected-review-action = "request_changes"; }
@@ -4233,12 +4241,12 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         backdrop-height: root.dialog-viewport-height;
         dialog-visible: root.merge-dialog-open;
         modal: false;
-        title: "Merge pull request #" + root.pull-request-number;
+        title: I18n.pr-review-merge-pull-request + " #" + root.pull-request-number;
         dialog-width: 480px;
         dialog-height: min(470px, root.dialog-viewport-height - 32px);
         body-padding: 0px;
         close-enabled: !root.action-loading;
-        primary-label: root.action-loading ? "Merging…" : "Confirm merge";
+        primary-label: root.action-loading ? I18n.pr-review-merging : I18n.pr-review-confirm-merge;
         primary-success: true;
         primary-enabled: !root.action-loading && root.can-merge;
         primary-busy: root.action-loading;
@@ -4257,7 +4265,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             width: merge-dialog-frame.content-width - 32px;
             height: 36px;
             z: 3100;
-            text: "Choose how the commits from " + root.source-branch + " are added to " + root.target-branch + ".";
+            text: I18n.pr-review-merge-description-prefix + " " + root.source-branch + " " + I18n.pr-review-merge-description-infix + " " + root.target-branch + ".";
             font-size: 12px;
             color: root.github-fg-muted;
             wrap: word-wrap;
@@ -4270,32 +4278,32 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             spacing: 0px;
             if root.merge-method-merge: GitHubReviewChoice {
                 width: parent.width;
-                title: "Create a merge commit";
-                description: "All commits will be added with a merge commit.";
+                title: I18n.pr-review-create-merge-commit;
+                description: I18n.pr-review-create-merge-commit-description;
                 selected: root.selected-merge-method == "merge";
                 choice-enabled: !root.action-loading;
                 chosen => { root.selected-merge-method = "merge"; }
             }
             if root.merge-method-squash: GitHubReviewChoice {
                 width: parent.width;
-                title: "Squash and merge";
-                description: "The commits will be combined into one commit.";
+                title: I18n.pr-review-squash-merge;
+                description: I18n.pr-review-squash-merge-description;
                 selected: root.selected-merge-method == "squash";
                 choice-enabled: !root.action-loading;
                 chosen => { root.selected-merge-method = "squash"; }
             }
             if root.merge-method-rebase: GitHubReviewChoice {
                 width: parent.width;
-                title: "Rebase and merge";
-                description: "The commits will be rebased onto the base branch.";
+                title: I18n.pr-review-rebase-merge;
+                description: I18n.pr-review-rebase-merge-description;
                 selected: root.selected-merge-method == "rebase";
                 choice-enabled: !root.action-loading;
                 chosen => { root.selected-merge-method = "rebase"; }
             }
             if root.merge-method-fast-forward: GitHubReviewChoice {
                 width: parent.width;
-                title: "Fast-forward and merge";
-                description: "Move the base branch directly to the pull request head.";
+                title: I18n.pr-review-fast-forward-merge;
+                description: I18n.pr-review-fast-forward-merge-description;
                 selected: root.selected-merge-method == "fast_forward";
                 choice-enabled: !root.action-loading;
                 chosen => { root.selected-merge-method = "fast_forward"; }
@@ -4329,7 +4337,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                 x: 26px;
                 width: parent.width - 26px;
                 height: parent.height;
-                text: "Delete the source branch after merging";
+                text: I18n.pr-review-delete-source-branch;
                 font-size: 12px;
                 color: root.github-fg-default;
                 vertical-alignment: center;
@@ -4351,12 +4359,12 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         backdrop-height: root.dialog-viewport-height;
         dialog-visible: root.revert-dialog-open;
         modal: false;
-        title: "Revert pull request #" + root.pull-request-number;
+        title: I18n.pr-review-revert-pull-request + " #" + root.pull-request-number;
         dialog-width: 480px;
         dialog-height: 296px;
         body-padding: 16px;
         close-enabled: !root.action-loading;
-        primary-label: root.action-loading ? "Working…" : root.revert-action-label;
+        primary-label: root.action-loading ? I18n.common-working : root.revert-action-label;
         primary-danger: true;
         primary-enabled: !root.action-loading && root.can-revert;
         primary-busy: root.action-loading;
@@ -4370,7 +4378,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             width: revert-dialog-frame.content-width;
             height: 36px;
             z: 3100;
-            text: "Reverse the changes introduced by this merged pull request?";
+            text: I18n.pr-review-revert-confirmation;
             font-size: 14px;
             font-weight: 600;
             color: root.github-fg-default;

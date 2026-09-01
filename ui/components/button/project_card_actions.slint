@@ -1,4 +1,5 @@
 import { GitHubIconButton } from "./github_icon_button.slint";
+import { I18n } from "@i18n";
 
 export component GitHubProjectCardActions inherits Rectangle {
     out property <bool> has-hover: terminal-btn.has-hover || settings-btn.has-hover || delete-btn.has-hover;
@@ -18,7 +19,7 @@ export component GitHubProjectCardActions inherits Rectangle {
 
         terminal-btn := GitHubIconButton {
             icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
-            tooltip-text: "Open terminal";
+            tooltip-text: I18n.tooltip-open-terminal;
             control-size: 28px;
             glyph-size: 16px;
             clicked => {
@@ -28,7 +29,7 @@ export component GitHubProjectCardActions inherits Rectangle {
 
         settings-btn := GitHubIconButton {
             icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
-            tooltip-text: "Settings";
+            tooltip-text: I18n.common-settings;
             control-size: 28px;
             glyph-size: 16px;
             clicked => {
@@ -38,7 +39,7 @@ export component GitHubProjectCardActions inherits Rectangle {
 
         delete-btn := GitHubIconButton {
             icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-            tooltip-text: "Delete";
+            tooltip-text: I18n.common-delete;
             danger: true;
             control-size: 28px;
             glyph-size: 16px;

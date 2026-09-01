@@ -39,6 +39,7 @@ use network::setup_network_monitor;
 mod http;
 use http::setup_http;
 
+mod i18n;
 mod settings;
 use settings::setup_settings;
 mod settings_page;
@@ -149,7 +150,8 @@ fn save_settings_with_feedback<F>(
     settings_page: SettingsPageBridge,
     target: SettingsSaveTarget,
     operation: &'static str,
-    success_message: &'static str,
+    success_message_key: &'static str,
+    failure_message_key: &'static str,
     save: F,
 ) where
     F: FnOnce() -> std::result::Result<(), String> + Send + 'static,
@@ -165,7 +167,8 @@ fn save_settings_with_feedback<F>(
             match result {
                 Ok(()) => {
                     set_settings_saved(&ui, &settings_page, target, true);
-                    ToastManager::get(&ui).invoke_success(settings_toast(success_message));
+                    ToastManager::get(&ui)
+                        .invoke_success(settings_toast(i18n::tr(success_message_key).as_ref()));
                     let reset_weak = ui.as_weak();
                     let reset_settings_page = settings_page.clone();
                     Timer::single_shot(std::time::Duration::from_secs(2), move || {
@@ -178,7 +181,7 @@ fn save_settings_with_feedback<F>(
                 Err(error) => {
                     set_settings_saved(&ui, &settings_page, target, false);
                     ToastManager::get(&ui)
-                        .invoke_error(settings_toast(&format!("Failed to save {operation}.")));
+                        .invoke_error(settings_toast(i18n::tr(failure_message_key).as_ref()));
                     log::error!("[Settings] Failed to save {operation}: {error}");
                 }
             }
@@ -210,6 +213,8 @@ fn ui(
     // Using native macOS title bar
     let app = MainWindow::new().context("Failed to create MainWindow")?;
     startup_timeline.checkpoint("main_window_created");
+    i18n::initialize(&app, &loaded_settings.language)?;
+    startup_timeline.checkpoint("language_initialized");
     app.set_sidebar_motion_display_linked(sidebar_motion_mode.is_display_linked());
     app.on_advance_sidebar_motion(sidebar_motion::advance);
     let settings_page = SettingsPageBridge::default();
@@ -309,6 +314,41 @@ fn ui(
         log::info!("[Settings] Update channel changed to: {channel}");
     });
 
+    let app_weak_language = app.as_weak();
+    let settings_page_for_language = settings_page.clone();
+    let message_page_for_language = message_page.clone();
+    AppState::get(&app).on_set_language(move |preference| {
+        let Some(app) = app_weak_language.upgrade() else {
+            return;
+        };
+        match i18n::apply_preference(preference.as_str()) {
+            Ok(canonical) => {
+                i18n::sync_main_window(&app, canonical);
+                settings_page_for_language.sync_language(canonical);
+                message_page_for_language.sync_language(canonical);
+                workflow::sync_language(&app);
+                artifact_preview::sync_language(&app);
+                terminal::sync_language(&app);
+                project::sync_language(&app);
+                chat::sync_language(&app);
+                #[cfg(feature = "ai-code-review")]
+                ai_review::sync_language(&app);
+                settings::save_language(canonical);
+                log::info!(
+                    "[I18n] Language preference changed to {canonical}; active locale={}",
+                    usher_i18n::active_locale().id
+                );
+            }
+            Err(error) => {
+                log::error!("[I18n] Failed to change language: {error:#}");
+                let current = settings::get_settings_manager().get().language;
+                i18n::sync_main_window(&app, &current);
+                settings_page_for_language.sync_language(&current);
+                message_page_for_language.sync_language(&current);
+            }
+        }
+    });
+
     // ========= Tracing File Logs ========= //
     AppState::get(&app).on_toggle_application_console_logging(move |enabled| {
         settings::save_application_console_logging(enabled);
@@ -369,7 +409,8 @@ fn ui(
                 settings_page_for_git_tokens.clone(),
                 SettingsSaveTarget::GitTokens,
                 "code hosting tokens",
-                "Code hosting tokens saved.",
+                "settings.feedback.tokens_saved",
+                "settings.feedback.tokens_save_failed",
                 move || {
                     settings::save_git_platform_tokens(
                         &github_token,
@@ -403,7 +444,8 @@ fn ui(
                 settings_page_for_git_hosting.clone(),
                 SettingsSaveTarget::GitHosting,
                 "code hosting API configuration",
-                "Code hosting API configuration saved.",
+                "settings.feedback.hosting_api_saved",
+                "settings.feedback.hosting_api_save_failed",
                 move || {
                     settings::save_git_hosted_repository_configs(
                         &github_api_base_url,
@@ -431,7 +473,8 @@ fn ui(
             settings_page_for_ai_save.clone(),
             SettingsSaveTarget::AiAgent,
             "AI Agent settings",
-            "AI Agent settings saved.",
+            "settings.feedback.ai_agent_saved",
+            "settings.feedback.ai_agent_save_failed",
             move || settings::save_ai_agent_settings(&provider, &base_url, &api_key, &model),
         );
     });
@@ -462,12 +505,12 @@ fn ui(
                 match result {
                     Ok(result) => {
                         let message = if result.model_listed {
-                            "AI Agent connected; the selected model is available."
+                            i18n::tr("settings.feedback.ai_agent_connected")
                         } else {
-                            "AI Agent connected. The provider did not list the selected model."
+                            i18n::tr("settings.feedback.ai_agent_connected_model_unlisted")
                         };
                         ToastManager::get(&ui).invoke_success(ToastOptions {
-                            message: message.into(),
+                            message: message.as_ref().into(),
                             duration: 3_500,
                             position: "bottom".into(),
                             icon: "".into(),
@@ -479,7 +522,7 @@ fn ui(
                     }
                     Err(error) => {
                         ToastManager::get(&ui).invoke_error(ToastOptions {
-                            message: error.user_message().into(),
+                            message: error.localized_user_message().into(),
                             duration: 3_500,
                             position: "bottom".into(),
                             icon: "".into(),

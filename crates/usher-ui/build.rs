@@ -23,8 +23,14 @@ fn main() {
     };
     let emit_debug_info = std::env::var_os("SLINT_EMIT_DEBUG_INFO").is_some()
         || std::env::var("PROFILE").is_ok_and(|profile| profile == "debug");
+    let i18n = usher_i18n::build_support::prepare_slint_bundle(
+        std::env::var_os("OUT_DIR").expect("Cargo must provide OUT_DIR"),
+        env!("CARGO_PKG_NAME"),
+    )
+    .expect("failed to prepare Slint translations");
     let config = slint_build::CompilerConfiguration::new()
         .with_debug_info(emit_debug_info)
+        .with_bundled_translations(i18n.translations_path)
         .with_library_paths(HashMap::from([
             (
                 "material".to_string(),
@@ -33,6 +39,7 @@ fn main() {
             ("ui-components".to_string(), ui_components_library),
             ("pr-review".to_string(), pr_review_library),
             ("ai-review".to_string(), ai_review_library),
+            ("i18n".to_string(), i18n.library_path),
         ]));
 
     slint_build::compile_with_config(repository_root.join("ui/main.slint"), config).unwrap();

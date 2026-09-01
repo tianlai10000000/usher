@@ -1,4 +1,5 @@
 use crate::MainWindow;
+use crate::i18n::LocalizedText;
 use crate::workflow::bindings::{show_error, show_success};
 use crate::workflow::state::SharedWorkflowState;
 use slint::ComponentHandle;
@@ -10,24 +11,27 @@ pub(crate) struct BranchRequest {
     pub(crate) recreate_remote: bool,
 }
 
-pub(crate) fn recreate_branch_plan(req: BranchRequest) -> Result<String, String> {
+pub(crate) fn recreate_branch_plan(req: BranchRequest) -> Result<LocalizedText, LocalizedText> {
     let source = req.source.trim();
     let target = req.target.trim();
     if source.is_empty() || target.is_empty() {
-        return Err("Source branch and target branch are required.".to_string());
+        return Err(LocalizedText::message("branch.source_target_required"));
     }
     if source == target {
-        return Err("Source branch and target branch must be different.".to_string());
+        return Err(LocalizedText::message("branch.source_target_different"));
     }
 
-    let remote_clause = if req.recreate_remote {
-        "Remote tracking branch will be recreated after local validation."
+    let key = if req.recreate_remote {
+        "branch.recreate_plan_with_remote"
     } else {
-        "Remote tracking branch recreation is disabled."
+        "branch.recreate_plan_without_remote"
     };
-
-    Ok(format!(
-        "Validated branch recreation: use '{source}' as the clean source, archive or delete '{target}', then recreate '{target}' from '{source}'. {remote_clause}"
+    Ok(LocalizedText::message_with(
+        key,
+        [
+            ("source", source.to_string()),
+            ("target", target.to_string()),
+        ],
     ))
 }
 
@@ -46,15 +50,16 @@ pub(crate) fn bind_branch(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 if let Ok(mut guard) = shared_state.lock() {
                     guard.upsert_current(|view| view.branch_result = result.clone());
                 }
-                ui.set_workflow_branch_result(result.into());
-                show_success(&ui, "Branch workflow validated.");
+                ui.set_workflow_branch_result(result.resolve().into());
+                show_success(&ui, crate::i18n::tr("branch.validated").as_ref());
             }
             Err(error) => {
                 if let Ok(mut guard) = shared_state.lock() {
                     guard.upsert_current(|view| view.branch_result = error.clone());
                 }
-                ui.set_workflow_branch_result(error.clone().into());
-                show_error(&ui, &error);
+                let message = error.resolve();
+                ui.set_workflow_branch_result(message.clone().into());
+                show_error(&ui, message.as_str());
             }
         }
     });

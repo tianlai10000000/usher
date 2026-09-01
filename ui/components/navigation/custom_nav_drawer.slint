@@ -1,6 +1,7 @@
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { Route } from "../../route/routeMap.slint";
+import { I18n } from "@i18n";
 
 export struct NavItem {
     icon: image,
@@ -196,7 +197,7 @@ export component GitHubNavigationSidebar inherits Rectangle {
             : transparent)
         : GitHubTheme.sidebar-canvas;
     accessible-role: tab-list;
-    accessible-label: "Primary navigation";
+    accessible-label: I18n.navigation-primary;
 
     // Receive clicks on sidebar chrome that is not occupied by a control.
     // Interactive children are painted later and keep their own hit targets.
@@ -225,8 +226,8 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 control-size: GitHubMetrics.control-medium-size;
                 icon: @image-url("../../assets/icons/octicon-sidebar-collapse-16.svg");
                 tooltip-text: root.toggle-shortcut-label == ""
-                    ? "Hide sidebar"
-                    : "Hide sidebar (" + root.toggle-shortcut-label + ")";
+                    ? I18n.tooltip-hide-sidebar
+                    : I18n.tooltip-hide-sidebar + " (" + root.toggle-shortcut-label + ")";
                 tooltip-above: false;
                 foreground: GitHubTheme.fg-muted;
                 clicked => {
@@ -241,8 +242,8 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 control-size: GitHubMetrics.control-medium-size;
                 icon: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
                 tooltip-text: root.back-shortcut-label == ""
-                    ? "Back"
-                    : "Back (" + root.back-shortcut-label + ")";
+                    ? I18n.common-back
+                    : I18n.common-back + " (" + root.back-shortcut-label + ")";
                 tooltip-above: false;
                 foreground: GitHubTheme.fg-muted;
                 button-enabled: root.can-go-back;
@@ -258,8 +259,8 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 control-size: GitHubMetrics.control-medium-size;
                 icon: @image-url("../../assets/icons/octicon-chevron-right-16.svg");
                 tooltip-text: root.forward-shortcut-label == ""
-                    ? "Forward"
-                    : "Forward (" + root.forward-shortcut-label + ")";
+                    ? I18n.tooltip-forward
+                    : I18n.tooltip-forward + " (" + root.forward-shortcut-label + ")";
                 tooltip-above: false;
                 foreground: GitHubTheme.fg-muted;
                 button-enabled: root.can-go-forward;
@@ -307,7 +308,7 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 // on 4.5px and FemtoVG bilinear-blurred the SVG bitmap.
                 glyph-size: GitHubMetrics.sidebar-nav-icon-size;
                 icon: root.search-icon;
-                tooltip-text: "Search";
+                tooltip-text: I18n.common-search;
                 tooltip-above: false;
                 foreground: GitHubTheme.fg-muted;
                 clicked => {
@@ -322,7 +323,7 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 control-size: GitHubMetrics.size-24;
                 glyph-size: GitHubMetrics.sidebar-nav-icon-size;
                 icon: root.notification-icon;
-                tooltip-text: "Notifications";
+                tooltip-text: I18n.common-notifications;
                 tooltip-above: false;
                 tooltip-align-right: true;
                 foreground: GitHubTheme.fg-muted;
@@ -390,7 +391,7 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 y: 9px;
                 width: parent.width - GitHubMetrics.size-40;
                 icon: root.settings-icon;
-                text: "Settings";
+                text: I18n.common-settings;
                 label-weight: 400;
                 label-y-offset: 1px;
                 selected: root.current-route == Route.Settings;
@@ -406,7 +407,7 @@ export component GitHubNavigationSidebar inherits Rectangle {
                 control-size: GitHubMetrics.size-24;
                 glyph-size: GitHubMetrics.sidebar-nav-icon-size;
                 icon: root.about-icon;
-                tooltip-text: "About Usher";
+                tooltip-text: I18n.navigation-about-usher;
                 show-tooltip: false;
                 tooltip-above: true;
                 foreground: GitHubTheme.fg-muted;

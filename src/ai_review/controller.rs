@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::future::Future;
@@ -6,7 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -46,6 +47,10 @@ use super::storage::{
 
 type TaskStore = dyn StateStore<ReviewTaskState, ReviewTaskAction, ReviewTaskActionResult>;
 
+thread_local! {
+    static LIFECYCLE_CONTROLLER: RefCell<Option<Weak<ControllerInner>>> = const { RefCell::new(None) };
+}
+
 const TASK_STATE_FILE: &str = "tasks.json";
 #[cfg(any(test, feature = "test-fixtures"))]
 const FIXTURE_NAME: &str = "review-v1";
@@ -61,6 +66,62 @@ const MAX_PROJECTED_ASSISTANT_ROWS: usize = 128;
 const MAX_STRUCTURED_ASSISTANT_ROWS: usize = 32;
 
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
+
+fn review_failure_key(error: &str) -> &'static str {
+    match error {
+        "ai_review.failure.configure_base_url" => "ai_review.failure.configure_base_url",
+        "ai_review.failure.configure_api_key" => "ai_review.failure.configure_api_key",
+        "ai_review.failure.configure_model" => "ai_review.failure.configure_model",
+        "ai_review.failure.no_diff" => "ai_review.failure.no_diff",
+        "ai_review.failure.timeout" => "ai_review.failure.timeout",
+        "ai_review.failure.invalid_response" => "ai_review.failure.invalid_response",
+        "ai_review.failure.agent_request" => "ai_review.failure.agent_request",
+        "ai_review.failure.context" => "ai_review.failure.context",
+        "ai_review.failure.rule" => "ai_review.failure.rule",
+        "ai_review.failure.storage" => "ai_review.failure.storage",
+        "ai_review.failure.interrupted" => "ai_review.failure.interrupted",
+        "ai_review.failure.internal" => "ai_review.failure.internal",
+        "ai_review.failure.generic" => "ai_review.failure.generic",
+        "git_error.configuration" => "git_error.configuration",
+        "git_error.authentication" => "git_error.authentication",
+        "git_error.permission" => "git_error.permission",
+        "git_error.not_found" => "git_error.not_found",
+        "git_error.conflict" => "git_error.conflict",
+        "git_error.rate_limited" => "git_error.rate_limited",
+        "git_error.network" => "git_error.network",
+        "git_error.timeout" => "git_error.timeout",
+        "git_error.invalid_response" => "git_error.invalid_response",
+        "git_error.unsupported" => "git_error.unsupported",
+        "git_error.unknown" => "git_error.unknown",
+        _ if error.contains("Base URL") => "ai_review.failure.configure_base_url",
+        _ if error.contains("API key") => "ai_review.failure.configure_api_key",
+        _ if error.contains("model in Settings") => "ai_review.failure.configure_model",
+        _ if error.contains("no reviewable diff") => "ai_review.failure.no_diff",
+        _ if error.to_ascii_lowercase().contains("timed out") => "ai_review.failure.timeout",
+        _ if error.contains("invalid JSON") => "ai_review.failure.invalid_response",
+        _ if error.contains("review rule") || error.contains("Review rule") => {
+            "ai_review.failure.rule"
+        }
+        _ if error.contains("metadata") || error.contains("pull request context") => {
+            "ai_review.failure.context"
+        }
+        _ if error.contains("persistence")
+            || error.contains("session")
+            || error.contains("chat history") =>
+        {
+            "ai_review.failure.storage"
+        }
+        _ if error.contains("previous application exit") => "ai_review.failure.interrupted",
+        _ if error.contains("released before execution") || error.contains("disappeared") => {
+            "ai_review.failure.internal"
+        }
+        _ => "ai_review.failure.generic",
+    }
+}
+
+fn localized_review_failure(error: &str) -> String {
+    crate::i18n::tr(review_failure_key(error)).into_owned()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DockedContentLifecycle {
@@ -228,6 +289,7 @@ struct ControllerInner {
     requests: Mutex<HashMap<ReviewTaskId, PendingReviewRequest>>,
     cancellations: Mutex<HashMap<ReviewTaskId, Arc<ReviewCancellation>>>,
     chat_cancellations: Mutex<HashMap<ReviewTaskId, Arc<ReviewCancellation>>>,
+    chat_status_key: Mutex<Option<&'static str>>,
     response_projector: Mutex<AgentResponseProjector>,
     response_projection_suspended: AtomicBool,
     response_projector_clear_requested: AtomicBool,
@@ -518,6 +580,7 @@ pub(crate) fn setup_ai_review(
         requests: Mutex::new(HashMap::new()),
         cancellations: Mutex::new(HashMap::new()),
         chat_cancellations: Mutex::new(HashMap::new()),
+        chat_status_key: Mutex::new(None),
         response_projector: Mutex::new(AgentResponseProjector::default()),
         response_projection_suspended: AtomicBool::new(true),
         response_projector_clear_requested: AtomicBool::new(false),
@@ -528,6 +591,9 @@ pub(crate) fn setup_ai_review(
         session_dir,
         task_persistence,
         message_center,
+    });
+    LIFECYCLE_CONTROLLER.with(|registered| {
+        *registered.borrow_mut() = Some(Arc::downgrade(&inner));
     });
 
     bind_callbacks(ui, &inner);
@@ -629,6 +695,25 @@ pub(crate) fn setup_ai_review(
     });
     maybe_mount_response_fixture(ui, inner);
     controller
+}
+
+pub(crate) fn sync_language(ui: &MainWindow) {
+    LIFECYCLE_CONTROLLER.with(|registered| {
+        let Some(inner) = registered.borrow().as_ref().and_then(Weak::upgrade) else {
+            return;
+        };
+        apply_configuration_to_ui(ui, inner.config.snapshot().state());
+        apply_task_state_to_ui(ui, inner.task_store.snapshot().state());
+        if ui.get_ai_review_chat_sending()
+            && let Some(key) = *inner
+                .chat_status_key
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        {
+            ui.set_ai_review_chat_status(crate::i18n::tr(key).into_owned().into());
+        }
+        sync_conversation_language(ui);
+    });
 }
 
 #[cfg(any(test, feature = "test-fixtures"))]
@@ -1033,7 +1118,7 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
             return;
         }
         let title = if title.trim().is_empty() {
-            "AI review response".to_string()
+            crate::i18n::tr("ai_review.response_preview_title").into_owned()
         } else {
             title.to_string()
         };
@@ -1192,7 +1277,7 @@ impl ControllerInner {
             .state()
             .resolved_rule_for(&request.project_key)
             .map(|rule| rule.name.clone())
-            .unwrap_or_else(|| "No preset".to_string());
+            .unwrap_or_default();
         let model_name = request.model_name.clone();
         let target = ReviewTarget {
             project_key: request.project_key.clone(),
@@ -1276,7 +1361,7 @@ impl ControllerInner {
             .and_then(|requests| requests.get(&id).cloned());
         let outcome = match request {
             Some(request) => self.execute_review(&id, request).await,
-            None => Err("Review request metadata was released before execution.".to_string()),
+            None => Err("ai_review.failure.internal".to_string()),
         };
 
         match outcome {
@@ -1414,7 +1499,7 @@ impl ControllerInner {
         } else {
             let chunks = chunk_diff(input.unified_diff.as_str(), diff_chunk_bytes());
             if chunks.is_empty() {
-                return Err("The current commit has no reviewable diff.".to_string());
+                return Err("ai_review.failure.no_diff".to_string());
             }
             let count = chunks.len();
             let total_chunks = count.min(u32::MAX as usize) as u32;
@@ -1476,14 +1561,23 @@ impl ControllerInner {
                 .await
                 .map_err(|()| "Review cancelled".to_string())?
                 .map_err(|_elapsed| {
-                    format!(
-                        "AI review chunk {}/{} timed out after {} seconds.",
+                    log::warn!(
+                        "[AI Review][Task] chunk {}/{} timed out after {} seconds",
                         index + 1,
                         count,
                         agent::REVIEW_CHUNK_TOTAL_TIMEOUT.as_secs()
-                    )
+                    );
+                    "ai_review.failure.timeout".to_string()
                 })?
-                .map_err(|error| error.user_message().to_string())?;
+                .map_err(|error| {
+                    log::warn!("[AI Review][Task] Agent request failed: {error}");
+                    match error.kind {
+                        crate::http::HttpErrorKind::Timeout => "ai_review.failure.timeout",
+                        crate::http::HttpErrorKind::Decode => "ai_review.failure.invalid_response",
+                        _ => "ai_review.failure.agent_request",
+                    }
+                    .to_string()
+                })?;
                 log::info!(
                     "[AI Review][Task] event=completion_received task={} chunk={}/{} response_bytes={} elapsed_ms={}",
                     id.0,
@@ -1492,10 +1586,10 @@ impl ControllerInner {
                     response.len(),
                     completion_started.elapsed().as_millis()
                 );
-                results.push(
-                    parse_review_response(response.as_str())
-                        .map_err(|error| format!("AI review returned invalid JSON: {error}"))?,
-                );
+                results.push(parse_review_response(response.as_str()).map_err(|error| {
+                    log::warn!("[AI Review][Task] Agent returned invalid JSON: {error}");
+                    "ai_review.failure.invalid_response".to_string()
+                })?);
                 self.task_store
                     .dispatch(ReviewTaskAction::SetChunkProgress {
                         id: id.clone(),
@@ -1514,7 +1608,7 @@ impl ControllerInner {
             .tasks
             .get(id)
             .cloned()
-            .ok_or_else(|| "Review task disappeared while running.".to_string())?;
+            .ok_or_else(|| "ai_review.failure.internal".to_string())?;
         task.status = ReviewTaskStatus::Completed;
         task.progress_percent = 100;
         task.finding_count = result.findings.len() as u32;
@@ -1603,6 +1697,7 @@ impl ControllerInner {
                 Ok(Some(projection)) => inner.apply_projection_if_visible(projection),
                 Ok(None) => {}
                 Err(error) => {
+                    log::warn!("[AI Review][Session] Failed to open task result: {error}");
                     let window = inner.window.clone();
                     let task_id = task_id_for_load;
                     let _ = slint::invoke_from_event_loop(move || {
@@ -1612,7 +1707,7 @@ impl ControllerInner {
                         if inner.response_mount_is_current(mount_generation)
                             && ui.get_ai_review_current_task_id() == task_id
                         {
-                            ui.set_ai_review_error(error.into());
+                            ui.set_ai_review_error(localized_review_failure(&error).into());
                             ui.set_ai_review_status("failed".into());
                         }
                     });
@@ -1704,10 +1799,18 @@ impl ControllerInner {
             return;
         };
         cancellation.cancel();
+        *self
+            .chat_status_key
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some("ai_review.stopping_response");
         if let Some(ui) = self.window.upgrade()
             && ui.get_ai_review_current_task_id() == id.0
         {
-            ui.set_ai_review_chat_status("Stopping response...".into());
+            ui.set_ai_review_chat_status(
+                crate::i18n::tr("ai_review.stopping_response")
+                    .into_owned()
+                    .into(),
+            );
         }
     }
 
@@ -1737,8 +1840,12 @@ impl ControllerInner {
         &self,
         id: &ReviewTaskId,
         cancellation: &Arc<ReviewCancellation>,
-        status: &'static str,
+        key: &'static str,
     ) {
+        *self
+            .chat_status_key
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(key);
         let id = id.0.clone();
         let cancellation = cancellation.clone();
         let window = self.window.clone();
@@ -1750,18 +1857,26 @@ impl ControllerInner {
                 return;
             };
             if ui.get_ai_review_current_task_id() == id && ui.get_ai_review_chat_sending() {
-                ui.set_ai_review_chat_status(status.into());
+                ui.set_ai_review_chat_status(crate::i18n::tr(key).into_owned().into());
             }
         });
     }
 
     fn fail_task(&self, id: &ReviewTaskId, error: &str) {
+        let key = review_failure_key(error);
+        log::error!(
+            "[AI Review][Task] event=failed task={} failure_key={} detail={error}",
+            id.0,
+            key
+        );
         self.task_store.dispatch(ReviewTaskAction::Fail {
             id: id.clone(),
-            error: error.to_string(),
+            // The framework-neutral Store persists a semantic failure key.
+            // Technical detail remains in logs and never crosses the UI boundary.
+            error: key.to_string(),
             updated_at_unix_ms: unix_millis(),
         });
-        self.publish_terminal_message(id, false, 0, error);
+        self.publish_terminal_message(id, false, 0, key);
     }
 
     fn send_message(self: Arc<Self>, message: String) {
@@ -1801,7 +1916,15 @@ impl ControllerInner {
         );
         append_ui_conversation(&ui, "user", message.as_str(), None);
         ui.set_ai_review_chat_sending(true);
-        ui.set_ai_review_chat_status("Preparing pull request context...".into());
+        *self
+            .chat_status_key
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some("ai_review.preparing_context");
+        ui.set_ai_review_chat_status(
+            crate::i18n::tr("ai_review.preparing_context")
+                .into_owned()
+                .into(),
+        );
         ui.set_ai_review_chat_elapsed_seconds(0);
         ui.set_ai_review_message_input("".into());
         let path = self.session_path(&id);
@@ -1829,7 +1952,7 @@ impl ControllerInner {
                         if !fixture {
                             validate_model_settings(&settings)?;
                         }
-                        self.update_chat_status(&id, &work_cancellation, "Thinking...");
+                        self.update_chat_status(&id, &work_cancellation, "ai_review.thinking");
                         let answer = complete_chat(
                             &settings,
                             &id,
@@ -1874,7 +1997,7 @@ impl ControllerInner {
                         session.input = build_chat_input(&request, &settings, fixture).await?;
                         persist_chat_session(chat_path.clone(), session.clone()).await?;
                     }
-                    self.update_chat_status(&id, &work_cancellation, "Thinking...");
+                    self.update_chat_status(&id, &work_cancellation, "ai_review.thinking");
                     let answer = complete_chat(
                         &settings,
                         &id,
@@ -1901,6 +2024,10 @@ impl ControllerInner {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .remove(&id);
+            *self
+                .chat_status_key
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
             let window = self.window.clone();
             let inner_for_ui = self.clone();
             let _ = slint::invoke_from_event_loop(move || {
@@ -1924,17 +2051,23 @@ impl ControllerInner {
                     }
                     Ok(Ok(_)) => {}
                     Ok(Err(error)) => {
+                        log::warn!("[AI Review][Chat] Completion failed: {error}");
+                        let reason = localized_review_failure(error.as_str());
+                        let message = crate::i18n::tr_args(
+                            "ai_review.response_failed",
+                            &[("reason", reason.as_str())],
+                        );
                         append_ui_conversation(
                             &ui,
                             "assistant",
-                            format!("Could not get a response: {error}").as_str(),
+                            message.as_str(),
                             Some(elapsed_ms),
                         );
                     }
                     Err(()) => append_ui_conversation(
                         &ui,
                         "assistant",
-                        "Response stopped.",
+                        crate::i18n::tr("ai_review.response_stopped").as_ref(),
                         Some(elapsed_ms),
                     ),
                 }
@@ -1955,17 +2088,23 @@ impl ControllerInner {
         };
         let (title, body, severity) = if success {
             (
-                format!(
-                    "AI review completed for #{}",
-                    task.target.pull_request_number
+                crate::i18n::tr_args(
+                    "ai_review.notification.completed_title",
+                    &[("number", task.target.pull_request_number.as_str())],
                 ),
-                format!("Found {finding_count} actionable issue(s)."),
+                crate::i18n::tr_args(
+                    "ai_review.notification.completed_body",
+                    &[("count", finding_count.to_string().as_str())],
+                ),
                 MessageSeverity::Success,
             )
         } else {
             (
-                format!("AI review failed for #{}", task.target.pull_request_number),
-                error.to_string(),
+                crate::i18n::tr_args(
+                    "ai_review.notification.failed_title",
+                    &[("number", task.target.pull_request_number.as_str())],
+                ),
+                localized_review_failure(error),
                 MessageSeverity::Error,
             )
         };
@@ -2101,19 +2240,27 @@ async fn load_pull_request_context(
     if fixture {
         return Ok(fixture_diff(request));
     }
-    let metadata =
-        if request.repo_type.trim().is_empty() || request.repo_project_id.trim().is_empty() {
-            let alias = request.project_alias.clone();
-            tokio::task::spawn_blocking(move || load_repository_metadata(alias.as_str()))
-                .await
-                .map_err(|error| format!("Failed to read project metadata: {error}"))??
-        } else {
-            crate::project::ProjectRepositoryMetadata {
-                repo_project_id: request.repo_project_id.clone(),
-                repo_type: request.repo_type.clone(),
-                remote_repo: request.remote_repo.clone(),
-            }
-        };
+    let metadata = if request.repo_type.trim().is_empty()
+        || request.repo_project_id.trim().is_empty()
+    {
+        let alias = request.project_alias.clone();
+        let loaded = tokio::task::spawn_blocking(move || load_repository_metadata(alias.as_str()))
+            .await
+            .map_err(|error| {
+                log::warn!("[AI Review][Context] Project metadata worker failed: {error}");
+                "ai_review.failure.context".to_string()
+            })?;
+        loaded.map_err(|error| {
+            log::warn!("[AI Review][Context] Project metadata could not be loaded: {error}");
+            "ai_review.failure.context".to_string()
+        })?
+    } else {
+        crate::project::ProjectRepositoryMetadata {
+            repo_project_id: request.repo_project_id.clone(),
+            repo_type: request.repo_type.clone(),
+            remote_repo: request.remote_repo.clone(),
+        }
+    };
     let detail = crate::git::get_pull_request_diff(
         metadata.repo_type.as_str(),
         metadata.repo_project_id.as_str(),
@@ -2122,7 +2269,10 @@ async fn load_pull_request_context(
         false,
     )
     .await
-    .map_err(|error| error.user_message().to_string())?;
+    .map_err(|error| {
+        log::warn!("[AI Review][Context] Pull Request Diff could not be loaded: {error}");
+        error.user_message_key().to_string()
+    })?;
     Ok((
         target_from_detail(request, &detail),
         unified_diff_from_detail(&detail),
@@ -2210,12 +2360,21 @@ async fn complete_chat(
     )
     .await
     .map_err(|_| {
-        format!(
-            "AI review conversation timed out after {} seconds.",
+        log::warn!(
+            "[AI Review][Chat] Agent response timed out after {} seconds",
             agent::REVIEW_CHAT_TOTAL_TIMEOUT.as_secs()
-        )
+        );
+        "ai_review.failure.timeout".to_string()
     })?
-    .map_err(|error| error.user_message().to_string())
+    .map_err(|error| {
+        log::warn!("[AI Review][Chat] Agent request failed: {error}");
+        match error.kind {
+            crate::http::HttpErrorKind::Timeout => "ai_review.failure.timeout",
+            crate::http::HttpErrorKind::Decode => "ai_review.failure.invalid_response",
+            _ => "ai_review.failure.agent_request",
+        }
+        .to_string()
+    })
 }
 
 fn build_chat_messages(
@@ -2328,18 +2487,16 @@ fn apply_configuration_to_ui(ui: &MainWindow, state: &usher_ai_review::ReviewCon
         .cloned()
         .unwrap_or_default();
     let resolved = state.resolved_rule_for(&project);
+    let default_name = state
+        .default_rule_id
+        .as_ref()
+        .and_then(|id| state.rule(id))
+        .map(|rule| rule.name.clone())
+        .unwrap_or_else(|| crate::i18n::tr("ai_review.no_preset").into_owned());
     let mut choices = vec![AiReviewRuleChoice {
         id: "".into(),
-        name: format!(
-            "Default ({})",
-            state
-                .default_rule_id
-                .as_ref()
-                .and_then(|id| state.rule(id))
-                .map(|rule| rule.name.as_str())
-                .unwrap_or("No preset")
-        )
-        .into(),
+        name: crate::i18n::tr_args("ai_review.default_rule", &[("name", default_name.as_str())])
+            .into(),
         selected: matches!(binding, RuleBinding::UseDefault),
         inherited: true,
     }];
@@ -2357,7 +2514,7 @@ fn apply_configuration_to_ui(ui: &MainWindow, state: &usher_ai_review::ReviewCon
     ui.set_ai_review_project_rule_name(
         resolved
             .map(|rule| rule.name.clone())
-            .unwrap_or_else(|| "No preset".to_string())
+            .unwrap_or_else(|| crate::i18n::tr("ai_review.no_preset").into_owned())
             .into(),
     );
 }
@@ -2409,14 +2566,22 @@ fn task_item_from_projection(row: &TaskRowProjection) -> AiReviewTaskItem {
         project_key: row.project_key.clone(),
         pull_request_number: row.pull_request_number.clone(),
         pull_request_title: row.pull_request_title.clone(),
-        rule_name: row.rule_name.clone(),
+        rule_name: if row.rule_name.is_empty() {
+            crate::i18n::tr("ai_review.no_preset").into_owned().into()
+        } else {
+            row.rule_name.clone()
+        },
         model_name: row.model_name.clone(),
         status: row.status.as_str().into(),
         progress_percent: i32::from(row.progress_percent),
         completed_chunks: row.completed_chunks.min(i32::MAX as u32) as i32,
         total_chunks: row.total_chunks.min(i32::MAX as u32) as i32,
         finding_count: row.finding_count.min(i32::MAX as u32) as i32,
-        error: row.error.clone(),
+        error: if row.error.is_empty() {
+            "".into()
+        } else {
+            localized_review_failure(row.error.as_str()).into()
+        },
     }
 }
 
@@ -2533,13 +2698,27 @@ fn apply_task_header(ui: &MainWindow, task: &ReviewTaskSummary) {
     ui.set_ai_review_project_name(task.target.project_name.clone().into());
     ui.set_ai_review_pull_request_number(task.target.pull_request_number.clone().into());
     ui.set_ai_review_pull_request_title(task.target.pull_request_title.clone().into());
-    ui.set_ai_review_rule_names(task.rule_name.clone().into());
+    ui.set_ai_review_rule_names(
+        if task.rule_name.is_empty() {
+            crate::i18n::tr("ai_review.no_preset").into_owned()
+        } else {
+            task.rule_name.clone()
+        }
+        .into(),
+    );
     ui.set_ai_review_model_name(task.model_name.clone().into());
     ui.set_ai_review_status(task.status.as_str().into());
     ui.set_ai_review_progress_percent(i32::from(task.progress_percent));
     ui.set_ai_review_completed_chunks(task.completed_chunks.min(i32::MAX as u32) as i32);
     ui.set_ai_review_total_chunks(task.total_chunks.min(i32::MAX as u32) as i32);
-    ui.set_ai_review_error(task.error.clone().into());
+    ui.set_ai_review_error(
+        if task.error.is_empty() {
+            String::new()
+        } else {
+            localized_review_failure(task.error.as_str())
+        }
+        .into(),
+    );
     let elapsed_ms = if task.status.is_active() {
         unix_millis().saturating_sub(task.created_at_unix_ms)
     } else {
@@ -2621,6 +2800,21 @@ fn append_ui_conversation(ui: &MainWindow, role: &str, content: &str, elapsed_ms
         let mut items = conversation.iter().collect::<Vec<_>>();
         items.push(item);
         ui.set_ai_review_conversation(ModelRc::new(VecModel::from(items)));
+    }
+    rebuild_response_visual_rows(ui);
+}
+
+fn sync_conversation_language(ui: &MainWindow) {
+    let conversation = ui.get_ai_review_conversation();
+    let preview_title = crate::i18n::tr("ai_review.response_preview_title").into_owned();
+    for index in 0..conversation.row_count() {
+        let Some(mut item) = conversation.row_data(index) else {
+            continue;
+        };
+        if item.preview_available && item.preview_title != preview_title {
+            item.preview_title = preview_title.clone().into();
+            conversation.set_row_data(index, item);
+        }
     }
     rebuild_response_visual_rows(ui);
 }
@@ -2776,17 +2970,24 @@ fn unified_diff_from_detail(detail: &crate::git::PullRequestDiffDetail) -> Strin
 }
 
 fn read_rule_snapshot(rule: ReviewRule) -> Result<RuleSnapshot, String> {
-    let metadata = fs::metadata(&rule.markdown_path)
-        .map_err(|error| format!("Cannot read review rule '{}': {error}", rule.name))?;
+    let metadata = fs::metadata(&rule.markdown_path).map_err(|error| {
+        log::warn!(
+            "[AI Review][Rule] Cannot read rule '{}': {error}",
+            rule.name
+        );
+        "ai_review.failure.rule".to_string()
+    })?;
     if !metadata.is_file() {
-        return Err(format!("Review rule '{}' is not a file.", rule.name));
+        log::warn!("[AI Review][Rule] Rule '{}' is not a file", rule.name);
+        return Err("ai_review.failure.rule".to_string());
     }
     if metadata.len() > MAX_RULE_BYTES {
-        return Err(format!(
-            "Review rule '{}' exceeds the {} KiB limit.",
+        log::warn!(
+            "[AI Review][Rule] Rule '{}' exceeds the {} KiB limit",
             rule.name,
             MAX_RULE_BYTES / 1024
-        ));
+        );
+        return Err("ai_review.failure.rule".to_string());
     }
     let is_markdown = rule
         .markdown_path
@@ -2796,13 +2997,16 @@ fn read_rule_snapshot(rule: ReviewRule) -> Result<RuleSnapshot, String> {
             matches!(extension.to_ascii_lowercase().as_str(), "md" | "markdown")
         });
     if !is_markdown {
-        return Err(format!(
-            "Review rule '{}' must be a Markdown file.",
-            rule.name
-        ));
+        log::warn!("[AI Review][Rule] Rule '{}' is not Markdown", rule.name);
+        return Err("ai_review.failure.rule".to_string());
     }
-    let content = fs::read_to_string(&rule.markdown_path)
-        .map_err(|error| format!("Cannot read review rule '{}': {error}", rule.name))?;
+    let content = fs::read_to_string(&rule.markdown_path).map_err(|error| {
+        log::warn!(
+            "[AI Review][Rule] Cannot read rule '{}': {error}",
+            rule.name
+        );
+        "ai_review.failure.rule".to_string()
+    })?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     content.hash(&mut hasher);
     Ok(RuleSnapshot {
@@ -2816,13 +3020,13 @@ fn read_rule_snapshot(rule: ReviewRule) -> Result<RuleSnapshot, String> {
 
 fn validate_model_settings(settings: &AiAgentSettings) -> Result<(), String> {
     if settings.base_url.trim().is_empty() {
-        return Err("Configure the AI Agent Base URL in Settings.".to_string());
+        return Err("ai_review.failure.configure_base_url".to_string());
     }
     if settings.api_key.trim().is_empty() {
-        return Err("Configure the AI Agent API key in Settings.".to_string());
+        return Err("ai_review.failure.configure_api_key".to_string());
     }
     if settings.model.trim().is_empty() {
-        return Err("Configure the AI Agent model in Settings.".to_string());
+        return Err("ai_review.failure.configure_model".to_string());
     }
     Ok(())
 }
@@ -3253,7 +3457,7 @@ fn load_task_state(path: &Path) -> (ReviewTaskState, bool) {
     for task in state.tasks.values_mut() {
         if task.status.is_active() {
             task.status = ReviewTaskStatus::Failed;
-            task.error = "Review interrupted by the previous application exit.".to_string();
+            task.error = "ai_review.failure.interrupted".to_string();
             task.updated_at_unix_ms = unix_millis();
         }
     }
@@ -3522,7 +3726,7 @@ mod tests {
             *observed_task.borrow_mut() = task_id.to_string();
         });
         window.set_ai_review_chat_sending(true);
-        window.set_ai_review_chat_status("Thinking...".into());
+        window.set_ai_review_chat_status(crate::i18n::tr("ai_review.thinking").into_owned().into());
         i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
         // PR Review reserves the bottom 28px for the application status bar,
         // so the composer and its stop control end above that persistent row.

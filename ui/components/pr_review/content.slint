@@ -6,6 +6,7 @@ import { GitHubTooltipPlacement } from "../../state/tooltip_overlay_state.slint"
 import { GitHubActionListItem, GitHubActionMenu } from "../github_action_menu.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
+import { I18n } from "@i18n";
 
 export component GitHubTreeIndentGuides inherits Rectangle {
     in property <int> depth: 0;
@@ -68,7 +69,7 @@ export component GitHubCommitMessageToggleButton inherits Rectangle {
     GitHubTooltip {
         preferred-placement: GitHubTooltipPlacement.Top;
         text: toggle-touch.has-hover
-            ? (root.expanded ? "Hide commit description" : "Show commit description")
+            ? (root.expanded ? I18n.diff-hide-commit-description : I18n.diff-show-commit-description)
             : "";
     }
 }
@@ -1045,7 +1046,7 @@ export component GitHubDiffSettingsPopover inherits Rectangle {
         y: 8px;
         width: parent.width - 24px;
         height: 22px;
-        text: "Diff view";
+        text: I18n.diff-view;
         font-size: 13px;
         font-weight: 600;
         color: root.fg-default;
@@ -1054,7 +1055,7 @@ export component GitHubDiffSettingsPopover inherits Rectangle {
     GitHubDiffViewChoice {
         x: 12px;
         y: 34px;
-        label: "Unified";
+        label: I18n.diff-unified;
         selected: root.pending-view != "split";
         bg-default: root.bg-default;
         bg-hover: root.bg-hover;
@@ -1069,7 +1070,7 @@ export component GitHubDiffSettingsPopover inherits Rectangle {
     GitHubDiffViewChoice {
         x: 120px;
         y: 34px;
-        label: "Split";
+        label: I18n.diff-split;
         split: true;
         selected: root.pending-view == "split";
         bg-default: root.bg-default;
@@ -1111,7 +1112,7 @@ export component GitHubDiffSettingsPopover inherits Rectangle {
         y: 136px;
         width: parent.width - 46px;
         height: 24px;
-        text: "Hide whitespace";
+        text: I18n.diff-hide-whitespace;
         font-size: 12px;
         font-weight: 600;
         color: root.ignore-whitespace-supported ? root.fg-default : root.fg-muted;
@@ -1142,7 +1143,7 @@ export component GitHubDiffSettingsPopover inherits Rectangle {
         Text {
             width: parent.width;
             height: parent.height;
-            text: "Apply and reload";
+            text: I18n.diff-apply-reload;
             font-size: 12px;
             font-weight: 600;
             color: root.fg-default;
@@ -1173,7 +1174,7 @@ export component GitHubFileTreeToggleButton inherits Rectangle {
         icon: root.file-tree-visible
             ? @image-url("../../assets/icons/octicon-sidebar-collapse-16.svg")
             : @image-url("../../assets/icons/octicon-sidebar-expand-16.svg");
-        tooltip-text: root.file-tree-visible ? "Hide file tree" : "Show file tree";
+        tooltip-text: root.file-tree-visible ? I18n.diff-hide-file-tree : I18n.diff-show-file-tree;
         tooltip-above: false;
         // This is the first Files changed control. Keep its downward tooltip
         // inside the review surface so it cannot overlap the sidebar divider.
@@ -1204,7 +1205,7 @@ export component GitHubFileMenuButton inherits Rectangle {
         icon-source: @image-url("../../assets/icons/octicon-kebab-horizontal-16.svg");
         button-enabled: root.button-enabled;
         selected: root.open;
-        tooltip-text: "More file actions";
+        tooltip-text: I18n.diff-more-file-actions;
         tooltip-align-right: true;
         clicked => { root.toggle-menu(); }
     }
@@ -1228,7 +1229,7 @@ export component GitHubFileMenuButton inherits Rectangle {
             x: GitHubMetrics.size-8;
             y: GitHubMetrics.size-8;
             width: parent.width - GitHubMetrics.size-16;
-            text: root.viewing-file ? "View diff" : "View file";
+            text: root.viewing-file ? I18n.diff-view-diff : I18n.diff-view-file;
             icon: @image-url("../../assets/icons/octicon-eye-16.svg");
             activated => { root.action(); }
         }
@@ -1356,7 +1357,7 @@ export component GitHubCodeRenderingIndicator inherits Rectangle {
 
         Text {
             height: 20px;
-            text: "Rendering code";
+            text: I18n.diff-rendering-code;
             vertical-alignment: center;
             font-size: 12px;
             font-weight: 600;
@@ -1397,7 +1398,7 @@ export component GitHubLargeDiffPlaceholder inherits Rectangle {
         load-label := Text {
             width: parent.width;
             height: parent.height;
-            text: "Load diff";
+            text: I18n.diff-load;
             horizontal-alignment: center;
             vertical-alignment: center;
             // GitHub: Button--link Button--medium Button f4.
@@ -1423,7 +1424,7 @@ export component GitHubLargeDiffPlaceholder inherits Rectangle {
         y: max(62px, root.github-placeholder-height / 2);
         width: parent.width - 32px;
         height: 28px;
-        text: "Large diffs are not rendered by default.";
+        text: I18n.diff-large-not-rendered;
         horizontal-alignment: center;
         vertical-alignment: center;
         font-size: 13px;
@@ -1473,7 +1474,7 @@ export component GitHubFileFilterField inherits Rectangle {
         x: 32px;
         width: parent.width - 40px;
         height: parent.height;
-        text: "Filter files…";
+        text: I18n.diff-filter-files;
         vertical-alignment: center;
         font-family: root.font-family;
         font-size: 14px;
@@ -1501,7 +1502,7 @@ export component GitHubDiffFindBar inherits Rectangle {
         root.query == ""
             ? ""
             : (root.match-count <= 0
-                ? "No results"
+                ? I18n.common-no-results
                 : (root.current-index + 1) + "/" + root.match-count);
     private property <bool> has-matches: root.match-count > 0;
 
@@ -1565,7 +1566,7 @@ export component GitHubDiffFindBar inherits Rectangle {
             x: 28px;
             width: parent.width - 168px;
             height: parent.height;
-            text: "Find in diff…";
+            text: I18n.diff-find;
             vertical-alignment: center;
             font-family: root.font-family;
             font-size: 12px;
@@ -1734,7 +1735,7 @@ export component GitHubFilterMenu inherits Rectangle {
                 y: 0px;
                 width: parent.width - 32px;
                 height: 53px;
-                text: "File extensions";
+                text: I18n.diff-file-extensions;
                 vertical-alignment: center;
                 font-family: root.font-family;
                 font-size: 14px;
@@ -1764,7 +1765,7 @@ export component GitHubFilterMenu inherits Rectangle {
                     x: 48px;
                     width: parent.width - 96px;
                     height: parent.height;
-                    text: extension.extension;
+                    text: extension.label;
                     vertical-alignment: center;
                     font-family: root.font-family;
                     font-size: 14px;
@@ -1804,7 +1805,7 @@ export component GitHubFilterMenu inherits Rectangle {
                 background: GitHubTheme.border-default;
             }
 
-            for option[index] in ["Only manifest files", "Viewed files"]: Rectangle {
+            for option[index] in [I18n.diff-only-manifest-files, I18n.diff-viewed-files]: Rectangle {
                 x: 0px;
                 y: 54px + root.extensions-height + index * 36px;
                 width: parent.width;

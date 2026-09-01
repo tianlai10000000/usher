@@ -1,6 +1,7 @@
 import { AppState } from "../state/app_state.slint";
 import { GitHubPageView } from "../components/page/page_view.slint";
 import { GitHubTheme } from "../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 
 
@@ -22,7 +23,7 @@ export component GitHubAboutPage inherits GitHubPageView {
 
             Text {
                 width: parent.width;
-                text: "About";
+                text: I18n.common-about;
                 font-size: 24px;
                 font-weight: 600;
                 color: GitHubTheme.fg-default;
@@ -94,7 +95,7 @@ export component GitHubAboutPage inherits GitHubPageView {
 
                     Text {
                         width: parent.width;
-                        text: "A desktop workspace for local Git projects and repeatable delivery workflows.";
+                        text: I18n.about-tagline;
                         font-size: 14px;
                         color: GitHubTheme.fg-muted;
                         wrap: word-wrap;
@@ -114,7 +115,7 @@ export component GitHubAboutPage inherits GitHubPageView {
                 alignment: start;
 
                 Text {
-                    text: "About Usher";
+                    text: I18n.navigation-about-usher;
                     font-size: 20px;
                     font-weight: 600;
                     color: GitHubTheme.fg-default;
@@ -122,7 +123,7 @@ export component GitHubAboutPage inherits GitHubPageView {
 
                 Text {
                     width: parent.width;
-                    text: "Usher brings project metadata, pull request summaries, guided Git workflows, an embedded terminal, update management, and desktop notifications into one focused application.";
+                    text: I18n.about-description;
                     font-size: 14px;
                     color: GitHubTheme.fg-default;
                     wrap: word-wrap;
@@ -135,7 +136,7 @@ export component GitHubAboutPage inherits GitHubPageView {
                 alignment: start;
 
                 Text {
-                    text: "Application information";
+                    text: I18n.about-application-information;
                     font-size: 16px;
                     font-weight: 600;
                     color: GitHubTheme.fg-default;
@@ -155,16 +156,16 @@ export component GitHubAboutPage inherits GitHubPageView {
                         spacing: 0px;
 
                         GitHubAboutDetailRow {
-                            label: "Author";
+                            label: I18n.common-author;
                             value: "yuankai";
                         }
                         GitHubAboutDetailRow {
-                            label: "Contact";
+                            label: I18n.common-contact;
                             value: "tianlai10000000@gmail.com";
                         }
                         GitHubAboutDetailRow {
-                            label: "License";
-                            value: "Proprietary (non-open-source)";
+                            label: I18n.common-license;
+                            value: I18n.about-license-proprietary;
                             last: true;
                         }
                     }
@@ -191,7 +192,7 @@ export component GitHubAboutPage inherits GitHubPageView {
                     x: 44px;
                     width: parent.width - 60px;
                     height: parent.height;
-                    text: "Usher is under active development.";
+                    text: I18n.about-development-notice;
                     font-size: 14px;
                     color: GitHubTheme.fg-muted;
                     vertical-alignment: center;

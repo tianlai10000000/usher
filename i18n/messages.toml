@@ -1,0 +1,3871 @@
+# Stable semantic keys and source-language text. UI and Rust code consume the
+# keys; translators only edit locale PO files under i18n/locales/.
+
+[[messages]]
+key = "common.add_rule"
+text = "Add rule"
+
+[[messages]]
+key = "common.auto"
+text = "Auto"
+
+[[messages]]
+key = "common.check_for_updates"
+text = "Check for updates"
+
+[[messages]]
+key = "common.checking"
+text = "Checking…"
+
+[[messages]]
+key = "common.close_menu"
+text = "Close menu"
+
+[[messages]]
+key = "common.custom"
+text = "Custom"
+
+[[messages]]
+key = "common.default"
+text = "Default"
+
+[[messages]]
+key = "common.disable_all"
+text = "Disable all"
+
+[[messages]]
+key = "common.enable_all"
+text = "Enable all"
+
+[[messages]]
+key = "common.off"
+text = "Off"
+
+[[messages]]
+key = "common.on"
+text = "On"
+
+[[messages]]
+key = "common.save"
+text = "Save"
+
+[[messages]]
+key = "common.saved"
+text = "Saved"
+
+[[messages]]
+key = "common.set_default"
+text = "Set default"
+
+[[messages]]
+key = "common.show_api_key"
+text = "Show API key"
+
+[[messages]]
+key = "common.show_tokens"
+text = "Show tokens"
+
+[[messages]]
+key = "common.test_connection"
+text = "Test connection"
+
+[[messages]]
+key = "common.testing"
+text = "Testing…"
+
+[[messages]]
+key = "language.description"
+text = "Choose the language used by Usher. System default follows your operating system locale."
+
+[[messages]]
+key = "language.system_default"
+text = "System default"
+
+[[messages]]
+key = "language.title"
+text = "Language"
+
+[[messages]]
+key = "settings.ai_agent.api_key"
+text = "API key"
+
+[[messages]]
+key = "settings.ai_agent.api_key_visible"
+text = "API key is visible"
+
+[[messages]]
+key = "settings.ai_agent.base_url"
+text = "Base URL"
+
+[[messages]]
+key = "settings.ai_agent.description"
+text = "Connect an OpenAI-compatible provider for workflow assistance."
+
+[[messages]]
+key = "settings.ai_agent.model"
+text = "Model"
+
+[[messages]]
+key = "settings.ai_agent.model_caption"
+text = "For example: deepseek-v4-flash or gpt-4o-mini."
+
+[[messages]]
+key = "settings.ai_agent.model_placeholder"
+text = "Model name"
+
+[[messages]]
+key = "settings.ai_agent.provider"
+text = "Provider"
+
+[[messages]]
+key = "settings.ai_agent.provider_api_caption"
+text = "The provider's OpenAI-compatible API root."
+
+[[messages]]
+key = "settings.ai_agent.save"
+text = "Save AI Agent"
+
+[[messages]]
+key = "settings.ai_agent.title"
+text = "AI Agent"
+
+[[messages]]
+key = "settings.ai_review.add_rule"
+text = "Add rule"
+
+[[messages]]
+key = "settings.ai_review.concurrent"
+text = "Concurrent reviews"
+
+[[messages]]
+key = "settings.ai_review.concurrent_description"
+text = "Applies to queued tasks immediately; running tasks are not interrupted."
+
+[[messages]]
+key = "settings.ai_review.decrease_concurrent"
+text = "Decrease concurrent reviews"
+
+[[messages]]
+key = "settings.ai_review.delete_rule"
+text = "Delete review rule"
+
+[[messages]]
+key = "settings.ai_review.description"
+text = "Configure review concurrency and reusable Markdown rule presets."
+
+[[messages]]
+key = "settings.ai_review.disabled"
+text = "AI Code Review is not included in this build."
+
+[[messages]]
+key = "settings.ai_review.increase_concurrent"
+text = "Increase concurrent reviews"
+
+[[messages]]
+key = "settings.ai_review.markdown_caption"
+text = "Local .md file, up to 512 KiB."
+
+[[messages]]
+key = "settings.ai_review.markdown_file"
+text = "Markdown file"
+
+[[messages]]
+key = "settings.ai_review.rules"
+text = "Review rules"
+
+[[messages]]
+key = "settings.ai_review.rules_description"
+text = "Markdown files are read only when a review starts."
+
+[[messages]]
+key = "settings.ai_review.rule_name"
+text = "Rule name"
+
+[[messages]]
+key = "settings.ai_review.rule_name_placeholder"
+text = "e.g. Security review"
+
+[[messages]]
+key = "settings.ai_review.title"
+text = "AI Review"
+
+[[messages]]
+key = "settings.ai_review.validation.empty_path"
+text = "Enter the Markdown file path."
+
+[[messages]]
+key = "settings.ai_review.validation.relative_path"
+text = "Use an absolute file path."
+
+[[messages]]
+key = "settings.ai_review.validation.not_markdown"
+text = "Choose a .md or .markdown file."
+
+[[messages]]
+key = "settings.ai_review.validation.not_found"
+text = "Choose an existing Markdown file."
+
+[[messages]]
+key = "settings.ai_review.validation.not_a_file"
+text = "The path must point to a file."
+
+[[messages]]
+key = "settings.ai_review.validation.too_large"
+text = "The Markdown file must be 512 KiB or smaller."
+
+[[messages]]
+key = "settings.ai_review.validation.inaccessible"
+text = "The Markdown file cannot be accessed."
+
+[[messages]]
+key = "settings.ai_review.validation.duplicate_name"
+text = "A rule with this name already exists."
+
+[[messages]]
+key = "settings.ai_review.validation.invalid_name"
+text = "Enter a non-empty, unique rule name."
+
+[[messages]]
+key = "settings.ai_review.validation.worker_failed"
+text = "The Markdown file could not be validated."
+
+[[messages]]
+key = "settings.code_hosting.api_base_url"
+text = "API base URL"
+
+[[messages]]
+key = "settings.code_hosting.description"
+text = "Configure credentials and enterprise API endpoints."
+
+[[messages]]
+key = "settings.code_hosting.enterprise"
+text = "Enterprise"
+
+[[messages]]
+key = "settings.code_hosting.enterprise_api"
+text = "Enterprise API configuration"
+
+[[messages]]
+key = "settings.code_hosting.enterprise_api_description"
+text = "Enter a service host or a complete REST API root. Provider version paths are added when omitted."
+
+[[messages]]
+key = "settings.code_hosting.gitee_enterprise_token"
+text = "Gitee Enterprise token"
+
+[[messages]]
+key = "settings.code_hosting.gitee_public_token"
+text = "Gitee public token"
+
+[[messages]]
+key = "settings.code_hosting.github_token"
+text = "GitHub token"
+
+[[messages]]
+key = "settings.code_hosting.gitlab_token"
+text = "GitLab token"
+
+[[messages]]
+key = "settings.code_hosting.personal_access_tokens"
+text = "Personal access tokens"
+
+[[messages]]
+key = "settings.code_hosting.save_api_configuration"
+text = "Save API configuration"
+
+[[messages]]
+key = "settings.code_hosting.save_tokens"
+text = "Save tokens"
+
+[[messages]]
+key = "settings.code_hosting.title"
+text = "Code hosting"
+
+[[messages]]
+key = "settings.code_hosting.tokens_description"
+text = "Tokens are stored locally and used for pull request summaries and workflows."
+
+[[messages]]
+key = "settings.code_hosting.tokens_visible"
+text = "Tokens are visible"
+
+[[messages]]
+key = "settings.diagnostics.application_file_description"
+text = "Write plain-text application logs to usher.log."
+
+[[messages]]
+key = "settings.diagnostics.application_file_logs"
+text = "Application file logs"
+
+[[messages]]
+key = "settings.diagnostics.console_description"
+text = "Write application logs to the process standard output."
+
+[[messages]]
+key = "settings.diagnostics.console_output"
+text = "Console output"
+
+[[messages]]
+key = "settings.diagnostics.description"
+text = "Choose where application logs are written and which detailed diagnostics are included."
+
+[[messages]]
+key = "settings.diagnostics.detailed"
+text = "Detailed diagnostics"
+
+[[messages]]
+key = "settings.diagnostics.export"
+text = "Export diagnostics"
+
+[[messages]]
+key = "settings.diagnostics.log_destinations"
+text = "Log destinations"
+
+[[messages]]
+key = "settings.diagnostics.logging_controls"
+text = "Logging controls"
+
+[[messages]]
+key = "settings.diagnostics.memory"
+text = "Memory diagnostics"
+
+[[messages]]
+key = "settings.diagnostics.memory_description"
+text = "Include periodic process memory and retained UI model measurements."
+
+[[messages]]
+key = "settings.diagnostics.open_logs"
+text = "Open logs"
+
+[[messages]]
+key = "settings.diagnostics.simulate_crash"
+text = "Simulate a crash"
+
+[[messages]]
+key = "settings.diagnostics.simulate_crash_description"
+text = "Verify crash reporting. This immediately terminates the application."
+
+[[messages]]
+key = "settings.diagnostics.structured_tracing"
+text = "Structured tracing file"
+
+[[messages]]
+key = "settings.diagnostics.structured_tracing_description"
+text = "Write structured tracing events to usher_tracing.log."
+
+[[messages]]
+key = "settings.diagnostics.terminal_verbose"
+text = "Terminal verbose diagnostics"
+
+[[messages]]
+key = "settings.diagnostics.terminal_verbose_description"
+text = "Include input, PTY output, viewport, and render details in enabled outputs."
+
+[[messages]]
+key = "settings.diagnostics.title"
+text = "Diagnostics"
+
+[[messages]]
+key = "settings.general.appearance"
+text = "Appearance"
+
+[[messages]]
+key = "settings.general.appearance_description"
+text = "Choose how Usher looks. Auto follows your system appearance."
+
+[[messages]]
+key = "settings.general.automatic_updates"
+text = "Automatic updates"
+
+[[messages]]
+key = "settings.general.automatic_updates_description"
+text = "Download and install new versions automatically."
+
+[[messages]]
+key = "settings.general.dark"
+text = "Dark"
+
+[[messages]]
+key = "settings.general.description"
+text = "Manage appearance, language, and update preferences."
+
+[[messages]]
+key = "settings.general.file_preview"
+text = "File preview"
+
+[[messages]]
+key = "settings.general.file_preview_description"
+text = "Choose where artifacts open and which file providers may parse content."
+
+[[messages]]
+key = "settings.general.images"
+text = "Images"
+
+[[messages]]
+key = "settings.general.images_description"
+text = "Decode supported local image files on demand."
+
+[[messages]]
+key = "settings.general.light"
+text = "Light"
+
+[[messages]]
+key = "settings.general.markdown"
+text = "Markdown"
+
+[[messages]]
+key = "settings.general.markdown_description"
+text = "Render Markdown documents in the shared preview surface."
+
+[[messages]]
+key = "settings.general.plain_text"
+text = "Plain text"
+
+[[messages]]
+key = "settings.general.plain_text_description"
+text = "Preview UTF-8 text and source files."
+
+[[messages]]
+key = "settings.general.release_channel"
+text = "Release channel"
+
+[[messages]]
+key = "settings.general.right_panel"
+text = "Right panel"
+
+[[messages]]
+key = "settings.general.separate_window"
+text = "Separate window"
+
+[[messages]]
+key = "settings.general.sound"
+text = "Sound"
+
+[[messages]]
+key = "settings.general.title"
+text = "General"
+
+[[messages]]
+key = "settings.general.ui_sound_effects"
+text = "UI sound effects"
+
+[[messages]]
+key = "settings.general.ui_sound_effects_description"
+text = "Play a system click when using the page Back button."
+
+[[messages]]
+key = "settings.general.updates"
+text = "Updates"
+
+[[messages]]
+key = "settings.general.version_prefix"
+text = "Current version"
+
+[[messages]]
+key = "settings.feedback.ai_agent_connected"
+text = "AI Agent connected; the selected model is available."
+
+[[messages]]
+key = "settings.feedback.ai_agent_connected_model_unlisted"
+text = "AI Agent connected. The provider did not list the selected model."
+
+[[messages]]
+key = "settings.feedback.ai_agent_save_failed"
+text = "AI Agent settings could not be saved."
+
+[[messages]]
+key = "settings.feedback.ai_agent_saved"
+text = "AI Agent settings saved."
+
+[[messages]]
+key = "settings.feedback.hosting_api_save_failed"
+text = "Code hosting API configuration could not be saved."
+
+[[messages]]
+key = "settings.feedback.hosting_api_saved"
+text = "Code hosting API configuration saved."
+
+[[messages]]
+key = "settings.feedback.tokens_save_failed"
+text = "Code hosting tokens could not be saved."
+
+[[messages]]
+key = "settings.feedback.tokens_saved"
+text = "Code hosting tokens saved."
+
+[[messages]]
+key = "settings.release.alpha"
+text = "Alpha"
+
+[[messages]]
+key = "settings.release.stable"
+text = "Stable"
+
+[[messages]]
+key = "settings.title"
+text = "Settings"
+
+# Shared application shell and route copy.
+
+[[messages]]
+key = "common.about"
+text = "About"
+
+[[messages]]
+key = "common.all"
+text = "All"
+
+[[messages]]
+key = "common.author"
+text = "Author"
+
+[[messages]]
+key = "common.back"
+text = "Back"
+
+[[messages]]
+key = "common.cancel"
+text = "Cancel"
+
+[[messages]]
+key = "common.close"
+text = "Close"
+
+[[messages]]
+key = "common.contact"
+text = "Contact"
+
+[[messages]]
+key = "common.copy_to_clipboard"
+text = "Copy to clipboard"
+
+[[messages]]
+key = "common.delete"
+text = "Delete"
+
+[[messages]]
+key = "common.dismiss"
+text = "Dismiss"
+
+[[messages]]
+key = "common.job_run"
+text = "Job run"
+
+[[messages]]
+key = "common.license"
+text = "License"
+
+[[messages]]
+key = "common.load_more"
+text = "Load more"
+
+[[messages]]
+key = "common.loading"
+text = "Loading"
+
+[[messages]]
+key = "common.notifications"
+text = "Notifications"
+
+[[messages]]
+key = "common.preview"
+text = "Preview"
+
+[[messages]]
+key = "common.projects"
+text = "Projects"
+
+[[messages]]
+key = "common.read"
+text = "Read"
+
+[[messages]]
+key = "common.search"
+text = "Search"
+
+[[messages]]
+key = "common.select"
+text = "Select"
+
+[[messages]]
+key = "common.settings"
+text = "Settings"
+
+[[messages]]
+key = "common.terminal"
+text = "Terminal"
+
+[[messages]]
+key = "common.try_again"
+text = "Try again"
+
+[[messages]]
+key = "common.unread"
+text = "Unread"
+
+[[messages]]
+key = "common.version"
+text = "Version"
+
+[[messages]]
+key = "common.workflow"
+text = "Workflow"
+
+[[messages]]
+key = "navigation.about_usher"
+text = "About Usher"
+
+[[messages]]
+key = "navigation.chat"
+text = "Chat"
+
+[[messages]]
+key = "navigation.home"
+text = "Home"
+
+[[messages]]
+key = "navigation.primary"
+text = "Primary navigation"
+
+[[messages]]
+key = "navigation.ui_components"
+text = "UI Components"
+
+[[messages]]
+key = "tooltip.back_to_top"
+text = "Back to top"
+
+[[messages]]
+key = "tooltip.checking_for_updates"
+text = "Checking for updates…"
+
+[[messages]]
+key = "tooltip.clear_search"
+text = "Clear search"
+
+[[messages]]
+key = "tooltip.close_preview"
+text = "Close preview"
+
+[[messages]]
+key = "tooltip.close_terminal"
+text = "Close Terminal"
+
+[[messages]]
+key = "tooltip.copy_full_sha"
+text = "Copy full SHA"
+
+[[messages]]
+key = "tooltip.copy_preview"
+text = "Copy preview"
+
+[[messages]]
+key = "tooltip.dismiss_notification"
+text = "Dismiss notification"
+
+[[messages]]
+key = "tooltip.edit_project"
+text = "Edit project"
+
+[[messages]]
+key = "tooltip.forward"
+text = "Forward"
+
+[[messages]]
+key = "tooltip.grid_view"
+text = "Grid view"
+
+[[messages]]
+key = "tooltip.list_view"
+text = "List view"
+
+[[messages]]
+key = "tooltip.open_system_application"
+text = "Open with system application"
+
+[[messages]]
+key = "tooltip.open_terminal"
+text = "Open Terminal"
+
+[[messages]]
+key = "tooltip.reload_projects"
+text = "Reload projects"
+
+[[messages]]
+key = "tooltip.show_sidebar"
+text = "Show sidebar"
+
+[[messages]]
+key = "home.description"
+text = "Git projects, pull requests, and delivery workflows"
+
+[[messages]]
+key = "home.empty_description"
+text = "Add a local Git repository, inspect pull request activity, and open project-aware workflows from one place."
+
+[[messages]]
+key = "home.open_projects"
+text = "Open projects"
+
+[[messages]]
+key = "home.configure_settings"
+text = "Configure settings"
+
+[[messages]]
+key = "search.description"
+text = "Find a registered repository by project name or alias."
+
+[[messages]]
+key = "search.empty_description"
+text = "Use the search field on the Projects page to filter the complete repository list."
+
+[[messages]]
+key = "search.projects"
+text = "Search projects"
+
+[[messages]]
+key = "about.tagline"
+text = "A desktop workspace for local Git projects and repeatable delivery workflows."
+
+[[messages]]
+key = "about.description"
+text = "Usher brings project metadata, pull request summaries, guided Git workflows, an embedded Terminal, update management, and desktop notifications into one focused application."
+
+[[messages]]
+key = "about.application_information"
+text = "Application information"
+
+[[messages]]
+key = "about.development_notice"
+text = "Usher is under active development."
+
+[[messages]]
+key = "projects.description"
+text = "Manage local repositories and open their delivery workflows."
+
+[[messages]]
+key = "projects.new_project"
+text = "New project"
+
+[[messages]]
+key = "projects.loading_registry"
+text = "Reading the local project registry."
+
+[[messages]]
+key = "projects.find_placeholder"
+text = "Find a project…"
+
+[[messages]]
+key = "projects.pull_requests"
+text = "Pull requests"
+
+[[messages]]
+key = "projects.repository_provider"
+text = "Repository provider"
+
+[[messages]]
+key = "projects.open_project"
+text = "Open project"
+
+[[messages]]
+key = "projects.delete_project"
+text = "Delete project"
+
+[[messages]]
+key = "projects.project_name"
+text = "Project name"
+
+[[messages]]
+key = "projects.project_name_placeholder"
+text = "e.g. Atlas"
+
+[[messages]]
+key = "projects.project_alias"
+text = "Project alias"
+
+[[messages]]
+key = "projects.project_alias_placeholder"
+text = "e.g. atlas"
+
+[[messages]]
+key = "projects.local_repository"
+text = "Local repository"
+
+[[messages]]
+key = "projects.remote_repository"
+text = "Remote repository"
+
+[[messages]]
+key = "projects.logo"
+text = "Logo"
+
+[[messages]]
+key = "projects.logo_placeholder"
+text = "Local path, HTTPS URL, or data URI"
+
+[[messages]]
+key = "projects.logo_caption"
+text = "Optional. Used in the project list and workflow header."
+
+[[messages]]
+key = "projects.type_tags"
+text = "Project type tags"
+
+[[messages]]
+key = "projects.type_tags_caption"
+text = "Optional. Separate multiple labels with commas."
+
+[[messages]]
+key = "projects.auto_refresh_pr_counts"
+text = "Auto-refresh pull request counts"
+
+[[messages]]
+key = "projects.auto_refresh_pr_counts_description"
+text = "Fetch FAT, UAT, and PROD counts when this list loads."
+
+[[messages]]
+key = "projects.logo_preview"
+text = "Logo preview"
+
+[[messages]]
+key = "chat.mode"
+text = "Chat mode"
+
+[[messages]]
+key = "chat.loading_history"
+text = "Loading Chat history"
+
+[[messages]]
+key = "chat.thinking"
+text = "Thinking"
+
+[[messages]]
+key = "chat.welcome_title"
+text = "Welcome to Usher Chat"
+
+[[messages]]
+key = "chat.welcome_description"
+text = "Start a conversation by typing a message below."
+
+[[messages]]
+key = "chat.try_asking"
+text = "Try asking:"
+
+[[messages]]
+key = "messages.caught_up"
+text = "You're all caught up."
+
+[[messages]]
+key = "messages.mark_all_read"
+text = "Mark all as read"
+
+[[messages]]
+key = "messages.filter"
+text = "Notification filter"
+
+[[messages]]
+key = "messages.mark_as_read"
+text = "Mark as read"
+
+[[messages]]
+key = "messages.mark_as_unread"
+text = "Mark as unread"
+
+[[messages]]
+key = "messages.more_actions"
+text = "More notification actions"
+
+[[messages]]
+key = "messages.view_all"
+text = "View all notifications"
+
+[[messages]]
+key = "messages.dismiss_all"
+text = "Dismiss all"
+
+[[messages]]
+key = "update.available"
+text = "Update available"
+
+[[messages]]
+key = "update.downloading"
+text = "Downloading update"
+
+[[messages]]
+key = "update.downloading_version"
+text = "Downloading version"
+
+[[messages]]
+key = "update.cancel_download"
+text = "Cancel download"
+
+[[messages]]
+key = "preview.preparing"
+text = "Preparing preview"
+
+[[messages]]
+key = "preview.unavailable"
+text = "Preview unavailable"
+
+[[messages]]
+key = "jobs.stop"
+text = "Stop Job"
+
+[[messages]]
+key = "jobs.title"
+text = "Jobs"
+
+[[messages]]
+key = "jobs.steps"
+text = "Workflow steps"
+
+[[messages]]
+key = "jobs.empty_steps"
+text = "No Workflow steps yet."
+
+[[messages]]
+key = "jobs.loading_logs"
+text = "Loading logs…"
+
+# Workflow, Pull Request, Diff, and AI Review copy. Domain terms remain English.
+
+[[messages]]
+key = "workflow.sections"
+text = "Workflow sections"
+
+[[messages]]
+key = "workflow.pull_requests"
+text = "Pull requests"
+
+[[messages]]
+key = "workflow.tags"
+text = "Tags"
+
+[[messages]]
+key = "workflow.branch"
+text = "Branch"
+
+[[messages]]
+key = "workflow.cd"
+text = "CD"
+
+[[messages]]
+key = "workflow.remote"
+text = "Remote"
+
+[[messages]]
+key = "workflow.local"
+text = "Local"
+
+[[messages]]
+key = "workflow.show_in_file_manager"
+text = "Show in file manager"
+
+[[messages]]
+key = "workflow.show_in_finder"
+text = "Show in Finder"
+slint = false
+
+[[messages]]
+key = "workflow.show_in_explorer"
+text = "Show in Explorer"
+slint = false
+
+[[messages]]
+key = "workflow.copy_remote_url"
+text = "Copy remote URL"
+
+[[messages]]
+key = "pr_list.search_placeholder"
+text = "Search all pull requests"
+
+[[messages]]
+key = "pr_list.clear_filters"
+text = "Clear current search query, filters, and sorts"
+
+[[messages]]
+key = "pr_list.more_filters"
+text = "More filters"
+
+[[messages]]
+key = "pr_list.all_reviews"
+text = "All reviews"
+
+[[messages]]
+key = "pr_list.review_required"
+text = "Review required"
+
+[[messages]]
+key = "pr_list.approved_review"
+text = "Approved review"
+
+[[messages]]
+key = "pr_list.changes_requested"
+text = "Changes requested"
+
+[[messages]]
+key = "pr_list.anyone"
+text = "Anyone"
+
+[[messages]]
+key = "pr_list.assigned_nobody"
+text = "Assigned to nobody"
+
+[[messages]]
+key = "pr_list.assigned_me"
+text = "Assigned to me"
+
+[[messages]]
+key = "pr_list.newest"
+text = "Newest"
+
+[[messages]]
+key = "pr_list.oldest"
+text = "Oldest"
+
+[[messages]]
+key = "pr_list.recently_updated"
+text = "Recently updated"
+
+[[messages]]
+key = "pr_list.least_recently_updated"
+text = "Least recently updated"
+
+[[messages]]
+key = "pr_list.filter_by_reviews"
+text = "Filter by reviews"
+
+[[messages]]
+key = "pr_list.sort_by"
+text = "Sort by"
+
+[[messages]]
+key = "pr_list.retry_request"
+text = "Retry request"
+
+[[messages]]
+key = "pr_list.open"
+text = "Open"
+
+[[messages]]
+key = "pr_list.closed"
+text = "Closed"
+
+[[messages]]
+key = "pr_list.total"
+text = "Total"
+
+[[messages]]
+key = "pr_list.ai_rule"
+text = "AI rule"
+
+[[messages]]
+key = "pr_list.reviews"
+text = "Reviews"
+
+[[messages]]
+key = "pr_list.assignee"
+text = "Assignee"
+
+[[messages]]
+key = "pr_list.sort"
+text = "Sort"
+
+[[messages]]
+key = "pr_list.loading"
+text = "Loading pull requests…"
+
+[[messages]]
+key = "pr_list.unable_to_load"
+text = "Unable to load pull requests"
+
+[[messages]]
+key = "pr_list.load_error_description"
+text = "Check your code hosting configuration or connection, then try again."
+
+[[messages]]
+key = "pr_list.empty_filter_description"
+text = "Try another status filter."
+
+[[messages]]
+key = "pr_list.cancel_review"
+text = "Cancel AI Review"
+
+[[messages]]
+key = "common.previous"
+text = "Previous"
+
+[[messages]]
+key = "common.next"
+text = "Next"
+
+[[messages]]
+key = "tag.scope"
+text = "Scope"
+
+[[messages]]
+key = "tag.repository_scope"
+text = "Tag repository scope"
+
+[[messages]]
+key = "tag.operations"
+text = "Tag operations"
+
+[[messages]]
+key = "tag.add"
+text = "Add Tag"
+
+[[messages]]
+key = "tag.remove"
+text = "Remove Tag"
+
+[[messages]]
+key = "tag.bump"
+text = "Bump"
+
+[[messages]]
+key = "tag.semantic_bump"
+text = "Semantic version bump"
+
+[[messages]]
+key = "tag.patch"
+text = "Patch"
+
+[[messages]]
+key = "tag.minor"
+text = "Minor"
+
+[[messages]]
+key = "tag.major"
+text = "Major"
+
+[[messages]]
+key = "tag.current_version"
+text = "Current Tag version"
+
+[[messages]]
+key = "tag.new_version"
+text = "New Tag version"
+
+[[messages]]
+key = "tag.description"
+text = "Tag description"
+
+[[messages]]
+key = "tag.to_remove"
+text = "Tag to remove"
+
+[[messages]]
+key = "branch.description"
+text = "Validate a clean source and target Branch before recreating the Branch plan."
+
+[[messages]]
+key = "branch.source"
+text = "Source Branch"
+
+[[messages]]
+key = "branch.target"
+text = "Target Branch"
+
+[[messages]]
+key = "branch.recreate_remote_tracking"
+text = "Recreate remote tracking"
+
+[[messages]]
+key = "branch.remote_tracking_description"
+text = "Include the remote tracking Branch in the validated plan."
+
+[[messages]]
+key = "branch.validate_plan"
+text = "Validate Branch plan"
+
+[[messages]]
+key = "branch.execution_plan"
+text = "Execution plan"
+
+[[messages]]
+key = "cd.description"
+text = "Run a staged deployment and inspect its build, test, deploy, and verification steps."
+
+[[messages]]
+key = "cd.environment"
+text = "Environment"
+
+[[messages]]
+key = "cd.release"
+text = "Release"
+
+[[messages]]
+key = "cd.commit"
+text = "Commit"
+
+[[messages]]
+key = "cd.rollback"
+text = "Rollback"
+
+[[messages]]
+key = "cd.rollback_description"
+text = "Return the active deployment to a previously verified Commit."
+
+[[messages]]
+key = "cd.rollback_commit"
+text = "Rollback Commit"
+
+[[messages]]
+key = "cd.start_rollback"
+text = "Start rollback"
+
+[[messages]]
+key = "cd.workflow"
+text = "CD Workflow"
+
+[[messages]]
+key = "cd.empty_steps"
+text = "Workflow steps will appear after deployment or rollback starts."
+
+[[messages]]
+key = "pr_review.sections"
+text = "Pull Request sections"
+
+[[messages]]
+key = "pr_review.conversation"
+text = "Conversation"
+
+[[messages]]
+key = "pr_review.commits"
+text = "Commits"
+
+[[messages]]
+key = "pr_review.files_changed"
+text = "Files changed"
+
+[[messages]]
+key = "pr_review.open_diff_settings"
+text = "Open Diff view settings"
+
+[[messages]]
+key = "pr_review.prev"
+text = "Prev"
+
+[[messages]]
+key = "pr_review.loading_conversation"
+text = "Loading conversation…"
+
+[[messages]]
+key = "pr_review.no_conversation"
+text = "No conversation activity was returned by this Provider."
+
+[[messages]]
+key = "pr_review.merged_commit"
+text = "merged Commit"
+
+[[messages]]
+key = "pr_review.into"
+text = "into"
+
+[[messages]]
+key = "pr_review.review_actions"
+text = "Review actions"
+
+[[messages]]
+key = "pr_review.no_description"
+text = "No description provided."
+
+[[messages]]
+key = "pr_review.write"
+text = "Write"
+
+[[messages]]
+key = "pr_review.leave_comment"
+text = "Leave a comment"
+
+[[messages]]
+key = "pr_review.loading_commits"
+text = "Loading Commits…"
+
+[[messages]]
+key = "pr_review.commits_on"
+text = "Commits on"
+
+[[messages]]
+key = "pr_review.verified"
+text = "Verified"
+
+[[messages]]
+key = "pr_review.no_commits"
+text = "No Commits were returned by this Provider."
+
+[[messages]]
+key = "pr_review.loading_files"
+text = "Loading changed files…"
+
+[[messages]]
+key = "pr_review.copy_file_path"
+text = "Copy file path"
+
+[[messages]]
+key = "pr_review.previous_file"
+text = "Previous file"
+
+[[messages]]
+key = "pr_review.next_file"
+text = "Next file"
+
+[[messages]]
+key = "pr_review.dismiss_review"
+text = "Dismiss review"
+
+[[messages]]
+key = "pr_review.select_commits"
+text = "Select Commits to view"
+
+[[messages]]
+key = "pr_review.all_commits"
+text = "All Commits"
+
+[[messages]]
+key = "pr_review.changes_since_review"
+text = "Changes since your last review"
+
+[[messages]]
+key = "pr_review.no_previous_review"
+text = "No previous review found"
+
+[[messages]]
+key = "pr_review.no_extension"
+text = "No extension"
+
+[[messages]]
+key = "pr_review.select_commit_range"
+text = "Select a range of Commits"
+
+[[messages]]
+key = "pr_review.dismiss_reason"
+text = "Reason for dismissing"
+
+[[messages]]
+key = "pr_review.review_changes"
+text = "Review changes"
+
+[[messages]]
+key = "pr_review.review_summary"
+text = "Review summary"
+
+[[messages]]
+key = "pr_review.comment"
+text = "Comment"
+
+[[messages]]
+key = "pr_review.comment_description"
+text = "Submit general feedback without explicit approval."
+
+[[messages]]
+key = "pr_review.approve"
+text = "Approve"
+
+[[messages]]
+key = "pr_review.approve_description"
+text = "Submit feedback and approve merging these changes."
+
+[[messages]]
+key = "pr_review.request_changes"
+text = "Request changes"
+
+[[messages]]
+key = "pr_review.merge_pull_request"
+text = "Merge Pull Request"
+
+[[messages]]
+key = "pr_review.merge_description_prefix"
+text = "Choose how the Commits from"
+
+[[messages]]
+key = "pr_review.merge_description_infix"
+text = "are added to"
+
+[[messages]]
+key = "pr_review.create_merge_commit"
+text = "Create a merge Commit"
+
+[[messages]]
+key = "pr_review.create_merge_commit_description"
+text = "All Commits will be added with a merge Commit."
+
+[[messages]]
+key = "pr_review.squash_merge"
+text = "Squash and merge"
+
+[[messages]]
+key = "pr_review.squash_merge_description"
+text = "The Commits will be combined into one Commit."
+
+[[messages]]
+key = "pr_review.rebase_merge"
+text = "Rebase and merge"
+
+[[messages]]
+key = "pr_review.rebase_merge_description"
+text = "The Commits will be rebased onto the base Branch."
+
+[[messages]]
+key = "pr_review.fast_forward_merge"
+text = "Fast-forward and merge"
+
+[[messages]]
+key = "pr_review.fast_forward_merge_description"
+text = "Move the base Branch directly to the Pull Request head."
+
+[[messages]]
+key = "pr_review.delete_source_branch"
+text = "Delete the source Branch after merging"
+
+[[messages]]
+key = "pr_review.revert_pull_request"
+text = "Revert Pull Request"
+
+[[messages]]
+key = "pr_review.revert_confirmation"
+text = "Reverse the changes introduced by this merged Pull Request?"
+
+[[messages]]
+key = "pr_review.approved"
+text = "Approved"
+
+[[messages]]
+key = "pr_review.copy_source_branch"
+text = "Copy source Branch"
+
+[[messages]]
+key = "pr_review.reverse_changes"
+text = "Reverse the changes from this merged Pull Request"
+
+[[messages]]
+key = "diff.view"
+text = "Diff view"
+
+[[messages]]
+key = "diff.unified"
+text = "Unified"
+
+[[messages]]
+key = "diff.split"
+text = "Split"
+
+[[messages]]
+key = "diff.hide_whitespace"
+text = "Hide whitespace"
+
+[[messages]]
+key = "diff.apply_reload"
+text = "Apply and reload"
+
+[[messages]]
+key = "diff.more_file_actions"
+text = "More file actions"
+
+[[messages]]
+key = "diff.rendering_code"
+text = "Rendering code"
+
+[[messages]]
+key = "diff.load"
+text = "Load Diff"
+
+[[messages]]
+key = "diff.large_not_rendered"
+text = "Large Diffs are not rendered by default."
+
+[[messages]]
+key = "diff.filter_files"
+text = "Filter files…"
+
+[[messages]]
+key = "diff.find"
+text = "Find in Diff…"
+
+[[messages]]
+key = "diff.file_extensions"
+text = "File extensions"
+
+[[messages]]
+key = "ai_review.elapsed"
+text = "Elapsed"
+
+[[messages]]
+key = "ai_review.copilot_review"
+text = "Copilot review"
+
+[[messages]]
+key = "ai_review.worked_for"
+text = "Worked for"
+
+[[messages]]
+key = "ai_review.title"
+text = "AI Review"
+
+[[messages]]
+key = "ai_review.close"
+text = "Close AI Review"
+
+[[messages]]
+key = "ai_review.composer_mode"
+text = "AI Review composer mode"
+
+[[messages]]
+key = "ai_review.ask"
+text = "Ask"
+
+[[messages]]
+key = "ai_review.review_again"
+text = "Review again"
+
+[[messages]]
+key = "ai_review.ask_about_pr"
+text = "Ask about this Pull Request"
+
+[[messages]]
+key = "ai_review.add_instructions"
+text = "Add review instructions"
+
+# Dynamic Workflow and PR Review presentation fragments. These remain typed
+# catalog entries so additional locales never require locale-specific UI code.
+
+[[messages]]
+key = "common.page"
+text = "Page"
+
+[[messages]]
+key = "common.open_settings"
+text = "Open Settings"
+
+[[messages]]
+key = "common.uh_oh"
+text = "Uh oh!"
+
+[[messages]]
+key = "common.load_error_reload"
+text = "There was an error while loading. Please reload this page."
+
+[[messages]]
+key = "common.thinking"
+text = "Thinking"
+
+[[messages]]
+key = "common.send"
+text = "Send"
+
+[[messages]]
+key = "common.cancel_response"
+text = "Cancel response"
+
+[[messages]]
+key = "common.working"
+text = "Working…"
+
+[[messages]]
+key = "common.no_preset"
+text = "No preset"
+
+[[messages]]
+key = "common.not_configured"
+text = "Not configured"
+
+[[messages]]
+key = "common.untitled_project"
+text = "Untitled project"
+
+[[messages]]
+key = "workflow.ready_branches"
+text = "Ready to recreate Branches."
+
+[[messages]]
+key = "workflow.ready_tags"
+text = "Ready to add or remove a Tag."
+
+[[messages]]
+key = "workflow.no_remote_url"
+text = "No remote URL"
+
+[[messages]]
+key = "workflow.no_local_path"
+text = "No local path"
+
+[[messages]]
+key = "workflow.repository_details"
+text = "Repository details"
+
+[[messages]]
+key = "cd.no_deployment"
+text = "No deployment started."
+
+[[messages]]
+key = "cd.waiting_to_start"
+text = "Waiting to start."
+
+[[messages]]
+key = "cd.build"
+text = "Build"
+
+[[messages]]
+key = "cd.test"
+text = "Test"
+
+[[messages]]
+key = "cd.deploy"
+text = "Deploy"
+
+[[messages]]
+key = "cd.verify"
+text = "Verify"
+
+[[messages]]
+key = "cd.deployment_running"
+text = "Deployment running…"
+
+[[messages]]
+key = "cd.start_deployment"
+text = "Start deployment"
+
+[[messages]]
+key = "cd.stable_hash_placeholder"
+text = "previous stable hash"
+
+[[messages]]
+key = "pr_list.empty_open"
+text = "There aren’t any open pull requests."
+
+[[messages]]
+key = "pr_list.empty_merged"
+text = "There aren’t any merged pull requests."
+
+[[messages]]
+key = "pr_list.empty_closed"
+text = "There aren’t any closed pull requests."
+
+[[messages]]
+key = "pr_list.pull_request"
+text = "Pull Request"
+
+[[messages]]
+key = "pr_list.by"
+text = "by"
+
+[[messages]]
+key = "pr_list.was_merged"
+text = "was merged"
+
+[[messages]]
+key = "pr_list.was_closed"
+text = "was closed"
+
+[[messages]]
+key = "pr_list.was_opened"
+text = "was opened"
+
+[[messages]]
+key = "pr_list.approving_review_tooltip"
+text = "This Pull Request has an approving Review"
+
+[[messages]]
+key = "pr_list.awaiting_review_tooltip"
+text = "This Pull Request is awaiting a required Review"
+
+[[messages]]
+key = "pr_list.changes_requested_tooltip"
+text = "A reviewer requested changes"
+
+[[messages]]
+key = "pr_list.open_conversation"
+text = "Open conversation"
+
+[[messages]]
+key = "pr_list.ai_review_queued"
+text = "AI Review queued"
+
+[[messages]]
+key = "pr_list.ai_review_in_progress"
+text = "AI Review in progress"
+
+[[messages]]
+key = "pr_list.open_ai_review"
+text = "Open AI Review"
+
+[[messages]]
+key = "pr_list.ai_review_failed"
+text = "AI Review failed; start again"
+
+[[messages]]
+key = "pr_list.review_with_ai"
+text = "Review Pull Request with AI"
+
+[[messages]]
+key = "pr_list.follows_settings_default"
+text = "Follows the Settings default"
+
+[[messages]]
+key = "pr_list.project_override"
+text = "Project override"
+
+[[messages]]
+key = "pr_review.merged"
+text = "Merged"
+
+[[messages]]
+key = "pr_review.wants_to_merge"
+text = "wants to merge"
+
+[[messages]]
+key = "pr_review.commit_into"
+text = "Commit into"
+
+[[messages]]
+key = "pr_review.commits_into"
+text = "Commits into"
+
+[[messages]]
+key = "pr_review.from"
+text = "from"
+
+[[messages]]
+key = "pr_review.copy_full_sha"
+text = "Copy full SHA"
+
+[[messages]]
+key = "pr_review.copy_full_sha_for"
+text = "Copy full SHA for"
+
+[[messages]]
+key = "pr_review.dismiss_explanation_prefix"
+text = "Dismiss"
+
+[[messages]]
+key = "pr_review.dismiss_explanation_suffix"
+text = "Review and explain why. The reason will be added to the conversation."
+
+[[messages]]
+key = "pr_review.comment_approve_request"
+text = "Comment, approve, or request changes"
+
+[[messages]]
+key = "pr_review.configure_provider"
+text = "Configure Provider credentials to submit a Review"
+
+[[messages]]
+key = "pr_review.choose_merge_method"
+text = "Choose a merge method"
+
+[[messages]]
+key = "ai_review.cancelled"
+text = "Review cancelled."
+
+[[messages]]
+key = "ai_review.no_actionable_findings"
+text = "No actionable findings"
+
+[[messages]]
+key = "ai_review.completed"
+text = "Review completed"
+
+[[messages]]
+key = "ai_review.finding"
+text = "finding"
+
+[[messages]]
+key = "ai_review.findings"
+text = "findings"
+
+[[messages]]
+key = "ai_review.processing_chunk"
+text = "Processing chunk"
+
+[[messages]]
+key = "ai_review.reviewing_changes"
+text = "Reviewing current changes"
+
+[[messages]]
+key = "ai_review.review_current_again"
+text = "Review current Commit again"
+
+[[messages]]
+key = "common.progress"
+text = "Progress"
+
+[[messages]]
+key = "common.active_filter"
+text = "active filter"
+
+[[messages]]
+key = "home.heading"
+text = "Manage your delivery workspace"
+
+[[messages]]
+key = "search.moved"
+text = "Project search has moved"
+
+[[messages]]
+key = "projects.loading"
+text = "Loading projects"
+
+[[messages]]
+key = "projects.load_failed"
+text = "Projects could not be loaded"
+
+[[messages]]
+key = "projects.none"
+text = "No projects yet"
+
+[[messages]]
+key = "projects.no_matches"
+text = "No matching projects"
+
+[[messages]]
+key = "projects.add_repository_to_start"
+text = "Add a local Git repository to get started."
+
+[[messages]]
+key = "projects.try_another"
+text = "Try another project name or alias."
+
+[[messages]]
+key = "projects.edit_project"
+text = "Edit project"
+
+[[messages]]
+key = "projects.delete_project_question"
+text = "Delete project?"
+
+[[messages]]
+key = "projects.edit_description"
+text = "Update repository metadata and project options."
+
+[[messages]]
+key = "projects.add_description"
+text = "Add a local Git repository to Usher."
+
+[[messages]]
+key = "projects.save_changes"
+text = "Save changes"
+
+[[messages]]
+key = "projects.add_project"
+text = "Add project"
+
+[[messages]]
+key = "projects.required_fields"
+text = "Project name, alias, local repository, and remote repository are required."
+
+[[messages]]
+key = "projects.delete_confirmation_prefix"
+text = "This will permanently delete"
+
+[[messages]]
+key = "projects.delete_confirmation_suffix"
+text = "from Usher. Repository files on disk will not be removed."
+
+[[messages]]
+key = "jobs.started_manually"
+text = "Started manually"
+
+[[messages]]
+key = "jobs.in_progress"
+text = "In progress"
+
+[[messages]]
+key = "jobs.success"
+text = "Success"
+
+[[messages]]
+key = "jobs.failure"
+text = "Failure"
+
+[[messages]]
+key = "jobs.cancelled"
+text = "Cancelled"
+
+[[messages]]
+key = "jobs.queued"
+text = "Queued"
+
+[[messages]]
+key = "chat.ai_not_configured"
+text = "AI Agent not configured"
+
+[[messages]]
+key = "chat.repository_knowledge"
+text = "Repository knowledge"
+
+[[messages]]
+key = "chat.ai_title"
+text = "AI Chat"
+
+[[messages]]
+key = "chat.rag_title"
+text = "RAG Chat"
+
+[[messages]]
+key = "chat.ai_description"
+text = "Ask the configured AI model for help with code, design, or delivery."
+
+[[messages]]
+key = "chat.rag_description"
+text = "Ask questions grounded in the connected repository knowledge base."
+
+[[messages]]
+key = "chat.suggestion_implementation"
+text = "Review this implementation approach"
+
+[[messages]]
+key = "chat.suggestion_rust"
+text = "Explain a Rust concept"
+
+[[messages]]
+key = "chat.suggestion_performance"
+text = "Help me debug a performance issue"
+
+[[messages]]
+key = "chat.suggestion_architecture"
+text = "Summarize the repository architecture"
+
+[[messages]]
+key = "chat.suggestion_feature"
+text = "Where is this feature implemented?"
+
+[[messages]]
+key = "chat.suggestion_docs"
+text = "Find related project documentation"
+
+[[messages]]
+key = "chat.waiting_response"
+text = "Waiting for response…"
+
+[[messages]]
+key = "chat.ask_ai"
+text = "Ask AI…"
+
+[[messages]]
+key = "chat.ask_repository"
+text = "Ask the repository…"
+
+[[messages]]
+key = "chat.sending_message"
+text = "Sending message"
+
+[[messages]]
+key = "chat.send_message"
+text = "Send message"
+
+[[messages]]
+key = "status.update_check"
+text = "Update check"
+
+[[messages]]
+key = "status.checking_update"
+text = "Checking if an update is available, please wait…"
+
+[[messages]]
+key = "status.download_progress"
+text = "Download progress"
+
+[[messages]]
+key = "status.downloading"
+text = "Downloading"
+
+[[messages]]
+key = "status.status"
+text = "Status"
+
+[[messages]]
+key = "status.shortcut_failed"
+text = "Shortcut initialization failed"
+
+[[messages]]
+key = "status.shortcuts_ready"
+text = "Shortcuts ready"
+
+[[messages]]
+key = "status.shortcut_status"
+text = "Shortcut status"
+
+[[messages]]
+key = "status.unread_notifications"
+text = "unread notifications"
+
+[[messages]]
+key = "status.no_notifications"
+text = "No notifications"
+
+[[messages]]
+key = "status.network_connected"
+text = "Network connected"
+
+[[messages]]
+key = "status.network_disconnected"
+text = "Network disconnected"
+
+[[messages]]
+key = "status.network_status"
+text = "Network status"
+
+[[messages]]
+key = "update.action"
+text = "Update"
+
+[[messages]]
+key = "update.new_version_prefix"
+text = "A new version"
+
+[[messages]]
+key = "update.new_version_infix"
+text = "is available. Current version:"
+
+[[messages]]
+key = "update.new_version_suffix"
+text = "Please update to the latest version."
+
+[[messages]]
+key = "messages.unread_notification"
+text = "unread notification"
+
+[[messages]]
+key = "messages.category_general"
+text = "General"
+
+[[messages]]
+key = "messages.category_webhook"
+text = "Webhook"
+
+[[messages]]
+key = "messages.category_software_update"
+text = "Software update"
+
+[[messages]]
+key = "messages.category_cd_workflow"
+text = "CD Workflow"
+
+[[messages]]
+key = "shortcuts.loading"
+text = "Loading shortcuts…"
+
+[[messages]]
+key = "shortcuts.loading_input"
+text = "Loading shortcut input…"
+
+[[messages]]
+key = "diagnostics.exported"
+text = "Diagnostic bundle exported."
+
+[[messages]]
+key = "diagnostics.export_failed"
+text = "Failed to export diagnostic bundle."
+
+[[messages]]
+key = "tag.already_running"
+text = "Tag Workflow is already running."
+
+[[messages]]
+key = "tag.initializing"
+text = "The Add Tag tab is still loading the latest Tag. Please wait."
+
+[[messages]]
+key = "tag.remote_unavailable"
+text = "Remote mode is not available yet."
+
+[[messages]]
+key = "tag.invalid_version"
+text = "The new Tag version must use a semantic version such as v1.2.3."
+
+[[messages]]
+key = "workflow.local_repository_empty"
+text = "The local repository path is empty. Open a project first."
+
+[[messages]]
+key = "workflow.local_repository_missing"
+text = "The local repository path does not exist."
+
+[[messages]]
+key = "tag.no_running_workflow"
+text = "No running Tag Workflow to stop."
+
+[[messages]]
+key = "tag.stop_requested"
+text = "Tag Workflow stop requested."
+
+[[messages]]
+key = "workflow.copy_remote_failed"
+text = "Failed to copy the remote URL."
+
+[[messages]]
+key = "workflow.open_local_repository_failed"
+text = "The local repository could not be opened."
+
+[[messages]]
+key = "pr_list.metadata_unavailable"
+text = "Repository metadata is not available."
+
+[[messages]]
+key = "pr_list.single_state_qualifier"
+text = "Use only one PR state qualifier: is:open, is:closed, or is:merged."
+
+[[messages]]
+key = "pr_list.merged_unmerged_conflict"
+text = "is:merged and is:unmerged cannot be combined."
+
+[[messages]]
+key = "pr_list.unmerged_requires_state"
+text = "Combine is:unmerged with is:closed or is:open for portable filtering."
+
+[[messages]]
+key = "cd.already_running"
+text = "A CD Workflow is already running."
+
+[[messages]]
+key = "cd.started"
+text = "CD Workflow started."
+
+[[messages]]
+key = "cd.completed"
+text = "CD Workflow completed"
+
+[[messages]]
+key = "cd.rollback_required"
+text = "Rollback Commit is required."
+
+[[messages]]
+key = "cd.finish_before_rollback"
+text = "The CD Workflow is running. Finish it before Rollback."
+
+[[messages]]
+key = "cd.rollback_started"
+text = "Rollback started."
+
+[[messages]]
+key = "cd.rollback_completed"
+text = "CD Rollback completed"
+
+[[messages]]
+key = "update.preparing"
+text = "Preparing…"
+
+[[messages]]
+key = "ai_review.stopping_response"
+text = "Stopping response…"
+
+[[messages]]
+key = "ai_review.preparing_context"
+text = "Preparing Pull Request context…"
+
+[[messages]]
+key = "ai_review.thinking"
+text = "Thinking…"
+
+[[messages]]
+key = "ai_review.no_preset"
+text = "No preset"
+
+[[messages]]
+key = "ai_review.default_rule"
+text = "Default ({name})"
+
+[[messages]]
+key = "ai_review.failure.configure_base_url"
+text = "Configure the AI Agent Base URL in Settings."
+
+[[messages]]
+key = "ai_review.failure.configure_api_key"
+text = "Configure the AI Agent API key in Settings."
+
+[[messages]]
+key = "ai_review.failure.configure_model"
+text = "Configure the AI Agent model in Settings."
+
+[[messages]]
+key = "ai_review.failure.no_diff"
+text = "The current Commit has no Diff available for Review."
+
+[[messages]]
+key = "ai_review.failure.timeout"
+text = "The AI Agent request timed out. Try again."
+
+[[messages]]
+key = "ai_review.failure.invalid_response"
+text = "The AI Agent returned data in an invalid format."
+
+[[messages]]
+key = "ai_review.failure.agent_request"
+text = "The AI Agent request failed. Check its configuration and try again."
+
+[[messages]]
+key = "ai_review.failure.context"
+text = "The Pull Request context could not be loaded."
+
+[[messages]]
+key = "ai_review.failure.rule"
+text = "The configured Markdown Review rule could not be read."
+
+[[messages]]
+key = "ai_review.failure.storage"
+text = "The AI Review data could not be saved or loaded."
+
+[[messages]]
+key = "ai_review.failure.interrupted"
+text = "The Review was interrupted when the application exited."
+
+[[messages]]
+key = "ai_review.failure.internal"
+text = "The Review could not continue because its task state was unavailable."
+
+[[messages]]
+key = "ai_review.failure.generic"
+text = "The AI Review failed. Try again."
+
+[[messages]]
+key = "ai_review.response_failed"
+text = "Could not get a response: {reason}"
+
+[[messages]]
+key = "ai_review.response_stopped"
+text = "Response stopped."
+
+[[messages]]
+key = "ai_review.response_preview_title"
+text = "AI Review response"
+
+[[messages]]
+key = "ai_review.notification.completed_title"
+text = "AI Review completed for Pull Request #{number}"
+
+[[messages]]
+key = "ai_review.notification.completed_body"
+text = "Found {count} actionable issue(s)."
+
+[[messages]]
+key = "ai_review.notification.failed_title"
+text = "AI Review failed for Pull Request #{number}"
+
+[[messages]]
+key = "pr_review.copy_file_failed"
+text = "Failed to copy the file path."
+
+[[messages]]
+key = "pr_review.copy_sha_failed"
+text = "Failed to copy the Commit SHA."
+
+[[messages]]
+key = "pr_review.copy_branch_failed"
+text = "Failed to copy the source Branch."
+
+[[messages]]
+key = "pr_review.commit_details_failed"
+text = "The selected Commit details could not be loaded."
+
+[[messages]]
+key = "pr_review.commit_missing"
+text = "The selected Commit is no longer in this Pull Request."
+
+[[messages]]
+key = "pr_review.checking_mergeability"
+text = "Checking mergeability…"
+
+[[messages]]
+key = "pr_review.mergeability_waiting"
+text = "Waiting for the repository Provider to calculate merge readiness."
+
+[[messages]]
+key = "pr_review.merge_status_unavailable"
+text = "Merge status unavailable"
+
+[[messages]]
+key = "pr_review.mergeability_unavailable"
+text = "The repository Provider could not return merge readiness."
+
+[[messages]]
+key = "pr_review.invalid_review_action"
+text = "Choose a valid Review action."
+
+[[messages]]
+key = "pr_review.comment_required"
+text = "Enter a Review comment before submitting."
+
+[[messages]]
+key = "pr_review.repository_context_unavailable"
+text = "The Pull Request repository context is unavailable."
+
+[[messages]]
+key = "pr_review.dismiss_reason_required"
+text = "Enter a reason before dismissing the Review."
+
+[[messages]]
+key = "pr_review.dismissed"
+text = "Review dismissed on the remote repository."
+
+[[messages]]
+key = "pr_review.invalid_merge_method"
+text = "Choose a valid merge method."
+
+[[messages]]
+key = "pr_review.merge_method_disabled"
+text = "That merge method is disabled for this repository."
+
+[[messages]]
+key = "pr_review.merged_successfully"
+text = "Pull Request merged successfully."
+
+[[messages]]
+key = "pr_review.source_reference_missing"
+text = "This file has no immutable source reference."
+
+[[messages]]
+key = "pr_review.load_complete_file_failed"
+text = "Failed to load the complete file."
+
+[[messages]]
+key = "projects.fill_all_fields"
+text = "Please fill in all fields."
+
+[[messages]]
+key = "projects.alias_exists"
+text = "Project alias already exists."
+
+[[messages]]
+key = "projects.original_alias_missing"
+text = "The original project alias is missing."
+
+[[messages]]
+key = "projects.not_found"
+text = "Project not found."
+
+[[messages]]
+key = "projects.alias_missing"
+text = "Project alias is missing."
+
+[[messages]]
+key = "projects.reload_failed"
+text = "Failed to reload projects."
+
+[[messages]]
+key = "projects.reloaded"
+text = "Projects reloaded."
+
+[[messages]]
+key = "projects.added"
+text = "Project added."
+
+[[messages]]
+key = "projects.updated"
+text = "Project updated."
+
+[[messages]]
+key = "projects.deleted"
+text = "Project deleted."
+
+[[messages]]
+key = "projects.registry_action_failed"
+text = "The project registry action could not be completed."
+
+[[messages]]
+key = "projects.save_in_progress"
+text = "A save for this project is already in progress."
+
+[[messages]]
+key = "projects.using_default_logo"
+text = "Using app default logo"
+
+[[messages]]
+key = "branch.validated"
+text = "Branch Workflow validated."
+
+[[messages]]
+key = "common.unavailable"
+text = "Unavailable"
+
+[[messages]]
+key = "tag.remove_initializing"
+text = "The Remove Tag tab is still loading the latest Tag. Please wait."
+
+[[messages]]
+key = "tag.invalid_remove_version"
+text = "The Tag to remove must use a semantic version such as v1.2.3."
+
+[[messages]]
+key = "tooltip.hide_sidebar"
+text = "Hide sidebar"
+
+[[messages]]
+key = "common.copied"
+text = "Copied!"
+
+[[messages]]
+key = "common.no_results"
+text = "No results"
+
+[[messages]]
+key = "messages.confirm_clear"
+text = "Confirm clear"
+
+[[messages]]
+key = "messages.clear_all"
+text = "Clear all"
+
+[[messages]]
+key = "messages.no_unread"
+text = "No unread notifications"
+
+[[messages]]
+key = "messages.no_read"
+text = "No read notifications"
+
+[[messages]]
+key = "messages.none_yet"
+text = "No notifications yet"
+
+[[messages]]
+key = "projects.pull_requests_loading"
+text = "Pull requests loading"
+
+[[messages]]
+key = "projects.pull_requests_unavailable"
+text = "Pull requests unavailable"
+
+[[messages]]
+key = "projects.invalid_logo_default"
+text = "Invalid input, using default logo"
+
+[[messages]]
+key = "terminal.connected"
+text = "Connected"
+
+[[messages]]
+key = "terminal.starting"
+text = "Starting"
+
+[[messages]]
+key = "terminal.idle"
+text = "Idle"
+
+[[messages]]
+key = "terminal.exit_fullscreen"
+text = "Exit fullscreen"
+
+[[messages]]
+key = "terminal.fullscreen"
+text = "Fullscreen"
+
+[[messages]]
+key = "terminal.ready"
+text = "Terminal ready."
+
+[[messages]]
+key = "terminal.session_closed"
+text = "[Terminal session closed]"
+
+[[messages]]
+key = "terminal.start_failed"
+text = "The Terminal session could not be started. Check the logs for details."
+
+[[messages]]
+key = "terminal.write_failed"
+text = "[Terminal input could not be sent. Check the logs for details.]"
+
+[[messages]]
+key = "ai_review.severity_high"
+text = "High"
+
+[[messages]]
+key = "ai_review.severity_medium"
+text = "Medium"
+
+[[messages]]
+key = "ai_review.severity_low"
+text = "Low"
+
+[[messages]]
+key = "pr_review.commenting"
+text = "Commenting…"
+
+[[messages]]
+key = "pr_review.write_comment"
+text = "Write a comment before submitting"
+
+[[messages]]
+key = "pr_review.add_comment"
+text = "Add a comment on this Pull Request"
+
+[[messages]]
+key = "pr_review.configure_to_comment"
+text = "Configure Provider credentials to comment"
+
+[[messages]]
+key = "pr_review.view_commit_details"
+text = "View Commit details"
+
+[[messages]]
+key = "pr_review.no_changed_files"
+text = "No changed files"
+
+[[messages]]
+key = "pr_review.no_matching_files"
+text = "No matching files"
+
+[[messages]]
+key = "pr_review.select_changed_file"
+text = "Select a changed file"
+
+[[messages]]
+key = "pr_review.collapse_non_diff"
+text = "Collapse non-Diff lines"
+
+[[messages]]
+key = "pr_review.expand_all_lines"
+text = "Expand all lines"
+
+[[messages]]
+key = "pr_review.dismissing"
+text = "Dismissing…"
+
+[[messages]]
+key = "pr_review.submitting"
+text = "Submitting…"
+
+[[messages]]
+key = "pr_review.submit_review"
+text = "Submit Review"
+
+[[messages]]
+key = "pr_review.merging"
+text = "Merging…"
+
+[[messages]]
+key = "pr_review.confirm_merge"
+text = "Confirm merge"
+
+[[messages]]
+key = "diff.hide_commit_description"
+text = "Hide Commit description"
+
+[[messages]]
+key = "diff.show_commit_description"
+text = "Show Commit description"
+
+[[messages]]
+key = "diff.hide_file_tree"
+text = "Hide file tree"
+
+[[messages]]
+key = "diff.show_file_tree"
+text = "Show file tree"
+
+[[messages]]
+key = "diff.view_diff"
+text = "View Diff"
+
+[[messages]]
+key = "diff.view_file"
+text = "View file"
+
+[[messages]]
+key = "diff.only_manifest_files"
+text = "Only manifest files"
+
+[[messages]]
+key = "diff.viewed_files"
+text = "Viewed files"
+
+[[messages]]
+key = "preview.open_full_response"
+text = "Open full response"
+
+[[messages]]
+key = "preview.open_formatted_response"
+text = "Open formatted response"
+
+[[messages]]
+key = "pr_list.count_unavailable"
+text = "Count unavailable"
+
+[[messages]]
+key = "pr_list.filter_by_assignee"
+text = "Filter by assignee"
+
+[[messages]]
+key = "tag.loading"
+text = "Loading…"
+
+[[messages]]
+key = "tag.create"
+text = "Create Tag"
+
+[[messages]]
+key = "tag.view_running_job"
+text = "View running Job"
+
+[[messages]]
+key = "tag.view_latest_job"
+text = "View latest Job"
+
+[[messages]]
+key = "update.preparing_download"
+text = "Preparing download…"
+
+[[messages]]
+key = "chat.default_help"
+text = "What can you help me with?"
+
+[[messages]]
+key = "chat.default_joke"
+text = "Tell me a joke"
+
+[[messages]]
+key = "chat.default_quantum"
+text = "Explain quantum computing"
+
+[[messages]]
+key = "projects.default_project"
+text = "Default project"
+
+[[messages]]
+key = "projects.logo_local_file"
+text = "Local file"
+
+[[messages]]
+key = "projects.logo_base64_image"
+text = "Base64 image"
+
+[[messages]]
+key = "projects.logo_remote_url"
+text = "Remote URL"
+
+[[messages]]
+key = "projects.logo_remote_loading"
+text = "Remote URL, loading preview…"
+
+[[messages]]
+key = "update.available_title"
+text = "Update available"
+
+[[messages]]
+key = "update.available_message"
+text = "Usher {new_version} is available. You are currently using {current_version}."
+
+[[messages]]
+key = "update.latest_title"
+text = "You're up to date"
+
+[[messages]]
+key = "update.latest_message"
+text = "Usher {version} is the latest version."
+
+[[messages]]
+key = "update.later"
+text = "Later"
+
+[[messages]]
+key = "update.update_now"
+text = "Update now"
+
+[[messages]]
+key = "update.check_failed_title"
+text = "Couldn't check for updates"
+
+[[messages]]
+key = "update.release_not_found"
+text = "No Release information was found for this repository."
+
+[[messages]]
+key = "update.network_failed"
+text = "We couldn't connect to the update service. Check your network connection and try again."
+
+[[messages]]
+key = "update.check_failed"
+text = "We couldn't check for updates. Try again in a moment."
+
+[[messages]]
+key = "update.cancelled"
+text = "Update cancelled."
+
+[[messages]]
+key = "update.install_failed"
+text = "The update couldn't be installed. Please try again."
+
+[[messages]]
+key = "update.connecting"
+text = "Connecting to the update service…"
+
+[[messages]]
+key = "update.fetching_release"
+text = "Fetching Release information…"
+
+[[messages]]
+key = "update.downloading_release"
+text = "Downloading v{version}…"
+
+[[messages]]
+key = "update.downloading_progress"
+text = "Downloading… {downloaded_mb} / {total_mb} MB"
+
+[[messages]]
+key = "update.downloading_amount"
+text = "Downloading… {downloaded_mb} MB"
+
+[[messages]]
+key = "update.download_installing"
+text = "Download complete. Installing…"
+
+[[messages]]
+key = "update.extracting"
+text = "Extracting update…"
+
+[[messages]]
+key = "update.installing"
+text = "Installing update…"
+
+[[messages]]
+key = "update.complete"
+text = "Update complete."
+
+[[messages]]
+key = "update.complete_restarting"
+text = "Update complete. Restarting…"
+
+[[messages]]
+key = "update.restarting"
+text = "Restarting Usher…"
+
+[[messages]]
+key = "diagnostics.previous_run_title"
+text = "Previous run ended unexpectedly"
+
+[[messages]]
+key = "diagnostics.previous_run_message"
+text = "Open Settings > Diagnostics to export the relevant logs."
+
+[[messages]]
+key = "diagnostics.open_logs_failed"
+text = "The log directory couldn't be opened."
+
+[[messages]]
+key = "chat.endpoint_invalid"
+text = "Chat needs a valid HTTPS endpoint. Configure the RAG API URL in Settings."
+
+[[messages]]
+key = "chat.network_failed"
+text = "Network connection failed. Check your network settings and try again."
+
+[[messages]]
+key = "chat.rate_limited"
+text = "Too many requests. Try again shortly."
+
+[[messages]]
+key = "chat.authentication_failed"
+text = "Authentication failed. Check the API Key or access permissions."
+
+[[messages]]
+key = "chat.service_unavailable"
+text = "The service is unavailable. Try again later."
+
+[[messages]]
+key = "chat.response_unreadable"
+text = "The service returned an unreadable response."
+
+[[messages]]
+key = "chat.send_failed"
+text = "The message couldn't be sent. Try again."
+
+[[messages]]
+key = "chat.storage_failed"
+text = "The message couldn't be saved. Your draft was restored."
+
+[[messages]]
+key = "git_error.configuration"
+text = "Repository settings are incomplete or do not match the remote URL."
+
+[[messages]]
+key = "git_error.authentication"
+text = "Authentication failed. Check the Provider Token in Settings."
+
+[[messages]]
+key = "git_error.permission"
+text = "The Provider denied this operation for the current account."
+
+[[messages]]
+key = "git_error.not_found"
+text = "The repository or Pull Request couldn't be found."
+
+[[messages]]
+key = "git_error.conflict"
+text = "The repository changed and this operation can no longer be completed."
+
+[[messages]]
+key = "git_error.rate_limited"
+text = "The Provider rate limit was reached. Wait a moment and try again."
+
+[[messages]]
+key = "git_error.network"
+text = "The Provider couldn't be reached. Check the network and try again."
+
+[[messages]]
+key = "git_error.timeout"
+text = "The Provider request timed out. Try again."
+
+[[messages]]
+key = "git_error.invalid_response"
+text = "The Provider returned a response that Usher couldn't read."
+
+[[messages]]
+key = "git_error.unsupported"
+text = "This operation isn't supported by the configured Provider."
+
+[[messages]]
+key = "git_error.unknown"
+text = "The Provider operation failed. Try again."
+
+[[messages]]
+key = "projects.save_failed"
+text = "The project couldn't be saved."
+
+[[messages]]
+key = "projects.registry_read_failed"
+text = "The local project registry couldn't be read."
+
+[[messages]]
+key = "projects.remote_details_failed"
+text = "Remote project details couldn't be loaded. Check the remote URL and Provider Token."
+
+[[messages]]
+key = "pr_review.project_context_missing"
+text = "The current project has no repository context."
+
+[[messages]]
+key = "pr_review.conversation_load_failed"
+text = "The Provider couldn't load this Pull Request conversation."
+
+[[messages]]
+key = "pr_review.commits_load_failed"
+text = "The Provider couldn't load this Pull Request's Commits."
+
+[[messages]]
+key = "pr_review.load_commits_for_range"
+text = "Load the Pull Request Commits before selecting a range."
+
+[[messages]]
+key = "pr_review.range_data_incomplete"
+text = "The Provider didn't return enough Commit data for this range."
+
+[[messages]]
+key = "pr_review.range_load_failed"
+text = "The Provider couldn't load the selected Commit range."
+
+[[messages]]
+key = "pr_review.review_action_unsupported"
+text = "This repository Provider doesn't support that Review action."
+
+[[messages]]
+key = "pr_review.comment_submitted"
+text = "Comment submitted to the remote repository."
+
+[[messages]]
+key = "pr_review.review_submitted"
+text = "Review submitted to the remote repository."
+
+[[messages]]
+key = "pr_review.not_mergeable"
+text = "This Pull Request isn't currently mergeable."
+
+[[messages]]
+key = "pr_review.merged_detail"
+text = "This Pull Request has been merged successfully."
+
+[[messages]]
+key = "pr_review.merged_block_reason"
+text = "This Pull Request has been merged."
+
+[[messages]]
+key = "pr_review.revert_not_available"
+text = "This merged Pull Request can't be reverted automatically."
+
+[[messages]]
+key = "pr_review.revert_completed"
+text = "The revert action already completed in this Review session."
+
+[[messages]]
+key = "pr_review.syntax_highlight_failed"
+text = "Syntax highlighting couldn't be rendered for this file."
+
+[[messages]]
+key = "cd.environment_required"
+text = "Environment is required."
+
+[[messages]]
+key = "cd.release_required"
+text = "Release name is required."
+
+[[messages]]
+key = "cd.commit_required"
+text = "Commit hash is required."
+
+[[messages]]
+key = "cd.deploying_summary"
+text = "Deploying Release '{release}' to '{environment}' from Commit '{commit}'."
+
+[[messages]]
+key = "cd.compiling_artifacts"
+text = "Compiling build artifacts."
+
+[[messages]]
+key = "cd.artifacts_compiled"
+text = "Artifacts compiled successfully."
+
+[[messages]]
+key = "cd.executing_tests"
+text = "Executing smoke and integration tests."
+
+[[messages]]
+key = "cd.tests_passed"
+text = "Smoke and integration tests passed."
+
+[[messages]]
+key = "cd.rolling_out"
+text = "Rolling out the selected Release."
+
+[[messages]]
+key = "cd.release_promoted"
+text = "Release promoted to the target environment."
+
+[[messages]]
+key = "cd.verifying_deployment"
+text = "Checking post-deploy health and key paths."
+
+[[messages]]
+key = "cd.deployment_verified"
+text = "Health checks and verification passed."
+
+[[messages]]
+key = "cd.deployment_finished"
+text = "Deployment finished: Release '{release}' is live in '{environment}'."
+
+[[messages]]
+key = "cd.rolling_back_summary"
+text = "Rolling back deployment to Commit '{commit}'."
+
+[[messages]]
+key = "cd.using_verified_artifacts"
+text = "Using previously verified artifacts."
+
+[[messages]]
+key = "cd.reusing_stable_test"
+text = "Reusing the last known stable test result."
+
+[[messages]]
+key = "cd.switching_traffic"
+text = "Switching traffic back to the selected Commit."
+
+[[messages]]
+key = "cd.traffic_restored"
+text = "Traffic moved back to the selected Commit."
+
+[[messages]]
+key = "cd.verifying_rollback"
+text = "Verifying rollback health signals."
+
+[[messages]]
+key = "cd.rollback_finished"
+text = "Rollback finished. Active Commit is '{commit}'."
+
+[[messages]]
+key = "cd.rollback_verified"
+text = "Rollback verification passed."
+
+[[messages]]
+key = "cd.state_cleared"
+text = "Workflow state was cleared after leaving the page."
+
+[[messages]]
+key = "cd.reopen_for_details"
+text = "Reopen Workflow to inspect the latest CD step details."
+
+[[messages]]
+key = "preview.parser_loading"
+text = "Loading the {display_name} Parser…"
+
+[[messages]]
+key = "preview.parser_ready"
+text = "The {display_name} Parser is ready. Preparing preview…"
+
+[[messages]]
+key = "preview.error.unsupported"
+text = "No enabled Preview Provider supports this artifact."
+
+[[messages]]
+key = "preview.error.too_large"
+text = "This artifact is too large to preview."
+
+[[messages]]
+key = "preview.error.cancelled"
+text = "Preview preparation was cancelled."
+
+[[messages]]
+key = "preview.error.invalid_utf8"
+text = "This text artifact is not valid UTF-8."
+
+[[messages]]
+key = "preview.error.io"
+text = "This artifact could not be read."
+
+[[messages]]
+key = "preview.error.decode"
+text = "This artifact could not be decoded."
+
+[[messages]]
+key = "shortcuts.status_loading"
+text = "Loading"
+
+[[messages]]
+key = "shortcuts.status_waiting"
+text = "Waiting"
+
+[[messages]]
+key = "shortcuts.status_ready"
+text = "Ready"
+
+[[messages]]
+key = "shortcuts.status_failed"
+text = "Failed"
+
+[[messages]]
+key = "shortcuts.unavailable"
+text = "Shortcuts unavailable"
+
+[[messages]]
+key = "shortcuts.detail"
+text = "Registry & callbacks — {registry_status}\nPlatform input bridge — {platform_status}\n\n{toggle_sidebar_binding}  Toggle sidebar · Application — {command_status}\n{toggle_terminal_binding}  Toggle Terminal · Workflow, Project — {command_status}\n{back_binding}  Back · Application — {command_status}\n{forward_binding}  Forward · Application — {command_status}\n{settings_binding}  Open Settings · Application — {command_status}"
+
+[[messages]]
+key = "about.license_proprietary"
+text = "Proprietary (non-open-source)"
+
+[[messages]]
+key = "projects.type_tags_placeholder"
+text = "For example: H5, Web, RN"
+
+[[messages]]
+key = "messages.empty_unread_description"
+text = "New notifications will appear here until you mark them as read."
+
+[[messages]]
+key = "messages.empty_read_description"
+text = "Notifications you have reviewed will appear here."
+
+[[messages]]
+key = "messages.empty_all_description"
+text = "Application updates and completed background work will appear here."
+
+[[messages]]
+key = "pr_review.files_truncated_warning"
+text = "The Provider returned only part of the changed-file list; this Diff is incomplete."
+
+[[messages]]
+key = "pr_review.too_many_commits_warning"
+text = "This Pull Request exceeds the server Commit limit; the displayed Diff may be partial."
+
+[[messages]]
+key = "pr_review.approved_changes"
+text = "approved these changes"
+
+[[messages]]
+key = "pr_review.requested_changes"
+text = "requested changes"
+
+[[messages]]
+key = "pr_review.left_comment"
+text = "left a comment"
+
+[[messages]]
+key = "pr_review.commented"
+text = "commented"
+
+[[messages]]
+key = "pr_review.plain_text_comments_supported"
+text = "Plain-text comments are supported."
+
+[[messages]]
+key = "pr_review.gitee_review_action_unavailable"
+text = "Gitee public v5 doesn't provide this Review action."
+
+[[messages]]
+key = "pr_review.request_changes_description"
+text = "Submit feedback that must be addressed before merging."
+
+[[messages]]
+key = "jobs.default_run_title"
+text = "Workflow run"
+
+[[messages]]
+key = "branch.source_target_required"
+text = "Source Branch and target Branch are required."
+
+[[messages]]
+key = "branch.source_target_different"
+text = "Source Branch and target Branch must be different."
+
+[[messages]]
+key = "branch.recreate_plan_with_remote"
+text = "Validated Branch recreation: use '{source}' as the clean source, archive or delete '{target}', then recreate '{target}' from '{source}'. The remote tracking Branch will be recreated after local validation."
+
+[[messages]]
+key = "branch.recreate_plan_without_remote"
+text = "Validated Branch recreation: use '{source}' as the clean source, archive or delete '{target}', then recreate '{target}' from '{source}'. Remote tracking Branch recreation is disabled."
+
+[[messages]]
+key = "tag.local_ready"
+text = "Local mode is ready. The latest Tag is '{current_tag}', and the next {bump} version is prepared."
+
+[[messages]]
+key = "tag.loading_add"
+text = "Loading the latest local Tag for project '{project}'."
+
+[[messages]]
+key = "tag.loading_remove"
+text = "Loading the latest remote Tag for project '{project}'."
+
+[[messages]]
+key = "tag.loading_context"
+text = "Loading the latest local Tag for the Tag Workflow."
+
+[[messages]]
+key = "tag.load_local_failed"
+text = "The latest local Tag could not be loaded. Check the repository and try again."
+
+[[messages]]
+key = "tag.load_remote_failed"
+text = "The latest remote Tag could not be loaded. Check the repository and network, then try again."
+
+[[messages]]
+key = "tag.remove_ready"
+text = "Remove mode is ready. The latest remote Tag is '{latest_tag}'."
+
+[[messages]]
+key = "tag.select_project"
+text = "Select a project to load the local repository context."
+
+[[messages]]
+key = "tag.running_create"
+text = "Running the local Tag Workflow for project '{project}' in {mode} mode."
+
+[[messages]]
+key = "tag.running_remove"
+text = "Running the local Tag removal Workflow for project '{project}' in {mode} mode."
+
+[[messages]]
+key = "tag.create_run_title"
+text = "Create Tag {version}"
+
+[[messages]]
+key = "tag.remove_run_title"
+text = "Remove Tag {tag}"
+
+[[messages]]
+key = "tag.workflow_name"
+text = "Tag Workflow"
+
+[[messages]]
+key = "tag.started_manually"
+text = "Started manually from Tag"
+
+[[messages]]
+key = "tag.stop_pausing"
+text = "Stop requested. Cancelling the Workflow and pausing the remaining steps."
+
+[[messages]]
+key = "tag.cancel_waiting_for_command"
+text = "Cancelled by the user. Waiting for the current command to stop."
+
+[[messages]]
+key = "tag.paused_after_cancel"
+text = "Paused because cancellation was requested."
+
+[[messages]]
+key = "tag.cancelled_before_step_detail"
+text = "Cancelled before this step started."
+
+[[messages]]
+key = "tag.cancelled_paused_detail"
+text = "Cancelled by the user. The Workflow is paused."
+
+[[messages]]
+key = "tag.command_failed_detail"
+text = "The command failed. Check the logs below."
+
+[[messages]]
+key = "tag.progress_running"
+text = "Running step {current}/{total}."
+
+[[messages]]
+key = "tag.progress_completed"
+text = "Step {current}/{total} completed."
+
+[[messages]]
+key = "tag.progress_failed"
+text = "Step {current}/{total} failed."
+
+[[messages]]
+key = "tag.stop_paused_at"
+text = "Stop requested. The Workflow paused at step {step}."
+
+[[messages]]
+key = "tag.cancelled_before_step"
+text = "The Tag Workflow was cancelled before step {step}."
+
+[[messages]]
+key = "tag.cancelled_at_step"
+text = "The Tag Workflow was cancelled at step {step}."
+
+[[messages]]
+key = "tag.failed_at_step"
+text = "The Tag Workflow failed at step {step}."
+
+[[messages]]
+key = "tag.create_finished_detail"
+text = "The local Tag Workflow finished successfully."
+
+[[messages]]
+key = "tag.create_finished"
+text = "The local Tag Workflow finished successfully. The active Tag is '{tag}'."
+
+[[messages]]
+key = "tag.create_completed"
+text = "The local Tag Workflow completed successfully. The active Tag is '{tag}'."
+
+[[messages]]
+key = "tag.cancelled_before_refresh_detail"
+text = "Cancelled before refreshing the latest remote Tag."
+
+[[messages]]
+key = "tag.cancelled_before_refresh"
+text = "The Tag removal Workflow was cancelled before refreshing the latest remote Tag."
+
+[[messages]]
+key = "tag.cancelled_during_refresh"
+text = "The Tag removal Workflow was cancelled while refreshing remote Tags."
+
+[[messages]]
+key = "tag.refresh_remote_failed_detail"
+text = "The latest remote Tag could not be refreshed."
+
+[[messages]]
+key = "tag.remove_finished_detail"
+text = "The local removal Workflow finished successfully. The input was updated to '{latest_tag}'."
+
+[[messages]]
+key = "tag.remove_finished"
+text = "The local Tag removal Workflow finished successfully. Removed '{removed_tag}'; the latest Tag is '{latest_tag}'."
+
+[[messages]]
+key = "tag.remove_completed"
+text = "The local Tag removal Workflow completed successfully. Removed '{removed_tag}'; the latest remote Tag is '{latest_tag}'."
+
+[[messages]]
+key = "tag.step.enter_repository"
+text = "Enter local repository"
+
+[[messages]]
+key = "tag.step.enter_repository_detail"
+text = "Resolve the configured local repository path."
+
+[[messages]]
+key = "tag.step.using_repository"
+text = "Use the local repository at '{repository}'."
+
+[[messages]]
+key = "tag.step.checkout_release"
+text = "Checkout release"
+
+[[messages]]
+key = "tag.step.checkout_release_detail"
+text = "Switch to the release Branch."
+
+[[messages]]
+key = "tag.step.pull_release"
+text = "Pull release"
+
+[[messages]]
+key = "tag.step.pull_release_detail"
+text = "Pull the latest release Branch changes."
+
+[[messages]]
+key = "tag.step.checkout_main"
+text = "Checkout main"
+
+[[messages]]
+key = "tag.step.checkout_main_detail"
+text = "Switch back to the main Branch."
+
+[[messages]]
+key = "tag.step.rebase_main"
+text = "Rebase main on release"
+
+[[messages]]
+key = "tag.step.rebase_main_detail"
+text = "Rebase main onto release."
+
+[[messages]]
+key = "tag.step.push_main"
+text = "Push main"
+
+[[messages]]
+key = "tag.step.push_main_detail"
+text = "Push the rebased main Branch to the remote."
+
+[[messages]]
+key = "tag.step.create_annotated"
+text = "Create annotated Tag"
+
+[[messages]]
+key = "tag.step.create_annotated_detail"
+text = "Create the new annotated semantic-version Tag."
+
+[[messages]]
+key = "tag.step.create_annotated_version_detail"
+text = "Create annotated Tag '{version}'."
+
+[[messages]]
+key = "tag.step.push_tag"
+text = "Push Tag"
+
+[[messages]]
+key = "tag.step.push_tag_detail"
+text = "Push the new Tag to the remote."
+
+[[messages]]
+key = "tag.step.push_tag_version_detail"
+text = "Push Tag '{version}' to the remote."
+
+[[messages]]
+key = "tag.step.delete_local"
+text = "Delete local Tag"
+
+[[messages]]
+key = "tag.step.delete_local_detail"
+text = "Delete the Tag from the local repository."
+
+[[messages]]
+key = "tag.step.delete_remote"
+text = "Delete remote Tag"
+
+[[messages]]
+key = "tag.step.delete_remote_detail"
+text = "Delete the Tag from the origin remote."
+
+[[messages]]
+key = "tag.step.refresh_remote"
+text = "Refresh latest remote Tag"
+
+[[messages]]
+key = "tag.step.refresh_remote_detail"
+text = "Fetch remote Tags and resolve the latest semantic-version Tag."
+
+[[messages]]
+key = "tag.step.complete"
+text = "Complete"
+
+[[messages]]
+key = "tag.step.complete_detail"
+text = "Finish the local Tag Workflow."
+
+[[messages]]
+key = "tag.step.remove_complete_waiting"
+text = "Waiting for the removal Workflow to complete."
+
+[[messages]]
+key = "tag.step.remove_target_resolved"
+text = "Resolved the latest remote Tag for removal: '{latest_tag}'."
+
+[[messages]]
+key = "tag.step.latest_remote_tag"
+text = "The latest remote semantic-version Tag is now '{latest_tag}'."
+
+[[messages]]
+key = "pr_review.readiness.checking"
+text = "Checking mergeability…"
+
+[[messages]]
+key = "pr_review.readiness.ready"
+text = "Ready to merge"
+
+[[messages]]
+key = "pr_review.readiness.conflicts"
+text = "Conflicts"
+
+[[messages]]
+key = "pr_review.readiness.draft"
+text = "Draft"
+
+[[messages]]
+key = "pr_review.readiness.review_required"
+text = "Review required"
+
+[[messages]]
+key = "pr_review.readiness.changes_requested"
+text = "Changes requested"
+
+[[messages]]
+key = "pr_review.readiness.checks_pending"
+text = "Checks pending"
+
+[[messages]]
+key = "pr_review.readiness.checks_failed"
+text = "Checks failed"
+
+[[messages]]
+key = "pr_review.readiness.branch_out_of_date"
+text = "Branch out of date"
+
+[[messages]]
+key = "pr_review.readiness.discussions_unresolved"
+text = "Resolve conversations"
+
+[[messages]]
+key = "pr_review.readiness.blocked"
+text = "Merge blocked"
+
+[[messages]]
+key = "pr_review.readiness.merged"
+text = "Merged"
+
+[[messages]]
+key = "pr_review.readiness.closed"
+text = "Closed"
+
+[[messages]]
+key = "pr_review.readiness.unavailable"
+text = "Merge status unavailable"
+
+[[messages]]
+key = "pr_review.readiness_detail.checking"
+text = "Merge conditions are still being checked."
+
+[[messages]]
+key = "pr_review.readiness_detail.ready"
+text = "All reported merge conditions are satisfied."
+
+[[messages]]
+key = "pr_review.readiness_detail.conflicts"
+text = "Resolve Branch conflicts before merging."
+
+[[messages]]
+key = "pr_review.readiness_detail.draft"
+text = "Mark this Pull Request as ready before merging."
+
+[[messages]]
+key = "pr_review.readiness_detail.review_required"
+text = "Complete the required Review before merging."
+
+[[messages]]
+key = "pr_review.readiness_detail.changes_requested"
+text = "Address the requested changes before merging."
+
+[[messages]]
+key = "pr_review.readiness_detail.checks_pending"
+text = "Wait for the required checks to finish."
+
+[[messages]]
+key = "pr_review.readiness_detail.checks_failed"
+text = "Fix the failing checks before merging."
+
+[[messages]]
+key = "pr_review.readiness_detail.branch_out_of_date"
+text = "Update the source Branch before merging."
+
+[[messages]]
+key = "pr_review.readiness_detail.discussions_unresolved"
+text = "Resolve all required conversations before merging."
+
+[[messages]]
+key = "pr_review.readiness_detail.blocked"
+text = "The Provider reports that this Pull Request is blocked."
+
+[[messages]]
+key = "pr_review.readiness_detail.merged"
+text = "This Pull Request has already been merged."
+
+[[messages]]
+key = "pr_review.readiness_detail.closed"
+text = "This Pull Request is closed."
+
+[[messages]]
+key = "pr_review.readiness_detail.unavailable"
+text = "The Provider did not return a usable merge status."
+
+[[messages]]
+key = "pr_review.configure_provider_for_merge"
+text = "Configure this Provider in Settings to enable merge actions."
+
+[[messages]]
+key = "pr_review.merge_permission_required"
+text = "The configured account does not have permission to merge this Pull Request."
+
+[[messages]]
+key = "pr_review.create_revert_pr"
+text = "Create revert PR"
+
+[[messages]]
+key = "pr_review.revert_changes"
+text = "Revert changes"
+
+[[messages]]
+key = "pr_review.revert_confirmation_pull_request"
+text = "A separate Pull Request will be created to reverse the merged changes. The original Pull Request remains merged."
+
+[[messages]]
+key = "pr_review.revert_confirmation_direct_commit"
+text = "A Revert Commit will be added directly to the target Branch. This changes the Branch immediately and does not create a new Pull Request."
+
+[[messages]]
+key = "pr_review.revert_confirmation_unsupported"
+text = "This Provider does not expose a supported automatic Revert operation."
+
+[[messages]]
+key = "http.request_failed"
+text = "Request failed"
+
+[[messages]]
+key = "http.error.timeout"
+text = "The request timed out. Please try again."
+
+[[messages]]
+key = "http.error.connect"
+text = "Could not connect. Check your network and try again."
+
+[[messages]]
+key = "http.error.authentication"
+text = "The request was rejected. Check your credentials or permissions."
+
+[[messages]]
+key = "http.error.rate_limited"
+text = "The request was rate limited. Please try again later."
+
+[[messages]]
+key = "http.error.server"
+text = "The request failed because the server returned {code}."
+
+[[messages]]
+key = "http.error.status"
+text = "The request failed (HTTP {code})."
+
+[[messages]]
+key = "http.error.decode"
+text = "The server returned data in an unexpected format."
+
+[[messages]]
+key = "http.error.request"
+text = "The request failed. Please try again."
+
+[[messages]]
+key = "toast.default.text"
+text = "Toast"
+
+[[messages]]
+key = "toast.default.success"
+text = "Operation successful!"
+
+[[messages]]
+key = "toast.default.error"
+text = "Operation failed!"
+
+[[messages]]
+key = "toast.default.loading"
+text = "Loading..."
+
+[[messages]]
+key = "notification.default.info"
+text = "Info"
+
+[[messages]]
+key = "notification.default.success"
+text = "Success"
+
+[[messages]]
+key = "notification.default.warning"
+text = "Warning"
+
+[[messages]]
+key = "notification.default.error"
+text = "Error"
+
+[[messages]]
+key = "notification.default_title.info"
+text = "Information"
+
+[[messages]]
+key = "notification.default_title.success"
+text = "Completed"
+
+[[messages]]
+key = "notification.default_title.warning"
+text = "Attention"
+
+[[messages]]
+key = "notification.default_title.error"
+text = "Failed"
+
+[[messages]]
+key = "terminal.project_title"
+text = "{project} Terminal"
+
+[[messages]]
+key = "terminal.project_title_default"
+text = "Project Terminal"
+
+[[messages]]
+key = "time.just_now"
+text = "just now"
+
+[[messages]]
+key = "time.minute_ago"
+text = "1 minute ago"
+
+[[messages]]
+key = "time.minutes_ago"
+text = "{count} minutes ago"
+
+[[messages]]
+key = "time.hour_ago"
+text = "1 hour ago"
+
+[[messages]]
+key = "time.hours_ago"
+text = "{count} hours ago"
+
+[[messages]]
+key = "time.yesterday"
+text = "yesterday"
+
+[[messages]]
+key = "time.two_days_ago"
+text = "two days ago"
+
+[[messages]]
+key = "time.weekday.mon"
+text = "Monday"
+
+[[messages]]
+key = "time.weekday.tue"
+text = "Tuesday"
+
+[[messages]]
+key = "time.weekday.wed"
+text = "Wednesday"
+
+[[messages]]
+key = "time.weekday.thu"
+text = "Thursday"
+
+[[messages]]
+key = "time.weekday.fri"
+text = "Friday"
+
+[[messages]]
+key = "time.weekday.sat"
+text = "Saturday"
+
+[[messages]]
+key = "time.weekday.sun"
+text = "Sunday"
+
+[[messages]]
+key = "time.relative_with_clock"
+text = "{relative} {time}"
+
+[[messages]]
+key = "time.month_day_with_clock"
+text = "{month} {day} {time}"
+
+[[messages]]
+key = "time.month_day_year_with_clock"
+text = "{month} {day}, {year} {time}"
+
+[[messages]]
+key = "time.days_ago"
+text = "{count} days ago"
+
+[[messages]]
+key = "time.last_week"
+text = "last week"
+
+[[messages]]
+key = "time.weeks_ago"
+text = "{count} weeks ago"
+
+[[messages]]
+key = "time.on_month_day"
+text = "on {month} {day}"
+
+[[messages]]
+key = "time.on_month_day_year"
+text = "on {month} {day}, {year}"
+
+[[messages]]
+key = "time.month_day_year"
+text = "{month} {day}, {year}"
+
+[[messages]]
+key = "time.absolute_tooltip"
+text = "{month} {day}, {year}, {hour}:{minute} {meridiem} GMT+8"
+
+[[messages]]
+key = "time.am"
+text = "AM"
+
+[[messages]]
+key = "time.pm"
+text = "PM"
+
+[[messages]]
+key = "time.month.jan"
+text = "Jan"
+
+[[messages]]
+key = "time.month.feb"
+text = "Feb"
+
+[[messages]]
+key = "time.month.mar"
+text = "Mar"
+
+[[messages]]
+key = "time.month.apr"
+text = "Apr"
+
+[[messages]]
+key = "time.month.may"
+text = "May"
+
+[[messages]]
+key = "time.month.jun"
+text = "Jun"
+
+[[messages]]
+key = "time.month.jul"
+text = "Jul"
+
+[[messages]]
+key = "time.month.aug"
+text = "Aug"
+
+[[messages]]
+key = "time.month.sep"
+text = "Sep"
+
+[[messages]]
+key = "time.month.oct"
+text = "Oct"
+
+[[messages]]
+key = "time.month.nov"
+text = "Nov"
+
+[[messages]]
+key = "time.month.dec"
+text = "Dec"
+
+[[messages]]
+key = "pr_review.commits_added.one"
+text = "added 1 Commit"
+
+[[messages]]
+key = "pr_review.commits_added.many"
+text = "added {count} Commits"
+
+[[messages]]
+key = "pr_review.commit_identity.authored_and_committed"
+text = "{author} authored and {committer} committed"
+
+[[messages]]
+key = "pr_review.commit_identity.authored"
+text = "{author} authored"
+
+[[messages]]
+key = "pr_review.commit_identity.committed"
+text = "{committer} committed"
+
+[[messages]]
+key = "pr_review.commit_identity.unknown"
+text = "Unknown author committed"
+
+[[messages]]
+key = "pr_review.timeline.review.approved"
+text = "approved these changes"
+
+[[messages]]
+key = "pr_review.timeline.review.changes_requested"
+text = "requested changes"
+
+[[messages]]
+key = "pr_review.timeline.review.dismissed"
+text = "had a Review dismissed"
+
+[[messages]]
+key = "pr_review.timeline.review.commented"
+text = "commented"
+
+[[messages]]
+key = "pr_review.timeline.review_requested"
+text = "requested a Review"
+
+[[messages]]
+key = "pr_review.timeline.review_requested_from"
+text = "requested a Review from"
+
+[[messages]]
+key = "pr_review.timeline.event.closed"
+text = "closed this Pull Request"
+
+[[messages]]
+key = "pr_review.timeline.event.reopened"
+text = "reopened this Pull Request"
+
+[[messages]]
+key = "pr_review.timeline.event.force_pushed"
+text = "force-pushed the Branch"
+
+[[messages]]
+key = "pr_review.timeline.event.ready_for_review"
+text = "marked this Pull Request as ready for Review"
+
+[[messages]]
+key = "pr_review.timeline.event.converted_to_draft"
+text = "converted this Pull Request to draft"
+
+[[messages]]
+key = "pr_review.timeline.event.updated"
+text = "updated this Pull Request"
+
+[[messages]]
+key = "common.unknown_author"
+text = "Unknown author"
+
+[[messages]]
+key = "common.unknown_reviewer"
+text = "Unknown Reviewer"
+
+[[messages]]
+key = "common.unknown_committer"
+text = "Unknown Committer"
+
+[[messages]]
+key = "common.unknown_merger"
+text = "Unknown merger"
+
+[[messages]]
+key = "common.unknown_file"
+text = "Unknown file"
+
+[[messages]]
+key = "pr_list.untitled_pull_request"
+text = "Untitled Pull Request"
+
+[[messages]]
+key = "tag.loading_add_default"
+text = "Loading the latest local Tag for the default project."
+
+[[messages]]
+key = "tag.loading_remove_default"
+text = "Loading the latest remote Tag for the default project."

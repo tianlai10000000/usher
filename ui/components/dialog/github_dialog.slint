@@ -2,6 +2,7 @@ import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { TransientOverlayState } from "../../state/transient_overlay_state.slint";
+import { I18n } from "@i18n";
 
 // Shared Primer Dialog surface for every application-owned modal.
 //
@@ -27,7 +28,7 @@ export component GitHubDialog inherits FocusScope {
     in property <bool> close-enabled: true;
     in property <bool> dismiss-on-backdrop: false;
     in property <[string]> secondary-actions: [];
-    in property <string> cancel-label: "Cancel";
+    in property <string> cancel-label: I18n.common-cancel;
     in property <bool> show-cancel: true;
     in property <string> primary-label: "";
     in property <bool> primary-enabled: true;
@@ -210,7 +211,7 @@ export component GitHubDialog inherits FocusScope {
         x: dialog-surface.x + dialog-surface.width - 40px;
         y: dialog-surface.y + 8px;
         icon: @image-url("../../assets/icons/octicon-x-16.svg");
-        tooltip-text: "Close";
+        tooltip-text: I18n.common-close;
         show-tooltip: false;
         tooltip-above: false;
         tooltip-align-right: true;

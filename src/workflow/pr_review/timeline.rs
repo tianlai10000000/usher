@@ -133,22 +133,24 @@ pub(super) fn conversation_model(
             .iter()
             .enumerate()
             .map(|(index, item)| {
+                let localized_body = localized_conversation_body(item);
                 let (body, message_body) = if item.kind == "commit" {
-                    let (title, body) = split_commit_message(item.body.as_str());
+                    let (title, body) = split_commit_message(localized_body.as_str());
                     let title = if title.is_empty() {
-                        item.body.lines().next().unwrap_or("").to_string()
+                        localized_body.lines().next().unwrap_or("").to_string()
                     } else {
                         title
                     };
                     (title, body)
                 } else {
-                    (item.body.clone(), String::new())
+                    (localized_body, String::new())
                 };
+                let author = localized_conversation_author(item);
                 let message_body_height = commit_message_body_height(message_body.as_str());
                 WorkflowPrConversationItem {
                     id: item.id.clone().into(),
                     kind: item.kind.clone().into(),
-                    author: item.author.clone().into(),
+                    author: author.into(),
                     avatar: cached_avatar_image(avatars, item.avatar_url.as_str()),
                     avatar_label: avatar_label(item.author.as_str()).into(),
                     author_association: item.author_association.clone().into(),
@@ -249,6 +251,16 @@ pub(super) fn commit_model(
                 let show_committer = commit_has_distinct_committer(commit);
                 let identity_action = commit_identity_action(commit, show_committer);
                 let display_timestamp = commit_display_timestamp(commit);
+                let author = if commit.author.trim().is_empty() {
+                    crate::i18n::tr("common.unknown_author").into_owned()
+                } else {
+                    commit.author.clone()
+                };
+                let committer = if commit.committer.trim().is_empty() {
+                    crate::i18n::tr("common.unknown_committer").into_owned()
+                } else {
+                    commit.committer.clone()
+                };
                 WorkflowPrCommit {
                     sha: commit.sha.clone().into(),
                     short_sha: commit.sha.chars().take(7).collect::<String>().into(),
@@ -258,7 +270,7 @@ pub(super) fn commit_model(
                     message_body: message_body.into(),
                     message_expanded: false,
                     group_expand_extra: 0,
-                    author: commit.author.clone().into(),
+                    author: author.into(),
                     avatar: cached_avatar_image(avatars, commit.avatar_url.as_str()),
                     avatar_label: avatar_label(commit.author.as_str()).into(),
                     // Absolute local datetime for the relative-time tooltip.
@@ -266,7 +278,7 @@ pub(super) fn commit_model(
                         display_timestamp,
                     )
                     .into(),
-                    committer: commit.committer.clone().into(),
+                    committer: committer.into(),
                     committer_avatar: cached_avatar_image(
                         avatars,
                         commit.committer_avatar_url.as_str(),
@@ -335,18 +347,87 @@ fn commit_display_timestamp(commit: &PullRequestCommit) -> &str {
 }
 
 fn commit_identity_action(commit: &PullRequestCommit, show_committer: bool) -> String {
+    commit_identity_action_for_locale(commit, show_committer, usher_i18n::active_locale().id)
+}
+
+fn commit_identity_action_for_locale(
+    commit: &PullRequestCommit,
+    show_committer: bool,
+    locale: &str,
+) -> String {
     if show_committer {
-        format!(
-            "{} authored and {} committed",
-            commit.author, commit.committer
+        usher_i18n::translate_for_with(
+            locale,
+            "pr_review.commit_identity.authored_and_committed",
+            &[
+                ("author", commit.author.as_str()),
+                ("committer", commit.committer.as_str()),
+            ],
         )
     } else if !commit.author.trim().is_empty() {
-        format!("{} authored", commit.author)
+        usher_i18n::translate_for_with(
+            locale,
+            "pr_review.commit_identity.authored",
+            &[("author", commit.author.as_str())],
+        )
     } else if !commit.committer.trim().is_empty() {
-        format!("{} committed", commit.committer)
+        usher_i18n::translate_for_with(
+            locale,
+            "pr_review.commit_identity.committed",
+            &[("committer", commit.committer.as_str())],
+        )
     } else {
-        "Unknown author committed".to_string()
+        usher_i18n::translate_for(locale, "pr_review.commit_identity.unknown").into_owned()
     }
+}
+
+fn localized_conversation_body(item: &PullRequestConversationItem) -> String {
+    match item.kind.as_str() {
+        "commits" => {
+            let Ok(count) = item.state.parse::<usize>() else {
+                return item.body.clone();
+            };
+            if count == 1 {
+                crate::i18n::tr("pr_review.commits_added.one").into_owned()
+            } else {
+                let count = count.to_string();
+                crate::i18n::tr_args("pr_review.commits_added.many", &[("count", count.as_str())])
+            }
+        }
+        "review_summary" => {
+            let key = match item.state.as_str() {
+                "approved" => "pr_review.timeline.review.approved",
+                "changes_requested" | "rejected" => "pr_review.timeline.review.changes_requested",
+                "dismissed" => "pr_review.timeline.review.dismissed",
+                _ => "pr_review.timeline.review.commented",
+            };
+            crate::i18n::tr(key).into_owned()
+        }
+        "review_requested" => {
+            let key = if item.state.trim().is_empty() {
+                "pr_review.timeline.review_requested"
+            } else {
+                "pr_review.timeline.review_requested_from"
+            };
+            crate::i18n::tr(key).into_owned()
+        }
+        "event" if item.state.starts_with("pr_review.timeline.event.") => {
+            crate::i18n::tr(item.state.as_str()).into_owned()
+        }
+        _ => item.body.clone(),
+    }
+}
+
+fn localized_conversation_author(item: &PullRequestConversationItem) -> String {
+    if !item.author.trim().is_empty() {
+        return item.author.clone();
+    }
+    let key = match item.kind.as_str() {
+        "merged" => "common.unknown_merger",
+        "review_summary" => "common.unknown_reviewer",
+        _ => "common.unknown_author",
+    };
+    crate::i18n::tr(key).into_owned()
 }
 
 const AVATAR_IMAGE_CACHE_CAPACITY: usize = 128;
@@ -442,27 +523,18 @@ pub(super) fn range_covers_all_commits(commit_count: usize, start: usize, end: u
 }
 
 fn format_commit_date(value: &str) -> String {
-    let utc_plus_eight =
-        chrono::FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
-    chrono::DateTime::parse_from_rfc3339(value)
-        .map(|timestamp| {
-            timestamp
-                .with_timezone(&utc_plus_eight)
-                .format("%b %-d, %Y")
-                .to_string()
-        })
-        .unwrap_or_else(|_| value.split('T').next().unwrap_or(value).to_string())
+    super::super::pr_list::format_github_calendar_date(value)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        chrono_commit_index_to_display, commit_has_distinct_committer, commit_identity_action,
-        commit_index_by_sha, commit_message_body_height, commit_model, commit_range_label,
-        commit_tab_expand_layout_extra, conversation_card_row_height, conversation_content_height,
-        conversation_items_connect, conversation_model, display_commit_range_to_chrono,
-        patch_commit_avatars, patch_conversation_avatars, range_covers_all_commits,
-        refresh_commit_group_expand_extras,
+        chrono_commit_index_to_display, commit_has_distinct_committer,
+        commit_identity_action_for_locale, commit_index_by_sha, commit_message_body_height,
+        commit_model, commit_range_label, commit_tab_expand_layout_extra,
+        conversation_card_row_height, conversation_content_height, conversation_items_connect,
+        conversation_model, display_commit_range_to_chrono, patch_commit_avatars,
+        patch_conversation_avatars, range_covers_all_commits, refresh_commit_group_expand_extras,
     };
     use crate::WorkflowPrCommit;
     use crate::git::{PullRequestCommit, PullRequestConversationItem};
@@ -517,13 +589,20 @@ mod tests {
         commit.committer = "Bob".to_string();
         assert!(commit_has_distinct_committer(&commit));
         assert_eq!(
-            commit_identity_action(&commit, true),
+            commit_identity_action_for_locale(&commit, true, "en"),
             "Alice authored and Bob committed"
+        );
+        assert_eq!(
+            commit_identity_action_for_locale(&commit, true, "zh-CN"),
+            "Alice 创建、Bob 提交了 Commit"
         );
 
         commit.committer = "alice".to_string();
         assert!(!commit_has_distinct_committer(&commit));
-        assert_eq!(commit_identity_action(&commit, false), "Alice authored");
+        assert_eq!(
+            commit_identity_action_for_locale(&commit, false, "en"),
+            "Alice authored"
+        );
     }
 
     #[test]

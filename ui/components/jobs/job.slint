@@ -1,6 +1,7 @@
 import { AppState } from "../../state/app_state.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 export struct JobLogLineItem {
     text: string,
@@ -350,7 +351,7 @@ component GitHubActionsJobStepRow inherits Rectangle {
                     x: 64px;
                     width: parent.width - 80px;
                     height: 28px;
-                    text: "Loading logs…";
+                    text: I18n.jobs-loading-logs;
                     vertical-alignment: center;
                     color: root.fg-muted;
                     font-size: 12px;
@@ -370,9 +371,9 @@ component GitHubActionsJobStepRow inherits Rectangle {
 }
 
 export component GitHubActionsJob inherits Rectangle {
-    in property <string> title: "Workflow steps";
+    in property <string> title: I18n.jobs-steps;
     in property <string> summary: "";
-    in property <string> empty-text: "No workflow steps yet.";
+    in property <string> empty-text: I18n.jobs-empty-steps;
     in property <[JobStepItem]> steps: [];
     // Controlled public state: the workflow owner binds snapshots into these
     // properties and may read them back without inspecting individual rows.

@@ -6,6 +6,7 @@ import { GitHubCopyButton } from "../button/github_copy_button.slint";
 import { GitHubScrollView, GitHubVirtualListScrollbar } from "../github_scroll_view.slint";
 import { GitHubCenteredLoadingState } from "../github_spinner.slint";
 import { GitHubMarkdownMetrics } from "../markdown/github_markdown_typography.slint";
+import { I18n } from "@i18n";
 
 export enum ArtifactPreviewKind {
     None,
@@ -346,7 +347,7 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
     in property <image> preview-image;
     in property <string> error-text: "";
     in property <bool> loading: false;
-    in property <string> loading-message: "Preparing preview";
+    in property <string> loading-message: I18n.preview-preparing;
     in property <bool> layout-resizing: false;
     in property <bool> virtualized-markdown: true;
     in property <int> markdown-layout-revision: 0;
@@ -547,7 +548,7 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
             spacing: GitHubMetrics.size-8;
 
             Text {
-                text: "Preview unavailable";
+                text: I18n.preview-unavailable;
                 color: GitHubTheme.fg-default;
                 font-size: GitHubMetrics.heading-small;
                 font-weight: 600;
@@ -564,14 +565,14 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
 }
 
 export component GitHubArtifactPreviewPanel inherits Rectangle {
-    in property <string> title: "Preview";
+    in property <string> title: I18n.common-preview;
     in property <ArtifactPreviewKind> preview-kind: ArtifactPreviewKind.None;
     in property <[ArtifactPreviewBlock]> markdown-blocks: [];
     in property <string> plain-text: "";
     in property <image> preview-image;
     in property <string> error-text: "";
     in property <bool> loading: false;
-    in property <string> loading-message: "Preparing preview";
+    in property <string> loading-message: I18n.preview-preparing;
     in property <bool> can-copy: false;
     in property <bool> can-open-external: false;
     in property <string> copy-content: "";
@@ -657,17 +658,17 @@ export component GitHubArtifactPreviewPanel inherits Rectangle {
             spacing: GitHubMetrics.size-4;
 
             if root.can-copy: GitHubCopyButton {
-                tooltip-text: "Copy preview";
+                tooltip-text: I18n.tooltip-copy-preview;
                 copy-requested => { root.copy-requested(root.copy-content) }
             }
             if root.can-open-external: GitHubIconButton {
                 icon: @image-url("../../assets/icons/octicon-link-external-16.svg");
-                tooltip-text: "Open with system application";
+                tooltip-text: I18n.tooltip-open-system-application;
                 clicked => { root.open-external-requested(); }
             }
             GitHubIconButton {
                 icon: @image-url("../../assets/icons/octicon-x-16.svg");
-                tooltip-text: "Close preview";
+                tooltip-text: I18n.tooltip-close-preview;
                 clicked => { root.close-requested(); }
             }
         }
@@ -748,14 +749,14 @@ export component ArtifactPreviewWindow inherits Window {
     }
     init => { root.apply-effective-theme(); }
     changed effective-dark-mode => { root.apply-effective-theme(); }
-    in property <string> document-title: "Preview";
+    in property <string> document-title: I18n.common-preview;
     in property <ArtifactPreviewKind> preview-kind: ArtifactPreviewKind.None;
     in property <[ArtifactPreviewBlock]> markdown-blocks: [];
     in property <string> plain-text: "";
     in property <image> preview-image;
     in property <string> error-text: "";
     in property <bool> loading: false;
-    in property <string> loading-message: "Preparing preview";
+    in property <string> loading-message: I18n.preview-preparing;
     in property <bool> can-copy: false;
     in property <bool> can-open-external: false;
     in property <string> copy-content: "";

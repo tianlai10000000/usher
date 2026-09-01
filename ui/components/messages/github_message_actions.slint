@@ -5,6 +5,7 @@ import {
     GitHubMarkUnreadTooltipAnchor,
 } from "./github_message_tooltip.slint";
 import { MessageTooltipOverlayState } from "../../state/message_tooltip_overlay_state.slint";
+import { I18n } from "@i18n";
 
 // Inbox row actions must NOT share `in property <image>` or tip-label strings.
 // Slint list rows alias those bindings. Each action publishes a literal label
@@ -81,7 +82,7 @@ component MessageActionChrome inherits FocusScope {
 // Keep read and unread as separate fixed leaves. ComponentFactory list rows
 // must never switch an Image source or stack state images behind opacity.
 export component MessageMarkReadAction inherits MessageActionChrome {
-    accessible-label: "Mark as read";
+    accessible-label: I18n.messages-mark-as-read;
 
     Image {
         x: (parent.width - root.glyph-size) / 2;
@@ -99,7 +100,7 @@ export component MessageMarkReadAction inherits MessageActionChrome {
 }
 
 export component MessageMarkUnreadAction inherits MessageActionChrome {
-    accessible-label: "Mark as unread";
+    accessible-label: I18n.messages-mark-as-unread;
 
     Image {
         x: (parent.width - root.glyph-size) / 2;
@@ -119,7 +120,7 @@ export component MessageMarkUnreadAction inherits MessageActionChrome {
 export component MessageDeleteAction inherits MessageActionChrome {
     danger-hover: true;
     hover-foreground: GitHubTheme.danger-fg;
-    accessible-label: "Delete";
+    accessible-label: I18n.common-delete;
 
     Image {
         x: (parent.width - root.glyph-size) / 2;

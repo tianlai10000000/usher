@@ -53,8 +53,12 @@ pub(crate) fn begin_run() -> Result<RunGuard> {
 pub(crate) fn setup(window: &MainWindow, run_guard: RunGuard) {
     if run_guard.previous_run_interrupted {
         NotificationManager::get(window).invoke_warn(NotificationOptions {
-            title: "Previous run ended unexpectedly".into(),
-            message: "Open Settings > Diagnostics to export the relevant logs.".into(),
+            title: crate::i18n::tr("diagnostics.previous_run_title")
+                .as_ref()
+                .into(),
+            message: crate::i18n::tr("diagnostics.previous_run_message")
+                .as_ref()
+                .into(),
             duration: 8_000,
             icon: "".into(),
             component: CustomComponentType::None,
@@ -74,8 +78,13 @@ pub(crate) fn setup(window: &MainWindow, run_guard: RunGuard) {
                 .map_err(|error| format!("Failed to create log directory: {error}"))?;
             platform::open_directory_in_file_manager(&path)
         });
-        if let (Err(error), Some(window)) = (result, weak.upgrade()) {
-            ToastManager::get(&window).invoke_error(settings_toast(&error));
+        if let Err(error) = result {
+            log::warn!("[Diagnostics] Failed to open log directory: {error}");
+            if let Some(window) = weak.upgrade() {
+                ToastManager::get(&window).invoke_error(settings_toast(
+                    crate::i18n::tr("diagnostics.open_logs_failed").as_ref(),
+                ));
+            }
         }
     });
 
@@ -93,8 +102,9 @@ pub(crate) fn setup(window: &MainWindow, run_guard: RunGuard) {
                 };
                 match result {
                     Ok(path) => {
-                        ToastManager::get(&window)
-                            .invoke_success(settings_toast("Diagnostic bundle exported."));
+                        ToastManager::get(&window).invoke_success(settings_toast(
+                            crate::i18n::tr("diagnostics.exported").as_ref(),
+                        ));
                         if let Some(parent) = path.parent()
                             && let Err(error) = platform::open_directory_in_file_manager(parent)
                         {
@@ -103,8 +113,9 @@ pub(crate) fn setup(window: &MainWindow, run_guard: RunGuard) {
                     }
                     Err(error) => {
                         log::error!("[Diagnostics] Export failed: {error:#}");
-                        ToastManager::get(&window)
-                            .invoke_error(settings_toast("Failed to export diagnostic bundle."));
+                        ToastManager::get(&window).invoke_error(settings_toast(
+                            crate::i18n::tr("diagnostics.export_failed").as_ref(),
+                        ));
                     }
                 }
             });

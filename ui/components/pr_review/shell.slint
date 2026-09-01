@@ -4,6 +4,7 @@ import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tool
 import { GitHubActionMenu, GitHubActionMenuTriggerArea } from "../github_action_menu.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
+import { I18n } from "@i18n";
 
 export struct WorkflowPrDiffFile {
     path: string,
@@ -133,6 +134,7 @@ export struct WorkflowPrTreeItem {
 
 export struct WorkflowPrFileExtensionFilter {
     extension: string,
+    label: string,
     count: int,
     selected: bool,
 }
@@ -396,7 +398,7 @@ export component GitHubReviewActionButton inherits Rectangle {
 
 // Primer-like primary green button used by the Conversation comment composer.
 export component GitHubCommentButton inherits Rectangle {
-    in property <string> text: "Comment";
+    in property <string> text: I18n.pr-review-comment;
     in property <bool> button-enabled: true;
     in property <string> tooltip-text: "";
     callback clicked();
@@ -478,8 +480,8 @@ export component GitHubPullRequestStateBadge inherits Rectangle {
     in property <color> danger-color;
     in property <color> done-color;
     private property <string> state-label: root.kind == "merged"
-        ? "Merged"
-        : (root.kind == "closed" ? "Closed" : "Open");
+        ? I18n.pr-review-merged
+        : (root.kind == "closed" ? I18n.pr-list-closed : I18n.pr-list-open);
     private property <color> state-color: root.kind == "merged"
         ? root.done-color
         : (root.kind == "closed" ? root.danger-color : root.success-color);
@@ -590,8 +592,8 @@ export component GitHubPullRequestSummaryMetrics inherits Rectangle {
     in property <string> source-branch;
     in property <string> updated-at;
     private property <string> state-label: root.state-kind == "merged"
-        ? "Merged"
-        : (root.state-kind == "closed" ? "Closed" : "Open");
+        ? I18n.pr-review-merged
+        : (root.state-kind == "closed" ? I18n.pr-list-closed : I18n.pr-list-open);
     out property <length> inline-width:
         state-measure.preferred-width + 40px
         + min(120px, author-measure.preferred-width)
@@ -618,7 +620,8 @@ export component GitHubPullRequestSummaryMetrics inherits Rectangle {
         font-weight: 600;
     }
     summary-measure := Text {
-        text: "wants to merge " + root.commit-count + (root.commit-count == 1 ? " commit into" : " commits into");
+        text: I18n.pr-review-wants-to-merge + " " + root.commit-count + " "
+            + (root.commit-count == 1 ? I18n.pr-review-commit-into : I18n.pr-review-commits-into);
         font-size: 13px;
     }
     target-measure := Text {
@@ -626,7 +629,7 @@ export component GitHubPullRequestSummaryMetrics inherits Rectangle {
         font-size: 13px;
     }
     from-measure := Text {
-        text: "from";
+        text: I18n.pr-review-from;
         font-size: 13px;
     }
     source-measure := Text {
@@ -710,7 +713,8 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
         merge-summary-label := Text {
             width: self.preferred-width;
             height: 26px;
-            text: "wants to merge " + root.commit-count + (root.commit-count == 1 ? " commit into" : " commits into");
+            text: I18n.pr-review-wants-to-merge + " " + root.commit-count + " "
+                + (root.commit-count == 1 ? I18n.pr-review-commit-into : I18n.pr-review-commits-into);
             font-size: 13px;
             color: root.muted-color;
             vertical-alignment: center;
@@ -723,7 +727,7 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
         from-label := Text {
             width: self.preferred-width;
             height: 26px;
-            text: "from";
+            text: I18n.pr-review-from;
             font-size: 13px;
             color: root.muted-color;
             vertical-alignment: center;
@@ -734,7 +738,7 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
             foreground-color: root.branch-foreground;
         }
         GitHubCopyButton {
-            tooltip-text: "Copy source branch";
+            tooltip-text: I18n.pr-review-copy-source-branch;
             tooltip-above: false;
             tooltip-align-right: true;
             copy-requested => {
@@ -788,7 +792,8 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
         compact-summary-label := Text {
             width: self.preferred-width;
             height: 26px;
-            text: "wants to merge " + root.commit-count + (root.commit-count == 1 ? " commit into" : " commits into");
+            text: I18n.pr-review-wants-to-merge + " " + root.commit-count + " "
+                + (root.commit-count == 1 ? I18n.pr-review-commit-into : I18n.pr-review-commits-into);
             font-size: 13px;
             color: root.muted-color;
             vertical-alignment: center;
@@ -812,7 +817,7 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
         compact-from-label := Text {
             width: self.preferred-width;
             height: 26px;
-            text: "from";
+            text: I18n.pr-review-from;
             font-size: 13px;
             color: root.muted-color;
             vertical-alignment: center;
@@ -823,7 +828,7 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
             foreground-color: root.branch-foreground;
         }
         GitHubCopyButton {
-            tooltip-text: "Copy source branch";
+            tooltip-text: I18n.pr-review-copy-source-branch;
             tooltip-above: false;
             tooltip-align-right: true;
             copy-requested => {
@@ -841,13 +846,13 @@ export component GitHubPullRequestSummaryRow inherits Rectangle {
 }
 
 export component GitHubCenteredErrorState inherits Rectangle {
-    in property <string> title: "Uh oh!";
-    in property <string> detail: "There was an error while loading. Please reload this page.";
+    in property <string> title: I18n.common-uh-oh;
+    in property <string> detail: I18n.common-load-error-reload;
     in property <color> background-color;
     in property <color> outline-color;
     in property <color> foreground-color;
     in property <color> muted-color;
-    in property <string> action-label: "Try again";
+    in property <string> action-label: I18n.common-try-again;
     callback retry();
 
     background: root.background-color;
@@ -998,7 +1003,7 @@ export component GitHubPullRequestTabButton inherits Rectangle {
 }
 
 export component GitHubCommitRangeButton inherits Rectangle {
-    in property <string> text: "All commits";
+    in property <string> text: I18n.pr-review-all-commits;
     callback clicked();
     private property <bool> keyboard-focus-visible: false;
 
@@ -1354,7 +1359,7 @@ export component GitHubHeaderActionStrip inherits Rectangle {
     in property <length> viewport-global-y: 0px;
     in property <length> viewport-width: 0px;
     in property <length> viewport-height: 0px;
-    in property <string> revert-action-label: "Revert pull request";
+    in property <string> revert-action-label: I18n.pr-review-revert-pull-request;
     in property <string> merge-block-reason;
     in property <color> background-color;
     in property <color> outline-color;
@@ -1459,7 +1464,7 @@ export component GitHubHeaderActionStrip inherits Rectangle {
                 x: 30px;
                 width: self.preferred-width;
                 height: parent.height;
-                text: "Approved";
+                text: I18n.pr-review-approved;
                 horizontal-alignment: left;
                 vertical-alignment: center;
                 font-size: 12px;
@@ -1475,12 +1480,12 @@ export component GitHubHeaderActionStrip inherits Rectangle {
                 height: root.titlebar-mode ? 28px : 36px;
                 width: parent.width;
                 titlebar-mode: root.titlebar-mode;
-                text: "Review changes";
+                text: I18n.pr-review-review-changes;
                 tooltip-align-start: root.align-start;
                 button-enabled: root.actions-enabled && !root.action-loading && (root.can-comment || root.can-approve || root.can-request-changes);
                 tooltip-text: root.can-comment || root.can-approve || root.can-request-changes
-                    ? "Comment, approve, or request changes"
-                    : "Configure provider credentials to submit a review";
+                    ? I18n.pr-review-comment-approve-request
+                    : I18n.pr-review-configure-provider;
                 clicked => { root.review(); }
             }
         }
@@ -1492,12 +1497,12 @@ export component GitHubHeaderActionStrip inherits Rectangle {
                 height: root.titlebar-mode ? 28px : 36px;
                 width: parent.width;
                 titlebar-mode: root.titlebar-mode;
-                text: root.action-loading ? "Working…" : "Merge pull request";
+                text: root.action-loading ? I18n.common-working : I18n.pr-review-merge-pull-request;
                 success: true;
                 show-chevron: true;
                 tooltip-align-start: root.align-start;
                 button-enabled: root.actions-enabled && !root.action-loading && root.can-merge;
-                tooltip-text: root.can-merge ? "Choose a merge method" : root.merge-block-reason;
+                tooltip-text: root.can-merge ? I18n.pr-review-choose-merge-method : root.merge-block-reason;
                 clicked => { root.merge(); }
             }
         }
@@ -1513,9 +1518,9 @@ export component GitHubHeaderActionStrip inherits Rectangle {
                 titlebar-mode: root.titlebar-mode;
                 hug-content: true;
                 tooltip-align-start: root.align-start;
-                text: root.action-loading ? "Working…" : root.revert-action-label;
+                text: root.action-loading ? I18n.common-working : root.revert-action-label;
                 button-enabled: root.actions-enabled && !root.action-loading;
-                tooltip-text: "Reverse the changes from this merged pull request";
+                tooltip-text: I18n.pr-review-reverse-changes;
                 clicked => { root.revert(); }
             }
         }

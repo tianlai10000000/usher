@@ -7,6 +7,7 @@ import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubFilterMenuButton } from "../github_filter_menu.slint";
 import { GitHubMetrics, GitHubTheme } from "../../theme/github_theme.slint";
 import { AiReviewRuleChoice } from "@ai-review";
+import { I18n } from "@i18n";
 
 
 
@@ -51,7 +52,7 @@ export component GitHubPullRequestFlow {
     in property <string> pr-error-kind: "";
     in property <[AiReviewRuleChoice]> ai-review-rule-options: [];
     in property <string> ai-review-project-rule-id: "";
-    in property <string> ai-review-project-rule-name: "No preset";
+    in property <string> ai-review-project-rule-name: I18n.common-no-preset;
     callback change-state(string);
     callback change-query(string);
     callback change-page(int);
@@ -83,10 +84,10 @@ export component GitHubPullRequestFlow {
     // GitHub keeps state and filter actions on one compact toolbar row.
     private property <length> header-height: 48px;
     private property <string> empty-title: root.pr-state == "open"
-        ? "There aren’t any open pull requests."
+        ? I18n.pr-list-empty-open
         : (root.pr-state == "merged"
-            ? "There aren’t any merged pull requests."
-            : "There aren’t any closed pull requests.");
+            ? I18n.pr-list-empty-merged
+            : I18n.pr-list-empty-closed);
     private property <color> canvas-default: GitHubTheme.canvas-default;
     private property <color> canvas-subtle: GitHubTheme.canvas-subtle;
     private property <color> border-default: GitHubTheme.border-default;
@@ -179,14 +180,14 @@ export component GitHubPullRequestFlow {
                 height: parent.height;
                 spacing: 0px;
                 open-state-btn := GitHubPullRequestStateButton {
-                    label: "Open";
+                    label: I18n.pr-list-open;
                     value: "open";
                     selected-value: root.pr-state;
                     count: root.pr-open-total;
                     selected(value) => { root.change-state(value); }
                 }
                 closed-state-btn := GitHubPullRequestStateButton {
-                    label: "Closed";
+                    label: I18n.pr-list-closed;
                     value: "closed";
                     selected-value: root.pr-state;
                     count: root.pr-closed-total;
@@ -196,7 +197,7 @@ export component GitHubPullRequestFlow {
 
             if !root.canonical-state-query: GitHubPullRequestStateButton {
                 x: 4px;
-                label: "Total";
+                label: I18n.pr-list-total;
                 value: "total";
                 selected-value: "total";
                 count: root.pr-total-exact ? root.pr-total : -1;
@@ -222,7 +223,7 @@ export component GitHubPullRequestFlow {
                     alignment: end;
 
                     if root.ai-review-rule-options.length > 0: rule-btn := GitHubFilterMenuButton {
-                        label: "AI rule: " + root.ai-review-project-rule-name;
+                        label: I18n.pr-list-ai-rule + ": " + root.ai-review-project-rule-name;
                         menu-open: root.active-menu == "ai-rule";
                         selected: root.active-menu == "ai-rule" || root.ai-review-project-rule-id != "";
                         clicked => {
@@ -233,7 +234,7 @@ export component GitHubPullRequestFlow {
                     }
 
                     if !root.compact-filters && root.supports-review-filter: reviews-btn := GitHubFilterMenuButton {
-                        label: "Reviews";
+                        label: I18n.pr-list-reviews;
                         menu-open: root.active-menu == "reviews";
                         selected: root.active-menu == "reviews" || root.pr-review-filter != "all";
                         clicked => {
@@ -243,7 +244,7 @@ export component GitHubPullRequestFlow {
                         }
                     }
                     if !root.compact-filters && root.supports-assignee-filter: assignee-btn := GitHubFilterMenuButton {
-                        label: "Assignee";
+                        label: I18n.pr-list-assignee;
                         menu-open: root.active-menu == "assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => {
@@ -253,7 +254,7 @@ export component GitHubPullRequestFlow {
                         }
                     }
                     if !root.compact-filters: sort-btn := GitHubFilterMenuButton {
-                        label: "Sort";
+                        label: I18n.pr-list-sort;
                         menu-open: root.active-menu == "sort";
                         selected: root.active-menu == "sort" || root.pr-sort-filter != "newest";
                         clicked => {
@@ -263,7 +264,7 @@ export component GitHubPullRequestFlow {
                         }
                     }
                     if root.compact-filters && root.supports-assignee-filter: GitHubFilterMenuButton {
-                        label: "Assignee";
+                        label: I18n.pr-list-assignee;
                         menu-open: root.active-menu == "assignee";
                         selected: root.active-menu == "assignee" || root.pr-assignee-filter != "any";
                         clicked => {
@@ -293,7 +294,7 @@ export component GitHubPullRequestFlow {
             y: root.header-height;
             width: parent.width;
             height: parent.height - root.header-height;
-            label: "Loading pull requests…";
+            label: I18n.pr-list-loading;
             foreground: root.fg-muted;
         }
 
@@ -301,12 +302,12 @@ export component GitHubPullRequestFlow {
             y: root.header-height;
             width: parent.width;
             error-state: true;
-            title: "Unable to load pull requests";
-            description: "Check your code hosting configuration or connection, then try again.";
+            title: I18n.pr-list-unable-to-load;
+            description: I18n.pr-list-load-error-description;
             show-action: true;
             action-label: root.pr-error-kind == "authentication" || root.pr-error-kind == "configuration"
-                ? "Open Settings"
-                : "Retry request";
+                ? I18n.common-open-settings
+                : I18n.pr-list-retry-request;
             action => {
                 if root.pr-error-kind == "authentication" || root.pr-error-kind == "configuration" {
                     root.open-settings();
@@ -320,7 +321,7 @@ export component GitHubPullRequestFlow {
             y: root.header-height;
             width: parent.width;
             title: root.empty-title;
-            description: "Try another status filter.";
+            description: I18n.pr-list-empty-filter-description;
         }
 
         visible-rows := VerticalLayout {
@@ -337,6 +338,12 @@ export component GitHubPullRequestFlow {
                 // accent link; hover underlines the title instead of painting
                 // Box-row--hover-gray across the row.
                 background: transparent;
+                private property <string> display-title: item.title == ""
+                    ? I18n.pr-list-untitled-pull-request
+                    : item.title;
+                private property <string> display-author: item.author == ""
+                    ? I18n.common-unknown-author
+                    : item.author;
                 private property <length> conversation-action-width: item.conversation-count > 0 ? 40px : 32px;
                 private property <length> ai-action-width: 32px;
                 private property <bool> ai-review-active:
@@ -384,7 +391,7 @@ export component GitHubPullRequestFlow {
                     height: 100%;
                     accessible-role: button;
                     accessible-enabled: true;
-                    accessible-label: item.title + ". Pull request " + item.number;
+                    accessible-label: pr-row.display-title + ". " + I18n.pr-list-pull-request + " " + item.number;
                     key-pressed(event) => {
                         pr-row.keyboard-focus-visible = true;
                         if event.text == Key.Return || event.text == " " {
@@ -431,7 +438,7 @@ export component GitHubPullRequestFlow {
 
                 title-measure := Text {
                     visible: false;
-                    text: item.title;
+                    text: pr-row.display-title;
                     font-size: 14px;
                     font-weight: 600;
                     wrap: no-wrap;
@@ -440,7 +447,7 @@ export component GitHubPullRequestFlow {
                 title-wrapped-measure := StyledText {
                     visible: false;
                     width: parent.title-max-width;
-                    text: @markdown("**\{item.title}**");
+                    text: @markdown("**\{pr-row.display-title}**");
                     default-font-size: 14px;
                 }
 
@@ -454,7 +461,7 @@ export component GitHubPullRequestFlow {
                     if !title-touch.has-hover: StyledText {
                         width: parent.width;
                         height: parent.height;
-                        text: @markdown("**\{item.title}**");
+                        text: @markdown("**\{pr-row.display-title}**");
                         default-font-size: 14px;
                         default-color: root.fg-default;
                         horizontal-alignment: left;
@@ -468,7 +475,7 @@ export component GitHubPullRequestFlow {
                     if title-touch.has-hover: StyledText {
                         width: parent.width;
                         height: parent.height;
-                        text: @markdown("<u>**\{item.title}**</u>");
+                        text: @markdown("<u>**\{pr-row.display-title}**</u>");
                         default-font-size: 14px;
                         default-color: GitHubTheme.accent-fg;
                         horizontal-alignment: left;
@@ -498,26 +505,28 @@ export component GitHubPullRequestFlow {
                     }
                 }
 
-                private property <string> meta-prefix: "#" + item.number + " by " + item.author
+                private property <string> meta-prefix: "#" + item.number + " " + I18n.pr-list-by + " " + pr-row.display-author
                     + (item.state == "merged"
-                        ? " was merged "
-                        : (item.state == "closed" ? " was closed " : " was opened "));
+                        ? " " + I18n.pr-list-was-merged + " "
+                        : (item.state == "closed"
+                            ? " " + I18n.pr-list-was-closed + " "
+                            : " " + I18n.pr-list-was-opened + " "));
                 private property <bool> has-branches: item.target-branch != ""
                     && item.source-branch != "";
                 // Gitee's mixed CJK/Latin metadata needs a small optical
                 // correction; Latin-only GitHub/GitLab metadata does not.
                 private property <length> time-visual-offset-y: root.repo-type == "gitee" ? 1px : 0px;
                 private property <string> review-status-label: item.review-status == "approved"
-                    ? "Approved"
+                    ? I18n.pr-review-approved
                     : (item.review-status == "review_required"
-                        ? "Review required"
-                        : (item.review-status == "changes_requested" ? "Changes requested" : ""));
+                        ? I18n.pr-list-review-required
+                        : (item.review-status == "changes_requested" ? I18n.pr-list-changes-requested : ""));
                 private property <string> review-status-tooltip: item.review-status == "approved"
-                    ? "This pull request has an approving review"
+                    ? I18n.pr-list-approving-review-tooltip
                     : (item.review-status == "review_required"
-                        ? "This pull request is awaiting a required review"
+                        ? I18n.pr-list-awaiting-review-tooltip
                         : (item.review-status == "changes_requested"
-                            ? "A reviewer requested changes"
+                            ? I18n.pr-list-changes-requested-tooltip
                             : ""));
                 private property <length> meta-max-width: max(
                     0px,
@@ -670,7 +679,7 @@ export component GitHubPullRequestFlow {
                     height: 22px;
                     accessible-role: button;
                     accessible-enabled: true;
-                    accessible-label: parent.review-status-label + ". Open pull request conversation";
+                    accessible-label: parent.review-status-label + ". " + I18n.pr-list-open-conversation;
                     private property <bool> keyboard-focus-visible: false;
 
                     key-pressed(event) => {
@@ -913,14 +922,14 @@ export component GitHubPullRequestFlow {
                         mouse-cursor: pointer;
                         changed has-hover => {
                             if self.has-hover {
-                                root.hovered-inline-tooltip = "Open Conversation";
+                                root.hovered-inline-tooltip = I18n.pr-list-open-conversation;
                                 root.hovered-inline-tooltip-x = self.absolute-position.x
                                     - root.absolute-position.x;
                                 root.hovered-inline-tooltip-y = self.absolute-position.y
                                     - root.absolute-position.y;
                                 root.hovered-inline-tooltip-width = self.width;
                                 root.hovered-inline-tooltip-height = self.height;
-                            } else if root.hovered-inline-tooltip == "Open Conversation" {
+                            } else if root.hovered-inline-tooltip == I18n.pr-list-open-conversation {
                                 root.hovered-inline-tooltip = "";
                             }
                         }
@@ -976,14 +985,14 @@ export component GitHubPullRequestFlow {
                         changed has-hover => {
                             if self.has-hover {
                                 root.hovered-inline-tooltip = item.ai-review-status == "queued"
-                                    ? "AI review queued"
+                                    ? I18n.pr-list-ai-review-queued
                                     : (item.ai-review-status == "running"
-                                        ? "AI review in progress"
+                                        ? I18n.pr-list-ai-review-in-progress
                                         : (item.ai-review-status == "completed"
-                                            ? "Open AI review (" + item.ai-review-finding-count + ")"
+                                            ? I18n.pr-list-open-ai-review + " (" + item.ai-review-finding-count + ")"
                                             : (item.ai-review-status == "failed"
-                                                ? "AI review failed; start again"
-                                                : "Review pull request with AI")));
+                                                ? I18n.pr-list-ai-review-failed
+                                                : I18n.pr-list-review-with-ai)));
                                 root.hovered-inline-tooltip-x = self.absolute-position.x
                                     - root.absolute-position.x;
                                 root.hovered-inline-tooltip-y = self.absolute-position.y
@@ -1021,7 +1030,7 @@ export component GitHubPullRequestFlow {
                     visual-size: GitHubMetrics.size-16;
                     glyph-size: GitHubMetrics.icon-medium;
                     icon: @image-url("../../assets/icons/github-stop-square-fill-16.svg");
-                    tooltip-text: "Cancel review";
+                    tooltip-text: I18n.pr-list-cancel-review;
                     tooltip-align-right: true;
                     inverse: true;
                     circular: true;
@@ -1079,7 +1088,7 @@ export component GitHubPullRequestFlow {
                 GitHubButton {
                     x: 0px;
                     width: 84px;
-                    text: "Previous";
+                    text: I18n.common-previous;
                     disabled: !(root.pr-page > 1 && !root.pr-loading);
                     clicked => { root.change-page(root.pr-page - 1); }
                 }
@@ -1087,7 +1096,7 @@ export component GitHubPullRequestFlow {
                     x: 96px;
                     width: max(0px, parent.width - 192px);
                     height: parent.height;
-                    text: "Page " + root.pr-page + " / " + root.pr-page-count;
+                    text: I18n.common-page + " " + root.pr-page + " / " + root.pr-page-count;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                     font-size: 12px;
@@ -1096,7 +1105,7 @@ export component GitHubPullRequestFlow {
                 GitHubButton {
                     x: parent.width - self.width;
                     width: 84px;
-                    text: "Next";
+                    text: I18n.common-next;
                     disabled: !(root.pr-page < root.pr-page-count && !root.pr-loading);
                     clicked => { root.change-page(root.pr-page + 1); }
                 }
@@ -1141,7 +1150,7 @@ export component GitHubPullRequestFlow {
             spacing: 0px;
             for rule in root.ai-review-rule-options: GitHubActionListItem {
                 text: rule.name;
-                description: rule.inherited ? "Follows the Settings default" : "Project override";
+                description: rule.inherited ? I18n.pr-list-follows-settings-default : I18n.pr-list-project-override;
                 selectable: true;
                 selected: rule.selected;
                 activated => {

@@ -8,13 +8,23 @@ fn main() {
     } else {
         repository_root.join("ui/features/ai_review_settings/disabled.slint")
     };
+    let i18n = usher_i18n::build_support::prepare_slint_bundle(
+        std::env::var_os("OUT_DIR").expect("Cargo must provide OUT_DIR"),
+        env!("CARGO_PKG_NAME"),
+    )
+    .expect("failed to prepare Slint translations");
+    let emit_debug_info = std::env::var_os("SLINT_EMIT_DEBUG_INFO").is_some()
+        || std::env::var("PROFILE").is_ok_and(|profile| profile == "debug");
     let config = slint_build::CompilerConfiguration::new()
+        .with_debug_info(emit_debug_info)
+        .with_bundled_translations(i18n.translations_path)
         .with_library_paths(HashMap::from([
             (
                 "material".to_string(),
                 repository_root.join("material-1.7.1-fixed/material.slint"),
             ),
             ("ai-review-settings".to_string(), ai_review_settings_library),
+            ("i18n".to_string(), i18n.library_path),
         ]))
         .as_library("usher_ui_settings");
 

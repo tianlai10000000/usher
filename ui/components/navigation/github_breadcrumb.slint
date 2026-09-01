@@ -2,6 +2,7 @@ import { Route } from "../../route/routeMap.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubLink } from "../github_link.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 // Primer Breadcrumbs "normal" variant:
 // 14 px link text, accent-colored ancestors, default-colored current page,
@@ -24,12 +25,6 @@ component GitHubBreadcrumbItem {
     private property <length> label-x: root.has-icon
         ? root.icon-size + GitHubMetrics.size-6
         : 0px;
-    // Slint centers a 14px font's line box, not its rendered glyph bounds.
-    // The platform font's visible glyphs sit 2px high relative to Lucide's
-    // symmetric 14px view box, so retain this minimal optical correction in
-    // one place.
-    private property <length> text-optical-offset: 1px;
-
     width: root.label-x + item-label-measure.preferred-width;
     height: 32px;
 
@@ -50,7 +45,7 @@ component GitHubBreadcrumbItem {
 
     if root.is-current: Text {
         x: root.label-x;
-        y: root.text-optical-offset;
+        y: 0px;
         width: item-label-measure.preferred-width;
         height: parent.height;
         text: root.text;
@@ -62,10 +57,10 @@ component GitHubBreadcrumbItem {
 
     if !root.is-current: GitHubLink {
         x: root.label-x;
-        // GitHubLink owns a compact 20 px line box while the breadcrumb row
-        // is 32 px tall. Apply the same optical correction as the current
-        // text so both labels share the Lucide icon's visible centerline.
-        y: (root.height - self.height) / 2 + root.text-optical-offset;
+        // GitHubLink owns a compact 20 px line box while the breadcrumb row is
+        // 32 px tall. Geometric centering keeps Latin and CJK labels aligned
+        // with the icon without a locale-specific optical offset.
+        y: (root.height - self.height) / 2;
         text: root.text;
         link-enabled: root.clickable;
         clicked => { root.clicked(); }
@@ -89,7 +84,7 @@ component GitHubBreadcrumbSeparator {
     // margins. At the 14 px body size that maps to an 11 px divider.
     Rectangle {
         x: 7px;
-        y: 10px;
+        y: (parent.height - self.height) / 2;
         width: 1px;
         height: 11px;
         background: GitHubTheme.fg-muted;
@@ -104,7 +99,7 @@ component GitHubBreadcrumbBackButton inherits GitHubIconButton {
     callback back();
 
     icon: @image-url("../../assets/icons/octicon-arrow-left-16.svg");
-    tooltip-text: "Back";
+    tooltip-text: I18n.common-back;
     tooltip-above: false;
     foreground: GitHubTheme.fg-default;
     clicked => { root.back(); }
@@ -179,7 +174,7 @@ export component GitHubBreadcrumb inherits Rectangle {
 
                 GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-home.svg");
-                    text: "Home";
+                    text: I18n.navigation-home;
                     is-current: root.is-home;
                     clickable: !root.is-home;
                     clicked => { root.navigate(Route.Home); }
@@ -188,69 +183,69 @@ export component GitHubBreadcrumb inherits Rectangle {
                 if root.is-about-page: GitHubBreadcrumbSeparator {}
                 if root.is-about-page: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-help.svg");
-                    text: "About";
+                    text: I18n.common-about;
                     is-current: true;
                 }
 
                 if root.is-settings-page: GitHubBreadcrumbSeparator {}
                 if root.is-settings-page: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-settings.svg");
-                    text: "Settings";
+                    text: I18n.common-settings;
                     is-current: true;
                 }
 
                 if root.current-route == Route.Search: GitHubBreadcrumbSeparator {}
                 if root.current-route == Route.Search: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-search.svg");
-                    text: "Search";
+                    text: I18n.common-search;
                     is-current: true;
                 }
 
                 if root.is-messages-page: GitHubBreadcrumbSeparator {}
                 if root.is-messages-page: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-bell.svg");
-                    text: "Notifications";
+                    text: I18n.common-notifications;
                     is-current: true;
                 }
 
                 if root.is-ui-components-page: GitHubBreadcrumbSeparator {}
                 if root.is-ui-components-page: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-components.svg");
-                    text: "UI Components";
+                    text: I18n.navigation-ui-components;
                     is-current: true;
                 }
 
                 if root.current-route == Route.Project: GitHubBreadcrumbSeparator {}
                 if root.current-route == Route.Project: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-projects.svg");
-                    text: "Projects";
+                    text: I18n.common-projects;
                     is-current: true;
                 }
 
                 if root.current-route == Route.Workflow: GitHubBreadcrumbSeparator {}
                 if root.current-route == Route.Workflow: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-projects.svg");
-                    text: "Projects";
+                    text: I18n.common-projects;
                     clicked => { root.navigate(Route.Project); }
                 }
                 if root.current-route == Route.Workflow: GitHubBreadcrumbSeparator {}
                 if root.current-route == Route.Workflow: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-components.svg");
-                    text: "Workflow";
+                    text: I18n.common-workflow;
                     is-current: true;
                 }
 
                 if root.current-route == Route.JobRun: GitHubBreadcrumbSeparator {}
                 if root.current-route == Route.JobRun: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-components.svg");
-                    text: "Job run";
+                    text: I18n.common-job-run;
                     is-current: true;
                 }
 
                 if root.current-route == Route.Chat: GitHubBreadcrumbSeparator {}
                 if root.current-route == Route.Chat: GitHubBreadcrumbItem {
                     icon: @image-url("../../assets/icons/lucide-sidebar-chat.svg");
-                    text: "Chat";
+                    text: I18n.navigation-chat;
                     is-current: true;
                 }
 

@@ -1,6 +1,7 @@
 import { GitHubIconButton } from "./button/github_icon_button.slint";
 import { Route } from "../route/routeMap.slint";
 import { GitHubTheme } from "../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 export component GitHubTitleBar {
     in property <string> title: "Usher";
@@ -83,7 +84,7 @@ export component GitHubTitleBar {
                     GitHubIconButton {
                         control-size: 28px;
                         icon: @image-url("../assets/icons/settings.svg");
-                        tooltip-text: "Settings";
+                        tooltip-text: I18n.common-settings;
                         tooltip-above: false;
                         selected: current-route == Route.Settings;
                         foreground: current-route == Route.Settings
@@ -97,7 +98,7 @@ export component GitHubTitleBar {
                     GitHubIconButton {
                         control-size: 28px;
                         icon: @image-url("../assets/icons/about.svg");
-                        tooltip-text: "About";
+                        tooltip-text: I18n.common-about;
                         tooltip-above: false;
                         selected: current-route == Route.About;
                         foreground: current-route == Route.About

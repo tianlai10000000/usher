@@ -1,6 +1,7 @@
 import { GitHubDialog } from "../dialog/github_dialog.slint";
 import { GitHubProgressBar } from "../github_progress_bar.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 export global UpdateLogic {
     in-out property <bool> update-available: false;
@@ -37,14 +38,14 @@ export component GitHubDownloadProgressDialog inherits Rectangle {
         dialog-visible: root.show-modal;
         // Keep Esc available so Cancel download matches the footer action.
         modal: false;
-        title: "Downloading update";
-        subtitle: "Downloading version " + root.version + "…";
+        title: I18n.update-downloading;
+        subtitle: I18n.update-downloading-version + " " + root.version + "…";
         dialog-width: 480px;
         dialog-height: 296px;
         body-padding: 16px;
         show-close: false;
         primary-label: "";
-        cancel-label: "Cancel download";
+        cancel-label: I18n.update-cancel-download;
         close-requested => { root.cancel-clicked(); }
         cancel-clicked => { root.cancel-clicked(); }
 
@@ -61,7 +62,7 @@ export component GitHubDownloadProgressDialog inherits Rectangle {
                 y: 8px;
                 width: parent.width;
                 height: 20px;
-                text: root.status == "" ? "Preparing download…" : root.status;
+                text: root.status == "" ? I18n.update-preparing-download : root.status;
                 font-size: 14px;
                 color: GitHubTheme.fg-default;
                 vertical-alignment: center;

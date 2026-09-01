@@ -36,6 +36,9 @@ export component GitHubSegmentedControlItem inherits FocusScope {
     // Text nodes so the integer can update on its own.
     in property <string> label;
     in property <int> count: -1;
+    // Locale typography metadata may opt into a small suffix correction when
+    // its fallback font does not share the Latin digit baseline.
+    in property <int> count-suffix-offset: 0;
     in property <bool> selected: false;
     in property <bool> item-enabled: true;
     callback clicked();
@@ -134,15 +137,18 @@ export component GitHubSegmentedControlItem inherits FocusScope {
         background: transparent;
     }
 
-    HorizontalLayout {
-        y: GitHubMetrics.border-thin;
+    caption-row := HorizontalLayout {
+        y: (parent.height - self.height) / 2 + 1px;
         width: parent.width;
-        height: parent.height;
+        height: self.preferred-height;
         spacing: 0px;
         alignment: center;
-        cross-axis-alignment: stretch;
+        // Align font-run boxes by their lower edge. A locale-owned optical
+        // correction handles fallback fonts whose reported metrics still do
+        // not share the Latin digit baseline.
+        cross-axis-alignment: end;
 
-        Text {
+        label-text := Text {
             text: root.label;
             font-size: GitHubMetrics.text-small;
             font-weight: root.selected ? 600 : 400;
@@ -151,29 +157,40 @@ export component GitHubSegmentedControlItem inherits FocusScope {
             wrap: no-wrap;
             overflow: elide;
         }
-        if root.show-count: Text {
-            text: " (";
-            font-size: GitHubMetrics.text-small;
-            font-weight: root.selected ? 600 : 400;
-            color: GitHubTheme.fg-default;
-            vertical-alignment: center;
-            wrap: no-wrap;
-        }
-        if root.show-count: Text {
-            text: root.count;
-            font-size: GitHubMetrics.text-small;
-            font-weight: root.selected ? 600 : 400;
-            color: GitHubTheme.fg-default;
-            vertical-alignment: center;
-            wrap: no-wrap;
-        }
-        if root.show-count: Text {
-            text: ")";
-            font-size: GitHubMetrics.text-small;
-            font-weight: root.selected ? 600 : 400;
-            color: GitHubTheme.fg-default;
-            vertical-alignment: center;
-            wrap: no-wrap;
+        if root.show-count: Rectangle {
+            horizontal-stretch: 0;
+            width: suffix-row.preferred-width;
+            height: label-text.preferred-height;
+            background: transparent;
+
+            suffix-row := HorizontalLayout {
+                y: root.count-suffix-offset * 1px;
+                width: self.preferred-width;
+                height: self.preferred-height;
+                spacing: 0px;
+
+                Text {
+                    text: " (";
+                    font-size: GitHubMetrics.text-small;
+                    font-weight: root.selected ? 600 : 400;
+                    color: GitHubTheme.fg-default;
+                    wrap: no-wrap;
+                }
+                Text {
+                    text: root.count;
+                    font-size: GitHubMetrics.text-small;
+                    font-weight: root.selected ? 600 : 400;
+                    color: GitHubTheme.fg-default;
+                    wrap: no-wrap;
+                }
+                Text {
+                    text: ")";
+                    font-size: GitHubMetrics.text-small;
+                    font-weight: root.selected ? 600 : 400;
+                    color: GitHubTheme.fg-default;
+                    wrap: no-wrap;
+                }
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 import { GitHubTagField } from "./fields.slint";
 import { GitHubTagActionButton } from "./tag_controls.slint";
+import { I18n } from "@i18n";
 
 export component GitHubTagRemovePanel {
     in property <bool> running: false;
@@ -22,7 +23,7 @@ export component GitHubTagRemovePanel {
 
         GitHubTagField {
             width: 100%;
-            label: "Tag to remove";
+            label: I18n.tag-to-remove;
             value <=> root.tag-to-remove;
             placeholder: "v1.2.3";
             enabled: !root.running && !root.initializing;
@@ -38,7 +39,7 @@ export component GitHubTagRemovePanel {
             GitHubTagActionButton {
                 enabled: !root.running && !root.initializing;
                 loading: root.initializing;
-                label: root.initializing ? "Loading…" : "Remove tag";
+                label: root.initializing ? I18n.tag-loading : I18n.tag-remove;
                 danger: true;
                 clicked => {
                     root.remove-tag(root.tag-to-remove);
@@ -46,7 +47,7 @@ export component GitHubTagRemovePanel {
             }
 
             if root.has-run: GitHubTagActionButton {
-                label: root.running ? "View running job" : "View latest job";
+                label: root.running ? I18n.tag-view-running-job : I18n.tag-view-latest-job;
                 action-primary: false;
                 clicked => {
                     root.view-run();

@@ -7367,6 +7367,7 @@ dependencies = [
  "tray-icon",
  "usher-ai-review",
  "usher-fs",
+ "usher-i18n",
  "usher-messages",
  "usher-preview",
  "usher-search",
@@ -7396,6 +7397,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "usher-i18n"
+version = "0.0.8-alpha.1"
+dependencies = [
+ "rspolib",
+ "serde",
+ "sys-locale",
+ "toml 1.1.4+spec-1.1.0",
+]
+
+[[package]]
 name = "usher-messages"
 version = "0.0.8-alpha.1"
 dependencies = [
@@ -7408,6 +7419,7 @@ dependencies = [
  "slint",
  "slint-build",
  "usher-fs",
+ "usher-i18n",
  "usher-state-store",
 ]
 
@@ -7442,6 +7454,7 @@ version = "0.0.7-alpha.1"
 dependencies = [
  "slint",
  "slint-build",
+ "usher-i18n",
 ]
 
 [[package]]
@@ -7450,6 +7463,7 @@ version = "0.0.8-alpha.1"
 dependencies = [
  "slint",
  "slint-build",
+ "usher-i18n",
 ]
 
 [[package]]

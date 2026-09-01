@@ -1,6 +1,7 @@
 import { GitHubButton, GitHubToggle } from "../settings/github_settings_controls.slint";
 import { GitHubTagField } from "./fields.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 export component GitHubBranchFlow {
     in property <string> result;
@@ -23,7 +24,7 @@ export component GitHubBranchFlow {
 
         Text {
             width: parent.width;
-            text: "Validate a clean source and target branch before recreating the branch plan.";
+            text: I18n.branch-description;
             wrap: word-wrap;
             font-size: GitHubMetrics.text-medium;
             color: GitHubTheme.fg-muted;
@@ -35,14 +36,14 @@ export component GitHubBranchFlow {
 
             GitHubTagField {
                 width: root.split-field-width;
-                label: "Source branch";
+                label: I18n.branch-source;
                 value <=> root.source-branch;
                 placeholder: "main";
             }
 
             GitHubTagField {
                 width: root.split-field-width;
-                label: "Target branch";
+                label: I18n.branch-target;
                 value <=> root.target-branch;
                 placeholder: "release/x.y";
             }
@@ -55,14 +56,14 @@ export component GitHubBranchFlow {
 
             GitHubTagField {
                 width: parent.width;
-                label: "Source branch";
+                label: I18n.branch-source;
                 value <=> root.source-branch;
                 placeholder: "main";
             }
 
             GitHubTagField {
                 width: parent.width;
-                label: "Target branch";
+                label: I18n.branch-target;
                 value <=> root.target-branch;
                 placeholder: "release/x.y";
             }
@@ -81,7 +82,7 @@ export component GitHubBranchFlow {
                 y: GitHubMetrics.size-8;
                 width: parent.width - GitHubMetrics.size-80;
                 height: GitHubMetrics.size-20;
-                text: "Recreate remote tracking";
+                text: I18n.branch-recreate-remote-tracking;
                 font-size: GitHubMetrics.text-medium;
                 font-weight: 600;
                 color: GitHubTheme.fg-default;
@@ -93,7 +94,7 @@ export component GitHubBranchFlow {
                 y: GitHubMetrics.size-32;
                 width: parent.width - GitHubMetrics.size-80;
                 height: GitHubMetrics.size-16;
-                text: "Include the remote tracking branch in the validated plan.";
+                text: I18n.branch-remote-tracking-description;
                 font-size: GitHubMetrics.text-small;
                 color: GitHubTheme.fg-muted;
                 vertical-alignment: center;
@@ -109,7 +110,7 @@ export component GitHubBranchFlow {
         }
 
         GitHubButton {
-            text: "Validate branch plan";
+            text: I18n.branch-validate-plan;
             primary: true;
             clicked => {
                 root.submit(root.source-branch, root.target-branch, root.recreate-remote);
@@ -130,7 +131,7 @@ export component GitHubBranchFlow {
                 y: GitHubMetrics.size-12;
                 width: parent.width - GitHubMetrics.size-32;
                 height: GitHubMetrics.size-20;
-                text: "Execution plan";
+                text: I18n.branch-execution-plan;
                 font-size: GitHubMetrics.text-small;
                 font-weight: 600;
                 color: GitHubTheme.fg-muted;

@@ -5,6 +5,7 @@ import {
 import { GitHubDialog } from "../dialog/github_dialog.slint";
 import { GitHubScrollView } from "../github_scroll_view.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 export component GitHubProjectDialog {
     in property <bool> modal-visible: false;
@@ -18,7 +19,7 @@ export component GitHubProjectDialog {
     in-out property <string> project-tags;
     in-out property <bool> is-pr-auto-update;
     in property <image> logo-preview-image: @image-url("../../../logo.png");
-    in property <string> logo-preview-status: "Using app default logo";
+    in property <string> logo-preview-status: I18n.projects-using-default-logo;
     in-out property <string> error-text;
     callback submit(string, string, string, string, string, string, bool);
     callback preview-logo(string);
@@ -36,16 +37,20 @@ export component GitHubProjectDialog {
         // Forms keep Esc dismissible; backdrop stays blocked so pointer
         // accidents do not discard edits (Primer form-dialog pattern).
         modal: false;
-        title: root.mode == "edit" ? "Edit project" : root.deleting ? "Delete project?" : "New project";
+        title: root.mode == "edit"
+            ? I18n.projects-edit-project
+            : root.deleting ? I18n.projects-delete-project-question : I18n.projects-new-project;
         subtitle: root.deleting
             ? ""
             : (root.mode == "edit"
-                ? "Update repository metadata and project options."
-                : "Add a local Git repository to Usher.");
+                ? I18n.projects-edit-description
+                : I18n.projects-add-description);
         dialog-width: root.dialog-width;
         dialog-height: root.dialog-height;
         body-padding: 0px;
-        primary-label: root.mode == "edit" ? "Save changes" : root.deleting ? "Delete project" : "Add project";
+        primary-label: root.mode == "edit"
+            ? I18n.projects-save-changes
+            : root.deleting ? I18n.projects-delete-project : I18n.projects-add-project;
         primary-success: !root.deleting;
         primary-danger: root.deleting;
         close-requested => { root.cancel(); }
@@ -56,7 +61,7 @@ export component GitHubProjectDialog {
                 return;
             }
             if root.name == "" || root.alias == "" || root.local-repo == "" || root.remote-repo == "" {
-                root.error-text = "Project name, alias, local repository, and remote repository are required.";
+                root.error-text = I18n.projects-required-fields;
                 return;
             }
             root.submit(root.name, root.alias, root.local-repo, root.remote-repo, root.logo, root.project-tags, root.is-pr-auto-update);
@@ -91,7 +96,8 @@ export component GitHubProjectDialog {
                             x: 28px;
                             y: 0px;
                             width: parent.width - 28px;
-                            text: "This will permanently delete “" + root.name + "” from Usher. Repository files on disk will not be removed.";
+                            text: I18n.projects-delete-confirmation-prefix + " “" + root.name + "” "
+                                + I18n.projects-delete-confirmation-suffix;
                             font-size: 14px;
                             color: GitHubTheme.fg-default;
                             wrap: word-wrap;
@@ -113,9 +119,9 @@ export component GitHubProjectDialog {
                             x: 16px;
                             y: 16px;
                             width: parent.width - 32px;
-                            label: "Project name";
+                            label: I18n.projects-project-name;
                             text <=> root.name;
-                            placeholder: "e.g. Atlas";
+                            placeholder: I18n.projects-project-name-placeholder;
                             required: true;
                             validation-error: root.error-text != "" && root.name == "";
                             edited(text) => { root.error-text = ""; }
@@ -124,9 +130,9 @@ export component GitHubProjectDialog {
                             x: 16px;
                             y: 86px;
                             width: parent.width - 32px;
-                            label: "Project alias";
+                            label: I18n.projects-project-alias;
                             text <=> root.alias;
-                            placeholder: "e.g. atlas";
+                            placeholder: I18n.projects-project-alias-placeholder;
                             required: true;
                             validation-error: root.error-text != "" && root.alias == "";
                             edited(text) => { root.error-text = ""; }
@@ -135,7 +141,7 @@ export component GitHubProjectDialog {
                             x: 16px;
                             y: 156px;
                             width: parent.width - 32px;
-                            label: "Local repository";
+                            label: I18n.projects-local-repository;
                             text <=> root.local-repo;
                             placeholder: "/path/to/repository";
                             required: true;
@@ -146,7 +152,7 @@ export component GitHubProjectDialog {
                             x: 16px;
                             y: 226px;
                             width: parent.width - 32px;
-                            label: "Remote repository";
+                            label: I18n.projects-remote-repository;
                             text <=> root.remote-repo;
                             placeholder: "git@github.com:org/repo.git";
                             required: true;
@@ -157,10 +163,10 @@ export component GitHubProjectDialog {
                             x: 16px;
                             y: 296px;
                             width: parent.width - 32px;
-                            label: "Logo";
+                            label: I18n.projects-logo;
                             text <=> root.logo;
-                            placeholder: "Local path, HTTPS URL, or data URI";
-                            caption: "Optional. Used in the project list and workflow header.";
+                            placeholder: I18n.projects-logo-placeholder;
+                            caption: I18n.projects-logo-caption;
                             edited(text) => {
                                 root.error-text = "";
                                 root.preview-logo(text);
@@ -170,10 +176,10 @@ export component GitHubProjectDialog {
                             x: 16px;
                             y: 386px;
                             width: parent.width - 32px;
-                            label: "Project type tags";
+                            label: I18n.projects-type-tags;
                             text <=> root.project-tags;
-                            placeholder: "H5, Web, RN";
-                            caption: "Optional. Separate multiple labels with commas.";
+                            placeholder: I18n.projects-type-tags-placeholder;
+                            caption: I18n.projects-type-tags-caption;
                         }
 
                         Rectangle {
@@ -191,7 +197,7 @@ export component GitHubProjectDialog {
                                 y: 8px;
                                 width: parent.width - 84px;
                                 height: 20px;
-                                text: "Auto-refresh pull request counts";
+                                text: I18n.projects-auto-refresh-pr-counts;
                                 font-size: 14px;
                                 font-weight: 600;
                                 color: GitHubTheme.fg-default;
@@ -204,7 +210,7 @@ export component GitHubProjectDialog {
                                 y: 32px;
                                 width: parent.width - 84px;
                                 height: 18px;
-                                text: "Fetch FAT, UAT, and PROD counts when this list loads.";
+                                text: I18n.projects-auto-refresh-pr-counts-description;
                                 font-size: 12px;
                                 color: GitHubTheme.fg-muted;
                                 vertical-alignment: center;
@@ -254,7 +260,7 @@ export component GitHubProjectDialog {
                                 y: 12px;
                                 width: parent.width - 92px;
                                 height: 20px;
-                                text: "Logo preview";
+                                text: I18n.projects-logo-preview;
                                 font-size: 14px;
                                 font-weight: 600;
                                 color: GitHubTheme.fg-default;
@@ -268,7 +274,7 @@ export component GitHubProjectDialog {
                                 height: 20px;
                                 text: root.logo-preview-status;
                                 font-size: 12px;
-                                color: root.logo-preview-status == "Invalid input, using default logo"
+                                color: root.logo-preview-status == I18n.projects-invalid-logo-default
                                     ? (GitHubTheme.danger-fg)
                                     : (GitHubTheme.fg-muted);
                                 vertical-alignment: center;

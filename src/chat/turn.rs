@@ -33,6 +33,10 @@ pub fn create_assistant_message(content: String) -> ChatMessage {
     let id = next_message_id();
     log::debug!("[Chat::Turn] Creating assistant message (id: {})", id);
     let projection = project_assistant_content(&content);
+    let preview_title = projection
+        .preview_title_key
+        .map(|key| crate::i18n::tr(key).into_owned())
+        .unwrap_or_default();
 
     ChatMessage {
         id,
@@ -40,7 +44,7 @@ pub fn create_assistant_message(content: String) -> ChatMessage {
         status: MessageStatus::Normal,
         rendered_content: projection.text.into(),
         preview_available: projection.preview_available,
-        preview_title: projection.preview_title.into(),
+        preview_title: preview_title.into(),
         content: content.into(),
         timestamp: get_current_timestamp(),
         elapsed: "".into(),
@@ -114,7 +118,7 @@ pub fn serialize_server_response(response: String) -> Result<ChatMessage, String
 /// * `ChatMessage` - 用户友好的错误消息
 pub fn handle_error_response(error: String) -> ChatMessage {
     log::error!("[Chat] Turn failed: {}", error);
-    create_error_message("The message could not be sent. Try again.".to_string())
+    create_error_message(crate::i18n::tr("chat.send_failed").into_owned())
 }
 
 /// 获取当前时间戳（格式化）

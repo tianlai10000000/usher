@@ -2,6 +2,7 @@ import { GitHubActionsJob, JobStepItem } from "job.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 component GitHubJobRunStatusIcon inherits Rectangle {
     in property <string> execution-status: "queued";
@@ -135,11 +136,11 @@ component GitHubJobRunHeader inherits Rectangle {
     callback stop();
 
     private property <string> status-label:
-        root.execution-status == "in_progress" ? "In progress"
-        : root.execution-status == "completed" && root.conclusion == "success" ? "Success"
-        : root.execution-status == "completed" && root.conclusion == "failure" ? "Failure"
-        : root.execution-status == "completed" && root.conclusion == "cancelled" ? "Cancelled"
-        : "Queued";
+        root.execution-status == "in_progress" ? I18n.jobs-in-progress
+        : root.execution-status == "completed" && root.conclusion == "success" ? I18n.jobs-success
+        : root.execution-status == "completed" && root.conclusion == "failure" ? I18n.jobs-failure
+        : root.execution-status == "completed" && root.conclusion == "cancelled" ? I18n.jobs-cancelled
+        : I18n.jobs-queued;
     private property <length> action-width: root.running ? 112px : 0px;
 
     width: 100%;
@@ -195,7 +196,7 @@ component GitHubJobRunHeader inherits Rectangle {
     if root.running: GitHubButton {
         x: root.compact ? GitHubMetrics.size-36 : parent.width - self.width;
         y: root.compact ? GitHubMetrics.size-80 : GitHubMetrics.size-2;
-        text: "Stop job";
+        text: I18n.jobs-stop;
         danger: true;
         clicked => { root.stop(); }
     }
@@ -224,7 +225,7 @@ component GitHubJobRunJobsNav inherits Rectangle {
         y: 0px;
         width: parent.width;
         height: GitHubMetrics.size-28;
-        text: "Jobs";
+        text: I18n.jobs-title;
         font-size: GitHubMetrics.text-medium;
         font-weight: 600;
         color: GitHubTheme.fg-default;
@@ -281,11 +282,11 @@ component GitHubJobRunJobFrame inherits Rectangle {
 }
 
 export component GitHubJobRunSurface {
-    in property <string> run-title: "Workflow run";
+    in property <string> run-title: I18n.common-job-run;
     in property <string> workflow-name: "Workflow";
     in property <string> context-name: "Usher";
     in property <string> job-name: "job";
-    in property <string> trigger-detail: "Started manually";
+    in property <string> trigger-detail: I18n.jobs-started-manually;
     in property <string> summary: "";
     in property <string> execution-status: "queued";
     in property <string> conclusion: "";

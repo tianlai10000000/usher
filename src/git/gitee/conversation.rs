@@ -30,8 +30,7 @@ pub(super) fn decode_gitee_operate_log_activity(
             let created_at = string_field(value, "created_at")
                 .or_else(|| string_field(value, "createdAt"))
                 .unwrap_or_default();
-            let author =
-                gitee_operate_log_user_name(value).unwrap_or_else(|| "Unknown author".to_string());
+            let author = gitee_operate_log_user_name(value).unwrap_or_default();
             let id = string_field(value, "id").unwrap_or_else(|| created_at.clone());
 
             if is_gitee_merge_log(action.as_str(), content.as_str()) {
@@ -137,7 +136,7 @@ pub(super) fn gitee_push_event_commit_activity(
         let actor = nested_string(event, "author", "name")
             .or_else(|| nested_string(event, "author", "username"))
             .or_else(|| nested_string(event, "author", "login"))
-            .unwrap_or_else(|| "Unknown author".to_string());
+            .unwrap_or_default();
         let avatar_url = nested_string(event, "author", "avatar_url")
             .or_else(|| nested_string(event, "author", "avatar"))
             .unwrap_or_default();
@@ -189,8 +188,7 @@ pub(super) fn gitee_operate_log_commit_activity(
             *assigned = true;
         }
         cursor = end;
-        let actor =
-            gitee_operate_log_user_name(event).unwrap_or_else(|| "Unknown author".to_string());
+        let actor = gitee_operate_log_user_name(event).unwrap_or_default();
         let avatar_url = gitee_operate_log_user_avatar(event).unwrap_or_default();
         let created_at = event_created_at(event).unwrap_or_default();
         let event_id = string_field(event, "id").unwrap_or_else(|| created_at.clone());
@@ -315,7 +313,7 @@ pub(super) fn gitee_merge_event_with_user(
                     .chain(merge_commit.and_then(gitee_commit_committer_label)),
             )
             .map(|label| label.text)
-            .unwrap_or_else(|| "Unknown merger".to_string()),
+            .unwrap_or_default(),
             avatar_url: resolved_user
                 .and_then(gitee_user_avatar)
                 .or_else(|| gitee_operate_log_user_avatar(event))
@@ -338,7 +336,7 @@ pub(super) fn gitee_merge_event_with_user(
                 .chain(merge_commit.and_then(gitee_commit_committer_label)),
         )
         .map(|label| label.text)
-        .unwrap_or_else(|| "Unknown merger".to_string()),
+        .unwrap_or_default(),
         avatar_url: resolved_user
             .and_then(gitee_user_avatar)
             .or_else(|| merger.and_then(gitee_user_avatar))
@@ -762,7 +760,7 @@ pub(super) fn decode_conversation_comment(value: &Value) -> PullRequestConversat
             .or_else(|| nested_string(value, "author", "username"))
             .or_else(|| nested_string(value, "user", "name"))
             .or_else(|| nested_string(value, "user", "login"))
-            .unwrap_or_else(|| "Unknown author".to_string()),
+            .unwrap_or_default(),
         avatar_url: nested_string(value, "author", "avatar_url")
             .or_else(|| nested_string(value, "author", "avatar"))
             .or_else(|| nested_string(value, "user", "avatar_url"))
@@ -810,7 +808,7 @@ pub(super) fn decode_conversation_review(value: &Value) -> Option<PullRequestCon
             ),
         )
         .map(|label| label.text)
-        .unwrap_or_else(|| "Unknown reviewer".to_string()),
+        .unwrap_or_default(),
         avatar_url: string_field(value, "avatar_url")
             .or_else(|| string_field(value, "avatar"))
             .or_else(|| nested_string(value, "author", "avatar_url"))
@@ -910,7 +908,7 @@ pub(super) fn decode_commit(value: &Value) -> PullRequestCommit {
                     .get("commit")
                     .and_then(|commit| nested_string(commit, "author", "name"))
             })
-            .unwrap_or_else(|| "Unknown author".to_string()),
+            .unwrap_or_default(),
         avatar_url: nested_string(value, "author", "avatar_url")
             .or_else(|| nested_string(value, "author", "avatar"))
             .unwrap_or_default(),

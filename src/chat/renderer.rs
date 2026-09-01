@@ -1,6 +1,7 @@
 use super::markdown::{AssistantProjection, project_assistant_content};
 use super::persistence::{StoredChatMessage, StoredMessageRole, StoredMessageStatus};
 use crate::{ChatMessage, MessageRole, MessageStatus};
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -13,7 +14,7 @@ const LOADING_PLACEHOLDER_ID: i32 = -1;
 struct CachedRender {
     rendered_content: Arc<str>,
     preview_available: bool,
-    preview_title: &'static str,
+    preview_title: Arc<str>,
     approx_bytes: usize,
 }
 
@@ -108,9 +109,12 @@ impl ChatMessageRenderer {
         let AssistantProjection {
             text,
             preview_available,
-            preview_title,
+            preview_title_key,
             markdown,
-        } = project_assistant_content(display_content);
+        } = project_assistant_content(display_content.as_ref());
+        let preview_title = preview_title_key
+            .map(|key| crate::i18n::tr(key).into_owned())
+            .unwrap_or_default();
         if markdown {
             MARKDOWN_PROJECTION_COUNT.with(|count| count.set(count.get().wrapping_add(1)));
         }
@@ -122,7 +126,7 @@ impl ChatMessageRenderer {
                 .saturating_add(std::mem::size_of::<CachedRender>()),
             rendered_content,
             preview_available,
-            preview_title,
+            preview_title: Arc::from(preview_title),
         });
         self.cache.insert(key, computed.clone());
         computed
@@ -151,10 +155,10 @@ impl ChatMessageRenderer {
                     id,
                     role: MessageRole::Assistant,
                     status: message_status_for_ui(stored_status),
-                    content: display_content.into(),
+                    content: display_content.as_ref().into(),
                     rendered_content: rendered.rendered_content.as_ref().into(),
                     preview_available: rendered.preview_available,
-                    preview_title: rendered.preview_title.into(),
+                    preview_title: rendered.preview_title.as_ref().into(),
                     timestamp: timestamp.into(),
                     elapsed: source
                         .elapsed_ms
@@ -199,17 +203,52 @@ fn format_elapsed(elapsed_ms: u64) -> String {
     format!("{hours}h {remaining_minutes:02}m {remaining_seconds:02}s")
 }
 
-fn assistant_display(message: &StoredChatMessage) -> (StoredMessageStatus, &str) {
+fn assistant_display(message: &StoredChatMessage) -> (StoredMessageStatus, Cow<'_, str>) {
     if message.status != StoredMessageStatus::Normal {
-        return (message.status, message.content.as_str());
+        let content = if message.status == StoredMessageStatus::Error {
+            localized_application_error(&message.content)
+                .map(Cow::Owned)
+                .unwrap_or_else(|| Cow::Borrowed(message.content.as_str()))
+        } else {
+            Cow::Borrowed(message.content.as_str())
+        };
+        return (message.status, content);
     }
     if let Some(content) = strip_legacy_status_prefix(&message.content, '❌') {
+        let content = localized_application_error(content)
+            .map(Cow::Owned)
+            .unwrap_or_else(|| Cow::Borrowed(content));
         return (StoredMessageStatus::Error, content);
     }
     if let Some(content) = strip_legacy_status_prefix(&message.content, '✅') {
-        return (StoredMessageStatus::Success, content);
+        return (StoredMessageStatus::Success, Cow::Borrowed(content));
     }
-    (StoredMessageStatus::Normal, message.content.as_str())
+    (
+        StoredMessageStatus::Normal,
+        Cow::Borrowed(message.content.as_str()),
+    )
+}
+
+const APPLICATION_ERROR_KEYS: &[&str] = &[
+    "chat.endpoint_invalid",
+    "chat.network_failed",
+    "chat.rate_limited",
+    "chat.authentication_failed",
+    "chat.service_unavailable",
+    "chat.response_unreadable",
+    "chat.send_failed",
+];
+
+fn application_error_key(content: &str) -> Option<&'static str> {
+    APPLICATION_ERROR_KEYS.iter().copied().find(|key| {
+        usher_i18n::available_locales()
+            .iter()
+            .any(|locale| usher_i18n::translate_for(locale.id, key).as_ref() == content)
+    })
+}
+
+fn localized_application_error(content: &str) -> Option<String> {
+    application_error_key(content).map(|key| crate::i18n::tr(key).into_owned())
 }
 
 fn strip_legacy_status_prefix(content: &str, marker: char) -> Option<&str> {
@@ -334,6 +373,18 @@ mod tests {
     }
 
     #[test]
+    fn application_error_keys_are_recognized_across_packaged_locales() {
+        for locale in usher_i18n::available_locales() {
+            let translated = usher_i18n::translate_for(locale.id, "chat.send_failed");
+            assert_eq!(
+                application_error_key(translated.as_ref()),
+                Some("chat.send_failed")
+            );
+        }
+        assert_eq!(application_error_key("provider detail"), None);
+    }
+
+    #[test]
     fn assistant_projection_is_bounded_and_retains_full_preview_source() {
         let source = message("answer ".repeat(300));
         let row = ChatMessageRenderer::new().render_single(&source);
@@ -348,7 +399,10 @@ mod tests {
         let source = message("# Result\n\n```rust\nfn main() {}\n```");
         let row = ChatMessageRenderer::new().render_single(&source);
         assert!(row.preview_available);
-        assert_eq!(row.preview_title.as_str(), "Open formatted response");
+        assert_eq!(
+            row.preview_title.as_str(),
+            crate::i18n::tr("preview.open_formatted_response")
+        );
         assert!(row.rendered_content.contains("fn main() {}"));
     }
 

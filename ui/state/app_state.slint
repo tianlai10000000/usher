@@ -1,4 +1,10 @@
 import { Palette } from "std-widgets.slint";
+import { I18n } from "@i18n";
+
+export struct LanguageOption {
+    id: string,
+    label: string,
+}
 
 export global AppState {
     /**
@@ -10,6 +16,19 @@ export global AppState {
     // effective-dark-mode is the actual dark mode state after resolving Auto
     // This is set by Rust code when theme-mode is 2 (Auto)
     in-out property <bool> effective-dark-mode: false;
+
+    // Language preference is `auto` or a locale id from the generated
+    // manifest. Keeping the model in shared state lets independently compiled
+    // Settings pages consume the same registry without hard-coded branches.
+    in property <LanguageOption> language-selection: {
+        id: "auto",
+        label: "",
+    };
+    in property <[LanguageOption]> language-options: [];
+    // Forces every independently compiled UI root to retain the complete
+    // generated I18n global, keeping Slint's process-global bundle indices
+    // identical across component-factory boundaries.
+    out property <string> i18n-catalog-sentinel: I18n.language-title;
 
     // auth
     in-out property <bool> is-logged-in: false;
@@ -71,6 +90,7 @@ export global AppState {
 
     // theme
     callback toggle-theme(mode: int);
+    callback set-language(language: string);
     
     // auto-update
     callback toggle-auto-update(enabled: bool);

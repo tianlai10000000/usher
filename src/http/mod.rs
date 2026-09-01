@@ -149,6 +149,7 @@ impl HttpError {
     }
 
     /// Stable, user-facing summary suitable for toast/notification content.
+    #[cfg(test)]
     pub(crate) fn user_message(&self) -> String {
         let action = if self.operation.trim().is_empty() {
             "Request"
@@ -174,6 +175,38 @@ impl HttpError {
                 format!("{action} returned data in an unexpected format.")
             }
             _ => format!("{action} failed. Please try again."),
+        }
+    }
+
+    pub(crate) fn localized_user_message(&self) -> String {
+        let locale = usher_i18n::active_locale().id;
+        match (self.kind, self.status.map(|status| status.as_u16())) {
+            (HttpErrorKind::Timeout, _) => {
+                usher_i18n::translate_for(locale, "http.error.timeout").into_owned()
+            }
+            (HttpErrorKind::Connect, _) => {
+                usher_i18n::translate_for(locale, "http.error.connect").into_owned()
+            }
+            (HttpErrorKind::Status, Some(401 | 403)) => {
+                usher_i18n::translate_for(locale, "http.error.authentication").into_owned()
+            }
+            (HttpErrorKind::Status, Some(429)) => {
+                usher_i18n::translate_for(locale, "http.error.rate_limited").into_owned()
+            }
+            (HttpErrorKind::Status, Some(code @ 500..=599)) => usher_i18n::translate_for_with(
+                locale,
+                "http.error.server",
+                &[("code", code.to_string().as_str())],
+            ),
+            (HttpErrorKind::Status, Some(code)) => usher_i18n::translate_for_with(
+                locale,
+                "http.error.status",
+                &[("code", code.to_string().as_str())],
+            ),
+            (HttpErrorKind::Decode, _) => {
+                usher_i18n::translate_for(locale, "http.error.decode").into_owned()
+            }
+            _ => usher_i18n::translate_for(locale, "http.error.request").into_owned(),
         }
     }
 }
@@ -1177,11 +1210,12 @@ fn present_error(error: &HttpError, feedback: ErrorFeedback) {
     let Some(ui_weak) = ui_weak else {
         return;
     };
-    let message = error.user_message();
+    let error = error.clone();
     let _ = slint::invoke_from_event_loop(move || {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
+        let message = error.localized_user_message();
         if matches!(
             feedback,
             ErrorFeedback::Toast | ErrorFeedback::ToastAndNotification
@@ -1202,7 +1236,7 @@ fn present_error(error: &HttpError, feedback: ErrorFeedback) {
             ErrorFeedback::Notification | ErrorFeedback::ToastAndNotification
         ) {
             NotificationManager::get(&ui).invoke_error(NotificationOptions {
-                title: "Request failed".into(),
+                title: crate::i18n::tr("http.request_failed").into_owned().into(),
                 message: message.into(),
                 duration: 5_000,
                 icon: "".into(),

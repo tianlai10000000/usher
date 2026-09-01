@@ -1,4 +1,5 @@
 import { GitHubNavigationSidebar, GitHubSidebarRightEdge, NavItem } from "./components/navigation/custom_nav_drawer.slint";
+import { I18n } from "@i18n";
 import { GitHubHomePage as HomePage } from "./views/home.slint";
 import { GitHubSearchPage as SearchPage } from "./views/search.slint";
 import { GitHubAboutPage as AboutPage } from "./views/about.slint";
@@ -15,7 +16,7 @@ import { GitHubProjectPage as ProjectPage, ProjectItem } from "./views/project.s
 import { GitHubProjectDialog } from "./components/project/github_project_dialog.slint";
 import { GitHubChatPage as ChatPage, ChatMessage, ChatSelectionRect, MessageRole, MessageStatus } from "./views/chat.slint";
 import { Route } from "./route/routeMap.slint";
-import { AppState } from "./state/app_state.slint";
+import { AppState, LanguageOption } from "./state/app_state.slint";
 import { DebugLogger } from "./state/debug_logger.slint";
 import { TransientOverlayState } from "./state/transient_overlay_state.slint";
 import { TooltipOverlayState } from "./state/tooltip_overlay_state.slint";
@@ -41,6 +42,7 @@ import { ArtifactPreviewKind, ArtifactPreviewBlockKind, ArtifactPreviewInlineKin
 
 export { MaterialWindowAdapter } from "@material";
 export { AppState } from "./state/app_state.slint";
+export { LanguageOption } from "./state/app_state.slint";
 export { DebugLogger } from "./state/debug_logger.slint";
 export { TransientOverlayState } from "./state/transient_overlay_state.slint";
 export { TooltipOverlayState } from "./state/tooltip_overlay_state.slint";
@@ -497,8 +499,8 @@ export component MainWindow inherits Window {
     in-out property <bool> artifact-preview-visible: false;
     in-out property <bool> artifact-preview-pr-side-context: false;
     in-out property <bool> artifact-preview-loading: false;
-    in-out property <string> artifact-preview-loading-message: "Preparing preview";
-    in-out property <string> artifact-preview-title: "Preview";
+    in-out property <string> artifact-preview-loading-message: I18n.preview-preparing;
+    in-out property <string> artifact-preview-title: I18n.common-preview;
     in-out property <ArtifactPreviewKind> artifact-preview-kind: ArtifactPreviewKind.None;
     in property <[ArtifactPreviewBlock]> artifact-preview-blocks: [];
     in-out property <int> artifact-preview-markdown-layout-revision: 0;
@@ -522,8 +524,8 @@ export component MainWindow inherits Window {
     ) -> ArtifactPreviewVirtualWindow;
 
     // Workflow state and callbacks
-    in property <string> workflow-branch-result: "Ready to recreate branches.";
-    in property <string> workflow-tag-result: "Ready to add or remove a tag.";
+    in property <string> workflow-branch-result: I18n.workflow-ready-branches;
+    in property <string> workflow-tag-result: I18n.workflow-ready-tags;
     in-out property <int> workflow-tag-selected-tab: 0;
     in-out property <int> workflow-selected-flow: 2;
     in-out property <string> workflow-tag-mode: "local";
@@ -539,11 +541,11 @@ export component MainWindow inherits Window {
     // descriptor and snapshot without owning or embedding the route page.
     in property <bool> job-run-active: false;
     in property <string> job-run-source: "";
-    in property <string> job-run-title: "Workflow run";
+    in property <string> job-run-title: I18n.common-job-run;
     in property <string> job-run-workflow-name: "Workflow";
     in property <string> job-run-context-name: "Usher";
     in property <string> job-run-job-name: "job";
-    in property <string> job-run-trigger-detail: "Started manually";
+    in property <string> job-run-trigger-detail: I18n.jobs-started-manually;
     in property <string> job-run-summary: "";
     in property <string> job-run-status: "queued";
     in property <string> job-run-conclusion: "";
@@ -551,11 +553,11 @@ export component MainWindow inherits Window {
     in property <[JobStepItem]> job-run-steps: [];
     in property <bool> job-run-running: false;
     in property <string> workflow-project-id: "default";
-    in property <string> workflow-project-name: "Default Project";
+    in property <string> workflow-project-name: I18n.projects-default-project;
     in property <string> workflow-project-alias: "";
     in property <string> workflow-project-local-repo: "";
     in property <string> workflow-project-remote-repo: "";
-    in property <string> workflow-open-local-folder-tooltip: "Show in file manager";
+    in property <string> workflow-open-local-folder-tooltip: I18n.workflow-show-in-file-manager;
     in property <string> workflow-project-logo: "";
     in property <image> workflow-project-logo-image: @image-url("../logo.png");
     in property <[ProjectItem]> project-items: [];
@@ -568,7 +570,7 @@ export component MainWindow inherits Window {
     in-out property <string> project-new-tags: "";
     in-out property <bool> project-new-pr-auto-update: false;
     in property <image> project-logo-preview-image: @image-url("../logo.png");
-    in property <string> project-logo-preview-status: "Using app default logo";
+    in property <string> project-logo-preview-status: I18n.projects-using-default-logo;
     in-out property <string> project-add-error: "";
     in-out property <string> project-modal-mode: "add";
     in-out property <string> project-modal-original-alias: "";
@@ -690,7 +692,7 @@ export component MainWindow inherits Window {
     in property <string> workflow-pr-review-commits-error: "";
     in-out property <int> workflow-pr-review-commit-range-start: -1;
     in-out property <int> workflow-pr-review-commit-range-end: -1;
-    in property <string> workflow-pr-review-commit-range-label: "All commits";
+    in property <string> workflow-pr-review-commit-range-label: I18n.pr-review-all-commits;
     in property <[WorkflowPrDiffFile]> workflow-pr-review-files: [];
     in property <[WorkflowPrTreeItem]> workflow-pr-review-tree-items: [];
     in property <[WorkflowPrFileExtensionFilter]> workflow-pr-review-extension-filters: [];
@@ -741,7 +743,7 @@ export component MainWindow inherits Window {
     in property <string> workflow-pr-merge-readiness-detail: "";
     in property <string> workflow-pr-merge-block-reason: "";
     in property <string> workflow-pr-revert-block-reason: "";
-    in property <string> workflow-pr-revert-action-label: "Revert changes";
+    in property <string> workflow-pr-revert-action-label: I18n.pr-review-revert-pull-request;
     in property <string> workflow-pr-revert-confirmation: "";
     in property <bool> workflow-pr-merge-method-merge: false;
     in property <bool> workflow-pr-merge-method-squash: false;
@@ -754,19 +756,19 @@ export component MainWindow inherits Window {
     in property <string> workflow-pr-uat-count: "-";
     in property <string> workflow-pr-prod-count: "-";
     in property <bool> workflow-cd-running: false;
-    in property <string> workflow-cd-summary: "No deployment started.";
+    in property <string> workflow-cd-summary: I18n.cd-no-deployment;
     in property <string> workflow-cd-build-status: "pending";
-    in property <string> workflow-cd-build-detail: "Waiting to start.";
+    in property <string> workflow-cd-build-detail: I18n.cd-waiting-to-start;
     in property <string> workflow-cd-test-status: "pending";
-    in property <string> workflow-cd-test-detail: "Waiting to start.";
+    in property <string> workflow-cd-test-detail: I18n.cd-waiting-to-start;
     in property <string> workflow-cd-deploy-status: "pending";
-    in property <string> workflow-cd-deploy-detail: "Waiting to start.";
+    in property <string> workflow-cd-deploy-detail: I18n.cd-waiting-to-start;
     in property <string> workflow-cd-verify-status: "pending";
-    in property <string> workflow-cd-verify-detail: "Waiting to start.";
+    in property <string> workflow-cd-verify-detail: I18n.cd-waiting-to-start;
     in-out property <bool> shell-drawer-visible: false;
     in-out property <string> shell-drawer-input-text: "";
     in property <string> shell-drawer-cwd: "";
-    in property <string> shell-drawer-output: "Terminal ready.\n";
+    in property <string> shell-drawer-output: I18n.terminal-ready + "\n";
     in property <int> shell-drawer-output-line-count: 1;
     in property <[TerminalLine]> shell-drawer-lines: [];
     in property <int> shell-drawer-scrollback-offset: 0;
@@ -779,7 +781,7 @@ export component MainWindow inherits Window {
     in-out property <[string]> shell-drawer-init-commands: [];
     in-out property <length> shell-drawer-height: 280px;
     in-out property <bool> shell-drawer-fullscreen: false;
-    in-out property <string> shell-drawer-title: "Project Terminal";
+    in-out property <string> shell-drawer-title: I18n.common-terminal;
     callback workflow-branch-submit(string, string, bool);
     callback workflow-tag-change-mode(string);
     callback workflow-tag-select-version-mode(string);
@@ -1061,10 +1063,12 @@ export component MainWindow inherits Window {
 
         DialogManager.show({
             id: "update-dialog",
-            title: "Update Available",
-            content: "A new version (" + latest-version + ") is available. Current version: " + current-version + ". Please update to the latest version.",
-            actions: ["Cancel"],
-            default-action: "Update",
+            title: I18n.update-available,
+            content: I18n.update-new-version-prefix + " (" + latest-version + ") "
+                + I18n.update-new-version-infix + " " + current-version + ". "
+                + I18n.update-new-version-suffix,
+            actions: [I18n.common-cancel],
+            default-action: I18n.update-action,
             overlay: true,
             modal: true,
             width: "480px",
@@ -1146,20 +1150,20 @@ export component MainWindow inherits Window {
 
                     GitHubIconButton {
                         icon: @image-url("./assets/icons/octicon-sidebar-expand-16.svg");
-                        tooltip-text: "Show sidebar (" + root.shortcut-toggle-sidebar-label + ")";
+                        tooltip-text: I18n.tooltip-show-sidebar + " (" + root.shortcut-toggle-sidebar-label + ")";
                         tooltip-above: false;
                         clicked => { root.toggle-navigation-drawer(); }
                     }
                     GitHubIconButton {
                         icon: @image-url("./assets/icons/octicon-arrow-left-16.svg");
-                        tooltip-text: "Back (" + root.shortcut-navigate-back-label + ")";
+                        tooltip-text: I18n.common-back + " (" + root.shortcut-navigate-back-label + ")";
                         tooltip-above: false;
                         button-enabled: root.navigation-can-go-back;
                         clicked => { root.navigate-back(); }
                     }
                     GitHubIconButton {
                         icon: @image-url("./assets/icons/octicon-chevron-right-16.svg");
-                        tooltip-text: "Forward (" + root.shortcut-navigate-forward-label + ")";
+                        tooltip-text: I18n.tooltip-forward + " (" + root.shortcut-navigate-forward-label + ")";
                         tooltip-above: false;
                         button-enabled: root.navigation-can-go-forward;
                         clicked => { root.navigate-forward(); }
@@ -1848,10 +1852,10 @@ export component MainWindow inherits Window {
             forward-shortcut-label: root.shortcut-navigate-forward-label;
             item-count: UiComponentsFeature.enabled ? 4 : 3;
             items: [
-                { icon: root.navigation-home-icon, text: "Home" },
-                { icon: root.navigation-chat-icon, text: "Chat" },
-                { icon: root.navigation-project-icon, text: "Projects" },
-                { icon: root.navigation-components-icon, text: "UI Components" },
+                { icon: root.navigation-home-icon, text: I18n.navigation-home },
+                { icon: root.navigation-chat-icon, text: I18n.navigation-chat },
+                { icon: root.navigation-project-icon, text: I18n.common-projects },
+                { icon: root.navigation-components-icon, text: I18n.navigation-ui-components },
             ];
             selected(item-index) => {
                 if item-index >= 0 {
@@ -1901,7 +1905,7 @@ export component MainWindow inherits Window {
             control-size: 28px;
             glyph-size: 14px;
             icon: @image-url("./assets/icons/lucide-sidebar-settings.svg");
-            tooltip-text: "Settings (" + root.shortcut-open-settings-label + ")";
+            tooltip-text: I18n.common-settings + " (" + root.shortcut-open-settings-label + ")";
             tooltip-above: false;
             tooltip-align-right: true;
             foreground: GitHubTheme.fg-subtle;
@@ -2018,10 +2022,10 @@ export component MainWindow inherits Window {
                 forward-shortcut-label: root.shortcut-navigate-forward-label;
                 item-count: UiComponentsFeature.enabled ? 4 : 3;
                 items: [
-                    { icon: root.navigation-home-icon, text: "Home" },
-                    { icon: root.navigation-chat-icon, text: "Chat" },
-                    { icon: root.navigation-project-icon, text: "Projects" },
-                    { icon: root.navigation-components-icon, text: "UI Components" },
+                    { icon: root.navigation-home-icon, text: I18n.navigation-home },
+                    { icon: root.navigation-chat-icon, text: I18n.navigation-chat },
+                    { icon: root.navigation-project-icon, text: I18n.common-projects },
+                    { icon: root.navigation-components-icon, text: I18n.navigation-ui-components },
                 ];
                 selected(item-index) => {
                     root.sidebar-preview-visible = false;
@@ -2098,8 +2102,8 @@ export component MainWindow inherits Window {
             enable-terminal: root.current-route == Route.Workflow;
             terminal-bottom-offset: root.workflow-fab-bottom-offset;
             terminal-active: root.shell-drawer-visible;
-            terminal-tooltip-text: "Open terminal (" + root.shortcut-toggle-terminal-label + ")";
-            terminal-active-tooltip-text: "Close terminal (" + root.shortcut-toggle-terminal-label + ")";
+            terminal-tooltip-text: I18n.tooltip-open-terminal + " (" + root.shortcut-toggle-terminal-label + ")";
+            terminal-active-tooltip-text: I18n.tooltip-close-terminal + " (" + root.shortcut-toggle-terminal-label + ")";
             enable-to-top: true;
             to-top-bottom-offset: root.current-route == Route.Workflow
                 ? root.workflow-fab-bottom-offset + LayoutConstants.page-fab-stack-spacing

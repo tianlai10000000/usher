@@ -1,10 +1,12 @@
 //! Pure Git command planning for Tag workflows.
 
+use crate::i18n::LocalizedText;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct PlannedCommand {
-    pub(super) name: &'static str,
+    pub(super) name: LocalizedText,
     pub(super) argv: Vec<String>,
-    pub(super) detail: String,
+    pub(super) detail: LocalizedText,
 }
 
 fn git(repo: &str, args: &[&str]) -> Vec<String> {
@@ -16,44 +18,53 @@ fn git(repo: &str, args: &[&str]) -> Vec<String> {
 pub(super) fn create_tag_plan(repo: &str, version: &str, description: &str) -> Vec<PlannedCommand> {
     vec![
         PlannedCommand {
-            name: "Enter local repository",
+            name: LocalizedText::message("tag.step.enter_repository"),
             argv: git(repo, &["rev-parse", "--show-toplevel"]),
-            detail: format!("Using local repository at '{repo}'."),
+            detail: LocalizedText::message_with(
+                "tag.step.using_repository",
+                [("repository", repo.to_string())],
+            ),
         },
         PlannedCommand {
-            name: "Checkout release",
+            name: LocalizedText::message("tag.step.checkout_release"),
             argv: git(repo, &["checkout", "release"]),
-            detail: "Switch to release branch.".to_string(),
+            detail: LocalizedText::message("tag.step.checkout_release_detail"),
         },
         PlannedCommand {
-            name: "Pull release",
+            name: LocalizedText::message("tag.step.pull_release"),
             argv: git(repo, &["pull", "origin", "release"]),
-            detail: "Update local release branch to latest.".to_string(),
+            detail: LocalizedText::message("tag.step.pull_release_detail"),
         },
         PlannedCommand {
-            name: "Checkout main",
+            name: LocalizedText::message("tag.step.checkout_main"),
             argv: git(repo, &["checkout", "main"]),
-            detail: "Switch to main branch.".to_string(),
+            detail: LocalizedText::message("tag.step.checkout_main_detail"),
         },
         PlannedCommand {
-            name: "Rebase main on release",
+            name: LocalizedText::message("tag.step.rebase_main"),
             argv: git(repo, &["rebase", "release"]),
-            detail: "Rebase main onto release.".to_string(),
+            detail: LocalizedText::message("tag.step.rebase_main_detail"),
         },
         PlannedCommand {
-            name: "Push main",
+            name: LocalizedText::message("tag.step.push_main"),
             argv: git(repo, &["push", "origin", "main"]),
-            detail: "Push main branch to remote.".to_string(),
+            detail: LocalizedText::message("tag.step.push_main_detail"),
         },
         PlannedCommand {
-            name: "Create annotated tag",
+            name: LocalizedText::message("tag.step.create_annotated"),
             argv: git(repo, &["tag", "-a", version, "-m", description]),
-            detail: format!("Create annotated tag '{version}'."),
+            detail: LocalizedText::message_with(
+                "tag.step.create_annotated_version_detail",
+                [("version", version.to_string())],
+            ),
         },
         PlannedCommand {
-            name: "Push tag",
+            name: LocalizedText::message("tag.step.push_tag"),
             argv: git(repo, &["push", "origin", version]),
-            detail: format!("Push tag '{version}' to remote."),
+            detail: LocalizedText::message_with(
+                "tag.step.push_tag_version_detail",
+                [("version", version.to_string())],
+            ),
         },
     ]
 }

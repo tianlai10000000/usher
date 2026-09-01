@@ -2,6 +2,7 @@ import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubMetadataLabel } from "../github_metadata_label.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 
 export struct ProjectItem {
@@ -53,7 +54,7 @@ export component GitHubProjectProviderRibbon inherits Rectangle {
     background: transparent;
     clip: false;
     accessible-role: text;
-    accessible-label: "Repository provider: " + root.provider-name;
+    accessible-label: I18n.projects-repository-provider + ": " + root.provider-name;
 
     // FemtoVG renders Text under rotation as anti-aliased glyph outlines
     // instead of using its hinted glyph atlas. At this size that is visibly
@@ -81,7 +82,7 @@ export component GitHubProjectIconButton inherits GitHubIconButton {
 
 export component GitHubProjectSearchField inherits Rectangle {
     in-out property <string> text;
-    in property <string> placeholder: "Find a project…";
+    in property <string> placeholder: I18n.projects-find-placeholder;
     callback accepted(string);
 
     width: 320px;
@@ -135,7 +136,7 @@ export component GitHubProjectSearchField inherits Rectangle {
         x: parent.width - GitHubMetrics.control-medium-size;
         y: 0px;
         icon: @image-url("../../assets/icons/octicon-x-16.svg");
-        tooltip: "Clear search";
+        tooltip: I18n.tooltip-clear-search;
         tooltip-end: true;
         clicked => {
             root.text = "";
@@ -154,7 +155,7 @@ export component GitHubProjectViewSwitcher inherits Rectangle {
     GitHubProjectIconButton {
         x: 0px;
         icon: @image-url("../../assets/icons/octicon-list-unordered-16.svg");
-        tooltip: "List view";
+        tooltip: I18n.tooltip-list-view;
         invisible: false;
         selected: root.mode == "list";
         clicked => { root.mode = "list"; }
@@ -163,7 +164,7 @@ export component GitHubProjectViewSwitcher inherits Rectangle {
     GitHubProjectIconButton {
         x: 40px;
         icon: @image-url("../../assets/icons/octicon-table-16.svg");
-        tooltip: "Grid view";
+        tooltip: I18n.tooltip-grid-view;
         invisible: false;
         selected: root.mode == "grid";
         clicked => { root.mode = "grid"; }
@@ -184,7 +185,7 @@ export component GitHubPullRequestSummary inherits Rectangle {
         alignment: end;
 
         Text {
-            text: "Pull requests";
+            text: I18n.projects-pull-requests;
             font-size: 12px;
             color: GitHubTheme.fg-muted;
             vertical-alignment: center;
@@ -366,19 +367,19 @@ export component GitHubProjectListRow inherits Rectangle {
 
         GitHubProjectIconButton {
             icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
-            tooltip: "Open terminal";
+            tooltip: I18n.tooltip-open-terminal;
             tooltip-end: true;
             clicked => { root.terminal-requested(); }
         }
         GitHubProjectIconButton {
             icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
-            tooltip: "Edit project";
+            tooltip: I18n.tooltip-edit-project;
             tooltip-end: true;
             clicked => { root.edit-requested(); }
         }
         GitHubProjectIconButton {
             icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-            tooltip: "Delete project";
+            tooltip: I18n.projects-delete-project;
             tooltip-end: true;
             danger: true;
             clicked => { root.delete-requested(); }
@@ -390,7 +391,7 @@ export component GitHubProjectListRow inherits Rectangle {
         height: parent.height;
         accessible-role: button;
         accessible-enabled: true;
-        accessible-label: "Open project " + root.project.project_name;
+        accessible-label: I18n.projects-open-project + " " + root.project.project_name;
         key-pressed(event) => {
             root.keyboard-focus-visible = true;
             if event.text == Key.Return || event.text == " " {
@@ -538,9 +539,9 @@ export component GitHubProjectGridCard inherits Rectangle {
         width: max(24px, parent.width - 136px);
         height: 20px;
         text: root.project.pr_count_loading
-            ? "Pull requests loading"
+            ? I18n.projects-pull-requests-loading
             : root.project.pr_count_failed
-                ? "Pull requests unavailable"
+                ? I18n.projects-pull-requests-unavailable
                 : "FAT " + root.project.pr_fat_count_text
                     + " · UAT " + root.project.pr_uat_count_text
                     + " · PROD " + root.project.pr_prod_count_text;
@@ -557,7 +558,7 @@ export component GitHubProjectGridCard inherits Rectangle {
         height: parent.height;
         accessible-role: button;
         accessible-enabled: true;
-        accessible-label: "Open project " + root.project.project_name;
+        accessible-label: I18n.projects-open-project + " " + root.project.project_name;
         key-pressed(event) => {
             root.keyboard-focus-visible = true;
             if event.text == Key.Return || event.text == " " {
@@ -610,21 +611,21 @@ export component GitHubProjectGridCard inherits Rectangle {
 
         GitHubProjectIconButton {
             icon: @image-url("../../assets/icons/octicon-terminal-16.svg");
-            tooltip: "Open terminal";
+            tooltip: I18n.tooltip-open-terminal;
             tooltip-above: true;
             tooltip-end: true;
             clicked => { root.terminal-requested(); }
         }
         GitHubProjectIconButton {
             icon: @image-url("../../assets/icons/octicon-pencil-16.svg");
-            tooltip: "Edit project";
+            tooltip: I18n.tooltip-edit-project;
             tooltip-above: true;
             tooltip-end: true;
             clicked => { root.edit-requested(); }
         }
         GitHubProjectIconButton {
             icon: @image-url("../../assets/icons/octicon-trash-16.svg");
-            tooltip: "Delete project";
+            tooltip: I18n.projects-delete-project;
             tooltip-above: true;
             tooltip-end: true;
             danger: true;

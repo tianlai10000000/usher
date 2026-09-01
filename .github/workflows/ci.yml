@@ -44,6 +44,9 @@ jobs:
       - name: Check UI policy
         run: ./scripts/check-ui-policy.sh
 
+      - name: Check i18n catalogs
+        run: ./scripts/check-i18n.sh
+
       - name: Test benchmark threshold policy
         run: python3 -m unittest scripts/tests/test_memory_benchmark_thresholds.py
 

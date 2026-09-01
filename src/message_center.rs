@@ -6,8 +6,9 @@ use anyhow::{Context, Result};
 use chrono::Local;
 use slint::{ComponentFactory, ComponentHandle, Global, Model, ModelRc, VecModel};
 use usher_messages::{
-    AppState as MessagesAppState, GitHubMessagesPage, MessageCenter, MessageLevel, MessageListItem,
-    MessageSeverity, MessageSnapshot, NotifyRustDesktopNotifier, Subscription,
+    AppState as MessagesAppState, GitHubMessagesPage, LanguageOption as MessagesLanguageOption,
+    MessageCenter, MessageLevel, MessageListItem, MessageSeverity, MessageSnapshot,
+    NotifyRustDesktopNotifier, Subscription,
 };
 
 use crate::{AppState, MainWindow, app_paths, app_runtime, startup};
@@ -75,6 +76,7 @@ impl MessagePageBridge {
                 }
             };
             sync_theme(&window, &page);
+            sync_language(&window, &page);
             page.set_viewport_width(window.get_messages_page_viewport_width());
             page.set_viewport_height(window.get_messages_page_viewport_height());
             bind_page_callbacks(&center, &page);
@@ -135,6 +137,14 @@ impl MessagePageBridge {
             let state = MessagesAppState::get(page);
             state.set_theme_mode(mode);
             state.set_effective_dark_mode(effective_dark_mode);
+        });
+    }
+
+    pub(crate) fn sync_language(&self, preference: &str) {
+        let snapshot = self.center.snapshot();
+        self.with_page(|page| {
+            sync_page_language(page, preference);
+            apply_page_snapshot(page, snapshot);
         });
     }
 
@@ -226,15 +236,52 @@ fn sync_theme(window: &MainWindow, page: &GitHubMessagesPage) {
     target.set_effective_dark_mode(source.get_effective_dark_mode());
 }
 
+fn sync_language(window: &MainWindow, page: &GitHubMessagesPage) {
+    let source = AppState::get(window);
+    sync_page_language(page, source.get_language_selection().id.as_str());
+}
+
+fn sync_page_language(page: &GitHubMessagesPage, preference: &str) {
+    let canonical = usher_i18n::canonical_preference(preference);
+    let locale = usher_i18n::resolve_preference(preference);
+    let label = crate::i18n::language_choices()
+        .into_iter()
+        .find(|choice| choice.id == canonical)
+        .map(|choice| choice.label)
+        .unwrap_or_else(|| canonical.to_string());
+    MessagesAppState::get(page).set_language_selection(MessagesLanguageOption {
+        id: canonical.into(),
+        label: label.into(),
+    });
+    page.set_filter_count_suffix_offset(locale.segmented_count_suffix_offset);
+}
+
 fn apply_page_snapshot(page: &GitHubMessagesPage, snapshot: MessageSnapshot) {
+    let locale = usher_i18n::active_locale().id;
     let rows = snapshot
         .messages
         .iter()
         .cloned()
         .map(|message| MessageListItem {
             id: message.id.into(),
-            title: message.title.into(),
-            body: message.body.into(),
+            title: localized_message_value(
+                locale,
+                message.source.as_str(),
+                message.channel.as_str(),
+                message.category.as_str(),
+                message.title.as_str(),
+                DIAGNOSTIC_TITLE_KEYS,
+            )
+            .into(),
+            body: localized_message_value(
+                locale,
+                message.source.as_str(),
+                message.channel.as_str(),
+                message.category.as_str(),
+                message.body.as_str(),
+                DIAGNOSTIC_BODY_KEYS,
+            )
+            .into(),
             source: message.source.into(),
             category_label: category_label(&message.category).into(),
             category: message.category.into(),
@@ -294,6 +341,32 @@ fn apply_page_snapshot(page: &GitHubMessagesPage, snapshot: MessageSnapshot) {
     page.set_messages(ModelRc::new(VecModel::from(rows)));
 }
 
+const DIAGNOSTIC_TITLE_KEYS: &[&str] = &["diagnostics.previous_run_title"];
+const DIAGNOSTIC_BODY_KEYS: &[&str] = &["diagnostics.previous_run_message"];
+
+fn localized_message_value(
+    locale: &str,
+    source: &str,
+    channel: &str,
+    category: &str,
+    value: &str,
+    keys: &[&'static str],
+) -> String {
+    if source != "Diagnostics" || channel != "application" || category != "diagnostics" {
+        return value.to_string();
+    }
+
+    keys.iter()
+        .copied()
+        .find(|key| {
+            usher_i18n::available_locales()
+                .iter()
+                .any(|candidate| usher_i18n::translate_for(candidate.id, key).as_ref() == value)
+        })
+        .map(|key| usher_i18n::translate_for(locale, key).into_owned())
+        .unwrap_or_else(|| value.to_string())
+}
+
 fn message_row_equivalent(left: &MessageListItem, right: &MessageListItem) -> bool {
     left.id == right.id
         && left.title == right.title
@@ -312,19 +385,41 @@ fn saturating_i32(value: usize) -> i32 {
 }
 
 fn status_description(unread: usize) -> String {
+    status_description_for(usher_i18n::active_locale().id, unread)
+}
+
+fn status_description_for(locale: &str, unread: usize) -> String {
     match unread {
-        0 => "You're all caught up.".to_string(),
-        1 => "1 unread notification".to_string(),
-        n => format!("{n} unread notifications"),
+        0 => usher_i18n::translate_for(locale, "messages.caught_up").into_owned(),
+        1 => format!(
+            "1 {}",
+            usher_i18n::translate_for(locale, "messages.unread_notification")
+        ),
+        n => format!(
+            "{n} {}",
+            usher_i18n::translate_for(locale, "status.unread_notifications")
+        ),
     }
 }
 
 fn category_label(category: &str) -> String {
+    category_label_for(usher_i18n::active_locale().id, category)
+}
+
+fn category_label_for(locale: &str, category: &str) -> String {
     match category {
-        usher_messages::categories::GENERAL => "General".to_string(),
-        usher_messages::categories::WEBHOOK => "Webhook".to_string(),
-        usher_messages::categories::SOFTWARE_UPDATE => "Software update".to_string(),
-        usher_messages::categories::CD_WORKFLOW => "CD workflow".to_string(),
+        usher_messages::categories::GENERAL => {
+            usher_i18n::translate_for(locale, "messages.category_general").into_owned()
+        }
+        usher_messages::categories::WEBHOOK => {
+            usher_i18n::translate_for(locale, "messages.category_webhook").into_owned()
+        }
+        usher_messages::categories::SOFTWARE_UPDATE => {
+            usher_i18n::translate_for(locale, "messages.category_software_update").into_owned()
+        }
+        usher_messages::categories::CD_WORKFLOW => {
+            usher_i18n::translate_for(locale, "messages.category_cd_workflow").into_owned()
+        }
         other => other
             .split(['_', '-'])
             .filter(|part| !part.is_empty())
@@ -342,20 +437,84 @@ fn category_label(category: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{category_label, message_row_equivalent, status_description};
+    use super::{
+        DIAGNOSTIC_BODY_KEYS, DIAGNOSTIC_TITLE_KEYS, category_label_for, localized_message_value,
+        message_row_equivalent, status_description_for,
+    };
     use usher_messages::{MessageLevel, MessageListItem};
 
     #[test]
     fn category_labels_cover_built_in_and_extension_keys() {
-        assert_eq!(category_label("software_update"), "Software update");
-        assert_eq!(category_label("security-alert"), "Security Alert");
+        assert_eq!(
+            category_label_for("en", "software_update"),
+            "Software update"
+        );
+        assert_eq!(category_label_for("zh-CN", "software_update"), "软件更新");
+        assert_eq!(
+            category_label_for("zh-CN", "security-alert"),
+            "Security Alert"
+        );
     }
 
     #[test]
     fn status_description_matches_unread_count() {
-        assert_eq!(status_description(0), "You're all caught up.");
-        assert_eq!(status_description(1), "1 unread notification");
-        assert_eq!(status_description(17), "17 unread notifications");
+        assert_eq!(status_description_for("en", 0), "You're all caught up.");
+        assert_eq!(status_description_for("en", 1), "1 unread notification");
+        assert_eq!(status_description_for("en", 17), "17 unread notifications");
+        assert_eq!(status_description_for("zh-CN", 0), "所有通知都已处理。");
+        assert_eq!(status_description_for("zh-CN", 17), "17 条未读通知");
+    }
+
+    #[test]
+    fn persisted_diagnostic_copy_follows_the_active_locale() {
+        assert_eq!(
+            localized_message_value(
+                "en",
+                "Diagnostics",
+                "application",
+                "diagnostics",
+                "上次运行意外结束",
+                DIAGNOSTIC_TITLE_KEYS,
+            ),
+            "Previous run ended unexpectedly"
+        );
+        assert_eq!(
+            localized_message_value(
+                "zh-CN",
+                "Diagnostics",
+                "application",
+                "diagnostics",
+                "Open Settings > Diagnostics to export the relevant logs.",
+                DIAGNOSTIC_BODY_KEYS,
+            ),
+            "请打开设置 > 诊断，导出相关日志。"
+        );
+    }
+
+    #[test]
+    fn remote_or_unrecognized_message_copy_is_never_reclassified() {
+        assert_eq!(
+            localized_message_value(
+                "en",
+                "Webhook",
+                "webhook",
+                "diagnostics",
+                "上次运行意外结束",
+                DIAGNOSTIC_TITLE_KEYS,
+            ),
+            "上次运行意外结束"
+        );
+        assert_eq!(
+            localized_message_value(
+                "en",
+                "Diagnostics",
+                "application",
+                "diagnostics",
+                "自定义诊断消息",
+                DIAGNOSTIC_TITLE_KEYS,
+            ),
+            "自定义诊断消息"
+        );
     }
 
     #[test]

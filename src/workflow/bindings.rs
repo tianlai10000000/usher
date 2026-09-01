@@ -1,5 +1,5 @@
 use crate::git::get_standard_environment_pull_request_counts;
-use crate::platform::{open_directory_in_file_manager, open_directory_tooltip};
+use crate::platform::{open_directory_in_file_manager, open_directory_tooltip_key};
 use crate::project::load_repository_metadata;
 use crate::terminal::{reset_terminal_for_project, terminal_title_for_project};
 use crate::workflow::pr_list::WorkflowPrListController;
@@ -19,7 +19,7 @@ pub(crate) fn bind_project_context(
     pr_list_controller: WorkflowPrListController,
     pr_review_controller: WorkflowPrReviewController,
 ) {
-    ui.set_workflow_open_local_folder_tooltip(open_directory_tooltip().into());
+    sync_open_directory_tooltip(ui);
 
     let ui_weak = ui.as_weak();
     ui.on_workflow_open_project(
@@ -151,7 +151,7 @@ pub(crate) fn bind_project_context(
             Err(error) => {
                 log::warn!("[Workflow] Failed to copy remote URL: {error}");
                 if let Some(ui) = ui_weak.upgrade() {
-                    show_error(&ui, "Failed to copy the remote URL.");
+                    show_error(&ui, crate::i18n::tr("workflow.copy_remote_failed").as_ref());
                 }
                 false
             }
@@ -169,11 +169,22 @@ pub(crate) fn bind_project_context(
             Err(error) => {
                 log::warn!("[Workflow] Failed to open local repository: {error}");
                 if let Some(ui) = ui_weak.upgrade() {
-                    show_error(&ui, &error);
+                    show_error(
+                        &ui,
+                        crate::i18n::tr("workflow.open_local_repository_failed").as_ref(),
+                    );
                 }
             }
         }
     });
+}
+
+pub(crate) fn sync_open_directory_tooltip(ui: &MainWindow) {
+    ui.set_workflow_open_local_folder_tooltip(
+        crate::i18n::tr(open_directory_tooltip_key())
+            .into_owned()
+            .into(),
+    );
 }
 
 pub(crate) fn show_success(ui: &MainWindow, message: &str) {

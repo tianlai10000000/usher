@@ -3,6 +3,7 @@ import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tool
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
 import { GitHubMetadataLabel } from "../github_metadata_label.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 export component GitHubWorkflowProjectDetails inherits Rectangle {
     in property <string> project-name: "";
@@ -13,7 +14,7 @@ export component GitHubWorkflowProjectDetails inherits Rectangle {
     in property <string> repo-project-id: "";
     in property <image> project-logo-image;
     // GitHub Desktop wording: Show in Finder / Explorer / file manager.
-    in property <string> open-local-folder-tooltip: "Show in file manager";
+    in property <string> open-local-folder-tooltip: I18n.workflow-show-in-file-manager;
     callback copy-remote(string) -> bool;
     callback open-local(string);
 
@@ -26,21 +27,21 @@ export component GitHubWorkflowProjectDetails inherits Rectangle {
     private property <color> border-default: GitHubTheme.border-default;
     private property <color> fg-default: GitHubTheme.fg-default;
     private property <color> fg-muted: GitHubTheme.fg-muted;
-    private property <string> display-name: root.project-name == "" ? "Untitled project" : root.project-name;
+    private property <string> display-name: root.project-name == "" ? I18n.common-untitled-project : root.project-name;
     private property <bool> has-alias: root.project-alias != "";
     private property <bool> has-remote: root.project-remote-repo != "";
     private property <bool> has-local: root.project-local-repo != "";
     private property <string> display-remote: root.has-remote
         ? root.project-remote-repo
-        : "No remote URL";
+        : I18n.workflow-no-remote-url;
     private property <string> display-local: root.has-local
         ? root.project-local-repo
-        : "No local path";
+        : I18n.workflow-no-local-path;
     private property <string> provider-label:
         root.repo-type == "github" ? "GitHub"
             : (root.repo-type == "gitlab" ? "GitLab"
                 : (root.repo-type == "gitee" ? "Gitee"
-                    : (root.repo-type == "" ? "Not configured" : root.repo-type)));
+                    : (root.repo-type == "" ? I18n.common-not-configured : root.repo-type)));
     private property <bool> has-repo-id: root.repo-project-id != "";
     private property <string> id-label: root.has-repo-id ? ("ID " + root.repo-project-id) : "ID —";
 
@@ -248,7 +249,7 @@ export component GitHubWorkflowProjectDetails inherits Rectangle {
         if root.has-remote: GitHubCopyButton {
             x: parent.width - 32px;
             y: 0px;
-            tooltip-text: "Copy remote URL";
+            tooltip-text: I18n.workflow-copy-remote-url;
             tooltip-align-right: true;
             copy-requested => {
                 root.copy-remote(root.project-remote-repo)
@@ -357,7 +358,7 @@ export component GitHubWorkflowProjectDetails inherits Rectangle {
             preferred-placement: GitHubTooltipPlacement.Top;
             alignment: GitHubTooltipAlignment.End;
             text: compact-details-touch.has-hover && !root.repository-details-open
-                ? "Repository details"
+                ? I18n.workflow-repository-details
                 : "";
         }
     }

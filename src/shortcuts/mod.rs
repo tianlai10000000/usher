@@ -204,10 +204,14 @@ pub(crate) fn start_initialization(ui: &MainWindow) {
     ui.set_shortcut_initialization_visible(true);
     ui.set_shortcut_initialization_failed(false);
     ui.set_shortcut_initialization_progress(0.1);
-    ui.set_shortcut_initialization_status("Loading shortcuts…".into());
+    ui.set_shortcut_initialization_status(crate::i18n::tr("shortcuts.loading").into_owned().into());
     ui.set_shortcut_initialization_detail(
-        "Registry & callbacks — Loading\nPlatform input bridge — Waiting\nCommands — Waiting"
-            .into(),
+        shortcut_status_detail(
+            "shortcuts.status_loading",
+            "shortcuts.status_waiting",
+            "shortcuts.status_waiting",
+        )
+        .into(),
     );
 
     let ui_weak = ui.as_weak();
@@ -221,8 +225,19 @@ pub(crate) fn start_initialization(ui: &MainWindow) {
         }
 
         ui.set_shortcut_initialization_progress(0.6);
-        ui.set_shortcut_initialization_status("Loading shortcut input…".into());
-        ui.set_shortcut_initialization_detail(shortcut_status_detail("Loading", "Waiting").into());
+        ui.set_shortcut_initialization_status(
+            crate::i18n::tr("shortcuts.loading_input")
+                .into_owned()
+                .into(),
+        );
+        ui.set_shortcut_initialization_detail(
+            shortcut_status_detail(
+                "shortcuts.status_ready",
+                "shortcuts.status_loading",
+                "shortcuts.status_waiting",
+            )
+            .into(),
+        );
         schedule_platform_bridge(ui.as_weak(), 0);
     });
 }
@@ -251,8 +266,19 @@ fn schedule_platform_bridge(ui_weak: slint::Weak<MainWindow>, attempt: u8) {
         };
         if crate::platform::install_shortcut_input_bridge(&ui) {
             ui.set_shortcut_initialization_progress(1.0);
-            ui.set_shortcut_initialization_status("Shortcuts ready".into());
-            ui.set_shortcut_initialization_detail(shortcut_status_detail("Ready", "Ready").into());
+            ui.set_shortcut_initialization_status(
+                crate::i18n::tr("status.shortcuts_ready")
+                    .into_owned()
+                    .into(),
+            );
+            ui.set_shortcut_initialization_detail(
+                shortcut_status_detail(
+                    "shortcuts.status_ready",
+                    "shortcuts.status_ready",
+                    "shortcuts.status_ready",
+                )
+                .into(),
+            );
             log::info!("[Shortcut] Initialization complete");
             return;
         }
@@ -269,27 +295,45 @@ fn schedule_platform_bridge(ui_weak: slint::Weak<MainWindow>, attempt: u8) {
 
 fn fail_initialization(ui: &MainWindow, message: &str) {
     ui.set_shortcut_initialization_failed(true);
-    ui.set_shortcut_initialization_status(message.into());
+    ui.set_shortcut_initialization_status(
+        crate::i18n::tr("shortcuts.unavailable").into_owned().into(),
+    );
     ui.set_shortcut_initialization_detail(
-        format!("Registry / input bridge — Failed\n\n{message}").into(),
+        shortcut_status_detail(
+            "shortcuts.status_failed",
+            "shortcuts.status_failed",
+            "shortcuts.status_failed",
+        )
+        .into(),
     );
     log::error!("[Shortcut] {message}");
 }
 
-fn shortcut_status_detail(platform_status: &str, command_status: &str) -> String {
-    format!(
-        "Registry & callbacks — Ready\n\
-         Platform input bridge — {platform_status}\n\n\
-         {}  Toggle sidebar · Application — {command_status}\n\
-         {}  Toggle terminal · Workflow, Project — {command_status}\n\
-         {}  Back · Application — {command_status}\n\
-         {}  Forward · Application — {command_status}\n\
-         {}  Open Settings · Application — {command_status}",
-        binding_label(CommandId::ToggleSidebar),
-        binding_label(CommandId::ToggleTerminal),
-        binding_label(CommandId::NavigateBack),
-        binding_label(CommandId::NavigateForward),
-        binding_label(CommandId::OpenSettings),
+fn shortcut_status_detail(
+    registry_status_key: &str,
+    platform_status_key: &str,
+    command_status_key: &str,
+) -> String {
+    let registry_status = crate::i18n::tr(registry_status_key);
+    let platform_status = crate::i18n::tr(platform_status_key);
+    let command_status = crate::i18n::tr(command_status_key);
+    let toggle_sidebar = binding_label(CommandId::ToggleSidebar);
+    let toggle_terminal = binding_label(CommandId::ToggleTerminal);
+    let back = binding_label(CommandId::NavigateBack);
+    let forward = binding_label(CommandId::NavigateForward);
+    let settings = binding_label(CommandId::OpenSettings);
+    crate::i18n::tr_args(
+        "shortcuts.detail",
+        &[
+            ("registry_status", registry_status.as_ref()),
+            ("platform_status", platform_status.as_ref()),
+            ("command_status", command_status.as_ref()),
+            ("toggle_sidebar_binding", toggle_sidebar.as_str()),
+            ("toggle_terminal_binding", toggle_terminal.as_str()),
+            ("back_binding", back.as_str()),
+            ("forward_binding", forward.as_str()),
+            ("settings_binding", settings.as_str()),
+        ],
     )
 }
 

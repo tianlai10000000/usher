@@ -1,5 +1,6 @@
 mod model;
 
+use crate::i18n::LocalizedText;
 use crate::{JobStepItem, MainWindow};
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::cell::RefCell;
@@ -14,11 +15,11 @@ pub(crate) use model::{
 pub(crate) struct JobRunDescriptor {
     pub(crate) active: bool,
     pub(crate) source: String,
-    pub(crate) run_title: String,
-    pub(crate) workflow_name: String,
+    pub(crate) run_title: LocalizedText,
+    pub(crate) workflow_name: LocalizedText,
     pub(crate) context_name: String,
     pub(crate) job_name: String,
-    pub(crate) trigger_detail: String,
+    pub(crate) trigger_detail: LocalizedText,
 }
 
 impl Default for JobRunDescriptor {
@@ -26,11 +27,11 @@ impl Default for JobRunDescriptor {
         Self {
             active: false,
             source: String::new(),
-            run_title: "Workflow run".to_string(),
-            workflow_name: "Workflow".to_string(),
+            run_title: LocalizedText::message("jobs.default_run_title"),
+            workflow_name: LocalizedText::message("common.workflow"),
             context_name: "Usher".to_string(),
             job_name: "job".to_string(),
-            trigger_detail: "Started manually".to_string(),
+            trigger_detail: LocalizedText::message("jobs.started_manually"),
         }
     }
 }
@@ -103,17 +104,17 @@ pub(crate) fn apply_job_run(
     ui: &MainWindow,
     descriptor: &JobRunDescriptor,
     snapshot: &JobSnapshot,
-    summary: &str,
+    summary: &LocalizedText,
     running: bool,
 ) {
     ui.set_job_run_active(descriptor.active);
     ui.set_job_run_source(descriptor.source.clone().into());
-    ui.set_job_run_title(descriptor.run_title.clone().into());
-    ui.set_job_run_workflow_name(descriptor.workflow_name.clone().into());
+    ui.set_job_run_title(descriptor.run_title.resolve().into());
+    ui.set_job_run_workflow_name(descriptor.workflow_name.resolve().into());
     ui.set_job_run_context_name(descriptor.context_name.clone().into());
     ui.set_job_run_job_name(descriptor.job_name.clone().into());
-    ui.set_job_run_trigger_detail(descriptor.trigger_detail.clone().into());
-    ui.set_job_run_summary(summary.into());
+    ui.set_job_run_trigger_detail(descriptor.trigger_detail.resolve().into());
+    ui.set_job_run_summary(summary.resolve().into());
     ui.set_job_run_status(snapshot.status.as_str().into());
     ui.set_job_run_conclusion(
         snapshot

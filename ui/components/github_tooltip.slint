@@ -15,9 +15,16 @@ export component GitHubTooltipSurface inherits Rectangle {
     // Keep the painted box and its 8px text inset on the logical-pixel grid.
     // Fractional preferred widths otherwise make centered tips land at x.5;
     // FemtoVG visibly softens 12px white glyphs there on 1x displays.
+    // Leave a small overhang allowance because fallback CJK glyphs can paint
+    // beyond the preferred width reported for the measuring Text node.
+    private property <length> glyph-overhang-allowance: GitHubMetrics.size-4;
     private property <length> natural-width:
         Math.ceil(
-            (tip-measure.preferred-width + GitHubMetrics.size-16) / 1px
+            (
+                tip-measure.preferred-width
+                + GitHubMetrics.size-16
+                + root.glyph-overhang-allowance
+            ) / 1px
         ) * 1px;
     private property <length> label-height: max(
         tip-label.preferred-height,

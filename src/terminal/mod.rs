@@ -53,12 +53,16 @@ fn default_scrollback() -> usize {
 
 struct TerminalDrawerState {
     project_key: String,
+    project_name: String,
     cwd: String,
+    drawer_visible: bool,
     active_session_id: Option<u64>,
     next_session_id: u64,
     selection_mode: bool,
     selection_output: String,
     selection_output_line_count: i32,
+    selection_output_prefix: String,
+    selection_notice_key: Option<&'static str>,
     output_dirty: bool,
     lines: Vec<RenderedTerminalLine>,
     scrollback_offset: usize,
@@ -85,12 +89,16 @@ impl Default for TerminalDrawerState {
         let render = TerminalRenderState::new(DEFAULT_ROWS, DEFAULT_COLS, default_scrollback());
         Self {
             project_key: String::new(),
+            project_name: String::new(),
             cwd: default_terminal_cwd(),
+            drawer_visible: false,
             active_session_id: None,
             next_session_id: 1,
             selection_mode: false,
-            selection_output: "Terminal ready.\n".to_string(),
+            selection_output: terminal_notice_line("terminal.ready"),
             selection_output_line_count: 1,
+            selection_output_prefix: String::new(),
+            selection_notice_key: Some("terminal.ready"),
             output_dirty: false,
             lines: default_terminal_lines(),
             scrollback_offset: 0,
@@ -134,8 +142,12 @@ pub fn shutdown_terminal() {
         return;
     };
     log::info!("[Terminal] Shutdown requested, terminating active PTY session");
-    terminate_session_locked(&mut guard);
+    let session = detach_session_locked(&mut guard);
     reset_terminal_view_state(&mut guard);
+    drop(guard);
+    if let Some(mut session) = session {
+        session.terminate();
+    }
 }
 
 pub fn set_dark_mode(ui: &MainWindow, is_dark: bool) {
@@ -160,6 +172,28 @@ pub fn set_dark_mode(ui: &MainWindow, is_dark: bool) {
 
 pub fn set_verbose_logging(enabled: bool) {
     TERMINAL_VERBOSE_LOGGING.store(enabled, Ordering::Relaxed);
+}
+
+pub fn sync_language(ui: &MainWindow) {
+    let Some(shared_state) = TERMINAL_SHARED_STATE.get() else {
+        return;
+    };
+    let Ok(mut guard) = shared_state.lock() else {
+        return;
+    };
+    let title = terminal_title_for_project(guard.project_name.as_str());
+    let notice_changed = guard.selection_notice_key.is_some();
+    if notice_changed {
+        refresh_selection_notice(&mut guard);
+    }
+    let output = guard.selection_output.clone();
+    let line_count = guard.selection_output_line_count;
+    drop(guard);
+    ui.set_shell_drawer_title(title.into());
+    if notice_changed {
+        ui.set_shell_drawer_output(output.into());
+        ui.set_shell_drawer_output_line_count(line_count);
+    }
 }
 
 pub fn log_page_memory_diag(
@@ -254,15 +288,18 @@ pub fn reset_terminal_for_project(
         return;
     }
 
-    terminate_session_locked(&mut guard);
+    let previous_session = detach_session_locked(&mut guard);
     guard.project_key = project_key.to_string();
     guard.cwd = if cwd.trim().is_empty() {
         default_terminal_cwd()
     } else {
         cwd.trim().to_string()
     };
+    guard.drawer_visible = false;
     reset_terminal_view_state(&mut guard);
     drop(guard);
+
+    terminate_session_in_background(previous_session, "project-switch");
 
     ui.set_shell_drawer_visible(false);
     ui.set_shell_drawer_input_text("".into());
@@ -287,6 +324,12 @@ pub fn open_terminal_for_project(
         .map(|guard| guard.project_key == project_key && guard.session.is_some())
         .unwrap_or(false);
 
+    if let Ok(mut guard) = shared_state.lock() {
+        guard.project_name = project_name.trim().to_string();
+        guard.drawer_visible = true;
+        guard.dirty = true;
+    }
+
     let title = terminal_title_for_project(project_name);
     log::info!(
         "[Terminal] Open requested from page context: route='{}', source='project-card', title='{}', project_key='{}', cwd='{}', preserve_state={}",
@@ -309,9 +352,12 @@ pub fn open_terminal_for_project(
 
 pub(crate) fn terminal_title_for_project(project_name: &str) -> String {
     if project_name.trim().is_empty() {
-        "Project Terminal".to_string()
+        crate::i18n::tr("terminal.project_title_default").into_owned()
     } else {
-        format!("{} Terminal", project_name.trim())
+        crate::i18n::tr_args(
+            "terminal.project_title",
+            &[("project", project_name.trim())],
+        )
     }
 }
 
@@ -332,11 +378,9 @@ fn bind_terminal(ui: &MainWindow, shared_state: SharedTerminalState) {
                 ui.get_shell_drawer_cwd(),
                 ui.get_shell_drawer_fullscreen()
             );
-            stop_session(state_toggle.clone(), false);
-            initialize_ui(&ui, &state_toggle);
+            set_drawer_visible(&state_toggle, false);
             ui.set_shell_drawer_visible(false);
             ui.set_shell_drawer_fullscreen(false);
-            schedule_refresh(ui.as_weak(), state_toggle.clone());
             return;
         }
 
@@ -347,6 +391,7 @@ fn bind_terminal(ui: &MainWindow, shared_state: SharedTerminalState) {
             ui.get_shell_drawer_title(),
             ui.get_shell_drawer_cwd(),
         );
+        set_drawer_visible(&state_toggle, true);
         ui.set_shell_drawer_visible(true);
         ensure_session_started(&ui, state_toggle.clone());
     });
@@ -364,8 +409,7 @@ fn bind_terminal(ui: &MainWindow, shared_state: SharedTerminalState) {
             ui.get_shell_drawer_cwd(),
             ui.get_shell_drawer_fullscreen()
         );
-        stop_session(state_close.clone(), false);
-        initialize_ui(&ui, &state_close);
+        set_drawer_visible(&state_close, false);
     });
 
     let state_submit = shared_state.clone();
@@ -416,6 +460,9 @@ fn bind_terminal(ui: &MainWindow, shared_state: SharedTerminalState) {
         let Ok(mut guard) = state_resize.lock() else {
             return;
         };
+        if !guard.drawer_visible {
+            return;
+        }
         if guard.cols != cols || guard.rows != rows {
             guard.cols = cols;
             guard.rows = rows;
@@ -498,17 +545,6 @@ fn bind_terminal(ui: &MainWindow, shared_state: SharedTerminalState) {
     });
 }
 
-fn stop_session(shared_state: SharedTerminalState, append_closed_notice: bool) {
-    let Ok(mut guard) = shared_state.lock() else {
-        return;
-    };
-    stop_session_locked(&mut guard, append_closed_notice);
-    drop(guard);
-    if append_closed_notice {
-        schedule_global_refresh(shared_state);
-    }
-}
-
 fn stop_session_locked(guard: &mut TerminalDrawerState, append_closed_notice: bool) {
     if !append_closed_notice {
         log_terminal_diagnostics("close", guard, None, true);
@@ -530,16 +566,8 @@ fn stop_session_locked(guard: &mut TerminalDrawerState, append_closed_notice: bo
     guard.connected = false;
     guard.running = false;
     if append_closed_notice {
-        let mut notice = if guard.selection_output.is_empty() {
-            String::new()
-        } else {
-            guard.selection_output.clone()
-        };
-        if !notice.is_empty() && !notice.ends_with('\n') {
-            notice.push('\n');
-        }
-        notice.push_str("[terminal session closed]\n");
-        set_selection_output_text(guard, notice);
+        let prefix = selection_output_without_notice(guard);
+        set_selection_notice(guard, prefix, "terminal.session_closed");
     }
     guard.selection_mode = false;
     guard.output_dirty = false;
@@ -578,6 +606,7 @@ fn ensure_session_started(ui: &MainWindow, shared_state: SharedTerminalState) {
         let Ok(mut guard) = shared_state.lock() else {
             return;
         };
+        guard.drawer_visible = true;
         if guard.session.is_some() {
             guard.connected = true;
             guard.dirty = true;
@@ -609,10 +638,7 @@ fn ensure_session_started(ui: &MainWindow, shared_state: SharedTerminalState) {
             }
             Err(error) => {
                 log::error!("[Terminal] Failed to start PTY session: {}", error);
-                set_selection_output_text(
-                    &mut guard,
-                    format!("Failed to start terminal session:\n{}\n", error),
-                );
+                set_selection_notice(&mut guard, String::new(), "terminal.start_failed");
                 guard.output_dirty = false;
                 guard.connected = false;
                 guard.running = false;
@@ -757,16 +783,8 @@ fn send_input_bytes(shared_state: SharedTerminalState, bytes: &[u8]) {
             }
             Err(error) => {
                 log::error!("[Terminal] Failed to write PTY input: {}", error);
-                let mut message = if guard.selection_output.is_empty() {
-                    String::new()
-                } else {
-                    guard.selection_output.clone()
-                };
-                if !message.is_empty() && !message.ends_with('\n') {
-                    message.push('\n');
-                }
-                message.push_str(&format!("[terminal write failed] {}\n", error));
-                set_selection_output_text(&mut guard, message);
+                let prefix = selection_output_without_notice(&guard);
+                set_selection_notice(&mut guard, prefix, "terminal.write_failed");
                 guard.output_dirty = false;
                 guard.dirty = true;
                 drop(guard);
@@ -839,18 +857,7 @@ fn schedule_refresh(_ui_weak: slint::Weak<MainWindow>, shared_state: SharedTermi
         let Ok(mut guard) = shared_state.lock() else {
             return;
         };
-        if guard.refresh_scheduled {
-            None
-        } else {
-            guard.refresh_scheduled = true;
-            let now = Instant::now();
-            let delay = next_refresh_delay(
-                now,
-                guard.last_refresh_applied_at,
-                TERMINAL_REFRESH_FRAME_INTERVAL,
-            );
-            Some(delay)
-        }
+        begin_refresh_schedule(&mut guard, Instant::now())
     };
 
     let Some(delay) = maybe_delay else {
@@ -873,15 +880,25 @@ fn schedule_refresh(_ui_weak: slint::Weak<MainWindow>, shared_state: SharedTermi
                 return;
             };
 
-            if let Ok(mut guard) = shared_state_for_ui.lock() {
-                if guard.dirty {
-                    refresh_render_snapshot(&mut guard);
-                    guard.dirty = false;
+            let should_apply = if let Ok(mut guard) = shared_state_for_ui.lock() {
+                if !guard.drawer_visible {
+                    guard.refresh_scheduled = false;
+                    false
+                } else {
+                    if guard.dirty {
+                        refresh_render_snapshot(&mut guard);
+                        guard.dirty = false;
+                    }
+                    guard.refresh_scheduled = false;
+                    guard.last_refresh_applied_at = Some(Instant::now());
+                    true
                 }
-                guard.refresh_scheduled = false;
-                guard.last_refresh_applied_at = Some(Instant::now());
+            } else {
+                false
+            };
+            if should_apply {
+                initialize_ui(&ui, &shared_state_for_ui);
             }
-            initialize_ui(&ui, &shared_state_for_ui);
         };
 
         if delay.is_zero() {
@@ -892,17 +909,54 @@ fn schedule_refresh(_ui_weak: slint::Weak<MainWindow>, shared_state: SharedTermi
     });
 }
 
+fn begin_refresh_schedule(guard: &mut TerminalDrawerState, now: Instant) -> Option<Duration> {
+    if !guard.drawer_visible || guard.refresh_scheduled {
+        return None;
+    }
+    guard.refresh_scheduled = true;
+    Some(next_refresh_delay(
+        now,
+        guard.last_refresh_applied_at,
+        TERMINAL_REFRESH_FRAME_INTERVAL,
+    ))
+}
+
 fn terminate_session_locked(guard: &mut TerminalDrawerState) {
-    if let Some(session) = guard.session.as_mut() {
+    if let Some(mut session) = detach_session_locked(guard) {
         session.terminate();
     }
-    guard.session = None;
+}
+
+fn detach_session_locked(guard: &mut TerminalDrawerState) -> Option<PtySession> {
+    let session = guard.session.take();
     guard.active_session_id = None;
     guard.connected = false;
     guard.running = false;
     guard.render.set_scrollback(0);
     guard.scrollback_offset = 0;
     guard.max_scrollback_dirty = false;
+    session
+}
+
+fn terminate_session_in_background(session: Option<PtySession>, reason: &'static str) {
+    let Some(mut session) = session else {
+        return;
+    };
+    crate::app_runtime::shared_runtime().spawn(async move {
+        if let Err(error) = tokio::task::spawn_blocking(move || session.terminate()).await {
+            log::warn!("[Terminal] PTY termination worker failed ({reason}): {error}");
+        }
+    });
+}
+
+fn set_drawer_visible(shared_state: &SharedTerminalState, visible: bool) {
+    let Ok(mut guard) = shared_state.lock() else {
+        return;
+    };
+    guard.drawer_visible = visible;
+    if visible {
+        guard.dirty = true;
+    }
 }
 
 fn reset_terminal_view_state(guard: &mut TerminalDrawerState) {
@@ -1011,11 +1065,49 @@ fn log_terminal_output_chunk(guard: &mut TerminalDrawerState, bytes: &[u8]) {
 fn clear_selection_output(guard: &mut TerminalDrawerState) {
     guard.selection_output.clear();
     guard.selection_output_line_count = 0;
+    guard.selection_output_prefix.clear();
+    guard.selection_notice_key = None;
 }
 
 fn set_selection_output_text(guard: &mut TerminalDrawerState, output: String) {
     guard.selection_output_line_count = count_output_lines(&output);
     guard.selection_output = output;
+    guard.selection_output_prefix.clear();
+    guard.selection_notice_key = None;
+}
+
+fn set_selection_notice(guard: &mut TerminalDrawerState, prefix: String, key: &'static str) {
+    guard.selection_output_prefix = prefix;
+    guard.selection_notice_key = Some(key);
+    refresh_selection_notice(guard);
+}
+
+fn refresh_selection_notice(guard: &mut TerminalDrawerState) {
+    let Some(key) = guard.selection_notice_key else {
+        return;
+    };
+    let mut output = guard.selection_output_prefix.clone();
+    if !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str(crate::i18n::tr(key).as_ref());
+    output.push('\n');
+    guard.selection_output_line_count = count_output_lines(&output);
+    guard.selection_output = output;
+}
+
+fn selection_output_without_notice(guard: &TerminalDrawerState) -> String {
+    if guard.selection_notice_key.is_some() {
+        guard.selection_output_prefix.clone()
+    } else {
+        guard.selection_output.clone()
+    }
+}
+
+fn terminal_notice_line(key: &'static str) -> String {
+    let mut line = crate::i18n::tr(key).into_owned();
+    line.push('\n');
+    line
 }
 
 fn count_output_lines(output: &str) -> i32 {
@@ -1074,5 +1166,46 @@ fn toggle_source_label(ui: &MainWindow) -> &'static str {
         Route::Workflow => "workflow-fab",
         Route::Project => "project-terminal-toggle",
         _ => "shell-toggle",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hidden_drawer_defers_refresh_until_reopened() {
+        let now = Instant::now();
+        let mut state = TerminalDrawerState::default();
+        state.dirty = true;
+
+        assert_eq!(begin_refresh_schedule(&mut state, now), None);
+        assert!(!state.refresh_scheduled);
+        assert!(state.dirty);
+
+        state.drawer_visible = true;
+        assert_eq!(
+            begin_refresh_schedule(&mut state, now),
+            Some(Duration::ZERO)
+        );
+        assert!(state.refresh_scheduled);
+        assert!(state.dirty);
+        assert_eq!(begin_refresh_schedule(&mut state, now), None);
+    }
+
+    #[test]
+    fn rapid_visibility_toggles_keep_the_last_requested_state() {
+        let shared_state = Arc::new(Mutex::new(TerminalDrawerState::default()));
+
+        for _ in 0..100 {
+            set_drawer_visible(&shared_state, true);
+            set_drawer_visible(&shared_state, false);
+        }
+        set_drawer_visible(&shared_state, true);
+
+        let state = shared_state.lock().expect("terminal state lock");
+        assert!(state.drawer_visible);
+        assert!(state.dirty);
+        assert!(state.session.is_none());
     }
 }

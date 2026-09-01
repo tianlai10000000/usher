@@ -63,8 +63,8 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
         let (state, filters) = match parse_pull_request_query(query.as_str(), current_sort.as_str())
         {
             Ok(parsed) => parsed,
-            Err(error) => {
-                ui.set_workflow_pr_list_error(error.into());
+            Err(error_key) => {
+                ui.set_workflow_pr_list_error(crate::i18n::tr(error_key).into_owned().into());
                 return;
             }
         };
@@ -166,6 +166,31 @@ pub(crate) fn bind_pr_list(ui: &MainWindow) -> WorkflowPrListController {
 }
 
 impl WorkflowPrListController {
+    pub(crate) fn sync_language(&self, ui: &MainWindow) {
+        let state = PullRequestState::parse(ui.get_workflow_pr_list_state().as_str())
+            .unwrap_or(PullRequestState::Open);
+        let page = ui.get_workflow_pr_list_page().max(1) as u32;
+        if self.fixture_enabled {
+            self.load_fixture_page(ui, state, page);
+            return;
+        }
+
+        let items = self
+            .visited_pages
+            .lock()
+            .ok()
+            .and_then(|pages| pages.get(&page).cloned());
+        if let Some(items) = items {
+            apply_page_to_ui(
+                ui,
+                page,
+                items,
+                ui.get_workflow_pr_list_page_count().max(1) as u32,
+                ui.get_workflow_pr_list_total_exact(),
+            );
+        }
+    }
+
     pub(crate) fn release_unreachable(&self, ui: &MainWindow) {
         self.generations.invalidate_all();
         if let Ok(mut context) = self.context.lock() {
@@ -248,7 +273,12 @@ impl WorkflowPrListController {
                             return;
                         };
                         ui.set_workflow_pr_list_loading(false);
-                        ui.set_workflow_pr_list_error(error.into());
+                        log::warn!("[Workflow] Failed to discover repository metadata: {error}");
+                        ui.set_workflow_pr_list_error(
+                            crate::i18n::tr("pr_list.metadata_unavailable")
+                                .into_owned()
+                                .into(),
+                        );
                         ui.set_workflow_pr_list_error_kind("configuration".into());
                     });
                 }
@@ -345,7 +375,11 @@ impl WorkflowPrListController {
         let context = self.context.lock().ok().and_then(|guard| guard.clone());
         let Some(context) = context else {
             ui.set_workflow_pr_list_loading(false);
-            ui.set_workflow_pr_list_error("Repository metadata is not available.".into());
+            ui.set_workflow_pr_list_error(
+                crate::i18n::tr("pr_list.metadata_unavailable")
+                    .into_owned()
+                    .into(),
+            );
             ui.set_workflow_pr_list_error_kind("configuration".into());
             return;
         };
@@ -403,7 +437,11 @@ impl WorkflowPrListController {
                     }
                     Err(error) => {
                         log::warn!("[Workflow] Failed to load pull requests: {error}");
-                        ui.set_workflow_pr_list_error(error.user_message().into());
+                        ui.set_workflow_pr_list_error(
+                            crate::i18n::tr(error.user_message_key())
+                                .into_owned()
+                                .into(),
+                        );
                         ui.set_workflow_pr_list_error_kind(error.error_kind().into());
                     }
                 }
@@ -467,7 +505,7 @@ impl WorkflowPrListController {
 fn parse_pull_request_query(
     value: &str,
     _current_sort: &str,
-) -> Result<(PullRequestState, PullRequestFilters), String> {
+) -> Result<(PullRequestState, PullRequestFilters), &'static str> {
     let mut state = None;
     let mut filters = PullRequestFilters {
         query: String::new(),
@@ -488,10 +526,7 @@ fn parse_pull_request_query(
         };
         if let Some(parsed_state) = parsed_state {
             if state.is_some_and(|current| current != parsed_state) {
-                return Err(
-                    "Use only one PR state qualifier: is:open, is:closed, or is:merged."
-                        .to_string(),
-                );
+                return Err("pr_list.single_state_qualifier");
             }
             state = Some(parsed_state);
             continue;
@@ -519,13 +554,11 @@ fn parse_pull_request_query(
     let state = match (state, unmerged) {
         (Some(PullRequestState::Closed), true) => PullRequestState::ClosedUnmerged,
         (Some(PullRequestState::Merged), true) => {
-            return Err("is:merged and is:unmerged cannot be combined.".to_string());
+            return Err("pr_list.merged_unmerged_conflict");
         }
         (Some(state), _) => state,
         (None, true) => {
-            return Err(
-                "Combine is:unmerged with is:closed or is:open for portable filtering.".to_string(),
-            );
+            return Err("pr_list.unmerged_requires_state");
         }
         (None, false) => PullRequestState::Open,
     };
@@ -726,26 +759,42 @@ pub(super) fn format_github_relative_time(value: &str) -> String {
 }
 
 pub(super) fn format_github_absolute_tooltip(value: &str) -> String {
+    format_github_absolute_tooltip_for_locale(value, usher_i18n::active_locale().id)
+}
+
+fn format_github_absolute_tooltip_for_locale(value: &str, locale: &str) -> String {
+    if value.trim().is_empty() {
+        return usher_i18n::translate_for(locale, "common.unavailable").into_owned();
+    }
     match parse_provider_timestamp(value) {
         Some(timestamp) => {
             let utc_plus_eight =
                 FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
             let local = timestamp.with_timezone(&utc_plus_eight);
             let hour24 = local.hour();
-            let (hour12, meridiem) = match hour24 {
-                0 => (12, "AM"),
-                1..=11 => (hour24, "AM"),
-                12 => (12, "PM"),
-                _ => (hour24 - 12, "PM"),
+            let (hour12, meridiem_key) = match hour24 {
+                0 => (12, "time.am"),
+                1..=11 => (hour24, "time.am"),
+                12 => (12, "time.pm"),
+                _ => (hour24 - 12, "time.pm"),
             };
-            format!(
-                "{} {}, {}, {}:{:02} {} GMT+8",
-                local.format("%b"),
-                local.day(),
-                local.year(),
-                hour12,
-                local.minute(),
-                meridiem
+            let month = localized_short_month(locale, local.month());
+            let day = local.day().to_string();
+            let year = local.year().to_string();
+            let hour = hour12.to_string();
+            let minute = format!("{:02}", local.minute());
+            let meridiem = usher_i18n::translate_for(locale, meridiem_key).into_owned();
+            usher_i18n::translate_for_with(
+                locale,
+                "time.absolute_tooltip",
+                &[
+                    ("month", month.as_str()),
+                    ("day", day.as_str()),
+                    ("year", year.as_str()),
+                    ("hour", hour.as_str()),
+                    ("minute", minute.as_str()),
+                    ("meridiem", meridiem.as_str()),
+                ],
             )
         }
         None => value.to_string(),
@@ -755,26 +804,48 @@ pub(super) fn format_github_absolute_tooltip(value: &str) -> String {
 fn format_github_absolute_short_at(
     value: &str,
     now: chrono::DateTime<chrono::Utc>,
+    locale: &str,
 ) -> Option<String> {
     let timestamp = parse_provider_timestamp(value)?;
     let utc_plus_eight =
         FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
     let local = timestamp.with_timezone(&utc_plus_eight);
     let now_local = now.with_timezone(&utc_plus_eight);
+    let month = localized_short_month(locale, local.month());
+    let day = local.day().to_string();
     // Primer defaults: month=short, day=numeric, year only when different.
     if local.year() == now_local.year() {
-        Some(format!("on {} {}", local.format("%b"), local.day()))
+        Some(usher_i18n::translate_for_with(
+            locale,
+            "time.on_month_day",
+            &[("month", month.as_str()), ("day", day.as_str())],
+        ))
     } else {
-        Some(format!(
-            "on {} {}, {}",
-            local.format("%b"),
-            local.day(),
-            local.year()
+        let year = local.year().to_string();
+        Some(usher_i18n::translate_for_with(
+            locale,
+            "time.on_month_day_year",
+            &[
+                ("month", month.as_str()),
+                ("day", day.as_str()),
+                ("year", year.as_str()),
+            ],
         ))
     }
 }
 
 fn format_github_relative_time_at(value: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+    format_github_relative_time_at_for_locale(value, now, usher_i18n::active_locale().id)
+}
+
+fn format_github_relative_time_at_for_locale(
+    value: &str,
+    now: chrono::DateTime<chrono::Utc>,
+    locale: &str,
+) -> String {
+    if value.trim().is_empty() {
+        return usher_i18n::translate_for(locale, "common.unavailable").into_owned();
+    }
     let Some(timestamp) = parse_provider_timestamp(value) else {
         return value.to_string();
     };
@@ -782,44 +853,94 @@ fn format_github_relative_time_at(value: &str, now: chrono::DateTime<chrono::Utc
     let delta = now.signed_duration_since(instant);
     let seconds = delta.num_seconds();
     if seconds < 0 {
-        return format_github_absolute_tooltip(value);
+        return format_github_absolute_tooltip_for_locale(value, locale);
     }
     // Past P30D: absolute `on Mar 19` instead of `N months ago`.
     let days = delta.num_days();
     if days >= 30 {
-        return format_github_absolute_short_at(value, now).unwrap_or_else(|| value.to_string());
+        return format_github_absolute_short_at(value, now, locale)
+            .unwrap_or_else(|| value.to_string());
     }
     if seconds < 60 {
-        return "just now".to_string();
+        return usher_i18n::translate_for(locale, "time.just_now").into_owned();
     }
     let minutes = delta.num_minutes();
     if minutes < 60 {
         return if minutes == 1 {
-            "1 minute ago".to_string()
+            usher_i18n::translate_for(locale, "time.minute_ago").into_owned()
         } else {
-            format!("{minutes} minutes ago")
+            let count = minutes.to_string();
+            usher_i18n::translate_for_with(locale, "time.minutes_ago", &[("count", count.as_str())])
         };
     }
     let hours = delta.num_hours();
     if hours < 24 {
         return if hours == 1 {
-            "1 hour ago".to_string()
+            usher_i18n::translate_for(locale, "time.hour_ago").into_owned()
         } else {
-            format!("{hours} hours ago")
+            let count = hours.to_string();
+            usher_i18n::translate_for_with(locale, "time.hours_ago", &[("count", count.as_str())])
         };
     }
     if days == 1 {
-        return "yesterday".to_string();
+        return usher_i18n::translate_for(locale, "time.yesterday").into_owned();
     }
     if days < 7 {
-        return format!("{days} days ago");
+        let count = days.to_string();
+        return usher_i18n::translate_for_with(
+            locale,
+            "time.days_ago",
+            &[("count", count.as_str())],
+        );
     }
     let weeks = days / 7;
     if weeks == 1 {
-        "last week".to_string()
+        usher_i18n::translate_for(locale, "time.last_week").into_owned()
     } else {
-        format!("{weeks} weeks ago")
+        let count = weeks.to_string();
+        usher_i18n::translate_for_with(locale, "time.weeks_ago", &[("count", count.as_str())])
     }
+}
+
+pub(super) fn format_github_calendar_date(value: &str) -> String {
+    let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(value) else {
+        return value.split('T').next().unwrap_or(value).to_string();
+    };
+    let utc_plus_eight =
+        FixedOffset::east_opt(8 * 60 * 60).expect("UTC+08:00 must be a valid fixed offset");
+    let local = timestamp.with_timezone(&utc_plus_eight);
+    let locale = usher_i18n::active_locale().id;
+    let month = localized_short_month(locale, local.month());
+    let day = local.day().to_string();
+    let year = local.year().to_string();
+    usher_i18n::translate_for_with(
+        locale,
+        "time.month_day_year",
+        &[
+            ("month", month.as_str()),
+            ("day", day.as_str()),
+            ("year", year.as_str()),
+        ],
+    )
+}
+
+fn localized_short_month(locale: &str, month: u32) -> String {
+    let key = match month {
+        1 => "time.month.jan",
+        2 => "time.month.feb",
+        3 => "time.month.mar",
+        4 => "time.month.apr",
+        5 => "time.month.may",
+        6 => "time.month.jun",
+        7 => "time.month.jul",
+        8 => "time.month.aug",
+        9 => "time.month.sep",
+        10 => "time.month.oct",
+        11 => "time.month.nov",
+        12 => "time.month.dec",
+        _ => return month.to_string(),
+    };
+    usher_i18n::translate_for(locale, key).into_owned()
 }
 
 fn parse_provider_timestamp(value: &str) -> Option<DateTime<FixedOffset>> {
@@ -871,8 +992,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::{
-        format_github_absolute_tooltip, format_github_relative_time_at, format_pull_request_query,
-        format_updated_at_in_utc_plus_eight, parse_pull_request_query,
+        format_github_absolute_tooltip_for_locale, format_github_relative_time_at_for_locale,
+        format_pull_request_query, format_updated_at_in_utc_plus_eight, parse_pull_request_query,
     };
     use crate::git::PullRequestState;
 
@@ -896,38 +1017,50 @@ mod tests {
     fn formats_github_style_relative_and_tooltip_times() {
         let now = Utc.with_ymd_and_hms(2026, 7, 21, 6, 0, 0).unwrap();
         assert_eq!(
-            format_github_relative_time_at("2026-07-21T05:59:20Z", now),
+            format_github_relative_time_at_for_locale("2026-07-21T05:59:20Z", now, "en"),
             "just now"
         );
         assert_eq!(
-            format_github_relative_time_at("2026-07-21T03:00:00Z", now),
+            format_github_relative_time_at_for_locale("2026-07-21T03:00:00Z", now, "en"),
             "3 hours ago"
         );
         assert_eq!(
-            format_github_relative_time_at("2026-07-20T06:00:00Z", now),
+            format_github_relative_time_at_for_locale("2026-07-20T06:00:00Z", now, "en"),
             "yesterday"
         );
         assert_eq!(
-            format_github_relative_time_at("2026-07-15 13:26:44 +08:00", now),
+            format_github_relative_time_at_for_locale("2026-07-15 13:26:44 +08:00", now, "en",),
             "6 days ago"
         );
         // Inside P30D: still relative weeks, never months-ago.
         assert_eq!(
-            format_github_relative_time_at("2026-06-25T06:00:00Z", now),
+            format_github_relative_time_at_for_locale("2026-06-25T06:00:00Z", now, "en"),
             "3 weeks ago"
         );
         // Past P30D: Primer absolute short date with `on` prefix.
         assert_eq!(
-            format_github_relative_time_at("2026-03-15T05:26:44Z", now),
+            format_github_relative_time_at_for_locale("2026-03-15T05:26:44Z", now, "en"),
             "on Mar 15"
         );
         assert_eq!(
-            format_github_relative_time_at("2025-03-15T05:26:44Z", now),
+            format_github_relative_time_at_for_locale("2025-03-15T05:26:44Z", now, "en"),
             "on Mar 15, 2025"
         );
         assert_eq!(
-            format_github_absolute_tooltip("2026-07-15T05:26:44Z"),
+            format_github_absolute_tooltip_for_locale("2026-07-15T05:26:44Z", "en"),
             "Jul 15, 2026, 1:26 PM GMT+8"
+        );
+        assert_eq!(
+            format_github_relative_time_at_for_locale("2026-07-21T03:00:00Z", now, "zh-CN"),
+            "3 小时前"
+        );
+        assert_eq!(
+            format_github_relative_time_at_for_locale("2026-03-15T05:26:44Z", now, "zh-CN"),
+            "3月15日"
+        );
+        assert_eq!(
+            format_github_absolute_tooltip_for_locale("2026-07-15T05:26:44Z", "zh-CN"),
+            "2026年7月15日 下午1:26 GMT+8"
         );
     }
 
@@ -953,7 +1086,13 @@ mod tests {
     #[test]
     fn rejects_conflicting_pull_request_state_qualifiers() {
         let error = parse_pull_request_query("is:pr is:open is:merged", "newest").unwrap_err();
-        assert!(error.contains("only one PR state qualifier"));
+        assert_eq!(error, "pr_list.single_state_qualifier");
+
+        let error = parse_pull_request_query("is:pr is:merged is:unmerged", "newest").unwrap_err();
+        assert_eq!(error, "pr_list.merged_unmerged_conflict");
+
+        let error = parse_pull_request_query("is:pr is:unmerged", "newest").unwrap_err();
+        assert_eq!(error, "pr_list.unmerged_requires_state");
     }
 
     #[test]

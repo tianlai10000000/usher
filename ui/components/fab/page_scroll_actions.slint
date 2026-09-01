@@ -1,5 +1,6 @@
 import { LayoutConstants } from "../../layout_constants.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
+import { I18n } from "@i18n";
 
 export component GitHubPageScrollActions inherits Rectangle {
     in property <length> container-width: 0px;
@@ -13,8 +14,8 @@ export component GitHubPageScrollActions inherits Rectangle {
     in property <length> terminal-bottom-offset: LayoutConstants.page-fab-bottom-offset;
     in property <bool> terminal-active: false;
     in property <bool> terminal-interactive: true;
-    in property <string> terminal-tooltip-text: "Open terminal";
-    in property <string> terminal-active-tooltip-text: "Close terminal";
+    in property <string> terminal-tooltip-text: I18n.tooltip-open-terminal;
+    in property <string> terminal-active-tooltip-text: I18n.tooltip-close-terminal;
     callback request-scroll-to-top();
     callback request-open-terminal();
 
@@ -33,7 +34,7 @@ export component GitHubPageScrollActions inherits Rectangle {
             ? parent.height - self.height - root.to-top-bottom-offset
             : parent.height - self.height - root.to-top-bottom-offset + 28px;
         icon: @image-url("../../assets/icons/octicon-arrow-up-16.svg");
-        tooltip-text: "Back to top";
+        tooltip-text: I18n.tooltip-back-to-top;
         // Same right-edge pin as the terminal FAB so the label is not clipped.
         tooltip-align-right: true;
         invisible: false;

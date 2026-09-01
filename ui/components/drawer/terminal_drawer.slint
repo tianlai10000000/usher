@@ -1,6 +1,7 @@
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 export struct TerminalSpan {
     start_col: int,
@@ -33,7 +34,7 @@ export component GitHubTerminalDrawer inherits Rectangle {
     in property <bool> drawer-open: false;
     in property <bool> docked: false;
     in-out property <string> input-text: "";
-    in property <string> title: "Terminal";
+    in property <string> title: I18n.common-terminal;
     in property <string> cwd: "";
     in property <string> output: "Terminal ready.\n";
     in property <int> output-line-count: 1;
@@ -347,7 +348,9 @@ export component GitHubTerminalDrawer inherits Rectangle {
                             y: 1px;
                             width: parent.width - 12px;
                             height: parent.height - 1px;
-                            text: root.connected ? "Connected" : root.running ? "Starting" : "Idle";
+                            text: root.connected
+                                ? I18n.terminal-connected
+                                : root.running ? I18n.terminal-starting : I18n.terminal-idle;
                             font-size: 12px;
                             color: root.fg-muted;
                             vertical-alignment: center;
@@ -360,7 +363,7 @@ export component GitHubTerminalDrawer inherits Rectangle {
                     GitHubButton {
                         width: 64px;
                         height: 28px;
-                        text: "Select";
+                        text: I18n.common-select;
                         label-font-size: 11px;
                         selected: root.selection-mode;
                         vertical-stretch: 0;
@@ -374,7 +377,7 @@ export component GitHubTerminalDrawer inherits Rectangle {
                     icon: root.fullscreen
                         ? @image-url("../../assets/icons/octicon-screen-normal-16.svg")
                         : @image-url("../../assets/icons/octicon-screen-full-16.svg");
-                    tooltip: root.fullscreen ? "Exit fullscreen" : "Fullscreen";
+                    tooltip: root.fullscreen ? I18n.terminal-exit-fullscreen : I18n.terminal-fullscreen;
                     selected: root.fullscreen;
                     clicked => { root.fullscreen = !root.fullscreen; }
                 }
@@ -383,7 +386,7 @@ export component GitHubTerminalDrawer inherits Rectangle {
                     x: parent.width - 36px;
                     y: 4px;
                     icon: @image-url("../../assets/icons/octicon-x-16.svg");
-                    tooltip: "Close terminal";
+                    tooltip: I18n.tooltip-close-terminal;
                     clicked => { root.close-requested(); }
                 }
             }

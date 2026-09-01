@@ -1,4 +1,5 @@
 import { WorkflowPrDiffFile, WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow, WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffFindMatch, WorkflowPrTreeItem, WorkflowPrFileExtensionFilter, WorkflowPrConversationItem, WorkflowPrCommit } from "../../components/pr_review/shell.slint";
+import { I18n } from "@i18n";
 
 // Public protocol shared by the complete page and the development shell. Keep
 // route-specific state outside this component so multiple entry points can host
@@ -36,7 +37,7 @@ export component PullRequestReviewPageContract inherits FocusScope {
     in property <string> commits-error: "";
     in property <int> commit-range-start: -1;
     in property <int> commit-range-end: -1;
-    in property <string> commit-range-label: "All commits";
+    in property <string> commit-range-label: I18n.pr-review-all-commits;
     in property <[WorkflowPrDiffFile]> files: [];
     in property <[WorkflowPrTreeItem]> tree-items: [];
     in property <[WorkflowPrFileExtensionFilter]> extension-filters: [];
@@ -87,7 +88,7 @@ export component PullRequestReviewPageContract inherits FocusScope {
     in property <string> merge-readiness-detail: "";
     in property <string> merge-block-reason: "";
     in property <string> revert-block-reason: "";
-    in property <string> revert-action-label: "Revert changes";
+    in property <string> revert-action-label: I18n.pr-review-revert-pull-request;
     in property <string> revert-confirmation: "";
     in property <bool> merge-method-merge: false;
     in property <bool> merge-method-squash: false;

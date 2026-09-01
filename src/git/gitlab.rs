@@ -18,9 +18,10 @@ use super::prefix_cache::PrefixCache;
 use super::{
     PageCollector, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
     PullRequestDiffDetail, PullRequestDiffFile, PullRequestFilters, PullRequestItem,
-    PullRequestMergeMethod, PullRequestPage, PullRequestReadiness, PullRequestReadinessKind,
-    PullRequestRevertResult, PullRequestReviewAction, PullRequestReviewStatus, PullRequestState,
-    RepoLocator, RepoType, commit_count_from_detail, configured_api_base_url, configured_token,
+    PullRequestMergeBlockKind, PullRequestMergeMethod, PullRequestPage, PullRequestReadiness,
+    PullRequestReadinessKind, PullRequestRevertResult, PullRequestRevertStrategy,
+    PullRequestReviewAction, PullRequestReviewStatus, PullRequestState, RepoLocator, RepoType,
+    commit_count_from_detail, configured_api_base_url, configured_token,
     conversation_body_to_plain_text, conversation_commit_batch_items,
     conversation_commit_batch_items_for_actor, conversation_count_from_detail,
     conversation_merged_item, finalize_conversation_timeline, is_configured_enterprise_host,
@@ -199,19 +200,17 @@ async fn get_gitlab_pull_request_server_page(
         .iter()
         .map(|value| PullRequestItem {
             number: string_field(value, "iid").unwrap_or_else(|| "—".to_string()),
-            title: string_field(value, "title")
-                .unwrap_or_else(|| "Untitled merge request".to_string()),
+            title: string_field(value, "title").unwrap_or_default(),
             state: string_field(value, "state").unwrap_or_else(|| "open".to_string()),
             author: nested_string(value, "author", "name")
                 .or_else(|| nested_string(value, "author", "username"))
-                .unwrap_or_else(|| "Unknown author".to_string()),
+                .unwrap_or_default(),
             source_branch: string_field(value, "source_branch").unwrap_or_else(|| "—".to_string()),
             target_branch: string_field(value, "target_branch").unwrap_or_else(|| "—".to_string()),
             review_status: gitlab_list_review_status(value),
             conversation_count: conversation_count_from_detail(value),
             created_at: string_field(value, "created_at").unwrap_or_default(),
-            updated_at: string_field(value, "updated_at")
-                .unwrap_or_else(|| "Unknown update time".to_string()),
+            updated_at: string_field(value, "updated_at").unwrap_or_default(),
             web_url: string_field(value, "web_url").unwrap_or_default(),
         })
         .collect::<Vec<_>>();
@@ -912,7 +911,7 @@ pub(super) async fn get_pull_request_conversation(
         kind: "description".to_string(),
         author: nested_string(&detail, "author", "name")
             .or_else(|| nested_string(&detail, "author", "username"))
-            .unwrap_or_else(|| "Unknown author".to_string()),
+            .unwrap_or_default(),
         avatar_url: nested_string(&detail, "author", "avatar_url").unwrap_or_default(),
         author_association: String::new(),
         body: string_field(&detail, "description").unwrap_or_default(),
@@ -951,7 +950,7 @@ pub(super) async fn get_pull_request_conversation(
                 },
                 author: nested_string(value, "author", "name")
                     .or_else(|| nested_string(value, "author", "username"))
-                    .unwrap_or_else(|| "Unknown author".to_string()),
+                    .unwrap_or_default(),
                 avatar_url: nested_string(value, "author", "avatar_url").unwrap_or_default(),
                 author_association: String::new(),
                 body,
@@ -975,8 +974,7 @@ pub(super) async fn get_pull_request_conversation(
                 title: string_field(&value, "title")
                     .unwrap_or_else(|| message.lines().next().unwrap_or_default().to_string()),
                 message,
-                author: string_field(&value, "author_name")
-                    .unwrap_or_else(|| "Unknown author".to_string()),
+                author: string_field(&value, "author_name").unwrap_or_default(),
                 avatar_url: string_field(&value, "author_avatar_url")
                     .or_else(|| nested_string(&value, "author", "avatar_url"))
                     .unwrap_or_default(),
@@ -1082,7 +1080,7 @@ fn gitlab_commit_batch_activity(
             .collect::<Vec<_>>();
         let actor = nested_string(note, "author", "name")
             .or_else(|| nested_string(note, "author", "username"))
-            .unwrap_or_else(|| "Unknown author".to_string());
+            .unwrap_or_default();
         let avatar_url = nested_string(note, "author", "avatar_url").unwrap_or_default();
         let created_at = string_field(note, "created_at").unwrap_or_default();
         let event_id = string_field(note, "id").unwrap_or_else(|| created_at.clone());
@@ -1147,7 +1145,7 @@ fn commit_sha_references(body: &str) -> Vec<String> {
 
 fn gitlab_merge_actor(detail: &Value) -> String {
     let Some(merged_by) = detail.get("merged_by") else {
-        return "Unknown merger".to_string();
+        return String::new();
     };
     ["display_name", "displayName", "name"]
         .into_iter()
@@ -1169,7 +1167,7 @@ fn gitlab_merge_actor(detail: &Value) -> String {
                         .map(|(account, _)| account.to_string())
                 })
         })
-        .unwrap_or_else(|| "Unknown merger".to_string())
+        .unwrap_or_default()
 }
 
 fn looks_like_email(value: &str) -> bool {
@@ -1197,7 +1195,7 @@ fn gitlab_approval_summaries(
             let username = string_field(user, "username").unwrap_or_default();
             let author = string_field(user, "name")
                 .or_else(|| string_field(user, "username"))
-                .unwrap_or_else(|| "Unknown reviewer".to_string());
+                .unwrap_or_default();
             let created_at = notes
                 .iter()
                 .filter(|note| {
@@ -1278,8 +1276,7 @@ pub(super) async fn get_pull_request_commits(
                 title: string_field(&value, "title")
                     .unwrap_or_else(|| message.lines().next().unwrap_or_default().to_string()),
                 message,
-                author: string_field(&value, "author_name")
-                    .unwrap_or_else(|| "Unknown author".to_string()),
+                author: string_field(&value, "author_name").unwrap_or_default(),
                 avatar_url: string_field(&value, "author_avatar_url")
                     .or_else(|| nested_string(&value, "author", "avatar_url"))
                     .unwrap_or_default(),
@@ -1437,14 +1434,14 @@ fn gitlab_action_state(
         .unwrap_or(false);
     let can_merge =
         has_token && user_can_merge && readiness.kind == PullRequestReadinessKind::Ready;
-    let merge_block_reason = if !has_token {
-        "Configure a GitLab Token in Settings to review or merge this merge request.".to_string()
+    let merge_block_kind = if !has_token {
+        PullRequestMergeBlockKind::ConfigureProvider
     } else if readiness.kind != PullRequestReadinessKind::Ready {
-        readiness.detail.clone()
+        PullRequestMergeBlockKind::Readiness
     } else if !user_can_merge {
-        "The configured GitLab user cannot merge this merge request.".to_string()
+        PullRequestMergeBlockKind::Permission
     } else {
-        String::new()
+        PullRequestMergeBlockKind::None
     };
 
     PullRequestActionState {
@@ -1459,13 +1456,8 @@ fn gitlab_action_state(
         can_revert: false,
         review_state,
         readiness,
-        merge_block_reason,
-        revert_block_reason: "Automated merge-request revert is not implemented for GitLab yet."
-            .to_string(),
-        revert_action_label: "Revert changes".to_string(),
-        revert_confirmation:
-            "This provider does not currently expose a supported automatic revert operation."
-                .to_string(),
+        merge_block_kind,
+        revert_strategy: PullRequestRevertStrategy::Unsupported,
         allowed_merge_methods: gitlab_merge_methods(project),
     }
 }
@@ -1732,8 +1724,8 @@ mod tests {
         );
     }
     use crate::git::{
-        PullRequestCommit, PullRequestItem, PullRequestMergeMethod, PullRequestReadinessKind,
-        PullRequestReviewStatus,
+        PullRequestCommit, PullRequestItem, PullRequestMergeBlockKind, PullRequestMergeMethod,
+        PullRequestReadinessKind, PullRequestReviewStatus,
     };
 
     fn commit(sha: &str, author: &str, authored_at: &str) -> PullRequestCommit {
@@ -1965,7 +1957,7 @@ mod tests {
         );
         assert_eq!(
             gitlab_merge_actor(&json!({ "author": { "name": "PR Author" } })),
-            "Unknown merger"
+            ""
         );
     }
 
@@ -2105,7 +2097,10 @@ mod tests {
         assert!(!state.can_comment);
         assert!(!state.can_approve);
         assert!(!state.can_merge);
-        assert!(state.merge_block_reason.contains("GitLab Token"));
+        assert_eq!(
+            state.merge_block_kind,
+            PullRequestMergeBlockKind::ConfigureProvider
+        );
     }
 
     #[test]

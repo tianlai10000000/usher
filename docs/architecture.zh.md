@@ -43,6 +43,7 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `src/main.rs` | 最小二进制入口，转发到库入口。 |
 | `src/lib.rs` | 导入并重新导出生成的 UI API，创建 `MainWindow`、初始化模块、绑定跨模块 callback，并管理窗口和关闭流程。 |
 | `crates/usher-ui/` | 负责 Slint build script 和生成的 Rust API；编译仓库根目录的 `ui/main.slint` 树，并导出窗口、global、model、struct 和 enum。 |
+| `crates/usher-i18n/` | 与框架无关的 locale 注册表和编译后消息 catalog。构建阶段校验根 `i18n/` manifest/PO 资产、生成强类型 Slint `I18n` global，并为每个独立编译的 UI 根准备索引完全一致的翻译 bundle；运行时 locale 解析与 Rust 文案查询不依赖具体 UI 引擎。 |
 | `crates/usher-messages/` | 独立编译的消息中心包：持久领域/存储服务、快照订阅、后台持久化/原生投递 Worker、`notify-rust` OS 适配器及生成的 Inbox 页面 API。可嵌入 Slint 页面使用 library-module 模式编译，不再依赖已废弃的非 Window 根组件兼容路径。 |
 | `crates/usher-search/` | 与框架无关的通用 Find 引擎：Unicode 安全的非重叠文本命中、首尾循环的相邻结果导航，以及 Chromium/Blink `CenterIfNeeded` 视口策略。Feature 只提供领域/model 与视觉换行适配。 |
 | `crates/usher-state-store/` | 与框架无关的跨页面 State 接口与内置引擎：强类型 reducer/action、不可变 revision 快照、selector、立即 hydration、自动单调订阅、RAII 取消，以及支持延迟启用、合并、flush 和 shutdown 的 Worker `PersistentStore` 门面。Feature 门面隐藏具体引擎，未来可通过 adapter 替换社区 Store。 |
@@ -413,7 +414,22 @@ Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可�
 
 ### 设置
 
-`AppSettings` 以 TOML 保存到平台配置目录，包括主题、自动更新、相互独立的 Console/`usher.log`/`usher_tracing.log` 输出目标、Terminal verbose 与内存诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称、位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置，以及位于 `[ai.chat]` 的可选 HTTPS RAG endpoint（环境变量回退为 `USHER_RAG_API_URL`）。保存操作由写锁串行化，先写入并同步同目录唯一临时文件，再原子替换目标；解析失败时必须先把原文件保留为 `settings.toml.corrupt-*`，若保留失败，则本进程禁止继续写 Settings。Logger 输出目标通过运行时原子过滤控制；`usher.log` 在首次启用写入时按需打开，Settings 使用 GitHub 风格的 `Enable all` / `Disable all` 批量操作，同时保留每项独立状态。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
+`AppSettings` 以 TOML 保存到平台配置目录，包括主题、`auto` 或规范 locale id 的语言偏好、自动更新、相互独立的 Console/`usher.log`/`usher_tracing.log` 输出目标、Terminal verbose 与内存诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称、位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置，以及位于 `[ai.chat]` 的可选 HTTPS RAG endpoint（环境变量回退为 `USHER_RAG_API_URL`）。保存操作由写锁串行化，先写入并同步同目录唯一临时文件，再原子替换目标；解析失败时必须先把原文件保留为 `settings.toml.corrupt-*`，若保留失败，则本进程禁止继续写 Settings。Logger 输出目标通过运行时原子过滤控制；`usher.log` 在首次启用写入时按需打开，Settings 使用 GitHub 风格的 `Enable all` / `Disable all` 批量操作，同时保留每项独立状态。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
+
+根目录 `i18n/` 是唯一翻译资产源：manifest 驱动 locale 发现、原生语言名称、别名、
+回退和覆盖率门禁；语义消息 catalog 同时驱动生成的 Slint property 与 Rust 查询。
+`src/i18n.rs` 在 Slint event loop 上、创建独立 Factory 页面前应用语言。由于 Slint
+每个运行时上下文只保存一个 bundle，MainWindow、Settings 和 Messages 必须编译同一
+份完整生成 catalog，禁止各页面维护局部 `@tr()` 索引。Rust 动态状态在构建 UI 投影
+之前始终保留语义 key、结构化类型或 `LocalizedText`；因此切换 locale 时可以重新投影
+已经挂载的 Preview、Terminal、Project、Chat、Workflow 和 AI Review 状态，无需匹配
+显示文案。Provider、PTY 与文件系统技术细节只进入日志，UI 只解析稳定的 catalog 错误。
+仅由 Rust 使用的消息设置 `slint = false`：它们保留在语义与 PO catalog 中，但不会进入
+或扰动 Slint 的实时 UI 翻译索引。
+已持久化的应用自有 Chat 错误是兼容性例外：Renderer 会在所有已注册 locale catalog 中
+精确反查语义 key，再按当前语言解析；不得用这套机制识别任意 Provider 内容。产品和
+工程专业术语保留英文，命名占位符允许调序但禁止改名。详见
+[specs/i18n.md](specs/i18n.md)。
 
 手工保存凭据、代码托管 Endpoint 与 AI Agent 配置时，文件持久化必须在
 Slint event loop 之外执行。完成结果回到 event loop 后，只有持久化成功
@@ -662,7 +678,7 @@ ScrollView、Spinner、Button/IconButton、token 与焦点契约。每条消息�
 
 ### Terminal
 
-Terminal 状态感知项目；同一项目重新打开时复用，切换项目时重置会话展示并切换工作目录。稳定行为契约见 [specs/terminal.md](specs/terminal.md)。
+Terminal 状态感知项目；同一项目重新打开时复用。关闭 Drawer 只隐藏展示，PTY 与 Rust 渲染状态继续工作，Slint model 刷新延迟到重新打开。切换项目时先原子地摘下旧 Session、重置展示与工作目录，再由共享 Runtime 的 blocking Worker 终止旧进程树，UI callback 不等待优雅退出窗口；Session ID 会丢弃被替换项目迟到的输出与退出事件。稳定行为契约见 [specs/terminal.md](specs/terminal.md)。
 
 `GitHubTerminalDrawer` 只负责 Drawer 外壳、viewport 上报、输入与单元格展示；
 页头/选择操作复用共享 GitHub 控件。终端单元格几何、等宽字体、ANSI 色、PTY

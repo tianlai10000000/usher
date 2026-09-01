@@ -285,7 +285,7 @@ pub(crate) fn conversation_commit_batch_items(
     let author = commits
         .first()
         .map(|commit| commit.author.clone())
-        .unwrap_or_else(|| "Unknown author".to_string());
+        .unwrap_or_default();
     let avatar_url = commits
         .first()
         .map(|commit| commit.avatar_url.clone())
@@ -329,7 +329,7 @@ pub(crate) fn conversation_commit_batch_items_for_actor(
         commits
             .first()
             .map(|commit| commit.author.clone())
-            .unwrap_or_else(|| "Unknown author".to_string())
+            .unwrap_or_default()
     } else {
         actor.to_string()
     };
@@ -412,7 +412,7 @@ pub(crate) fn conversation_merged_item(
         id: format!("merged-{}", short_sha(merge_sha)),
         kind: "merged".to_string(),
         author: if author.trim().is_empty() {
-            "Unknown author".to_string()
+            String::new()
         } else {
             author.to_string()
         },
@@ -436,7 +436,7 @@ pub(crate) fn conversation_system_event_item(
         id: id.into(),
         kind: "event".to_string(),
         author: if author.trim().is_empty() {
-            "Unknown author".to_string()
+            String::new()
         } else {
             author.to_string()
         },
@@ -761,24 +761,58 @@ impl PullRequestReadinessKind {
         }
     }
 
-    pub(crate) const fn label(&self) -> &'static str {
+    pub(crate) const fn label_key(&self) -> &'static str {
         match self {
-            Self::Checking => "Checking mergeability…",
-            Self::Ready => "Ready to merge",
-            Self::Conflicts => "Conflicts",
-            Self::Draft => "Draft",
-            Self::ReviewRequired => "Review required",
-            Self::ChangesRequested => "Changes requested",
-            Self::ChecksPending => "Checks pending",
-            Self::ChecksFailed => "Checks failed",
-            Self::BranchOutOfDate => "Branch out of date",
-            Self::DiscussionsUnresolved => "Resolve conversations",
-            Self::Blocked => "Merge blocked",
-            Self::Merged => "Merged",
-            Self::Closed => "Closed",
-            Self::Unavailable => "Merge status unavailable",
+            Self::Checking => "pr_review.readiness.checking",
+            Self::Ready => "pr_review.readiness.ready",
+            Self::Conflicts => "pr_review.readiness.conflicts",
+            Self::Draft => "pr_review.readiness.draft",
+            Self::ReviewRequired => "pr_review.readiness.review_required",
+            Self::ChangesRequested => "pr_review.readiness.changes_requested",
+            Self::ChecksPending => "pr_review.readiness.checks_pending",
+            Self::ChecksFailed => "pr_review.readiness.checks_failed",
+            Self::BranchOutOfDate => "pr_review.readiness.branch_out_of_date",
+            Self::DiscussionsUnresolved => "pr_review.readiness.discussions_unresolved",
+            Self::Blocked => "pr_review.readiness.blocked",
+            Self::Merged => "pr_review.readiness.merged",
+            Self::Closed => "pr_review.readiness.closed",
+            Self::Unavailable => "pr_review.readiness.unavailable",
         }
     }
+
+    pub(crate) const fn detail_key(&self) -> &'static str {
+        match self {
+            Self::Checking => "pr_review.readiness_detail.checking",
+            Self::Ready => "pr_review.readiness_detail.ready",
+            Self::Conflicts => "pr_review.readiness_detail.conflicts",
+            Self::Draft => "pr_review.readiness_detail.draft",
+            Self::ReviewRequired => "pr_review.readiness_detail.review_required",
+            Self::ChangesRequested => "pr_review.readiness_detail.changes_requested",
+            Self::ChecksPending => "pr_review.readiness_detail.checks_pending",
+            Self::ChecksFailed => "pr_review.readiness_detail.checks_failed",
+            Self::BranchOutOfDate => "pr_review.readiness_detail.branch_out_of_date",
+            Self::DiscussionsUnresolved => "pr_review.readiness_detail.discussions_unresolved",
+            Self::Blocked => "pr_review.readiness_detail.blocked",
+            Self::Merged => "pr_review.readiness_detail.merged",
+            Self::Closed => "pr_review.readiness_detail.closed",
+            Self::Unavailable => "pr_review.readiness_detail.unavailable",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PullRequestMergeBlockKind {
+    None,
+    ConfigureProvider,
+    Readiness,
+    Permission,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PullRequestRevertStrategy {
+    PullRequest,
+    DirectCommit,
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -805,10 +839,8 @@ pub(crate) struct PullRequestActionState {
     pub(crate) can_revert: bool,
     pub(crate) review_state: String,
     pub(crate) readiness: PullRequestReadiness,
-    pub(crate) merge_block_reason: String,
-    pub(crate) revert_block_reason: String,
-    pub(crate) revert_action_label: String,
-    pub(crate) revert_confirmation: String,
+    pub(crate) merge_block_kind: PullRequestMergeBlockKind,
+    pub(crate) revert_strategy: PullRequestRevertStrategy,
     pub(crate) allowed_merge_methods: Vec<PullRequestMergeMethod>,
 }
 

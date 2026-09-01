@@ -21,12 +21,12 @@ use usher_search::{SearchDirection, step_match_index};
 #[cfg(any(test, feature = "test-fixtures"))]
 use crate::git::PullRequestDiffLine;
 use crate::git::{
-    GitError, GitResult, PullRequestActionState, PullRequestCommit, PullRequestDiffDetail,
-    PullRequestDiffFile, PullRequestMergeMethod, PullRequestReviewAction,
-    dismiss_pull_request_review, get_pull_request_action_state, get_pull_request_commit_range_diff,
-    get_pull_request_commits, get_pull_request_conversation, get_pull_request_diff,
-    get_repository_file_text, merge_pull_request, provider_capabilities, revert_pull_request,
-    submit_pull_request_review,
+    GitError, GitResult, PullRequestActionState, PullRequestCommit, PullRequestConversationItem,
+    PullRequestDiffDetail, PullRequestDiffFile, PullRequestMergeBlockKind, PullRequestMergeMethod,
+    PullRequestRevertStrategy, PullRequestReviewAction, dismiss_pull_request_review,
+    get_pull_request_action_state, get_pull_request_commit_range_diff, get_pull_request_commits,
+    get_pull_request_conversation, get_pull_request_diff, get_repository_file_text,
+    merge_pull_request, provider_capabilities, revert_pull_request, submit_pull_request_review,
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{
@@ -248,6 +248,7 @@ pub(crate) struct WorkflowPrReviewController {
     pr_list_controller: WorkflowPrListController,
     project_alias: Arc<Mutex<String>>,
     active_request: Arc<Mutex<Option<ReviewRequest>>>,
+    action_state: Arc<Mutex<Option<PullRequestActionState>>>,
     cache: Arc<Mutex<Option<ReviewCache>>>,
     file_filter: Arc<Mutex<String>>,
     selected_extensions: Arc<Mutex<HashSet<String>>>,
@@ -259,6 +260,7 @@ pub(crate) struct WorkflowPrReviewController {
     source_files: Arc<Mutex<BoundedCache<String>>>,
     state: ReviewStateFacade,
     conversation_loaded: Arc<Mutex<bool>>,
+    conversation: Arc<Mutex<Vec<PullRequestConversationItem>>>,
     commits_loaded: Arc<Mutex<bool>>,
     commits: Arc<Mutex<Vec<PullRequestCommit>>>,
     pending_open_commit: Arc<Mutex<Option<String>>>,
@@ -285,6 +287,7 @@ pub(crate) fn bind_pr_review(
         pr_list_controller,
         project_alias: Arc::new(Mutex::new(String::new())),
         active_request: Arc::new(Mutex::new(None)),
+        action_state: Arc::new(Mutex::new(None)),
         cache: Arc::new(Mutex::new(None)),
         file_filter: Arc::new(Mutex::new(String::new())),
         selected_extensions: Arc::new(Mutex::new(HashSet::new())),
@@ -296,6 +299,7 @@ pub(crate) fn bind_pr_review(
         source_files: Arc::new(Mutex::new(BoundedCache::new(SOURCE_CACHE_CAPACITY))),
         state: ReviewStateFacade::new(),
         conversation_loaded: Arc::new(Mutex::new(false)),
+        conversation: Arc::new(Mutex::new(Vec::new())),
         commits_loaded: Arc::new(Mutex::new(false)),
         commits: Arc::new(Mutex::new(Vec::new())),
         pending_open_commit: Arc::new(Mutex::new(None)),
@@ -476,7 +480,9 @@ pub(crate) fn bind_pr_review(
             request.ignore_whitespace = ignore_whitespace;
             ui.set_workflow_pr_review_commit_range_start(-1);
             ui.set_workflow_pr_review_commit_range_end(-1);
-            ui.set_workflow_pr_review_commit_range_label("All commits".into());
+            ui.set_workflow_pr_review_commit_range_label(
+                crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+            );
             reload_controller.open(&ui, request, true);
         }
     });
@@ -509,7 +515,9 @@ pub(crate) fn bind_pr_review(
                 request.ignore_whitespace = ignore_whitespace;
                 ui.set_workflow_pr_review_commit_range_start(-1);
                 ui.set_workflow_pr_review_commit_range_end(-1);
-                ui.set_workflow_pr_review_commit_range_label("All commits".into());
+                ui.set_workflow_pr_review_commit_range_label(
+                    crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+                );
                 diff_settings_controller.open(&ui, request, true);
             }
         } else {
@@ -649,7 +657,7 @@ pub(crate) fn bind_pr_review(
             Err(error) => {
                 log::warn!("[Workflow][PR Review] Failed to copy file path: {error}");
                 if let Some(ui) = ui_weak.upgrade() {
-                    show_error(&ui, "Failed to copy the file path.");
+                    show_error(&ui, crate::i18n::tr("pr_review.copy_file_failed").as_ref());
                 }
                 false
             }
@@ -667,7 +675,7 @@ pub(crate) fn bind_pr_review(
             Err(error) => {
                 log::warn!("[Workflow][PR Review] Failed to copy commit SHA: {error}");
                 if let Some(ui) = ui_weak.upgrade() {
-                    show_error(&ui, "Failed to copy the commit SHA.");
+                    show_error(&ui, crate::i18n::tr("pr_review.copy_sha_failed").as_ref());
                 }
                 false
             }
@@ -692,7 +700,10 @@ pub(crate) fn bind_pr_review(
             Err(error) => {
                 log::warn!("[Workflow][PR Review] Failed to copy source branch: {error}");
                 if let Some(ui) = ui_weak.upgrade() {
-                    show_error(&ui, "Failed to copy the source branch.");
+                    show_error(
+                        &ui,
+                        crate::i18n::tr("pr_review.copy_branch_failed").as_ref(),
+                    );
                 }
                 false
             }
@@ -1126,6 +1137,9 @@ impl WorkflowPrReviewController {
         if let Ok(mut cache) = self.cache.lock() {
             *cache = None;
         }
+        if let Ok(mut action_state) = self.action_state.lock() {
+            *action_state = None;
+        }
         self.reset_request_scoped_state(ui, true);
         reset_review_ui(ui);
     }
@@ -1162,6 +1176,9 @@ impl WorkflowPrReviewController {
         if let Ok(mut loaded) = self.conversation_loaded.lock() {
             *loaded = false;
         }
+        if let Ok(mut conversation) = self.conversation.lock() {
+            conversation.clear();
+        }
         if let Ok(mut loaded) = self.commits_loaded.lock() {
             *loaded = false;
         }
@@ -1189,7 +1206,9 @@ impl WorkflowPrReviewController {
         ui.set_workflow_pr_review_commits_error("".into());
         ui.set_workflow_pr_review_commit_range_start(-1);
         ui.set_workflow_pr_review_commit_range_end(-1);
-        ui.set_workflow_pr_review_commit_range_label("All commits".into());
+        ui.set_workflow_pr_review_commit_range_label(
+            crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+        );
         ui.set_workflow_pr_review_file_filter("".into());
         reset_action_ui(ui);
     }
@@ -1235,6 +1254,77 @@ impl WorkflowPrReviewController {
         self.log_memory_diagnostics("project_switch.after_clear");
     }
 
+    pub(crate) fn sync_language(&self, ui: &MainWindow) {
+        if let Some(request) = self
+            .active_request
+            .lock()
+            .ok()
+            .and_then(|request| request.clone())
+        {
+            apply_review_header(ui, &request);
+        }
+        if self
+            .conversation_loaded
+            .lock()
+            .map(|loaded| *loaded)
+            .unwrap_or(false)
+            && let Ok(items) = self.conversation.lock()
+        {
+            ui.set_workflow_pr_review_conversation_content_height(conversation_content_height(
+                items.as_slice(),
+            ));
+            ui.set_workflow_pr_review_expanded_commit_body_height(0);
+            ui.set_workflow_pr_review_conversation_items(conversation_model(
+                items.as_slice(),
+                &HashMap::new(),
+            ));
+        }
+        if self
+            .commits_loaded
+            .lock()
+            .map(|loaded| *loaded)
+            .unwrap_or(false)
+            && let Ok(commits) = self.commits.lock()
+        {
+            ui.set_workflow_pr_review_commits(commit_model(commits.as_slice(), &HashMap::new()));
+        }
+        if !ui.get_workflow_pr_review_conversation_error().is_empty() {
+            ui.set_workflow_pr_review_conversation_error(
+                crate::i18n::tr("pr_review.conversation_load_failed")
+                    .into_owned()
+                    .into(),
+            );
+        }
+        if !ui.get_workflow_pr_review_commits_error().is_empty() {
+            ui.set_workflow_pr_review_commits_error(
+                crate::i18n::tr("pr_review.commits_load_failed")
+                    .into_owned()
+                    .into(),
+            );
+        }
+        if ui.get_workflow_pr_review_commit_range_start() < 0
+            && ui.get_workflow_pr_review_commit_range_end() < 0
+        {
+            ui.set_workflow_pr_review_commit_range_label(
+                crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+            );
+        }
+        self.refresh_tree(ui);
+        let state = self
+            .action_state
+            .lock()
+            .ok()
+            .and_then(|state| state.clone());
+        if let Some(state) = state {
+            apply_action_state(ui, &state);
+        } else if !ui.get_workflow_pr_merge_readiness_kind().is_empty() {
+            let label_key = readiness_label_key(ui.get_workflow_pr_merge_readiness_kind().as_str());
+            ui.set_workflow_pr_merge_readiness_label(
+                crate::i18n::tr(label_key).into_owned().into(),
+            );
+        }
+    }
+
     fn open(&self, ui: &MainWindow, request: ReviewRequest, force_refresh: bool) {
         let project_alias = self
             .project_alias
@@ -1244,7 +1334,9 @@ impl WorkflowPrReviewController {
         if project_alias.is_empty() {
             ui.set_workflow_pr_review_visible(true);
             ui.set_workflow_pr_review_error(
-                "The current project has no repository context.".into(),
+                crate::i18n::tr("pr_review.project_context_missing")
+                    .into_owned()
+                    .into(),
             );
             return;
         }
@@ -1443,7 +1535,11 @@ impl WorkflowPrReviewController {
                         ui.set_workflow_pr_review_ignore_whitespace(false);
                         ui.set_workflow_pr_merge_delete_source_branch_supported(false);
                         log::warn!("[Workflow][PR Review] Failed to load diff: {error}");
-                        ui.set_workflow_pr_review_error(error.user_message().into());
+                        ui.set_workflow_pr_review_error(
+                            crate::i18n::tr(error.user_message_key())
+                                .into_owned()
+                                .into(),
+                        );
                         ui.set_workflow_pr_review_error_kind(error.error_kind().into());
                     }
                 }
@@ -1532,6 +1628,9 @@ impl WorkflowPrReviewController {
                             &initial_items,
                             &HashMap::new(),
                         ));
+                        if let Ok(mut stored) = initial_controller.conversation.lock() {
+                            *stored = initial_items;
+                        }
                         if let Ok(mut loaded) = initial_controller.conversation_loaded.lock() {
                             *loaded = true;
                         }
@@ -1569,7 +1668,9 @@ impl WorkflowPrReviewController {
                         ui.set_workflow_pr_review_conversation_loading(false);
                         log::warn!("[Workflow][PR Review] Failed to load conversation: {error}");
                         ui.set_workflow_pr_review_conversation_error(
-                            "The provider could not load this pull request conversation.".into(),
+                            crate::i18n::tr("pr_review.conversation_load_failed")
+                                .into_owned()
+                                .into(),
                         );
                     });
                 }
@@ -1713,10 +1814,15 @@ impl WorkflowPrReviewController {
                             .unwrap_or(false);
                         log::warn!("[Workflow][PR Review] Failed to load commits: {error}");
                         ui.set_workflow_pr_review_commits_error(
-                            "The provider could not load this pull request's commits.".into(),
+                            crate::i18n::tr("pr_review.commits_load_failed")
+                                .into_owned()
+                                .into(),
                         );
                         if was_opening_commit {
-                            show_error(&ui, "The selected commit details could not be loaded.");
+                            show_error(
+                                &ui,
+                                crate::i18n::tr("pr_review.commit_details_failed").as_ref(),
+                            );
                         }
                     });
                 }
@@ -1752,7 +1858,7 @@ impl WorkflowPrReviewController {
             .map(|loaded| *loaded)
             .unwrap_or(false);
         if commits_loaded {
-            show_error(ui, "The selected commit is no longer in this pull request.");
+            show_error(ui, crate::i18n::tr("pr_review.commit_missing").as_ref());
             return;
         }
         if let Ok(mut pending) = self.pending_open_commit.lock() {
@@ -1773,7 +1879,9 @@ impl WorkflowPrReviewController {
                 self.activate_commit_range(ui, detail);
                 ui.set_workflow_pr_review_commit_range_start(-1);
                 ui.set_workflow_pr_review_commit_range_end(-1);
-                ui.set_workflow_pr_review_commit_range_label("All commits".into());
+                ui.set_workflow_pr_review_commit_range_label(
+                    crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+                );
                 ui.set_workflow_pr_review_error("".into());
             }
             return;
@@ -1796,7 +1904,7 @@ impl WorkflowPrReviewController {
         else {
             show_error(
                 ui,
-                "Load the pull request commits before selecting a range.",
+                crate::i18n::tr("pr_review.load_commits_for_range").as_ref(),
             );
             return;
         };
@@ -1839,7 +1947,7 @@ impl WorkflowPrReviewController {
         if base_sha.is_empty() || head_sha.is_empty() {
             show_error(
                 ui,
-                "The provider did not return enough commit data for this range.",
+                crate::i18n::tr("pr_review.range_data_incomplete").as_ref(),
             );
             return;
         }
@@ -1913,7 +2021,9 @@ impl WorkflowPrReviewController {
                             "[Workflow][PR Review] Failed to load commit range diff: {error}"
                         );
                         ui.set_workflow_pr_review_error(
-                            "The provider could not load the selected commit range.".into(),
+                            crate::i18n::tr("pr_review.range_load_failed")
+                                .into_owned()
+                                .into(),
                         );
                     }
                 }
@@ -1981,9 +2091,15 @@ impl WorkflowPrReviewController {
         };
         if ui.get_workflow_pr_merge_readiness_label().trim().is_empty() {
             ui.set_workflow_pr_merge_readiness_kind("checking".into());
-            ui.set_workflow_pr_merge_readiness_label("Checking mergeability…".into());
+            ui.set_workflow_pr_merge_readiness_label(
+                crate::i18n::tr("pr_review.checking_mergeability")
+                    .into_owned()
+                    .into(),
+            );
             ui.set_workflow_pr_merge_readiness_detail(
-                "Waiting for the repository provider to calculate merge readiness.".into(),
+                crate::i18n::tr("pr_review.mergeability_waiting")
+                    .into_owned()
+                    .into(),
             );
         }
         let generation = self.state.begin(ReviewRequestKind::RemoteActionState);
@@ -2008,18 +2124,33 @@ impl WorkflowPrReviewController {
                     return;
                 };
                 match result {
-                    Ok(state) => apply_action_state(&ui, &state),
+                    Ok(state) => {
+                        if let Ok(mut cached) = controller.action_state.lock() {
+                            *cached = Some(state.clone());
+                        }
+                        apply_action_state(&ui, &state);
+                    }
                     Err(error) => {
                         log::warn!(
                             "[Workflow][PR Review] Failed to load remote action state: {error}"
                         );
                         reset_action_capabilities(&ui);
                         ui.set_workflow_pr_merge_readiness_kind("unavailable".into());
-                        ui.set_workflow_pr_merge_readiness_label("Merge status unavailable".into());
-                        ui.set_workflow_pr_merge_readiness_detail(
-                            "The repository provider could not return merge readiness.".into(),
+                        ui.set_workflow_pr_merge_readiness_label(
+                            crate::i18n::tr("pr_review.merge_status_unavailable")
+                                .into_owned()
+                                .into(),
                         );
-                        ui.set_workflow_pr_merge_block_reason(error.user_message().into());
+                        ui.set_workflow_pr_merge_readiness_detail(
+                            crate::i18n::tr("pr_review.mergeability_unavailable")
+                                .into_owned()
+                                .into(),
+                        );
+                        ui.set_workflow_pr_merge_block_reason(
+                            crate::i18n::tr(error.user_message_key())
+                                .into_owned()
+                                .into(),
+                        );
                     }
                 }
             });
@@ -2028,7 +2159,10 @@ impl WorkflowPrReviewController {
 
     fn submit_review(&self, ui: &MainWindow, action: &str, body: &str) {
         let Some(action) = PullRequestReviewAction::parse(action) else {
-            show_error(ui, "Choose a valid review action.");
+            show_error(
+                ui,
+                crate::i18n::tr("pr_review.invalid_review_action").as_ref(),
+            );
             return;
         };
         let allowed = match action {
@@ -2039,16 +2173,19 @@ impl WorkflowPrReviewController {
         if !allowed {
             show_error(
                 ui,
-                "This repository provider does not support that review action.",
+                crate::i18n::tr("pr_review.review_action_unsupported").as_ref(),
             );
             return;
         }
         if action != PullRequestReviewAction::Approve && body.trim().is_empty() {
-            show_error(ui, "Enter a review comment before submitting.");
+            show_error(ui, crate::i18n::tr("pr_review.comment_required").as_ref());
             return;
         }
         let Some((metadata, pull_request_iid)) = self.action_context() else {
-            show_error(ui, "The pull request repository context is unavailable.");
+            show_error(
+                ui,
+                crate::i18n::tr("pr_review.repository_context_unavailable").as_ref(),
+            );
             return;
         };
         let body = body.to_string();
@@ -2083,17 +2220,18 @@ impl WorkflowPrReviewController {
                     show_success(
                         ui,
                         if action == PullRequestReviewAction::Comment {
-                            "Comment submitted to the remote repository."
+                            crate::i18n::tr("pr_review.comment_submitted")
                         } else {
-                            "Review submitted to the remote repository."
-                        },
+                            crate::i18n::tr("pr_review.review_submitted")
+                        }
+                        .as_ref(),
                     );
                     controller.refresh_action_state(ui);
                     controller.refresh_conversation_after_remote_action(ui);
                 }
                 Err(error) => {
                     log::warn!("[Workflow][PR Review] Failed to submit review: {error}");
-                    show_error(ui, error.user_message());
+                    show_error(ui, crate::i18n::tr(error.user_message_key()).as_ref());
                 }
             },
         );
@@ -2101,11 +2239,17 @@ impl WorkflowPrReviewController {
 
     fn dismiss_review(&self, ui: &MainWindow, review_id: &str, reason: &str) {
         if reason.trim().is_empty() {
-            show_error(ui, "Enter a reason before dismissing the review.");
+            show_error(
+                ui,
+                crate::i18n::tr("pr_review.dismiss_reason_required").as_ref(),
+            );
             return;
         }
         let Some((metadata, pull_request_iid)) = self.action_context() else {
-            show_error(ui, "The pull request repository context is unavailable.");
+            show_error(
+                ui,
+                crate::i18n::tr("pr_review.repository_context_unavailable").as_ref(),
+            );
             return;
         };
         let review_id = review_id.to_string();
@@ -2128,13 +2272,13 @@ impl WorkflowPrReviewController {
                     ui.set_workflow_pr_dismiss_review_dialog_open(false);
                     let count = ui.get_workflow_pr_review_conversation_count();
                     ui.set_workflow_pr_review_conversation_count(count.saturating_add(1));
-                    show_success(ui, "Review dismissed on the remote repository.");
+                    show_success(ui, crate::i18n::tr("pr_review.dismissed").as_ref());
                     controller.refresh_action_state(ui);
                     controller.refresh_conversation_after_remote_action(ui);
                 }
                 Err(error) => {
                     log::warn!("[Workflow][PR Review] Failed to dismiss review: {error}");
-                    show_error(ui, error.user_message());
+                    show_error(ui, crate::i18n::tr(error.user_message_key()).as_ref());
                 }
             },
         );
@@ -2146,15 +2290,19 @@ impl WorkflowPrReviewController {
             show_error(
                 ui,
                 if reason.trim().is_empty() {
-                    "This pull request is not currently mergeable."
+                    crate::i18n::tr("pr_review.not_mergeable")
                 } else {
-                    reason.as_str()
-                },
+                    std::borrow::Cow::Borrowed(reason.as_str())
+                }
+                .as_ref(),
             );
             return;
         }
         let Some(method) = PullRequestMergeMethod::parse(method) else {
-            show_error(ui, "Choose a valid merge method.");
+            show_error(
+                ui,
+                crate::i18n::tr("pr_review.invalid_merge_method").as_ref(),
+            );
             return;
         };
         let method_allowed = match method {
@@ -2164,11 +2312,17 @@ impl WorkflowPrReviewController {
             PullRequestMergeMethod::FastForward => ui.get_workflow_pr_merge_method_fast_forward(),
         };
         if !method_allowed {
-            show_error(ui, "That merge method is disabled for this repository.");
+            show_error(
+                ui,
+                crate::i18n::tr("pr_review.merge_method_disabled").as_ref(),
+            );
             return;
         }
         let Some((metadata, pull_request_iid)) = self.action_context() else {
-            show_error(ui, "The pull request repository context is unavailable.");
+            show_error(
+                ui,
+                crate::i18n::tr("pr_review.repository_context_unavailable").as_ref(),
+            );
             return;
         };
         self.run_action(
@@ -2189,23 +2343,32 @@ impl WorkflowPrReviewController {
                     ui.set_workflow_pr_merge_dialog_open(false);
                     ui.set_workflow_pr_can_merge(false);
                     ui.set_workflow_pr_merge_readiness_kind("merged".into());
-                    ui.set_workflow_pr_merge_readiness_label("Merged".into());
+                    ui.set_workflow_pr_merge_readiness_label(
+                        crate::i18n::tr("pr_review.merged").into_owned().into(),
+                    );
                     ui.set_workflow_pr_merge_readiness_detail(
-                        "This pull request has been merged successfully.".into(),
+                        crate::i18n::tr("pr_review.merged_detail")
+                            .into_owned()
+                            .into(),
                     );
                     ui.set_workflow_pr_merge_block_reason(
-                        "This pull request has been merged.".into(),
+                        crate::i18n::tr("pr_review.merged_block_reason")
+                            .into_owned()
+                            .into(),
                     );
                     controller
                         .pr_list_refresh_pending
                         .store(true, Ordering::SeqCst);
-                    show_success(ui, "Pull request merged successfully.");
+                    show_success(
+                        ui,
+                        crate::i18n::tr("pr_review.merged_successfully").as_ref(),
+                    );
                     controller.refresh_action_state(ui);
                     controller.refresh_conversation_after_remote_action(ui);
                 }
                 Err(error) => {
                     log::warn!("[Workflow][PR Review] Failed to merge pull request: {error}");
-                    show_error(ui, error.user_message());
+                    show_error(ui, crate::i18n::tr(error.user_message_key()).as_ref());
                     controller.refresh_action_state(ui);
                 }
             },
@@ -2218,15 +2381,19 @@ impl WorkflowPrReviewController {
             show_error(
                 ui,
                 if reason.trim().is_empty() {
-                    "This merged pull request cannot be reverted automatically."
+                    crate::i18n::tr("pr_review.revert_not_available")
                 } else {
-                    reason.as_str()
-                },
+                    std::borrow::Cow::Borrowed(reason.as_str())
+                }
+                .as_ref(),
             );
             return;
         }
         let Some((metadata, pull_request_iid)) = self.action_context() else {
-            show_error(ui, "The pull request repository context is unavailable.");
+            show_error(
+                ui,
+                crate::i18n::tr("pr_review.repository_context_unavailable").as_ref(),
+            );
             return;
         };
         self.run_action(
@@ -2245,7 +2412,9 @@ impl WorkflowPrReviewController {
                         ui.set_workflow_pr_revert_dialog_open(false);
                         ui.set_workflow_pr_can_revert(false);
                         ui.set_workflow_pr_revert_block_reason(
-                            "The revert action already completed in this review session.".into(),
+                            crate::i18n::tr("pr_review.revert_completed")
+                                .into_owned()
+                                .into(),
                         );
                         show_success(ui, revert.message.as_str());
                         log::info!(
@@ -2257,7 +2426,7 @@ impl WorkflowPrReviewController {
                     }
                     Err(error) => {
                         log::warn!("[Workflow][PR Review] Revert action failed: {error}");
-                        show_error(ui, error.user_message());
+                        show_error(ui, crate::i18n::tr(error.user_message_key()).as_ref());
                     }
                 },
         );
@@ -2352,7 +2521,9 @@ impl WorkflowPrReviewController {
                 }
                 let Ok(highlighted) = highlighted else {
                     ui.set_workflow_pr_review_error(
-                        "Failed to render syntax highlighting for this file.".into(),
+                        crate::i18n::tr("pr_review.syntax_highlight_failed")
+                            .into_owned()
+                            .into(),
                     );
                     return;
                 };
@@ -2441,7 +2612,9 @@ impl WorkflowPrReviewController {
             .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
         if base_request.is_none() && head_request.is_none() {
             ui.set_workflow_pr_review_error(
-                "This diff has no immutable source reference for expanding context.".into(),
+                crate::i18n::tr("pr_review.source_reference_missing")
+                    .into_owned()
+                    .into(),
             );
             return;
         }
@@ -2591,7 +2764,9 @@ impl WorkflowPrReviewController {
             .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
         if base_request.is_none() && head_request.is_none() {
             ui.set_workflow_pr_review_error(
-                "This diff has no immutable source reference for expanding context.".into(),
+                crate::i18n::tr("pr_review.source_reference_missing")
+                    .into_owned()
+                    .into(),
             );
             return;
         }
@@ -2776,7 +2951,10 @@ impl WorkflowPrReviewController {
         };
         let reference = if use_new_side { head_sha } else { base_sha };
         if path.is_empty() || reference.is_empty() {
-            show_error(ui, "This file has no immutable source reference.");
+            show_error(
+                ui,
+                crate::i18n::tr("pr_review.source_reference_missing").as_ref(),
+            );
             return;
         }
         let source_key = format!("{reference}:{path}");
@@ -2826,7 +3004,10 @@ impl WorkflowPrReviewController {
                     }
                     Err(error) => {
                         log::warn!("[Workflow][PR Review] Failed to view file: {error}");
-                        show_error(&ui, "Failed to load the complete file.");
+                        show_error(
+                            &ui,
+                            crate::i18n::tr("pr_review.load_complete_file_failed").as_ref(),
+                        );
                     }
                 }
             });
@@ -3007,6 +3188,13 @@ impl WorkflowPrReviewController {
             .iter()
             .map(|(extension, count)| WorkflowPrFileExtensionFilter {
                 extension: extension.clone().into(),
+                label: if extension == "No extension" {
+                    crate::i18n::tr("pr_review.no_extension")
+                        .into_owned()
+                        .into()
+                } else {
+                    extension.clone().into()
+                },
                 count: *count as i32,
                 selected: selected_extensions.contains(extension),
             })
@@ -3240,8 +3428,18 @@ fn memory_benchmark_diff_detail(seed: usize) -> PullRequestDiffDetail {
 
 fn apply_review_header(ui: &MainWindow, request: &ReviewRequest) {
     ui.set_workflow_pr_review_number(request.number.clone().into());
-    ui.set_workflow_pr_review_title(request.title.clone().into());
-    ui.set_workflow_pr_review_author(request.author.clone().into());
+    let title = if request.title.trim().is_empty() {
+        crate::i18n::tr("pr_list.untitled_pull_request").into_owned()
+    } else {
+        request.title.clone()
+    };
+    let author = if request.author.trim().is_empty() {
+        crate::i18n::tr("common.unknown_author").into_owned()
+    } else {
+        request.author.clone()
+    };
+    ui.set_workflow_pr_review_title(title.into());
+    ui.set_workflow_pr_review_author(author.into());
     ui.set_workflow_pr_review_source_branch(request.source_branch.clone().into());
     ui.set_workflow_pr_review_target_branch(request.target_branch.clone().into());
     ui.set_workflow_pr_review_updated_at(
@@ -3463,12 +3661,50 @@ fn apply_action_state(ui: &MainWindow, state: &PullRequestActionState) {
         ui.set_workflow_pr_remote_review_state(state.review_state.clone().into());
     }
     ui.set_workflow_pr_merge_readiness_kind(state.readiness.kind.as_str().into());
-    ui.set_workflow_pr_merge_readiness_label(state.readiness.kind.label().into());
-    ui.set_workflow_pr_merge_readiness_detail(state.readiness.detail.clone().into());
-    ui.set_workflow_pr_merge_block_reason(state.merge_block_reason.clone().into());
-    ui.set_workflow_pr_revert_block_reason(state.revert_block_reason.clone().into());
-    ui.set_workflow_pr_revert_action_label(state.revert_action_label.clone().into());
-    ui.set_workflow_pr_revert_confirmation(state.revert_confirmation.clone().into());
+    ui.set_workflow_pr_merge_readiness_label(
+        crate::i18n::tr(state.readiness.kind.label_key())
+            .into_owned()
+            .into(),
+    );
+    let readiness_detail = crate::i18n::tr(state.readiness.kind.detail_key()).into_owned();
+    ui.set_workflow_pr_merge_readiness_detail(readiness_detail.clone().into());
+    let merge_block_reason = match state.merge_block_kind {
+        PullRequestMergeBlockKind::None => String::new(),
+        PullRequestMergeBlockKind::ConfigureProvider => {
+            crate::i18n::tr("pr_review.configure_provider_for_merge").into_owned()
+        }
+        PullRequestMergeBlockKind::Readiness => readiness_detail,
+        PullRequestMergeBlockKind::Permission => {
+            crate::i18n::tr("pr_review.merge_permission_required").into_owned()
+        }
+    };
+    ui.set_workflow_pr_merge_block_reason(merge_block_reason.into());
+    ui.set_workflow_pr_revert_block_reason(
+        if state.can_revert {
+            String::new()
+        } else {
+            crate::i18n::tr("pr_review.revert_not_available").into_owned()
+        }
+        .into(),
+    );
+    let (revert_action_key, revert_confirmation_key) = match state.revert_strategy {
+        PullRequestRevertStrategy::PullRequest => (
+            "pr_review.create_revert_pr",
+            "pr_review.revert_confirmation_pull_request",
+        ),
+        PullRequestRevertStrategy::DirectCommit => (
+            "pr_review.revert_pull_request",
+            "pr_review.revert_confirmation_direct_commit",
+        ),
+        PullRequestRevertStrategy::Unsupported => (
+            "pr_review.revert_changes",
+            "pr_review.revert_confirmation_unsupported",
+        ),
+    };
+    ui.set_workflow_pr_revert_action_label(crate::i18n::tr(revert_action_key).into_owned().into());
+    ui.set_workflow_pr_revert_confirmation(
+        crate::i18n::tr(revert_confirmation_key).into_owned().into(),
+    );
     ui.set_workflow_pr_merge_method_merge(
         state
             .allowed_merge_methods
@@ -3489,6 +3725,25 @@ fn apply_action_state(ui: &MainWindow, state: &PullRequestActionState) {
             .allowed_merge_methods
             .contains(&PullRequestMergeMethod::FastForward),
     );
+}
+
+fn readiness_label_key(kind: &str) -> &'static str {
+    match kind {
+        "checking" => "pr_review.readiness.checking",
+        "ready" => "pr_review.readiness.ready",
+        "conflicts" => "pr_review.readiness.conflicts",
+        "draft" => "pr_review.readiness.draft",
+        "review_required" => "pr_review.readiness.review_required",
+        "changes_requested" => "pr_review.readiness.changes_requested",
+        "checks_pending" => "pr_review.readiness.checks_pending",
+        "checks_failed" => "pr_review.readiness.checks_failed",
+        "branch_out_of_date" => "pr_review.readiness.branch_out_of_date",
+        "discussions_unresolved" => "pr_review.readiness.discussions_unresolved",
+        "blocked" => "pr_review.readiness.blocked",
+        "merged" => "pr_review.readiness.merged",
+        "closed" => "pr_review.readiness.closed",
+        _ => "pr_review.readiness.unavailable",
+    }
 }
 
 fn reset_action_capabilities(ui: &MainWindow) {
@@ -3515,7 +3770,11 @@ fn reset_action_ui(ui: &MainWindow) {
     ui.set_workflow_pr_merge_readiness_detail("".into());
     ui.set_workflow_pr_merge_block_reason("".into());
     ui.set_workflow_pr_revert_block_reason("".into());
-    ui.set_workflow_pr_revert_action_label("Revert changes".into());
+    ui.set_workflow_pr_revert_action_label(
+        crate::i18n::tr("pr_review.revert_pull_request")
+            .into_owned()
+            .into(),
+    );
     ui.set_workflow_pr_revert_confirmation("".into());
     reset_action_capabilities(ui);
 }
@@ -3559,7 +3818,9 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_commits_error("".into());
     ui.set_workflow_pr_review_commit_range_start(-1);
     ui.set_workflow_pr_review_commit_range_end(-1);
-    ui.set_workflow_pr_review_commit_range_label("All commits".into());
+    ui.set_workflow_pr_review_commit_range_label(
+        crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+    );
     ui.set_workflow_pr_review_has_expandable_hunks(false);
     ui.set_workflow_pr_review_context_expanded(false);
     ui.set_workflow_pr_review_viewing_file(false);

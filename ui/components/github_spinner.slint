@@ -1,4 +1,5 @@
 import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
+import { I18n } from "@i18n";
 
 // Primer Spinner is a visual, indeterminate progress indicator. Callers must
 // also keep a visible loading label or status message; the spinner is never
@@ -17,7 +18,7 @@ export component GitHubSpinner inherits Rectangle {
     height: root.spinner-size;
     background: transparent;
     accessible-role: progress-indicator;
-    accessible-label: "Loading";
+    accessible-label: I18n.common-loading;
 
     // Keep the Primer 2px stroke at every display size (SVG used
     // vector-effect="non-scaling-stroke").

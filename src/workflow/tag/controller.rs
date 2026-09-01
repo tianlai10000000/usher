@@ -1,4 +1,5 @@
 use crate::app_runtime::shared_runtime;
+use crate::i18n::LocalizedText;
 use crate::jobs::{
     JobConclusion, JobRunDescriptor, JobStepData, JobStepDefinition, JobStepStatus,
     format_duration, register_job_run_source,
@@ -177,11 +178,14 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 if !view.tag_running {
                     view.reset_tag_job(default_tag_steps());
                     view.tag_result = if view.tag_mode == TAG_MODE_REMOTE {
-                        "Remote mode is not available yet.".to_string()
+                        LocalizedText::message("tag.remote_unavailable")
                     } else {
-                        format!(
-                            "Local mode ready. Current latest tag is '{}', next {} version prepared.",
-                            view.tag_current_version, version_mode
+                        LocalizedText::message_with(
+                            "tag.local_ready",
+                            [
+                                ("current_tag", view.tag_current_version.clone()),
+                                ("bump", version_mode.to_string()),
+                            ],
                         )
                     };
                 }
@@ -244,9 +248,12 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     // Always restore the create plan so a prior run's expanded /
                     // failed steps cannot leak into the Add tab surface.
                     view.reset_tag_job(default_tag_steps());
-                    view.tag_result = format!(
-                        "Local mode ready. Current latest tag is '{}', next {} version prepared.",
-                        view.tag_current_version, view.tag_version_mode
+                    view.tag_result = LocalizedText::message_with(
+                        "tag.local_ready",
+                        [
+                            ("current_tag", view.tag_current_version.clone()),
+                            ("bump", view.tag_version_mode.clone()),
+                        ],
                     );
                 });
             }
@@ -259,7 +266,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 guard.upsert_current(|view| {
                     view.tag_selected_tab = 0;
                     view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
-                    view.tag_result = "Remote mode is not available yet.".to_string();
+                    view.tag_result = LocalizedText::message("tag.remote_unavailable");
                     view.tag_add_initializing = false;
                     view.tag_add_ready = false;
                     view.reset_tag_job(default_tag_steps());
@@ -277,10 +284,14 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 request_seq = view.tag_add_request_seq;
                 view.tag_add_initializing = true;
                 view.tag_add_ready = false;
-                view.tag_result = format!(
-                    "Loading latest local tag for add workflow in project '{}'.",
-                    project_name
-                );
+                view.tag_result = if project_id == "default" {
+                    LocalizedText::message("tag.loading_add_default")
+                } else {
+                    LocalizedText::message_with(
+                        "tag.loading_add",
+                        [("project", project_name.clone())],
+                    )
+                };
                 view.reset_tag_job(default_tag_steps());
             });
             request_seq
@@ -324,9 +335,12 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_remove_target = latest_tag.clone();
                                 entry.tag_add_initializing = false;
                                 entry.tag_add_ready = true;
-                                entry.tag_result = format!(
-                                    "Local mode ready. Current latest tag is '{}', next {} version prepared.",
-                                    latest_tag, bump_mode
+                                entry.tag_result = LocalizedText::message_with(
+                                    "tag.local_ready",
+                                    [
+                                        ("current_tag", latest_tag),
+                                        ("bump", bump_mode.clone()),
+                                    ],
                                 );
                             }
                             Err(error) => {
@@ -336,7 +350,8 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_remove_target = "v0.0.0".to_string();
                                 entry.tag_add_initializing = false;
                                 entry.tag_add_ready = false;
-                                entry.tag_result = error;
+                                entry.tag_result =
+                                    LocalizedText::message("tag.load_local_failed");
                             }
                         }
                         if current_project_id != project_id {
@@ -395,9 +410,9 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     // Always restore the remove plan so a prior create run's
                     // steps/disclosures cannot leak into the Remove tab.
                     view.reset_tag_job(default_remove_tag_steps());
-                    view.tag_result = format!(
-                        "Remove mode ready. Latest remote tag is '{}'.",
-                        view.tag_remove_target
+                    view.tag_result = LocalizedText::message_with(
+                        "tag.remove_ready",
+                        [("latest_tag", view.tag_remove_target.clone())],
                     );
                 });
             }
@@ -410,10 +425,10 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 guard.upsert_current(|view| {
                     view.tag_selected_tab = 1;
                     view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-                    view.tag_result = "Remote mode is not available yet.".to_string();
+                    view.tag_result = LocalizedText::message("tag.remote_unavailable");
                     view.tag_remove_initializing = false;
                     view.tag_remove_ready = false;
-                    view.tag_remove_target = "Unavailable".to_string();
+                    view.tag_remove_target.clear();
                     view.reset_tag_job(default_remove_tag_steps());
                 });
             }
@@ -430,10 +445,14 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 view.tag_add_initializing = false;
                 view.tag_remove_initializing = true;
                 view.tag_remove_ready = false;
-                view.tag_result = format!(
-                    "Loading latest remote tag for remove workflow in project '{}'.",
-                    project_name
-                );
+                view.tag_result = if project_id == "default" {
+                    LocalizedText::message("tag.loading_remove_default")
+                } else {
+                    LocalizedText::message_with(
+                        "tag.loading_remove",
+                        [("project", project_name.clone())],
+                    )
+                };
                 view.reset_tag_job(default_remove_tag_steps());
             });
             request_seq
@@ -476,14 +495,14 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_add_initializing = false;
                                 entry.tag_remove_initializing = false;
                                 entry.tag_remove_ready = true;
-                                entry.tag_result = format!(
-                                    "Remove mode ready. Latest remote tag is '{}'.",
-                                    latest_tag
+                                entry.tag_result = LocalizedText::message_with(
+                                    "tag.remove_ready",
+                                    [("latest_tag", latest_tag.clone())],
                                 );
                                 if let Some(first) = entry.tag_job.steps.get_mut(0) {
-                                    first.detail = format!(
-                                        "Latest remote tag resolved for removal: '{}'.",
-                                        latest_tag
+                                    first.detail = LocalizedText::message_with(
+                                        "tag.step.remove_target_resolved",
+                                        [("latest_tag", latest_tag)],
                                     );
                                     set_step_log(first, lookup_log);
                                 }
@@ -497,7 +516,8 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_add_initializing = false;
                                 entry.tag_remove_initializing = false;
                                 entry.tag_remove_ready = false;
-                                entry.tag_result = error;
+                                entry.tag_result =
+                                    LocalizedText::message("tag.load_remote_failed");
                             }
                         }
                         if current_project_id != project_id {
@@ -560,12 +580,12 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
 
         if already_running {
             log::warn!("[Workflow][Tag] Run rejected: workflow is already running");
-            show_error(&ui, "Tag workflow is already running.");
+            show_error(&ui, crate::i18n::tr("tag.already_running").as_ref());
             return;
         }
         if add_initializing {
             log::warn!("[Workflow][Tag] Run rejected: add tab is still initializing");
-            show_error(&ui, "Add tab is still initializing latest tag. Please wait.");
+            show_error(&ui, crate::i18n::tr("tag.initializing").as_ref());
             return;
         }
 
@@ -573,7 +593,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             log::warn!("[Workflow][Tag] Run rejected: remote mode not implemented");
             if let Ok(mut guard) = state_run.lock() {
                 guard.upsert_current(|view| {
-                    view.tag_result = "Remote mode is not available yet.".to_string();
+                    view.tag_result = LocalizedText::message("tag.remote_unavailable");
                     view.tag_running = false;
                     view.tag_add_ready = false;
                     view.tag_remove_ready = false;
@@ -587,7 +607,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 );
             }
             initialize_current_ui(&ui, &state_run);
-            show_error(&ui, "Remote mode is not implemented yet.");
+            show_error(&ui, crate::i18n::tr("tag.remote_unavailable").as_ref());
             return;
         }
 
@@ -597,12 +617,15 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 "[Workflow][Tag] Run rejected: invalid semantic version -> '{}'",
                 version
             );
-            show_error(&ui, "New tag version must match semantic version format like v1.2.3.");
+            show_error(&ui, crate::i18n::tr("tag.invalid_version").as_ref());
             return;
         }
         if local_repo.trim().is_empty() {
             log::warn!("[Workflow][Tag] Run rejected: empty local repository path");
-            show_error(&ui, "Local repository path is empty. Open a project first.");
+            show_error(
+                &ui,
+                crate::i18n::tr("workflow.local_repository_empty").as_ref(),
+            );
             return;
         }
         if !Path::new(&local_repo).exists() {
@@ -610,7 +633,10 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 "[Workflow][Tag] Run rejected: local repository path does not exist -> '{}'",
                 local_repo
             );
-            show_error(&ui, "Local repository path does not exist.");
+            show_error(
+                &ui,
+                crate::i18n::tr("workflow.local_repository_missing").as_ref(),
+            );
             return;
         }
 
@@ -622,20 +648,26 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 view.tag_remove_ready = false;
                 view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
                 view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-                view.tag_result = format!(
-                    "Running local tag workflow for project '{}' in {} mode.",
-                    project_name, mode
+                view.tag_result = LocalizedText::message_with(
+                    "tag.running_create",
+                    [
+                        ("project", project_name.clone()),
+                        ("mode", mode.clone()),
+                    ],
                 );
                 view.tag_next_version = version.clone();
                 view.tag_job.start(default_tag_steps());
                 view.job_run = JobRunDescriptor {
                     active: true,
                     source: "tag".to_string(),
-                    run_title: format!("Create tag {version}"),
-                    workflow_name: "Tag workflow".to_string(),
+                    run_title: LocalizedText::message_with(
+                        "tag.create_run_title",
+                        [("version", version.clone())],
+                    ),
+                    workflow_name: LocalizedText::message("tag.workflow_name"),
                     context_name: project_name.clone(),
                     job_name: "create-tag".to_string(),
-                    trigger_detail: "Started manually from Tag".to_string(),
+                    trigger_detail: LocalizedText::message("tag.started_manually"),
                 };
             });
             log::info!(
@@ -773,8 +805,14 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     }
                     initialize_current_ui(&ui, &state_task);
                     match execution {
-                        Ok(ref success) => show_success(&ui, &success.summary),
-                        Err(ref failure) => show_error(&ui, &failure.summary),
+                        Ok(ref success) => {
+                            let message = success.summary.resolve();
+                            show_success(&ui, message.as_str());
+                        }
+                        Err(ref failure) => {
+                            let message = failure.summary.resolve();
+                            show_error(&ui, message.as_str());
+                        }
                     }
                 } else {
                     log::warn!("[Workflow][Tag] Event-loop callback ignored: UI already dropped");
@@ -825,21 +863,18 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
 
         if already_running {
             log::warn!("[Workflow][Tag] Remove rejected: workflow is already running");
-            show_error(&ui, "Tag workflow is already running.");
+            show_error(&ui, crate::i18n::tr("tag.already_running").as_ref());
             return;
         }
         if remove_initializing {
             log::warn!("[Workflow][Tag] Remove rejected: remove tab is still initializing");
-            show_error(
-                &ui,
-                "Remove tab is still initializing latest tag. Please wait.",
-            );
+            show_error(&ui, crate::i18n::tr("tag.remove_initializing").as_ref());
             return;
         }
         if mode == TAG_MODE_REMOTE {
             if let Ok(mut guard) = state_remove.lock() {
                 guard.upsert_current(|view| {
-                    view.tag_result = "Remote mode is not available yet.".to_string();
+                    view.tag_result = LocalizedText::message("tag.remote_unavailable");
                     view.tag_running = false;
                     view.tag_add_initializing = false;
                     view.tag_remove_initializing = false;
@@ -851,24 +886,27 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 });
             }
             initialize_current_ui(&ui, &state_remove);
-            show_error(&ui, "Remote mode is not implemented yet.");
+            show_error(&ui, crate::i18n::tr("tag.remote_unavailable").as_ref());
             return;
         }
 
         let tag = tag.trim().to_string();
         if !is_valid_semver_tag(&tag) {
-            show_error(
-                &ui,
-                "Tag to remove must match semantic version format like v1.2.3.",
-            );
+            show_error(&ui, crate::i18n::tr("tag.invalid_remove_version").as_ref());
             return;
         }
         if local_repo.trim().is_empty() {
-            show_error(&ui, "Local repository path is empty. Open a project first.");
+            show_error(
+                &ui,
+                crate::i18n::tr("workflow.local_repository_empty").as_ref(),
+            );
             return;
         }
         if !Path::new(&local_repo).exists() {
-            show_error(&ui, "Local repository path does not exist.");
+            show_error(
+                &ui,
+                crate::i18n::tr("workflow.local_repository_missing").as_ref(),
+            );
             return;
         }
 
@@ -881,20 +919,23 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 view.tag_remove_ready = false;
                 view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
                 view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
-                view.tag_result = format!(
-                    "Running local tag remove workflow for project '{}' in {} mode.",
-                    project_name, mode
+                view.tag_result = LocalizedText::message_with(
+                    "tag.running_remove",
+                    [("project", project_name.clone()), ("mode", mode.clone())],
                 );
                 view.tag_remove_target = tag.clone();
                 view.tag_job.start(default_remove_tag_steps());
                 view.job_run = JobRunDescriptor {
                     active: true,
                     source: "tag".to_string(),
-                    run_title: format!("Remove tag {tag}"),
-                    workflow_name: "Tag workflow".to_string(),
+                    run_title: LocalizedText::message_with(
+                        "tag.remove_run_title",
+                        [("tag", tag.clone())],
+                    ),
+                    workflow_name: LocalizedText::message("tag.workflow_name"),
                     context_name: project_name.clone(),
                     job_name: "remove-tag".to_string(),
-                    trigger_detail: "Started manually from Tag".to_string(),
+                    trigger_detail: LocalizedText::message("tag.started_manually"),
                 };
             });
         }
@@ -1011,8 +1052,14 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     }
                     initialize_current_ui(&ui, &state_task);
                     match execution {
-                        Ok(ref success) => show_success(&ui, &success.summary),
-                        Err(ref failure) => show_error(&ui, &failure.summary),
+                        Ok(ref success) => {
+                            let message = success.summary.resolve();
+                            show_success(&ui, message.as_str());
+                        }
+                        Err(ref failure) => {
+                            let message = failure.summary.resolve();
+                            show_error(&ui, message.as_str());
+                        }
                     }
                 }
             });
@@ -1035,7 +1082,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             .unwrap_or(false);
         if !is_running {
             log::warn!("[Workflow][Tag] stop ignored: no active workflow");
-            show_error(&ui, "No running tag workflow to stop.");
+            show_error(&ui, crate::i18n::tr("tag.no_running_workflow").as_ref());
             return;
         }
 
@@ -1046,14 +1093,12 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
         if let Ok(mut guard) = state_stop.lock() {
             guard.upsert_current(|view| {
                 view.tag_running = false;
-                view.tag_result =
-                    "Stop requested. Cancelling workflow and pausing remaining steps.".to_string();
+                view.tag_result = LocalizedText::message("tag.stop_pausing");
                 for step in &mut view.tag_job.steps {
                     if step.status == JobStepStatus::InProgress {
                         step.status = JobStepStatus::Completed;
                         step.conclusion = Some(JobConclusion::Cancelled);
-                        step.detail =
-                            "Cancelled by user. Waiting for current command to stop.".into();
+                        step.detail = LocalizedText::message("tag.cancel_waiting_for_command");
                         let current_log = step.log.to_string();
                         let updated_log = if current_log.is_empty() {
                             "[Stop] Cancel requested by user.".to_string()
@@ -1064,7 +1109,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     } else if step.status == JobStepStatus::Queued {
                         step.status = JobStepStatus::Completed;
                         step.conclusion = Some(JobConclusion::Cancelled);
-                        step.detail = "Paused due to cancellation request.".into();
+                        step.detail = LocalizedText::message("tag.paused_after_cancel");
                     }
                 }
             });
@@ -1073,7 +1118,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             log::warn!("[Workflow][Tag] stop failed: cannot acquire state lock");
         }
         initialize_current_ui(&ui, &state_stop);
-        show_error(&ui, "Tag workflow stop requested.");
+        show_error(&ui, crate::i18n::tr("tag.stop_requested").as_ref());
     });
 }
 
@@ -1126,17 +1171,17 @@ pub(crate) fn refresh_tag_context(
                 view.tag_add_request_seq = view.tag_add_request_seq.saturating_add(1);
                 view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
                 view.reset_tag_job(default_tag_steps());
-                view.tag_current_version = "Unavailable".to_string();
-                view.tag_next_version = "Unavailable".to_string();
-                view.tag_remove_target = "Unavailable".to_string();
-                view.tag_result = "Remote mode is not available yet.".to_string();
+                view.tag_current_version.clear();
+                view.tag_next_version.clear();
+                view.tag_remove_target.clear();
+                view.tag_result = LocalizedText::message("tag.remote_unavailable");
             });
         } else {
             log::warn!("[Workflow][Tag] Refresh context failed: cannot acquire state lock");
         }
         initialize_current_ui(ui, shared_state);
         if announce_remote_todo {
-            show_error(ui, "Remote mode is not implemented yet.");
+            show_error(ui, crate::i18n::tr("tag.remote_unavailable").as_ref());
         }
         log::info!("[Workflow][Tag] Refresh context finished");
         return;
@@ -1157,7 +1202,7 @@ pub(crate) fn refresh_tag_context(
             request_seq = view.tag_add_request_seq;
             view.tag_remove_request_seq = view.tag_remove_request_seq.saturating_add(1);
             view.reset_tag_job(default_tag_steps());
-            view.tag_result = "Loading latest local tag for the tag workflow.".to_string();
+            view.tag_result = LocalizedText::message("tag.loading_context");
         });
         request_seq
     } else {
@@ -1200,11 +1245,11 @@ pub(crate) fn refresh_tag_context(
                         entry.tag_add_initializing = false;
                         entry.tag_add_ready = true;
                         entry.tag_result = if local_repo.trim().is_empty() {
-                            "Select a project to load the local repository context.".to_string()
+                            LocalizedText::message("tag.select_project")
                         } else {
-                            format!(
-                                "Local mode ready. Current latest tag is '{}', next {} version prepared.",
-                                current_tag, bump_mode
+                            LocalizedText::message_with(
+                                "tag.local_ready",
+                                [("current_tag", current_tag), ("bump", bump_mode.clone())],
                             )
                         };
                     }
@@ -1219,7 +1264,7 @@ pub(crate) fn refresh_tag_context(
                         entry.tag_remove_target = "v0.0.0".to_string();
                         entry.tag_add_initializing = false;
                         entry.tag_add_ready = false;
-                        entry.tag_result = error;
+                        entry.tag_result = LocalizedText::message("tag.load_local_failed");
                     }
                 }
                 if current_project_id != project_id {
@@ -1231,8 +1276,8 @@ pub(crate) fn refresh_tag_context(
                 );
             }
             initialize_current_ui(&ui, &state_task);
-            if let Some(error) = maybe_error {
-                show_error(&ui, &error);
+            if maybe_error.is_some() {
+                show_error(&ui, crate::i18n::tr("tag.load_local_failed").as_ref());
             }
             log::info!("[Workflow][Tag] Refresh context finished");
         });
@@ -1240,37 +1285,37 @@ pub(crate) fn refresh_tag_context(
 }
 
 struct TagRunSuccess {
-    summary: String,
+    summary: LocalizedText,
     current_version: String,
     steps: Vec<JobStepData>,
 }
 
 struct TagRunFailure {
-    summary: String,
+    summary: LocalizedText,
     steps: Vec<JobStepData>,
 }
 
-type TagProgressReporter = Arc<dyn Fn(Vec<JobStepData>, String) + Send + Sync>;
+type TagProgressReporter = Arc<dyn Fn(Vec<JobStepData>, LocalizedText) + Send + Sync>;
 
 fn default_remove_tag_steps() -> Vec<JobStepData> {
     vec![
         JobStepData::queued(
             JobStepDefinition::new(
-                "Enter local repository",
+                LocalizedText::message("tag.step.enter_repository"),
                 vec!["git".into(), "rev-parse".into(), "--show-toplevel".into()],
             ),
-            "Resolve git repository path.",
+            LocalizedText::message("tag.step.enter_repository_detail"),
         ),
         JobStepData::queued(
             JobStepDefinition::new(
-                "Delete local tag",
+                LocalizedText::message("tag.step.delete_local"),
                 vec!["git".into(), "tag".into(), "-d".into(), "<tag>".into()],
             ),
-            "Delete tag from local repository.",
+            LocalizedText::message("tag.step.delete_local_detail"),
         ),
         JobStepData::queued(
             JobStepDefinition::new(
-                "Delete remote tag",
+                LocalizedText::message("tag.step.delete_remote"),
                 vec![
                     "git".into(),
                     "push".into(),
@@ -1279,18 +1324,21 @@ fn default_remove_tag_steps() -> Vec<JobStepData> {
                     "<tag>".into(),
                 ],
             ),
-            "Delete tag from origin remote.",
+            LocalizedText::message("tag.step.delete_remote_detail"),
         ),
         JobStepData::queued(
             JobStepDefinition::new(
-                "Refresh latest remote tag",
+                LocalizedText::message("tag.step.refresh_remote"),
                 vec!["git".into(), "fetch".into(), "--tags".into()],
             ),
-            "Fetch and resolve the latest remote semantic tag.",
+            LocalizedText::message("tag.step.refresh_remote_detail"),
         ),
         JobStepData::queued(
-            JobStepDefinition::new("Workflow complete", vec!["complete".into()]),
-            "Waiting for remove workflow completion.",
+            JobStepDefinition::new(
+                LocalizedText::message("tag.step.complete"),
+                vec!["complete".into()],
+            ),
+            LocalizedText::message("tag.step.remove_complete_waiting"),
         ),
     ]
 }
@@ -1313,14 +1361,17 @@ async fn run_local_tag_flow(
         .iter()
         .map(|planned| {
             JobStepData::queued(
-                JobStepDefinition::new(planned.name, planned.argv.clone()),
+                JobStepDefinition::new(planned.name.clone(), planned.argv.clone()),
                 planned.detail.clone(),
             )
         })
         .collect();
     steps.push(JobStepData::queued(
-        JobStepDefinition::new("Complete", vec!["complete".into()]),
-        "Finish the local tag workflow.",
+        JobStepDefinition::new(
+            LocalizedText::message("tag.step.complete"),
+            vec!["complete".into()],
+        ),
+        LocalizedText::message("tag.step.complete_detail"),
     ));
 
     for (index, planned) in commands.iter().enumerate() {
@@ -1329,10 +1380,13 @@ async fn run_local_tag_flow(
         if cancel_token.load(Ordering::SeqCst) {
             steps[index].status = JobStepStatus::Completed;
             steps[index].conclusion = Some(JobConclusion::Cancelled);
-            steps[index].detail = "Cancelled before step started.".into();
+            steps[index].detail = LocalizedText::message("tag.cancelled_before_step_detail");
             set_step_log(&mut steps[index], "[Stop] Cancel requested by user.");
             return Err(TagRunFailure {
-                summary: format!("Tag workflow cancelled by user before step {}.", index + 1),
+                summary: LocalizedText::message_with(
+                    "tag.cancelled_before_step",
+                    [("step", (index + 1).to_string())],
+                ),
                 steps,
             });
         }
@@ -1350,20 +1404,22 @@ async fn run_local_tag_flow(
         if let Some(progress) = on_progress.as_ref() {
             progress(
                 steps.clone(),
-                format!(
-                    "Running step {}/{}: {}",
-                    index + 1,
-                    commands.len(),
-                    steps[index].definition.name
+                LocalizedText::message_with(
+                    "tag.progress_running",
+                    [
+                        ("current", (index + 1).to_string()),
+                        ("total", commands.len().to_string()),
+                    ],
                 ),
             );
         }
 
-        let running_summary = format!(
-            "Running step {}/{}: {}",
-            index + 1,
-            commands.len(),
-            steps[index].definition.name
+        let running_summary = LocalizedText::message_with(
+            "tag.progress_running",
+            [
+                ("current", (index + 1).to_string()),
+                ("total", commands.len().to_string()),
+            ],
         );
         let result = run_command(command.clone(), &cancel_token, |live_log| {
             set_step_log(&mut steps[index], live_log);
@@ -1381,11 +1437,12 @@ async fn run_local_tag_flow(
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
                         steps.clone(),
-                        format!(
-                            "Step {}/{} completed: {}",
-                            index + 1,
-                            commands.len(),
-                            steps[index].definition.name
+                        LocalizedText::message_with(
+                            "tag.progress_completed",
+                            [
+                                ("current", (index + 1).to_string()),
+                                ("total", commands.len().to_string()),
+                            ],
                         ),
                     );
                 }
@@ -1400,18 +1457,21 @@ async fn run_local_tag_flow(
                     steps[index].status = JobStepStatus::Completed;
                     steps[index].conclusion = Some(JobConclusion::Cancelled);
                     set_step_log(&mut steps[index], log.clone());
-                    steps[index].detail = "Cancelled by user. Workflow paused.".into();
+                    steps[index].detail = LocalizedText::message("tag.cancelled_paused_detail");
                     for remaining in steps.iter_mut().skip(index + 1) {
                         if remaining.status == JobStepStatus::Queued {
                             remaining.status = JobStepStatus::Completed;
                             remaining.conclusion = Some(JobConclusion::Cancelled);
-                            remaining.detail = "Paused due to cancellation request.".into();
+                            remaining.detail = LocalizedText::message("tag.paused_after_cancel");
                         }
                     }
                     if let Some(progress) = on_progress.as_ref() {
                         progress(
                             steps.clone(),
-                            format!("Stop requested. Workflow paused at step {}.", index + 1),
+                            LocalizedText::message_with(
+                                "tag.stop_paused_at",
+                                [("step", (index + 1).to_string())],
+                            ),
                         );
                     }
                     log::warn!(
@@ -1420,10 +1480,9 @@ async fn run_local_tag_flow(
                         steps[index].definition.name
                     );
                     return Err(TagRunFailure {
-                        summary: format!(
-                            "Tag workflow cancelled by user at step {} ('{}').",
-                            index + 1,
-                            steps[index].definition.name
+                        summary: LocalizedText::message_with(
+                            "tag.cancelled_at_step",
+                            [("step", (index + 1).to_string())],
                         ),
                         steps,
                     });
@@ -1432,15 +1491,16 @@ async fn run_local_tag_flow(
                 steps[index].conclusion = Some(JobConclusion::Failure);
                 steps[index].default_expanded = true;
                 set_step_log(&mut steps[index], log.clone());
-                steps[index].detail = "Command failed. Check logs below.".into();
+                steps[index].detail = LocalizedText::message("tag.command_failed_detail");
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
                         steps.clone(),
-                        format!(
-                            "Step {}/{} failed: {}",
-                            index + 1,
-                            commands.len(),
-                            steps[index].definition.name
+                        LocalizedText::message_with(
+                            "tag.progress_failed",
+                            [
+                                ("current", (index + 1).to_string()),
+                                ("total", commands.len().to_string()),
+                            ],
                         ),
                     );
                 }
@@ -1450,10 +1510,9 @@ async fn run_local_tag_flow(
                     steps[index].definition.name
                 );
                 return Err(TagRunFailure {
-                    summary: format!(
-                        "Tag workflow failed at step {} ('{}').",
-                        index + 1,
-                        steps[index].definition.name
+                    summary: LocalizedText::message_with(
+                        "tag.failed_at_step",
+                        [("step", (index + 1).to_string())],
                     ),
                     steps,
                 });
@@ -1465,7 +1524,7 @@ async fn run_local_tag_flow(
     steps[complete_index].status = JobStepStatus::Completed;
     steps[complete_index].conclusion = Some(JobConclusion::Success);
     steps[complete_index].duration = "0s".into();
-    steps[complete_index].detail = "Local tag workflow finished successfully.".into();
+    steps[complete_index].detail = LocalizedText::message("tag.create_finished_detail");
     set_step_log(
         &mut steps[complete_index],
         format!(
@@ -1476,10 +1535,7 @@ async fn run_local_tag_flow(
     if let Some(progress) = on_progress.as_ref() {
         progress(
             steps.clone(),
-            format!(
-                "Local tag workflow finished successfully. Active tag is '{}'.",
-                version
-            ),
+            LocalizedText::message_with("tag.create_finished", [("tag", version.to_string())]),
         );
     }
     log::info!(
@@ -1488,9 +1544,9 @@ async fn run_local_tag_flow(
     );
 
     Ok(TagRunSuccess {
-        summary: format!(
-            "Local tag workflow completed successfully. Active tag is '{}'.",
-            version
+        summary: LocalizedText::message_with(
+            "tag.create_completed",
+            [("tag", version.to_string())],
         ),
         current_version: version.to_string(),
         steps,
@@ -1513,12 +1569,12 @@ async fn run_local_remove_tag_flow(
         if cancel_token.load(Ordering::SeqCst) {
             steps[index].status = JobStepStatus::Completed;
             steps[index].conclusion = Some(JobConclusion::Cancelled);
-            steps[index].detail = "Cancelled before step started.".into();
+            steps[index].detail = LocalizedText::message("tag.cancelled_before_step_detail");
             set_step_log(&mut steps[index], "[Stop] Cancel requested by user.");
             return Err(TagRunFailure {
-                summary: format!(
-                    "Tag remove workflow cancelled by user before step {}.",
-                    index + 1
+                summary: LocalizedText::message_with(
+                    "tag.cancelled_before_step",
+                    [("step", (index + 1).to_string())],
                 ),
                 steps,
             });
@@ -1531,20 +1587,22 @@ async fn run_local_remove_tag_flow(
         if let Some(progress) = on_progress.as_ref() {
             progress(
                 steps.clone(),
-                format!(
-                    "Running remove step {}/{}: {}",
-                    index + 1,
-                    commands.len(),
-                    steps[index].definition.name
+                LocalizedText::message_with(
+                    "tag.progress_running",
+                    [
+                        ("current", (index + 1).to_string()),
+                        ("total", commands.len().to_string()),
+                    ],
                 ),
             );
         }
 
-        let running_summary = format!(
-            "Running remove step {}/{}: {}",
-            index + 1,
-            commands.len(),
-            steps[index].definition.name
+        let running_summary = LocalizedText::message_with(
+            "tag.progress_running",
+            [
+                ("current", (index + 1).to_string()),
+                ("total", commands.len().to_string()),
+            ],
         );
         let result = run_command(command.clone(), &cancel_token, |live_log| {
             set_step_log(&mut steps[index], live_log);
@@ -1562,11 +1620,12 @@ async fn run_local_remove_tag_flow(
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
                         steps.clone(),
-                        format!(
-                            "Remove step {}/{} completed: {}",
-                            index + 1,
-                            commands.len(),
-                            steps[index].definition.name
+                        LocalizedText::message_with(
+                            "tag.progress_completed",
+                            [
+                                ("current", (index + 1).to_string()),
+                                ("total", commands.len().to_string()),
+                            ],
                         ),
                     );
                 }
@@ -1576,28 +1635,27 @@ async fn run_local_remove_tag_flow(
                     steps[index].status = JobStepStatus::Completed;
                     steps[index].conclusion = Some(JobConclusion::Cancelled);
                     set_step_log(&mut steps[index], log.clone());
-                    steps[index].detail = "Cancelled by user. Workflow paused.".into();
+                    steps[index].detail = LocalizedText::message("tag.cancelled_paused_detail");
                     for remaining in steps.iter_mut().skip(index + 1) {
                         if remaining.status == JobStepStatus::Queued {
                             remaining.status = JobStepStatus::Completed;
                             remaining.conclusion = Some(JobConclusion::Cancelled);
-                            remaining.detail = "Paused due to cancellation request.".into();
+                            remaining.detail = LocalizedText::message("tag.paused_after_cancel");
                         }
                     }
                     if let Some(progress) = on_progress.as_ref() {
                         progress(
                             steps.clone(),
-                            format!(
-                                "Stop requested. Remove workflow paused at step {}.",
-                                index + 1
+                            LocalizedText::message_with(
+                                "tag.stop_paused_at",
+                                [("step", (index + 1).to_string())],
                             ),
                         );
                     }
                     return Err(TagRunFailure {
-                        summary: format!(
-                            "Tag remove workflow cancelled by user at step {} ('{}').",
-                            index + 1,
-                            steps[index].definition.name
+                        summary: LocalizedText::message_with(
+                            "tag.cancelled_at_step",
+                            [("step", (index + 1).to_string())],
                         ),
                         steps,
                     });
@@ -1606,23 +1664,23 @@ async fn run_local_remove_tag_flow(
                 steps[index].conclusion = Some(JobConclusion::Failure);
                 steps[index].default_expanded = true;
                 set_step_log(&mut steps[index], log);
-                steps[index].detail = "Command failed. Check logs below.".into();
+                steps[index].detail = LocalizedText::message("tag.command_failed_detail");
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
                         steps.clone(),
-                        format!(
-                            "Remove step {}/{} failed: {}",
-                            index + 1,
-                            commands.len(),
-                            steps[index].definition.name
+                        LocalizedText::message_with(
+                            "tag.progress_failed",
+                            [
+                                ("current", (index + 1).to_string()),
+                                ("total", commands.len().to_string()),
+                            ],
                         ),
                     );
                 }
                 return Err(TagRunFailure {
-                    summary: format!(
-                        "Tag remove workflow failed at step {} ('{}').",
-                        index + 1,
-                        steps[index].definition.name
+                    summary: LocalizedText::message_with(
+                        "tag.failed_at_step",
+                        [("step", (index + 1).to_string())],
                     ),
                     steps,
                 });
@@ -1634,14 +1692,13 @@ async fn run_local_remove_tag_flow(
     if cancel_token.load(Ordering::SeqCst) {
         steps[refresh_index].status = JobStepStatus::Completed;
         steps[refresh_index].conclusion = Some(JobConclusion::Cancelled);
-        steps[refresh_index].detail = "Cancelled before refreshing latest remote tag.".into();
+        steps[refresh_index].detail = LocalizedText::message("tag.cancelled_before_refresh_detail");
         set_step_log(
             &mut steps[refresh_index],
             "[Stop] Cancel requested by user.",
         );
         return Err(TagRunFailure {
-            summary: "Tag remove workflow cancelled before refreshing latest remote tag."
-                .to_string(),
+            summary: LocalizedText::message("tag.cancelled_before_refresh"),
             steps,
         });
     }
@@ -1649,20 +1706,19 @@ async fn run_local_remove_tag_flow(
     steps[refresh_index].status = JobStepStatus::InProgress;
     steps[refresh_index].conclusion = None;
     steps[refresh_index].duration = "…".into();
-    steps[refresh_index].detail =
-        "Fetching remote tags and resolving the latest semantic tag.".into();
+    steps[refresh_index].detail = LocalizedText::message("tag.step.refresh_remote_detail");
     if let Some(progress) = on_progress.as_ref() {
         progress(
             steps.clone(),
-            format!(
-                "Running remove step 4/4: {}",
-                steps[refresh_index].definition.name
+            LocalizedText::message_with(
+                "tag.progress_running",
+                [("current", "4".to_string()), ("total", "4".to_string())],
             ),
         );
     }
-    let refresh_summary = format!(
-        "Running remove step 4/4: {}",
-        steps[refresh_index].definition.name
+    let refresh_summary = LocalizedText::message_with(
+        "tag.progress_running",
+        [("current", "4".to_string()), ("total", "4".to_string())],
     );
     let refresh_result = inspect_latest_remote_tag_live(repo, &cancel_token, |live_log| {
         set_step_log(&mut steps[refresh_index], live_log);
@@ -1683,19 +1739,18 @@ async fn run_local_remove_tag_flow(
             steps[refresh_index].default_expanded = true;
             steps[refresh_index].duration = format_duration(refresh_started.elapsed());
             steps[refresh_index].detail = if cancel_token.load(Ordering::SeqCst) {
-                "Cancelled by user. Workflow paused.".into()
+                LocalizedText::message("tag.cancelled_paused_detail")
             } else {
-                "Failed to refresh latest remote tag.".into()
+                LocalizedText::message("tag.refresh_remote_failed_detail")
             };
             set_step_log(&mut steps[refresh_index], error);
             return Err(TagRunFailure {
                 summary: if cancel_token.load(Ordering::SeqCst) {
-                    "Tag remove workflow cancelled while refreshing remote tags.".into()
+                    LocalizedText::message("tag.cancelled_during_refresh")
                 } else {
-                    format!(
-                        "Tag remove workflow failed at step {} ('{}').",
-                        refresh_index + 1,
-                        steps[refresh_index].definition.name
+                    LocalizedText::message_with(
+                        "tag.failed_at_step",
+                        [("step", (refresh_index + 1).to_string())],
                     )
                 },
                 steps,
@@ -1705,14 +1760,17 @@ async fn run_local_remove_tag_flow(
     steps[refresh_index].status = JobStepStatus::Completed;
     steps[refresh_index].conclusion = Some(JobConclusion::Success);
     steps[refresh_index].duration = format_duration(refresh_started.elapsed());
-    steps[refresh_index].detail = format!("Latest remote semantic tag is now '{}'.", latest_tag);
+    steps[refresh_index].detail = LocalizedText::message_with(
+        "tag.step.latest_remote_tag",
+        [("latest_tag", latest_tag.clone())],
+    );
     set_step_log(&mut steps[refresh_index], refresh_log);
     if let Some(progress) = on_progress.as_ref() {
         progress(
             steps.clone(),
-            format!(
-                "Remove step 4/4 completed: {}",
-                steps[refresh_index].definition.name
+            LocalizedText::message_with(
+                "tag.progress_completed",
+                [("current", "4".to_string()), ("total", "4".to_string())],
             ),
         );
     }
@@ -1721,9 +1779,9 @@ async fn run_local_remove_tag_flow(
     steps[complete_index].status = JobStepStatus::Completed;
     steps[complete_index].conclusion = Some(JobConclusion::Success);
     steps[complete_index].duration = "0s".into();
-    steps[complete_index].detail = format!(
-        "Local remove workflow finished successfully. Input updated to '{}'.",
-        latest_tag
+    steps[complete_index].detail = LocalizedText::message_with(
+        "tag.remove_finished_detail",
+        [("latest_tag", latest_tag.clone())],
     );
     set_step_log(
         &mut steps[complete_index],
@@ -1735,17 +1793,23 @@ async fn run_local_remove_tag_flow(
     if let Some(progress) = on_progress.as_ref() {
         progress(
             steps.clone(),
-            format!(
-                "Local tag remove workflow finished successfully. Removed '{}', latest tag '{}'.",
-                tag, latest_tag
+            LocalizedText::message_with(
+                "tag.remove_finished",
+                [
+                    ("removed_tag", tag.to_string()),
+                    ("latest_tag", latest_tag.clone()),
+                ],
             ),
         );
     }
 
     Ok(TagRunSuccess {
-        summary: format!(
-            "Local tag remove workflow completed successfully. Removed '{}'. Latest remote tag is '{}'.",
-            tag, latest_tag
+        summary: LocalizedText::message_with(
+            "tag.remove_completed",
+            [
+                ("removed_tag", tag.to_string()),
+                ("latest_tag", latest_tag.clone()),
+            ],
         ),
         current_version: latest_tag,
         steps,
@@ -2132,7 +2196,7 @@ mod tests {
             definition: JobStepDefinition::new("Example", vec!["git".into(), "status".into()]),
             status: JobStepStatus::Completed,
             conclusion: Some(JobConclusion::Success),
-            detail: String::new(),
+            detail: String::new().into(),
             log: "Run git status\nclean\ncomplete".into(),
             duration: "0s".into(),
             default_expanded: false,

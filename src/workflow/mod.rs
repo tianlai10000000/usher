@@ -50,6 +50,17 @@ pub fn setup_workflow(ui: &MainWindow) {
     log::info!("[Workflow] Workflow module initialized successfully");
 }
 
+pub(crate) fn sync_language(ui: &MainWindow) {
+    bindings::sync_open_directory_tooltip(ui);
+    state::reproject_registered_ui(ui);
+    LIFECYCLE_CONTROLLER.with(|registered| {
+        if let Some(controller) = registered.borrow().as_ref() {
+            controller.pr_list.sync_language(ui);
+            controller.pr_review.sync_language(ui);
+        }
+    });
+}
+
 pub(crate) fn release_unreachable_state(ui: &MainWindow) {
     let mode = std::env::var("USHER_MEMORY_WORKFLOW_LIFECYCLE").unwrap_or_default();
     if mode != "clear" {

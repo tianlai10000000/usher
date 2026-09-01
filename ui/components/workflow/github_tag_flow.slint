@@ -1,6 +1,7 @@
 import { GitHubTagAddPanel } from "./github_tag_add_panel.slint";
 import { GitHubTagRemovePanel } from "./github_tag_remove_panel.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
+import { I18n } from "@i18n";
 import {
     GitHubSegmentedControl,
     GitHubSegmentedControlItem,
@@ -22,7 +23,7 @@ export component GitHubTagFlow {
     in property <bool> remove-initializing: false;
     in property <bool> running: false;
     in property <bool> has-run: false;
-    in property <string> result: "Ready to create a tag.";
+    in property <string> result: I18n.workflow-ready-tags;
     callback change-mode(string);
     callback select-version-mode(string);
     callback run(string, string);
@@ -58,7 +59,7 @@ export component GitHubTagFlow {
 
                 Text {
                     height: 28px;
-                    text: "Scope";
+                    text: I18n.tag-scope;
                     font-size: 12px;
                     font-weight: 600;
                     color: root.fg-muted;
@@ -66,17 +67,17 @@ export component GitHubTagFlow {
                 }
 
                 GitHubSegmentedControl {
-                    group-label: "Tag repository scope";
+                    group-label: I18n.tag-repository-scope;
 
                     GitHubSegmentedControlItem {
-                        label: "Local";
+                        label: I18n.workflow-local;
                         selected: root.mode != "remote";
                         item-enabled: !root.running;
                         clicked => { root.change-mode("local"); }
                     }
                     GitHubSegmentedControlDivider { }
                     GitHubSegmentedControlItem {
-                        label: "Remote";
+                        label: I18n.workflow-remote;
                         selected: root.mode == "remote";
                         item-enabled: !root.running;
                         clicked => { root.change-mode("remote"); }
@@ -89,10 +90,10 @@ export component GitHubTagFlow {
         tabs-row := GitHubUnderlineNav {
             width: parent.width;
             height: 48px;
-            group-label: "Tag operations";
+            group-label: I18n.tag-operations;
 
             GitHubUnderlineNavItem {
-                label: "Add Tag";
+                label: I18n.tag-add;
                 selected: root.selected-tab == 0;
                 clicked => {
                     root.selected-tab = 0;
@@ -101,7 +102,7 @@ export component GitHubTagFlow {
             }
 
             GitHubUnderlineNavItem {
-                label: "Remove Tag";
+                label: I18n.tag-remove;
                 selected: root.selected-tab == 1;
                 clicked => {
                     root.selected-tab = 1;

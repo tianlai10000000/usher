@@ -281,9 +281,30 @@ thread_local! {
     static ACTIVE_VIRTUAL_WRAP_WIDTH_PX: Cell<i32> = const { Cell::new(0) };
     static MODEL_MUTATION_IN_PROGRESS: Cell<bool> = const { Cell::new(false) };
     static CHAT_MESSAGE_MODEL: RefCell<Option<Rc<ChatMessageModelBridge>>> = const { RefCell::new(None) };
+    static CHAT_SESSION: RefCell<Option<SharedChatSessions>> = const { RefCell::new(None) };
     static ANCHOR_SETTLE_REVISION: Cell<u64> = const { Cell::new(0) };
     static ANCHOR_SCROLL_WRITE_IN_PROGRESS: Cell<bool> = const { Cell::new(false) };
     static ANCHOR_SCROLL_WRITE_COUNT: Cell<u64> = const { Cell::new(0) };
+}
+
+pub(crate) fn sync_language(ui: &MainWindow) {
+    clear_render_cache();
+    clear_virtual_layout_cache();
+    LAST_RENDER_SIGNATURE.with(|last| *last.borrow_mut() = None);
+    if ui.get_current_route() != Route::Chat {
+        return;
+    }
+    let Some(session) = CHAT_SESSION.with(|slot| slot.borrow().clone()) else {
+        return;
+    };
+    apply_chat_state_to_ui(
+        ui,
+        &session,
+        chat_mode_from_ui(ui),
+        ui.get_chat_is_sending(),
+        Some(active_wrap_width_px(ui)),
+        false,
+    );
 }
 
 fn schedule_anchor_compensation(ui_weak: slint::Weak<MainWindow>) {
@@ -1006,7 +1027,7 @@ fn scroll_chat_to_bottom(ui: &MainWindow) {
 
 fn show_chat_storage_error(ui: &MainWindow) {
     ToastManager::get(ui).invoke_error(ToastOptions {
-        message: "Message could not be saved. Your draft was restored.".into(),
+        message: crate::i18n::tr("chat.storage_failed").as_ref().into(),
         duration: 3_500,
         position: "middle".into(),
         icon: "".into(),
@@ -1062,6 +1083,7 @@ pub fn setup_interactive(ui: &MainWindow) {
     // Sessions bootstrap on a blocking worker and are backfilled on the event
     // loop; the UI starts from the empty/loading state until then.
     let session: SharedChatSessions = Arc::new(Mutex::new(None));
+    CHAT_SESSION.with(|slot| *slot.borrow_mut() = Some(session.clone()));
     let request_state = Arc::new(Mutex::new(ChatRequestState::default()));
     let drafts = Arc::new(Mutex::new(ChatDrafts::default()));
     ui.set_chat_ai_mode(true);

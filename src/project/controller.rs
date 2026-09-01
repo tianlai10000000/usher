@@ -36,17 +36,33 @@ impl ProjectController {
     }
 }
 
+pub(crate) fn sync_language(ui: &MainWindow) {
+    if !ui.get_project_list_error().is_empty() {
+        ui.set_project_list_error(
+            crate::i18n::tr("projects.registry_read_failed")
+                .into_owned()
+                .into(),
+        );
+    }
+    let logo = ui.get_project_new_logo();
+    ui.set_project_logo_preview_status(
+        crate::i18n::tr(preview_logo_status_key(logo.as_str()))
+            .into_owned()
+            .into(),
+    );
+}
+
 pub fn setup_project(ui: &MainWindow) -> ProjectController {
     let state_slot = Arc::new(OnceLock::<ProjectStateFacade>::new());
     let state_slot_for_failure = state_slot.clone();
     let ui_weak_for_success = ui.as_weak();
     let ui_weak_for_failure = ui.as_weak();
     let state = ProjectStateFacade::open_deferred(
-        Arc::new(move |message| {
+        Arc::new(move |message_key| {
             let ui_weak = ui_weak_for_success.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = ui_weak.upgrade() {
-                    show_success(&ui, message);
+                    show_success(&ui, crate::i18n::tr(message_key).as_ref());
                 }
             });
         }),
@@ -59,7 +75,7 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
             let _ = slint::invoke_from_event_loop(move || {
                 if state.rollback_if_current(expected, rollback) {
                     if let Some(ui) = ui_weak.upgrade() {
-                        show_error(&ui, &format!("Failed to save project: {error}"));
+                        show_error(&ui, crate::i18n::tr("projects.save_failed").as_ref());
                     }
                 } else {
                     log::warn!(
@@ -123,12 +139,12 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
                 || local_repo.is_empty()
                 || remote_repo.is_empty()
             {
-                show_error(&ui, "Please fill in all fields.");
+                show_error(&ui, crate::i18n::tr("projects.fill_all_fields").as_ref());
                 return;
             }
 
             if state_add.contains_alias(alias) {
-                show_error(&ui, "Project alias already exists.");
+                show_error(&ui, crate::i18n::tr("projects.alias_exists").as_ref());
                 return;
             }
             start_project_save(
@@ -178,7 +194,10 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
             let project_tags = parse_project_tags(project_tags.as_str());
 
             if original_alias.is_empty() {
-                show_error(&ui, "Missing original project alias.");
+                show_error(
+                    &ui,
+                    crate::i18n::tr("projects.original_alias_missing").as_ref(),
+                );
                 return;
             }
             if name.is_empty()
@@ -186,17 +205,17 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
                 || local_repo.is_empty()
                 || remote_repo.is_empty()
             {
-                show_error(&ui, "Please fill in all fields.");
+                show_error(&ui, crate::i18n::tr("projects.fill_all_fields").as_ref());
                 return;
             }
 
             if !state_update.contains_alias(original_alias) {
-                show_error(&ui, "Project not found.");
+                show_error(&ui, crate::i18n::tr("projects.not_found").as_ref());
                 return;
             }
 
             if alias != original_alias && state_update.contains_alias(alias) {
-                show_error(&ui, "Project alias already exists.");
+                show_error(&ui, crate::i18n::tr("projects.alias_exists").as_ref());
                 return;
             }
             start_project_save(
@@ -229,12 +248,12 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
 
         let alias = alias.trim();
         if alias.is_empty() {
-            show_error(&ui, "Missing project alias.");
+            show_error(&ui, crate::i18n::tr("projects.alias_missing").as_ref());
             return;
         }
 
         if let Err(error) = state_delete.delete(alias.to_string()) {
-            show_error(&ui, &error);
+            show_error(&ui, crate::i18n::tr(error.as_str()).as_ref());
         }
     });
 
@@ -275,16 +294,18 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
                     Err(error) => {
                         log::error!("[Project] Reload task failed: {error}");
                         ui.set_project_list_error(
-                            "The local project registry could not be read.".into(),
+                            crate::i18n::tr("projects.registry_read_failed")
+                                .into_owned()
+                                .into(),
                         );
-                        show_error(&ui, "Failed to reload projects.");
+                        show_error(&ui, crate::i18n::tr("projects.reload_failed").as_ref());
                         return;
                     }
                 };
 
                 state_task.hydrate(list);
                 refresh_project_items(&ui, &state_task, query.as_str());
-                show_success(&ui, "Projects reloaded.");
+                show_success(&ui, crate::i18n::tr("projects.reloaded").as_ref());
             });
         });
     });
@@ -321,12 +342,18 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
                     Err(error) => {
                         log::error!("[Project] Initial load worker failed: {error}");
                         ui.set_project_list_error(
-                            "The local project registry could not be read.".into(),
+                            crate::i18n::tr("projects.registry_read_failed")
+                                .into_owned()
+                                .into(),
                         );
                     }
                 }
                 ui.set_project_logo_preview_image(resolve_project_logo_image(""));
-                ui.set_project_logo_preview_status("Using app default logo".into());
+                ui.set_project_logo_preview_status(
+                    crate::i18n::tr("projects.using_default_logo")
+                        .into_owned()
+                        .into(),
+                );
                 ui.set_project_list_loading(false);
             });
         });
@@ -347,7 +374,7 @@ fn start_project_save(
     let pending_key = action.pending_key(draft.project_alias.as_str());
     if !state.begin_save(pending_key.clone()) {
         if let Some(ui) = ui_weak.upgrade() {
-            show_error(&ui, "A save for this project is already in progress.");
+            show_error(&ui, crate::i18n::tr("projects.save_in_progress").as_ref());
         }
         return;
     }
@@ -370,7 +397,7 @@ fn start_project_save(
                     );
                     show_error(
                         &ui,
-                        "Unable to load remote project details. Check the remote URL and provider token.",
+                        crate::i18n::tr("projects.remote_details_failed").as_ref(),
                     );
                     return;
                 }
@@ -397,7 +424,7 @@ fn start_project_save(
             };
 
             if let Err(message) = outcome {
-                show_error(&ui, message.as_str());
+                show_error(&ui, crate::i18n::tr(message.as_str()).as_ref());
             }
         });
     });

@@ -39,6 +39,11 @@ This is the stable contract for the project-aware terminal drawer. Historical ex
 12. Session shutdown terminates the PTY process group, waits for graceful exit,
     escalates when required, and reaps the child. Descendant commands must not
     survive a project switch as orphan processes.
+13. Closing or toggling the drawer hides it without terminating the current
+    project session. Hidden sessions keep their Rust render state current but
+    defer Slint model refreshes until the drawer reopens. Project replacement
+    detaches the old session before terminating it on a worker so late exit or
+    refresh events cannot affect the new project.
 
 1. `open_terminal_for_project` 是 Project 页面唯一标准入口。
 2. 同项目重开保留 PTY/Session 内容和 cwd。
@@ -55,6 +60,9 @@ This is the stable contract for the project-aware terminal drawer. Historical ex
     色。
 12. Session 关闭时终止 PTY 进程组，等待正常退出，必要时升级终止并回收 Child；
     切换项目后子命令不得作为孤儿进程继续运行。
+13. 关闭或切换 Drawer 只隐藏界面，不终止当前项目 Session。隐藏期间继续更新 Rust
+    渲染状态，但延迟 Slint model 刷新直到重新打开；替换项目时先摘下旧 Session，再由
+    Worker 终止，迟到的退出或刷新事件不得影响新项目。
 
 ## Project switching matrix / 项目切换矩阵
 
@@ -84,6 +92,8 @@ This is the stable contract for the project-aware terminal drawer. Historical ex
 
 - First open shows prompt without clipping.
 - Close/reopen preserves prompt and does not duplicate shell initialization output.
+- Rapid close/open toggles keep the final requested visibility, reuse one session,
+  and apply hidden output when reopened.
 - A -> B -> A project switching selects the correct session and cwd.
 - Resize narrow/wide repeatedly without stale rows, overlapping output, or feedback loops.
 - Docked/fullscreen transitions preserve output and restore FAB/page layout.

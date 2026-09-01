@@ -13,6 +13,7 @@ import { GitHubTooltipAlignment, GitHubTooltipPlacement } from "../../state/tool
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import { GitHubWorkflowProjectDetails } from "../../components/workflow/github_workflow_components.slint";
 import { AiReviewRuleChoice } from "@ai-review";
+import { I18n } from "@i18n";
 
 
 export component GitHubWorkflowPage inherits GitHubPageView {
@@ -43,8 +44,8 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     callback cd-start(string, string, string);
     callback cd-rollback(string);
 
-    in property <string> branch-result: "Ready to recreate branches.";
-    in property <string> tag-result: "Ready to add or remove a tag.";
+    in property <string> branch-result: I18n.workflow-ready-branches;
+    in property <string> tag-result: I18n.workflow-ready-tags;
     in-out property <int> tag-selected-tab: 0;
     in-out property <string> tag-mode: "local";
     in-out property <string> tag-version-mode: "patch";
@@ -56,11 +57,11 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in property <bool> tag-running: false;
     in property <bool> tag-has-run: false;
     in property <string> project-id: "default";
-    in property <string> project-name: "Default Project";
+    in property <string> project-name: I18n.projects-default-project;
     in property <string> project-alias: "";
     in property <string> project-local-repo: "";
     in property <string> project-remote-repo: "";
-    in property <string> open-local-folder-tooltip: "Show in file manager";
+    in property <string> open-local-folder-tooltip: I18n.workflow-show-in-file-manager;
     in property <string> project-logo: "";
     in property <image> project-logo-image: @image-url("../../../logo.png");
     in property <string> code-font-family: "Menlo";
@@ -83,7 +84,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in property <string> pr-list-error-kind: "";
     in property <[AiReviewRuleChoice]> ai-review-rule-options: [];
     in property <string> ai-review-project-rule-id: "";
-    in property <string> ai-review-project-rule-name: "No preset";
+    in property <string> ai-review-project-rule-name: I18n.common-no-preset;
     in property <bool> pr-count-auto-update: false;
     in property <bool> pr-count-loading: false;
     in property <bool> pr-count-failed: false;
@@ -91,15 +92,15 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     in property <string> pr-uat-count: "-";
     in property <string> pr-prod-count: "-";
     in property <bool> cd-running: false;
-    in property <string> cd-summary: "No deployment started.";
+    in property <string> cd-summary: I18n.cd-no-deployment;
     in property <string> cd-build-status: "pending";
-    in property <string> cd-build-detail: "Waiting to start.";
+    in property <string> cd-build-detail: I18n.cd-waiting-to-start;
     in property <string> cd-test-status: "pending";
-    in property <string> cd-test-detail: "Waiting to start.";
+    in property <string> cd-test-detail: I18n.cd-waiting-to-start;
     in property <string> cd-deploy-status: "pending";
-    in property <string> cd-deploy-detail: "Waiting to start.";
+    in property <string> cd-deploy-detail: I18n.cd-waiting-to-start;
     in property <string> cd-verify-status: "pending";
-    in property <string> cd-verify-detail: "Waiting to start.";
+    in property <string> cd-verify-detail: I18n.cd-waiting-to-start;
 
     // MainWindow retains this navigation state while the full-window PR review
     // workspace temporarily unmounts the Workflow component tree.
@@ -118,10 +119,10 @@ export component GitHubWorkflowPage inherits GitHubPageView {
     private property <bool> has-local: root.project-local-repo != "";
     private property <string> display-remote: root.has-remote
         ? root.project-remote-repo
-        : "No remote URL";
+        : I18n.workflow-no-remote-url;
     private property <string> display-local: root.has-local
         ? root.project-local-repo
-        : "No local path";
+        : I18n.workflow-no-local-path;
     // GitHub-style full-width repo header stays mounted on both breakpoints.
     // Compact mode moves paths into the overflow menu.
     private property <length> project-header-height: project-details.height;
@@ -171,28 +172,28 @@ export component GitHubWorkflowPage inherits GitHubPageView {
             y: root.project-header-height;
             width: parent.width;
             height: root.workflow-nav-height;
-            group-label: "Workflow sections";
+            group-label: I18n.workflow-sections;
 
             GitHubUnderlineNavItem {
-                label: "Pull requests";
+                label: I18n.workflow-pull-requests;
                 icon: @image-url("../../assets/icons/octicon-git-pull-request-16.svg");
                 selected: root.selected-flow == 2;
                 clicked => { root.selected-flow = 2; }
             }
             GitHubUnderlineNavItem {
-                label: "Tags";
+                label: I18n.workflow-tags;
                 icon: @image-url("../../assets/icons/octicon-stack-16.svg");
                 selected: root.selected-flow == 3;
                 clicked => { root.selected-flow = 3; }
             }
             GitHubUnderlineNavItem {
-                label: "Branch";
+                label: I18n.workflow-branch;
                 icon: @image-url("../../assets/icons/octicon-git-commit-16.svg");
                 selected: root.selected-flow == 0;
                 clicked => { root.selected-flow = 0; }
             }
             GitHubUnderlineNavItem {
-                label: "CD";
+                label: I18n.workflow-cd;
                 icon: @image-url("../../assets/icons/octicon-repo-push-16.svg");
                 selected: root.selected-flow == 1;
                 clicked => { root.selected-flow = 1; }
@@ -360,7 +361,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 y: 8px;
                 width: parent.width - 24px;
                 height: 20px;
-                text: "Remote";
+                text: I18n.workflow-remote;
                 font-size: 12px;
                 font-weight: 600;
                 color: root.fg-muted;
@@ -383,7 +384,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 x: parent.width - 44px;
                 y: 28px;
                 button-enabled: root.has-remote;
-                tooltip-text: "Copy remote URL";
+                tooltip-text: I18n.workflow-copy-remote-url;
                 tooltip-align-right: true;
                 copy-requested => {
                     root.copy-remote-repo(root.project-remote-repo)
@@ -402,7 +403,7 @@ export component GitHubWorkflowPage inherits GitHubPageView {
                 y: 77px;
                 width: parent.width - 24px;
                 height: 20px;
-                text: "Local";
+                text: I18n.workflow-local;
                 font-size: 12px;
                 font-weight: 600;
                 color: root.fg-muted;
