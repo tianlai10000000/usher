@@ -1893,6 +1893,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn chat_scrollbar_origin_is_local_to_the_message_viewport() {
+        let chat_view = include_str!("../../ui/views/chat.slint");
+        let main_ui = include_str!("../../ui/main.slint");
+
+        assert!(!chat_view.contains("in property <length> scrollbar-top-inset"));
+        assert!(!chat_view.contains("scrollbar-top-inset: root.scrollbar-top-inset"));
+        assert!(!main_ui.contains("scrollbar-top-inset: root.native-titlebar-inset"));
+    }
+
+    #[test]
     fn drafts_are_isolated_by_chat_mode() {
         let mut drafts = ChatDrafts::default();
         drafts.set(ChatMode::Ai, "AI draft".into());

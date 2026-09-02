@@ -29,7 +29,6 @@ export component GitHubChatPage inherits Rectangle {
     in property <length> virtual-document-height: 0px;
     in-out property <int> loading-phase: 0;
     in property <length> viewport-height;
-    in property <length> scrollbar-top-inset: 0px;
     in property <string> application-font-family;
     in-out property <length> scroll-position: 0px;
     in property <int> scroll-to-bottom-revision: 0;
@@ -304,7 +303,6 @@ export component GitHubChatPage inherits Rectangle {
                 viewport_y <=> root.scroll-position;
                 show-scrollbar: !root.live-resizing;
                 stable-scrollbar-drag: root.performance-optimized;
-                scrollbar-top-inset: root.scrollbar-top-inset;
                 user-scroll-started => {
                     root.bottom-scroll-pin-ticks = 0;
                 }

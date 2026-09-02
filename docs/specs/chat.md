@@ -174,6 +174,10 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     current text and restores the destination mode's text. If user-message
     persistence fails after a mode switch, the original text is restored to the
     originating mode and the failure remains visible.
+40. The AI/RAG message scrollbar is bounded by the message viewport. The Chat
+    page already starts below the native title bar, so its scrollbar must not
+    apply the window title-bar inset a second time; at document offset zero the
+    thumb starts at the top of the message viewport track.
 
 1. Chat 历史继续使用 JSONL；缺少 `status` 字段的旧记录按普通消息兼容读取。
 2. 应用生成的错误/成功状态与正文分开保存，并使用矢量图标展示；禁止重新加入会触发彩色字体回退的固定 Emoji 前缀。
@@ -278,6 +282,9 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     再回锁校验最早消息 ID 并提交。过期分页不得覆盖更新的 prepend 结果。
 39. AI 与 RAG 分别保存 composer 草稿。切换模式时保存当前文字并恢复目标模式文字；
     若用户消息持久化失败时已经切换模式，原文字仍恢复到发起模式且失败提示保持可见。
+40. AI/RAG 消息滚动条以消息 viewport 为边界。Chat 页面本身已经位于原生标题栏下方，
+    因此滚动条不得再次应用窗口标题栏 inset；文档偏移为零时，thumb 必须位于消息 viewport
+    轨道顶部。
 
 ## Regression checklist / 回归检查
 
@@ -342,4 +349,8 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 - Verify both 24-step fast scrollbar drags (bottom-to-top and top-to-bottom)
   produce at least five rendered drag samples and report at most 1 px of blank
   exposure during drag and after release.
+- In both AI Chat and RAG, scroll to document offset zero and verify the
+  scrollbar thumb reaches the top of the message viewport track without a
+  native-title-bar-sized gap. Repeat in the AI Review conversation and PR
+  Conversation surfaces to confirm their scrollbar origins remain unchanged.
 - Run `cargo test --lib --locked` and compile the root Slint UI.
