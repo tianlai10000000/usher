@@ -142,8 +142,9 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 30. AI and RAG persist to separate JSONL files: `im/ai_chat_history.jsonl` and
     the legacy `im/chat_history.jsonl`. Pagination, next IDs, loaded tails, and
     sending state are isolated by mode.
-31. AI requests include at most the latest 20 loaded AI messages plus one
-    feature-owned system instruction. Switching mode while a response is in
+31. AI requests include at most the latest 20 loaded AI messages plus the
+    `general_chat` system instruction from `src/ai/prompts.toml`, including the
+    effective `[ai.agent].reply_language` instruction. Switching mode while a response is in
     flight must not cancel it, append it to the other history, clear the other
     mode's sending state, or project it into the other mode.
 32. A late response may update its original Rust session and persistence while
@@ -261,7 +262,8 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     `src/chat/chat.rs` 中的仓库知识 endpoint。
 30. AI 与 RAG 分别持久化到 `im/ai_chat_history.jsonl` 和旧有
     `im/chat_history.jsonl`；分页、next ID、加载尾部和发送状态按模式隔离。
-31. AI 请求最多携带最近 20 条已加载 AI 消息和一条 Feature 自有 system 指令。
+31. AI 请求最多携带最近 20 条已加载 AI 消息，以及 `src/ai/prompts.toml` 中包含
+    `[ai.agent].reply_language` 实际语言指令的 `general_chat` system 指令。
     响应进行中切换模式不得取消请求、写入另一历史、清除另一模式 sending 状态，或把
     响应投影到另一模式。
 32. 晚到响应可以更新原模式 Rust Session 与持久化；只有 Chat 可见且原模式仍为活动模式时，

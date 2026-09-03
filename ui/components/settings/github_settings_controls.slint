@@ -2,6 +2,86 @@ import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { I18n } from "@i18n";
 
+export component GitHubSettingsSectionMenuButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> open: false;
+    callback clicked();
+    private property <bool> keyboard-focus-visible: false;
+
+    width: 100%;
+    height: 40px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: GitHubTheme.border-default;
+    background: menu-touch.has-hover
+        ? GitHubTheme.control-default-hover
+        : GitHubTheme.control-default-rest;
+    accessible-role: button;
+    accessible-label: root.text;
+
+    menu-focus := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            root.keyboard-focus-visible = true;
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.keyboard-focus-visible = false;
+        }
+    }
+
+    Text {
+        x: 12px;
+        width: parent.width - 48px;
+        height: parent.height;
+        text: root.text;
+        font-size: 14px;
+        font-weight: 600;
+        color: GitHubTheme.fg-default;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Image {
+        x: parent.width - 28px;
+        y: 12px;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
+        colorize: GitHubTheme.fg-muted;
+        transform-rotation: root.open ? 180deg : 0deg;
+        transform-origin: { x: self.width / 2, y: self.height / 2 };
+    }
+
+    menu-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.keyboard-focus-visible = false;
+            menu-focus.focus();
+            root.clicked();
+        }
+    }
+
+    if menu-focus.has-focus && root.keyboard-focus-visible: Rectangle {
+        x: -2px;
+        y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-radius: 8px;
+        border-width: 2px;
+        border-color: GitHubTheme.focus-outline;
+        background: transparent;
+    }
+}
+
 // Shared controls for Settings and About.
 //
 // Geometry follows the current Primer Product UI medium controls: 32px control

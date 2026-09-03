@@ -218,6 +218,10 @@ fn ui(
     app.set_sidebar_motion_display_linked(sidebar_motion_mode.is_display_linked());
     app.on_advance_sidebar_motion(sidebar_motion::advance);
     let settings_page = SettingsPageBridge::default();
+    let ai_agent_settings =
+        ai::settings_state::AiAgentSettingsFacade::open(loaded_settings.ai.agent.clone())
+            .context("Failed to start AI Agent settings state")?;
+    settings_page.configure_ai_agent_settings(ai_agent_settings.clone());
     let (message_center, message_page) = MessagePageBridge::open_deferred(startup_timeline)?;
     app.set_platform_is_macos(cfg!(target_os = "macos"));
     message_center.set_application_active(app.get_native_window_active());
@@ -442,7 +446,7 @@ fn ui(
             save_settings_with_feedback(
                 app_weak_git_hosting_config.clone(),
                 settings_page_for_git_hosting.clone(),
-                SettingsSaveTarget::GitHosting,
+                SettingsSaveTarget::AiAgent,
                 "code hosting API configuration",
                 "settings.feedback.hosting_api_saved",
                 "settings.feedback.hosting_api_save_failed",
@@ -463,19 +467,17 @@ fn ui(
     // ========= AI Agent Settings ========= //
     let app_weak_ai_agent_save = app.as_weak();
     let settings_page_for_ai_save = settings_page.clone();
-    AppState::get(&app).on_save_ai_agent_settings(move |provider, base_url, api_key, model| {
-        let provider = provider.to_string();
-        let base_url = base_url.to_string();
-        let api_key = api_key.to_string();
-        let model = model.to_string();
+    let ai_agent_settings_for_save = ai_agent_settings.clone();
+    AppState::get(&app).on_save_ai_agent_settings(move |_, _, _, _, _| {
+        let ai_agent_settings = ai_agent_settings_for_save.clone();
         save_settings_with_feedback(
             app_weak_ai_agent_save.clone(),
             settings_page_for_ai_save.clone(),
-            SettingsSaveTarget::AiAgent,
+            SettingsSaveTarget::GitHosting,
             "AI Agent settings",
             "settings.feedback.ai_agent_saved",
             "settings.feedback.ai_agent_save_failed",
-            move || settings::save_ai_agent_settings(&provider, &base_url, &api_key, &model),
+            move || ai_agent_settings.flush(),
         );
     });
 
@@ -487,6 +489,7 @@ fn ui(
             base_url: base_url.to_string(),
             api_key: api_key.to_string(),
             model: model.to_string(),
+            reply_language: usher_i18n::AUTO_LANGUAGE.to_string(),
         };
         let ui_weak = app_weak_ai_agent_test.clone();
         let settings_page = settings_page_for_ai_test.clone();
@@ -549,32 +552,8 @@ fn ui(
 
     // Connect navigate callback in slint
     let router_clone = router.clone();
-    let app_for_ai_agent_provider = app.as_weak();
-    let settings_page_for_navigation = settings_page.clone();
     app.on_navigate(move |route| {
         router_clone.navigate(route);
-
-        if route == Route::Settings
-            && let Some(ui) = app_for_ai_agent_provider.upgrade()
-        {
-            let index = match AppState::get(&ui).get_ai_agent_provider().as_str() {
-                "deepseek" => 1,
-                "openai" => 2,
-                _ => 0,
-            };
-            // SettingsPage is conditionally created by the route. Force a
-            // transition after it exists so the native dropdown populates.
-            ui.set_settings_ai_agent_provider_index(-1);
-            settings_page_for_navigation.set_ai_agent_provider_index(-1);
-            let ui_weak = ui.as_weak();
-            let settings_page = settings_page_for_navigation.clone();
-            Timer::single_shot(std::time::Duration::from_millis(1), move || {
-                if let Some(ui) = ui_weak.upgrade() {
-                    ui.set_settings_ai_agent_provider_index(index);
-                    settings_page.set_ai_agent_provider_index(index);
-                }
-            });
-        }
     });
 
     let router_for_back = router.clone();
@@ -892,6 +871,11 @@ fn ui(
     shutdown::register_pre_shutdown_task_with_priority("shutdown_terminal", PRIORITY_HIGH, || {
         shutdown_terminal();
     });
+    shutdown::register_pre_shutdown_task_with_priority(
+        "shutdown_ai_agent_settings",
+        PRIORITY_HIGH,
+        move || ai_agent_settings.shutdown(),
+    );
     shutdown::register_pre_shutdown_task_with_priority(
         "shutdown_project_state",
         PRIORITY_HIGH,

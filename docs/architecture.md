@@ -51,7 +51,8 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `crates/usher-state-store/` | Framework-neutral cross-page state port and built-in engine: typed reducers/actions, immutable revisioned snapshots, selectors, immediate hydration, automatic monotonic subscriptions, RAII cancellation, and the worker-owned `PersistentStore` facade with deferred enable, coalescing, flush, and shutdown. Feature facades hide the engine so a community Store can replace it through an adapter. |
 | `crates/usher-virtual-list/` | Framework-neutral variable-height virtualization facade: exact item extents, offset/index mapping, bounded overscan windows, and exact item reveal. Its private adapter currently uses the community `virtualizer` engine; features and Slint bridges depend only on the local port so the engine remains replaceable. |
 | `crates/usher-preview/` | Framework-neutral artifact descriptors, provider/registry contracts, runtime policy, prepared payloads, and build-time detachable Markdown/image/plain-text providers. Its structure-only Markdown entry preserves blocks and inline semantics without initializing code-highlighting resources. It has no Chat, MainWindow, or Slint dependency. |
-| `crates/usher-ai-review/` | Optional framework-neutral AI review domain package: rule/config reducers, dynamic bounded scheduler, review inputs/sessions, diff chunking, prompt construction, response parsing, and finding aggregation. It has no MainWindow or Slint dependency. |
+| `crates/usher-ai-review/` | Optional framework-neutral AI review domain package: rule/config reducers, dynamic bounded scheduler, review inputs/sessions and prompt provenance, diff chunking, response parsing, and finding aggregation. It has no MainWindow or Slint dependency. |
+| `src/ai/` | OpenAI-compatible transport, the feature-owned typed/persistent AI Agent settings Store, plus the sole source-controlled built-in prompt catalog in `prompts.toml`; `prompts.rs` strictly renders typed, bounded AI Chat, AI Review, and Review Ask message envelopes and metadata-only provenance. |
 | `src/app_runtime.rs` | Process-wide Tokio runtime with two production worker threads. Runtime threads install the tracing dispatch; an explicit environment override exists for controlled benchmarks. |
 | `src/memory_diagnostics.rs` | Process-wide RSS/footprint snapshots and lifetime high-water marks, startup/run metadata, bounded Slint-model accounting, UI-size correlation, and the cancellable periodic memory sampler. |
 | `src/diagnostics.rs` | Crash-run sentinel, retention workers, log-directory reveal, and privacy-bounded diagnostic archive export. |
@@ -82,7 +83,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/shortcuts/` | Application command IDs, declarative key bindings, platform-normalized matching, route scopes, conflict validation, dispatch, and display labels. |
 | `src/app_lifecycle.rs` | Composition-level lifecycle registrations for Chat transition visibility and Workflow-scope cleanup. |
 | `src/settings.rs` | TOML settings model and serialized atomic persistence, including AI Agent credentials and the configurable RAG endpoint. |
-| `src/ai/` | Shared OpenAI-compatible AI Agent transport; `agent.rs` owns connection tests and chat completions used by AI Chat and AI Code Review. It does not own RAG transport or feature state. |
+| `src/ai/` | Shared OpenAI-compatible AI Agent transport and settings state; `agent.rs` owns connection tests and chat completions used by AI Chat and AI Code Review, while `settings_state.rs` owns the typed automatically persisted configuration facade. It does not own RAG transport. |
 | `src/network.rs` | Connectivity ownership and `AppState.network-online`: macOS uses SystemConfiguration reachability callbacks; other platforms use a no-packet route check with offline backoff. |
 | `src/http/mod.rs` | The single shared reqwest client, per-request total/body-idle timeout policy, centralized response-body reads, interceptors, error normalization, and optional UI feedback. |
 | `src/logger/` | Debug logging, tracing, and panic/error support. The panic hook owns a direct JSON fallback write that remains active when ordinary tracing is disabled. |
@@ -350,6 +351,31 @@ sentinel and transition to their default on the next UI tick so a newly built
 tree invalidates cached bindings. A selector label, its selected appearance, and
 its displayed fields must derive from the same state source. This rule covers
 the Settings section menu, Git hosting providers, and AI Agent provider presets.
+The compact section menu uses one fixed trigger leaf per section and snapshots
+the active section whenever it opens, so both its collapsed label and selected
+row survive factory reuse without retaining the previous route's section.
+The interface-language and AI reply-language pickers follow the same fixed-leaf
+rule without hard-coding a locale list in application UI. The
+`usher-ui-settings` build script reads the validated `usher-i18n` locale
+manifest and generates one fixed trigger and option leaf per locale. Adding a
+locale therefore remains a manifest/catalog operation, while no runtime
+repeater delegate can retain another locale's label, id, or selected state
+across factory products. On every menu open, the picker snapshots the current
+canonical selection into picker-local state; option styling reads that snapshot
+instead of a global binding that the real renderer may leave stale while the
+option surface is hidden.
+
+AI Agent form state is an exception to purely page-local edit ownership because
+it is consumed by Chat and Review outside Settings. `src/ai/settings_state.rs`
+owns one typed Store snapshot for Provider, Base URL, API Key, Model, and reply
+language. Settings controls dispatch one typed action; selecting a preset
+reduces its Provider, Base URL, and Model in one commit, then the bridge projects
+that same snapshot into the isolated page and `MainWindow`. Every changed commit
+is automatically queued to the Store-owned persistence worker, which writes the
+complete `[ai.agent]` snapshot through the existing atomic TOML boundary. A
+factory recreation hydrates from the Store snapshot, never from independent
+selector fields. The visible Save command remains an explicit flush/feedback
+operation; persistence does not depend on pressing it.
 
 Messages keeps its factory root and visual tree stable after the first
 visit to avoid Slint 1.17.1 factory remount corruption. Its bridge clears the
@@ -506,11 +532,20 @@ Debug builds enable process memory diagnostics by default; the persisted Setting
 
 ### Settings
 
-`AppSettings` is persisted as TOML in the platform config directory. It contains theme mode, the `auto` or canonical locale-id language preference, auto-update, independent console/`usher.log`/`usher_tracing.log` destinations, Terminal verbose and memory diagnostics, UI sound-effect preference, navigation drawer state, Git platform tokens, plus per-provider enterprise API URLs and names under `[git.platform.<provider>]`, OpenAI-compatible AI Agent connection values under `[ai.agent]`, and an optional HTTPS RAG endpoint under `[ai.chat]` (with `USHER_RAG_API_URL` as the environment fallback). Saves are serialized, write and sync a unique same-directory temporary file, and atomically replace the destination. A parse failure preserves the source as `settings.toml.corrupt-*` before defaults may be saved; if preservation fails, settings writes remain disabled for that process. Logger destinations use runtime atomic filters; `usher.log` opens lazily on the first enabled write, and Settings exposes GitHub-style `Enable all` / `Disable all` actions while retaining every independent state. Gitee stores public `token` and `enterprise_token` separately. A legacy single Gitee token is migrated to the enterprise field only when an enterprise API root was already configured; credentials never fall back across profiles. `AppState` mirrors values required by Slint. API keys, enterprise names, and configured URLs are local configuration and must not be logged. Provider API code uses an enterprise API URL only when its host matches the repository remote; users may supply the host or the complete API root, with the provider version path added if omitted. Public-provider defaults remain remote-derived. Auto theme resolves through AppKit on macOS, the Windows per-user application-theme setting, and the XDG Desktop Portal on Linux. While Auto is selected, Usher watches OS appearance changes: macOS uses `AppleInterfaceThemeChangedNotification` plus a 1s poll fallback; Windows and Linux poll the same detectors every 1s. Selecting Auto clears any forced AppKit appearance so the process can track the system; explicit Light/Dark lock Aqua/DarkAqua. When UI sound effects are enabled, breadcrumb Back uses `platform::play_ui_click`: macOS plays `Tink`, Windows queues the user-configured default sound, and Linux plays the desktop sound-theme event on a worker thread with common PipeWire/PulseAudio/ALSA command-line fallbacks.
+`AppSettings` is persisted as TOML in the platform config directory. It contains theme mode, the `auto` or canonical locale-id language preference, auto-update, independent console/`usher.log`/`usher_tracing.log` destinations, Terminal verbose and memory diagnostics, UI sound-effect preference, navigation drawer state, Git platform tokens, plus per-provider enterprise API URLs and names under `[git.platform.<provider>]`, OpenAI-compatible AI Agent connection values under `[ai.agent]`, and an optional HTTPS RAG endpoint under `[ai.chat]` (with `USHER_RAG_API_URL` as the environment fallback). AI Agent edits are reduced and auto-persisted by its feature Store; other settings retain their existing immediate or explicit-save entry points. Saves are serialized, write and sync a unique same-directory temporary file, and atomically replace the destination. A parse failure preserves the source as `settings.toml.corrupt-*` before defaults may be saved; if preservation fails, settings writes remain disabled for that process. Logger destinations use runtime atomic filters; `usher.log` opens lazily on the first enabled write, and Settings exposes GitHub-style `Enable all` / `Disable all` actions while retaining every independent state. Gitee stores public `token` and `enterprise_token` separately. A legacy single Gitee token is migrated to the enterprise field only when an enterprise API root was already configured; credentials never fall back across profiles. `AppState` mirrors values required by Slint. API keys, enterprise names, and configured URLs are local configuration and must not be logged. Provider API code uses an enterprise API URL only when its host matches the repository remote; users may supply the host or the complete API root, with the provider version path added if omitted. Public-provider defaults remain remote-derived. Auto theme resolves through AppKit on macOS, the Windows per-user application-theme setting, and the XDG Desktop Portal on Linux. While Auto is selected, Usher watches OS appearance changes: macOS uses `AppleInterfaceThemeChangedNotification` plus a 1s poll fallback; Windows and Linux poll the same detectors every 1s. Selecting Auto clears any forced AppKit appearance so the process can track the system; explicit Light/Dark lock Aqua/DarkAqua. When UI sound effects are enabled, breadcrumb Back uses `platform::play_ui_click`: macOS plays `Tink`, Windows queues the user-configured default sound, and Linux plays the desktop sound-theme event on a worker thread with common PipeWire/PulseAudio/ALSA command-line fallbacks.
+
+Within `[ai.agent]`, `reply_language` is either `auto` or a canonical locale id.
+`auto` resolves from the active UI locale at request assembly time; the setting
+applies to AI Chat, AI Review, and Review Ask, never RAG. Unknown persisted values
+normalize to `auto`, and the isolated Settings factory mirrors both the selected
+id and manifest-driven options through its event-loop bridge.
 
 The root `i18n/` directory is the only translation asset source. Its manifest
 drives locale discovery, native labels, aliases, fallback, and coverage gates;
 its semantic message catalog drives generated Slint properties and Rust lookup.
+After selecting a bundled locale, the application explicitly marks all Slint
+translations dirty so independently compiled MainWindow, Settings, and Messages
+roots repaint their existing `@tr` bindings in the same event-loop turn.
 `src/i18n.rs` applies the selected bundled locale on the Slint event loop before
 factory pages are created. Because Slint keeps one bundle per runtime context,
 MainWindow, Settings, and Messages compile the same complete generated catalog
@@ -906,6 +941,21 @@ of the Slint compile and live-preview dependency graph.
    the event loop.
 5. Failures remain an inline assistant message; the request is silent to prevent duplicate toast feedback.
 
+### AI Agent prompt assembly
+
+1. AI Chat, AI Review, and Review Ask load `[ai.agent]` and delegate all built-in
+   instructions to `src/ai/prompts.rs`; call sites contain no prompt literals.
+2. The adapter parses the embedded `src/ai/prompts.toml` catalog once, rejects an
+   unsupported schema, and renders each versioned entry with strict undefined variables.
+3. The selected reply locale contributes exactly one language instruction to the
+   system message. Typed context assembly applies the 20-message conversation and
+   48 KiB Review Ask diff bounds before transport.
+4. Local paths, remote/provider URLs, author, update time, credentials, and model
+   connection settings are excluded from PR prompt context. Logs contain only prompt
+   id/version, effective locale, message counts, and context byte/truncation totals.
+5. Review Sessions aggregate chunk-request provenance; successful Review Ask assistant
+   messages keep per-request provenance. Legacy records default these fields safely.
+
 ### AI Review response projection
 
 1. A worker loading or completing a review session passes assistant Markdown to
@@ -932,7 +982,7 @@ of the Slint compile and live-preview dependency graph.
 
 ### AI Agent connection test
 
-1. Settings saves an independent OpenAI-compatible Base URL, API Key, and model name.
+1. Settings saves an independent OpenAI-compatible Base URL, API Key, model name, and reply language.
 2. A user-triggered test runs `ai/agent.rs` on the shared runtime.
 3. The shared HTTP module requests the provider's `/models` endpoint and reports the result through Toast feedback.
 4. This flow must not change the RAG Chat endpoint, payload, or history behavior.

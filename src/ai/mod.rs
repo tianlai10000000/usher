@@ -4,3 +4,5 @@
 //! by AI Agent work.
 
 pub(crate) mod agent;
+pub(crate) mod prompts;
+pub(crate) mod settings_state;

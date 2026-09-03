@@ -5,7 +5,7 @@
 //! domain crate never depends on a concrete generated UI engine.
 
 use anyhow::{Context, Result};
-use slint::{Global, Model, ModelRc, VecModel};
+use slint::Global;
 use std::borrow::Cow;
 use std::fmt;
 #[cfg(test)]
@@ -120,6 +120,9 @@ pub(crate) fn apply_preference(preference: &str) -> Result<&'static str> {
     let locale = usher_i18n::resolve_preference(preference);
     slint::select_bundled_translation(locale.id)
         .with_context(|| format!("Failed to select bundled locale {}", locale.id))?;
+    // ComponentFactory products are independently generated UI roots. Force
+    // every root to re-evaluate @tr bindings after changing the bundle index.
+    i_slint_core::translations::mark_all_translations_dirty();
     usher_i18n::activate_locale(locale.id)
         .with_context(|| format!("Resolved locale {} is not registered", locale.id))?;
     Ok(usher_i18n::canonical_preference(preference))
@@ -127,6 +130,7 @@ pub(crate) fn apply_preference(preference: &str) -> Result<&'static str> {
 
 pub(crate) fn sync_main_window(app: &MainWindow, preference: &str) {
     let state = AppState::get(app);
+    let reply_language = state.get_ai_agent_reply_language_selection().id.to_string();
     let canonical = usher_i18n::canonical_preference(preference);
     let choices = language_choices();
     let selected_label = choices
@@ -138,19 +142,7 @@ pub(crate) fn sync_main_window(app: &MainWindow, preference: &str) {
         id: canonical.into(),
         label: selected_label.into(),
     });
-    let options = choices
-        .into_iter()
-        .map(|choice| LanguageOption {
-            id: choice.id.into(),
-            label: choice.label.into(),
-        })
-        .collect::<Vec<_>>();
-    let current = state.get_language_options();
-    if let Some(model) = current.as_any().downcast_ref::<VecModel<LanguageOption>>() {
-        model.set_vec(options);
-    } else {
-        state.set_language_options(ModelRc::new(VecModel::from(options)));
-    }
+    sync_ai_reply_language(app, &reply_language);
 }
 
 pub(crate) fn language_choices() -> Vec<LanguageChoice> {
@@ -168,6 +160,45 @@ pub(crate) fn language_choices() -> Vec<LanguageChoice> {
             }),
     );
     choices
+}
+
+pub(crate) fn ai_reply_language_choices() -> Vec<LanguageChoice> {
+    let mut choices = Vec::with_capacity(usher_i18n::available_locales().len() + 1);
+    choices.push(LanguageChoice {
+        id: usher_i18n::AUTO_LANGUAGE.to_string(),
+        label: usher_i18n::translate("settings.ai_agent.reply_language_auto").into_owned(),
+    });
+    choices.extend(
+        usher_i18n::available_locales()
+            .iter()
+            .map(|locale| LanguageChoice {
+                id: locale.id.to_string(),
+                label: locale.native_name.to_string(),
+            }),
+    );
+    choices
+}
+
+pub(crate) fn sync_ai_reply_language(app: &MainWindow, preference: &str) {
+    let state = AppState::get(app);
+    let canonical = if preference
+        .trim()
+        .eq_ignore_ascii_case(usher_i18n::AUTO_LANGUAGE)
+    {
+        usher_i18n::AUTO_LANGUAGE
+    } else {
+        usher_i18n::canonical_preference(preference)
+    };
+    let choices = ai_reply_language_choices();
+    let selected_label = choices
+        .iter()
+        .find(|choice| choice.id == canonical)
+        .map(|choice| choice.label.as_str())
+        .unwrap_or(canonical);
+    state.set_ai_agent_reply_language_selection(LanguageOption {
+        id: canonical.into(),
+        label: selected_label.into(),
+    });
 }
 
 pub(crate) fn tr(key: &str) -> Cow<'_, str> {
@@ -195,6 +226,16 @@ mod tests {
         for locale in usher_i18n::available_locales() {
             assert!(choices.iter().any(|choice| choice.id == locale.id));
         }
+    }
+
+    #[test]
+    fn ai_reply_language_choices_use_a_distinct_auto_label() {
+        let _locale_guard = test_locale_guard();
+        usher_i18n::activate_preference("en");
+        let choices = ai_reply_language_choices();
+        assert_eq!(choices[0].id, usher_i18n::AUTO_LANGUAGE);
+        assert_eq!(choices[0].label, "Follow interface language");
+        assert_eq!(choices.len(), usher_i18n::available_locales().len() + 1);
     }
 
     #[test]
@@ -244,6 +285,14 @@ mod tests {
             assert_eq!(
                 MessagesAppState::get(&messages).get_i18n_catalog_sentinel(),
                 expected
+            );
+
+            let settings_title = usher_i18n::translate_for(locale.id, "settings.title");
+            assert!(
+                ElementHandle::find_by_accessible_label(&settings, settings_title.as_ref())
+                    .next()
+                    .is_some(),
+                "runtime locale switch must repaint the Settings factory title"
             );
 
             for key in ["navigation.home", "common.projects", "workflow.sections"] {

@@ -126,6 +126,18 @@ msgctxt "settings.ai_agent.provider_api_caption"
 msgid "The provider's OpenAI-compatible API root."
 msgstr "Provider 的 OpenAI-compatible API 根地址。"
 
+msgctxt "settings.ai_agent.reply_language"
+msgid "Reply language"
+msgstr "回复语言"
+
+msgctxt "settings.ai_agent.reply_language_auto"
+msgid "Follow interface language"
+msgstr "跟随界面语言"
+
+msgctxt "settings.ai_agent.reply_language_description"
+msgid "Applies to AI Chat, AI Code Review, and Review Ask."
+msgstr "应用于 AI Chat、AI Code Review 和 Review Ask。"
+
 msgctxt "settings.ai_agent.save"
 msgid "Save AI Agent"
 msgstr "保存 AI Agent"

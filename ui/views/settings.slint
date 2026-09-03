@@ -4,11 +4,11 @@ import { I18n } from "@i18n";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
 import { GitHubTheme } from "../theme/github_theme.slint";
 import { GitHubTooltipOverlayHost } from "../components/github_tooltip_overlay.slint";
-import { GitHubSettingsNavItem } from "../components/settings/github_settings_controls.slint";
 import {
-    GitHubSettingsPane,
+    GitHubSettingsNavItem,
     GitHubSettingsSectionMenuButton
-} from "../components/settings/github_settings_layout.slint";
+} from "../components/settings/github_settings_controls.slint";
+import { GitHubSettingsPane } from "../components/settings/github_settings_layout.slint";
 import { AiReviewRuleItem } from "@ai-review-settings";
 export { AiReviewRuleItem } from "@ai-review-settings";
 
@@ -33,7 +33,6 @@ export component GitHubSettingsPage inherits Rectangle {
     in-out property <bool> reveal-ai-agent-api-key: false;
     in-out property <bool> ai-agent-saved: false;
     in-out property <bool> ai-agent-testing: false;
-    in-out property <int> ai-agent-provider-index: -1;
     in-out property <bool> update-checking: false;
     in property <[AiReviewRuleItem]> ai-review-rules: [];
     in property <int> ai-review-max-concurrent-tasks: 3;
@@ -52,6 +51,7 @@ export component GitHubSettingsPage inherits Rectangle {
     private property <int> hosting-config-tab: -1;
     private property <bool> initial-tab-sync-pending: true;
     private property <bool> compact-navigation-open: false;
+    private property <int> compact-navigation-selection: -1;
     private property <length> page-gutter: root.width >= 1000px ? 48px : 16px;
     private property <length> available-width: max(0px, root.width - root.page-gutter * 2);
     private property <length> page-width: min(1120px, root.available-width);
@@ -146,7 +146,6 @@ export component GitHubSettingsPage inherits Rectangle {
                                 reveal-ai-agent-api-key <=> root.reveal-ai-agent-api-key;
                                 ai-agent-saved <=> root.ai-agent-saved;
                                 ai-agent-testing <=> root.ai-agent-testing;
-                                ai-agent-provider-index <=> root.ai-agent-provider-index;
                                 hosting-config-tab <=> root.hosting-config-tab;
                                 update-checking <=> root.update-checking;
                                 ai-review-rules: root.ai-review-rules;
@@ -172,15 +171,60 @@ export component GitHubSettingsPage inherits Rectangle {
                             spacing: 16px;
                             alignment: start;
 
-                            GitHubSettingsSectionMenuButton {
+                            Rectangle {
                                 width: parent.width;
-                                text: root.selected-section == 1 ? I18n.settings-code-hosting-title
-                                    : (root.selected-section == 2 ? I18n.settings-ai-agent-title
-                                        : (root.selected-section == 3 ? I18n.settings-ai-review-title
-                                            : (root.selected-section == 4 ? I18n.settings-diagnostics-title : I18n.settings-general-title)));
-                                open: root.compact-navigation-open;
-                                clicked => {
-                                    root.compact-navigation-open = !root.compact-navigation-open;
+                                height: 40px;
+                                background: transparent;
+
+                                GitHubSettingsSectionMenuButton {
+                                    width: parent.width;
+                                    visible: root.selected-section == 0;
+                                    text: I18n.settings-general-title;
+                                    open: root.compact-navigation-open;
+                                    clicked => {
+                                        root.compact-navigation-selection = root.selected-section;
+                                        root.compact-navigation-open = !root.compact-navigation-open;
+                                    }
+                                }
+                                GitHubSettingsSectionMenuButton {
+                                    width: parent.width;
+                                    visible: root.selected-section == 1;
+                                    text: I18n.settings-code-hosting-title;
+                                    open: root.compact-navigation-open;
+                                    clicked => {
+                                        root.compact-navigation-selection = root.selected-section;
+                                        root.compact-navigation-open = !root.compact-navigation-open;
+                                    }
+                                }
+                                GitHubSettingsSectionMenuButton {
+                                    width: parent.width;
+                                    visible: root.selected-section == 2;
+                                    text: I18n.settings-ai-agent-title;
+                                    open: root.compact-navigation-open;
+                                    clicked => {
+                                        root.compact-navigation-selection = root.selected-section;
+                                        root.compact-navigation-open = !root.compact-navigation-open;
+                                    }
+                                }
+                                GitHubSettingsSectionMenuButton {
+                                    width: parent.width;
+                                    visible: root.selected-section == 3;
+                                    text: I18n.settings-ai-review-title;
+                                    open: root.compact-navigation-open;
+                                    clicked => {
+                                        root.compact-navigation-selection = root.selected-section;
+                                        root.compact-navigation-open = !root.compact-navigation-open;
+                                    }
+                                }
+                                GitHubSettingsSectionMenuButton {
+                                    width: parent.width;
+                                    visible: root.selected-section == 4;
+                                    text: I18n.settings-diagnostics-title;
+                                    open: root.compact-navigation-open;
+                                    clicked => {
+                                        root.compact-navigation-selection = root.selected-section;
+                                        root.compact-navigation-open = !root.compact-navigation-open;
+                                    }
                                 }
                             }
 
@@ -201,28 +245,48 @@ export component GitHubSettingsPage inherits Rectangle {
 
                                     GitHubSettingsNavItem {
                                         text: I18n.settings-general-title;
-                                        selected: root.selected-section == 0;
-                                        clicked => { root.selected-section = 0; root.compact-navigation-open = false; }
+                                        selected: root.compact-navigation-selection == 0;
+                                        clicked => {
+                                            root.compact-navigation-selection = 0;
+                                            root.selected-section = 0;
+                                            root.compact-navigation-open = false;
+                                        }
                                     }
                                     GitHubSettingsNavItem {
                                         text: I18n.settings-code-hosting-title;
-                                        selected: root.selected-section == 1;
-                                        clicked => { root.selected-section = 1; root.compact-navigation-open = false; }
+                                        selected: root.compact-navigation-selection == 1;
+                                        clicked => {
+                                            root.compact-navigation-selection = 1;
+                                            root.selected-section = 1;
+                                            root.compact-navigation-open = false;
+                                        }
                                     }
                                     GitHubSettingsNavItem {
                                         text: I18n.settings-ai-agent-title;
-                                        selected: root.selected-section == 2;
-                                        clicked => { root.selected-section = 2; root.compact-navigation-open = false; }
+                                        selected: root.compact-navigation-selection == 2;
+                                        clicked => {
+                                            root.compact-navigation-selection = 2;
+                                            root.selected-section = 2;
+                                            root.compact-navigation-open = false;
+                                        }
                                     }
                                     GitHubSettingsNavItem {
                                         text: I18n.settings-ai-review-title;
-                                        selected: root.selected-section == 3;
-                                        clicked => { root.selected-section = 3; root.compact-navigation-open = false; }
+                                        selected: root.compact-navigation-selection == 3;
+                                        clicked => {
+                                            root.compact-navigation-selection = 3;
+                                            root.selected-section = 3;
+                                            root.compact-navigation-open = false;
+                                        }
                                     }
                                     GitHubSettingsNavItem {
                                         text: I18n.settings-diagnostics-title;
-                                        selected: root.selected-section == 4;
-                                        clicked => { root.selected-section = 4; root.compact-navigation-open = false; }
+                                        selected: root.compact-navigation-selection == 4;
+                                        clicked => {
+                                            root.compact-navigation-selection = 4;
+                                            root.selected-section = 4;
+                                            root.compact-navigation-open = false;
+                                        }
                                     }
                                 }
                             }
@@ -237,7 +301,6 @@ export component GitHubSettingsPage inherits Rectangle {
                                 reveal-ai-agent-api-key <=> root.reveal-ai-agent-api-key;
                                 ai-agent-saved <=> root.ai-agent-saved;
                                 ai-agent-testing <=> root.ai-agent-testing;
-                                ai-agent-provider-index <=> root.ai-agent-provider-index;
                                 hosting-config-tab <=> root.hosting-config-tab;
                                 update-checking <=> root.update-checking;
                                 ai-review-rules: root.ai-review-rules;

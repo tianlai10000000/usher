@@ -49,7 +49,8 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `crates/usher-state-store/` | 与框架无关的跨页面 State 接口与内置引擎：强类型 reducer/action、不可变 revision 快照、selector、立即 hydration、自动单调订阅、RAII 取消，以及支持延迟启用、合并、flush 和 shutdown 的 Worker `PersistentStore` 门面。Feature 门面隐藏具体引擎，未来可通过 adapter 替换社区 Store。 |
 | `crates/usher-virtual-list/` | 与框架无关的可变行高虚拟列表门面：精确 item extent、offset/index 映射、有界 overscan 窗口与精确 item reveal。私有 adapter 当前使用社区 `virtualizer` 引擎；Feature 与 Slint bridge 只依赖本地接口，底层可替换。 |
 | `crates/usher-preview/` | 与框架无关的 Artifact 描述、Provider/Registry 契约、运行时策略、准备后 payload，以及构建期可拆卸的 Markdown/图片/纯文本 Provider；其纯结构 Markdown 入口保留 block 与行内语义，但不会初始化代码高亮资源；不依赖 Chat、MainWindow 或 Slint。 |
-| `crates/usher-ai-review/` | 可选且与框架无关的 AI Review 领域包：规则/配置 reducer、动态有界调度器、Review 输入/Session、diff 分块、Prompt 构造、响应解析和 finding 聚合；不依赖 MainWindow 或 Slint。 |
+| `crates/usher-ai-review/` | 可选且与框架无关的 AI Review 领域包：规则/配置 reducer、动态有界调度器、Review 输入/Session 与 Prompt provenance、diff 分块、响应解析和 finding 聚合；不依赖 MainWindow 或 Slint。 |
+| `src/ai/` | OpenAI-compatible transport、Feature 自有的强类型/持久化 AI Agent 配置 Store，以及位于 `prompts.toml` 的唯一受版本控制内置 Prompt catalog；`prompts.rs` 以 strict 模式渲染强类型、有界的 AI Chat、AI Review、Review Ask 消息 envelope 与纯元数据 provenance。 |
 | `src/app_runtime.rs` | 进程级 Tokio runtime，生产默认使用 2 个 worker；runtime 线程安装 tracing dispatch，并保留显式环境覆盖用于受控基准。 |
 | `src/memory_diagnostics.rs` | 统一采集进程 RSS/footprint 与生命周期高水位、启动/运行元数据、有界 Slint model 占用、UI 尺寸关联，以及可取消的周期内存采样。 |
 | `src/diagnostics.rs` | 崩溃运行哨兵、保留策略 Worker、日志目录打开与隐私有界的诊断归档导出。 |
@@ -80,7 +81,7 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `src/shortcuts/` | 应用命令 ID、声明式键位、平台归一化匹配、路由作用域、冲突校验、分发与展示标签。 |
 | `src/app_lifecycle.rs` | composition 层生命周期注册，负责 Chat transition 可见性与 Workflow scope 清理。 |
 | `src/settings.rs` | TOML 设置模型与串行原子持久化，包含 AI Agent 凭据和可配置 RAG endpoint。 |
-| `src/ai/` | 共用 OpenAI-compatible AI Agent transport；`agent.rs` 负责连通性测试，以及 AI Chat/AI Code Review 使用的 chat completion；不负责 RAG transport 或 Feature 状态。 |
+| `src/ai/` | 共用 OpenAI-compatible AI Agent transport、Feature 自有的强类型/持久化配置 Store 与内置 Prompt catalog；`agent.rs` 负责连通性测试及 AI Chat/AI Code Review 使用的 chat completion，不负责 RAG transport。 |
 | `src/network.rs` | 网络可达性与 `AppState.network-online`：macOS 使用 SystemConfiguration 回调，其它平台使用不发包的路由检查与离线退避。 |
 | `src/http/mod.rs` | 唯一共享 reqwest client、单请求总超时/响应体空闲超时策略、统一响应体读取、拦截器、统一错误和可选 UI 反馈。 |
 | `src/logger/` | Debug 日志、tracing 和 panic/error 支持；panic hook 自有直接 JSON 兜底写入，即使普通 tracing 已关闭仍保持生效。 |
@@ -283,6 +284,24 @@ placeholder、值或选中态。路由级选择索引必须从哨兵值开始，
 默认值，以便新建视觉树主动失效旧绑定。选择器文字、选中样式和显示字段必须来自同一
 状态源。该规则覆盖 Settings section 菜单、Git hosting provider 和 AI Agent provider
 预设。
+compact section 菜单为每个 section 使用独立的固定触发器叶子，并在每次展开时快照
+当前 section，因此折叠标签与选中行不会在 factory 复用后保留上一条路由的 section。
+界面语言与 AI 回复语言选择器同样遵守固定叶子规则，但不在应用 UI 中硬编码语言
+列表。`usher-ui-settings` 构建脚本读取经过校验的 `usher-i18n` locale manifest，
+为每个语言生成固定的触发器和选项叶子。因此新增语言仍然只需维护 manifest 与翻译
+catalog，同时运行时 repeater delegate 不会在 factory 产品之间残留其他语言的标签、
+id 或选中状态。每次展开菜单时，picker 都会把当前规范化选择快照到自身局部状态；
+选项样式读取该快照，而不直接依赖真实渲染器在选项 surface 隐藏期间可能未失效的
+global binding。
+
+AI Agent 表单状态并非纯页面局部编辑状态，因为 Settings 之外的 Chat 与 Review 也会
+消费它。`src/ai/settings_state.rs` 用一个强类型 Store 快照统一持有 Provider、Base URL、
+API Key、Model 与回复语言。Settings 控件只 dispatch 强类型 Action；选择预设时，
+reducer 在一次 commit 中同时更新 Provider、Base URL 与 Model，随后 bridge 把同一份
+快照投影到独立页面和 `MainWindow`。每次有效 commit 都自动进入 Store 自有的持久化
+worker，并通过既有原子 TOML 边界写入完整 `[ai.agent]` 快照。factory 重建只能从
+Store 快照 hydration，不能再分别读取多个选择器字段。可见的 Save 命令保留为显式
+flush 与反馈入口，但持久化不依赖用户点击它。
 
 Messages 首次访问后保留稳定 factory 根与视觉树，以规避 Slint
 1.17.1 的 factory 重挂载损坏。退出时 bridge 清空行 model，重新进入时先从最新
@@ -414,10 +433,17 @@ Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可�
 
 ### 设置
 
-`AppSettings` 以 TOML 保存到平台配置目录，包括主题、`auto` 或规范 locale id 的语言偏好、自动更新、相互独立的 Console/`usher.log`/`usher_tracing.log` 输出目标、Terminal verbose 与内存诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称、位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置，以及位于 `[ai.chat]` 的可选 HTTPS RAG endpoint（环境变量回退为 `USHER_RAG_API_URL`）。保存操作由写锁串行化，先写入并同步同目录唯一临时文件，再原子替换目标；解析失败时必须先把原文件保留为 `settings.toml.corrupt-*`，若保留失败，则本进程禁止继续写 Settings。Logger 输出目标通过运行时原子过滤控制；`usher.log` 在首次启用写入时按需打开，Settings 使用 GitHub 风格的 `Enable all` / `Disable all` 批量操作，同时保留每项独立状态。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
+`AppSettings` 以 TOML 保存到平台配置目录，包括主题、`auto` 或规范 locale id 的语言偏好、自动更新、相互独立的 Console/`usher.log`/`usher_tracing.log` 输出目标、Terminal verbose 与内存诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称、位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置，以及位于 `[ai.chat]` 的可选 HTTPS RAG endpoint（环境变量回退为 `USHER_RAG_API_URL`）。AI Agent 编辑由其 Feature Store 归约并自动持久化，其他设置继续使用既有的即时或显式保存入口。保存操作由写锁串行化，先写入并同步同目录唯一临时文件，再原子替换目标；解析失败时必须先把原文件保留为 `settings.toml.corrupt-*`，若保留失败，则本进程禁止继续写 Settings。Logger 输出目标通过运行时原子过滤控制；`usher.log` 在首次启用写入时按需打开，Settings 使用 GitHub 风格的 `Enable all` / `Disable all` 批量操作，同时保留每项独立状态。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
+
+`[ai.agent]` 下的 `reply_language` 取值为 `auto` 或规范 locale id。`auto` 在组装每次请求时
+解析当前 UI locale；该设置应用于 AI Chat、AI Review 与 Review Ask，绝不影响 RAG。
+未知持久值归一化为 `auto`；独立 Settings factory 通过 event-loop bridge 同步选中 id 与
+manifest 驱动的选项列表。
 
 根目录 `i18n/` 是唯一翻译资产源：manifest 驱动 locale 发现、原生语言名称、别名、
 回退和覆盖率门禁；语义消息 catalog 同时驱动生成的 Slint property 与 Rust 查询。
+选择 bundled locale 后，应用会显式把全部 Slint translation 标记为 dirty，使独立编译的
+MainWindow、Settings 与 Messages root 在同一个 event-loop turn 重新绘制既有 `@tr` binding。
 `src/i18n.rs` 在 Slint event loop 上、创建独立 Factory 页面前应用语言。由于 Slint
 每个运行时上下文只保存一个 bundle，MainWindow、Settings 和 Messages 必须编译同一
 份完整生成 catalog，禁止各页面维护局部 `@tr()` 索引。Rust 动态状态在构建 UI 投影
@@ -747,6 +773,19 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
    并在 event loop 中转换为 Slint model。
 5. 失败会作为 assistant 消息显示，因此该请求保持静默，避免重复 Toast。
 
+### AI Agent Prompt 组装
+
+1. AI Chat、AI Review 与 Review Ask 读取 `[ai.agent]`，并把所有内置指令委托给
+   `src/ai/prompts.rs`；调用点不保留 Prompt 字面量。
+2. Adapter 只解析一次内嵌 `src/ai/prompts.toml` catalog，拒绝不支持的 schema，并以
+   strict undefined 模式渲染每个带版本条目。
+3. 所选回复 locale 向 system 消息恰好注入一条语言指令；强类型上下文组装在 transport
+   之前执行 20 条对话消息与 Review Ask 48 KiB diff 上限。
+4. PR Prompt 上下文排除本地路径、远端/Provider URL、作者、更新时间、凭据及模型连接设置。
+   日志只包含 Prompt id/version、实际 locale、消息数和上下文字节/截断汇总。
+5. Review Session 聚合 chunk 请求 provenance；成功的 Review Ask assistant 消息保存单次
+   provenance。旧记录安全回退为空字段。
+
 ### AI Review 回复投影
 
 1. Worker 加载或完成 Review Session 时，把 Assistant Markdown 交给
@@ -768,7 +807,7 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 
 ### AI Agent 连通性测试
 
-1. 设置页独立保存 OpenAI-compatible Base URL、API Key 和模型名称。
+1. 设置页独立保存 OpenAI-compatible Base URL、API Key、模型名称和回复语言。
 2. 用户触发测试后，共享 runtime 执行 `ai/agent.rs`。
 3. 统一 HTTP 模块请求 Provider 的 `/models` endpoint，并通过 Toast 反馈结果。
 4. 此流程不得改变 RAG Chat 的 endpoint、payload 或历史行为。

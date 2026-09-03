@@ -122,6 +122,18 @@ key = "settings.ai_agent.provider_api_caption"
 text = "The provider's OpenAI-compatible API root."
 
 [[messages]]
+key = "settings.ai_agent.reply_language"
+text = "Reply language"
+
+[[messages]]
+key = "settings.ai_agent.reply_language_auto"
+text = "Follow interface language"
+
+[[messages]]
+key = "settings.ai_agent.reply_language_description"
+text = "Applies to AI Chat, AI Code Review, and Review Ask."
+
+[[messages]]
 key = "settings.ai_agent.save"
 text = "Save AI Agent"
 

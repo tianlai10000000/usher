@@ -14,7 +14,9 @@ review task does not own a route or require a visible page.
 ## Ownership / 职责
 
 - `crates/usher-ai-review/`: framework-neutral inputs, rules, scheduler,
-  reducers, prompt construction, diff chunking, result parsing, and sessions.
+  reducers, prompt provenance records, diff chunking, result parsing, and sessions.
+- `src/ai/prompts.toml` and `src/ai/prompts.rs`: the source-controlled prompt
+  catalog and typed, bounded request assembly shared with AI Chat.
 - `src/ai_review/config.rs`: `usher-state-store` facade plus automatic
   configuration persistence.
 - `src/ai_review/controller.rs`: task orchestration, Git/provider diff loading,
@@ -31,8 +33,10 @@ review task does not own a route or require a visible page.
   `ui/components/ai_review/`; compact response blocks live in
   `ui/components/agent_response/`. Both visual layers own no parsing or I/O.
 
-- `crates/usher-ai-review/`：与框架无关的输入、规则、调度器、reducer、Prompt、
+- `crates/usher-ai-review/`：与框架无关的输入、规则、调度器、reducer、Prompt 来源记录、
   diff 分块、结果解析和 Session。
+- `src/ai/prompts.toml` 与 `src/ai/prompts.rs`：与 AI Chat 共用、受版本控制的 Prompt
+  catalog，以及强类型、有界的请求组装。
 - `src/ai_review/config.rs`：基于 `usher-state-store` 的门面和自动配置持久化。
 - `src/ai_review/controller.rs`：任务编排、Git/Provider diff 获取、AI 调用、取消、
   Session 持久化、通知和按需 UI 投影。
@@ -109,6 +113,9 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
     line positions, remains within the byte budget, and preserves the original
     payload exactly when continuation headers are removed. `@@` text outside a
     real hunk header must not be treated as a hunk.
+11. Every real review chunk uses the versioned `review_chunk` catalog entry.
+    Its completed session stores the effective reply locale, request count, and
+    aggregate metadata-only context manifest. Fixture reviews retain empty provenance.
 
 1. 从 PR 列表启动时只入队元数据并留在列表；从 PR 详情启动时可立即打开右侧面板。
 2. 调度器最多启动 Settings 配置的任务数；调高后立即调度队列，调低不打断运行任务，
@@ -134,6 +141,8 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
 10. 超大 diff 按文件/行边界切分；每个续块重复文件头与指向下一旧/新行位置的数字 hunk
     头，保持在字节预算内，去除续块头后必须精确还原原 payload。真实 hunk header 之外的
     `@@` 文本不得被误判为 hunk。
+11. 每个真实 Review chunk 都使用带版本的 `review_chunk` catalog 条目；完成 Session
+    保存实际回复 locale、请求数及聚合后的纯元数据上下文清单。Fixture Review 保持空 provenance。
 
 ## Presentation / 展示
 
@@ -153,6 +162,11 @@ optional additional context. Conversation history is stored locally and sent
 to the Settings-configured OpenAI-compatible AI Agent. Ask only performs
 read-only PR context loading and never submits a hosting-provider comment,
 review, approval, or other write.
+Each real Ask uses the versioned `review_conversation` catalog entry and stores
+its metadata-only provenance on the resulting assistant message. The model sees
+project name, PR number/title, source/target branch, base/head SHA, a UTF-8-safe
+48 KiB diff excerpt, an optional completed result, and the latest 20 conversation
+messages. It does not receive local paths, remote URLs, author, or update time.
 Submitting an Ask message immediately appends the user's message to the visible
 conversation. While the response is pending, an Agent row shows bounded
 operational phases such as PR-context preparation and thinking; these phases
@@ -211,6 +225,10 @@ High/Medium/Low finding 与 Review 专属对话的滚动流，以及一个固定
 只是可选附加上下文。对话历史仅保存在本地，并发送给 Settings 中配置的
 OpenAI-compatible AI Agent。Ask 只读取 PR 上下文，绝不向代码托管平台提交评论、Review、
 Approval 或其他写操作。
+每次真实 Ask 都使用带版本的 `review_conversation` catalog 条目，并把纯元数据 provenance
+保存在对应 assistant 消息上。模型会收到项目名、PR 编号/标题、源/目标 Branch、base/head
+SHA、UTF-8 安全且最多 48 KiB 的 diff 摘要、可选完成结果及最近 20 条对话；不会收到本地
+路径、远端 URL、作者或更新时间。
 提交 Ask 后，用户消息必须立即追加到可见对话。等待回复期间，Agent 行显示“准备 PR
 上下文”“正在思考”等有界运行阶段；这些阶段不得声称展示模型隐藏推理。Composer
 主操作切换为与 Review 取消一致的紧凑 Stop 控件；点击后中止上下文读取或在途 Agent
@@ -498,6 +516,9 @@ stage, chunk index, completion message counts and byte totals, serialized reques
 body size, response framing, elapsed time, and bounded response-body chunk sizes,
 arrival intervals, and progress classification. They never record authorization
 data, prompt/rule/source content, or provider response content.
+Prompt diagnostics additionally record only the catalog id/version, effective
+reply locale, message count, and context field byte/truncation totals. The
+source-controlled catalog is the exact authority for static Agent instructions.
 The measured reason for the current 300-second threshold and the adjustment
 playbook are preserved in the historical
 [response-timeout investigation](../ai-review-response-timeout-investigation.md).
@@ -520,6 +541,8 @@ completion 继续使用共享的 30 秒总时限和响应体空闲时限。普�
 chunk 序号、completion 消息数量与字节总量、序列化请求体大小、响应 framing、耗时，以及
 有界的响应体 chunk 大小、到达间隔和进度分类；绝不记录鉴权数据、Prompt/规则/源码内容
 或 Provider 响应正文。
+Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息数和上下文字段字节/截断
+汇总；受版本控制的 catalog 是 Agent 静态指令的唯一准确来源。
 当前 300 秒阈值的实测依据和后续调参流程保留在历史
 [响应超时排查记录](../ai-review-response-timeout-investigation.md) 中。
 

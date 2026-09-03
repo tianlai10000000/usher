@@ -8,17 +8,47 @@ This spec covers the Settings-page connection to an OpenAI-compatible AI Agent p
 
 ## Configuration / 配置项
 
-The minimum usable configuration has three values:
+The minimum usable connection configuration has three values:
 
 1. **OpenAI Base URL** — provider origin, with or without `/v1`.
 2. **OpenAI API Key** — sent only as a Bearer authorization header.
 3. **Model Name** — the exact model identifier to request.
 
-最小可用配置有三项：服务地址（可带或不带 `/v1`）、API Key、模型名称。仅有前两项只能定位并认证服务，不能确定实际调用哪个模型。
+最小可用连接配置有三项：服务地址（可带或不带 `/v1`）、API Key、模型名称。仅有前两项只能定位并认证服务，不能确定实际调用哪个模型。
 
-Values are stored in the local platform `settings.toml` under `[ai.agent]`, including the selected provider preset, then loaded during startup and mirrored to `AppState` for the Settings view. Keys must never be logged or committed.
+The same section stores `reply_language = "auto" | <locale-id>`. `auto` resolves to the active interface locale when each request is built; an explicit locale remains independent from later interface-language changes. It applies to AI Chat, AI Code Review, and Review Ask, but never to RAG. Unknown legacy values normalize to `auto`.
+
+同一区块保存 `reply_language = "auto" | <locale-id>`。`auto` 在每次构建请求时解析为当前界面 locale；显式 locale 不随之后的界面语言切换而改变。该设置应用于 AI Chat、AI Code Review 和 Review Ask，不影响 RAG；未知旧值统一归一化为 `auto`。
+
+The five AI Agent fields form one typed Store snapshot. UI edits dispatch typed Actions and every changed commit is automatically persisted on the Store worker; the Save button only forces an explicit flush and user-visible confirmation. Selecting DeepSeek or OpenAI updates Provider, Base URL, and Model atomically. Leaving and reopening Settings hydrates the new factory page from that same snapshot, so the selected segment and displayed fields cannot diverge.
+
+这五项 AI Agent 字段构成同一个强类型 Store 快照。UI 编辑统一 dispatch 强类型 Action，每次有效 commit 都由 Store worker 自动持久化；Save 按钮只负责显式 flush 和用户可见确认。选择 DeepSeek 或 OpenAI 时，Provider、Base URL 与 Model 必须原子更新。离开并重新进入 Settings 后，新 factory 页面从同一份快照 hydration，因此选中按钮与显示字段不得出现分裂。
 
 配置（包括选中的 Provider 预设）保存到本机平台目录下 `settings.toml` 的 `[ai.agent]`，启动时读取并同步到 `AppState`。API Key 不得写入日志或提交到仓库。
+
+## Prompt catalog and context / Prompt catalog 与上下文
+
+`src/ai/prompts.toml` is the sole source of built-in AI Agent instructions. Every entry has a stable `id` and numeric `version`; `src/ai/prompts.rs` parses the embedded catalog once, renders it with MiniJinja strict-undefined behavior, assembles typed messages, and applies bounds. Do not add built-in system/user prompt literals at call sites.
+
+`src/ai/prompts.toml` 是所有内置 AI Agent 指令的唯一来源。每项都有稳定 `id` 和数字 `version`；`src/ai/prompts.rs` 只解析一次内嵌 catalog，以 MiniJinja strict-undefined 模式渲染，组装强类型消息并执行边界限制。调用点不得再增加内置 system/user Prompt 字面量。
+
+| Operation / 操作 | Prompt id and message order / Prompt id 与消息顺序 | Dynamic context sent to the model / 发送给模型的动态上下文 |
+| --- | --- | --- |
+| AI Chat | `general_chat`: system, then the latest 20 AI Chat history messages | User/assistant message content only. No RAG context. / 仅用户与 assistant 消息正文；无 RAG 上下文。 |
+| AI Code Review | `review_chunk`: system, then one rendered user context per diff chunk | Project name; PR number/title; source/target branch; base/head SHA; selected rule names and contents; one-off requirements; current diff chunk and chunk index/count. / 项目名、PR 编号/标题、源/目标 Branch、base/head SHA、所选规则名称与正文、一次性要求、当前 diff chunk 及序号/总数。 |
+| Review Ask | `review_conversation`: system, one rendered PR-context user message, then the latest 20 review conversation messages | The same approved PR metadata, a UTF-8-safe diff excerpt capped at 48 KiB, optional completed review JSON, and conversation content. / 同一组获准 PR 元数据、UTF-8 安全且最多 48 KiB 的 diff 摘要、可选已完成 Review JSON 与对话正文。 |
+
+Local absolute repository/rule paths, remote repository/provider URLs, PR author, PR update time, API credentials, and model connection settings are never prompt context. Repository metadata, rule text, diffs, and conversation content are explicitly treated as untrusted data in the system contract.
+
+本地仓库/规则绝对路径、远端仓库/Provider URL、PR 作者、PR 更新时间、API 凭据和模型连接设置绝不作为 Prompt 上下文。System contract 明确把仓库元数据、规则正文、diff 与对话内容视为不可信数据。
+
+Every system prompt receives exactly one rendered language fragment: `请用<语言原生名称>回复结果。` General replies preserve code, identifiers, and file paths; structured review replies additionally keep JSON keys, `severity` values, paths, and code identifiers unchanged.
+
+每条 system Prompt 都恰好注入一次语言片段：`请用<语言原生名称>回复结果。` 普通回复保留代码、标识符和文件路径；结构化 Review 回复还必须保持 JSON key、`severity` 值、路径和代码标识符不变。
+
+Diagnostics log metadata only: operation, prompt id/version, effective locale, message count, dynamic-context field count/bytes, and truncation count. Completed Review Sessions persist aggregate prompt provenance and request count; Review Ask assistant messages persist per-request provenance. Neither path logs or duplicates raw prompt, source, rules, history, credentials, or response content.
+
+诊断只记录元数据：操作、Prompt id/version、实际 locale、消息数、动态上下文字段数/字节数及截断数。已完成 Review Session 持久化聚合后的 Prompt 来源和请求数；Review Ask assistant 消息持久化单次请求来源。两条路径都不记录或复制原始 Prompt、源码、规则、历史、凭据或回复正文。
 
 ## Request behavior / 请求行为
 
@@ -40,6 +70,8 @@ Values are stored in the local platform `settings.toml` under `[ai.agent]`, incl
 4. A missing URL, key, or model is a local validation error and must not create a network request.
 5. Completion requests carry a bounded feature-owned message list. API keys, complete prompts, source payloads, and response bodies must not be logged.
 6. Ordinary completions keep the shared 30-second total and body-idle timeouts. Explicitly cancellable AI Review and Review Ask completions use OpenAI-compatible SSE streaming through the same interceptor pipeline, disable only the HTTP request total deadline, retain the 10-second connect timeout, and use a 300-second response-body idle timeout. Review chunks and Review Ask conversations additionally have caller-owned 600-second wall-clock limits. An SSE response is successful only after `[DONE]` or a `finish_reason`; provider error events and cleanly truncated streams fail explicitly. A provider that answers a streaming request with one JSON response remains supported.
+7. Prompt rendering must succeed before a provider request starts; invalid catalog/schema/template data becomes a bounded internal/configuration error.
+8. AI Agent settings mutations must dispatch typed Store Actions. Persistence runs on the Store worker, never on the Slint event loop, and factory recreation hydrates one complete snapshot.
 
 1. AI 请求不得创建 reqwest client，也不得绕过 `src/http/mod.rs`。
 2. API Key 仅附加到配置的 Provider 请求，不得出现在日志、Toast、通知或错误正文中。
@@ -47,21 +79,27 @@ Values are stored in the local platform `settings.toml` under `[ai.agent]`, incl
 4. URL、Key、模型任一缺失时为本地校验错误，不得发起网络请求。
 5. Completion 请求只接收 Feature 自有的有界消息列表；日志不得包含 API Key、完整 Prompt、源码 payload 或响应正文。
 6. 普通 completion 使用共享的 30 秒总时限和响应体空闲时限；可显式取消的 AI Review 与 Review Ask completion 通过同一 interceptor 管线使用 OpenAI-compatible SSE streaming，只关闭 HTTP 请求总截止时间，仍保留 10 秒连接超时和 300 秒响应体空闲超时。Review chunk 与 Review Ask conversation 另有调用方管理的 600 秒墙钟上限。SSE 只有收到 `[DONE]` 或 `finish_reason` 才成功；Provider error event 与干净断流的截断响应必须显式失败。若 Provider 对 streaming 请求返回一次性 JSON，仍须兼容。
+7. Provider 请求开始前必须成功渲染 Prompt；catalog/schema/template 无效时只暴露有界的内部/配置错误。
+8. AI Agent 设置变更必须 dispatch 强类型 Store Action；持久化只能运行在 Store worker，禁止在 Slint event loop 执行，factory 重建必须 hydration 一份完整快照。
 
 ## Regression checklist / 回归检查
 
-- Save a DeepSeek preset, restart the app, and verify all three fields are restored (the key remains masked).
+- Save a DeepSeek preset and reply language, restart the app, and verify all four values are restored (the key remains masked).
 - Cycle `Custom -> DeepSeek -> OpenAI -> DeepSeek`. The selected segment, Base URL, and Model must always describe the same provider: DeepSeek uses `https://api.deepseek.com` / `deepseek-v4-flash`, while OpenAI uses `https://api.openai.com/v1` / `gpt-4o-mini`. Editing Base URL or Model must select Custom.
-- Navigate away from Settings so its route-conditional factory product is destroyed, reopen it, and repeat the provider cycle. The saved preset must be restored without stale segment or field bindings; do not retain the hidden Settings tree to pass this check.
+- Navigate away from Settings so its route-conditional factory product is destroyed, reopen it, and repeat the provider cycle. The automatically persisted snapshot must restore without stale segment or field bindings; do not retain the hidden Settings tree to pass this check.
 - Test a valid provider/key and confirm a bottom success Toast; test invalid credentials and confirm one bottom error Toast.
 - Verify a RAG Chat message still reaches its configured RAG endpoint after AI Agent settings are saved.
 - Switch Chat between AI Chat and RAG; verify AI uses the configured model and each mode retains a separate history.
+- Select each reply-language option, navigate away and back, then restart; verify the selection survives both and AI Chat, AI Code Review, and Review Ask use it while RAG is unchanged. Verify `auto` follows a runtime interface-language switch.
+- Inspect one completed Review Session and one Review Ask assistant message; verify provenance contains only prompt metadata/context sizes and no source or credentials.
 - Verify no logs contain the API key and no new direct reqwest client exists outside `src/http/mod.rs`.
 
-- 保存 DeepSeek 预设并重启应用，确认三个字段都被恢复，API Key 仍保持遮罩。
+- 保存 DeepSeek 预设与回复语言并重启应用，确认四项值都被恢复，API Key 仍保持遮罩。
 - 按 `Custom -> DeepSeek -> OpenAI -> DeepSeek` 循环切换；选中项、Base URL 和 Model 必须始终属于同一 Provider。DeepSeek 对应 `https://api.deepseek.com` / `deepseek-v4-flash`，OpenAI 对应 `https://api.openai.com/v1` / `gpt-4o-mini`；手工编辑 Base URL 或 Model 后必须切到 Custom。
-- 离开 Settings 使按路由创建的 factory 产品销毁，重新进入后再次循环切换。已保存预设必须正确恢复，不能残留旧选中态或字段绑定；禁止通过常驻隐藏 Settings 树来通过此检查。
+- 离开 Settings 使按路由创建的 factory 产品销毁，重新进入后再次循环切换。自动持久化快照必须正确恢复，不能残留旧选中态或字段绑定；禁止通过常驻隐藏 Settings 树来通过此检查。
 - 使用有效 Provider/Key 测试时确认底部只出现一个成功 Toast；无效凭据只出现一个错误 Toast。
 - 保存 AI Agent 设置后，确认 RAG Chat 仍请求其独立配置的 RAG endpoint。
 - 在 Chat 中切换 AI Chat 与 RAG，确认 AI 使用配置模型且两种模式保留独立历史。
+- 逐个选择回复语言，先离开再返回 Settings，然后重启；确认两种情况下选择都保留，AI Chat、AI Code Review 与 Review Ask 使用该语言而 RAG 不变；运行时切换界面语言后，确认 `auto` 跟随新语言。
+- 检查一个已完成 Review Session 和一条 Review Ask assistant 消息，确认 provenance 只有 Prompt 元数据/上下文大小，不含源码或凭据。
 - 确认日志不包含 API Key，并且 `src/http/mod.rs` 之外没有新增直接 reqwest client。

@@ -1,7 +1,6 @@
 import { AppState } from "../../state/app_state.slint";
 import { I18n } from "@i18n";
 import { GitHubPageView } from "../page/page_view.slint";
-import { GitHubScrollView } from "../github_scroll_view.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import {
     GitHubButton,
@@ -10,85 +9,11 @@ import {
     GitHubTextField,
     GitHubToggle
 } from "./github_settings_controls.slint";
+import {
+    ManifestInterfaceLanguagePicker,
+    ManifestReplyLanguagePicker
+} from "@language-picker";
 import { GitHubAiReviewSettingsSection, AiReviewRuleItem } from "@ai-review-settings";
-
-export component GitHubSettingsSectionMenuButton inherits Rectangle {
-    in property <string> text;
-    in property <bool> open: false;
-    callback clicked();
-    private property <bool> keyboard-focus-visible: false;
-
-    width: 100%;
-    height: 40px;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: GitHubTheme.border-default;
-    background: menu-touch.has-hover
-        ? GitHubTheme.control-default-hover
-        : GitHubTheme.control-default-rest;
-
-    menu-focus := FocusScope {
-        width: 100%;
-        height: 100%;
-        key-pressed(event) => {
-            root.keyboard-focus-visible = true;
-            if event.text == Key.Return || event.text == " " {
-                root.clicked();
-                return accept;
-            }
-            return reject;
-        }
-        focus-gained(reason) => {
-            root.keyboard-focus-visible = reason == FocusReason.tab-navigation;
-        }
-        focus-lost => {
-            root.keyboard-focus-visible = false;
-        }
-    }
-
-    Text {
-        x: 12px;
-        width: parent.width - 48px;
-        height: parent.height;
-        text: root.text;
-        font-size: 14px;
-        font-weight: 600;
-        color: GitHubTheme.fg-default;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    Image {
-        x: parent.width - 28px;
-        y: 12px;
-        width: 16px;
-        height: 16px;
-        source: @image-url("../../assets/icons/octicon-chevron-down-16.svg");
-        colorize: GitHubTheme.fg-muted;
-        transform-rotation: root.open ? 180deg : 0deg;
-        transform-origin: { x: self.width / 2, y: self.height / 2 };
-    }
-
-    menu-touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => {
-            root.keyboard-focus-visible = false;
-            menu-focus.focus();
-            root.clicked();
-        }
-    }
-
-    if menu-focus.has-focus && root.keyboard-focus-visible: Rectangle {
-        x: -2px;
-        y: -2px;
-        width: parent.width + 4px;
-        height: parent.height + 4px;
-        border-radius: 8px;
-        border-width: 2px;
-        border-color: GitHubTheme.focus-outline;
-        background: transparent;
-    }
-}
 
 export component GitHubSettingsSectionHeader inherits Rectangle {
     in property <string> title;
@@ -205,54 +130,6 @@ export component GitHubProviderNavigation inherits Rectangle {
     }
 }
 
-component GitHubLanguagePicker inherits VerticalLayout {
-    private property <bool> open: false;
-    width: 100%;
-    spacing: root.open ? 4px : 0px;
-
-    GitHubSettingsSectionMenuButton {
-        text: AppState.language-selection.label;
-        open: root.open;
-        clicked => { root.open = !root.open; }
-    }
-
-    Rectangle {
-        width: parent.width;
-        height: root.open
-            ? min(264px, AppState.language-options.length * 32px + 8px)
-            : 0px;
-        visible: root.open;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: GitHubTheme.border-default;
-        background: GitHubTheme.canvas-default;
-        clip: true;
-
-        // The locale registry is small enough to mount directly. A virtual
-        // ListView retains delegate/viewport state when the catalog changes,
-        // which can pair a stale label with a different locale id. This
-        // application-owned scroll host preserves model order and still scales
-        // when more than eight locales are registered.
-        GitHubScrollView {
-            x: 4px;
-            y: 4px;
-            width: parent.width - 8px;
-            height: parent.height - 8px;
-            show-scrollbar: AppState.language-options.length > 8;
-
-            for option in AppState.language-options: GitHubSettingsNavItem {
-                width: parent.width;
-                text: option.label;
-                selected: option.id == AppState.language-selection.id;
-                clicked => {
-                    AppState.set-language(option.id);
-                    root.open = false;
-                }
-            }
-        }
-    }
-}
-
 export component GitHubSettingsPane inherits Rectangle {
     in property <int> selected-section: 0;
     in-out property <bool> simulate-crash-active: false;
@@ -262,7 +139,6 @@ export component GitHubSettingsPane inherits Rectangle {
     in-out property <bool> reveal-ai-agent-api-key: false;
     in-out property <bool> ai-agent-saved: false;
     in-out property <bool> ai-agent-testing: false;
-    in-out property <int> ai-agent-provider-index: -1;
     in-out property <int> hosting-config-tab: 0;
     in-out property <bool> update-checking: false;
     in property <[AiReviewRuleItem]> ai-review-rules: [];
@@ -343,7 +219,9 @@ export component GitHubSettingsPane inherits Rectangle {
                     color: GitHubTheme.fg-muted;
                     wrap: word-wrap;
                 }
-                GitHubLanguagePicker { width: parent.width; }
+                ManifestInterfaceLanguagePicker {
+                    width: parent.width;
+                }
             }
 
             Rectangle {
@@ -857,8 +735,7 @@ export component GitHubSettingsPane inherits Rectangle {
                         text: I18n.common-custom;
                         selected: AppState.ai-agent-provider == "custom";
                         clicked => {
-                            root.ai-agent-provider-index = 0;
-                            AppState.ai-agent-provider = "custom";
+                            AppState.select-ai-agent-provider("custom");
                             root.ai-agent-saved = false;
                         }
                     }
@@ -866,10 +743,7 @@ export component GitHubSettingsPane inherits Rectangle {
                         text: "DeepSeek";
                         selected: AppState.ai-agent-provider == "deepseek";
                         clicked => {
-                            root.ai-agent-provider-index = 1;
-                            AppState.ai-agent-provider = "deepseek";
-                            AppState.ai-agent-base-url = "https://api.deepseek.com";
-                            AppState.ai-agent-model = "deepseek-v4-flash";
+                            AppState.select-ai-agent-provider("deepseek");
                             root.ai-agent-saved = false;
                         }
                     }
@@ -877,10 +751,7 @@ export component GitHubSettingsPane inherits Rectangle {
                         text: "OpenAI";
                         selected: AppState.ai-agent-provider == "openai";
                         clicked => {
-                            root.ai-agent-provider-index = 2;
-                            AppState.ai-agent-provider = "openai";
-                            AppState.ai-agent-base-url = "https://api.openai.com/v1";
-                            AppState.ai-agent-model = "gpt-4o-mini";
+                            AppState.select-ai-agent-provider("openai");
                             root.ai-agent-saved = false;
                         }
                     }
@@ -891,9 +762,8 @@ export component GitHubSettingsPane inherits Rectangle {
                     text <=> AppState.ai-agent-base-url;
                     placeholder: "https://api.example.com/v1";
                     caption: I18n.settings-ai-agent-provider-api-caption;
-                    edited(_) => {
-                        AppState.ai-agent-provider = "custom";
-                        root.ai-agent-provider-index = 0;
+                    edited(value) => {
+                        AppState.set-ai-agent-base-url(value);
                         root.ai-agent-saved = false;
                     }
                 }
@@ -903,17 +773,45 @@ export component GitHubSettingsPane inherits Rectangle {
                     placeholder: "sk-...";
                     secret: true;
                     reveal: root.reveal-ai-agent-api-key;
-                    edited(_) => { root.ai-agent-saved = false; }
+                    edited(value) => {
+                        AppState.set-ai-agent-api-key(value);
+                        root.ai-agent-saved = false;
+                    }
                 }
                 GitHubTextField {
                     label: I18n.settings-ai-agent-model;
                     text <=> AppState.ai-agent-model;
                     placeholder: I18n.settings-ai-agent-model-placeholder;
                     caption: I18n.settings-ai-agent-model-caption;
-                    edited(_) => {
-                        AppState.ai-agent-provider = "custom";
-                        root.ai-agent-provider-index = 0;
+                    edited(value) => {
+                        AppState.set-ai-agent-model(value);
                         root.ai-agent-saved = false;
+                    }
+                }
+
+                VerticalLayout {
+                    width: parent.width;
+                    spacing: 6px;
+
+                    Text {
+                        width: parent.width;
+                        text: I18n.settings-ai-agent-reply-language;
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: GitHubTheme.fg-default;
+                    }
+                    Text {
+                        width: parent.width;
+                        text: I18n.settings-ai-agent-reply-language-description;
+                        font-size: 12px;
+                        color: GitHubTheme.fg-muted;
+                        wrap: word-wrap;
+                    }
+                    ManifestReplyLanguagePicker {
+                        width: parent.width;
+                        changed => {
+                            root.ai-agent-saved = false;
+                        }
                     }
                 }
 
@@ -950,7 +848,8 @@ export component GitHubSettingsPane inherits Rectangle {
                                 AppState.ai-agent-provider,
                                 AppState.ai-agent-base-url,
                                 AppState.ai-agent-api-key,
-                                AppState.ai-agent-model
+                                AppState.ai-agent-model,
+                                AppState.ai-agent-reply-language-selection.id
                             );
                         }
                     }

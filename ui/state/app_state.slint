@@ -24,7 +24,12 @@ export global AppState {
         id: "auto",
         label: "",
     };
-    in property <[LanguageOption]> language-options: [];
+    // AI response language is persisted independently from the UI locale.
+    // `auto` follows the active UI locale at request time.
+    in-out property <LanguageOption> ai-agent-reply-language-selection: {
+        id: "auto",
+        label: "",
+    };
     // Forces every independently compiled UI root to retain the complete
     // generated I18n global, keeping Slint's process-global bundle indices
     // identical across component-factory boundaries.
@@ -91,6 +96,11 @@ export global AppState {
     // theme
     callback toggle-theme(mode: int);
     callback set-language(language: string);
+    callback select-ai-agent-provider(provider: string);
+    callback set-ai-agent-base-url(base-url: string);
+    callback set-ai-agent-api-key(api-key: string);
+    callback set-ai-agent-model(model: string);
+    callback select-ai-agent-reply-language(language: string);
     
     // auto-update
     callback toggle-auto-update(enabled: bool);
@@ -121,7 +131,13 @@ export global AppState {
     );
 
     // AI Agent settings and connection test
-    callback save-ai-agent-settings(provider: string, base-url: string, api-key: string, model: string);
+    callback save-ai-agent-settings(
+        provider: string,
+        base-url: string,
+        api-key: string,
+        model: string,
+        reply-language: string
+    );
     callback test-ai-agent-connection(base-url: string, api-key: string, model: string);
     
     // Update Palette.color-scheme when theme-mode changes

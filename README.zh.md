@@ -191,7 +191,7 @@ Usher 使用 `directories::ProjectDirs::from("com", "usher", "app")` 选择各�
 | 日志 | 本地数据目录：`logs/<date>/usher.log` 和 `logs/<date>/usher_tracing.log` |
 | 远程项目 Logo 缓存 | 临时目录：`usher-logo-cache/` |
 
-GitHub、GitLab 和 Gitee Token 可在设置页面管理。Gitee 公有版与企业版凭据独立保存，仓库 remote host 自动选择公有 v5 或已配置的企业 v8 API，两套 Token 不共用。**代码托管 API 配置**区块以 `[git.platform.<provider>]` 保存各平台企业版 API 地址和企业名称；可填写服务主机或完整 REST API 根地址（例如 `https://git.example.com` 或 `https://git.example.com/api/v4`），缺少版本路径时由对应 Provider 自动补齐。这些值只保存在本地，且仅在配置的 API 主机与项目 remote 主机匹配时使用。**AI Agent** 区块支持 OpenAI-compatible 的 Base URL、API Key 和模型名称；**AI Review** 配置本地 Markdown 规则、默认规则和并发上限。配置分别保存到 `[ai.agent]` 和 `ai-review.json`。不要提交生成的设置、日志、聊天记录、Review Session 或凭据。详见 [AI Agent 配置规格](docs/specs/ai-agent.md)和 [AI Code Review](docs/specs/ai-code-review.md)。
+GitHub、GitLab 和 Gitee Token 可在设置页面管理。Gitee 公有版与企业版凭据独立保存，仓库 remote host 自动选择公有 v5 或已配置的企业 v8 API，两套 Token 不共用。**代码托管 API 配置**区块以 `[git.platform.<provider>]` 保存各平台企业版 API 地址和企业名称；可填写服务主机或完整 REST API 根地址（例如 `https://git.example.com` 或 `https://git.example.com/api/v4`），缺少版本路径时由对应 Provider 自动补齐。这些值只保存在本地，且仅在配置的 API 主机与项目 remote 主机匹配时使用。**AI Agent** 区块支持 OpenAI-compatible 的 Base URL、API Key、模型名称和回复语言；该语言应用于 AI Chat、AI Code Review 与 Review Ask，`auto` 跟随当前界面语言，RAG 不受影响。**AI Review** 配置本地 Markdown 规则、默认规则和并发上限。配置分别保存到 `[ai.agent]` 和 `ai-review.json`。所有内置 Agent 指令统一位于受版本控制的 `src/ai/prompts.toml` catalog。不要提交生成的设置、日志、聊天记录、Review Session 或凭据。详见 [AI Agent 配置规格](docs/specs/ai-agent.md)和 [AI Code Review](docs/specs/ai-code-review.md)。
 
 ## 架构概览
 
