@@ -132,6 +132,7 @@ export component GitHubProviderNavigation inherits Rectangle {
 
 export component GitHubSettingsPane inherits Rectangle {
     in property <int> selected-section: 0;
+    in property <int> route-entry-revision: 0;
     in-out property <bool> simulate-crash-active: false;
     in-out property <bool> reveal-git-tokens: false;
     in-out property <bool> git-tokens-saved: false;
@@ -220,6 +221,7 @@ export component GitHubSettingsPane inherits Rectangle {
                     wrap: word-wrap;
                 }
                 ManifestInterfaceLanguagePicker {
+                    reset-revision: root.route-entry-revision;
                     width: parent.width;
                 }
             }
@@ -808,6 +810,7 @@ export component GitHubSettingsPane inherits Rectangle {
                         wrap: word-wrap;
                     }
                     ManifestReplyLanguagePicker {
+                        reset-revision: root.route-entry-revision;
                         width: parent.width;
                         changed => {
                             root.ai-agent-saved = false;

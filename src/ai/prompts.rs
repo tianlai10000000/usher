@@ -536,6 +536,8 @@ mod tests {
             "high|medium|low",
             "file",
             "line",
+            "side",
+            "left|right",
             "title",
             "explanation",
             "suggestion",

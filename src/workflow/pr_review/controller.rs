@@ -47,7 +47,9 @@ use super::cache::{
     diff_storage_stats, highlighted_cache_stats, owned_diff_storage_stats, source_cache_stats,
 };
 use super::diff_model::{LazyPrDiffLineModel, to_slint_file};
-use super::diff_projection::hunk_scroll_anchor_source_index;
+use super::diff_projection::{
+    DiffLineSide, display_row_for_location, hunk_scroll_anchor_source_index,
+};
 use super::file_tree::{build_tree_items, extension_counts};
 use super::find::{
     DiffFindRowTable, collect_diff_find_matches, collect_diff_find_row_matches,
@@ -55,7 +57,8 @@ use super::find::{
 };
 use super::hunk::{
     HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection, expand_all_hunk_context_from_sources,
-    expand_hunk_context_from_sources, full_source_file, hunk_is_expandable,
+    expand_hunk_context_around_line_from_sources, expand_hunk_context_from_sources,
+    full_source_file, hidden_hunk_for_line, hunk_is_expandable,
 };
 #[cfg(test)]
 use super::hunk::{
@@ -243,6 +246,16 @@ pub(super) struct ReviewRequest {
     ignore_whitespace: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocationReveal {
+    generation: u64,
+    file_index: usize,
+    path: String,
+    line: i32,
+    side: DiffLineSide,
+    expanding_context: bool,
+}
+
 #[derive(Clone)]
 pub(crate) struct WorkflowPrReviewController {
     pr_list_controller: WorkflowPrListController,
@@ -258,6 +271,7 @@ pub(crate) struct WorkflowPrReviewController {
     highlight_resources: Arc<Mutex<Option<Arc<HighlightResources>>>>,
     highlighted_files: Arc<Mutex<BoundedCache<Arc<Vec<HighlightedLine>>>>>,
     source_files: Arc<Mutex<BoundedCache<String>>>,
+    location_reveal: Arc<Mutex<Option<LocationReveal>>>,
     state: ReviewStateFacade,
     conversation_loaded: Arc<Mutex<bool>>,
     conversation: Arc<Mutex<Vec<PullRequestConversationItem>>>,
@@ -297,6 +311,7 @@ pub(crate) fn bind_pr_review(
         highlight_resources: Arc::new(Mutex::new(None)),
         highlighted_files: Arc::new(Mutex::new(BoundedCache::new(HIGHLIGHT_CACHE_CAPACITY))),
         source_files: Arc::new(Mutex::new(BoundedCache::new(SOURCE_CACHE_CAPACITY))),
+        location_reveal: Arc::new(Mutex::new(None)),
         state: ReviewStateFacade::new(),
         conversation_loaded: Arc::new(Mutex::new(false)),
         conversation: Arc::new(Mutex::new(Vec::new())),
@@ -463,6 +478,40 @@ pub(crate) fn bind_pr_review(
         };
         let selected = ui.get_workflow_pr_review_selected_file_index();
         relative_controller.select_file(&ui, selected.saturating_add(offset));
+    });
+
+    let reveal_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_reveal_location(move |path, line, side, head_sha| {
+        if let Some(ui) = ui_weak.upgrade() {
+            reveal_controller.reveal_location(
+                &ui,
+                path.to_string(),
+                line,
+                DiffLineSide::parse(side.as_str()),
+                head_sha.as_str(),
+            );
+        }
+    });
+
+    let view_location_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_view_location_file(move |path, side| {
+        if let Some(ui) = ui_weak.upgrade() {
+            view_location_controller.view_location_file(
+                &ui,
+                path.as_str(),
+                DiffLineSide::parse(side.as_str()),
+            );
+        }
+    });
+
+    let clear_location_controller = controller.clone();
+    let ui_weak = ui.as_weak();
+    ui.on_workflow_pr_review_clear_location(move || {
+        if let Some(ui) = ui_weak.upgrade() {
+            clear_location_controller.cancel_location_reveal(&ui);
+        }
     });
 
     let reload_controller = controller.clone();
@@ -1017,6 +1066,19 @@ pub(crate) fn bind_pr_review(
         },
     );
 
+    let reveal_location_virtual_list = diff_virtual_list.clone();
+    ui.on_workflow_pr_review_resolve_location_viewport_y(
+        move |line, current_viewport_y, visible_height| {
+            -reveal_location_virtual_list
+                .borrow_mut()
+                .reveal_row_center_if_needed(
+                    line.max(0) as usize,
+                    -current_viewport_y,
+                    visible_height,
+                )
+        },
+    );
+
     let submit_controller = controller.clone();
     let ui_weak = ui.as_weak();
     ui.on_workflow_pr_submit_review(move |action, body| {
@@ -1149,6 +1211,10 @@ impl WorkflowPrReviewController {
     }
 
     fn reset_request_scoped_state(&self, ui: &MainWindow, reset_tab: bool) {
+        if let Ok(mut location) = self.location_reveal.lock() {
+            *location = None;
+        }
+        self.clear_location_presentation(ui);
         if let Ok(mut filter) = self.file_filter.lock() {
             filter.clear();
         }
@@ -1389,7 +1455,9 @@ impl WorkflowPrReviewController {
         }
 
         if ai_review_fixture_enabled() {
-            let detail = Arc::new(SharedDiffDetail::from(ai_review_fixture_diff_detail()));
+            let detail = Arc::new(SharedDiffDetail::from(ai_review_fixture_diff_detail(
+                request.number.as_str(),
+            )));
             ui.set_workflow_pr_review_loading(false);
             ui.set_workflow_pr_review_ignore_whitespace_supported(false);
             ui.set_workflow_pr_review_ignore_whitespace(false);
@@ -2432,6 +2500,420 @@ impl WorkflowPrReviewController {
         );
     }
 
+    fn reveal_location(
+        &self,
+        ui: &MainWindow,
+        requested_path: String,
+        line: i32,
+        side: DiffLineSide,
+        review_head_sha: &str,
+    ) {
+        let generation = self.state.begin(ReviewRequestKind::Reveal);
+        self.clear_location_presentation(ui);
+        ui.set_workflow_pr_review_tab(2);
+        ui.invoke_workflow_pr_review_select_tab(2);
+
+        let prepared = self.cache.lock().ok().and_then(|mut cache| {
+            let cache = cache.as_mut()?;
+            let file_index =
+                location_file_index(&cache.all_detail.files, requested_path.as_str(), side);
+            if review_head_sha.is_empty() || cache.all_detail.head_sha != review_head_sha {
+                return Some(Err(file_index));
+            }
+            let file_index = file_index?;
+            let restoring_all = !Arc::ptr_eq(&cache.base_detail, &cache.all_detail);
+            if restoring_all {
+                cache.base_detail = cache.all_detail.clone();
+                cache.expanded_files.clear();
+                cache.loaded_large_diffs.clear();
+            }
+            let file = cache.shared_file(file_index)?;
+            if is_large_diff(&file) {
+                cache.loaded_large_diffs.insert(file_index);
+            }
+            Some(Ok((
+                file_index,
+                file.path.clone(),
+                restoring_all,
+                cache.base_detail.clone(),
+            )))
+        });
+
+        let Some(prepared) = prepared else {
+            self.fail_location_reveal(
+                ui,
+                generation,
+                "ai_review.finding_location_unavailable",
+                false,
+            );
+            return;
+        };
+        let (file_index, path, restoring_all, detail) = match prepared {
+            Ok(prepared) => prepared,
+            Err(file_index) => {
+                self.fail_location_reveal(
+                    ui,
+                    generation,
+                    "ai_review.finding_location_outdated",
+                    file_index.is_some(),
+                );
+                return;
+            }
+        };
+
+        if restoring_all && let Ok(mut highlighted) = self.highlighted_files.lock() {
+            highlighted.clear();
+        }
+
+        if let Ok(mut location) = self.location_reveal.lock() {
+            *location = Some(LocationReveal {
+                generation,
+                file_index,
+                path,
+                line,
+                side,
+                expanding_context: false,
+            });
+        }
+        if restoring_all {
+            ui.set_workflow_pr_review_commit_range_start(-1);
+            ui.set_workflow_pr_review_commit_range_end(-1);
+            ui.set_workflow_pr_review_commit_range_label(
+                crate::i18n::tr("pr_review.all_commits").into_owned().into(),
+            );
+            self.apply_detail(ui, &detail);
+        }
+        self.select_file(ui, file_index as i32);
+    }
+
+    fn continue_location_reveal(&self, ui: &MainWindow) {
+        let location = self
+            .location_reveal
+            .lock()
+            .ok()
+            .and_then(|location| location.clone());
+        let Some(location) = location else {
+            return;
+        };
+        if !self
+            .state
+            .is_current(ReviewRequestKind::Reveal, location.generation)
+            || ui.get_workflow_pr_review_selected_file_index() != location.file_index as i32
+            || ui.get_workflow_pr_review_selected_file_path().as_str() != location.path
+        {
+            return;
+        }
+        let file = self.cache.lock().ok().and_then(|cache| {
+            cache
+                .as_ref()
+                .and_then(|cache| cache.shared_file(location.file_index))
+        });
+        let Some(file) = file else {
+            self.fail_location_reveal(
+                ui,
+                location.generation,
+                "ai_review.finding_location_unavailable",
+                false,
+            );
+            return;
+        };
+        if let Some(row) = display_row_for_location(
+            file.lines.as_slice(),
+            location.line,
+            location.side,
+            ui.get_workflow_pr_review_diff_view().as_str() == "split",
+        ) {
+            ui.set_workflow_pr_review_location_row_index(row as i32);
+            ui.set_workflow_pr_review_location_side(location.side.as_str().into());
+            ui.set_workflow_pr_review_location_reveal_revision(
+                ui.get_workflow_pr_review_location_reveal_revision()
+                    .wrapping_add(1),
+            );
+            ui.set_ai_review_finding_navigation_message("".into());
+            ui.set_ai_review_finding_navigation_can_view_file(false);
+            return;
+        }
+
+        if location.expanding_context {
+            return;
+        }
+        let Some(hunk_index) =
+            hidden_hunk_for_line(&file, location.line, location.side.uses_new_line())
+        else {
+            self.fail_location_reveal(
+                ui,
+                location.generation,
+                "ai_review.finding_location_unavailable",
+                true,
+            );
+            return;
+        };
+        if let Ok(mut pending) = self.location_reveal.lock()
+            && let Some(pending) = pending.as_mut()
+            && pending.generation == location.generation
+        {
+            pending.expanding_context = true;
+        }
+        self.load_location_context(ui, location, hunk_index);
+    }
+
+    fn load_location_context(&self, ui: &MainWindow, location: LocationReveal, hunk_index: usize) {
+        let selected = self.cache.lock().ok().and_then(|cache| {
+            let cache = cache.as_ref()?;
+            Some((
+                cache.shared_file(location.file_index)?,
+                cache.base_detail.head_sha.clone(),
+                cache.base_detail.base_sha.clone(),
+                cache.metadata.clone(),
+            ))
+        });
+        let Some((file, head_sha, base_sha, metadata)) = selected else {
+            self.fail_location_reveal(
+                ui,
+                location.generation,
+                "ai_review.finding_location_unavailable",
+                false,
+            );
+            return;
+        };
+        let base_path = if file.old_path.is_empty() {
+            file.path.clone()
+        } else {
+            file.old_path.clone()
+        };
+        let base_request = (file.change_type != "new_file")
+            .then_some((base_sha, base_path))
+            .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
+        let head_request = (file.change_type != "deleted_file")
+            .then_some((head_sha, file.path.clone()))
+            .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
+        let base_key = base_request
+            .as_ref()
+            .map(|(reference, path)| format!("{reference}:{path}"));
+        let head_key = head_request
+            .as_ref()
+            .map(|(reference, path)| format!("{reference}:{path}"));
+        let (base_cached, head_cached) = self
+            .source_files
+            .lock()
+            .ok()
+            .map(|mut sources| {
+                (
+                    base_key.as_deref().and_then(|key| sources.get_cloned(key)),
+                    head_key.as_deref().and_then(|key| sources.get_cloned(key)),
+                )
+            })
+            .unwrap_or_default();
+        if (base_request.is_none() || base_cached.is_some())
+            && (head_request.is_none() || head_cached.is_some())
+        {
+            self.apply_location_context(
+                ui,
+                &location,
+                hunk_index,
+                base_cached.as_deref().unwrap_or(""),
+                head_cached.as_deref().unwrap_or(""),
+            );
+            return;
+        }
+
+        let controller = self.clone();
+        let ui_weak = ui.as_weak();
+        crate::app_runtime::shared_runtime().spawn(async move {
+            let base_future = async {
+                if let Some(source) = base_cached {
+                    Ok(source)
+                } else if let Some((reference, path)) = base_request.as_ref() {
+                    get_repository_file_text(
+                        metadata.repo_type.as_str(),
+                        metadata.repo_project_id.as_str(),
+                        metadata.remote_repo.as_str(),
+                        path.as_str(),
+                        reference.as_str(),
+                    )
+                    .await
+                } else {
+                    Ok(String::new())
+                }
+            };
+            let head_future = async {
+                if let Some(source) = head_cached {
+                    Ok(source)
+                } else if let Some((reference, path)) = head_request.as_ref() {
+                    get_repository_file_text(
+                        metadata.repo_type.as_str(),
+                        metadata.repo_project_id.as_str(),
+                        metadata.remote_repo.as_str(),
+                        path.as_str(),
+                        reference.as_str(),
+                    )
+                    .await
+                } else {
+                    Ok(String::new())
+                }
+            };
+            let (base_result, head_result) = tokio::join!(base_future, head_future);
+            let result = base_result.and_then(|base| head_result.map(|head| (base, head)));
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = ui_weak.upgrade() else {
+                    return;
+                };
+                if !controller
+                    .state
+                    .is_current(ReviewRequestKind::Reveal, location.generation)
+                {
+                    return;
+                }
+                match result {
+                    Ok((base_source, head_source)) => {
+                        if let Ok(mut sources) = controller.source_files.lock() {
+                            if let Some(key) = base_key {
+                                sources.insert(key, base_source.clone());
+                            }
+                            if let Some(key) = head_key {
+                                sources.insert(key, head_source.clone());
+                            }
+                        }
+                        controller.apply_location_context(
+                            &ui,
+                            &location,
+                            hunk_index,
+                            base_source.as_str(),
+                            head_source.as_str(),
+                        );
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "[Workflow][PR Review] Failed to reveal finding context: {error}"
+                        );
+                        controller.fail_location_reveal(
+                            &ui,
+                            location.generation,
+                            "ai_review.finding_location_unavailable",
+                            true,
+                        );
+                    }
+                }
+            });
+        });
+    }
+
+    fn apply_location_context(
+        &self,
+        ui: &MainWindow,
+        location: &LocationReveal,
+        hunk_index: usize,
+        base_source: &str,
+        head_source: &str,
+    ) {
+        if !self
+            .state
+            .is_current(ReviewRequestKind::Reveal, location.generation)
+        {
+            return;
+        }
+        let updated = self.cache.lock().ok().and_then(|mut cache| {
+            let cache = cache.as_mut()?;
+            let file = cache.file_mut_cow(location.file_index)?;
+            let hunk_index =
+                hidden_hunk_for_line(file, location.line, location.side.uses_new_line())
+                    .unwrap_or(hunk_index);
+            expand_hunk_context_around_line_from_sources(
+                file,
+                hunk_index,
+                location.line,
+                location.side.uses_new_line(),
+                base_source,
+                head_source,
+                HUNK_CONTEXT_PAGE_SIZE,
+            )
+            .then(|| cache.shared_file(location.file_index))
+            .flatten()
+        });
+        let Some(file) = updated else {
+            self.fail_location_reveal(
+                ui,
+                location.generation,
+                "ai_review.finding_location_unavailable",
+                true,
+            );
+            return;
+        };
+        if let Ok(mut pending) = self.location_reveal.lock()
+            && let Some(pending) = pending.as_mut()
+            && pending.generation == location.generation
+        {
+            pending.expanding_context = false;
+        }
+        if let Ok(mut highlighted) = self.highlighted_files.lock() {
+            highlighted.remove(file.path.as_str());
+        }
+        self.select_file(ui, location.file_index as i32);
+    }
+
+    fn fail_location_reveal(
+        &self,
+        ui: &MainWindow,
+        generation: u64,
+        message_key: &str,
+        can_view_file: bool,
+    ) {
+        if !self.state.is_current(ReviewRequestKind::Reveal, generation) {
+            return;
+        }
+        ui.set_workflow_pr_review_location_row_index(-1);
+        ui.set_workflow_pr_review_location_side("".into());
+        ui.set_ai_review_finding_navigation_message(
+            crate::i18n::tr(message_key).into_owned().into(),
+        );
+        ui.set_ai_review_finding_navigation_can_view_file(can_view_file);
+    }
+
+    fn clear_location_presentation(&self, ui: &MainWindow) {
+        ui.set_workflow_pr_review_location_row_index(-1);
+        ui.set_workflow_pr_review_location_side("".into());
+        ui.set_ai_review_finding_navigation_message("".into());
+        ui.set_ai_review_finding_navigation_can_view_file(false);
+    }
+
+    fn cancel_location_reveal(&self, ui: &MainWindow) {
+        self.state.invalidate(ReviewRequestKind::Reveal);
+        if let Ok(mut location) = self.location_reveal.lock() {
+            *location = None;
+        }
+        self.clear_location_presentation(ui);
+    }
+
+    fn view_location_file(&self, ui: &MainWindow, path: &str, side: DiffLineSide) {
+        self.cancel_location_reveal(ui);
+        let selected = self.cache.lock().ok().and_then(|mut cache| {
+            let cache = cache.as_mut()?;
+            let index = location_file_index(&cache.all_detail.files, path, side)?;
+            let restoring_all = !Arc::ptr_eq(&cache.base_detail, &cache.all_detail);
+            if restoring_all {
+                cache.base_detail = cache.all_detail.clone();
+                cache.expanded_files.clear();
+                cache.loaded_large_diffs.clear();
+            }
+            Some((index, restoring_all, cache.base_detail.clone()))
+        });
+        let Some((index, restoring_all, detail)) = selected else {
+            show_error(
+                ui,
+                crate::i18n::tr("ai_review.finding_location_unavailable").as_ref(),
+            );
+            return;
+        };
+        if restoring_all {
+            if let Ok(mut highlighted) = self.highlighted_files.lock() {
+                highlighted.clear();
+            }
+            self.apply_detail(ui, &detail);
+        }
+        self.select_file(ui, index as i32);
+        self.toggle_view_file(ui);
+    }
+
     fn select_file(&self, ui: &MainWindow, index: i32) {
         ui.set_workflow_pr_review_large_diff_loading(false);
         let index = index.max(0) as usize;
@@ -2446,6 +2928,20 @@ impl WorkflowPrReviewController {
         let Some((file, context_expanded, large_diff_loaded)) = selected else {
             return;
         };
+        let location_matches = self
+            .location_reveal
+            .lock()
+            .ok()
+            .and_then(|location| {
+                location
+                    .as_ref()
+                    .map(|location| location.file_index == index)
+            })
+            .unwrap_or(false);
+        if !location_matches {
+            ui.set_workflow_pr_review_location_row_index(-1);
+            ui.set_workflow_pr_review_location_side("".into());
+        }
         ui.set_workflow_pr_review_viewing_file(false);
         ui.set_workflow_pr_review_has_expandable_hunks(false);
         ui.set_workflow_pr_review_context_expanded(context_expanded);
@@ -2483,6 +2979,7 @@ impl WorkflowPrReviewController {
             ui.set_workflow_pr_review_code_loading(false);
             ui.set_workflow_pr_review_large_diff_loading(false);
             self.log_memory_diagnostics("file_highlight.cache_hit_applied");
+            self.continue_location_reveal(ui);
             return;
         }
 
@@ -2533,6 +3030,7 @@ impl WorkflowPrReviewController {
                 }
                 apply_highlighted_file(&ui, file, highlighted, reset_scroll);
                 controller.log_memory_diagnostics("file_highlight.generated_and_applied");
+                controller.continue_location_reveal(&ui);
             });
         });
     }
@@ -3296,7 +3794,7 @@ fn ai_review_fixture_enabled() -> bool {
 }
 
 #[cfg(any(test, feature = "test-fixtures"))]
-fn ai_review_fixture_diff_detail() -> PullRequestDiffDetail {
+fn ai_review_fixture_diff_detail(pull_request_number: &str) -> PullRequestDiffDetail {
     PullRequestDiffDetail {
         files: vec![PullRequestDiffFile {
             path: "src/fixture_0000.rs".to_string(),
@@ -3355,7 +3853,7 @@ fn ai_review_fixture_diff_detail() -> PullRequestDiffDetail {
         commit_count: 1,
         conversation_count: Some(0),
         base_sha: "fixture-base".to_string(),
-        head_sha: "fixture-head".to_string(),
+        head_sha: format!("fixture-head-{pull_request_number}"),
         start_sha: "fixture-base".to_string(),
         too_many_commits: false,
         files_truncated: false,
@@ -3363,7 +3861,7 @@ fn ai_review_fixture_diff_detail() -> PullRequestDiffDetail {
 }
 
 #[cfg(not(any(test, feature = "test-fixtures")))]
-fn ai_review_fixture_diff_detail() -> PullRequestDiffDetail {
+fn ai_review_fixture_diff_detail(_pull_request_number: &str) -> PullRequestDiffDetail {
     unreachable!("AI Review fixtures require the test-fixtures feature")
 }
 
@@ -3495,6 +3993,17 @@ fn apply_file_header(ui: &MainWindow, index: usize, file: &PullRequestDiffFile) 
     ui.set_workflow_pr_review_selected_file_path(file.path.clone().into());
     ui.set_workflow_pr_review_selected_file_added_lines(file.added_lines as i32);
     ui.set_workflow_pr_review_selected_file_removed_lines(file.removed_lines as i32);
+}
+
+fn location_file_index(files: &[SharedDiffFile], path: &str, side: DiffLineSide) -> Option<usize> {
+    if side == DiffLineSide::Left
+        && let Some(index) = files.iter().position(|file| {
+            !file.old_path.is_empty() && file.old_path != file.path && file.old_path == path
+        })
+    {
+        return Some(index);
+    }
+    files.iter().position(|file| file.path == path)
 }
 
 fn is_large_diff(file: &PullRequestDiffFile) -> bool {
@@ -3785,6 +4294,8 @@ fn reset_review_ui(ui: &MainWindow) {
     ui.set_workflow_pr_review_code_loading(false);
     ui.set_workflow_pr_review_large_diff_deferred(false);
     ui.set_workflow_pr_review_large_diff_loading(false);
+    ui.set_workflow_pr_review_location_row_index(-1);
+    ui.set_workflow_pr_review_location_side("".into());
     ui.set_workflow_pr_review_error("".into());
     ui.set_workflow_pr_review_files(empty_file_model());
     ui.set_workflow_pr_review_tree_items(empty_tree_model());
@@ -3837,14 +4348,14 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        BoundedCache, HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection, LARGE_DIFF_BYTE_THRESHOLD,
-        LARGE_DIFF_LINE_THRESHOLD, RANGE_DIFF_CACHE_CAPACITY, ReviewCache, ReviewRequest,
-        SharedDiffDetail, ai_review_fixture_diff_detail, build_tree_items,
-        commit_detail_source_tab, diff_storage_stats, expand_all_hunk_context,
+        BoundedCache, DiffLineSide, HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection,
+        LARGE_DIFF_BYTE_THRESHOLD, LARGE_DIFF_LINE_THRESHOLD, RANGE_DIFF_CACHE_CAPACITY,
+        ReviewCache, ReviewRequest, SharedDiffDetail, ai_review_fixture_diff_detail,
+        build_tree_items, commit_detail_source_tab, diff_storage_stats, expand_all_hunk_context,
         expand_all_hunk_context_from_sources, expand_hunk_context,
         expand_hunk_context_from_sources, full_source_file, hunk_can_expand_all,
         hunk_can_expand_down, hunk_is_expandable, hunk_scroll_anchor_source_index, is_large_diff,
-        owned_diff_storage_stats, restore_original_diff,
+        location_file_index, owned_diff_storage_stats, restore_original_diff,
     };
     use crate::git::{PullRequestDiffDetail, PullRequestDiffFile, PullRequestDiffLine};
     use crate::project::ProjectRepositoryMetadata;
@@ -3863,8 +4374,9 @@ mod tests {
 
     #[test]
     fn ai_review_fixture_finding_path_and_line_exist_in_diff() {
-        let detail = ai_review_fixture_diff_detail();
+        let detail = ai_review_fixture_diff_detail("42");
         let file = detail.files.first().expect("fixture file");
+        assert_eq!(detail.head_sha, "fixture-head-42");
         assert_eq!(file.path, "src/fixture_0000.rs");
         assert!(file.lines.iter().any(|line| {
             line.new_line == 12 && line.kind == "addition" && line.content == "persist(input);"
@@ -3891,6 +4403,26 @@ mod tests {
         let mut ordinary = file("src/lib.rs");
         ordinary.lines = vec![line("small".to_string()); 32];
         assert!(!is_large_diff(&ordinary));
+    }
+
+    #[test]
+    fn renamed_file_locations_resolve_paths_on_the_requested_side() {
+        let mut renamed = file("src/new_name.rs");
+        renamed.old_path = "src/old_name.rs".to_string();
+        let files = vec![Arc::new(file("src/old_name.rs")), Arc::new(renamed)];
+
+        assert_eq!(
+            location_file_index(&files, "src/old_name.rs", DiffLineSide::Left),
+            Some(1)
+        );
+        assert_eq!(
+            location_file_index(&files, "src/old_name.rs", DiffLineSide::Right),
+            Some(0)
+        );
+        assert_eq!(
+            location_file_index(&files, "src/new_name.rs", DiffLineSide::Right),
+            Some(1)
+        );
     }
 
     #[test]

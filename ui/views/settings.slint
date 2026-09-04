@@ -34,6 +34,7 @@ export component GitHubSettingsPage inherits Rectangle {
     in-out property <bool> ai-agent-saved: false;
     in-out property <bool> ai-agent-testing: false;
     in-out property <bool> update-checking: false;
+    in-out property <int> route-entry-revision: 0;
     in property <[AiReviewRuleItem]> ai-review-rules: [];
     in property <int> ai-review-max-concurrent-tasks: 3;
     in-out property <bool> ai-review-rule-add-pending: false;
@@ -44,9 +45,8 @@ export component GitHubSettingsPage inherits Rectangle {
     callback ai-review-delete-rule(string);
     callback ai-review-set-default-rule(string);
 
-    // ComponentFactory pages are destroyed with their route. Start each new
-    // tree from a sentinel and select the defaults on the next UI tick so
-    // Slint 1.17.1 cannot reuse a stale tab binding from the previous tree.
+    // Start the lazily created tree from a sentinel and select its defaults on
+    // the next UI tick so Slint 1.17.1 invalidates cached selector bindings.
     private property <int> selected-section: -1;
     private property <int> hosting-config-tab: -1;
     private property <bool> initial-tab-sync-pending: true;
@@ -58,6 +58,23 @@ export component GitHubSettingsPage inherits Rectangle {
     private property <bool> compact-layout: root.page-width < 768px;
     private property <length> nav-width: 180px;
     private property <length> nav-content-gap: 32px;
+
+    changed route-entry-revision => {
+        draft-reset-focus.focus();
+        root.compact-navigation-open = false;
+        root.compact-navigation-selection = root.selected-section;
+        root.simulate-crash-active = false;
+        root.reveal-git-tokens = false;
+        root.reveal-ai-agent-api-key = false;
+    }
+
+    // The Settings factory stays mounted between routes. Move focus away from
+    // any active editor before Rust restores the committed values, otherwise
+    // TextInput's live edit binding can retain an unsaved draft.
+    draft-reset-focus := FocusScope {
+        width: 0px;
+        height: 0px;
+    }
 
     initial-tab-sync := Timer {
         interval: 1ms;
@@ -139,6 +156,7 @@ export component GitHubSettingsPage inherits Rectangle {
                             wide-settings-pane := GitHubSettingsPane {
                                 width: root.page-width - root.nav-width - root.nav-content-gap;
                                 selected-section: root.selected-section;
+                                route-entry-revision: root.route-entry-revision;
                                 simulate-crash-active <=> root.simulate-crash-active;
                                 reveal-git-tokens <=> root.reveal-git-tokens;
                                 git-tokens-saved <=> root.git-tokens-saved;
@@ -294,6 +312,7 @@ export component GitHubSettingsPage inherits Rectangle {
                             compact-settings-pane := GitHubSettingsPane {
                                 width: root.page-width;
                                 selected-section: root.selected-section;
+                                route-entry-revision: root.route-entry-revision;
                                 simulate-crash-active <=> root.simulate-crash-active;
                                 reveal-git-tokens <=> root.reveal-git-tokens;
                                 git-tokens-saved <=> root.git-tokens-saved;

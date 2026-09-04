@@ -1,5 +1,6 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubMarkdownMetrics } from "../markdown/github_markdown_typography.slint";
+import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { I18n } from "@i18n";
 
 // Codex-style user turn: compact content-sized prose aligned to the trailing
@@ -100,7 +101,10 @@ export component GitHubAiReviewFindingRow inherits Rectangle {
     in property <string> explanation: "";
     in property <string> suggestion: "";
     in property <bool> selected: false;
+    in property <string> navigation-message: "";
+    in property <bool> navigation-can-view-file: false;
     callback activated();
+    callback view-file();
 
     private property <length> content-x: GitHubMetrics.size-12;
     private property <length> trailing-width: GitHubMetrics.size-64;
@@ -114,6 +118,13 @@ export component GitHubAiReviewFindingRow inherits Rectangle {
         : (finding-touch.has-hover
             ? GitHubTheme.canvas-subtle
             : GitHubTheme.canvas-default);
+
+    finding-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.activated(); }
+    }
 
     finding-content := VerticalLayout {
         x: root.content-x;
@@ -154,6 +165,18 @@ export component GitHubAiReviewFindingRow inherits Rectangle {
             color: GitHubTheme.fg-muted;
             wrap: word-wrap;
         }
+        if root.selected && root.navigation-message != "": Text {
+            width: parent.width;
+            height: self.preferred-height;
+            text: root.navigation-message;
+            font-size: GitHubMetrics.text-small;
+            color: GitHubTheme.attention-fg;
+            wrap: word-wrap;
+        }
+        if root.selected && root.navigation-can-view-file: GitHubButton {
+            text: I18n.diff-view-file;
+            clicked => { root.view-file(); }
+        }
     }
 
     GitHubAiReviewSeverityLabel {
@@ -162,10 +185,4 @@ export component GitHubAiReviewFindingRow inherits Rectangle {
         severity: root.severity;
     }
 
-    finding-touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-        mouse-cursor: pointer;
-        clicked => { root.activated(); }
-    }
 }

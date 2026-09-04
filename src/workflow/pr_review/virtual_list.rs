@@ -121,6 +121,19 @@ impl PrDiffVirtualListBridge {
             .min(f32::MAX as u64) as f32
     }
 
+    pub(super) fn reveal_row_center_if_needed(
+        &mut self,
+        index: usize,
+        current_offset: f32,
+        viewport_extent: f32,
+    ) -> f32 {
+        self.list
+            .set_viewport(to_u64(current_offset), to_u32(viewport_extent).max(1));
+        self.list
+            .reveal_item_center_if_needed(index)
+            .min(f32::MAX as u64) as f32
+    }
+
     fn sync_visible_rows(
         lines: &ModelRc<WorkflowPrDiffLine>,
         items: &[VirtualItem],

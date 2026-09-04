@@ -25,9 +25,12 @@ export struct AiReviewRuleChoice {
 }
 
 export struct AiReviewFindingItem {
+    id: string,
     severity: string,
     file: string,
     line: int,
+    side: string,
+    head-sha: string,
     title: string,
     explanation: string,
     suggestion: string,
@@ -73,6 +76,9 @@ export component AiReviewPanelContract inherits Rectangle {
     in property <string> summary: "";
     in property <string> error-text: "";
     in property <[AiReviewFindingItem]> findings: [];
+    in property <string> selected-finding-id: "";
+    in property <string> finding-navigation-message: "";
+    in property <bool> finding-navigation-can-view-file: false;
     in property <[AiReviewConversationItem]> conversation: [];
     in property <[AiReviewResponseVisualRow]> response-rows: [];
     in property <bool> response-virtualized: false;
@@ -94,7 +100,8 @@ export component AiReviewPanelContract inherits Rectangle {
     callback cancel-message(string);
     callback re-review(string);
     callback send-message(string);
-    callback select-finding(string, int);
+    callback select-finding(string, string, int, string, string);
+    callback view-finding-file(string, string);
     callback open-response-artifact(string, string, string);
     callback open-response-link(string);
     callback response-wheel-consumed(length);

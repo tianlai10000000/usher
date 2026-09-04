@@ -20,9 +20,9 @@ The same section stores `reply_language = "auto" | <locale-id>`. `auto` resolves
 
 同一区块保存 `reply_language = "auto" | <locale-id>`。`auto` 在每次构建请求时解析为当前界面 locale；显式 locale 不随之后的界面语言切换而改变。该设置应用于 AI Chat、AI Code Review 和 Review Ask，不影响 RAG；未知旧值统一归一化为 `auto`。
 
-The five AI Agent fields form one typed Store snapshot. UI edits dispatch typed Actions and every changed commit is automatically persisted on the Store worker; the Save button only forces an explicit flush and user-visible confirmation. Selecting DeepSeek or OpenAI updates Provider, Base URL, and Model atomically. Leaving and reopening Settings hydrates the new factory page from that same snapshot, so the selected segment and displayed fields cannot diverge.
+The five AI Agent fields form one page-local draft while Settings is open. Selecting DeepSeek or OpenAI updates Provider, Base URL, and Model atomically in that draft. Only Save dispatches the complete draft as one typed Store Action; the changed commit is automatically persisted on the Store worker and Save waits for its flush before reporting success. The Settings factory product stays mounted after its first visit to avoid Slint 1.17.1 remount corruption. On every re-entry, the bridge overwrites its draft from the last committed Store snapshot before paint, so leaving without Save still discards every edit and the selected segment cannot diverge from the displayed fields.
 
-这五项 AI Agent 字段构成同一个强类型 Store 快照。UI 编辑统一 dispatch 强类型 Action，每次有效 commit 都由 Store worker 自动持久化；Save 按钮只负责显式 flush 和用户可见确认。选择 DeepSeek 或 OpenAI 时，Provider、Base URL 与 Model 必须原子更新。离开并重新进入 Settings 后，新 factory 页面从同一份快照 hydration，因此选中按钮与显示字段不得出现分裂。
+Settings 打开期间，这五项 AI Agent 字段构成一份页面局部草稿。选择 DeepSeek 或 OpenAI 时，Provider、Base URL 与 Model 必须在草稿中原子更新。只有点击 Save 才把完整草稿作为一个强类型 Store Action 提交；有效 commit 由 Store worker 自动持久化，Save 等待 flush 后再提示成功。Settings factory 产品首次访问后保持挂载，以规避 Slint 1.17.1 重挂载损坏；每次重新进入时，bridge 都在绘制前用最近提交的 Store 快照覆盖草稿，因此未点击 Save 的所有编辑仍会丢弃，选中按钮与显示字段也不得出现分裂。
 
 配置（包括选中的 Provider 预设）保存到本机平台目录下 `settings.toml` 的 `[ai.agent]`，启动时读取并同步到 `AppState`。API Key 不得写入日志或提交到仓库。
 
@@ -71,7 +71,7 @@ Diagnostics log metadata only: operation, prompt id/version, effective locale, m
 5. Completion requests carry a bounded feature-owned message list. API keys, complete prompts, source payloads, and response bodies must not be logged.
 6. Ordinary completions keep the shared 30-second total and body-idle timeouts. Explicitly cancellable AI Review and Review Ask completions use OpenAI-compatible SSE streaming through the same interceptor pipeline, disable only the HTTP request total deadline, retain the 10-second connect timeout, and use a 300-second response-body idle timeout. Review chunks and Review Ask conversations additionally have caller-owned 600-second wall-clock limits. An SSE response is successful only after `[DONE]` or a `finish_reason`; provider error events and cleanly truncated streams fail explicitly. A provider that answers a streaming request with one JSON response remains supported.
 7. Prompt rendering must succeed before a provider request starts; invalid catalog/schema/template data becomes a bounded internal/configuration error.
-8. AI Agent settings mutations must dispatch typed Store Actions. Persistence runs on the Store worker, never on the Slint event loop, and factory recreation hydrates one complete snapshot.
+8. AI Agent form edits remain page-local drafts. Save is the only operation that dispatches the complete settings as a typed Store Action. Persistence runs on the Store worker, never on the Slint event loop, and every Settings route re-entry restores one complete committed snapshot into the stable factory page before paint.
 
 1. AI 请求不得创建 reqwest client，也不得绕过 `src/http/mod.rs`。
 2. API Key 仅附加到配置的 Provider 请求，不得出现在日志、Toast、通知或错误正文中。
@@ -80,26 +80,26 @@ Diagnostics log metadata only: operation, prompt id/version, effective locale, m
 5. Completion 请求只接收 Feature 自有的有界消息列表；日志不得包含 API Key、完整 Prompt、源码 payload 或响应正文。
 6. 普通 completion 使用共享的 30 秒总时限和响应体空闲时限；可显式取消的 AI Review 与 Review Ask completion 通过同一 interceptor 管线使用 OpenAI-compatible SSE streaming，只关闭 HTTP 请求总截止时间，仍保留 10 秒连接超时和 300 秒响应体空闲超时。Review chunk 与 Review Ask conversation 另有调用方管理的 600 秒墙钟上限。SSE 只有收到 `[DONE]` 或 `finish_reason` 才成功；Provider error event 与干净断流的截断响应必须显式失败。若 Provider 对 streaming 请求返回一次性 JSON，仍须兼容。
 7. Provider 请求开始前必须成功渲染 Prompt；catalog/schema/template 无效时只暴露有界的内部/配置错误。
-8. AI Agent 设置变更必须 dispatch 强类型 Store Action；持久化只能运行在 Store worker，禁止在 Slint event loop 执行，factory 重建必须 hydration 一份完整快照。
+8. AI Agent 表单编辑必须保留为页面局部草稿；只有 Save 才把完整配置 dispatch 为强类型 Store Action。持久化只能运行在 Store worker，禁止在 Slint event loop 执行；每次重新进入 Settings 路由时，必须在绘制前向稳定 factory 页面恢复一份完整的已提交快照。
 
 ## Regression checklist / 回归检查
 
 - Save a DeepSeek preset and reply language, restart the app, and verify all four values are restored (the key remains masked).
 - Cycle `Custom -> DeepSeek -> OpenAI -> DeepSeek`. The selected segment, Base URL, and Model must always describe the same provider: DeepSeek uses `https://api.deepseek.com` / `deepseek-v4-flash`, while OpenAI uses `https://api.openai.com/v1` / `gpt-4o-mini`. Editing Base URL or Model must select Custom.
-- Navigate away from Settings so its route-conditional factory product is destroyed, reopen it, and repeat the provider cycle. The automatically persisted snapshot must restore without stale segment or field bindings; do not retain the hidden Settings tree to pass this check.
+- Change each AI Agent field without saving, navigate away, and reopen Settings. The same factory product must remain mounted while hidden, and the last committed snapshot must be restored before it becomes visible without stale segment, placeholder, or field bindings. Save a complete draft and repeat; the saved draft must then be restored.
 - Test a valid provider/key and confirm a bottom success Toast; test invalid credentials and confirm one bottom error Toast.
 - Verify a RAG Chat message still reaches its configured RAG endpoint after AI Agent settings are saved.
 - Switch Chat between AI Chat and RAG; verify AI uses the configured model and each mode retains a separate history.
-- Select each reply-language option, navigate away and back, then restart; verify the selection survives both and AI Chat, AI Code Review, and Review Ask use it while RAG is unchanged. Verify `auto` follows a runtime interface-language switch.
+- Select each reply-language option without saving and verify navigation away/back restores the committed choice. Save each choice, then navigate away/back and restart; verify the saved selection survives and AI Chat, AI Code Review, and Review Ask use it while RAG is unchanged. Verify `auto` follows a runtime interface-language switch.
 - Inspect one completed Review Session and one Review Ask assistant message; verify provenance contains only prompt metadata/context sizes and no source or credentials.
 - Verify no logs contain the API key and no new direct reqwest client exists outside `src/http/mod.rs`.
 
 - 保存 DeepSeek 预设与回复语言并重启应用，确认四项值都被恢复，API Key 仍保持遮罩。
 - 按 `Custom -> DeepSeek -> OpenAI -> DeepSeek` 循环切换；选中项、Base URL 和 Model 必须始终属于同一 Provider。DeepSeek 对应 `https://api.deepseek.com` / `deepseek-v4-flash`，OpenAI 对应 `https://api.openai.com/v1` / `gpt-4o-mini`；手工编辑 Base URL 或 Model 后必须切到 Custom。
-- 离开 Settings 使按路由创建的 factory 产品销毁，重新进入后再次循环切换。自动持久化快照必须正确恢复，不能残留旧选中态或字段绑定；禁止通过常驻隐藏 Settings 树来通过此检查。
+- 不保存地修改每个 AI Agent 字段，离开再重新进入 Settings。隐藏期间必须保留同一个 factory 产品，并在再次显示前恢复最近提交的快照，不能残留旧选中态、placeholder 或字段绑定。保存完整草稿后再重复一次，此时必须恢复已保存草稿。
 - 使用有效 Provider/Key 测试时确认底部只出现一个成功 Toast；无效凭据只出现一个错误 Toast。
 - 保存 AI Agent 设置后，确认 RAG Chat 仍请求其独立配置的 RAG endpoint。
 - 在 Chat 中切换 AI Chat 与 RAG，确认 AI 使用配置模型且两种模式保留独立历史。
-- 逐个选择回复语言，先离开再返回 Settings，然后重启；确认两种情况下选择都保留，AI Chat、AI Code Review 与 Review Ask 使用该语言而 RAG 不变；运行时切换界面语言后，确认 `auto` 跟随新语言。
+- 不保存地逐个选择回复语言，确认离开再返回 Settings 后恢复已提交选项。保存各选项后再离开返回并重启，确认已保存选择在两种情况下都保留，AI Chat、AI Code Review 与 Review Ask 使用该语言而 RAG 不变；运行时切换界面语言后，确认 `auto` 跟随新语言。
 - 检查一个已完成 Review Session 和一条 Review Ask assistant 消息，确认 provenance 只有 Prompt 元数据/上下文大小，不含源码或凭据。
 - 确认日志不包含 API Key，并且 `src/http/mod.rs` 之外没有新增直接 reqwest client。

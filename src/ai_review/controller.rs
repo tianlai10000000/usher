@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use slint::{ComponentHandle, Global, Model, ModelRc, SharedString, Timer, VecModel};
+use slint::{ComponentHandle, Global, Model, ModelRc, SharedString, VecModel};
 use tokio::sync::Notify;
 use usher_ai_review::{
     AiModelRef, DEFAULT_DIFF_CHUNK_BYTES, MAX_RULE_BYTES, ProjectReviewKey, PromptProvenance,
@@ -22,7 +22,7 @@ use usher_ai_review::{
     reduce_tasks,
 };
 #[cfg(any(test, feature = "test-fixtures"))]
-use usher_ai_review::{FindingSeverity, ReviewFinding};
+use usher_ai_review::{FindingDiffSide, FindingSeverity, ReviewFinding};
 use usher_messages::{MessageCenter, MessageDraft, MessageSeverity, NativeDelivery};
 use usher_state_store::{LocalStateStore, StateStore, StateStoreExt, Subscription};
 
@@ -1107,8 +1107,22 @@ fn bind_callbacks(ui: &MainWindow, inner: &Arc<ControllerInner>) {
     });
 
     let inner_finding = inner.clone();
-    ui.on_ai_review_select_finding(move |file, line| {
-        reveal_finding(inner_finding.window.clone(), file.to_string(), line, 0);
+    ui.on_ai_review_select_finding(move |id, file, line, side, head_sha| {
+        let Some(ui) = inner_finding.window.upgrade() else {
+            return;
+        };
+        ui.set_ai_review_selected_finding_id(id);
+        ui.set_ai_review_finding_navigation_message("".into());
+        ui.set_ai_review_finding_navigation_can_view_file(false);
+        ui.invoke_workflow_pr_review_reveal_location(file, line, side, head_sha);
+    });
+
+    let inner_view_finding = inner.clone();
+    ui.on_ai_review_view_finding_file(move |file, side| {
+        let Some(ui) = inner_view_finding.window.upgrade() else {
+            return;
+        };
+        ui.invoke_workflow_pr_review_view_location_file(file, side);
     });
 
     let inner_response_preview = inner.clone();
@@ -2755,10 +2769,14 @@ fn apply_projection(
             result
                 .findings
                 .into_iter()
-                .map(|finding| AiReviewFindingItem {
+                .enumerate()
+                .map(|(index, finding)| AiReviewFindingItem {
+                    id: format!("{}:{index}", task.id.0).into(),
                     severity: finding.severity.as_str().into(),
                     file: finding.file.into(),
                     line: finding.line,
+                    side: finding.side.as_str().into(),
+                    head_sha: task.target.head_sha.clone().into(),
                     title: finding.title.into(),
                     explanation: finding.explanation.into(),
                     suggestion: finding.suggestion.into(),
@@ -2883,6 +2901,7 @@ fn rebuild_response_visual_rows(ui: &MainWindow) {
 }
 
 fn clear_panel_ui(ui: &MainWindow) {
+    ui.invoke_workflow_pr_review_clear_location();
     ui.set_ai_review_panel_visible(false);
     ui.set_ai_review_current_task_id("".into());
     ui.set_ai_review_summary("".into());
@@ -2896,6 +2915,11 @@ fn clear_panel_ui(ui: &MainWindow) {
     ui.set_ai_review_elapsed_seconds(0);
     ui.set_ai_review_chat_elapsed_seconds(0);
     ui.set_ai_review_findings(ModelRc::new(VecModel::default()));
+    ui.set_ai_review_selected_finding_id("".into());
+    ui.set_ai_review_finding_navigation_message("".into());
+    ui.set_ai_review_finding_navigation_can_view_file(false);
+    ui.set_workflow_pr_review_location_row_index(-1);
+    ui.set_workflow_pr_review_location_side("".into());
     ui.set_ai_review_conversation(ModelRc::new(VecModel::default()));
     rebuild_response_visual_rows(ui);
 }
@@ -3311,6 +3335,7 @@ fn fixture_result() -> ReviewResult {
             severity: FindingSeverity::High,
             file: "src/fixture_0000.rs".to_string(),
             line: 12,
+            side: FindingDiffSide::Right,
             title: "Validation error is discarded".to_string(),
             explanation: "The new code persists the input even when validation fails.".to_string(),
             suggestion: "Return the validation error before calling persist, then cover the rejected input with a regression test.".to_string(),
@@ -3372,46 +3397,6 @@ async fn load_chat_session(path: PathBuf) -> Result<Option<PullRequestChatSessio
     })
     .await
     .map_err(|error| format!("AI review chat session loader failed: {error}"))?
-}
-
-fn reveal_finding(window: slint::Weak<MainWindow>, file: String, line: i32, attempt: u8) {
-    let Some(ui) = window.upgrade() else {
-        return;
-    };
-    if attempt == 0 {
-        ui.set_workflow_pr_review_tab(2);
-        ui.invoke_workflow_pr_review_select_tab(2);
-        let files = ui.get_workflow_pr_review_files();
-        if let Some(index) = (0..files.row_count()).find(|index| {
-            files
-                .row_data(*index)
-                .is_some_and(|candidate| candidate.path.as_str() == file)
-        }) {
-            ui.invoke_workflow_pr_review_select_file(index as i32);
-        }
-    }
-    let selected_matches = ui.get_workflow_pr_review_selected_file_path().as_str() == file;
-    let lines = ui.get_workflow_pr_review_lines();
-    let row = selected_matches
-        .then(|| {
-            (0..lines.row_count()).find(|index| {
-                lines.row_data(*index).is_some_and(|candidate| {
-                    candidate.old_line == line || candidate.new_line == line
-                })
-            })
-        })
-        .flatten();
-    if let Some(row) = row {
-        ui.set_workflow_pr_review_hunk_scroll_anchor_source_index(row as i32);
-        ui.set_workflow_pr_review_hunk_scroll_restore_revision(
-            ui.get_workflow_pr_review_hunk_scroll_restore_revision()
-                .saturating_add(1),
-        );
-    } else if attempt < 12 {
-        Timer::single_shot(Duration::from_millis(80), move || {
-            reveal_finding(window, file, line, attempt + 1);
-        });
-    }
 }
 
 fn new_task_id(now: u64) -> ReviewTaskId {

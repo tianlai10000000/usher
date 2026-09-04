@@ -53,6 +53,9 @@ export component PullRequestReviewPageContract inherits FocusScope {
     in property <bool> scroll-diagnostics-enabled: false;
     in property <int> hunk-scroll-anchor-source-index: -1;
     in property <int> hunk-scroll-restore-revision: 0;
+    in property <int> location-row-index: -1;
+    in property <string> location-side: "";
+    in property <int> location-reveal-revision: 0;
     in property <int> selected-file-index: -1;
     in property <string> selected-file-path;
     in property <int> selected-file-added-lines: 0;
@@ -139,6 +142,7 @@ export component PullRequestReviewPageContract inherits FocusScope {
     pure callback find-diff-row-matches(int, string, string) -> [WorkflowPrDiffFindMatch];
     pure callback step-diff-find-index(int, int, bool) -> int;
     callback resolve-diff-find-viewport-y(int, int, float, float, string, float, float, float) -> float;
+    callback resolve-location-viewport-y(int, float, float) -> float;
     callback layout-diff-virtual-window(int, [WorkflowPrDiffRowMetric], float, float, float, float, float, float) -> WorkflowPrDiffVirtualWindow;
     callback diagnose-diff-scroll(string, float, float, float, float, bool, bool, bool, int, int, int);
     callback view-file();

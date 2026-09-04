@@ -446,7 +446,7 @@ fn ui(
             save_settings_with_feedback(
                 app_weak_git_hosting_config.clone(),
                 settings_page_for_git_hosting.clone(),
-                SettingsSaveTarget::AiAgent,
+                SettingsSaveTarget::GitHosting,
                 "code hosting API configuration",
                 "settings.feedback.hosting_api_saved",
                 "settings.feedback.hosting_api_save_failed",
@@ -473,7 +473,7 @@ fn ui(
         save_settings_with_feedback(
             app_weak_ai_agent_save.clone(),
             settings_page_for_ai_save.clone(),
-            SettingsSaveTarget::GitHosting,
+            SettingsSaveTarget::AiAgent,
             "AI Agent settings",
             "settings.feedback.ai_agent_saved",
             "settings.feedback.ai_agent_save_failed",
@@ -541,7 +541,14 @@ fn ui(
     });
 
     // ========= Router ========= //
-    let router = Router::new(app.as_weak(), app_lifecycle::hooks(app.get_current_route()));
+    let lifecycle_hooks = app_lifecycle::hooks(app.get_current_route());
+    let settings_page_for_lifecycle = settings_page.clone();
+    lifecycle_hooks.on_transition(std::rc::Rc::new(move |window, event| {
+        if event.current == Route::Settings {
+            settings_page_for_lifecycle.reset_drafts_from_committed(window);
+        }
+    }));
+    let router = Router::new(app.as_weak(), lifecycle_hooks);
 
     let router_for_nav_index = router.clone();
     app.on_navigate_from_nav_index(move |item_index| {

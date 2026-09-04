@@ -273,13 +273,13 @@ global 自动共享。Messages Inbox 行只把动作枚举与锚点矩形发布�
 `MessageTooltipOverlayState`，由页面唯一的 `GitHubMessageTooltipOverlayHost` 把枚举
 映射到相互独立的字面量 surface，任何标签字符串都不穿过列表 delegate。Settings 为
 共享控件挂载本地通用 `GitHubTooltipOverlayHost`，并在每个新 claim token 到来时重建
-文本测量 surface。Settings 与 Messages 的路由生命周期刻意不同：Settings 的
-`ComponentContainer` 必须继续按路由条件创建，离开 Settings 时销毁 factory 产品，
-使对应视觉树 RSS 可以被回收。禁止用常驻隐藏 Settings 树来规避选择器问题。
+文本测量 surface。Settings 与 Messages 都在首次访问后惰性创建一个稳定的 factory
+产品。Slint 1.17.1 销毁并重挂载跨 crate 产品时可能复用错误的控件文案或 placeholder，
+因此离开路由只隐藏这些 host；各 Feature bridge 分别负责状态重置生命周期。
 
 在单次 Settings factory 产品内部，Slint 1.17.1 的选择器内容必须使用固定挂载的
 叶子节点，并通过 `visible` 与显式活动高度选择当前内容。禁止用 `if` 节点重建互斥的
-section 或 provider 表单，否则 factory 重建和重复 Tab 切换可能保留兄弟节点的标签、
+section 或 provider 表单，否则重复 Tab 切换可能保留兄弟节点的标签、
 placeholder、值或选中态。路由级选择索引必须从哨兵值开始，并在下一次 UI tick 切到
 默认值，以便新建视觉树主动失效旧绑定。选择器文字、选中样式和显示字段必须来自同一
 状态源。该规则覆盖 Settings section 菜单、Git hosting provider 和 AI Agent provider
@@ -294,17 +294,18 @@ id 或选中状态。每次展开菜单时，picker 都会把当前规范化选�
 选项样式读取该快照，而不直接依赖真实渲染器在选项 surface 隐藏期间可能未失效的
 global binding。
 
-AI Agent 表单状态并非纯页面局部编辑状态，因为 Settings 之外的 Chat 与 Review 也会
-消费它。`src/ai/settings_state.rs` 用一个强类型 Store 快照统一持有 Provider、Base URL、
-API Key、Model 与回复语言。Settings 控件只 dispatch 强类型 Action；选择预设时，
-reducer 在一次 commit 中同时更新 Provider、Base URL 与 Model，随后 bridge 把同一份
-快照投影到独立页面和 `MainWindow`。每次有效 commit 都自动进入 Store 自有的持久化
-worker，并通过既有原子 TOML 边界写入完整 `[ai.agent]` 快照。factory 重建只能从
-Store 快照 hydration，不能再分别读取多个选择器字段。可见的 Save 命令保留为显式
-flush 与反馈入口，但持久化不依赖用户点击它。
+Settings 打开期间，凭据、Endpoint 与 AI Agent 文本字段都采用页面局部编辑所有权；
+代码托管分组只有点击各自可见的 Save 命令才提交完整草稿。AI Agent 另用一份已提交的
+强类型 Store 快照供 Settings 之外的 Chat 与 Review 消费。选择预设只在独立页面草稿中
+原子更新 Provider、Base URL 与 Model，其他编辑同样不修改 `MainWindow` 或 Store。
+Save 经 `src/ai/settings_state.rs` 把完整草稿 dispatch 为一个强类型 Action，随后 bridge
+把规范化后的已提交快照投影到页面与 `MainWindow`。有效 commit 自动进入 Store 自有的
+持久化 worker，并通过既有原子 TOML 边界写入 `[ai.agent]`；显式 flush 成功后才显示
+保存反馈。每次进入 Settings 路由时，bridge 都在稳定 factory host 绘制前，用最近提交的
+宿主/Store 快照覆盖这些页面局部草稿，不能再分别读取多个选择器字段。因此未点击 Save
+就离开再返回时，编辑会被丢弃，但视觉树不会重挂载。
 
-Messages 首次访问后保留稳定 factory 根与视觉树，以规避 Slint
-1.17.1 的 factory 重挂载损坏。退出时 bridge 清空行 model，重新进入时先从最新
+Messages 同样在首次访问后保留稳定 factory 根与视觉树。退出时 bridge 清空行 model，重新进入时先从最新
 Store 快照 hydration 再激活，因此非活动 Inbox 不保留投影行。逐次重建视觉树的
 Release A/B 没有测得实质 RSS 节省，且 physical footprint 出现混合回退，因此该
 候选被拒绝。两个 factory
@@ -347,7 +348,8 @@ preview 动态 handle；主窗口与 UI Components 路由仍可正常热更新�
 4. 操作 begin/end 必须在 event loop 上双写宿主 property/global 与
    `*PageBridge::set_*(value)`，覆盖成功/失败/取消全部路径，并在 Notify/Toast
    之前或同一轮回写完成。
-5. factory 创建时同步当前宿主 busy 与领域快照，避免中途 remount 丢失 UI 状态。
+5. factory 创建时同步当前宿主 busy 与领域快照；拥有草稿的稳定 factory 页面还必须在
+   每次重新进入路由前恢复已提交快照。
 6. Worker 回写页面必须通过 `slint::invoke_from_event_loop`。
 
 后续独立页复用同一清单，按状态种类选择 snapshot、operation 或两者并用；不得假定
@@ -614,6 +616,8 @@ Conversation 提交批次使用 Primer 官方 `repo-push` Octicon；相对时间
 
 Diff 几何只使用同一份实测宽度：Rust 在显示列元数据之外传入最长的已展开代码行，Slint 使用当前等宽字体测量，并让横向滚动与每行背景共用该像素宽度。代码栏支持 GitHub 风格的跨精确虚拟行拖拽选中；软换行继续使用 Slint `TextInput.word-wrap` 原生 UTF-8 选区几何。PR 虚拟列表 adapter 使用轻量显示列指标和最终稳定宽度计算相同换行数，再以精确前缀和统一驱动 content extent、滚动条映射、可见窗口与 Find reveal。⌘/Ctrl+F 定位仍是一次性命令：只有 Enter、Shift+Enter 或上一个/下一个控件计算并至多写一次 viewport。普通滚动只更新有界虚拟渲染窗口，绝不执行 Find 定位；Find 打开时活动与非活动高亮都限制在已挂载行内。review controller 的同步命中测试仍按投影 model 的实际换行高度解析字符，⌘/Ctrl+C 静默复制纯文本。
 
+AI Review 只发出 finding 位置，位置解释统一由 PR Review 负责。控制器先校验 Review head SHA，再把 left/right 对应的 old/new 源行映射到 Unified 或 Split 展示行；延迟 large diff 会自动载入，目标位于隐藏区时复用固定源码缓存，只插入以目标为中心的一页上下文。独立 Reveal 代际保证快速连续点击只应用最后一次请求。Slint 通过虚拟列表门面执行一次精确 `CenterIfNeeded`，并在 gutter 绘制不覆盖增删语义背景的 side-aware 标记；过期或缺失目标保持明确未定位状态，直到用户显式选择 View file。
+
 对不换行代码，token 内、跨 token、跨行拖拽目标的鼠标命中和相交选区/当前 Find 矩形
 使用该门面的 shaped cursor 边界；run 序列命中累加每个独立 Slint token 的 shaped advance。
 这替代了标点、CJK fallback、kerning、粗体和斜体
@@ -633,7 +637,7 @@ ListView/ScrollView 可以为大型时间线、文件树和 diff 提供虚拟化
 排版、配色、焦点状态或控件外观；这些能力全部由项目自有 GitHub 组件负责。
 空白/错误状态复用 `GitHubBlankslate`，图标操作复用 `GitHubIconButton`。
 
-PR Review 为 diff、高亮、展开、远端 action-state 读取、远端 mutation、Conversation 与 Commits 使用七个相互独立的 typed state-store 代际；启动 action-state 刷新不会使正在执行的 mutation 失效，启动一种惰性读取也不会使另一种失效。切换 PR、手动 Reload 与 ignore-whitespace 变更通过一个 reducer action 使七类代际全部失效；强刷绕过 diff 缓存、清空惰性 Tab model，并重新加载当前 Tab。Provider changed-file 分页共用一个有界收集器；最后一页仍满时把归一化 detail 标记为 `files_truncated`，Files changed 明确展示该限制。Conversation block 按解析后的 RFC3339 时刻而不是 Provider 原始字符串比较。Merge 能力采用 fail-closed：必需的 Review/approval 状态读取失败时，action-state bridge 清空全部写能力并发布不可用 readiness。
+PR Review 为 diff、高亮、展开、AI finding Reveal、远端 action-state 读取、远端 mutation、Conversation 与 Commits 使用八个相互独立的 typed state-store 代际；启动 action-state 刷新不会使正在执行的 mutation 失效，启动一种惰性读取也不会使另一种失效。切换 PR、手动 Reload 与 ignore-whitespace 变更通过一个 reducer action 使八类代际全部失效；强刷绕过 diff 缓存、清空惰性 Tab model，并重新加载当前 Tab。Provider changed-file 分页共用一个有界收集器；最后一页仍满时把归一化 detail 标记为 `files_truncated`，Files changed 明确展示该限制。Conversation block 按解析后的 RFC3339 时刻而不是 Provider 原始字符串比较。Merge 能力采用 fail-closed：必需的 Review/approval 状态读取失败时，action-state bridge 清空全部写能力并发布不可用 readiness。
 
 ### Pull Request 子系统边界
 
@@ -736,7 +740,7 @@ Toast、Dialog demo 路由已删除。关闭 feature 时，两个侧边栏都不
 3. Adapter 将 Provider 响应归一化为最多 10 条的页面。GitHub 保留搜索接口的准确总数，并发读取当前可见行详情以补充分支 ref。
 4. 控制器只在强类型 Page 代际仍为最新时应用页面；Open/Closed 总数使用独立的 Totals 代际。在生成 view model 前将可解析的更新时间格式化为东八区（UTC+08:00）。
 5. 打开某一行后，在共享 Workflow 生命周期域内从 `Workflow` 导航到 `PrReview`。Workflow 组件被卸载但列表/root model 保留；审核控制器重新读取元数据、请求一份归一化 diff，按项目/请求/空白模式缓存并渲染本地文件树。
-6. 文件选择、筛选、目录展开、复制路径、比例条渲染、语法高亮和收起已展开上下文均在本地完成。只有 hunk 展开和应用内 View file 会产生后续 Provider 读取；两者共享有界的固定源码缓存。方向展开以 GitHub 登录后的新版 `/changes/{commit}` 页面为基准，每页补充 21 个主侧源码行；未登录时回退的经典 `/commits/{commit}` 页面采用不同的 20 行行为，不是本工作区的设计基准。hunk 间剩余上下文不超过一页时，双向控件切换为单个“全部展开”，补齐最后上下文后移除已失效的 hunk 分隔行。文件级展开全部补齐当前文件全部隐藏区间，收起则恢复保留的原始 diff。
+6. 文件选择、筛选、目录展开、复制路径、比例条渲染、语法高亮和收起已展开上下文均在本地完成。只有 hunk 展开、AI finding 隐藏上下文揭示和应用内 View file 会产生后续 Provider 读取；三者共享有界的固定源码缓存。方向展开以 GitHub 登录后的新版 `/changes/{commit}` 页面为基准，每页补充 21 个主侧源码行；AI finding 只插入以目标为中心的一页，并为两侧剩余隐藏区保留分隔标记。未登录时回退的经典 `/commits/{commit}` 页面采用不同的 20 行行为，不是本工作区的设计基准。hunk 间剩余上下文不超过一页时，双向控件切换为单个“全部展开”，补齐最后上下文后移除已失效的 hunk 分隔行。文件级展开全部补齐当前文件全部隐藏区间，收起则恢复保留的原始 diff。
 7. 返回 Workflow 或切换项目会使审核/Conversation/Commit/高亮/源码请求序列失效，迟到任务不得影响新上下文。
 
 ### 项目保存与 Provider 查询

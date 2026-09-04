@@ -152,6 +152,10 @@ export component MainWindow inherits Window {
         : 0px;
     private property <bool> page-memory-diag-pending: false;
     private property <bool> page-scroll-reset-pending: false;
+    // Slint 1.17.1 can corrupt cross-crate factory controls when the product is
+    // destroyed and remounted. Keep the small Settings tree stable after its
+    // first visit; Rust restores committed values before each re-entry paints.
+    private property <bool> settings-page-ever-opened: false;
     // Latch after the first Inbox visit. The cross-crate factory shell is
     // created lazily and never remounted; its potentially large row model is
     // released separately while the route is hidden.
@@ -399,6 +403,9 @@ export component MainWindow inherits Window {
     in property <string> ai-review-summary: "";
     in property <string> ai-review-error: "";
     in property <[AiReviewFindingItem]> ai-review-findings: [];
+    in-out property <string> ai-review-selected-finding-id: "";
+    in-out property <string> ai-review-finding-navigation-message: "";
+    in-out property <bool> ai-review-finding-navigation-can-view-file: false;
     in property <[AiReviewConversationItem]> ai-review-conversation: [];
     in property <[AiReviewResponseVisualRow]> ai-review-response-rows: [];
     // Step-3 same-binary A/B candidate. Keep false until the Release memory and
@@ -482,7 +489,8 @@ export component MainWindow inherits Window {
     callback ai-review-open(string);
     callback ai-review-toggle-current();
     callback ai-review-close-panel();
-    callback ai-review-select-finding(string, int);
+    callback ai-review-select-finding(string, string, int, string, string);
+    callback ai-review-view-finding-file(string, string);
     callback ai-review-set-project-rule(string);
     callback ai-review-cancel(string);
     callback ai-review-cancel-message(string);
@@ -708,6 +716,9 @@ export component MainWindow inherits Window {
     in property <int> workflow-pr-review-hunk-scroll-anchor-source-index: -1;
     in property <int> workflow-pr-review-hunk-scroll-restore-revision: 0;
     in property <bool> workflow-pr-review-hunk-scroll-restore-pending: false;
+    in property <int> workflow-pr-review-location-row-index: -1;
+    in property <string> workflow-pr-review-location-side: "";
+    in property <int> workflow-pr-review-location-reveal-revision: 0;
     in property <string> workflow-pr-review-code-font-family: "Menlo";
     in property <length> workflow-pr-review-code-font-size: 13px;
     in property <string> workflow-pr-review-tree-font-family: ".SF NS";
@@ -834,9 +845,13 @@ export component MainWindow inherits Window {
     pure callback workflow-pr-review-find-diff-row-matches(int, string, string) -> [WorkflowPrDiffFindMatch];
     pure callback workflow-pr-review-step-diff-find-index(int, int, bool) -> int;
     callback workflow-pr-review-resolve-diff-find-viewport-y(int, int, float, float, string, float, float, float) -> float;
+    callback workflow-pr-review-resolve-location-viewport-y(int, float, float) -> float;
     callback workflow-pr-review-layout-diff-virtual-window(int, [WorkflowPrDiffRowMetric], float, float, float, float, float, float) -> WorkflowPrDiffVirtualWindow;
     callback workflow-pr-review-diagnose-diff-scroll(string, float, float, float, float, bool, bool, bool, int, int, int);
     callback workflow-pr-review-view-file();
+    callback workflow-pr-review-reveal-location(string, int, string, string);
+    callback workflow-pr-review-view-location-file(string, string);
+    callback workflow-pr-review-clear-location();
     callback workflow-pr-review-toggle-commit-message(string);
     callback workflow-pr-submit-review(string, string);
     callback workflow-pr-dismiss-review(string, string);
@@ -984,6 +999,7 @@ export component MainWindow inherits Window {
         root.sidebar-preview-dismiss-pending = false;
         root.workflow-pr-readiness-popup-open = false;
         if root.current-route == Route.Settings {
+            root.settings-page-ever-opened = true;
             page-scroll-view.viewport_x = 0px;
         }
         if root.current-route == Route.Messages {
@@ -1465,15 +1481,24 @@ export component MainWindow inherits Window {
                     }
 
                     // Settings owns its own scroll viewport in an independently
-                    // generated crate. Mount it beside (not inside) the shell
-                    // Flickable so wheel events cannot bubble into a nested
-                    // outer scroller and move the whole page container.
-                    if root.current-route == Route.Settings && root.show-page-scroll-view: ComponentContainer {
+                    // generated crate. Keep one stable factory product after the
+                    // first visit, but hide the host outside the route. Mount it
+                    // beside (not inside) the shell Flickable so wheel events
+                    // cannot bubble into a nested outer scroller.
+                    if root.settings-page-ever-opened: settings-page-host := Rectangle {
                         x: 0px;
                         y: 0px;
                         width: root.settings-page-viewport-width;
                         height: root.settings-page-viewport-height;
-                        component-factory: root.settings-page-factory;
+                        visible: root.current-route == Route.Settings && root.show-page-scroll-view;
+                        background: transparent;
+                        clip: true;
+
+                        ComponentContainer {
+                            width: parent.width;
+                            height: parent.height;
+                            component-factory: root.settings-page-factory;
+                        }
                     }
 
                     // Lazily create one stable cross-crate factory shell. The
@@ -2234,6 +2259,9 @@ export component MainWindow inherits Window {
         scroll-diagnostics-enabled: root.workflow-pr-review-scroll-diagnostics-enabled;
         hunk-scroll-anchor-source-index: root.workflow-pr-review-hunk-scroll-anchor-source-index;
         hunk-scroll-restore-revision: root.workflow-pr-review-hunk-scroll-restore-revision;
+        location-row-index: root.workflow-pr-review-location-row-index;
+        location-side: root.workflow-pr-review-location-side;
+        location-reveal-revision: root.workflow-pr-review-location-reveal-revision;
         code-font-family: root.workflow-pr-review-code-font-family;
         code-font-size: root.workflow-pr-review-code-font-size;
         tree-font-family: root.workflow-pr-review-tree-font-family;
@@ -2355,6 +2383,13 @@ export component MainWindow inherits Window {
                 content-height
             )
         }
+        resolve-location-viewport-y(line, current-viewport-y, visible-height) => {
+            root.workflow-pr-review-resolve-location-viewport-y(
+                line,
+                current-viewport-y,
+                visible-height
+            )
+        }
         layout-diff-virtual-window(revision, metrics, scroll-offset, visible-height, code-width, cell-width, code-line-height, hunk-line-height) => {
             root.workflow-pr-review-layout-diff-virtual-window(
                 revision,
@@ -2430,6 +2465,9 @@ export component MainWindow inherits Window {
         summary: root.ai-review-summary;
         error-text: root.ai-review-error;
         findings: root.ai-review-findings;
+        selected-finding-id: root.ai-review-selected-finding-id;
+        finding-navigation-message: root.ai-review-finding-navigation-message;
+        finding-navigation-can-view-file: root.ai-review-finding-navigation-can-view-file;
         conversation: root.ai-review-conversation;
         response-rows: root.ai-review-response-rows;
         response-virtualized: root.ai-review-response-virtualized;
@@ -2451,7 +2489,10 @@ export component MainWindow inherits Window {
         cancel-message(task-id) => { root.ai-review-cancel-message(task-id); }
         re-review(extra) => { root.ai-review-rerun(extra); }
         send-message(message) => { root.ai-review-send-message(message); }
-        select-finding(file, line) => { root.ai-review-select-finding(file, line); }
+        select-finding(id, file, line, side, head-sha) => {
+            root.ai-review-select-finding(id, file, line, side, head-sha);
+        }
+        view-finding-file(file, side) => { root.ai-review-view-finding-file(file, side); }
         open-response-artifact(id, title, markdown) => {
             root.ai-review-open-response-artifact(id, title, markdown);
         }

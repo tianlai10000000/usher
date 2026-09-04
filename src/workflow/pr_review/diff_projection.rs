@@ -16,6 +16,65 @@ pub(super) enum DiffRowProjection {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DiffLineSide {
+    Left,
+    Right,
+}
+
+impl DiffLineSide {
+    pub(super) fn parse(value: &str) -> Self {
+        if value.eq_ignore_ascii_case("left") {
+            Self::Left
+        } else {
+            Self::Right
+        }
+    }
+
+    pub(super) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+
+    pub(super) const fn uses_new_line(self) -> bool {
+        matches!(self, Self::Right)
+    }
+}
+
+pub(super) fn source_index_for_location(
+    lines: &[PullRequestDiffLine],
+    line: i32,
+    side: DiffLineSide,
+) -> Option<usize> {
+    (line > 0).then_some(())?;
+    lines.iter().position(|candidate| match side {
+        DiffLineSide::Left => candidate.old_line == line,
+        DiffLineSide::Right => candidate.new_line == line,
+    })
+}
+
+pub(super) fn display_row_for_location(
+    lines: &[PullRequestDiffLine],
+    line: i32,
+    side: DiffLineSide,
+    split: bool,
+) -> Option<usize> {
+    let source_index = source_index_for_location(lines, line, side)?;
+    diff_row_projection(lines, split)
+        .iter()
+        .position(|projection| match (*projection, side) {
+            (DiffRowProjection::Unified(index), _) => index == source_index,
+            (DiffRowProjection::Split { left, .. }, DiffLineSide::Left) => {
+                left == Some(source_index)
+            }
+            (DiffRowProjection::Split { right, .. }, DiffLineSide::Right) => {
+                right == Some(source_index)
+            }
+        })
+}
+
 pub(super) fn diff_row_projection(
     lines: &[PullRequestDiffLine],
     split: bool,
@@ -103,7 +162,10 @@ pub(super) fn hunk_scroll_anchor_source_index(
 
 #[cfg(test)]
 mod tests {
-    use super::{DiffRowProjection, diff_row_projection};
+    use super::{
+        DiffLineSide, DiffRowProjection, diff_row_projection, display_row_for_location,
+        source_index_for_location,
+    };
     use crate::git::PullRequestDiffLine;
 
     fn line(old_line: i32, new_line: i32, kind: &str, content: &str) -> PullRequestDiffLine {
@@ -186,6 +248,55 @@ mod tests {
                     spanning: false,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn location_resolution_keeps_replacement_sides_distinct() {
+        let lines = vec![
+            line(0, 0, "hunk", "@@ -6 +6 @@"),
+            line(7, 0, "deletion", "old"),
+            line(0, 7, "addition", "new"),
+        ];
+
+        assert_eq!(
+            source_index_for_location(&lines, 7, DiffLineSide::Left),
+            Some(1)
+        );
+        assert_eq!(
+            source_index_for_location(&lines, 7, DiffLineSide::Right),
+            Some(2)
+        );
+        assert_eq!(
+            display_row_for_location(&lines, 7, DiffLineSide::Left, true),
+            Some(1)
+        );
+        assert_eq!(
+            display_row_for_location(&lines, 7, DiffLineSide::Right, true),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn location_resolution_returns_display_rows_in_both_modes() {
+        let lines = vec![
+            line(0, 0, "hunk", "@@ -1,2 +1,2 @@"),
+            line(1, 1, "context", "same"),
+            line(2, 0, "deletion", "old"),
+            line(0, 2, "addition", "new"),
+        ];
+
+        assert_eq!(
+            display_row_for_location(&lines, 2, DiffLineSide::Right, false),
+            Some(3)
+        );
+        assert_eq!(
+            display_row_for_location(&lines, 2, DiffLineSide::Right, true),
+            Some(2)
+        );
+        assert_eq!(
+            display_row_for_location(&lines, 2, DiffLineSide::Left, true),
+            Some(2)
         );
     }
 }

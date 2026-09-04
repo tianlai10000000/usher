@@ -2511,6 +2511,10 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     root.hunk-scroll-restore-revision;
                 private property <int> observed-diff-find-scroll-revision:
                     root.diff-find-scroll-revision;
+                private property <int> observed-location-reveal-revision:
+                    root.location-reveal-revision;
+                private property <int> processed-line-content-revision: -1;
+                private property <bool> location-scroll-awaiting-content-refresh: false;
                 private property <WorkflowPrDiffVirtualWindow> virtual-window;
                 private property <bool> refreshing-virtual-window: false;
                 private property <length> diagnostic-viewport-y: diff-scroll.viewport-y;
@@ -2576,6 +2580,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
                 init => {
                     diff-surface.refresh-virtual-window();
+                    diff-surface.processed-line-content-revision = root.line-content-revision;
                     diff-surface.emit-scroll-diagnostic("surface-init", diff-scroll.viewport-y);
                 }
 
@@ -2629,6 +2634,20 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     }
                 }
 
+                function apply-location-scroll() {
+                    if root.location-row-index < 0 || root.live-resizing {
+                        return;
+                    }
+                    let target-y = root.resolve-location-viewport-y(
+                        root.location-row-index,
+                        diff-scroll.viewport-y / 1px,
+                        diff-scroll.visible-height / 1px
+                    );
+                    if Math.abs(diff-scroll.viewport-y - target-y * 1px) > 1px {
+                        diff-scroll.viewport-y = target-y * 1px;
+                    }
+                }
+
                 changed observed-line-model-revision => {
                     root.hunk-scroll-restore-pending = false;
                     root.hunk-scroll-anchor-resolved = false;
@@ -2639,6 +2658,14 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
                 changed observed-line-content-revision => {
                     diff-surface.refresh-virtual-window();
+                    diff-surface.processed-line-content-revision =
+                        diff-surface.observed-line-content-revision;
+                    if diff-surface.location-scroll-awaiting-content-refresh {
+                        // A finding reveal can arrive in the same UI turn as a full-file model
+                        // swap. Reapply only that pending reveal after rebuilding the geometry.
+                        diff-surface.location-scroll-awaiting-content-refresh = false;
+                        diff-surface.apply-location-scroll();
+                    }
                 }
 
                 changed observed-hunk-scroll-restore-revision => {
@@ -2651,6 +2678,13 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                     // One command, one calculation, at most one viewport write.
                     // No timer or observer can re-enter this during scrolling.
                     diff-surface.apply-diff-find-scroll();
+                }
+
+                changed observed-location-reveal-revision => {
+                    diff-surface.location-scroll-awaiting-content-refresh =
+                        diff-surface.processed-line-content-revision
+                            != diff-surface.observed-line-content-revision;
+                    diff-surface.apply-location-scroll();
                 }
 
                 hunk-scroll-restore-timer := Timer {
@@ -3115,6 +3149,15 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
                                 // post-update anchor report in that case.
                                 changed observed-hunk-scroll-restore-revision => {
                                     self.report-hunk-scroll-anchor();
+                                }
+                                if line-index == root.location-row-index: Rectangle {
+                                    x: root.diff-view == "split" && root.location-side == "right"
+                                        ? parent.width / 2
+                                        : 0px;
+                                    width: 3px;
+                                    height: parent.height;
+                                    background: root.github-accent-fg;
+                                    z: 60;
                                 }
                                 private property <length> split-code-width:
                                     max(1px, (diff-scroll.visible_width - 1px) / 2 - 70px);

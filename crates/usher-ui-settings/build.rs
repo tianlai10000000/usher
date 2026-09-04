@@ -31,7 +31,7 @@ fn prepare_language_picker(out_dir: &Path) -> std::io::Result<PathBuf> {
         let option_count = locales.len() + 1;
         writeln!(
             source,
-            "export component {component} inherits VerticalLayout {{\n    callback changed();\n    private property <bool> open: false;\n    private property <string> menu-selection: \"\";\n    width: 100%;\n    spacing: root.open ? 4px : 0px;\n\n    Rectangle {{\n        width: parent.width;\n        height: 40px;\n        background: transparent;"
+            "export component {component} inherits VerticalLayout {{\n    callback changed();\n    in property <int> reset-revision: 0;\n    private property <bool> open: false;\n    private property <string> menu-selection: \"\";\n    width: 100%;\n    spacing: root.open ? 4px : 0px;\n    changed reset-revision => {{\n        root.open = false;\n        root.menu-selection = {selection};\n    }}\n\n    Rectangle {{\n        width: parent.width;\n        height: 40px;\n        background: transparent;"
         )
         .expect("writing to String cannot fail");
         write_trigger(

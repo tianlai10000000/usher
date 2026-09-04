@@ -2226,6 +2226,14 @@ msgctxt "ai_review.failure.generic"
 msgid "The AI Review failed. Try again."
 msgstr "AI Review 失败，请重试。"
 
+msgctxt "ai_review.finding_location_outdated"
+msgid "This finding belongs to an older Pull Request version."
+msgstr "此问题属于 Pull Request 的旧版本。"
+
+msgctxt "ai_review.finding_location_unavailable"
+msgid "This line is no longer available in the current Diff."
+msgstr "当前 Diff 中已无法定位到这一行。"
+
 msgctxt "ai_review.response_failed"
 msgid "Could not get a response: {reason}"
 msgstr "无法获取回复：{reason}"

@@ -2231,6 +2231,14 @@ key = "ai_review.failure.generic"
 text = "The AI Review failed. Try again."
 
 [[messages]]
+key = "ai_review.finding_location_outdated"
+text = "This finding belongs to an older Pull Request version."
+
+[[messages]]
+key = "ai_review.finding_location_unavailable"
+text = "This line is no longer available in the current Diff."
+
+[[messages]]
 key = "ai_review.response_failed"
 text = "Could not get a response: {reason}"
 

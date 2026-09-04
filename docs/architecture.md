@@ -337,15 +337,15 @@ action enum and anchor rectangle through the dedicated factory-local
 maps those enum values to separate literal surfaces. No label string crosses a
 list delegate. Settings mounts a local generic `GitHubTooltipOverlayHost` for
 shared controls; that host remounts its text-measurement surface for each claim
-token. Settings deliberately keeps the opposite route lifecycle from Messages:
-its `ComponentContainer` remains route-conditional, so leaving Settings destroys
-the factory product and permits its visual-tree RSS to be reclaimed. Do not keep
-the hidden Settings tree alive as a workaround for selector bugs.
+token. Settings and Messages each lazily create one stable factory product after
+their first visit. Slint 1.17.1 can reuse the wrong control text or placeholder
+when a cross-crate product is destroyed and remounted, so route exit only hides
+these hosts; feature bridges own the separate state-reset lifecycle.
 
 Within a Settings factory product, Slint 1.17.1 selector bodies must use fixed
 mounted leaves and select them with `visible` plus an explicit active height.
 Do not recreate mutually exclusive section or provider forms with `if` nodes:
-factory remounts and repeated tab changes can otherwise retain a sibling's label,
+repeated tab changes can otherwise retain a sibling's label,
 placeholder, value, or selected state. Route-local selector indices start at a
 sentinel and transition to their default on the next UI tick so a newly built
 tree invalidates cached bindings. A selector label, its selected appearance, and
@@ -365,20 +365,23 @@ canonical selection into picker-local state; option styling reads that snapshot
 instead of a global binding that the real renderer may leave stale while the
 option surface is hidden.
 
-AI Agent form state is an exception to purely page-local edit ownership because
-it is consumed by Chat and Review outside Settings. `src/ai/settings_state.rs`
-owns one typed Store snapshot for Provider, Base URL, API Key, Model, and reply
-language. Settings controls dispatch one typed action; selecting a preset
-reduces its Provider, Base URL, and Model in one commit, then the bridge projects
-that same snapshot into the isolated page and `MainWindow`. Every changed commit
-is automatically queued to the Store-owned persistence worker, which writes the
-complete `[ai.agent]` snapshot through the existing atomic TOML boundary. A
-factory recreation hydrates from the Store snapshot, never from independent
-selector fields. The visible Save command remains an explicit flush/feedback
-operation; persistence does not depend on pressing it.
+Credential, endpoint, and AI Agent text fields use page-local edit ownership
+while Settings is open. The code-hosting groups commit their complete drafts only
+through their visible Save commands. AI Agent additionally owns one committed
+typed Store snapshot for consumption by Chat and Review. Selecting a preset
+updates Provider, Base URL, and Model atomically in the isolated page draft;
+other edits likewise do not mutate `MainWindow` or the Store. Save dispatches
+the complete draft as one typed action through `src/ai/settings_state.rs`, then
+the bridge projects the normalized committed snapshot into the page and
+`MainWindow`. The changed commit is queued to the Store-owned persistence worker,
+which writes `[ai.agent]` through the existing atomic TOML boundary, and success
+feedback waits for an explicit flush. Every route entry overwrites these
+page-local drafts from the last committed host/Store snapshot before the stable
+factory host paints, never from independent selector fields. Thus leaving and
+returning without Save discards edits without remounting the visual tree.
 
-Messages keeps its factory root and visual tree stable after the first
-visit to avoid Slint 1.17.1 factory remount corruption. Its bridge clears the
+Messages likewise keeps its factory root and visual tree stable after the first
+visit. Its bridge clears the
 row model on exit and hydrates the latest Store snapshot before reactivation,
 so an inactive Inbox retains no projected rows. Rebuilding the visual tree per
 visit was rejected after a release A/B showed no material RSS saving and mixed
@@ -430,7 +433,8 @@ Common rules:
    `*PageBridge::set_*(value)` on the event loop, on every success/error/cancel
    path, before or with Notify/Toast feedback.
 5. Factory create-time sync restores the current host busy flags and domain
-   snapshot so remount mid-flight does not lose UI state.
+   snapshot. Stable factory pages that own drafts also restore the committed
+   snapshot before every route re-entry.
 6. All page writes from workers use `slint::invoke_from_event_loop`.
 
 Future isolated pages reuse the same checklist and pick snapshot mode,
@@ -748,7 +752,7 @@ own product typography, palette, focus treatment, or controls; those stay in
 application-owned GitHub components. Empty/error states reuse
 `GitHubBlankslate`, and icon actions reuse `GitHubIconButton`.
 
-PR Review uses seven independent typed state-store generations for diff, highlight, expansion, remote action-state reads, remote mutations, Conversation, and Commits work. Switching PRs, manual Reload, and ignore-whitespace changes invalidate all seven generations in one reducer action; starting an action-state refresh does not invalidate an in-flight mutation, and starting one lazy read does not invalidate an unrelated one. Forced reload bypasses the diff cache, clears lazy tab models, and reloads the active tab. Provider changed-file pages share one bounded collector. A full final page marks the normalized detail as `files_truncated`, and the Files changed surface presents that limitation explicitly. Conversation blocks compare parsed RFC3339 instants rather than provider strings. Merge capability is fail-closed: if required review/approval state cannot be loaded, the action-state bridge clears every write capability and publishes unavailable readiness.
+PR Review uses eight independent typed state-store generations for diff, highlight, expansion, AI-finding Reveal, remote action-state reads, remote mutations, Conversation, and Commits work. Switching PRs, manual Reload, and ignore-whitespace changes invalidate all eight generations in one reducer action; starting an action-state refresh does not invalidate an in-flight mutation, and starting one lazy read does not invalidate an unrelated one. Forced reload bypasses the diff cache, clears lazy tab models, and reloads the active tab. Provider changed-file pages share one bounded collector. A full final page marks the normalized detail as `files_truncated`, and the Files changed surface presents that limitation explicitly. Conversation blocks compare parsed RFC3339 instants rather than provider strings. Merge capability is fail-closed: if required review/approval state cannot be loaded, the action-state bridge clears every write capability and publishes unavailable readiness.
 
 The review header follows GitHub's two-step command model. A GitHub-styled readiness badge beside the title renders the normalized kind/detail with Primer semantic colors, while each adapter owns its merge semantics: GitHub maps REST mergeability, Gitee Enterprise maps v8 `current_state` conditions, public Gitee maps only v5 fields, and GitLab maps `detailed_merge_status` with an asynchronous recheck. The shared enum is a presentation boundary and must never cause one provider's conditions to be applied to another. `Review changes` submits an explicit provider-neutral Comment, Approve, or Request changes command; unsupported choices remain visible but disabled. The Conversation tab also exposes a GitHub-style plain-text composer (`Write` + green `Comment`) that submits the same Comment action. Eligible `review_summary` rows expose GitHub's per-review kebab and required-reason `Dismiss review` dialog; the aggregate header state remains informational. The provider-neutral dismissal facade delegates the selected review id to GitHub's dismissal endpoint when repository permissions allow it, posts a reason note and unapproves the authenticated user on GitLab, and withdraws the authenticated user's Gitee Enterprise review through the working Web API route `/api/code/api/{full_path}/-/pull_requests/{iid}/reviews` with the exact payload `{"state":"initialized"}`. Gitee falls back silently to the documented v8 reviews route for deployments without that Web route, then records the required reason as a best-effort MR note. Gitee public v5 has no dismissal capability. Provider success triggers a remote state refresh and never starts a merge. `Merge pull request` is enabled only by the latest normalized `PullRequestActionState` and presents only adapter-returned methods. GitHub supports repository-enabled merge, squash, and rebase methods. Gitee Enterprise v8 maps review states, omits the optional `comment` field for an Approve with no summary, and supports merge, squash, rebase, and fast-forward according to `restrict_merge_type`; public Gitee v5 supports comments plus merge/squash but has no approve/request-changes endpoint. GitLab supports comments, approvals, and SHA-guarded merge/squash with explicit source-branch deletion; its project `squash_option` limits the presented methods, and Request changes remains disabled because the stable REST API has no matching write command.
 
@@ -761,6 +765,8 @@ Conversation and Commits adapters normalize optional Git author and committer id
 Conversation commit batches use Primer's official `repo-push` Octicon. Their relative timestamp remains inline immediately after `added N commits`, while the shared absolute-time tooltip preserves exact provider time. GitHub reviews become an atomic activity summary plus optional body card; review state controls wording, automatic relative-time units match GitHub, and merged activity suppresses redundant closed activity. Connector segments follow semantic boundaries, but consecutive review pairs share a continuous rail from the preceding review card to the next summary marker. Gitee Enterprise ordinary comments use MR `/notes` with `noteable_type: PullRequest`; `/reviews` is reserved for review decisions. A commit-count probe without totals treats a response exactly filling the requested page as ambiguous—even for a bare array—and falls back to counting and discarding the documented complete non-paginated collection without mounting the lazy Commits model.
 
 Diff geometry uses one measured extent: Rust passes the longest expanded code line alongside display-column metadata, and Slint measures it with the active monospace font for horizontal scrolling and row-background painting. This prevents an unpainted strip at the right edge and keeps tabs/wide glyphs aligned. The code column accepts GitHub-style drag selection across exact virtual rows (gutters excluded; hunk/meta rows never selectable and omitted from clipboard text); double-click expands to the same character-class run (word / whitespace / punctuation) and triple-click selects the full code line, with the multi-click streak owned by the review workspace so row-window changes cannot break the gesture. Soft-wrapped rows keep Slint `TextInput.word-wrap` auto-wrap and use its native UTF-8 selection geometry. The PR virtual-list adapter calculates the same wrap count from lightweight display-column metrics and final stable width, then uses exact prefix sums for content extent, scrollbar mapping, visible-window selection, and Find reveal. ⌘/Ctrl+F positioning remains a one-shot command: only Enter, Shift+Enter, or the previous/next controls calculate and perform at most one viewport write. Ordinary scrolling updates only the bounded virtual render window; it never runs Find positioning. Inactive and active match painting remains bounded to mounted rows while Find is open. The synchronous review-controller hit test walks actual projected row wrap heights so a forward or reverse drag can resolve an exact character in a wrapped endpoint. ⌘/Ctrl+C copies the plain selection silently.
+
+AI Review emits finding locations but PR Review owns their interpretation. It validates the Review head SHA, maps left/right old/new source indices onto Unified or Split display rows, automatically admits a deferred large diff, and reuses the immutable-source cache to insert one target-centered hidden-context page when required. A dedicated Reveal generation makes rapid activations latest-request-wins. Slint applies one exact `CenterIfNeeded` command through the virtual-list facade and paints a side-aware gutter marker without replacing diff semantic backgrounds; stale or missing targets remain visibly unresolved until the user explicitly chooses View file.
 
 For unwrapped code, pointer hits within a token, across tokens, or on a crossed
 row and intersecting selection/current-Find rectangles use that facade's shaped
@@ -902,7 +908,7 @@ of the Slint compile and live-preview dependency graph.
 3. The adapter normalizes provider responses into a 10-item page. GitHub retains its exact search total and enriches visible rows with concurrent detail requests for branch refs.
 4. The controller applies a page only if its typed Page generation is current; Open/Closed totals use an independent Totals generation. It formats parseable update times as UTC+08:00 before producing view models.
 5. Opening a row navigates from `Workflow` to `PrReview` inside the shared Workflow lifecycle domain. The Workflow component is unmounted but its list/root models remain retained; the review controller reads fresh metadata, requests one normalized diff, caches it by project/request/whitespace mode, and renders its local file tree.
-6. File selection, filtering, folder expansion, copy-path, ratio rendering, syntax highlighting, and collapsing expanded context are local. Hunk expansion and in-app View file are the only follow-up provider reads; both share the bounded immutable-source cache. Directional expansion follows GitHub's signed-in improved `/changes/{commit}` view and reveals 21 primary-side source rows per page; the signed-out classic `/commits/{commit}` view has different 20-row behavior and is not this UI's baseline. Once the remaining between-hunk context fits one page, the directional controls become one expand-all action; revealing the final context removes the obsolete hunk separator. File-level expand-all fills every hidden range, and collapse restores the retained original diff.
+6. File selection, filtering, folder expansion, copy-path, ratio rendering, syntax highlighting, and collapsing expanded context are local. Hunk expansion, AI-finding hidden-context reveal, and in-app View file are the only follow-up provider reads; all share the bounded immutable-source cache. Directional expansion follows GitHub's signed-in improved `/changes/{commit}` view and reveals 21 primary-side source rows per page; AI finding reveal inserts one target-centered page and preserves separators around remaining hidden ranges. The signed-out classic `/commits/{commit}` view has different 20-row behavior and is not this UI's baseline. Once the remaining between-hunk context fits one page, the directional controls become one expand-all action; revealing the final context removes the obsolete hunk separator. File-level expand-all fills every hidden range, and collapse restores the retained original diff.
 7. Returning to Workflow or switching project invalidates review/conversation/commit/highlight/source sequences so late work cannot affect the new context.
 
 ### Project save and provider lookup

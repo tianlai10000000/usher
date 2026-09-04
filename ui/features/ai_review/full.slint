@@ -28,7 +28,11 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
     in property <string> model-name: "";
     in property <string> application-font-family: "sans-serif";
     in property <string> code-font-family: "Menlo";
-    callback select-finding(string, int);
+    in property <string> selected-finding-id: "";
+    in property <string> finding-navigation-message: "";
+    in property <bool> finding-navigation-can-view-file: false;
+    callback select-finding(string, string, int, string, string);
+    callback view-finding-file(string, string);
     callback open-response-artifact(string, string, string);
     callback open-response-link(string);
     callback interaction-started();
@@ -174,8 +178,23 @@ component GitHubAiReviewVirtualResponseRow inherits Rectangle {
             title: root.visual-row.finding.title;
             explanation: root.visual-row.finding.explanation;
             suggestion: root.visual-row.finding.suggestion;
+            selected: root.selected-finding-id == root.visual-row.finding.id;
+            navigation-message: self.selected ? root.finding-navigation-message : "";
+            navigation-can-view-file: self.selected && root.finding-navigation-can-view-file;
             activated => {
-                root.select-finding(root.visual-row.finding.file, root.visual-row.finding.line);
+                root.select-finding(
+                    root.visual-row.finding.id,
+                    root.visual-row.finding.file,
+                    root.visual-row.finding.line,
+                    root.visual-row.finding.side,
+                    root.visual-row.finding.head-sha
+                );
+            }
+            view-file => {
+                root.view-finding-file(
+                    root.visual-row.finding.file,
+                    root.visual-row.finding.side
+                );
             }
         }
     }
@@ -690,7 +709,19 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                 title: finding.title;
                 explanation: finding.explanation;
                 suggestion: finding.suggestion;
-                activated => { root.select-finding(finding.file, finding.line); }
+                selected: root.selected-finding-id == finding.id;
+                navigation-message: self.selected ? root.finding-navigation-message : "";
+                navigation-can-view-file: self.selected && root.finding-navigation-can-view-file;
+                activated => {
+                    root.select-finding(
+                        finding.id,
+                        finding.file,
+                        finding.line,
+                        finding.side,
+                        finding.head-sha
+                    );
+                }
+                view-file => { root.view-finding-file(finding.file, finding.side); }
             }
 
             if root.conversation.length > 0: Rectangle {
@@ -873,7 +904,13 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
                 model-name: root.model-name;
                 application-font-family: root.application-font-family;
                 code-font-family: root.code-font-family;
-                select-finding(file, line) => { root.select-finding(file, line); }
+                selected-finding-id: root.selected-finding-id;
+                finding-navigation-message: root.finding-navigation-message;
+                finding-navigation-can-view-file: root.finding-navigation-can-view-file;
+                select-finding(id, file, line, side, head-sha) => {
+                    root.select-finding(id, file, line, side, head-sha);
+                }
+                view-finding-file(file, side) => { root.view-finding-file(file, side); }
                 open-response-artifact(id, title, markdown) => {
                     root.open-response-artifact(id, title, markdown);
                 }

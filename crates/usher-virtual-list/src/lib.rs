@@ -109,6 +109,17 @@ impl VirtualList {
             .saturating_sub(window.viewport_extent as u64 / 2);
         centered.min(self.engine.maximum_offset())
     }
+
+    pub fn reveal_item_center_if_needed(&self, index: usize) -> u64 {
+        let Some(item) = self.engine.item(index) else {
+            return 0;
+        };
+        self.reveal_center_if_needed(RevealTarget {
+            index,
+            intra_item_offset: 0,
+            extent: item.extent,
+        })
+    }
 }
 
 #[derive(Default)]
@@ -211,6 +222,14 @@ mod tests {
             }),
             90
         );
+    }
+
+    #[test]
+    fn reveal_item_uses_its_complete_extent() {
+        let mut list = VirtualList::new(&[20, 80, 30], 1);
+        list.set_viewport(40, 40);
+
+        assert_eq!(list.reveal_item_center_if_needed(1), 40);
     }
 
     #[test]

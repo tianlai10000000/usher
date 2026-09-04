@@ -287,12 +287,31 @@ pub enum FindingSeverity {
     Low,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FindingDiffSide {
+    Left,
+    #[default]
+    Right,
+}
+
+impl FindingDiffSide {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewFinding {
     pub severity: FindingSeverity,
     pub file: String,
     #[serde(default)]
     pub line: i32,
+    #[serde(default)]
+    pub side: FindingDiffSide,
     pub title: String,
     pub explanation: String,
     #[serde(default)]
@@ -760,6 +779,7 @@ pub fn merge_review_results(results: impl IntoIterator<Item = ReviewResult>) -> 
             let key = (
                 finding.file.clone(),
                 finding.line,
+                finding.side,
                 finding.title.to_lowercase(),
             );
             if seen_findings.insert(key) {
@@ -1367,6 +1387,7 @@ mod tests {
             severity: FindingSeverity::High,
             file: "src/lib.rs".into(),
             line: 12,
+            side: FindingDiffSide::Right,
             title: "Unchecked state".into(),
             explanation: "The transition can fail.".into(),
             suggestion: "Handle the error.".into(),
@@ -1387,5 +1408,43 @@ mod tests {
         assert_eq!(merged.skipped_files, vec!["large.bin"]);
         assert!(merged.summary.contains("First chunk"));
         assert!(merged.summary.contains("Second chunk"));
+    }
+
+    #[test]
+    fn persisted_finding_without_side_defaults_to_right() {
+        let finding: ReviewFinding = serde_json::from_str(
+            r#"{"severity":"medium","file":"src/lib.rs","line":7,"title":"Issue","explanation":"Details","suggestion":"Fix it"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(finding.side, FindingDiffSide::Right);
+    }
+
+    #[test]
+    fn findings_on_opposite_diff_sides_are_not_deduplicated() {
+        let finding = ReviewFinding {
+            severity: FindingSeverity::Medium,
+            file: "src/lib.rs".into(),
+            line: 7,
+            side: FindingDiffSide::Left,
+            title: "Replacement issue".into(),
+            explanation: "Details".into(),
+            suggestion: String::new(),
+        };
+        let mut right = finding.clone();
+        right.side = FindingDiffSide::Right;
+
+        let merged = merge_review_results([
+            ReviewResult {
+                findings: vec![finding],
+                ..ReviewResult::default()
+            },
+            ReviewResult {
+                findings: vec![right],
+                ..ReviewResult::default()
+            },
+        ]);
+
+        assert_eq!(merged.findings.len(), 2);
     }
 }

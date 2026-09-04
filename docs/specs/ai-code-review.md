@@ -190,8 +190,21 @@ glyph, and a 24px interaction target. It cancels that task. The PR list keeps
 its Copilot action and adds a denser 16px-visual Stop button with the same 24px
 target directly to its right. Conversation, Copilot, and Stop action centers
 remain evenly spaced while that row's task is active.
-Activating a finding selects its changed file and line in
-the existing diff. The panel uses Primer density and repository-owned `GitHub*`
+Each persisted finding records `path + line + side` against the Review target's
+head SHA; legacy sessions without `side` default to `right`. Activating a
+finding selects Files changed and its file, resolves `left` against old lines
+and `right` against new lines, and reveals the exact projected row in Unified
+or Split mode. The selected finding and a narrow diff-gutter marker remain
+highlighted. An already visible target does not move the viewport, while a
+hidden target is centered. Repeated activation issues a new reveal command.
+Large deferred diffs load automatically. A line hidden between hunks expands
+only one target-centered context page and preserves separators for context that
+remains hidden on either side; finding navigation never switches to full-file
+mode automatically. Stale head SHAs and locations absent from the current diff
+show an explicit unavailable/outdated state with `View file` when the file can
+still be resolved. Rapid activations are latest-request-wins through a
+PR-Review-owned Reveal generation.
+The panel uses Primer density and repository-owned `GitHub*`
 components; it is not a standalone review page. Its divider has a persistent resize hit target: dragging
 retains a session width preference, clamps the panel between its readable
 minimum and the remaining diff workspace, moves and clips the lightweight diff
@@ -244,7 +257,15 @@ Review 处于排队或运行状态时，`Review again` composer 的主操作切�
 可视圆形为 20px、交互热区为 24px 的紧凑反色 Stop 按钮，并取消该任务。PR 列表
 保留 Copilot 操作，并在对应行任务活跃时于其右侧显示可视圆形为 16px、交互
 热区仍为 24px 的 Stop 按钮。Conversation、Copilot 与 Stop 三个操作的中心间距必须保持均等。
-点击 finding 会在现有 diff 中选择对应文件与行。面板遵循
+每个持久化 finding 都以 `path + line + side` 绑定到 Review 目标的 head SHA；旧 Session
+缺少 `side` 时默认使用 `right`。点击 finding 后选择 Files changed 与对应文件，`left`
+按旧行、`right` 按新行解析，并在 Unified 或 Split 模式精确揭示投影后的展示行。选中的
+finding 与 Diff gutter 中的窄强调标记保持可见；目标已在 viewport 内时不移动，隐藏时才
+居中；重复点击会发出新的 reveal 命令。延迟加载的大 Diff 会自动加载。若目标位于 hunk
+之间的省略区，只展开以目标为中心的一页上下文，并为两侧仍隐藏的内容保留分隔标记；
+finding 导航绝不自动切换到完整文件。若 head SHA 已过期或当前 Diff 不再含该位置，界面
+显示明确的过期/不可用状态；文件仍可解析时提供显式 `View file`。连续快速点击通过
+PR Review 自有的 Reveal 代际实现 latest-request-wins。面板遵循
 Primer 密度并复用仓库自有 `GitHub*` 组件，不提供独立 Review 页面。分隔线提供常驻拖拽命中区：拖动会保留本次会话的
 宽度偏好，在面板可读最小宽度与剩余 Diff 工作区之间夹紧；轻量 Diff viewport 与裁剪
 边界持续跟随拖动，仅在释放鼠标后提交一次重型 Diff 排版。静止态的单像素分隔线只由
@@ -553,7 +574,13 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
   start as slots become free.
 - Start from the PR list and verify it remains visible. Open a completed task and
   verify PR detail selects Files changed and opens the panel.
-- Select a finding and verify the matching file and changed line are revealed.
+- Select findings on left/right replacement rows in Unified and Split modes;
+  verify the exact row and side marker, cross-file selection, repeated reveal,
+  and no viewport movement when the target is already visible.
+- Select a hidden-context finding and verify only one target-centered page is
+  inserted. Verify a deferred large diff loads automatically, rapid clicks
+  apply only the last location, stale/missing locations show the fallback, and
+  `View file` is the only action that opens the complete source.
 - Send a follow-up question, add one-off requirements, and run Review again.
 - Send an Ask question and verify the user row appears before the Agent
   completes. Verify the pending Agent row advances from context preparation to
@@ -609,7 +636,11 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
 - 使用 `USHER_AI_REVIEW_FIXTURE=review-v1` 入队超过上限的任务，确认运行高水位等于
   配置值，空出 slot 后队列继续启动。
 - 从 PR 列表启动后确认仍停留列表；打开完成任务后进入 PR 详情 Files changed 并打开面板。
-- 点击 finding，确认对应文件和变更行被揭示。
+- 在 Unified/Split 模式分别点击 replacement 的 left/right finding，确认精确行与 side
+  标记、跨文件选择、重复揭示，以及目标已可见时 viewport 不移动。
+- 点击隐藏上下文 finding，确认只插入以目标为中心的一页；确认延迟 large diff 自动加载、
+  快速连续点击只应用最后位置、过期/缺失位置显示 fallback，且只有显式 `View file` 才打开
+  完整源码。
 - 发送追问、增加一次性要求并再次 Review。
 - 发送 Ask 后确认用户行在 Agent 完成前立即出现；确认等待行从准备上下文进入思考状态，
   实时耗时持续增长，Send 操作切换为 Stop，且 Stop 只终止该次回复并冻结耗时。

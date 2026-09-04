@@ -107,6 +107,142 @@ fn hunk_side_bounds(
     Some((previous, next))
 }
 
+pub(super) fn hidden_hunk_for_line(
+    file: &PullRequestDiffFile,
+    target_line: i32,
+    use_new_side: bool,
+) -> Option<usize> {
+    (target_line > 0).then_some(())?;
+    file.lines.iter().enumerate().find_map(|(index, line)| {
+        if line.kind != "hunk" {
+            return None;
+        }
+        let (previous, next) = hunk_side_bounds(file, index, use_new_side)?;
+        (target_line > previous && target_line < next).then_some(index)
+    })
+}
+
+fn centered_source_range<'a>(
+    source_lines: &'a [&'a str],
+    previous: i32,
+    next: i32,
+    target: i32,
+    limit: usize,
+) -> Vec<(i32, &'a str)> {
+    let hidden_start = previous.saturating_add(1).max(1);
+    let hidden_end = next
+        .saturating_sub(1)
+        .min(source_lines.len().min(i32::MAX as usize) as i32);
+    if limit == 0 || target < hidden_start || target > hidden_end {
+        return Vec::new();
+    }
+    let limit = limit.min(i32::MAX as usize) as i32;
+    let count = hidden_end.saturating_sub(hidden_start).saturating_add(1);
+    let selected = count.min(limit);
+    let mut start = target.saturating_sub(selected / 2).max(hidden_start);
+    let mut end = start.saturating_add(selected.saturating_sub(1));
+    if end > hidden_end {
+        end = hidden_end;
+        start = end
+            .saturating_sub(selected.saturating_sub(1))
+            .max(hidden_start);
+    }
+    (start..=end)
+        .map(|number| (number, source_lines[number as usize - 1]))
+        .collect()
+}
+
+pub(super) fn expand_hunk_context_around_line_from_sources(
+    file: &mut PullRequestDiffFile,
+    hunk_index: usize,
+    target_line: i32,
+    use_new_side: bool,
+    base_source: &str,
+    head_source: &str,
+    limit: usize,
+) -> bool {
+    let Some(marker) = file
+        .lines
+        .get(hunk_index)
+        .filter(|line| line.kind == "hunk")
+        .cloned()
+    else {
+        return false;
+    };
+    let old_bounds = hunk_side_bounds(file, hunk_index, false);
+    let new_bounds = hunk_side_bounds(file, hunk_index, true);
+    let Some((primary_previous, primary_next)) =
+        (if use_new_side { new_bounds } else { old_bounds })
+    else {
+        return false;
+    };
+    if target_line <= primary_previous || target_line >= primary_next {
+        return false;
+    }
+
+    let base_lines = base_source.lines().collect::<Vec<_>>();
+    let head_lines = head_source.lines().collect::<Vec<_>>();
+    let mapped_target = |bounds: Option<(i32, i32)>| {
+        bounds.map(|(_, next)| next.saturating_sub(primary_next.saturating_sub(target_line)))
+    };
+    let old_target = if use_new_side {
+        mapped_target(old_bounds)
+    } else {
+        Some(target_line)
+    };
+    let new_target = if use_new_side {
+        Some(target_line)
+    } else {
+        mapped_target(new_bounds)
+    };
+    let old_range = old_bounds
+        .zip(old_target)
+        .map(|((previous, next), target)| {
+            centered_source_range(&base_lines, previous, next, target, limit)
+        })
+        .unwrap_or_default();
+    let new_range = new_bounds
+        .zip(new_target)
+        .map(|((previous, next), target)| {
+            centered_source_range(&head_lines, previous, next, target, limit)
+        })
+        .unwrap_or_default();
+    let rows = align_source_ranges(old_range.as_slice(), new_range.as_slice());
+    let primary_number = |line: &PullRequestDiffLine| {
+        if use_new_side {
+            line.new_line
+        } else {
+            line.old_line
+        }
+    };
+    let Some(first) = rows.iter().find_map(|line| {
+        let number = primary_number(line);
+        (number > 0).then_some(number)
+    }) else {
+        return false;
+    };
+    let Some(last) = rows.iter().rev().find_map(|line| {
+        let number = primary_number(line);
+        (number > 0).then_some(number)
+    }) else {
+        return false;
+    };
+    if !rows.iter().any(|line| primary_number(line) == target_line) {
+        return false;
+    }
+
+    let mut replacement = Vec::with_capacity(rows.len().saturating_add(2));
+    if first > primary_previous.saturating_add(1) {
+        replacement.push(marker.clone());
+    }
+    replacement.extend(rows);
+    if last < primary_next.saturating_sub(1) {
+        replacement.push(marker);
+    }
+    file.lines.splice(hunk_index..=hunk_index, replacement);
+    true
+}
+
 fn bounded_source_range<'a>(
     source_lines: &'a [&'a str],
     previous: i32,
@@ -526,7 +662,8 @@ pub(super) fn full_source_file(file: &PullRequestDiffFile, source: &str) -> Pull
 mod tests {
     use super::{
         HunkExpansionDirection, expand_all_hunk_context_from_sources,
-        expand_hunk_context_from_sources, full_source_file, sanitize_diff_content,
+        expand_hunk_context_around_line_from_sources, expand_hunk_context_from_sources,
+        full_source_file, hidden_hunk_for_line, sanitize_diff_content,
     };
     use crate::git::{PullRequestDiffFile, PullRequestDiffLine};
 
@@ -632,6 +769,49 @@ mod tests {
                 (3, 3, "context", "tail"),
             ]
         );
+    }
+
+    #[test]
+    fn target_centered_expansion_keeps_hidden_ranges_on_both_sides() {
+        let source = (1..=60)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut diff = file(vec![
+            line(1, 1, "context", "line 1"),
+            line(0, 0, "hunk", "@@ hidden @@"),
+            line(60, 60, "context", "line 60"),
+        ]);
+
+        let hunk = hidden_hunk_for_line(&diff, 30, true).expect("hidden hunk");
+        assert!(expand_hunk_context_around_line_from_sources(
+            &mut diff, hunk, 30, true, &source, &source, 21,
+        ));
+
+        assert_eq!(
+            diff.lines.iter().filter(|line| line.kind == "hunk").count(),
+            2
+        );
+        assert!(diff.lines.iter().any(|line| line.new_line == 30));
+        assert!(!diff.lines.iter().any(|line| line.new_line == 2));
+        assert!(!diff.lines.iter().any(|line| line.new_line == 59));
+    }
+
+    #[test]
+    fn target_centered_expansion_uses_the_requested_old_side() {
+        let base = "same\nold two\nold three\ntail";
+        let head = "same\nnew two\nnew three\ntail";
+        let mut diff = file(vec![
+            line(1, 1, "context", "same"),
+            line(0, 0, "hunk", "@@ hidden @@"),
+            line(4, 4, "context", "tail"),
+        ]);
+
+        let hunk = hidden_hunk_for_line(&diff, 2, false).expect("hidden old line");
+        assert!(expand_hunk_context_around_line_from_sources(
+            &mut diff, hunk, 2, false, base, head, 1,
+        ));
+        assert!(diff.lines.iter().any(|line| line.old_line == 2));
     }
 
     #[test]
