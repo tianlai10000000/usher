@@ -353,10 +353,12 @@ export component MainWindow inherits Window {
     in property <bool> artifact-preview-performance-optimized: true;
     in property <bool> chat-can-load-more-history: false;
     in property <bool> chat-loading-history: false;
+    in property <bool> chat-history-load-failed: false;
     // Route-scoped message delegates are rebuilt after Chat becomes visible.
     // Keep this distinct from loading an older pagination page.
     in property <bool> chat-history-restoring: false;
     in-out property <length> chat-bottom-distance: 0px;
+    in-out property <length> chat-message-viewport-height: 0px;
     in property <length> chat-virtual-top-spacer: 0px;
     in property <length> chat-virtual-bottom-spacer: 0px;
     in property <length> chat-virtual-document-height: 0px;
@@ -373,6 +375,7 @@ export component MainWindow inherits Window {
     callback chat-send-message(string);
     callback chat-switch-mode(bool);
     callback chat-load-more-history();
+    callback chat-user-scroll-started();
     callback chat-open-artifact(string, string, string);
     callback chat-scroll-position-changed(length);
     callback chat-scrollbar-dragging-changed(bool);
@@ -1630,6 +1633,7 @@ export component MainWindow inherits Window {
                 application-font-family: root.application-font-family;
                 can-load-more-history: root.chat-can-load-more-history;
                 loading-history: root.chat-loading-history;
+                history-load-failed: root.chat-history-load-failed;
                 history-restoring: root.chat-history-restoring;
                 virtual-top-spacer: root.chat-virtual-top-spacer;
                 virtual-bottom-spacer: root.chat-virtual-bottom-spacer;
@@ -1648,6 +1652,9 @@ export component MainWindow inherits Window {
                 }
                 load-more-history() => {
                     root.chat-load-more-history();
+                }
+                user-scroll-started() => {
+                    root.chat-user-scroll-started();
                 }
                 open-artifact(id, title, markdown) => {
                     root.chat-open-artifact(id, title, markdown);
@@ -1680,7 +1687,11 @@ export component MainWindow inherits Window {
                     root.chat-message-geometry(id, y, height, position-changed);
                 }
                 layout-metrics-changed(width, height) => {
+                    root.chat-message-viewport-height = self.message-viewport-height;
                     root.chat-layout-metrics-changed(width, height);
+                }
+                changed message-viewport-height => {
+                    root.chat-message-viewport-height = self.message-viewport-height;
                 }
                 resolve-text-hit(text, x, y, width, pitch, family, size) => {
                     root.chat-resolve-text-hit(text, x, y, width, pitch, family, size)

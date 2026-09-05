@@ -317,6 +317,16 @@ pub(crate) struct ChatSessions {
 }
 
 impl ChatSessions {
+    #[cfg(test)]
+    pub(crate) fn from_test_stores(ai: JsonlHistoryStore, rag: JsonlHistoryStore) -> Self {
+        Self {
+            active_mode: ChatMode::Ai,
+            ai: ChatSessionService::bootstrap(ai, DEFAULT_STARTUP_LOAD, DEFAULT_PAGE_SIZE).unwrap(),
+            rag: ChatSessionService::bootstrap(rag, DEFAULT_STARTUP_LOAD, DEFAULT_PAGE_SIZE)
+                .unwrap(),
+        }
+    }
+
     pub(crate) fn bootstrap_default() -> io::Result<Self> {
         Ok(Self {
             active_mode: ChatMode::Ai,

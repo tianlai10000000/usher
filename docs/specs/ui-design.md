@@ -715,8 +715,8 @@ prefix until their implementation satisfies this specification.
 业务层只提供中性的 label、value、分组与锚点状态，UI Components 页面必须在
 ActionMenu 区域使用无 Provider/Workflow/PR 字样的通用数据演示。Project 网格
 必须按受约束内容区计算列数，新增一列前保证每张卡片至少 280px 可读宽度。Chat
-历史分页入口必须位于 virtual top spacer 之后的消息流内并占据真实高度，禁止覆盖
-最早一条已挂载消息；用户可见错误统一使用应用语言，HTTP 技术详情仅写有界日志。
+历史分页入口必须位于 virtual top spacer 之前的真正历史顶部并占据真实高度，禁止覆盖
+消息或跟随虚拟窗口出现在会话中间；用户可见错误统一使用应用语言，HTTP 技术详情仅写有界日志。
 PR 审核摘要是 Open/Closed/Merged 的唯一可见状态来源，页头操作条不得重复状态；
 三个带计数 Tab 在所有宽度下都按共享 Primer UnderlineNav 规范左对齐并按内容定宽，
 保留 16px 容器内边距与 4px Tab 间距，禁止拉伸均分；尾部 diff 统计必须先让位。PR 页头、导航和交互

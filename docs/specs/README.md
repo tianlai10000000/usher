@@ -13,7 +13,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [AI Agent configuration](ai-agent.md) | Current / 当前 | `src/settings.rs`, `src/ai/agent.rs`, `ui/views/settings.slint` |
 | [AI Code Review](ai-code-review.md) | Current / 当前 | `crates/usher-ai-review/`, `src/ai_review/`, `src/agent_response/`, PR list/detail and Settings bridges |
 | [Diagnostic logging](diagnostics.md) | Current / 当前 | `src/diagnostics.rs`, `src/logger/`, `src/memory_diagnostics.rs`, `src/terminal/`, Settings UI and bridges |
-| [Chat behavior](chat.md) | Current / 当前 | `src/chat/`, `ui/views/chat.slint`, `ui/components/chat/`, `ui/main.slint` |
+| [Chat behavior](chat.md) | Current: history boundary anchoring and bidirectional viewport coverage / 当前：历史边界锚定与双向视口覆盖 | `src/chat/`, `ui/views/chat.slint`, `ui/components/chat/`, `ui/main.slint` |
 | [Artifact preview framework](artifact-preview.md) | Current / 当前 | `crates/usher-preview/`, `src/artifact_preview/`, `ui/components/artifact_preview/`, Settings and all preview callers |
 | [Project repository metadata](project-repository.md) | Current / 当前 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/views/workflow/`, `ui/components/workflow/` |

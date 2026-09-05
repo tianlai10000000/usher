@@ -848,6 +848,18 @@ key = "chat.loading_history"
 text = "Loading Chat history"
 
 [[messages]]
+key = "chat.load_earlier_messages"
+text = "Load earlier messages"
+
+[[messages]]
+key = "chat.loading_earlier_messages"
+text = "Loading earlier messages"
+
+[[messages]]
+key = "chat.history_load_failed"
+text = "Could not load earlier messages"
+
+[[messages]]
 key = "chat.thinking"
 text = "Thinking"
 

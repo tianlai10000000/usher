@@ -1,6 +1,7 @@
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubButton } from "../settings/github_settings_controls.slint";
 import { GitHubLink } from "../github_link.slint";
+import { GitHubSpinner } from "../github_spinner.slint";
 import { I18n } from "@i18n";
 
 
@@ -13,6 +14,12 @@ export enum MessageStatus {
     Normal,
     Error,
     Success,
+}
+
+export enum ChatHistoryControlState {
+    Ready,
+    Loading,
+    Error,
 }
 
 export struct ChatMessage {
@@ -32,6 +39,210 @@ export struct ChatSelectionRect {
     y: float,
     width: float,
     height: float,
+}
+
+// A low-emphasis, in-flow history action. Ready, loading, and failure keep the
+// same geometry so async state changes cannot move the first mounted message.
+export component GitHubChatHistoryControl inherits Rectangle {
+    in property <ChatHistoryControlState> state: ChatHistoryControlState.Ready;
+    callback activated();
+
+    private property <bool> activation-enabled:
+        root.state != ChatHistoryControlState.Loading;
+    private property <string> accessible-copy:
+        root.state == ChatHistoryControlState.Ready
+            ? I18n.chat-load-earlier-messages
+            : (root.state == ChatHistoryControlState.Loading
+                ? I18n.chat-loading-earlier-messages
+                : I18n.chat-history-load-failed + ". " + I18n.common-try-again);
+    private property <length> ready-content-width:
+        GitHubMetrics.icon-medium + GitHubMetrics.size-6
+            + ready-label-measure.preferred-width;
+    private property <length> loading-content-width:
+        GitHubMetrics.icon-medium + GitHubMetrics.size-6
+            + loading-label-measure.preferred-width;
+    private property <length> error-content-width:
+        GitHubMetrics.icon-medium + GitHubMetrics.size-6
+            + error-label-measure.preferred-width + GitHubMetrics.size-8
+            + retry-label-measure.preferred-width;
+    private property <length> action-natural-width:
+        max(
+            GitHubMetrics.size-48 + GitHubMetrics.size-24,
+            max(
+                root.ready-content-width,
+                max(root.loading-content-width, root.error-content-width)
+            ) + GitHubMetrics.size-24
+        );
+
+    height: GitHubMetrics.size-64;
+    background: transparent;
+
+    ready-label-measure := Text {
+        visible: false;
+        text: I18n.chat-load-earlier-messages;
+        font-size: GitHubMetrics.text-medium;
+        font-weight: 400;
+        wrap: no-wrap;
+    }
+    loading-label-measure := Text {
+        visible: false;
+        text: I18n.chat-loading-earlier-messages;
+        font-size: GitHubMetrics.text-medium;
+        font-weight: 400;
+        wrap: no-wrap;
+    }
+    error-label-measure := Text {
+        visible: false;
+        text: I18n.chat-history-load-failed;
+        font-size: GitHubMetrics.text-medium;
+        font-weight: 400;
+        wrap: no-wrap;
+    }
+    retry-label-measure := Text {
+        visible: false;
+        text: I18n.common-try-again;
+        font-size: GitHubMetrics.text-medium;
+        font-weight: 600;
+        wrap: no-wrap;
+    }
+
+    history-action := FocusScope {
+        x: (parent.width - self.width) / 2;
+        y: GitHubMetrics.size-12;
+        width: min(
+            root.action-natural-width,
+            max(0px, parent.width - GitHubMetrics.size-16)
+        );
+        height: GitHubMetrics.control-medium-size;
+        focus-on-click: false;
+        accessible-role: button;
+        accessible-enabled: root.activation-enabled;
+        accessible-label: root.accessible-copy;
+        private property <bool> keyboard-focus-visible: false;
+        private property <length> current-content-width:
+            root.state == ChatHistoryControlState.Ready
+                ? root.ready-content-width
+                : (root.state == ChatHistoryControlState.Loading
+                    ? root.loading-content-width
+                    : root.error-content-width);
+        private property <length> content-x:
+            max(
+                GitHubMetrics.size-12,
+                (self.width - self.current-content-width) / 2
+            );
+
+        key-pressed(event) => {
+            self.keyboard-focus-visible = true;
+            if root.activation-enabled
+                && (event.text == Key.Return || event.text == " ") {
+                root.activated();
+                return accept;
+            }
+            return reject;
+        }
+        focus-gained(reason) => {
+            self.keyboard-focus-visible = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            self.keyboard-focus-visible = false;
+        }
+        accessible-action-default => {
+            if root.activation-enabled {
+                root.activated();
+            }
+        }
+
+        action-surface := Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-radius: GitHubMetrics.radius-medium;
+            background: action-touch.pressed
+                ? GitHubTheme.control-transparent-active
+                : (action-touch.has-hover
+                    ? GitHubTheme.control-transparent-hover
+                    : transparent);
+            animate background { duration: 100ms; easing: ease-out; }
+
+            if root.state == ChatHistoryControlState.Loading: GitHubSpinner {
+                x: history-action.content-x;
+                y: (parent.height - self.height) / 2;
+                spinner-size: GitHubMetrics.icon-medium;
+                foreground: GitHubTheme.fg-muted;
+            }
+
+            if root.state != ChatHistoryControlState.Loading: Image {
+                x: history-action.content-x;
+                y: (parent.height - self.height) / 2;
+                width: GitHubMetrics.icon-medium;
+                height: GitHubMetrics.icon-medium;
+                source: root.state == ChatHistoryControlState.Error
+                    ? @image-url("../../assets/icons/octicon-alert-16.svg")
+                    : @image-url("../../assets/icons/octicon-arrow-up-16.svg");
+                image-fit: contain;
+                colorize: root.state == ChatHistoryControlState.Error
+                    ? GitHubTheme.danger-fg
+                    : GitHubTheme.fg-muted;
+            }
+
+            Text {
+                x: history-action.content-x
+                    + GitHubMetrics.icon-medium + GitHubMetrics.size-6;
+                width: root.state == ChatHistoryControlState.Ready
+                    ? ready-label-measure.preferred-width
+                    : (root.state == ChatHistoryControlState.Loading
+                        ? loading-label-measure.preferred-width
+                        : error-label-measure.preferred-width);
+                height: parent.height;
+                text: root.state == ChatHistoryControlState.Ready
+                    ? I18n.chat-load-earlier-messages
+                    : (root.state == ChatHistoryControlState.Loading
+                        ? I18n.chat-loading-earlier-messages
+                        : I18n.chat-history-load-failed);
+                color: GitHubTheme.fg-muted;
+                font-size: GitHubMetrics.text-medium;
+                font-weight: 400;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            if root.state == ChatHistoryControlState.Error: Text {
+                x: history-action.content-x
+                    + GitHubMetrics.icon-medium + GitHubMetrics.size-6
+                    + error-label-measure.preferred-width + GitHubMetrics.size-8;
+                width: retry-label-measure.preferred-width;
+                height: parent.height;
+                text: I18n.common-try-again;
+                color: GitHubTheme.accent-fg;
+                font-size: GitHubMetrics.text-medium;
+                font-weight: 600;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        if self.has-focus && self.keyboard-focus-visible: Rectangle {
+            x: -GitHubMetrics.size-2;
+            y: -GitHubMetrics.size-2;
+            width: parent.width + GitHubMetrics.size-4;
+            height: parent.height + GitHubMetrics.size-4;
+            border-radius: GitHubMetrics.radius-medium + GitHubMetrics.size-2;
+            border-width: GitHubMetrics.focus-outline-width;
+            border-color: GitHubTheme.focus-outline;
+            background: transparent;
+        }
+
+        action-touch := TouchArea {
+            width: 100%;
+            height: 100%;
+            enabled: root.activation-enabled;
+            mouse-cursor: self.enabled ? pointer : default;
+            clicked => {
+                history-action.keyboard-focus-visible = false;
+                history-action.focus();
+                root.activated();
+            }
+        }
+    }
 }
 
 // Plain Text is the only layout owner. The selection rectangles and pointer

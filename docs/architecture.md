@@ -866,9 +866,16 @@ per-message copy control. The Chat viewport gives pointer drags to text
 selection while retaining wheel/touchpad and explicit scrollbar navigation.
 Reaching the top starts one deduplicated history-page
 load. Prepend commits preserve the first fully visible message by stable ID and
-its actual pre/post-layout position, applying only the exact delta before the
-next frame; the in-flow pagination action remains available. This presentation
-boundary must not expand the bounded Rust message window or move
+its actual pre/post-layout position. The mode- and generation-scoped anchor
+applies only the exact remaining delta over a bounded number of layout frames
+until that position is stable; any wheel, touchpad, or scrollbar input cancels
+the pending correction immediately. The history action stays before the top
+spacer at the actual loaded-history boundary, not above every moving mounted
+window. Prepend mounts neighboring older rows together with the reading anchor
+within the 32-row budget. Initial layout publishes the real message viewport
+height; virtual lookups exclude the header inset. Coverage checks are independent
+of stale commit direction or scroll buckets, and input cancellation replays a
+scroll request suppressed by settlement once. This presentation boundary must not expand the bounded Rust message window or move
 persistence/HTTP work onto the event loop.
 
 ### Terminal

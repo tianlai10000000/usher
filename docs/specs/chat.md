@@ -51,8 +51,11 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     its model mounted while sending. Loading does not duplicate or reorder the
     currently loaded message model.
 13. The history pagination action is mounted in the message flow immediately
-    after the virtual top spacer. It reserves its own height and never overlays
-    the oldest mounted message.
+    before the virtual top spacer, at the actual loaded-history boundary. It must
+    not follow a moving mounted window through the middle of the conversation.
+    It reserves its own height and never overlays a message. Ready, loading, and inline retry/error states
+    share one 64 px slot and the same 32 px action geometry, so state changes do
+    not displace that message.
 14. New user-facing request errors use concise English recovery text. Provider,
     HTTP status, and decode details remain in logs and are not exposed verbatim
     in message bubbles.
@@ -97,9 +100,18 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     scrollbar remain available.
 23. Reaching the top automatically starts one deduplicated history-page load.
     Before prepended rows are committed, Chat captures the first fully visible
-    message's stable ID and actual content position; after layout, it applies
-    the exact position delta so that message stays at the same viewport pixel.
-    The explicit in-flow pagination action remains as a retry/accessibility path.
+    message's stable ID and actual content position. A mode- and generation-scoped
+    anchor applies only the remaining exact delta over bounded layout frames until
+    that message is stable at the same viewport pixel. Wheel, touchpad, scrollbar,
+    mode, and route changes cancel the pending correction. The explicit in-flow
+    pagination action remains as a retry/accessibility path. The newest preceding
+    messages and the old reading anchor must be mounted together (within the
+    32-row cap); a loaded page must not be represented entirely by a spacer at
+    the reading boundary. The viewport includes the nearest preceding message
+    above the retained anchor, rather than jumping to the start of the new page.
+    Coverage checks run even for same-bucket motion and cannot depend solely on
+    the last model-commit direction. Input suppressed during anchor settlement
+    is replayed once when user input cancels that settlement.
 24. New persisted messages store a complete RFC 3339 instant with the local
     offset. Message rows derive a compact local-time label from calendar dates:
     `HH:mm` today, `昨天 HH:mm` yesterday, `前天 HH:mm` two calendar days ago,
@@ -200,8 +212,10 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     键盘激活与仅键盘可见的焦点状态。
 12. 编辑器必须随可用宽度自适应，保留拖拽调高能力，发送期间保持 model 常驻；
     loading 不得复制或重排当前已加载的消息 model。
-13. 历史分页操作必须挂在 virtual top spacer 之后的消息流内并占据自身高度，
-    不得覆盖最早一条已挂载消息。
+13. 历史分页操作必须挂在 virtual top spacer 之前、真正的已加载历史顶部，
+    不得跟随移动的挂载窗口出现在会话中间。控件占据自身高度且不得覆盖消息。
+    Ready、Loading 与内联重试/错误状态共用 64 px 槽位
+    和相同的 32 px 操作区几何，状态切换不得挤动该消息。
 14. 新产生的用户可见请求错误统一使用简洁英文恢复文案；Provider、HTTP 状态和
     解码技术详情只写日志，不得原样暴露在消息气泡中。
 15. Assistant 行保留宽度无关的可读纯文本投影。为限制 Slint 文本布局开销，长内联投影
@@ -232,8 +246,13 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 22. 消息 viewport 内的鼠标拖拽归文本选择所有，不得被 Flickable 接管为拖拽滚动；
     滚轮、触控板和显式滚动条继续可用。
 23. 滚动到顶部会自动启动一次去重的历史分页加载。提交 prepend 行之前，Chat 记录首个
-    完整可见消息的稳定 ID 与真实内容坐标；布局后只补偿该消息的精确坐标差，使它保持
-    在同一 viewport 像素。消息流内的显式分页操作继续作为重试和无障碍入口。
+    完整可见消息的稳定 ID 与真实内容坐标。锚点按模式和 generation 隔离，并在有限布局
+    帧内只补偿剩余精确差值，直至该消息稳定在同一 viewport 像素；滚轮、触控板、滚动条、
+    模式或路由变化必须取消待执行补偿。消息流内的显式分页操作继续作为重试和无障碍入口。
+    在 32 行上限内，新加载的相邻旧消息必须与原阅读锚点共同挂载，不能把分页边界的新消息
+    全部留在 spacer 中；视口在原锚点上方呈现最近的前一条消息，不跳到新页开头。
+    同一滚动 bucket 内的移动也必须检查覆盖，不能仅依赖上次 model 提交时的方向。
+    用户输入取消锚点收敛时，必须补处理一次此前被收敛阶段抑制的滚动请求。
 24. 新持久化消息使用带本地时区偏移的完整 RFC 3339 时间。消息行按本地自然日生成紧凑
     标签：今天为 `HH:mm`，昨天为“昨天 `HH:mm`”，前天为“前天 `HH:mm`”，前 3 至 6
     个自然日为“星期X `HH:mm`”，同年更早为“`M月D日 HH:mm`”，跨年为

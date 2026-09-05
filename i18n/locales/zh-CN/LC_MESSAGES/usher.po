@@ -850,6 +850,18 @@ msgctxt "chat.loading_history"
 msgid "Loading Chat history"
 msgstr "正在加载 Chat 历史"
 
+msgctxt "chat.load_earlier_messages"
+msgid "Load earlier messages"
+msgstr "加载更早消息"
+
+msgctxt "chat.loading_earlier_messages"
+msgid "Loading earlier messages"
+msgstr "正在加载更早消息"
+
+msgctxt "chat.history_load_failed"
+msgid "Could not load earlier messages"
+msgstr "无法加载更早消息"
+
 msgctxt "chat.thinking"
 msgid "Thinking"
 msgstr "思考中"

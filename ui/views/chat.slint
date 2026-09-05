@@ -3,9 +3,8 @@ import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 import { GitHubIconButton } from "../components/button/github_icon_button.slint";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
 import { GitHubCenteredLoadingState } from "../components/github_spinner.slint";
-import { GitHubButton } from "../components/settings/github_settings_controls.slint";
 import { GitHubSegmentedControl, GitHubSegmentedControlDivider, GitHubSegmentedControlItem } from "../components/github_segmented_control.slint";
-import { GitHubMessageBubble, GitHubChatWelcomeView, MessageRole, MessageStatus, ChatMessage, ChatSelectionRect } from "../components/chat/github_chat_components.slint";
+import { GitHubMessageBubble, GitHubChatWelcomeView, GitHubChatHistoryControl, ChatHistoryControlState, MessageRole, MessageStatus, ChatMessage, ChatSelectionRect } from "../components/chat/github_chat_components.slint";
 import { I18n } from "@i18n";
 
 export { MessageRole, MessageStatus, ChatMessage, ChatSelectionRect } from "../components/chat/github_chat_components.slint";
@@ -23,6 +22,7 @@ export component GitHubChatPage inherits Rectangle {
     in property <bool> live-resizing: false;
     in property <bool> can-load-more-history: false;
     in property <bool> loading-history: false;
+    in property <bool> history-load-failed: false;
     in property <bool> history-restoring: false;
     in property <length> virtual-top-spacer: 0px;
     in property <length> virtual-bottom-spacer: 0px;
@@ -40,6 +40,8 @@ export component GitHubChatPage inherits Rectangle {
                 + root.scroll-position
         )
         : 0px;
+    out property <length> message-viewport-height:
+        message-scroll-view.visible_height;
     out property <bool> scrollbar-dragging: message-scroll-view.scrollbar-dragging;
     out property <length> scrollbar-drag-pointer-y:
         message-scroll-view.scrollbar-drag-pointer-y;
@@ -58,6 +60,7 @@ export component GitHubChatPage inherits Rectangle {
     callback send-message(string);
     callback switch-mode(bool);
     callback load-more-history();
+    callback user-scroll-started();
     callback open-artifact(string, string, string);
     callback scroll-position-changed(length);
     callback scrollbar-dragging-changed(bool);
@@ -305,6 +308,7 @@ export component GitHubChatPage inherits Rectangle {
                 stable-scrollbar-drag: root.performance-optimized;
                 user-scroll-started => {
                     root.bottom-scroll-pin-ticks = 0;
+                    root.user-scroll-started();
                 }
                 user-wheel-direction(delta) => {
                     root.observe-wheel(delta);
@@ -326,33 +330,27 @@ export component GitHubChatPage inherits Rectangle {
                     padding-bottom: GitHubMetrics.size-32;
                     alignment: start;
 
+                    if root.loading-history || root.can-load-more-history || root.history-load-failed: GitHubChatHistoryControl {
+                        width: parent.width;
+                        state: root.history-load-failed
+                            ? ChatHistoryControlState.Error
+                            : (root.loading-history
+                                ? ChatHistoryControlState.Loading
+                                : ChatHistoryControlState.Ready);
+                        activated => { root.load-more-history(); }
+                    }
+
                     Rectangle {
                         width: 1px;
                         height: root.virtual-top-spacer;
                         background: transparent;
                     }
 
-                    if root.loading-history || root.can-load-more-history: Rectangle {
-                        width: parent.width;
-                        height: GitHubMetrics.size-36;
-                        background: transparent;
-
-                        GitHubButton {
-                            x: (parent.width - self.width) / 2;
-                            y: GitHubMetrics.size-4;
-                            height: GitHubMetrics.control-small-size;
-                            text: I18n.common-load-more;
-                            leading-icon: @image-url("../assets/icons/octicon-arrow-up-16.svg");
-                            label-font-size: GitHubMetrics.text-small;
-                            busy: root.loading-history;
-                            disabled: root.loading-history;
-                            clicked => { root.load-more-history(); }
-                        }
-                    }
-
                     mounted-message-list := VerticalLayout {
                         spacing: GitHubMetrics.size-8;
                         for message[index] in root.messages: GitHubMessageBubble {
+                            private property <length> content-y:
+                                mounted-message-list.y + self.y;
                             message-id: message.id;
                             role: message.role;
                             status: message.status;
@@ -386,10 +384,10 @@ export component GitHubChatPage inherits Rectangle {
                             resolve-selection-rects(text, start, end, width, pitch, family, size) => {
                                 root.resolve-selection-rects(text, start, end, width, pitch, family, size)
                             }
-                            changed y => {
+                            changed content-y => {
                                 root.message-geometry(
                                     message.id,
-                                    mounted-message-list.y + self.y,
+                                    self.content-y,
                                     self.height,
                                     true
                                 );
@@ -397,7 +395,7 @@ export component GitHubChatPage inherits Rectangle {
                             changed height => {
                                 root.message-geometry(
                                     message.id,
-                                    mounted-message-list.y + self.y,
+                                    self.content-y,
                                     self.height,
                                     false
                                 );

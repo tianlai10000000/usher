@@ -34,6 +34,10 @@ const AUTO_LOAD_MORE_TOP_THRESHOLD_PX: f32 = 160.0;
 const AUTO_LOAD_MORE_REARM_THRESHOLD_PX: f32 = 320.0;
 const MOUNTED_EDGE_GUARD_PX: f32 = 2400.0;
 const LAYOUT_SETTLE_DELAY_MS: u64 = 80;
+const ANCHOR_SETTLE_INTERVAL_MS: u64 = 16;
+const ANCHOR_STABLE_FRAMES: u8 = 2;
+const ANCHOR_MAX_FRAMES: u8 = 16;
+const ANCHOR_EPSILON_PX: f32 = 0.5;
 const MAX_NEW_ROWS_PER_SCROLL_COMMIT: usize = 2;
 const STICK_TO_BOTTOM_THRESHOLD_PX: f32 = 96.0;
 
@@ -130,13 +134,18 @@ fn should_shift_near_virtual_edge(
     if !crate::chat::performance::virtualization_enabled() {
         return (false, false);
     }
-    let near_mounted = should_shift_near_mounted_edge(
-        geometries,
-        scroll_offset_px,
-        viewport_height_px,
-        moving_down,
-        has_more_in_direction,
-    );
+    // Coverage is not directional: a prepend/scrollbar jump can put the viewport
+    // on either spacer even when the last applied scroll bucket suggests the
+    // opposite direction.
+    let uncovered = virtual_blank_exposure_px(scroll_offset_px, viewport_height_px) > 1.0;
+    let near_mounted = uncovered
+        || should_shift_near_mounted_edge(
+            geometries,
+            scroll_offset_px,
+            viewport_height_px,
+            moving_down,
+            has_more_in_direction,
+        );
     let near_estimated = should_shift_near_estimated_edge(
         ui.get_chat_virtual_top_spacer(),
         ui.get_chat_virtual_bottom_spacer(),
@@ -222,6 +231,7 @@ fn update_auto_load_armed(armed: bool, scroll_offset_px: f32) -> (bool, bool) {
 struct MessageGeometry {
     y: f32,
     height: f32,
+    revision: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -229,59 +239,201 @@ struct VisibleAnchor {
     message_id: i32,
     content_y: f32,
     scroll_offset: f32,
+    geometry_revision: u64,
 }
 
 fn select_visible_anchor(
     geometries: &HashMap<i32, MessageGeometry>,
     scroll_offset: f32,
+    viewport_height: f32,
 ) -> Option<VisibleAnchor> {
+    let viewport_bottom = scroll_offset + viewport_height.max(1.0);
     geometries
         .iter()
         .filter(|(_, geometry)| geometry.height > 0.0)
-        .min_by(|(_, left), (_, right)| {
-            let left_rank = if left.y >= scroll_offset - 1.0 { 0 } else { 1 };
-            let right_rank = if right.y >= scroll_offset - 1.0 { 0 } else { 1 };
-            left_rank.cmp(&right_rank).then_with(|| {
-                if left_rank == 0 {
-                    left.y.total_cmp(&right.y)
+        .min_by(|(left_id, left), (right_id, right)| {
+            let rank = |geometry: &MessageGeometry| {
+                let bottom = geometry.y + geometry.height;
+                if geometry.y >= scroll_offset - 1.0 && bottom <= viewport_bottom + 1.0 {
+                    0
+                } else if bottom > scroll_offset && geometry.y < viewport_bottom {
+                    1
+                } else if geometry.y >= viewport_bottom {
+                    2
                 } else {
-                    right.y.total_cmp(&left.y)
+                    3
                 }
-            })
+            };
+            let left_rank = rank(left);
+            let right_rank = rank(right);
+            left_rank
+                .cmp(&right_rank)
+                .then_with(|| {
+                    if left_rank == 3 {
+                        right.y.total_cmp(&left.y)
+                    } else {
+                        left.y.total_cmp(&right.y)
+                    }
+                })
+                .then_with(|| left_id.cmp(right_id))
         })
         .map(|(message_id, geometry)| VisibleAnchor {
             message_id: *message_id,
             content_y: geometry.y,
             scroll_offset,
+            geometry_revision: geometry.revision,
         })
 }
 
-fn anchored_scroll_offset(
-    anchor: VisibleAnchor,
-    new_content_y: f32,
-    current_scroll_offset: f32,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnchorPurpose {
+    HistoryPrepend,
+    SettledLayout,
+    VirtualWindow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct AnchorSettle {
+    generation: u64,
+    mode: ChatMode,
+    purpose: AnchorPurpose,
+    message_id: i32,
+    viewport_y: f32,
+    original_scroll_offset: f32,
+    expected_scroll_offset: f32,
+    capture_geometry_revision: u64,
+    input_revision: u64,
+    last_observed_y: Option<f32>,
+    stable_frames: u8,
+    frames_left: u8,
     max_correction_px: Option<f32>,
-) -> Option<f32> {
-    if (current_scroll_offset - anchor.scroll_offset).abs() > 1.0 {
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AnchorStep {
+    Wait,
+    Write(f32),
+    Complete,
+    Cancel,
+}
+
+impl AnchorSettle {
+    fn new(
+        generation: u64,
+        mode: ChatMode,
+        purpose: AnchorPurpose,
+        anchor: VisibleAnchor,
+        input_revision: u64,
+        max_correction_px: Option<f32>,
+    ) -> Self {
+        Self {
+            generation,
+            mode,
+            purpose,
+            message_id: anchor.message_id,
+            viewport_y: anchor.content_y - anchor.scroll_offset,
+            original_scroll_offset: anchor.scroll_offset,
+            expected_scroll_offset: anchor.scroll_offset,
+            capture_geometry_revision: anchor.geometry_revision,
+            input_revision,
+            last_observed_y: None,
+            stable_frames: 0,
+            frames_left: ANCHOR_MAX_FRAMES,
+            max_correction_px,
+        }
+    }
+
+    fn step(
+        &mut self,
+        mode: ChatMode,
+        input_revision: u64,
+        current_scroll_offset: f32,
+        observation: Option<MessageGeometry>,
+    ) -> AnchorStep {
+        if self.mode != mode
+            || self.input_revision != input_revision
+            || (current_scroll_offset - self.expected_scroll_offset).abs() > 1.0
+            || self.frames_left == 0
+        {
+            return AnchorStep::Cancel;
+        }
+        self.frames_left -= 1;
+
+        let Some(observation) = observation else {
+            return AnchorStep::Wait;
+        };
+        if observation.revision <= self.capture_geometry_revision {
+            return AnchorStep::Wait;
+        }
+
+        let target = (observation.y - self.viewport_y).max(0.0);
+        if self
+            .max_correction_px
+            .is_some_and(|maximum| (target - self.original_scroll_offset).abs() > maximum)
+        {
+            return AnchorStep::Cancel;
+        }
+
+        if (target - current_scroll_offset).abs() > ANCHOR_EPSILON_PX {
+            self.expected_scroll_offset = target;
+            self.last_observed_y = Some(observation.y);
+            self.stable_frames = 0;
+            return AnchorStep::Write(target);
+        }
+
+        let geometry_is_stable = self
+            .last_observed_y
+            .is_some_and(|previous| (previous - observation.y).abs() <= ANCHOR_EPSILON_PX);
+        self.expected_scroll_offset = target;
+        self.last_observed_y = Some(observation.y);
+        if geometry_is_stable {
+            self.stable_frames = self.stable_frames.saturating_add(1);
+            if self.stable_frames >= ANCHOR_STABLE_FRAMES {
+                return AnchorStep::Complete;
+            }
+        } else {
+            self.stable_frames = 0;
+        }
+        AnchorStep::Wait
+    }
+}
+
+fn shifted_prepend_window(
+    previous: VirtualRenderSignature,
+    total_len: usize,
+    anchor_index: usize,
+) -> Option<(usize, usize)> {
+    if total_len <= previous.total_len || previous.start >= previous.end {
         return None;
     }
-    let delta = new_content_y - anchor.content_y;
-    if max_correction_px.is_some_and(|maximum| delta.abs() > maximum) {
+    let inserted = total_len - previous.total_len;
+    let old_start = previous.start.checked_add(inserted)?;
+    let old_end = previous.end.checked_add(inserted)?;
+    if old_end > total_len || !(old_start..old_end).contains(&anchor_index) {
         return None;
     }
-    (delta.abs() > 0.5).then_some((anchor.scroll_offset + delta).max(0.0))
+    // Materialize the page boundary as well as the reading anchor. Hiding the
+    // entire page in a spacer preserves a coordinate but leaves nothing to read.
+    // Keep room for the old visible rows even if the new page contains tall rows.
+    let start = old_start
+        .saturating_sub(inserted.min(16))
+        .max(anchor_index.saturating_sub(16));
+    let end = old_end.min(start + 32).max(anchor_index + 1);
+    Some((start, end))
 }
 
 thread_local! {
     static LAST_RENDER_SIGNATURE: RefCell<Option<VirtualRenderSignature>> = const { RefCell::new(None) };
     static MESSAGE_GEOMETRIES: RefCell<HashMap<i32, MessageGeometry>> = RefCell::new(HashMap::new());
-    static PENDING_HISTORY_ANCHOR: Cell<Option<VisibleAnchor>> = const { Cell::new(None) };
-    static PENDING_ANCHOR_MAX_CORRECTION_PX: Cell<Option<f32>> = const { Cell::new(None) };
+    static PENDING_HISTORY_ANCHOR: RefCell<Option<AnchorSettle>> = const { RefCell::new(None) };
     static ACTIVE_VIRTUAL_WRAP_WIDTH_PX: Cell<i32> = const { Cell::new(0) };
     static MODEL_MUTATION_IN_PROGRESS: Cell<bool> = const { Cell::new(false) };
     static CHAT_MESSAGE_MODEL: RefCell<Option<Rc<ChatMessageModelBridge>>> = const { RefCell::new(None) };
     static CHAT_SESSION: RefCell<Option<SharedChatSessions>> = const { RefCell::new(None) };
+    static ANCHOR_GENERATION: Cell<u64> = const { Cell::new(0) };
     static ANCHOR_SETTLE_REVISION: Cell<u64> = const { Cell::new(0) };
+    static USER_SCROLL_REVISION: Cell<u64> = const { Cell::new(0) };
+    static GEOMETRY_REVISION: Cell<u64> = const { Cell::new(0) };
     static ANCHOR_SCROLL_WRITE_IN_PROGRESS: Cell<bool> = const { Cell::new(false) };
     static ANCHOR_SCROLL_WRITE_COUNT: Cell<u64> = const { Cell::new(0) };
 }
@@ -306,55 +458,98 @@ pub(crate) fn sync_language(ui: &MainWindow) {
     );
 }
 
-fn schedule_anchor_compensation(ui_weak: slint::Weak<MainWindow>) {
+fn schedule_anchor_compensation_after(
+    ui_weak: slint::Weak<MainWindow>,
+    delay: std::time::Duration,
+) {
+    let Some(generation) = PENDING_HISTORY_ANCHOR
+        .with(|pending| pending.borrow().as_ref().map(|anchor| anchor.generation))
+    else {
+        return;
+    };
     let revision = ANCHOR_SETTLE_REVISION.with(|latest| {
         let revision = latest.get().wrapping_add(1);
         latest.set(revision);
         revision
     });
-    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
-        if ANCHOR_SETTLE_REVISION.with(Cell::get) != revision
-            || MODEL_MUTATION_IN_PROGRESS.with(Cell::get)
-        {
+    slint::Timer::single_shot(delay, move || {
+        if ANCHOR_SETTLE_REVISION.with(Cell::get) != revision {
             return;
         }
-        let Some(anchor) = PENDING_HISTORY_ANCHOR.with(Cell::get) else {
-            return;
-        };
-        let new_content_y = MESSAGE_GEOMETRIES.with(|geometries| {
-            geometries
+        let generation_is_current = PENDING_HISTORY_ANCHOR.with(|pending| {
+            pending
                 .borrow()
-                .get(&anchor.message_id)
-                .map(|geometry| geometry.y)
+                .as_ref()
+                .is_some_and(|anchor| anchor.generation == generation)
         });
-        PENDING_HISTORY_ANCHOR.with(|pending| pending.set(None));
-        let max_correction_px =
-            PENDING_ANCHOR_MAX_CORRECTION_PX.with(|maximum| maximum.replace(None));
-        let Some(new_content_y) = new_content_y else {
+        if !generation_is_current {
+            return;
+        }
+        if MODEL_MUTATION_IN_PROGRESS.with(Cell::get) {
+            schedule_anchor_compensation_after(
+                ui_weak,
+                std::time::Duration::from_millis(ANCHOR_SETTLE_INTERVAL_MS),
+            );
+            return;
+        }
+
+        let Some(ui) = ui_weak.upgrade() else {
+            clear_pending_anchor_if_generation(generation);
             return;
         };
-        if let Some(ui) = ui_weak.upgrade()
-            && ui.get_current_route() == Route::Chat
-        {
-            if ui.get_chat_scrollbar_dragging() {
-                clear_pending_anchor();
-                return;
-            }
-            let current_scroll_offset = (-ui.get_chat_scroll_position()).max(0.0);
-            let Some(target_offset) = anchored_scroll_offset(
-                anchor,
-                new_content_y,
+        if ui.get_current_route() != Route::Chat || ui.get_chat_scrollbar_dragging() {
+            clear_pending_anchor_if_generation(generation);
+            return;
+        }
+
+        let (message_id, expected_mode) = PENDING_HISTORY_ANCHOR.with(|pending| {
+            let pending = pending.borrow();
+            let anchor = pending.as_ref().expect("anchor generation checked above");
+            (anchor.message_id, anchor.mode)
+        });
+        if chat_mode_from_ui(&ui) != expected_mode {
+            clear_pending_anchor_if_generation(generation);
+            return;
+        }
+        let observation =
+            MESSAGE_GEOMETRIES.with(|geometries| geometries.borrow().get(&message_id).copied());
+        let current_scroll_offset = (-ui.get_chat_scroll_position()).max(0.0);
+        let input_revision = USER_SCROLL_REVISION.with(Cell::get);
+        let step = PENDING_HISTORY_ANCHOR.with(|pending| {
+            let mut pending = pending.borrow_mut();
+            let anchor = pending.as_mut().expect("anchor generation checked above");
+            anchor.step(
+                expected_mode,
+                input_revision,
                 current_scroll_offset,
-                max_correction_px,
-            ) else {
-                return;
-            };
-            ANCHOR_SCROLL_WRITE_IN_PROGRESS.with(|active| active.set(true));
-            ui.set_chat_scroll_position(-target_offset);
-            ANCHOR_SCROLL_WRITE_IN_PROGRESS.with(|active| active.set(false));
-            ANCHOR_SCROLL_WRITE_COUNT.with(|count| count.set(count.get().wrapping_add(1)));
+                observation,
+            )
+        });
+
+        match step {
+            AnchorStep::Write(target_offset) => {
+                ANCHOR_SCROLL_WRITE_IN_PROGRESS.with(|active| active.set(true));
+                ui.set_chat_scroll_position(-target_offset);
+                ANCHOR_SCROLL_WRITE_IN_PROGRESS.with(|active| active.set(false));
+                ANCHOR_SCROLL_WRITE_COUNT.with(|count| count.set(count.get().wrapping_add(1)));
+                schedule_anchor_compensation_after(
+                    ui.as_weak(),
+                    std::time::Duration::from_millis(ANCHOR_SETTLE_INTERVAL_MS),
+                );
+            }
+            AnchorStep::Wait => schedule_anchor_compensation_after(
+                ui.as_weak(),
+                std::time::Duration::from_millis(ANCHOR_SETTLE_INTERVAL_MS),
+            ),
+            AnchorStep::Complete | AnchorStep::Cancel => {
+                clear_pending_anchor_if_generation(generation);
+            }
         }
     });
+}
+
+fn schedule_anchor_compensation(ui_weak: slint::Weak<MainWindow>) {
+    schedule_anchor_compensation_after(ui_weak, std::time::Duration::ZERO);
 }
 
 struct ChatMessageModelBridge {
@@ -532,8 +727,24 @@ fn clear_history_anchor_state() {
 }
 
 fn clear_pending_anchor() {
-    PENDING_HISTORY_ANCHOR.with(|anchor| anchor.set(None));
-    PENDING_ANCHOR_MAX_CORRECTION_PX.with(|maximum| maximum.set(None));
+    ANCHOR_GENERATION.with(|generation| generation.set(generation.get().wrapping_add(1)));
+    PENDING_HISTORY_ANCHOR.with(|anchor| *anchor.borrow_mut() = None);
+}
+
+fn clear_pending_anchor_if_generation(expected_generation: u64) {
+    let should_clear = PENDING_HISTORY_ANCHOR.with(|pending| {
+        pending
+            .borrow()
+            .as_ref()
+            .is_some_and(|anchor| anchor.generation == expected_generation)
+    });
+    if should_clear {
+        clear_pending_anchor();
+    }
+}
+
+fn has_pending_anchor() -> bool {
+    PENDING_HISTORY_ANCHOR.with(|anchor| anchor.borrow().is_some())
 }
 
 fn virtual_window_has_more(moving_down: bool) -> bool {
@@ -580,7 +791,7 @@ pub(crate) fn virtual_blank_exposure_px(scroll_offset: f32, viewport_height: f32
     })
 }
 
-fn capture_visible_anchor(ui: &MainWindow, max_correction_px: Option<f32>) {
+fn capture_visible_anchor(ui: &MainWindow, purpose: AnchorPurpose, max_correction_px: Option<f32>) {
     if ui.get_chat_scrollbar_dragging() {
         clear_pending_anchor();
         return;
@@ -590,14 +801,30 @@ fn capture_visible_anchor(ui: &MainWindow, max_correction_px: Option<f32>) {
         .filter_map(|index| model.row_data(index).map(|message| message.id))
         .collect::<std::collections::HashSet<_>>();
     let scroll_offset = (-ui.get_chat_scroll_position()).max(0.0);
+    let viewport_height = ui.get_chat_message_viewport_height().max(1.0);
     let anchor = MESSAGE_GEOMETRIES.with(|geometries| {
         let mut geometries = geometries.borrow_mut();
         geometries.retain(|message_id, _| mounted_ids.contains(message_id));
-        select_visible_anchor(&geometries, scroll_offset)
+        select_visible_anchor(&geometries, scroll_offset, viewport_height)
     });
-    PENDING_HISTORY_ANCHOR.with(|pending| pending.set(anchor));
-    PENDING_ANCHOR_MAX_CORRECTION_PX.with(|maximum| {
-        maximum.set(anchor.and(max_correction_px));
+    let generation = ANCHOR_GENERATION.with(|generation| {
+        let next = generation.get().wrapping_add(1);
+        generation.set(next);
+        next
+    });
+    let input_revision = USER_SCROLL_REVISION.with(Cell::get);
+    let mode = chat_mode_from_ui(ui);
+    PENDING_HISTORY_ANCHOR.with(|pending| {
+        *pending.borrow_mut() = anchor.map(|anchor| {
+            AnchorSettle::new(
+                generation,
+                mode,
+                purpose,
+                anchor,
+                input_revision,
+                max_correction_px,
+            )
+        });
     });
 }
 
@@ -606,7 +833,7 @@ pub(crate) fn anchor_scroll_write_count() -> u64 {
 }
 
 fn capture_visible_history_anchor(ui: &MainWindow) {
-    capture_visible_anchor(ui, None);
+    capture_visible_anchor(ui, AnchorPurpose::HistoryPrepend, None);
 }
 
 fn compute_wrap_width_px(ui: &MainWindow) -> i32 {
@@ -736,8 +963,17 @@ fn apply_chat_state_to_ui_with_policy(
             )
         } else {
             let scroll_offset_px = (-ui.get_chat_scroll_position()).max(0.0);
-            let viewport_height_px =
-                (ui.get_chat_layout_window_height() - 180.0).clamp(360.0, 1400.0);
+            let viewport_height_px = ui.get_chat_message_viewport_height().max(1.0);
+            let history_inset_px = 24.0
+                + if guard.can_load_more_for(mode)
+                    || ui.get_chat_loading_history()
+                    || ui.get_chat_history_load_failed()
+                {
+                    64.0
+                } else {
+                    0.0
+                };
+            let message_offset_px = (scroll_offset_px - history_inset_px).max(0.0);
             let wrap_width_px = wrap_width_override_px.unwrap_or_else(|| compute_wrap_width_px(ui));
             ACTIVE_VIRTUAL_WRAP_WIDTH_PX.with(|width| width.set(wrap_width_px));
             let virtualization_enabled = crate::chat::performance::virtualization_enabled();
@@ -749,16 +985,48 @@ fn apply_chat_state_to_ui_with_policy(
                     VirtualWindowPolicy::baseline()
                 }
             });
-            let (mut start, mut end, mut top_px, mut bottom_px, sampled_avg_height_px) =
+            let (mut start, mut end, mut top_px, mut bottom_px, mut sampled_avg_height_px) =
                 compute_history_window(
                     all_messages,
                     virtualization_enabled,
-                    scroll_offset_px,
+                    message_offset_px,
                     viewport_height_px,
                     wrap_width_px,
                     row_estimate_px,
                     window_policy,
                 );
+            let pending_history_anchor = PENDING_HISTORY_ANCHOR.with(|pending| {
+                pending.borrow().as_ref().and_then(|anchor| {
+                    (anchor.mode == mode && anchor.purpose == AnchorPurpose::HistoryPrepend)
+                        .then_some(anchor.message_id)
+                })
+            });
+            if virtualization_enabled
+                && let Some(anchor_id) = pending_history_anchor
+                && let Some(previous) = LAST_RENDER_SIGNATURE.with(|last| *last.borrow())
+                && previous.include_loading_placeholder == include_loading_placeholder
+                && let Some(anchor_index) = all_messages
+                    .iter()
+                    .position(|message| message.id as i32 == anchor_id)
+                && let Some((preserved_start, preserved_end)) =
+                    shifted_prepend_window(previous, total, anchor_index)
+                && let Some((preserved_top, preserved_bottom, preserved_average)) =
+                    compute_spacers_for_fixed_window(
+                        all_messages,
+                        preserved_start,
+                        preserved_end,
+                        wrap_width_px,
+                        true,
+                    )
+            {
+                // Keep the reading anchor and its newly loaded predecessors
+                // mounted together, including pages containing very tall rows.
+                start = preserved_start;
+                end = preserved_end;
+                top_px = preserved_top;
+                bottom_px = preserved_bottom;
+                sampled_avg_height_px = preserved_average;
+            }
             if limit_scroll_insertions
                 && virtualization_enabled
                 && crate::chat::performance::variant().is_optimized()
@@ -784,7 +1052,7 @@ fn apply_chat_state_to_ui_with_policy(
                         limited_top,
                         limited_bottom,
                         current_virtual_document_height_px(),
-                        scroll_offset_px,
+                        message_offset_px,
                         viewport_height_px,
                     )
                 {
@@ -816,6 +1084,7 @@ fn apply_chat_state_to_ui_with_policy(
         }
     };
 
+    ui.set_chat_can_load_more_history(can_load_more);
     let should_render = LAST_RENDER_SIGNATURE.with(|last| {
         let mut slot = last.borrow_mut();
         let same = *slot == render_signature;
@@ -863,7 +1132,6 @@ fn apply_chat_state_to_ui_with_policy(
         schedule_anchor_compensation(ui.as_weak());
     }
     ui.set_chat_virtual_document_height(document_height_px);
-    ui.set_chat_can_load_more_history(can_load_more);
 }
 
 fn clear_chat_ui_state(ui: &MainWindow) {
@@ -876,6 +1144,7 @@ fn clear_chat_ui_state(ui: &MainWindow) {
     });
     ui.set_chat_can_load_more_history(false);
     ui.set_chat_loading_history(false);
+    ui.set_chat_history_load_failed(false);
     ui.set_chat_history_restoring(false);
     ui.set_chat_virtual_top_spacer(0.0);
     ui.set_chat_virtual_bottom_spacer(0.0);
@@ -1021,6 +1290,7 @@ fn stop_loading_phase_animation(
 }
 
 fn scroll_chat_to_bottom(ui: &MainWindow) {
+    clear_pending_anchor();
     ui.set_chat_scroll_to_bottom_revision(ui.get_chat_scroll_to_bottom_revision().wrapping_add(1));
 }
 
@@ -1086,12 +1356,17 @@ async fn send_chat_message(
 
 /// 设置聊天交互逻辑和事件回调
 pub fn setup_interactive(ui: &MainWindow) {
+    setup_interactive_with_sessions(ui, None);
+}
+
+fn setup_interactive_with_sessions(ui: &MainWindow, initial: Option<ChatSessions>) {
     log::info!("[Chat::Interactive] Setting up interactive callbacks...");
     let runtime = shared_runtime();
 
     // Sessions bootstrap on a blocking worker and are backfilled on the event
     // loop; the UI starts from the empty/loading state until then.
-    let session: SharedChatSessions = Arc::new(Mutex::new(None));
+    let bootstrap = initial.is_none();
+    let session: SharedChatSessions = Arc::new(Mutex::new(initial));
     CHAT_SESSION.with(|slot| *slot.borrow_mut() = Some(session.clone()));
     let request_state = Arc::new(Mutex::new(ChatRequestState::default()));
     let drafts = Arc::new(Mutex::new(ChatDrafts::default()));
@@ -1111,53 +1386,54 @@ pub fn setup_interactive(ui: &MainWindow) {
 
     let ui_weak_bootstrap = ui.as_weak();
     let session_bootstrap = session.clone();
-    runtime.spawn(async move {
-        let bootstrapped = tokio::task::spawn_blocking(|| {
-            ChatSessions::bootstrap_default().map(|mut sessions| {
-                sessions.install_performance_fixture();
-                sessions
+    if bootstrap {
+        runtime.spawn(async move {
+            let bootstrapped = tokio::task::spawn_blocking(|| {
+                ChatSessions::bootstrap_default().map(|mut sessions| {
+                    sessions.install_performance_fixture();
+                    sessions
+                })
             })
-        })
-        .await;
+            .await;
 
-        let _ = slint::invoke_from_event_loop(move || {
-            let sessions = match bootstrapped {
-                Ok(Ok(sessions)) => sessions,
-                Ok(Err(e)) => {
-                    log::error!("[Chat::Storage] Failed to initialize chat storage: {}", e);
-                    if let Some(ui) = ui_weak_bootstrap.upgrade() {
-                        ui.set_chat_history_restoring(false);
+            let _ = slint::invoke_from_event_loop(move || {
+                let sessions = match bootstrapped {
+                    Ok(Ok(sessions)) => sessions,
+                    Ok(Err(e)) => {
+                        log::error!("[Chat::Storage] Failed to initialize chat storage: {}", e);
+                        if let Some(ui) = ui_weak_bootstrap.upgrade() {
+                            ui.set_chat_history_restoring(false);
+                        }
+                        return;
                     }
-                    return;
-                }
-                Err(e) => {
-                    log::error!("[Chat::Storage] Bootstrap task join failed: {}", e);
-                    if let Some(ui) = ui_weak_bootstrap.upgrade() {
-                        ui.set_chat_history_restoring(false);
+                    Err(e) => {
+                        log::error!("[Chat::Storage] Bootstrap task join failed: {}", e);
+                        if let Some(ui) = ui_weak_bootstrap.upgrade() {
+                            ui.set_chat_history_restoring(false);
+                        }
+                        return;
                     }
-                    return;
+                };
+                sessions.log_storage_paths();
+                log::info!(
+                    "[Chat::History] bootstrap loaded_messages={} can_load_more={}",
+                    sessions.loaded_messages().len(),
+                    sessions.can_load_more()
+                );
+                if let Ok(mut slot) = session_bootstrap.lock() {
+                    *slot = Some(sessions);
                 }
-            };
-            sessions.log_storage_paths();
-            log::info!(
-                "[Chat::History] bootstrap loaded_messages={} can_load_more={}",
-                sessions.loaded_messages().len(),
-                sessions.can_load_more()
-            );
-            if let Ok(mut slot) = session_bootstrap.lock() {
-                *slot = Some(sessions);
-            }
-            let Some(ui) = ui_weak_bootstrap.upgrade() else {
-                return;
-            };
-            if ui.get_current_route() == Route::Chat {
-                // Remount through the route callback so revision tracking and
-                // first-entry scrolling behave exactly like a fresh entry.
-                ui.invoke_chat_route_visible_changed(true);
-            }
+                let Some(ui) = ui_weak_bootstrap.upgrade() else {
+                    return;
+                };
+                if ui.get_current_route() == Route::Chat {
+                    // Remount through the route callback so revision tracking and
+                    // first-entry scrolling behave exactly like a fresh entry.
+                    ui.invoke_chat_route_visible_changed(true);
+                }
+            });
         });
-    });
-
+    }
     let ui_weak = ui.as_weak();
     let has_entered_chat_once = Rc::new(Cell::new(false));
     let loading_phase_active = Arc::new(AtomicBool::new(false));
@@ -1210,6 +1486,7 @@ pub fn setup_interactive(ui: &MainWindow) {
         ui.set_chat_ai_mode(ai_mode);
         ui.set_chat_input_text(next_draft.into());
         ui.set_chat_loading_history(false);
+        ui.set_chat_history_load_failed(false);
         let (sending, elapsed_seconds) = request_state_mode
             .lock()
             .map(|state| (state.is_sending(mode), state.elapsed_seconds(mode)))
@@ -1229,23 +1506,50 @@ pub fn setup_interactive(ui: &MainWindow) {
     });
 
     let ui_weak_geometry = ui_weak.clone();
-    ui.on_chat_message_geometry(move |message_id, y, height, position_changed| {
+    ui.on_chat_message_geometry(move |message_id, y, height, _position_changed| {
+        let revision = GEOMETRY_REVISION.with(|latest| {
+            let revision = latest.get().wrapping_add(1);
+            latest.set(revision);
+            revision
+        });
         MESSAGE_GEOMETRIES.with(|geometries| {
-            geometries
-                .borrow_mut()
-                .insert(message_id, MessageGeometry { y, height });
+            geometries.borrow_mut().insert(
+                message_id,
+                MessageGeometry {
+                    y,
+                    height,
+                    revision,
+                },
+            );
         });
 
-        if !position_changed {
-            return;
+        let is_anchor = PENDING_HISTORY_ANCHOR.with(|pending| {
+            pending
+                .borrow()
+                .as_ref()
+                .is_some_and(|anchor| anchor.message_id == message_id)
+        });
+        if is_anchor {
+            schedule_anchor_compensation(ui_weak_geometry.clone());
         }
-        let Some(anchor) = PENDING_HISTORY_ANCHOR.with(Cell::get) else {
-            return;
-        };
-        if anchor.message_id != message_id {
-            return;
+    });
+
+    let ui_weak_user_scroll = ui_weak.clone();
+    ui.on_chat_user_scroll_started(move || {
+        USER_SCROLL_REVISION.with(|revision| revision.set(revision.get().wrapping_add(1)));
+        let interrupted_anchor = has_pending_anchor();
+        clear_pending_anchor();
+        if interrupted_anchor {
+            // Flickable may report viewport-y before flicked(). Replay that
+            // input once after cancellation so a suppressed final wheel event
+            // cannot strand the viewport in an unmounted spacer.
+            let weak = ui_weak_user_scroll.clone();
+            slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.invoke_chat_scroll_position_changed(ui.get_chat_scroll_position());
+                }
+            });
         }
-        schedule_anchor_compensation(ui_weak_geometry.clone());
     });
 
     let ui_weak_scrollbar = ui_weak.clone();
@@ -1331,7 +1635,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                 if stick_to_bottom {
                     clear_pending_anchor();
                 } else {
-                    capture_visible_history_anchor(&ui);
+                    capture_visible_anchor(&ui, AnchorPurpose::SettledLayout, None);
                 }
                 settled_size.set(size);
                 apply_chat_state_to_ui(
@@ -1373,6 +1677,8 @@ pub fn setup_interactive(ui: &MainWindow) {
                 return;
             }
 
+            clear_pending_anchor();
+            ui.set_chat_history_load_failed(false);
             ui.set_chat_loading_history(true);
             let mode = chat_mode_from_ui(&ui);
             log::debug!("[Chat::History] Start loading older messages...");
@@ -1420,6 +1726,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                                 if loaded_count > 0 {
                                     capture_visible_history_anchor(&ui);
                                 }
+                                ui.set_chat_history_load_failed(false);
                                 ui.set_chat_loading_history(false);
                                 let wrap_width_px = active_wrap_width_px(&ui);
                                 apply_chat_state_to_ui(
@@ -1434,16 +1741,20 @@ pub fn setup_interactive(ui: &MainWindow) {
                             log::debug!("[Chat::History] History page loaded with visible anchor");
                         }
                         Ok(Err(e)) => {
-                            PENDING_HISTORY_ANCHOR.with(|pending| pending.set(None));
-                            if chat_mode_from_ui(&ui) == mode {
+                            if ui.get_current_route() == Route::Chat
+                                && chat_mode_from_ui(&ui) == mode
+                            {
                                 ui.set_chat_loading_history(false);
+                                ui.set_chat_history_load_failed(true);
                             }
                             log::error!("[Chat::Storage] Failed to load older history: {}", e);
                         }
                         Err(e) => {
-                            PENDING_HISTORY_ANCHOR.with(|pending| pending.set(None));
-                            if chat_mode_from_ui(&ui) == mode {
+                            if ui.get_current_route() == Route::Chat
+                                && chat_mode_from_ui(&ui) == mode
+                            {
                                 ui.set_chat_loading_history(false);
+                                ui.set_chat_history_load_failed(true);
                             }
                             log::error!("[Chat::Storage] Background load task join failed: {}", e);
                         }
@@ -1686,6 +1997,8 @@ pub fn setup_interactive(ui: &MainWindow) {
     applied_scroll_bucket.set(initial_scroll_bucket);
 
     let ui_weak_scroll = ui.as_weak();
+    let last_scroll_offset = Rc::new(Cell::new((-ui.get_chat_scroll_position()).max(0.0)));
+    let latest_scroll_down = Rc::new(Cell::new(false));
     let session_scroll = session.clone();
     let observed_scroll_bucket_scroll = observed_scroll_bucket.clone();
     let applied_scroll_bucket_scroll = applied_scroll_bucket.clone();
@@ -1694,6 +2007,11 @@ pub fn setup_interactive(ui: &MainWindow) {
     let virtual_commit_scheduled_scroll = virtual_commit_scheduled.clone();
     let layout_stick_to_bottom_scroll = layout_stick_to_bottom.clone();
     ui.on_chat_scroll_position_changed(move |position| {
+        let scroll_offset_px = (-position).max(0.0);
+        let previous_offset = last_scroll_offset.replace(scroll_offset_px);
+        if (scroll_offset_px - previous_offset).abs() > 0.01 {
+            latest_scroll_down.set(scroll_offset_px > previous_offset);
+        }
         let Some(ui) = ui_weak_scroll.upgrade() else {
             return;
         };
@@ -1703,12 +2021,11 @@ pub fn setup_interactive(ui: &MainWindow) {
             || virtual_commit_in_progress_scroll.get()
             || MODEL_MUTATION_IN_PROGRESS.with(Cell::get)
             || ANCHOR_SCROLL_WRITE_IN_PROGRESS.with(Cell::get)
-            || PENDING_HISTORY_ANCHOR.with(Cell::get).is_some()
+            || has_pending_anchor()
         {
             return;
         }
 
-        let scroll_offset_px = (-position).max(0.0);
         if ui.get_chat_bottom_distance() > STICK_TO_BOTTOM_THRESHOLD_PX {
             layout_stick_to_bottom_scroll.set(false);
         }
@@ -1721,17 +2038,14 @@ pub fn setup_interactive(ui: &MainWindow) {
         }
 
         let scroll_bucket = virtual_scroll_bucket(scroll_offset_px);
-        if scroll_bucket == observed_scroll_bucket_scroll.get() {
-            return;
-        }
         observed_scroll_bucket_scroll.set(scroll_bucket);
         let applied = applied_scroll_bucket_scroll.get();
         if applied < 0 {
             applied_scroll_bucket_scroll.set(scroll_bucket);
             return;
         }
-        let moving_down = scroll_bucket > applied;
-        let viewport_height = (ui.get_chat_layout_window_height() - 180.0).clamp(360.0, 1400.0);
+        let moving_down = latest_scroll_down.get();
+        let viewport_height = ui.get_chat_message_viewport_height().max(1.0);
         let (_, near_virtual_edge) = MESSAGE_GEOMETRIES.with(|geometries| {
             should_shift_near_virtual_edge(
                 &ui,
@@ -1756,6 +2070,7 @@ pub fn setup_interactive(ui: &MainWindow) {
         let applied_bucket = applied_scroll_bucket_scroll.clone();
         let commit_scheduled = virtual_commit_scheduled_scroll.clone();
         let commit_in_progress = virtual_commit_in_progress_scroll.clone();
+        let latest_scroll_down = latest_scroll_down.clone();
         slint::Timer::single_shot(std::time::Duration::ZERO, move || {
             commit_scheduled.set(false);
             let Some(ui) = ui_weak.upgrade() else {
@@ -1767,7 +2082,7 @@ pub fn setup_interactive(ui: &MainWindow) {
                 || commit_in_progress.get()
                 || MODEL_MUTATION_IN_PROGRESS.with(Cell::get)
                 || ANCHOR_SCROLL_WRITE_IN_PROGRESS.with(Cell::get)
-                || PENDING_HISTORY_ANCHOR.with(Cell::get).is_some()
+                || has_pending_anchor()
             {
                 return;
             }
@@ -1779,8 +2094,8 @@ pub fn setup_interactive(ui: &MainWindow) {
                 applied_bucket.set(scroll_bucket);
                 return;
             }
-            let moving_down = scroll_bucket > applied;
-            let viewport_height = (ui.get_chat_layout_window_height() - 180.0).clamp(360.0, 1400.0);
+            let moving_down = latest_scroll_down.get();
+            let viewport_height = ui.get_chat_message_viewport_height().max(1.0);
             let (near_mounted_edge, near_virtual_edge) = MESSAGE_GEOMETRIES.with(|geometries| {
                 should_shift_near_virtual_edge(
                     &ui,
@@ -1802,7 +2117,11 @@ pub fn setup_interactive(ui: &MainWindow) {
             {
                 clear_pending_anchor();
             } else {
-                capture_visible_anchor(&ui, Some(MOUNTED_EDGE_GUARD_PX));
+                capture_visible_anchor(
+                    &ui,
+                    AnchorPurpose::VirtualWindow,
+                    Some(MOUNTED_EDGE_GUARD_PX),
+                );
             }
             applied_bucket.set(scroll_bucket);
             commit_in_progress.set(true);
@@ -1896,6 +2215,10 @@ pub fn setup_interactive(ui: &MainWindow) {
 
     log::info!("[Chat::Interactive] Interactive callbacks initialized successfully");
 }
+
+#[cfg(test)]
+#[path = "pagination_tests.rs"]
+mod pagination_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2070,6 +2393,7 @@ mod tests {
                 MessageGeometry {
                     y: 80.0,
                     height: 90.0,
+                    revision: 1,
                 },
             ),
             (
@@ -2077,6 +2401,7 @@ mod tests {
                 MessageGeometry {
                     y: 178.0,
                     height: 60.0,
+                    revision: 2,
                 },
             ),
             (
@@ -2084,53 +2409,164 @@ mod tests {
                 MessageGeometry {
                     y: 246.0,
                     height: 70.0,
+                    revision: 3,
                 },
             ),
         ]);
 
         assert_eq!(
-            select_visible_anchor(&geometries, 150.0),
+            select_visible_anchor(&geometries, 150.0, 100.0),
             Some(VisibleAnchor {
                 message_id: 11,
                 content_y: 178.0,
                 scroll_offset: 150.0,
+                geometry_revision: 2,
             })
         );
     }
 
     #[test]
-    fn prepend_compensation_keeps_the_anchor_at_the_same_viewport_pixel() {
+    fn visible_anchor_falls_back_to_the_top_intersecting_long_message() {
+        let geometries = HashMap::from([
+            (
+                10,
+                MessageGeometry {
+                    y: 100.0,
+                    height: 1_000.0,
+                    revision: 4,
+                },
+            ),
+            (
+                11,
+                MessageGeometry {
+                    y: 1_108.0,
+                    height: 60.0,
+                    revision: 5,
+                },
+            ),
+        ]);
+
+        assert_eq!(
+            select_visible_anchor(&geometries, 150.0, 600.0),
+            Some(VisibleAnchor {
+                message_id: 10,
+                content_y: 100.0,
+                scroll_offset: 150.0,
+                geometry_revision: 4,
+            })
+        );
+    }
+
+    fn test_anchor_settle(max_correction_px: Option<f32>) -> AnchorSettle {
         let anchor = VisibleAnchor {
             message_id: 11,
             content_y: 178.0,
             scroll_offset: 150.0,
+            geometry_revision: 7,
         };
-
-        let next_offset = anchored_scroll_offset(anchor, 438.0, 150.0, None).unwrap();
-        assert_eq!(next_offset, 410.0);
-        assert_eq!(anchor.content_y - anchor.scroll_offset, 438.0 - next_offset);
-        assert_eq!(anchored_scroll_offset(anchor, 178.2, 150.0, None), None);
+        AnchorSettle::new(
+            9,
+            ChatMode::Ai,
+            AnchorPurpose::HistoryPrepend,
+            anchor,
+            3,
+            max_correction_px,
+        )
     }
 
     #[test]
-    fn stale_or_implausible_virtual_anchor_cannot_override_new_scroll_input() {
-        let anchor = VisibleAnchor {
-            message_id: 11,
-            content_y: 10_000.0,
-            scroll_offset: 9_800.0,
+    fn prepend_anchor_waits_for_new_geometry_and_settles_across_frames() {
+        let mut settle = test_anchor_settle(None);
+        let old_geometry = MessageGeometry {
+            y: 178.0,
+            height: 60.0,
+            revision: 7,
+        };
+        assert_eq!(
+            settle.step(ChatMode::Ai, 3, 150.0, Some(old_geometry)),
+            AnchorStep::Wait
+        );
+
+        let first_layout = MessageGeometry {
+            y: 438.0,
+            height: 60.0,
+            revision: 8,
+        };
+        assert_eq!(
+            settle.step(ChatMode::Ai, 3, 150.0, Some(first_layout)),
+            AnchorStep::Write(410.0)
+        );
+
+        let final_layout = MessageGeometry {
+            y: 468.0,
+            height: 60.0,
+            revision: 9,
+        };
+        assert_eq!(
+            settle.step(ChatMode::Ai, 3, 410.0, Some(final_layout)),
+            AnchorStep::Write(440.0)
+        );
+        assert_eq!(
+            settle.step(ChatMode::Ai, 3, 440.0, Some(final_layout)),
+            AnchorStep::Wait
+        );
+        assert_eq!(
+            settle.step(ChatMode::Ai, 3, 440.0, Some(final_layout)),
+            AnchorStep::Complete
+        );
+        assert_eq!(final_layout.y - 440.0, settle.viewport_y);
+    }
+
+    #[test]
+    fn user_input_or_mode_switch_cancels_a_pending_anchor() {
+        let mut input_changed = test_anchor_settle(None);
+        assert_eq!(
+            input_changed.step(ChatMode::Ai, 4, 150.0, None),
+            AnchorStep::Cancel
+        );
+
+        let mut mode_changed = test_anchor_settle(None);
+        assert_eq!(
+            mode_changed.step(ChatMode::Rag, 3, 150.0, None),
+            AnchorStep::Cancel
+        );
+
+        let mut unexpected_scroll = test_anchor_settle(None);
+        assert_eq!(
+            unexpected_scroll.step(ChatMode::Ai, 3, 180.0, None),
+            AnchorStep::Cancel
+        );
+    }
+
+    #[test]
+    fn implausible_virtual_anchor_correction_is_rejected() {
+        let mut settle = test_anchor_settle(Some(2_400.0));
+        let implausible = MessageGeometry {
+            y: 20_000.0,
+            height: 60.0,
+            revision: 8,
+        };
+        assert_eq!(
+            settle.step(ChatMode::Ai, 3, 150.0, Some(implausible)),
+            AnchorStep::Cancel
+        );
+    }
+
+    #[test]
+    fn history_prepend_mounts_predecessors_and_preserves_the_anchor() {
+        let previous = VirtualRenderSignature {
+            total_len: 20,
+            start: 0,
+            end: 20,
+            include_loading_placeholder: false,
         };
 
+        assert_eq!(shifted_prepend_window(previous, 30, 10), Some((0, 30)));
+        assert_eq!(shifted_prepend_window(previous, 30, 9), None);
         assert_eq!(
-            anchored_scroll_offset(anchor, 10_200.0, 10_120.0, Some(2_400.0)),
-            None
-        );
-        assert_eq!(
-            anchored_scroll_offset(anchor, 20_000.0, 9_800.0, Some(2_400.0)),
-            None
-        );
-        assert_eq!(
-            anchored_scroll_offset(anchor, 10_200.0, 9_800.0, Some(2_400.0)),
-            Some(10_000.0)
+            shifted_prepend_window(previous, 20, 10),
+            None,
+            "a non-prepend render must use the ordinary virtual window"
         );
     }
 
@@ -2142,6 +2578,7 @@ mod tests {
                 MessageGeometry {
                     y: 10_000.0,
                     height: 180.0,
+                    revision: 1,
                 },
             ),
             (
@@ -2149,6 +2586,7 @@ mod tests {
                 MessageGeometry {
                     y: 10_188.0,
                     height: 220.0,
+                    revision: 2,
                 },
             ),
         ]);
@@ -2192,6 +2630,7 @@ mod tests {
                 MessageGeometry {
                     y: 1_000.0,
                     height: 2_000.0,
+                    revision: 1,
                 },
             )]);
         });
