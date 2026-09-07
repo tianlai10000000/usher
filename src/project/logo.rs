@@ -7,7 +7,6 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
-use slint::ComponentHandle;
 
 use crate::MainWindow;
 use crate::http::{self, RequestOptions};
@@ -303,53 +302,18 @@ pub(super) async fn download_remote_logo_to_cache(url: &str) -> Option<PathBuf> 
 pub(super) fn refresh_logo_preview(ui: &MainWindow, state: &ProjectStateFacade, logo: &str) {
     let trimmed = logo.trim();
     let normalized = normalize_project_logo(logo);
-    ui.set_project_logo_preview_status(
-        crate::i18n::tr(preview_logo_status_key(trimmed))
-            .into_owned()
-            .into(),
-    );
+    let status = if state.remote_logo_failed(&normalized) {
+        "projects.invalid_logo_default"
+    } else {
+        preview_logo_status_key(trimmed)
+    };
+    ui.set_project_logo_preview_status(crate::i18n::tr(status).into_owned().into());
     if is_valid_logo_remote_url(&normalized) && find_cached_remote_logo_path(&normalized).is_some()
     {
         // Re-read from disk so a previously cached pending-default cannot stick.
         invalidate_cached_logo_image(&logo_image_cache_key(&normalized));
     }
     ui.set_project_logo_preview_image(resolve_project_logo_image(&normalized));
-
-    if !is_valid_logo_remote_url(&normalized) || find_cached_remote_logo_path(&normalized).is_some()
-    {
-        return;
-    }
-
-    if !state.begin_remote_logo(normalized.clone()) {
-        return;
-    }
-
-    let ui_weak = ui.as_weak();
-    let state = state.clone();
-    crate::app_runtime::shared_runtime().spawn(async move {
-        let downloaded = download_remote_logo_to_cache(normalized.as_str())
-            .await
-            .is_some();
-        state.finish_remote_logo(normalized.clone());
-        if !downloaded {
-            return;
-        }
-
-        let _ = slint::invoke_from_event_loop(move || {
-            let Some(ui) = ui_weak.upgrade() else {
-                return;
-            };
-            if ui.get_project_new_logo().as_str() == normalized {
-                invalidate_cached_logo_image(&logo_image_cache_key(&normalized));
-                ui.set_project_logo_preview_status(
-                    crate::i18n::tr("projects.logo_remote_url")
-                        .into_owned()
-                        .into(),
-                );
-                ui.set_project_logo_preview_image(resolve_project_logo_image(&normalized));
-            }
-        });
-    });
 }
 
 pub(super) fn preview_logo_status_key(value: &str) -> &'static str {

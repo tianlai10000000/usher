@@ -7,8 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak, mpsc};
-use std::thread::JoinHandle;
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use slint::{ComponentHandle, Global, Model, ModelRc, SharedString, VecModel};
@@ -40,10 +39,11 @@ use crate::{
 
 use super::config::{ReviewConfigFacade, default_session_dir};
 use super::response::{self, ResponseVariant};
-use super::storage::{
-    JsonLoad, load_json_preserving_corrupt, reconcile_session_files, remove_stale_temporary_files,
-    session_paths,
-};
+use super::storage::{JsonLoad, load_json_preserving_corrupt, session_paths};
+
+#[cfg(test)]
+use super::storage::reconcile_session_files;
+use super::task_persistence::{TaskPersistenceCommand, TaskPersistenceWorker};
 
 type TaskStore = dyn StateStore<ReviewTaskState, ReviewTaskAction, ReviewTaskActionResult>;
 
@@ -561,7 +561,7 @@ pub(crate) fn setup_ai_review(
         TaskPersistenceWorker::start(task_state_path.clone(), session_dir.clone(), false);
     let persistence_sender = task_persistence.sender.clone();
     let persistence_subscription = task_store.observe_commits(Arc::new(move |snapshot| {
-        let _ = persistence_sender.send(Some(snapshot.state_arc()));
+        let _ = persistence_sender.send(TaskPersistenceCommand::Persist(snapshot.state_arc()));
     }));
 
     let response_variant = ResponseVariant::from_environment();
@@ -687,7 +687,9 @@ pub(crate) fn setup_ai_review(
                 let _ = inner
                     .task_persistence
                     .sender
-                    .send(Some(inner.task_store.snapshot().state_arc()));
+                    .send(TaskPersistenceCommand::Persist(
+                        inner.task_store.snapshot().state_arc(),
+                    ));
             }
             log::info!("[AI Review][Task Store] Deferred hydration complete");
         });
@@ -948,9 +950,8 @@ fn schedule_response_preview_memory_fixture_cycle(
 
 impl AiReviewController {
     fn with_persistence_subscription(self, subscription: Subscription) -> Self {
-        // The persistence subscription must live for the controller lifetime.
-        // Store it beside the worker by leaking only the tiny cancellation
-        // handle into the controller-owned Arc; shutdown reclaims the process.
+        // Keep the commit subscription beside its worker. Shutdown removes it
+        // before enqueuing the persistence barrier.
         self.inner
             .task_persistence
             .retain_subscription(subscription);
@@ -3458,75 +3459,6 @@ fn load_task_state(path: &Path) -> (ReviewTaskState, bool) {
         }
     }
     (state, writes_allowed)
-}
-
-struct TaskPersistenceWorker {
-    sender: mpsc::Sender<Option<Arc<ReviewTaskState>>>,
-    handle: Mutex<Option<JoinHandle<()>>>,
-    subscription: Mutex<Option<Subscription>>,
-    writes_allowed: Arc<AtomicBool>,
-}
-
-impl TaskPersistenceWorker {
-    fn start(path: PathBuf, session_dir: PathBuf, writes_allowed: bool) -> Self {
-        let (sender, receiver) = mpsc::channel::<Option<Arc<ReviewTaskState>>>();
-        let writes_allowed = Arc::new(AtomicBool::new(writes_allowed));
-        let writes_allowed_worker = writes_allowed.clone();
-        let handle = std::thread::Builder::new()
-            .name("ai-review-tasks".into())
-            .spawn(move || {
-                remove_stale_temporary_files(path.parent().unwrap_or_else(|| Path::new(".")));
-                while let Ok(message) = receiver.recv() {
-                    let Some(mut latest) = message else {
-                        break;
-                    };
-                    while let Ok(Some(newer)) = receiver.try_recv() {
-                        latest = newer;
-                    }
-                    if !writes_allowed_worker.load(Ordering::Acquire) {
-                        continue;
-                    }
-                    if let Err(error) = persist_task_state(&path, &latest) {
-                        log::error!("[AI Review][Task Store] Persistence failed: {error}");
-                        continue;
-                    }
-                    let _ = reconcile_session_files(&session_dir, latest.tasks.keys());
-                }
-            })
-            .expect("failed to start AI review task persistence worker");
-        Self {
-            sender,
-            handle: Mutex::new(Some(handle)),
-            subscription: Mutex::new(None),
-            writes_allowed,
-        }
-    }
-
-    fn set_writes_allowed(&self, allowed: bool) {
-        self.writes_allowed.store(allowed, Ordering::Release);
-    }
-
-    fn retain_subscription(&self, subscription: Subscription) {
-        *self
-            .subscription
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(subscription);
-    }
-
-    fn shutdown(&self) {
-        if let Ok(mut subscription) = self.subscription.lock() {
-            subscription.take();
-        }
-        let _ = self.sender.send(None);
-        if let Some(handle) = self.handle.lock().ok().and_then(|mut handle| handle.take()) {
-            let _ = handle.join();
-        }
-    }
-}
-
-fn persist_task_state(path: &Path, state: &ReviewTaskState) -> Result<(), String> {
-    let data = serde_json::to_vec_pretty(state).map_err(|error| error.to_string())?;
-    usher_fs::atomic_write(path, &data).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

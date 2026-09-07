@@ -2,6 +2,8 @@
 
 mod controller;
 mod logo;
+mod logo_loader;
+mod logo_requests;
 mod model;
 mod overview;
 mod state;

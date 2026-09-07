@@ -19,6 +19,8 @@ review task does not own a route or require a visible page.
   catalog and typed, bounded request assembly shared with AI Chat.
 - `src/ai_review/config.rs`: `usher-state-store` facade plus automatic
   configuration persistence.
+- `src/ai_review/task_persistence.rs`: ordered task snapshot persistence,
+  shutdown barriers, and post-write session reconciliation.
 - `src/ai_review/controller.rs`: task orchestration, Git/provider diff loading,
   AI calls, cancellation, session persistence, notifications, and on-demand UI
   projection.
@@ -38,6 +40,7 @@ review task does not own a route or require a visible page.
 - `src/ai/prompts.toml` 与 `src/ai/prompts.rs`：与 AI Chat 共用、受版本控制的 Prompt
   catalog，以及强类型、有界的请求组装。
 - `src/ai_review/config.rs`：基于 `usher-state-store` 的门面和自动配置持久化。
+- `src/ai_review/task_persistence.rs`：有序任务快照持久化、关闭屏障与写后会话对账。
 - `src/ai_review/controller.rs`：任务编排、Git/Provider diff 获取、AI 调用、取消、
   Session 持久化、通知和按需 UI 投影。
 - `src/agent_response/`：Agent Markdown 的宽度无关有界投影、内容身份缓存和不透明
@@ -108,6 +111,11 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
    updated in place with `set_row_data`; progress commits must not rebuild or
    rescan the PR list. Application shutdown cancels every running review before
    joining persistence workers.
+   Task persistence may coalesce snapshots before a Shutdown command, but must
+   process the latest preceding snapshot and then exit without waiting for
+   senders to be dropped. Disabled/failed writes must still honor the barrier;
+   repeated shutdown is safe. This drains already queued commits, not a promise
+   to capture future commits from producers that have not stopped.
 10. Oversized diffs split on file/line boundaries. Every continuation repeats
     the file header and a numeric synthetic hunk header for the next old/new
     line positions, remains within the byte budget, and preserves the original
@@ -138,6 +146,9 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
 9. Task UI 订阅使用两个独立 selector：任务行包含进度，PR 列表徽标排除逐 chunk 进度；
    既有 Slint 行使用 `set_row_data` 原地更新，进度 commit 不得重建或重扫 PR 列表。
    应用 shutdown 必须先取消全部运行中 Review，再 join 持久化 Worker。
+   任务持久化可以合并 Shutdown 命令前的快照，但必须处理此前的最新快照后退出，
+   不得依赖 sender 被释放。禁用写入或写入失败仍必须尊重关闭屏障，重复关闭安全。
+   此契约排空已经入队的 commit，不承诺捕获尚未停止的发布方在未来提交的状态。
 10. 超大 diff 按文件/行边界切分；每个续块重复文件头与指向下一旧/新行位置的数字 hunk
     头，保持在字节预算内，去除续块头后必须精确还原原 payload。真实 hunk header 之外的
     `@@` 文本不得被误判为 hunk。

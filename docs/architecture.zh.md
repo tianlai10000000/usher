@@ -433,6 +433,11 @@ Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可�
 
 ## 状态和持久化
 
+AI Review 任务快照持久化隔离在 `src/ai_review/task_persistence.rs`。Worker 合并相邻
+`Persist` 命令但保留 `Shutdown` 屏障：先处理此前的最新快照再退出，写入禁用或失败时
+也不能丢失关闭信号。Controller 保留 commit 订阅和关闭编排，会话文件对账仍归 Worker。
+该协议沿用 `PersistentStore` 的控制消息顺序，不改变公共 Store API 或队列策略。
+
 ### 设置
 
 `AppSettings` 以 TOML 保存到平台配置目录，包括主题、`auto` 或规范 locale id 的语言偏好、自动更新、相互独立的 Console/`usher.log`/`usher_tracing.log` 输出目标、Terminal verbose 与内存诊断、UI 声效开关、导航抽屉状态、Git 平台 Token、位于 `[git.platform.<provider>]` 的各平台企业版 API 地址和企业名称、位于 `[ai.agent]` 的 OpenAI-compatible AI Agent 连接配置，以及位于 `[ai.chat]` 的可选 HTTPS RAG endpoint（环境变量回退为 `USHER_RAG_API_URL`）。AI Agent 编辑由其 Feature Store 归约并自动持久化，其他设置继续使用既有的即时或显式保存入口。保存操作由写锁串行化，先写入并同步同目录唯一临时文件，再原子替换目标；解析失败时必须先把原文件保留为 `settings.toml.corrupt-*`，若保留失败，则本进程禁止继续写 Settings。Logger 输出目标通过运行时原子过滤控制；`usher.log` 在首次启用写入时按需打开，Settings 使用 GitHub 风格的 `Enable all` / `Disable all` 批量操作，同时保留每项独立状态。Gitee 的公有版 `token` 与 `enterprise_token` 分开保存；只有旧配置已经存在企业 API 地址时，旧版单一 Token 才迁移到企业字段，两套凭据不得跨 profile fallback。Slint 需要的数据同步到 `AppState`；API Key、企业名称和配置 URL 均属于本地配置，不得写入日志。Provider API 只有在企业 API 地址主机与项目 remote 主机匹配时才使用该配置；用户既可填写服务主机，也可填写完整 API 根地址，缺少版本路径时由 Provider 自动补齐。否则继续使用由 remote 推导出的公共平台默认地址。自动主题在 macOS 通过 AppKit、Windows 通过用户级应用主题设置、Linux 通过 XDG Desktop Portal 判断。选中 Auto 时会持续跟随系统外观变化：macOS 使用 `AppleInterfaceThemeChangedNotification` 并辅以 1 秒轮询兜底；Windows 与 Linux 每秒轮询同一检测路径。选择 Auto 会清除强制的 AppKit appearance，使进程跟随系统；显式浅色/深色则锁定 Aqua/DarkAqua。开启 UI 声效后，面包屑返回统一调用 `platform::play_ui_click`：macOS 播放 `Tink`，Windows 异步播放用户配置的默认系统音，Linux 在后台线程播放桌面 Sound Theme 事件，并以常见的 PipeWire/PulseAudio/ALSA 命令行播放器作为回退。
@@ -505,6 +510,14 @@ pending save、Logo 与概览均通过强类型 Action commit；controller 不�
 durable 快照，并以同目录临时文件原子 rename 替换 `projects.json`；仅 runtime 状态变化
 不会重写未变化的持久记录。写入失败时只回滚仍为当前版本的乐观快照，不覆盖后续编辑；
 只有真实写盘完成后才提示成功。
+列表 Logo 与表单预览共享 `app_runtime` 上的单个 `logo_loader.rs` 驱动器。
+Project Store 持有 `logo_requests.rs` 调度策略：最多 4 个活跃请求，对持续选中的
+每个 URL 最多尝试 3 次，失败后分别冷却 2/4 秒。显式刷新注册表重置失败项，
+不重复启动正在执行的请求。搜索与预览 callback 只提交最新输入，来源筛选和
+强类型调度 Action 在 Worker 执行；UI 投影不再启动 Logo 下载。调度元数据只保留
+筛选后的项目 URL、当前预览，以及至多 4 个移除后尚未完成的请求；既有图片缓存
+另行管理。Project 关闭时先取消驱动器，再 flush Store。HTTP 沿用统一静默请求链路。
+
 `ui/views/project.slint` 只负责路由编排；可复用的项目卡片、工具栏控件和对话框统一位于
 `ui/components/project/`。Home、Search、Detail、Project 路由状态统一复用
 `GitHubPageHeader` 与 `GitHubBlankslate`，不再维护页面局部占位模式。

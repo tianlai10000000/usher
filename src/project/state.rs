@@ -1,10 +1,12 @@
 //! Project registry state, typed actions, and automatic persistence facade.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use usher_state_store::{PersistentStore, Reduction, StoreSnapshot, Subscription};
 
+use super::logo_requests::{LogoRequest, LogoRequests};
 use super::model::{ProjectConfig, ProjectPrOverview, ProjectRepositoryMetadata};
 use super::overview::{ProjectPrOverviewTask, collect_pr_overview_tasks};
 use super::storage::write_projects;
@@ -13,7 +15,9 @@ use super::storage::write_projects;
 pub(super) struct ProjectState {
     pub(super) projects: Vec<ProjectConfig>,
     persistence_feedback: Option<&'static str>,
-    pending_remote_logos: HashSet<String>,
+    remote_logos: LogoRequests,
+    pub(super) logo_query: String,
+    pub(super) preview_logo_url: Option<String>,
     pending_pr_overview: HashSet<String>,
     pending_saves: HashSet<String>,
 }
@@ -32,8 +36,17 @@ enum ProjectAction {
     },
     BeginSave(String),
     FinishSave(String),
-    BeginRemoteLogo(String),
-    FinishRemoteLogo(String),
+    UpdateLogoInputs {
+        query: Option<String>,
+        preview: Option<Option<String>>,
+    },
+    SyncRemoteLogoSources(BTreeSet<String>),
+    ClaimRemoteLogos(Instant),
+    CompleteRemoteLogo {
+        request: LogoRequest,
+        succeeded: bool,
+        now: Instant,
+    },
     PreparePrOverview(String),
     CompletePrOverview {
         alias: String,
@@ -47,6 +60,7 @@ enum ProjectOutput {
     Mutation(Result<(), String>),
     RolledBack(bool),
     OverviewTasks(Vec<ProjectPrOverviewTask>),
+    LogoRequests(Vec<LogoRequest>),
 }
 
 type ProjectStore = PersistentStore<ProjectState, ProjectAction, ProjectOutput>;
@@ -213,19 +227,68 @@ impl ProjectStateFacade {
         }
     }
 
-    pub(super) fn begin_remote_logo(&self, url: String) -> bool {
+    pub(super) fn update_logo_inputs(
+        &self,
+        query: Option<String>,
+        preview: Option<Option<String>>,
+    ) {
+        self.store
+            .dispatch(ProjectAction::UpdateLogoInputs { query, preview });
+    }
+
+    pub(super) fn sync_remote_logo_sources(&self, sources: BTreeSet<String>) {
+        self.store
+            .dispatch(ProjectAction::SyncRemoteLogoSources(sources));
+    }
+
+    pub(super) fn claim_remote_logos(&self, now: Instant) -> Vec<LogoRequest> {
         match self
             .store
-            .dispatch(ProjectAction::BeginRemoteLogo(url))
+            .dispatch(ProjectAction::ClaimRemoteLogos(now))
             .output
         {
-            ProjectOutput::Started(started) => started,
-            _ => false,
+            ProjectOutput::LogoRequests(requests) => requests,
+            _ => Vec::new(),
         }
     }
 
-    pub(super) fn finish_remote_logo(&self, url: String) {
-        self.store.dispatch(ProjectAction::FinishRemoteLogo(url));
+    pub(super) fn complete_remote_logo(
+        &self,
+        request: &LogoRequest,
+        succeeded: bool,
+        now: Instant,
+    ) {
+        self.store.dispatch(ProjectAction::CompleteRemoteLogo {
+            request: request.clone(),
+            succeeded,
+            now,
+        });
+    }
+
+    pub(super) fn next_remote_logo_retry(&self) -> Option<Instant> {
+        self.snapshot().state().remote_logos.next_retry()
+    }
+
+    pub(super) fn remote_logo_failed(&self, url: &str) -> bool {
+        self.snapshot().state().remote_logos.failed(url)
+    }
+
+    #[cfg(test)]
+    pub(super) fn memory(projects: Vec<ProjectConfig>) -> Self {
+        Self {
+            last_persisted: Arc::new(Mutex::new(projects.clone())),
+            store: PersistentStore::new_deferred(
+                ProjectState {
+                    projects,
+                    ..ProjectState::default()
+                },
+                reduce_project_state,
+                "project-logo-test",
+                |_| Ok(()),
+                |_, error| panic!("unexpected persistence failure: {error}"),
+            )
+            .unwrap(),
+        }
     }
 
     pub(super) fn prepare_pr_overview(&self, query: String) -> Vec<ProjectPrOverviewTask> {
@@ -269,7 +332,7 @@ fn reduce_project_state(
         ProjectAction::Hydrate(projects) => {
             next.projects = projects;
             next.persistence_feedback = None;
-            next.pending_remote_logos.clear();
+            next.remote_logos.retry_failed();
             next.pending_pr_overview.clear();
             next.pending_saves.clear();
             Reduction::changed(next, ProjectOutput::None)
@@ -352,16 +415,36 @@ fn reduce_project_state(
         ProjectAction::FinishSave(key) => {
             changed_set_removal(current, next.pending_saves.remove(&key), next)
         }
-        ProjectAction::BeginRemoteLogo(url) => {
-            let started = next.pending_remote_logos.insert(url);
-            if started {
-                Reduction::changed(next, ProjectOutput::Started(true))
+        ProjectAction::UpdateLogoInputs { query, preview } => {
+            if let Some(query) = query {
+                next.logo_query = query.trim().to_lowercase();
+            }
+            if let Some(preview) = preview {
+                next.preview_logo_url = preview;
+            }
+            let changed = next.logo_query != current.logo_query
+                || next.preview_logo_url != current.preview_logo_url;
+            changed_set_removal(current, changed, next)
+        }
+        ProjectAction::SyncRemoteLogoSources(sources) => {
+            let changed = next.remote_logos.sync_sources(sources);
+            changed_set_removal(current, changed, next)
+        }
+        ProjectAction::ClaimRemoteLogos(now) => {
+            let requests = next.remote_logos.claim(now);
+            if requests.is_empty() {
+                Reduction::unchanged(current.clone(), ProjectOutput::LogoRequests(requests))
             } else {
-                Reduction::unchanged(current.clone(), ProjectOutput::Started(false))
+                Reduction::changed(next, ProjectOutput::LogoRequests(requests))
             }
         }
-        ProjectAction::FinishRemoteLogo(url) => {
-            changed_set_removal(current, next.pending_remote_logos.remove(&url), next)
+        ProjectAction::CompleteRemoteLogo {
+            request,
+            succeeded,
+            now,
+        } => {
+            let changed = next.remote_logos.complete(&request, succeeded, now);
+            changed_set_removal(current, changed, next)
         }
         ProjectAction::PreparePrOverview(query) => {
             let tasks = collect_pr_overview_tasks(&mut next.projects, &query)

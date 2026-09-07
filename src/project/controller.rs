@@ -11,6 +11,7 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use super::logo::*;
+use super::logo_loader::LogoLoader;
 use super::model::{
     ProjectConfig, ProjectDraft, ProjectPrOverview, ProjectSaveAction, ProjectViewDiagSnapshot,
     parse_project_tags,
@@ -27,11 +28,13 @@ thread_local! {
 #[derive(Clone)]
 pub(crate) struct ProjectController {
     state: ProjectStateFacade,
+    logo_loader: Arc<LogoLoader>,
     _subscription: Arc<usher_state_store::Subscription>,
 }
 
 impl ProjectController {
     pub(crate) fn shutdown(&self) {
+        self.logo_loader.shutdown();
         self.state.shutdown();
     }
 }
@@ -105,11 +108,15 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
     }));
 
     let ui_weak = ui.as_weak();
+    let logo_loader = Arc::new(LogoLoader::start(state.clone(), ui.as_weak()));
+    let loader_preview = logo_loader.clone();
     let state_preview = state.clone();
     ui.on_project_preview_logo(move |logo| {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
+        let url = logo.as_str().trim();
+        loader_preview.set_preview_url(is_valid_logo_remote_url(url).then(|| url.to_owned()));
         refresh_logo_preview(&ui, &state_preview, logo.as_str());
     });
 
@@ -259,11 +266,13 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
 
     let ui_weak = ui.as_weak();
     let state_search = state.clone();
+    let loader_search = logo_loader.clone();
     ui.on_project_search_projects(move |query| {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
 
+        loader_search.set_query(query.as_str());
         refresh_project_items(&ui, &state_search, query.as_str());
     });
 
@@ -361,6 +370,7 @@ pub fn setup_project(ui: &MainWindow) -> ProjectController {
 
     ProjectController {
         state,
+        logo_loader,
         _subscription: Arc::new(subscription),
     }
 }
@@ -443,7 +453,6 @@ fn refresh_project_items(ui: &MainWindow, state: &ProjectStateFacade, query: &st
         state.pending_pr_overview_count(),
     );
     ui.set_project_items(ModelRc::new(VecModel::from(ui_items)));
-    prefetch_remote_logos(state.clone(), remote_urls);
     prefetch_project_pr_overview(state.clone(), pr_tasks);
 }
 
@@ -675,32 +684,6 @@ fn pr_count_display(value: &str, failed: bool) -> &str {
         "-"
     } else {
         value
-    }
-}
-
-fn prefetch_remote_logos(state: ProjectStateFacade, remote_urls: Vec<String>) {
-    for url in remote_urls {
-        if find_cached_remote_logo_path(url.as_str()).is_some() {
-            continue;
-        }
-
-        if !state.begin_remote_logo(url.clone()) {
-            continue;
-        }
-
-        let state_task = state.clone();
-        crate::app_runtime::shared_runtime().spawn(async move {
-            let downloaded = download_remote_logo_to_cache(url.as_str()).await.is_some();
-            if !downloaded {
-                state_task.finish_remote_logo(url);
-                return;
-            }
-
-            let _ = slint::invoke_from_event_loop(move || {
-                invalidate_cached_logo_image(&logo_image_cache_key(url.as_str()));
-                state_task.finish_remote_logo(url);
-            });
-        });
     }
 }
 

@@ -534,6 +534,14 @@ Debug builds enable process memory diagnostics by default; the persisted Setting
 
 ## State and persistence
 
+AI Review task snapshot persistence is isolated in `src/ai_review/task_persistence.rs`.
+Its worker coalesces adjacent `Persist` commands but preserves the `Shutdown`
+barrier: it processes the latest preceding snapshot before exiting, including
+when writes are disabled or fail. The controller retains commit subscription
+and shutdown orchestration; session-file reconciliation remains with the worker.
+This follows the control-message ordering of `PersistentStore` without changing
+the shared Store API or its queue policy.
+
 ### Settings
 
 `AppSettings` is persisted as TOML in the platform config directory. It contains theme mode, the `auto` or canonical locale-id language preference, auto-update, independent console/`usher.log`/`usher_tracing.log` destinations, Terminal verbose and memory diagnostics, UI sound-effect preference, navigation drawer state, Git platform tokens, plus per-provider enterprise API URLs and names under `[git.platform.<provider>]`, OpenAI-compatible AI Agent connection values under `[ai.agent]`, and an optional HTTPS RAG endpoint under `[ai.chat]` (with `USHER_RAG_API_URL` as the environment fallback). AI Agent edits are reduced and auto-persisted by its feature Store; other settings retain their existing immediate or explicit-save entry points. Saves are serialized, write and sync a unique same-directory temporary file, and atomically replace the destination. A parse failure preserves the source as `settings.toml.corrupt-*` before defaults may be saved; if preservation fails, settings writes remain disabled for that process. Logger destinations use runtime atomic filters; `usher.log` opens lazily on the first enabled write, and Settings exposes GitHub-style `Enable all` / `Disable all` actions while retaining every independent state. Gitee stores public `token` and `enterprise_token` separately. A legacy single Gitee token is migrated to the enterprise field only when an enterprise API root was already configured; credentials never fall back across profiles. `AppState` mirrors values required by Slint. API keys, enterprise names, and configured URLs are local configuration and must not be logged. Provider API code uses an enterprise API URL only when its host matches the repository remote; users may supply the host or the complete API root, with the provider version path added if omitted. Public-provider defaults remain remote-derived. Auto theme resolves through AppKit on macOS, the Windows per-user application-theme setting, and the XDG Desktop Portal on Linux. While Auto is selected, Usher watches OS appearance changes: macOS uses `AppleInterfaceThemeChangedNotification` plus a 1s poll fallback; Windows and Linux poll the same detectors every 1s. Selecting Auto clears any forced AppKit appearance so the process can track the system; explicit Light/Dark lock Aqua/DarkAqua. When UI sound effects are enabled, breadcrumb Back uses `platform::play_ui_click`: macOS plays `Tink`, Windows queues the user-configured default sound, and Linux plays the desktop sound-theme event on a worker thread with common PipeWire/PulseAudio/ALSA command-line fallbacks.
@@ -629,6 +637,18 @@ temporary sibling over `projects.json`. Runtime-only commits do not rewrite
 unchanged durable records. A failed write rolls back its still-current optimistic
 snapshot without overwriting a later edit; success feedback is emitted only
 after a real write completes.
+
+Remote list logos and the form preview share one `logo_loader.rs` driver on
+`app_runtime`. The Project Store owns the `logo_requests.rs` admission policy:
+at most four active requests, three attempts per continuously selected URL,
+and 2/4-second failure cooldowns. Explicit registry reload resets failed entries
+without duplicating in-flight work. Search and preview callbacks only enqueue
+the latest input; source selection and typed scheduling Actions run on the
+worker. UI projection never starts Logo downloads. Metadata is retained only
+for filtered project URLs, the current preview and at most four retired active
+requests; the existing image cache is separate. Project shutdown cancels the
+driver before flushing its Store. HTTP uses the existing shared silent pipeline.
+
 `ui/views/project.slint` is route composition only; reusable project cards,
 toolbar controls, and dialogs live in `ui/components/project/`.
 Home/Search/Detail/Project route states share `GitHubPageHeader` and

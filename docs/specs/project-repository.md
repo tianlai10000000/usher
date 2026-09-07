@@ -12,6 +12,8 @@ This specification covers provider metadata resolved on the Project page and the
   coordinates asynchronous saves; `state.rs` owns the typed Project reducer, selectors,
   request de-duplication, and `PersistentStore`; `model.rs`, `storage.rs`, `logo.rs`, and
   `overview.rs` own persistence records, `projects.json`, logo handling, and PR-overview tasks.
+- `logo_loader.rs` owns the shared list/preview effect driver; `logo_requests.rs`
+  implements admission and backoff inside the Project Store.
 - `src/codereview/api/` owns provider URL/path constants only.
 - `src/git/` parses remotes and owns provider-specific operations, authentication headers, and response decoding.
 - `src/git/overview.rs` aggregates normalized open PR/MR pages into `fat`, `uat`, and `prod` counts; Project and Workflow do not implement provider requests.
@@ -26,6 +28,8 @@ This specification covers provider metadata resolved on the Project page and the
   `state.rs` 负责强类型 Project reducer、selector、请求去重和 `PersistentStore`；
   `model.rs`、`storage.rs`、`logo.rs`、`overview.rs` 分别负责持久化记录、
   `projects.json`、Logo 处理和 PR overview 任务选择。
+- `logo_loader.rs` 负责列表/预览共用的副作用驱动器；`logo_requests.rs` 在 Project Store
+  中实现请求准入与退避。
 - `src/codereview/api/` 只负责 Provider URL/路径常量。
 - `src/git/` 解析 remote，负责 Provider 实际操作、鉴权 header 和响应解码。
 - `src/git/overview.rs` 将归一化的 open PR/MR 分页聚合为 `fat`、`uat`、`prod` 数量；Project 与 Workflow 不实现 Provider 请求。
@@ -95,6 +99,17 @@ This specification covers provider metadata resolved on the Project page and the
     Explicit page-one refresh bypasses the cached prefix; a successful merge
     invalidates every prefix for that repository.
 
+20. Remote Logo loading is independent of UI projection. Filtered project URLs
+    and the current form preview share URL deduplication and at most four active
+    requests. Each continuously selected URL has three total attempts with 2/4s
+    cooldowns after failures; ordinary Store/UI refreshes cannot bypass them.
+    Explicit registry reload resets failures, preserving active request identities.
+    Removed sources release scheduling metadata after any active request completes;
+    selecting them again starts a new budget. One shared-runtime driver owns all
+    futures and the next retry deadline, with no task/timer per waiting URL.
+    Shutdown cancels its HTTP futures before Project persistence shuts down.
+    Downloads remain silent and failed images use the default Logo.
+
 1. `remote_repo` 决定 Provider，支持 `gitee`、`gitlab`、`github`。
 2. 支持 HTTPS 或 SSH Git URL，且必须包含 owner/group 与仓库路径。
 3. 已配置的 Gitee 兼容企业仓库搜索使用 `remote_repo` 中 `.git` 前的最后一段作为 `project_name`；绝不使用可编辑的项目名称或别名。
@@ -136,6 +151,14 @@ This specification covers provider metadata resolved on the Project page and the
     共用原始 closed 前缀，再在本地应用状态与关键词筛选。完整 Provider 页按 30 秒 TTL
     增量缓存，每个 adapter 最多保留 32 个仓库/筛选/状态/页大小 key，并按 IID 去重。
     显式刷新第 1 页必须绕过旧前缀；合并成功后必须使该仓库的全部前缀失效。
+
+20. 远程 Logo 加载必须独立于 UI 投影。筛选后的项目 URL 与当前表单预览共享 URL
+    去重及最多 4 个活跃请求。持续选中的每个 URL 总共最多尝试 3 次，失败后分别
+    冷却 2/4 秒；普通 Store/UI 刷新不得绕过退避。显式刷新注册表可重置失败项，
+    但必须保留正在执行的请求身份。移除来源后，其活跃请求完成时释放调度元数据；
+    再次选中时开始新的预算。单一共享 runtime 驱动器持有请求 future 与下一次重试
+    截止时间，不为每个等待 URL 创建任务/定时器。关闭 Project 持久化前取消 HTTP
+    future。下载失败继续静默并显示默认 Logo。
 
 ## Deferred enhancement / 后续优化
 
@@ -183,3 +206,9 @@ The enterprise Gitee search result is selected by exact namespace/path where ava
 - Enter Workflow and verify the PR tab shows the saved provider/id and the first 10 open requests.
 - For a GitHub PR page, verify every available `head.ref → base.ref` pair is shown and a failed row-detail request does not hide the rest of the page.
 - Switch open/closed/merged/all and paginate rapidly; verify only the latest response updates the list.
+
+- Use local 404, stalled and recovered image responses to verify finite attempts,
+  cooldowns, explicit reload recovery, shared list/preview admission and shutdown
+  cancellation. Batch 32 failing URLs and verify at most four concurrent requests.
+- 使用本地 404、无响应和恢复后的图片响应，检查有限次数、冷却、显式刷新恢复、列表/
+  预览共享准入与关闭取消；批量 32 个失败 URL 时并发请求不能超过 4 个。
