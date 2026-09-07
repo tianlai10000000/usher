@@ -1,8 +1,13 @@
 //! Application-wide reusable Job definitions and runtime snapshots.
 
+#[cfg(test)]
+use super::log_model::LogModel;
+use super::log_model::LogSnapshot;
+#[cfg(test)]
+use super::log_model::parse_log_line;
 use crate::i18n::LocalizedText;
 use crate::{JobLogLineItem, JobStepItem};
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{ModelRc, SharedString};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +83,7 @@ impl JobStepDefinition {
 }
 
 /// Runtime snapshot for one definition. This is Send-safe; Slint models are
-/// created only in `to_slint` on the event loop.
+/// created only by the presenter on the event loop.
 #[derive(Debug, Clone)]
 pub(crate) struct JobStepData {
     pub(crate) definition: JobStepDefinition,
@@ -86,6 +91,7 @@ pub(crate) struct JobStepData {
     pub(crate) conclusion: Option<JobConclusion>,
     pub(crate) detail: LocalizedText,
     pub(crate) log: String,
+    pub(crate) parsed_log: LogSnapshot,
     pub(crate) duration: String,
     pub(crate) default_expanded: bool,
     /// Backend-owned lazy-load latch. Raw output is collected independently,
@@ -101,19 +107,33 @@ impl JobStepData {
             conclusion: None,
             detail: detail.into(),
             log: String::new(),
+            parsed_log: LogSnapshot::default(),
             duration: String::new(),
             default_expanded: false,
             log_requested: false,
         }
     }
 
+    /// Called by the feature worker when raw output changes, never by scrolling.
+    pub(crate) fn set_log(&mut self, log: String) {
+        if self.log == log {
+            return;
+        }
+        self.parsed_log = self.parsed_log.update(&log);
+        self.log = log;
+    }
+
+    #[cfg(test)]
     pub(crate) fn to_slint(&self) -> JobStepItem {
-        let materialize_log = self.log_requested || self.default_expanded;
-        let log_lines: Vec<JobLogLineItem> = if !materialize_log || self.log.is_empty() {
-            Vec::new()
+        let snapshot = if self.log_requested || self.default_expanded {
+            self.parsed_log.clone()
         } else {
-            self.log.lines().map(parse_log_line).collect()
+            LogSnapshot::default()
         };
+        self.to_slint_with_lines(ModelRc::new(LogModel::new(snapshot)))
+    }
+    pub(super) fn to_slint_with_lines(&self, log_lines: ModelRc<JobLogLineItem>) -> JobStepItem {
+        let materialize_log = self.log_requested || self.default_expanded;
         JobStepItem {
             name: self.definition.name.resolve().into(),
             command: self.definition.rendered_command().into(),
@@ -133,7 +153,7 @@ impl JobStepData {
             },
             has_log: !self.log.is_empty() || self.status == JobStepStatus::InProgress,
             log_loaded: materialize_log,
-            log_lines: ModelRc::new(VecModel::from(log_lines)),
+            log_lines,
             duration: self.duration.as_str().into(),
             default_expanded: self.default_expanded,
         }
@@ -200,81 +220,6 @@ fn preserve_log_requests(previous: &[JobStepData], next: &mut [JobStepData]) {
     for (next_step, previous_step) in next.iter_mut().zip(previous) {
         next_step.log_requested |= previous_step.log_requested;
     }
-}
-
-fn decode_workflow_command(value: &str) -> String {
-    value
-        .replace("%0D", "\r")
-        .replace("%0A", "\n")
-        .replace("%3A", ":")
-        .replace("%2C", ",")
-        .replace("%25", "%")
-}
-
-fn semantic_line(
-    kind: &'static str,
-    prefix: &'static str,
-    text: impl Into<String>,
-) -> JobLogLineItem {
-    JobLogLineItem {
-        kind: kind.into(),
-        prefix: prefix.into(),
-        text: text.into().into(),
-    }
-}
-
-fn parse_workflow_annotation(line: &str) -> Option<JobLogLineItem> {
-    let rest = line.strip_prefix("::")?;
-    let separator = rest.find("::")?;
-    let (header, message_with_separator) = rest.split_at(separator);
-    let command = header.split([' ', ',']).next()?.to_ascii_lowercase();
-    let message = decode_workflow_command(&message_with_separator[2..]);
-    match command.as_str() {
-        "notice" => Some(semantic_line("notice", "Notice: ", message)),
-        "warning" => Some(semantic_line("warning", "Warning: ", message)),
-        "error" => Some(semantic_line("error", "Error: ", message)),
-        "debug" => Some(semantic_line("debug", "Debug: ", message)),
-        _ => None,
-    }
-}
-
-fn split_prefixed_line<'a>(line: &'a str, lowercase: &str, prefix: &str) -> Option<&'a str> {
-    lowercase
-        .strip_prefix(prefix)
-        .map(|suffix| &line[line.len() - suffix.len()..])
-}
-
-fn parse_log_line(line: &str) -> JobLogLineItem {
-    if let Some(annotation) = parse_workflow_annotation(line) {
-        return annotation;
-    }
-
-    let trimmed = line.trim_start();
-    let lowercase = trimmed.to_ascii_lowercase();
-    if let Some(message) = split_prefixed_line(trimmed, &lowercase, "warning:") {
-        return semantic_line("warning", "Warning:", message);
-    }
-    if let Some(message) = split_prefixed_line(trimmed, &lowercase, "error:") {
-        return semantic_line("error", "Error:", message);
-    }
-    if let Some(message) = split_prefixed_line(trimmed, &lowercase, "fatal:") {
-        return semantic_line("error", "Fatal:", message);
-    }
-    if let Some(message) = split_prefixed_line(trimmed, &lowercase, "notice:") {
-        return semantic_line("notice", "Notice:", message);
-    }
-    if let Some(message) = split_prefixed_line(trimmed, &lowercase, "debug:") {
-        return semantic_line("debug", "Debug:", message);
-    }
-
-    let embedded_kind = if lowercase.contains(": warning:") {
-        "warning"
-    } else if lowercase.contains(": error:") || lowercase.contains(": fatal:") {
-        "error"
-    } else {
-        "plain"
-    };
-    semantic_line(embedded_kind, "", line)
 }
 
 pub(crate) fn format_duration(duration: Duration) -> String {
@@ -353,7 +298,7 @@ mod tests {
             "Build project.",
         );
         step.status = super::JobStepStatus::Completed;
-        step.log = "warning: cached dependency".into();
+        step.set_log("warning: cached dependency".into());
 
         assert_eq!(step.to_slint().log_lines.row_count(), 0);
         step.log_requested = true;

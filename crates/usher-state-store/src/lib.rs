@@ -4,10 +4,12 @@
 //! future third-party Redux/Pinia-like engine can implement the same port
 //! without leaking its concrete types into UI bridges or publishers.
 
+mod latest;
+pub use latest::{LatestDelivery, LatestPersistence};
+
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, Weak, mpsc};
-use std::thread::JoinHandle;
+use std::sync::{Arc, Mutex, RwLock, Weak};
 
 /// Immutable, revisioned state delivered to selectors and subscribers.
 pub struct StoreSnapshot<S> {
@@ -393,97 +395,8 @@ where
     }
 }
 
-type PersistCallback<S> = dyn Fn(&S) -> Result<(), String> + Send + Sync;
-type PersistenceErrorHandler<S> = dyn Fn(Arc<S>, String) + Send + Sync;
-
-enum PersistenceCommand<S> {
-    Persist(Arc<S>),
-    Flush(mpsc::Sender<()>),
-    Shutdown(mpsc::Sender<()>),
-}
-
-struct PersistenceWorker<S> {
-    sender: mpsc::Sender<PersistenceCommand<S>>,
-    handle: Mutex<Option<JoinHandle<()>>>,
-}
-
-impl<S> PersistenceWorker<S>
-where
-    S: Send + Sync + 'static,
-{
-    fn start(
-        thread_name: impl Into<String>,
-        persist: Arc<PersistCallback<S>>,
-        on_error: Arc<PersistenceErrorHandler<S>>,
-    ) -> std::io::Result<Self> {
-        let (sender, receiver) = mpsc::channel();
-        let handle = std::thread::Builder::new()
-            .name(thread_name.into())
-            .spawn(move || {
-                let mut pending = None;
-                loop {
-                    let command = match pending.take() {
-                        Some(command) => command,
-                        None => match receiver.recv() {
-                            Ok(command) => command,
-                            Err(_) => break,
-                        },
-                    };
-                    match command {
-                        PersistenceCommand::Persist(mut latest) => {
-                            while let Ok(command) = receiver.try_recv() {
-                                match command {
-                                    PersistenceCommand::Persist(newer) => latest = newer,
-                                    control => {
-                                        pending = Some(control);
-                                        break;
-                                    }
-                                }
-                            }
-                            if let Err(error) = persist(&latest) {
-                                on_error(latest, error);
-                            }
-                        }
-                        PersistenceCommand::Flush(done) => {
-                            let _ = done.send(());
-                        }
-                        PersistenceCommand::Shutdown(done) => {
-                            let _ = done.send(());
-                            break;
-                        }
-                    }
-                }
-            })?;
-        Ok(Self {
-            sender,
-            handle: Mutex::new(Some(handle)),
-        })
-    }
-
-    fn flush(&self) -> Result<(), String> {
-        let (sender, receiver) = mpsc::channel();
-        self.sender
-            .send(PersistenceCommand::Flush(sender))
-            .map_err(|_| "persistence worker is unavailable".to_string())?;
-        receiver
-            .recv()
-            .map_err(|_| "persistence worker stopped before flushing".to_string())
-    }
-
-    fn shutdown(&self) {
-        let handle = self.handle.lock().ok().and_then(|mut handle| handle.take());
-        let Some(handle) = handle else {
-            return;
-        };
-        let (sender, receiver) = mpsc::channel();
-        let _ = self.sender.send(PersistenceCommand::Shutdown(sender));
-        let _ = receiver.recv();
-        let _ = handle.join();
-    }
-}
-
-/// Stable store facade for durable state. Every changed commit is queued to
-/// one owned worker; callers dispatch typed actions and never save manually.
+/// Stable durable-state facade. Changed commits offer their latest snapshot to
+/// one bounded worker; callers dispatch typed actions and never save manually.
 pub struct PersistentStore<S, A, O>
 where
     S: Send + Sync + 'static,
@@ -491,7 +404,7 @@ where
     O: Send + 'static,
 {
     store: Arc<dyn StateStore<S, A, O>>,
-    worker: Arc<PersistenceWorker<S>>,
+    worker: Arc<LatestPersistence<S>>,
     commit_subscription: Arc<Mutex<Option<Subscription>>>,
 }
 
@@ -540,10 +453,11 @@ where
     ) -> std::io::Result<Self> {
         let store: Arc<dyn StateStore<S, A, O>> =
             Arc::new(LocalStateStore::new(initial_state, reducer));
-        let worker = Arc::new(PersistenceWorker::start(
+        let worker = Arc::new(LatestPersistence::start(
             thread_name,
-            Arc::new(persist),
-            Arc::new(on_error),
+            std::time::Duration::ZERO,
+            persist,
+            on_error,
         )?);
         Ok(Self {
             store,
@@ -559,9 +473,9 @@ where
         if subscription.is_some() {
             return;
         }
-        let persistence_sender = self.worker.sender.clone();
+        let worker = self.worker.clone();
         *subscription = Some(self.store.observe_commits(Arc::new(move |snapshot| {
-            let _ = persistence_sender.send(PersistenceCommand::Persist(snapshot.state_arc()));
+            worker.submit(snapshot.revision(), snapshot.state_arc());
         })));
     }
 
@@ -587,7 +501,7 @@ where
             .lock()
             .ok()
             .and_then(|mut subscription| subscription.take());
-        self.worker.shutdown();
+        let _ = self.worker.shutdown();
     }
 }
 

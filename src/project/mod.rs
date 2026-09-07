@@ -1,11 +1,14 @@
 //! Project feature composition façade.
 
+mod benchmark;
 mod controller;
 mod logo;
 mod logo_loader;
+mod logo_prepare;
 mod logo_requests;
 mod model;
 mod overview;
+mod projection;
 mod state;
 mod storage;
 

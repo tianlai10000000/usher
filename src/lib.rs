@@ -26,6 +26,7 @@ mod dialog;
 use dialog::setup_dialog;
 
 mod diagnostics;
+mod persistence_benchmark;
 
 mod tray;
 use tray::setup_tray;
@@ -900,6 +901,8 @@ fn ui(
         PRIORITY_HIGH,
         move || message_center_for_shutdown.shutdown(),
     );
+    // Normal priority flushes preferences after the high-priority feature workers stop.
+    shutdown::register_pre_shutdown_task("flush_settings", settings::shutdown_saves);
     shutdown::register_ui_shutdown_task_with_priority("remove_tray", PRIORITY_HIGH, || {
         tray::remove_tray();
     });
@@ -910,6 +913,7 @@ fn ui(
     );
     settings_page.install(&app);
     message_page.install(&app);
+    persistence_benchmark::setup(&app, &message_center);
     memory_diagnostics::log_checkpoint("startup.ui_bindings_complete");
     startup_timeline.checkpoint("ui_bindings_complete");
 

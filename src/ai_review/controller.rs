@@ -43,7 +43,7 @@ use super::storage::{JsonLoad, load_json_preserving_corrupt, session_paths};
 
 #[cfg(test)]
 use super::storage::reconcile_session_files;
-use super::task_persistence::{TaskPersistenceCommand, TaskPersistenceWorker};
+use super::task_persistence::TaskPersistenceWorker;
 
 type TaskStore = dyn StateStore<ReviewTaskState, ReviewTaskAction, ReviewTaskActionResult>;
 
@@ -561,7 +561,7 @@ pub(crate) fn setup_ai_review(
         TaskPersistenceWorker::start(task_state_path.clone(), session_dir.clone(), false);
     let persistence_sender = task_persistence.sender.clone();
     let persistence_subscription = task_store.observe_commits(Arc::new(move |snapshot| {
-        let _ = persistence_sender.send(TaskPersistenceCommand::Persist(snapshot.state_arc()));
+        let _ = persistence_sender.send(snapshot.revision(), snapshot.state_arc());
     }));
 
     let response_variant = ResponseVariant::from_environment();
@@ -599,49 +599,41 @@ pub(crate) fn setup_ai_review(
     apply_configuration_to_ui(ui, inner.config.snapshot().state());
     apply_task_state_to_ui(ui, inner.task_store.snapshot().state());
 
+    let deliver_tasks = crate::app_runtime::latest_ui(
+        ui.as_weak(),
+        |ui, (rows, state): (Vec<TaskRowProjection>, Arc<ReviewTaskState>)| {
+            apply_task_rows_to_ui(ui, &rows);
+            apply_current_task_state_to_ui(ui, &state);
+        },
+    );
     let weak_inner = Arc::downgrade(&inner);
     let task_subscription = inner.task_store.subscribe_selector(
-        // Project only the UI-visible task fields so commits that merely
-        // touch bookkeeping (for example timestamps) never wake the UI
-        // thread; per-chunk progress updates hop over exactly once each.
         Arc::new(|state: &ReviewTaskState| project_task_rows(state)),
         Arc::new(move |rows: Vec<TaskRowProjection>| {
-            let Some(inner) = weak_inner.upgrade() else {
-                return;
-            };
-            let state = inner.task_store.snapshot().state_arc();
-            let window = inner.window.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(ui) = window.upgrade() else {
-                    return;
-                };
-                apply_task_rows_to_ui(&ui, &rows);
-                apply_current_task_state_to_ui(&ui, &state);
-            });
+            if let Some(inner) = weak_inner.upgrade() {
+                deliver_tasks((rows, inner.task_store.snapshot().state_arc()));
+            }
         }),
     );
-
+    let deliver_prs =
+        crate::app_runtime::latest_ui(ui.as_weak(), |ui, rows: Vec<PrListTaskProjection>| {
+            apply_pr_list_review_projection(ui, &rows);
+        });
     let weak_inner = Arc::downgrade(&inner);
     let pr_list_subscription = inner.task_store.subscribe_selector(
-        // PR badges do not include chunk progress. Keeping this selector
-        // separate prevents every progress tick from scanning the PR list.
         Arc::new(|state: &ReviewTaskState| project_pr_list_rows(state)),
         Arc::new(move |rows: Vec<PrListTaskProjection>| {
-            let Some(inner) = weak_inner.upgrade() else {
-                return;
-            };
-            let window = inner.window.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                let Some(ui) = window.upgrade() else {
-                    return;
-                };
-                apply_pr_list_review_projection(&ui, &rows);
-            });
+            if weak_inner.upgrade().is_some() {
+                deliver_prs(rows);
+            }
         }),
     );
-
-    let weak_inner = Arc::downgrade(&inner);
     let settings_page = settings_page.clone();
+    let deliver_config = crate::app_runtime::latest_ui(ui.as_weak(), move |ui, state: Arc<_>| {
+        apply_configuration_to_ui(ui, &state);
+        settings_page.apply_ai_review_configuration(&state);
+    });
+    let weak_inner = Arc::downgrade(&inner);
     let config_subscription = inner.config.subscribe(Arc::new(move |snapshot| {
         let Some(inner) = weak_inner.upgrade() else {
             return;
@@ -650,16 +642,7 @@ pub(crate) fn setup_ai_review(
             scheduler.set_max_concurrent(snapshot.state().max_concurrent_tasks);
         }
         inner.clone().schedule_ready();
-        let state = snapshot.state_arc();
-        let window = inner.window.clone();
-        let settings_page = settings_page.clone();
-        let _ = slint::invoke_from_event_loop(move || {
-            let Some(ui) = window.upgrade() else {
-                return;
-            };
-            apply_configuration_to_ui(&ui, &state);
-            settings_page.apply_ai_review_configuration(&state);
-        });
+        deliver_config(snapshot.state_arc());
     }));
 
     let controller = AiReviewController {
@@ -684,12 +667,11 @@ pub(crate) fn setup_ai_review(
             inner.task_persistence.set_writes_allowed(writes_allowed);
             inner.task_store.dispatch(ReviewTaskAction::Hydrate(state));
             if writes_allowed {
+                let snapshot = inner.task_store.snapshot();
                 let _ = inner
                     .task_persistence
                     .sender
-                    .send(TaskPersistenceCommand::Persist(
-                        inner.task_store.snapshot().state_arc(),
-                    ));
+                    .send(snapshot.revision(), snapshot.state_arc());
             }
             log::info!("[AI Review][Task Store] Deferred hydration complete");
         });

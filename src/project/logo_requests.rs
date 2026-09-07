@@ -10,7 +10,7 @@ pub(super) const MAX_LOGO_ATTEMPTS: u8 = 3;
 enum Status {
     Queued,
     Pending(u64),
-    Ready,
+    Ready(u64),
     Failed(Instant),
 }
 
@@ -102,7 +102,7 @@ impl LogoRequests {
             return true;
         }
         entry.status = if succeeded {
-            Status::Ready
+            Status::Ready(request.sequence)
         } else {
             Status::Failed(now + Duration::from_secs(2u64.pow(u32::from(entry.attempts))))
         };
@@ -129,6 +129,16 @@ impl LogoRequests {
                 _ => None,
             })
             .min()
+    }
+
+    pub(super) fn ready_revision(&self, url: &str) -> u64 {
+        self.entries
+            .get(url)
+            .and_then(|entry| match entry.status {
+                Status::Ready(sequence) => Some(sequence),
+                _ => None,
+            })
+            .unwrap_or(0)
     }
 
     pub(super) fn failed(&self, url: &str) -> bool {

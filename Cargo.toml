@@ -79,6 +79,7 @@ tar = "0.4"
 flate2 = "1.0"
 tray-icon = "0.24"
 image = "0.25"
+resvg = { version = "0.47", default-features = false, features = ["text", "raster-images"] }
 pulldown-cmark = "0.13"
 config = { version = "0.15", default-features = false, features = ["toml"] }
 directories = "6.0"

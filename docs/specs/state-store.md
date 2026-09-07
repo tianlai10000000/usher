@@ -71,8 +71,8 @@ features when their shared state is materially changed.
 ## Persistence / 持久化
 
 - Durable shared State uses `PersistentStore` or an equivalent feature facade.
-  Every changed revision is automatically queued to one owned worker; adjacent
-  pending snapshots may collapse to the latest State, and individual action
+  Every changed revision is offered to one owned worker with one active write
+  and one replaceable pending snapshot. Intermediate State may be superseded; action
   creators must not call save manually.
 - A feature may load and validate persisted data before constructing revision
   zero, or create a deferred store and enable persistence immediately after a
@@ -82,8 +82,11 @@ features when their shared state is materially changed.
 - File/network/OS side effects never run in a reducer or on the Slint event
   loop. Persistence preserves commit order, writes through a temporary file when
   replacing JSON, and participates in the application shutdown flush sequence.
-- `flush()` waits for all commits queued before it; `shutdown()` drains prior
-  commits and joins the worker. Both belong in the application shutdown order.
+- `flush()` captures the accepted revision and waits for that or a newer
+  successful write; write errors return failure and still invoke the error handler.
+  `shutdown()` rejects new submissions, drains the latest accepted state and joins
+  the worker. Repeated/concurrent shutdown is safe. Control waiters use revision
+  predicates rather than an unbounded command queue.
 - A persistence failure is observable through the facade callback and bounded
   logs/diagnostics. The feature must document retry, rollback, or memory-only
   degradation and must not silently block UI dispatch.
@@ -91,15 +94,16 @@ features when their shared state is materially changed.
   timer does not enter the durable Store unless another page genuinely consumes it.
 
 - 需要持久化的共享 State 必须使用 `PersistentStore` 或等价 Feature 门面。每个有效
-  revision 自动排队到单一自有 Worker；相邻待处理快照可以合并为最新 State，各 Action
-  creator 禁止手工调用 save。
+  revision 自动交给单一自有 Worker，最多一个正在写入的快照和一个可替换的待写快照；
+  中间状态可以被取代，各 Action creator 禁止手工调用 save。
 - Feature 可以在构造 revision 0 前读取并校验持久化数据，也可以先创建 deferred store，
   通过强类型 hydration Action 提交数据后立即启用持久化。deferred hydration 不得把刚
   读取的快照冗余写回磁盘；损坏数据按 Feature 文档规定恢复。
 - 文件、网络和 OS 副作用不得进入 reducer，也不得在 Slint event loop 执行。
   持久化必须保持 commit 顺序，替换 JSON 时使用临时文件，并接入应用关闭 flush。
-- `flush()` 必须等待此前已排队 commit，`shutdown()` 必须排空此前任务并 join Worker；
-  两者都要接入应用关闭顺序。
+- `flush()` 捕获已接受 revision，等待该版本或更新版本成功写入；写入错误必须返回
+  失败并继续调用错误回调。`shutdown()` 拒绝新提交，排空最新已接受状态并 join，
+  并发/重复关闭安全。控制等待通过版本条件实现，不使用无界控制消息队列。
 - 持久化失败必须通过门面回调及有界日志/诊断可观测；Feature 应明确重试、回滚或降级
   为仅内存状态，禁止静默阻塞 UI dispatch。
 - Hover、Focus、打开菜单、本地确认计时器等临时 UI 状态，除非确有其他页面消费，
@@ -175,3 +179,25 @@ The message center and Project registry are reference implementations:
   能观察到该写入。
 - Drop subscription 后不得再收到 commit。
 - 运行 Store crate 测试、Feature 持久化测试、完整 lib 测试和受影响路由切换矩阵。
+
+## Latest UI delivery and preferences / 最新 UI 投递与偏好
+
+`LatestDelivery` retains one pending state and one queued delivery. The Slint
+helper in `app_runtime/latest_ui.rs` takes the latest value when its callback
+runs; it is used by Inbox/unread and AI Review snapshot projections. It must
+not coalesce ordered deltas, user actions or audit/event records. Regression
+coverage includes 1,000 offers while delivery is busy, stale revisions and close.
+
+Delayed Settings preferences use one worker with a resettable 100 ms deadline.
+Flush bypasses debounce and waits for the accepted request; application
+pre-shutdown joins the worker after high-priority feature workers. Explicit
+credential/provider saves retain their existing save feedback and write gate.
+Tests cover burst coalescing, final preference, write failure/recovery and close.
+
+`LatestDelivery` 最多保留一个待投递状态和一个排队回调。`app_runtime/latest_ui.rs`
+在 Slint 回调运行时取最新值，适用于 Inbox/未读与 AI Review 快照投影；不得合并逐条
+增量、用户动作、审计或事件记录。回归覆盖投递繁忙时 1,000 次提交、旧版本与关闭。
+
+Settings 延迟偏好使用单个 Worker，每次请求重置 100ms 截止时间。Flush 跳过去抖并
+等待已接受请求；应用 pre-shutdown 在高优先级 Feature Worker 后 join。显式凭据/
+Provider 保存保留反馈及写锁。测试覆盖突发合并、最终偏好、写失败/恢复和关闭。

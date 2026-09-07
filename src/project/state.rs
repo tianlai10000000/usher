@@ -13,13 +13,25 @@ use super::storage::write_projects;
 
 #[derive(Clone, Default)]
 pub(super) struct ProjectState {
-    pub(super) projects: Vec<ProjectConfig>,
+    pub(super) projects: Arc<Vec<ProjectConfig>>,
+    pub(super) hydrated: bool,
+    pub(super) logo_revision: u64,
+    pub(super) logo_refresh: u64,
     persistence_feedback: Option<&'static str>,
     remote_logos: LogoRequests,
     pub(super) logo_query: String,
     pub(super) preview_logo_url: Option<String>,
     pending_pr_overview: HashSet<String>,
     pending_saves: HashSet<String>,
+}
+
+impl ProjectState {
+    pub(super) fn logo_version(&self, url: &str) -> u64 {
+        self.logo_refresh + self.remote_logos.ready_revision(url)
+    }
+    pub(super) fn logo_failed(&self, url: &str) -> bool {
+        self.remote_logos.failed(url)
+    }
 }
 
 enum ProjectAction {
@@ -123,14 +135,15 @@ impl ProjectStateFacade {
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     if registries_match_persisted(&persisted, &state.projects) {
-                        *persisted = state.projects.clone();
+                        *persisted = state.projects.as_ref().clone();
                         return Ok(());
                     }
                 }
                 write_projects(&state.projects).map_err(|error| error.to_string())?;
                 *persisted_for_write
                     .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = state.projects.clone();
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    state.projects.as_ref().clone();
                 if let Some(message) = state.persistence_feedback {
                     on_success(message);
                 }
@@ -141,7 +154,7 @@ impl ProjectStateFacade {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .clone();
-                on_failure(failed.projects.clone(), rollback, error);
+                on_failure(failed.projects.as_ref().clone(), rollback, error);
             },
         )?;
         Ok(Self {
@@ -269,17 +282,14 @@ impl ProjectStateFacade {
         self.snapshot().state().remote_logos.next_retry()
     }
 
-    pub(super) fn remote_logo_failed(&self, url: &str) -> bool {
-        self.snapshot().state().remote_logos.failed(url)
-    }
-
     #[cfg(test)]
     pub(super) fn memory(projects: Vec<ProjectConfig>) -> Self {
         Self {
             last_persisted: Arc::new(Mutex::new(projects.clone())),
             store: PersistentStore::new_deferred(
                 ProjectState {
-                    projects,
+                    projects: Arc::new(projects),
+                    hydrated: true,
                     ..ProjectState::default()
                 },
                 reduce_project_state,
@@ -307,10 +317,6 @@ impl ProjectStateFacade {
             .dispatch(ProjectAction::CompletePrOverview { alias, counts });
     }
 
-    pub(super) fn pending_pr_overview_count(&self) -> usize {
-        self.snapshot().state().pending_pr_overview.len()
-    }
-
     pub(super) fn shutdown(&self) {
         self.store.shutdown();
     }
@@ -330,7 +336,9 @@ fn reduce_project_state(
     let mut next = current.clone();
     match action {
         ProjectAction::Hydrate(projects) => {
-            next.projects = projects;
+            next.projects = Arc::new(projects);
+            next.logo_refresh += 1;
+            next.hydrated = true;
             next.persistence_feedback = None;
             next.remote_logos.retry_failed();
             next.pending_pr_overview.clear();
@@ -348,7 +356,7 @@ fn reduce_project_state(
                     ProjectOutput::Mutation(Err("Project alias already exists.".to_string())),
                 );
             }
-            next.projects.push(project);
+            Arc::make_mut(&mut next.projects).push(project);
             next.persistence_feedback = Some("projects.added");
             Reduction::changed(next, ProjectOutput::Mutation(Ok(())))
         }
@@ -377,7 +385,7 @@ fn reduce_project_state(
                     ProjectOutput::Mutation(Err("projects.alias_exists".to_string())),
                 );
             }
-            next.projects[index] = project;
+            Arc::make_mut(&mut next.projects)[index] = project;
             next.persistence_feedback = Some("projects.updated");
             Reduction::changed(next, ProjectOutput::Mutation(Ok(())))
         }
@@ -392,7 +400,7 @@ fn reduce_project_state(
                     ProjectOutput::Mutation(Err("projects.not_found".to_string())),
                 );
             };
-            next.projects.remove(index);
+            Arc::make_mut(&mut next.projects).remove(index);
             next.persistence_feedback = Some("projects.deleted");
             Reduction::changed(next, ProjectOutput::Mutation(Ok(())))
         }
@@ -400,7 +408,7 @@ fn reduce_project_state(
             if !registries_match_persisted(&next.projects, &expected) {
                 return Reduction::unchanged(current.clone(), ProjectOutput::RolledBack(false));
             }
-            next.projects = rollback;
+            next.projects = Arc::new(rollback);
             next.persistence_feedback = None;
             Reduction::changed(next, ProjectOutput::RolledBack(true))
         }
@@ -444,13 +452,25 @@ fn reduce_project_state(
             now,
         } => {
             let changed = next.remote_logos.complete(&request, succeeded, now);
+            if changed {
+                next.logo_revision += 1;
+            }
             changed_set_removal(current, changed, next)
         }
         ProjectAction::PreparePrOverview(query) => {
-            let tasks = collect_pr_overview_tasks(&mut next.projects, &query)
-                .into_iter()
-                .filter(|task| next.pending_pr_overview.insert(task.project_alias.clone()))
-                .collect::<Vec<_>>();
+            let needle = query.trim().to_lowercase();
+            if !next
+                .projects
+                .iter()
+                .any(|project| super::overview::needs_pr_overview(project, &needle))
+            {
+                return Reduction::unchanged(next, ProjectOutput::OverviewTasks(Vec::new()));
+            }
+            let tasks =
+                collect_pr_overview_tasks(Arc::make_mut(&mut next.projects).as_mut_slice(), &query)
+                    .into_iter()
+                    .filter(|task| next.pending_pr_overview.insert(task.project_alias.clone()))
+                    .collect::<Vec<_>>();
             if tasks.is_empty() {
                 Reduction::unchanged(current.clone(), ProjectOutput::OverviewTasks(tasks))
             } else {
@@ -459,8 +479,7 @@ fn reduce_project_state(
         }
         ProjectAction::CompletePrOverview { alias, counts } => {
             next.pending_pr_overview.remove(&alias);
-            let Some(project) = next
-                .projects
+            let Some(project) = Arc::make_mut(&mut next.projects)
                 .iter_mut()
                 .find(|project| project.project_alias == alias)
             else {
@@ -535,7 +554,7 @@ mod tests {
     #[test]
     fn typed_registry_actions_reject_duplicates_and_rollback_only_current_state() {
         let initial = ProjectState {
-            projects: vec![project("alpha")],
+            projects: Arc::new(vec![project("alpha")]),
             ..ProjectState::default()
         };
         let added = reduce_project_state(&initial, ProjectAction::Add(project("beta")));
@@ -550,8 +569,8 @@ mod tests {
         let rolled_back = reduce_project_state(
             &added.state,
             ProjectAction::RollbackIfCurrent {
-                expected: added.state.projects.clone(),
-                rollback: initial.projects.clone(),
+                expected: added.state.projects.as_ref().clone(),
+                rollback: initial.projects.as_ref().clone(),
             },
         );
         assert!(rolled_back.changed);

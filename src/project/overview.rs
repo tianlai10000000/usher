@@ -52,3 +52,13 @@ fn matches_project_query(item: &ProjectConfig, needle: &str) -> bool {
         || item.project_name.to_lowercase().contains(needle)
         || item.project_alias.to_lowercase().contains(needle)
 }
+
+pub(super) fn needs_pr_overview(item: &ProjectConfig, needle: &str) -> bool {
+    matches_project_query(item, needle)
+        && item.is_pr_auto_update
+        && !item.pr_overview.loading
+        && !item.pr_overview.failed
+        && (item.pr_overview.fat_display.is_empty()
+            || item.pr_overview.uat_display.is_empty()
+            || item.pr_overview.prod_display.is_empty())
+}

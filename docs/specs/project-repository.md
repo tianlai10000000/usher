@@ -212,3 +212,34 @@ The enterprise Gitee search result is selected by exact namespace/path where ava
   cancellation. Batch 32 failing URLs and verify at most four concurrent requests.
 - 使用本地 404、无响应和恢复后的图片响应，检查有限次数、冷却、显式刷新恢复、列表/
   预览共享准入与关闭取消；批量 32 个失败 URL 时并发请求不能超过 4 个。
+
+## Bounded projection / 有界投影
+
+- `projection.rs` selects registry identity, query, preview and image revisions.
+  Save/request bookkeeping alone must not prepare or replace list models.
+- At most one input, one prepared output and one event-loop delivery are pending.
+  Older generations are rejected; unchanged rows retain their model/image identity.
+- `logo_prepare.rs` performs file/base64/SVG/raster work on a worker. Source input
+  is limited to 8 MiB; standalone raster decoding checks RGBA dimensions and sets
+  the decoder allocation limit to 64 MiB. Shared thumbnails are at most 128 pixels
+  per side. These are not a total-memory bound for SVG embedded resources. Only
+  selected sources remain cached; diagnostics reuse byte metadata.
+- Regression: repeated pending actions, rapid searches, overview bursts, local,
+  SVG and failed remote previews, refresh/loading and shutdown during preparation.
+
+- `projection.rs` 按注册表身份、查询、预览和图片版本选择更新；仅保存/请求记账
+  不得重新准备或替换列表 model。
+- 最多保留一个待处理输入、一个准备结果和一个排队 event-loop 回调。拒绝过期
+  代际，未变化行保留 model 与图片身份。
+- `logo_prepare.rs` 的文件/Base64/SVG/栅格工作在 Worker 执行。源输入最多 8 MiB；
+  独立栅格图片检查 RGBA 尺寸并设置 64 MiB 解码器分配限制，共享缩略图每边最多
+  128 像素。这不构成 SVG 内嵌资源的总内存上限。缓存只保留当前选择来源，诊断
+  复用字节元数据。
+- 回归覆盖 pending 连续变更、快速搜索、概览突发、本地/SVG/失败远程预览、
+  刷新 loading，以及准备期间关闭。
+
+Project SVG text uses the bundled Noto Sans SC font as its fallback, loaded on
+demand from shared static bytes; projection never scans installed system fonts.
+
+Project SVG 文字按需使用应用自带 Noto Sans SC 字体兜底，共享静态字节，
+投影不得扫描已安装的全部系统字体。

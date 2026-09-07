@@ -59,7 +59,7 @@ References:
 8. Step disclosure state is local presentation state. Disclosures are
    independent, matching GitHub Actions; opening one step does not close another.
 9. Raw process output remains backend-owned. The presenter requests a step's
-   parsed line model only on its first expansion. A failed step may opt into
+   lazy Slint line model only on its first expansion. A failed step may opt into
    `default_expanded`, which also materializes its log. Once requested, the
    latch survives progress and completion snapshots for that project.
 10. Process stdout and stderr are consumed while the process is running.
@@ -119,7 +119,7 @@ References:
    definitions 与对应 controller，不得复制 Job UI，也不得向 Job 中添加业务分支。
 8. Step 展开状态属于本地展示状态；与 GitHub Actions 一致，各 Step 独立展开，
    打开一个 Step 不会关闭其他 Step。
-9. 原始进程输出由后端持有。展示层仅在 Step 第一次展开时请求并构造解析后的行
+9. 原始进程输出由后端持有。展示层仅在 Step 第一次展开时请求 Slint 懒加载行
    model；失败 Step 可通过 `default_expanded` 自动构造日志。请求标记在同项目的
    progress 与 completion 快照替换时必须保留。
 10. 进程运行期间持续读取 stdout/stderr。Controller 以受控频率发布有界快照，
@@ -201,3 +201,31 @@ References:
 - 验证动画启用时运行 Spinner 持续旋转，queued Step 没有 hover 或点击行为。
 - 分别从 Workflow 与 UI Components 进入并验证 Back 精确返回各来源。
 - 验证 Stop 与日志懒加载只分发给当前 source key。
+
+## Output and viewport budgets / 输出与视口预算
+
+- Worker log mutations prepare semantic lines incrementally, reusing unchanged
+  lines; the event loop only converts requested visible rows. Step/log model
+  identities remain stable across progress, append and tail eviction.
+- Slint conversion cache: at most 128 rows. Expanded log panes: at most 420 px,
+  using public ListView and the existing GitHub scrollbar. Source numbers,
+  wrapping and semantic colors remain; long wrapped rows scroll inside the pane.
+- Tag transport: two 4 KiB readers, a shared queue of 16 blocks, at most three
+  UTF-8 carry bytes per stream, and a 32 KiB combined tail including truncation.
+  Overflow discards oldest display bytes; it does not grow the queue or line buffer.
+- Continue consuming while readers complete. Cancellation aborts and joins both
+  readers; inherited pipes after child exit have a two-second drain deadline.
+  Deadline expiry returns a failure with an explanatory bounded log.
+- Regression: split UTF-8/CRLF, short-line bursts, multi-MiB lines, both streams,
+  queue backpressure, exit/Stop, first expansion, collapse/reopen and scrolling.
+
+- Worker 日志变更增量准备语义行并复用未变化行；event loop 只转换请求的可见行。
+  Progress、追加与尾部淘汰保持 Step/log model 身份。
+- Slint 转换缓存最多 128 行，展开面板最高 420px，复用公开 ListView 与现有
+  GitHub 滚动条。保留源行号、换行和语义色；较长的换行行在面板内滚动。
+- Tag 两个 Reader 每次读取 4 KiB，共用 16 块队列，每流 UTF-8 跨块残留最多 3 字节；
+  合并尾日志连同截断标记最多 32 KiB。超限淘汰最旧展示字节，不扩大队列或整行缓冲。
+- 等待 Reader 时继续消费。取消必须 abort/join 两个 Reader；直接子进程退出后
+  继承管道排空限时 2 秒，超时返回失败及有界解释日志。
+- 回归覆盖 UTF-8/CRLF 拆分、短行突发、数 MiB 单行、双流、背压、退出/Stop、
+  首次展开、折叠重开及滚动。

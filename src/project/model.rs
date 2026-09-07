@@ -66,21 +66,6 @@ impl ProjectSaveAction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ProjectViewDiagSnapshot {
-    pub(super) query: String,
-    pub(super) configured_items: usize,
-    pub(super) visible_items: usize,
-    pub(super) remote_logo_prefetch: usize,
-    pub(super) pending_pr_tasks: usize,
-    pub(super) local_logos: usize,
-    pub(super) remote_logos: usize,
-    pub(super) base64_logos: usize,
-    pub(super) default_logos: usize,
-    pub(super) logo_source_bytes: u64,
-    pub(super) logo_decoded_rgba_bytes_estimate: u64,
-}
-
 pub(super) fn parse_project_tags(value: &str) -> Vec<String> {
     let raw_tags = value
         .split([',', '，', ';', '；'])

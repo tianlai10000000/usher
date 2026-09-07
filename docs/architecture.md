@@ -534,13 +534,28 @@ Debug builds enable process memory diagnostics by default; the persisted Setting
 
 ## State and persistence
 
-AI Review task snapshot persistence is isolated in `src/ai_review/task_persistence.rs`.
-Its worker coalesces adjacent `Persist` commands but preserves the `Shutdown`
-barrier: it processes the latest preceding snapshot before exiting, including
-when writes are disabled or fail. The controller retains commit subscription
-and shutdown orchestration; session-file reconciliation remains with the worker.
-This follows the control-message ordering of `PersistentStore` without changing
-the shared Store API or its queue policy.
+`crates/usher-state-store/src/latest.rs` provides `LatestPersistence`: one active
+write and one replaceable pending snapshot. Store revisions reject stale input;
+flush captures the latest accepted revision and waits for that revision or a
+newer successful write. Errors remain observable and flush returns failure.
+Shutdown rejects new submissions, drains the accepted state, and joins once;
+concurrent/repeated shutdown is safe. These semantics apply to state snapshots,
+not lossless events or audit records.
+
+AI Review task persistence keeps its feature policy in `task_persistence.rs`
+and uses the same bounded writer. It rejects older Store revisions but permits
+an explicit repeat of an unchanged hydration revision after writes become enabled;
+a separate monotonic submission revision covers that write in the barrier.
+Temporary-file cleanup runs before the first submitted snapshot is processed,
+and successful writes still reconcile session files. Disabled/failed writes
+cannot lose the shutdown barrier.
+
+`app_runtime/latest_ui.rs` coalesces replaceable view snapshots using
+`LatestDelivery`, with one pending value and one queued Slint callback. The Inbox,
+unread badge, AI Review task/current-result, PR-badge and configuration bridges
+use this helper. Project owns its generation-aware preparation pipeline. Ordered
+banner deletions, user actions and incremental event streams retain their own
+lossless delivery semantics.
 
 ### Settings
 
@@ -578,8 +593,11 @@ Manual credential, hosting-endpoint, and AI Agent saves run off the Slint event
 loop. Their completion returns through the event loop, updates the transient
 Saved label only after persistence succeeds, and emits one bottom Toast for the
 terminal result.
-All delayed preference saves use the same shared-runtime `spawn_blocking` path;
-the 100 ms Slint timer only coalesces/schedules work and never writes TOML.
+`settings/save_worker.rs` owns one latest-state preference writer. Each request
+resets a 100 ms debounce deadline; at most one save and one pending request exist.
+Normal-priority pre-shutdown flush runs after high-priority feature shutdown,
+bypasses the deadline and joins the writer. Explicit credential/provider saves
+retain their existing feedback and serialized atomic-write path.
 Read-heavy provider helpers use fine-grained `with_settings`/`with_git` access
 instead of cloning the complete settings tree. Parsed API-base facts are cached
 by exact configured value with a bounded process cache.
@@ -637,6 +655,21 @@ temporary sibling over `projects.json`. Runtime-only commits do not rewrite
 unchanged durable records. A failed write rolls back its still-current optimistic
 snapshot without overwriting a later edit; success feedback is emitted only
 after a real write completes.
+
+Project projection is owned by `projection.rs`: registry identity, query, preview,
+and logo/reload revisions select updates; pending-save/request bookkeeping does
+not rebuild the list. One worker prepares the latest selection and one queued
+UI delivery applies it to a stable `VecModel`, preserving unchanged rows and
+nested tag models. `logo_prepare.rs` reads and decodes images off the event loop,
+limits source bytes to 8 MiB, checks standalone raster RGBA size and sets its
+decoder allocation limit to 64 MiB, and shares thumbnails of at most 128 pixels
+per side with the UI. These limits do not bound all SVG embedded-resource memory.
+The cache retains selected sources
+only. Diagnostic byte counts reuse prepared metadata. Search and form-preview
+callbacks only dispatch intent; stale generations cannot overwrite newer views.
+Shutdown stops projection before cancelling the loader and flushing the Store.
+SVG text uses bundled Noto Sans SC as its fallback, loaded on demand from shared
+static bytes; projection never scans installed system fonts.
 
 Remote list logos and the form preview share one `logo_loader.rs` driver on
 `app_runtime`. The Project Store owns the `logo_requests.rs` admission policy:
@@ -719,7 +752,8 @@ No WebView/editor is embedded; the facade cache is bounded and no Find viewport
 positioning work enters scrolling or resizing.
 
 The Tag workflow follows the same façade pattern: `workflow/tag.rs` exposes binding and refresh,
-`tag/controller.rs` owns project state, UI sequencing, cancellation, and command execution,
+`tag/controller.rs` owns project state, UI sequencing and command orchestration;
+`tag/command_output.rs` owns streaming process execution and cancellation,
 while `tag/version.rs` and `tag/commands.rs` are pure, directly tested rules. The application-wide
 `src/jobs/` model separates immutable `name + argv` step definitions from runtime step data
 and makes one `JobSnapshot` the source of job status, conclusion, total duration, and ordered
@@ -735,6 +769,15 @@ through shell interpolation. CD adapts its project-scoped stage snapshot to the 
 `GitHubActionsJob` visual presenter. Branch currently produces a validation plan rather than
 executing a Job; any future executable Branch plan must adopt the reusable Job boundary instead
 of copying the presenter or adding domain branches to it.
+`jobs/log_model.rs` incrementally prepares Send-safe semantic lines on log mutations,
+reusing unchanged lines. `jobs/presenter.rs` preserves Step and nested log model identities;
+the lazy UI cache retains at most 128 converted rows. Expanded logs use the existing public
+ListView with the GitHub scrollbar in a pane capped at 420 px; wrapped lines retain source
+numbers and scroll within the pane. Scrolling/resizing never reparses the complete log.
+The process driver reads 4 KiB blocks into a 16-block queue, preserves UTF-8/CRLF across
+blocks, and keeps a strict 32 KiB tail including the truncation marker. It drains while
+readers run, aborts/joins them on cancellation, and limits inherited-pipe drain after direct
+child exit to two seconds (a timeout reports failure).
 Raw step logs remain in the project-scoped Rust snapshot until a disclosure first requests its
 line model; that request latch survives later progress snapshots. Tag commands stream stdout and
 stderr while running and publish bounded progress, so an opened step updates live. The presenter

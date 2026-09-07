@@ -1,11 +1,12 @@
 // Settings module - Responsible for configuration read/write
+mod save_worker;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use config::{Config, File as ConfigFile, FileFormat};
 use serde::{Deserialize, Serialize};
-use slint::{Global, Timer};
+use slint::Global;
 
 use crate::{AppState, MainWindow};
 
@@ -706,19 +707,11 @@ pub fn save_memory_diagnostics_logging(enabled: bool) {
 }
 
 fn schedule_settings_save() {
-    Timer::single_shot(std::time::Duration::from_millis(100), || {
-        crate::app_runtime::shared_runtime().spawn(async {
-            match tokio::task::spawn_blocking(|| get_settings_manager().save()).await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => {
-                    log::error!("[Settings] Failed to save settings: {error}");
-                }
-                Err(error) => {
-                    log::error!("[Settings] Save worker failed: {error}");
-                }
-            }
-        });
-    });
+    save_worker::request();
+}
+
+pub(crate) fn shutdown_saves() {
+    save_worker::shutdown();
 }
 
 /// Save UI sound effects setting asynchronously

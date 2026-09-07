@@ -336,7 +336,7 @@ mod tests {
         };
         view.tag_job.steps[0].status = JobStepStatus::Completed;
         view.tag_job.steps[0].conclusion = Some(JobConclusion::Success);
-        view.tag_job.steps[0].log = "preserved log".into();
+        view.tag_job.steps[0].set_log("preserved log".into());
         view.tag_job.steps[0].duration = "1s".into();
         view.job_run.active = true;
         view.job_run.source = "tag".to_string();

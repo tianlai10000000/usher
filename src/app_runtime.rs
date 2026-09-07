@@ -50,3 +50,6 @@ mod tests {
         assert_eq!(selected_worker_threads(Some("2")), Some(2));
     }
 }
+
+mod latest_ui;
+pub(crate) use latest_ui::latest_ui;

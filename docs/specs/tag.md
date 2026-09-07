@@ -27,7 +27,9 @@ Git command plans, progress reporting, and cancellation.
    The project `tag_running` flag stays latched from accepted start until the terminal
    success/failure callback or an explicit stop; progress ticks must not clear it from
    transient step statuses (that would flash the Stop control between steps).
-7. Step logs are bounded. Secrets must not be added to commands or logs.
+7. Step logs including truncation markers are capped at 32 KiB. The streaming
+   driver uses 4 KiB reads and a 16-block queue; it drains concurrently with readers
+   and aborts/joins readers on cancellation. Secrets must not enter commands/logs.
 8. Remote mode remains explicitly unavailable in the current product and must report that
    state instead of silently executing a local plan.
 9. The Tag configuration surface shows inputs and start actions only. After a
@@ -64,7 +66,8 @@ Git command plans, progress reporting, and cancellation.
    命令执行期间检查取消 token。UI 只能通过 Slint event loop 回写，过期初始化序列
    必须丢弃。项目的 `tag_running` 从接受启动起保持闩锁，直到终态成功/失败回调或
    显式 Stop；进度回写不得根据瞬时步骤 status 清除它（否则步骤间隙会闪烁 Stop）。
-7. 步骤日志必须有界，不得把密钥加入命令或日志。
+7. 步骤日志含截断标记最多 32 KiB。流式驱动每次读取 4 KiB，队列最多 16 块；
+   Reader 运行期间并发排空，取消时 abort/join。不得把密钥加入命令或日志。
 8. 当前产品的 Remote 模式仍明确不可用，必须展示该状态，不得静默执行 Local 计划。
 9. Tag 配置面只展示输入与启动操作。合法创建/删除启动被接受后，必须先把完整的
    queued 计划发布到应用级 Job Run 路由，再开始执行。
@@ -89,6 +92,7 @@ Git command plans, progress reporting, and cancellation.
   cancellation, and command execution.
 - `src/workflow/tag/version.rs`: pure semantic-version parsing and bump rules.
 - `src/workflow/tag/commands.rs`: pure create/remove Git argv plans.
+- `src/workflow/tag/command_output.rs`: bounded streaming transport, tail retention and reader lifecycle.
 - `src/jobs/`: reusable immutable step definitions, runtime snapshots, and Job Run projection.
 - `ui/components/jobs/job.slint`: shared `GitHubActionsJob` presenter.
 - `ui/views/job_run.slint`: shared application-level execution route.

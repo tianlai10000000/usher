@@ -744,7 +744,9 @@ library:
   and verify it has no working-tree changes before handoff.
 - the application allowlist is limited to `MaterialWindowAdapter` in
   `ui/main.slint` and public `ListView`/`ScrollView` virtualization in
-  `ui/views/workflow/pr_review_workspace.slint`;
+  `ui/views/workflow/pr_review_workspace.slint`, `ui/features/ai_review/full.slint`,
+  `ui/components/artifact_preview/github_artifact_preview.slint` and
+  `ui/components/jobs/job.slint`;
 - run `./scripts/check-ui-policy.sh` to enforce the Material and icon boundary.
 
 Material 只能作为可替换的底层 Slint 实现库：必须通过 `@material` 导入公开控件，
@@ -753,7 +755,8 @@ typography 或 style metrics 当作产品设计令牌，GitHub/Primer 视觉行�
 项目自有 `ui/` 文件中实现。
 当前应用白名单仅包含 `ui/main.slint` 的 `MaterialWindowAdapter`，以及
 `ui/views/workflow/pr_review_workspace.slint` 用于大型 model 虚拟化的公开
-`ListView`/`ScrollView`。`./scripts/check-ui-policy.sh` 自动检查 Material 与
+`ListView`/`ScrollView`，以及 AI Review full、artifact preview 与 Jobs 组件中的
+公开 `ListView`（具体文件路径由脚本逐项列举）。`./scripts/check-ui-policy.sh` 自动检查 Material 与
 图标边界。
 
 ## 10. Validation and batch gate / 验证与批次门禁

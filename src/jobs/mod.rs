@@ -1,8 +1,10 @@
+mod log_model;
 mod model;
+mod presenter;
 
 use crate::i18n::LocalizedText;
 use crate::{JobStepItem, MainWindow};
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::ComponentHandle;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -125,6 +127,5 @@ pub(crate) fn apply_job_run(
     );
     ui.set_job_run_total_duration(snapshot.total_duration.clone().into());
     ui.set_job_run_running(running);
-    let steps: Vec<JobStepItem> = snapshot.steps.iter().map(JobStepData::to_slint).collect();
-    ui.set_job_run_steps(ModelRc::new(VecModel::from(steps)));
+    presenter::apply(ui, &descriptor.source, snapshot);
 }

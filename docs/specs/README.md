@@ -7,17 +7,17 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | Spec | Status | Code owners |
 | --- | --- | --- |
 | [HTTP pipeline](http.md) | Current / 当前 | `src/http/mod.rs`, all HTTP callers |
-| [Cross-page state store](state-store.md) | Current / 当前 | `crates/usher-state-store/`, all cross-page state owners and UI bridges |
+| [Cross-page state store](state-store.md) | Current: bounded latest snapshots and revision barriers / 当前：有界最新快照与版本屏障 | `crates/usher-state-store/`, all cross-page state owners and UI bridges |
 | [Shared search navigation](search.md) | Current / 当前 | `crates/usher-search/`, all feature Find adapters |
 | [Internationalization](i18n.md) | Implementation current; full-route visual QA pending / 实现当前，全路由视觉验收待完成 | `i18n/`, `crates/usher-i18n/`, `src/i18n.rs`, all user-facing copy |
 | [AI Agent configuration](ai-agent.md) | Current / 当前 | `src/settings.rs`, `src/ai/agent.rs`, `ui/views/settings.slint` |
-| [AI Code Review](ai-code-review.md) | Current: task persistence shutdown barrier / 当前：任务持久化关闭屏障 | `crates/usher-ai-review/`, `src/ai_review/`, `src/agent_response/`, PR list/detail and Settings bridges |
+| [AI Code Review](ai-code-review.md) | Current: bounded task persistence and UI delivery / 当前：有界任务持久化与 UI 投递 | `crates/usher-ai-review/`, `src/ai_review/`, `src/agent_response/`, PR list/detail and Settings bridges |
 | [Diagnostic logging](diagnostics.md) | Current / 当前 | `src/diagnostics.rs`, `src/logger/`, `src/memory_diagnostics.rs`, `src/terminal/`, Settings UI and bridges |
 | [Chat behavior](chat.md) | Current: history boundary anchoring and bidirectional viewport coverage / 当前：历史边界锚定与双向视口覆盖 | `src/chat/`, `ui/views/chat.slint`, `ui/components/chat/`, `ui/main.slint` |
 | [Artifact preview framework](artifact-preview.md) | Current / 当前 | `crates/usher-preview/`, `src/artifact_preview/`, `ui/components/artifact_preview/`, Settings and all preview callers |
-| [Project repository metadata](project-repository.md) | Current: bounded Logo retries / 当前：Logo 有界重试 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
+| [Project repository metadata](project-repository.md) | Current: bounded Logo retries and projection / 当前：Logo 有界重试与投影 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/views/workflow/`, `ui/components/workflow/` |
-| [Reusable job runs](jobs.md) | Current / 当前 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
+| [Reusable job runs](jobs.md) | Current: bounded output and virtualized logs / 当前：有界输出与日志虚拟化 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
 | [Tag workflow](tag.md) | Current / 当前 | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `ui/views/workflow/` |
 | [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 | [Application keyboard shortcuts](shortcuts.md) | Current / 当前 | `src/shortcuts/`, `ui/main.slint`, `src/platform/` |

@@ -7366,6 +7366,7 @@ dependencies = [
  "rand 0.10.2",
  "raw-window-handle",
  "reqwest",
+ "resvg",
  "rustix 1.1.4",
  "self_update",
  "semver",

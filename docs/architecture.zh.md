@@ -433,10 +433,20 @@ Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可�
 
 ## 状态和持久化
 
-AI Review 任务快照持久化隔离在 `src/ai_review/task_persistence.rs`。Worker 合并相邻
-`Persist` 命令但保留 `Shutdown` 屏障：先处理此前的最新快照再退出，写入禁用或失败时
-也不能丢失关闭信号。Controller 保留 commit 订阅和关闭编排，会话文件对账仍归 Worker。
-该协议沿用 `PersistentStore` 的控制消息顺序，不改变公共 Store API 或队列策略。
+`crates/usher-state-store/src/latest.rs` 提供 `LatestPersistence`：最多一个正在写入的
+快照和一个可替换的待写快照。Store revision 拒绝旧输入；flush 捕获最新已接受版本，
+等待该版本或更新版本成功写入，失败仍可观测且 flush 返回错误。Shutdown 拒绝新提交，
+排空已接受状态并 join，支持并发/重复关闭。该语义只用于状态快照，不用于审计或逐条事件。
+
+AI Review 在 `task_persistence.rs` 保留 Feature 策略并复用该有界 Writer。拒绝较旧的
+Store revision，但启用写入后允许显式补写同一 hydration revision；独立递增的提交版本
+把补写纳入屏障。处理首个提交快照前清理临时文件，成功写入后继续对账会话文件。
+禁用写入或失败不能丢失关闭屏障。
+
+`app_runtime/latest_ui.rs` 使用 `LatestDelivery` 合并可替换的展示快照，最多一个待投递值
+和一个排队 Slint 回调。Inbox/未读数、AI Review 任务/当前结果、PR 标记及配置桥接
+使用该辅助函数；Project 保留自身带代际的准备管线。Banner 删除、用户动作和增量事件流
+继续按各自不可丢失中间事件的协议投递。
 
 ### 设置
 
@@ -467,8 +477,10 @@ MainWindow、Settings 与 Messages root 在同一个 event-loop turn 重新绘�
 手工保存凭据、代码托管 Endpoint 与 AI Agent 配置时，文件持久化必须在
 Slint event loop 之外执行。完成结果回到 event loop 后，只有持久化成功
 才更新临时 Saved 标签，并为最终结果显示一个底部 Toast。
-所有延迟偏好保存共用 shared-runtime `spawn_blocking` 路径；100 ms Slint timer 只负责
-合并/调度，绝不写 TOML。Provider 高频读取通过细粒度 `with_settings`/`with_git` 访问，
+`settings/save_worker.rs` 拥有单个最新状态偏好 Writer；每次请求重置 100ms 去抖
+截止时间，最多一个正在执行的保存和一个待处理请求。普通优先级 pre-shutdown 在
+高优先级 Feature 关闭后跳过去抖、flush 并 join；显式凭据/Provider 保存保留原有
+反馈和串行原子写路径。Provider 高频读取通过细粒度 `with_settings`/`with_git` 访问，
 不再 clone 整棵 Settings；API base 解析事实按精确配置值进入有界进程缓存。
 
 Settings 与 About 路由文件只负责组合；可复用导航、字段、Toggle、Section 和
@@ -510,6 +522,16 @@ pending save、Logo 与概览均通过强类型 Action commit；controller 不�
 durable 快照，并以同目录临时文件原子 rename 替换 `projects.json`；仅 runtime 状态变化
 不会重写未变化的持久记录。写入失败时只回滚仍为当前版本的乐观快照，不覆盖后续编辑；
 只有真实写盘完成后才提示成功。
+`projection.rs` 负责 Project 投影：以注册表身份、query、preview 和 Logo/刷新
+版本选择更新，pending save/request 记账不重建列表。单个 Worker 准备最新选择，
+最多一个排队 UI 回调把结果应用到稳定 `VecModel`，保留未变化行和嵌套 tag model。
+`logo_prepare.rs` 在 event loop 外读取和解码，源输入最多 8 MiB；独立栅格图片检查
+RGBA 尺寸并设置 64 MiB 解码器分配限制，缩略图每边最多 128 像素，与 UI 共享像素
+内存。这不构成 SVG 内嵌资源的总内存上限；缓存只保留当前选择的来源。
+诊断复用准备好的字节元数据。搜索和表单预览回调只提交意图，旧代际不能覆盖新视图。
+关闭时先停止投影，再取消 Loader 并 flush Store。SVG 文字按需使用应用自带
+Noto Sans SC 字体兜底，共享静态字节，不扫描已安装的全部系统字体。
+
 列表 Logo 与表单预览共享 `app_runtime` 上的单个 `logo_loader.rs` 驱动器。
 Project Store 持有 `logo_requests.rs` 调度策略：最多 4 个活跃请求，对持续选中的
 每个 URL 最多尝试 3 次，失败后分别冷却 2/4 秒。显式刷新注册表重置失败项，
@@ -589,6 +611,14 @@ GitHub Actions 风格页头、Jobs 区和响应式日志布局；两者都不负
 Stage Snapshot 适配到共用 `GitHubActionsJob` 视觉展示；Branch 当前只生成校验
 计划、不执行 Job。未来若让 Branch 执行命令，必须采用复用 Job 边界，不得复制
 展示组件或向通用组件加入领域分支。
+`tag/command_output.rs` 负责流式进程执行与取消，controller 保留领域编排。
+`jobs/log_model.rs` 在日志变更时后台增量准备可跨线程的语义行，复用未变化行。
+`jobs/presenter.rs` 保留 Step 与嵌套日志 model 身份，UI 懒缓存最多 128 个转换行。
+展开日志复用公开 ListView 与 GitHub 滚动条，视口最高 420px；换行保留源行号，
+在面板内滚动，滚动/resize 不重新解析全部日志。进程以 4 KiB 分块读取，队列最多
+16 块，跨块保留 UTF-8/CRLF；含截断标记的尾日志严格不超过 32 KiB。Reader 运行
+期间持续排空，取消时 abort/join；直接子进程退出后，继承管道最多继续排空 2 秒，
+超时明确报告失败。
 Step 原始日志在 disclosure 第一次请求行 model 前始终保留在项目级 Rust 快照中，
 该请求标记在后续 progress 快照替换时继续保留。Tag 命令执行期间持续读取
 stdout/stderr 并发布有界进度，因此已展开 Step 可实时更新。展示组件把 GitHub

@@ -1,221 +1,187 @@
-//! Ordered task snapshot persistence and shutdown. Session cleanup stays here,
-//! while the controller only owns the commit subscription and lifecycle call.
-
+//! Feature policy over a bounded latest-snapshot writer. Session cleanup stays here.
+use super::storage::{reconcile_session_files, remove_stale_temporary_files};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread::JoinHandle;
-
+use std::sync::{Arc, Mutex, Once};
+use std::time::Duration;
 use usher_ai_review::ReviewTaskState;
-use usher_state_store::Subscription;
+use usher_state_store::{LatestPersistence, Subscription};
 
-use super::storage::{reconcile_session_files, remove_stale_temporary_files};
-
-pub(super) enum TaskPersistenceCommand {
-    Persist(Arc<ReviewTaskState>),
-    Shutdown,
+#[derive(Clone)]
+pub(super) struct TaskPersistenceSender {
+    writer: Arc<LatestPersistence<ReviewTaskState>>,
+    revision: Arc<Mutex<(Option<u64>, u64)>>,
 }
-
+impl TaskPersistenceSender {
+    pub(super) fn send(
+        &self,
+        store_revision: u64,
+        value: Arc<ReviewTaskState>,
+    ) -> Result<(), String> {
+        // Equal Store revisions may be explicitly persisted after enabling
+        // writes; older revisions may never overwrite a later commit.
+        let mut revisions = self.revision.lock().unwrap_or_else(|p| p.into_inner());
+        if revisions.0.is_some_and(|latest| store_revision < latest) {
+            return Err("task persistence snapshot is obsolete".into());
+        }
+        revisions.0 = Some(store_revision);
+        revisions.1 += 1;
+        self.writer
+            .submit(revisions.1, value)
+            .then_some(())
+            .ok_or_else(|| "task persistence is closed".into())
+    }
+}
 pub(super) struct TaskPersistenceWorker {
-    pub(super) sender: mpsc::Sender<TaskPersistenceCommand>,
-    handle: Mutex<Option<JoinHandle<()>>>,
+    pub(super) sender: TaskPersistenceSender,
     subscription: Mutex<Option<Subscription>>,
     writes_allowed: Arc<AtomicBool>,
 }
-
 impl TaskPersistenceWorker {
-    pub(super) fn start(path: PathBuf, session_dir: PathBuf, writes_allowed: bool) -> Self {
-        let (sender, receiver) = mpsc::channel();
-        let writes_allowed = Arc::new(AtomicBool::new(writes_allowed));
-        let writes_allowed_worker = writes_allowed.clone();
-        let handle = std::thread::Builder::new()
-            .name("ai-review-tasks".into())
-            .spawn(move || {
-                remove_stale_temporary_files(path.parent().unwrap_or_else(|| Path::new(".")));
-                run(receiver, |latest| {
-                    if !writes_allowed_worker.load(Ordering::Acquire) {
-                        return;
-                    }
-                    if let Err(error) = persist_task_state(&path, &latest) {
-                        log::error!("[AI Review][Task Store] Persistence failed: {error}");
-                        return;
-                    }
-                    let _ = reconcile_session_files(&session_dir, latest.tasks.keys());
+    pub(super) fn start(path: PathBuf, session_dir: PathBuf, allowed: bool) -> Self {
+        let writes_allowed = Arc::new(AtomicBool::new(allowed));
+        let permission = writes_allowed.clone();
+        let cleanup = Once::new();
+        let writer = LatestPersistence::start(
+            "ai-review-tasks",
+            Duration::ZERO,
+            move |latest: &ReviewTaskState| {
+                cleanup.call_once(|| {
+                    remove_stale_temporary_files(path.parent().unwrap_or_else(|| Path::new(".")))
                 });
-            })
-            .expect("failed to start AI review task persistence worker");
+                if !permission.load(Ordering::Acquire) {
+                    return Ok(());
+                }
+                persist_task_state(&path, latest)?;
+                let _ = reconcile_session_files(&session_dir, latest.tasks.keys());
+                Ok(())
+            },
+            |_, error| log::error!("[AI Review][Task Store] Persistence failed: {error}"),
+        )
+        .expect("failed to start AI review task persistence worker");
+        Self::with_writer(writer, writes_allowed)
+    }
+    fn with_writer(
+        writer: LatestPersistence<ReviewTaskState>,
+        writes_allowed: Arc<AtomicBool>,
+    ) -> Self {
         Self {
-            sender,
-            handle: Mutex::new(Some(handle)),
+            sender: TaskPersistenceSender {
+                writer: Arc::new(writer),
+                revision: Arc::new(Mutex::new((None, 0))),
+            },
             subscription: Mutex::new(None),
             writes_allowed,
         }
     }
-
     pub(super) fn set_writes_allowed(&self, allowed: bool) {
         self.writes_allowed.store(allowed, Ordering::Release);
     }
-
     pub(super) fn retain_subscription(&self, subscription: Subscription) {
         *self.subscription.lock().unwrap_or_else(|p| p.into_inner()) = Some(subscription);
     }
-
     pub(super) fn shutdown(&self) {
         self.subscription
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .take();
-        let mut handle = self.handle.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(worker) = handle.take() {
-            let _ = self.sender.send(TaskPersistenceCommand::Shutdown);
-            let _ = worker.join();
-        }
+        let _ = self.sender.writer.shutdown();
     }
 }
-
-fn run(
-    receiver: mpsc::Receiver<TaskPersistenceCommand>,
-    mut persist: impl FnMut(Arc<ReviewTaskState>),
-) {
-    while let Ok(command) = receiver.recv() {
-        let TaskPersistenceCommand::Persist(mut latest) = command else {
-            break;
-        };
-        let mut shutdown = false;
-        while let Ok(command) = receiver.try_recv() {
-            match command {
-                TaskPersistenceCommand::Persist(newer) => latest = newer,
-                TaskPersistenceCommand::Shutdown => {
-                    shutdown = true;
-                    break;
-                }
-            }
-        }
-        // Complete the latest snapshot before the control barrier, including
-        // when the callback skips disabled writes or handles an I/O error.
-        persist(latest);
-        if shutdown {
-            break;
-        }
-    }
-}
-
 fn persist_task_state(path: &Path, state: &ReviewTaskState) -> Result<(), String> {
     let data = serde_json::to_vec_pretty(state).map_err(|error| error.to_string())?;
     usher_fs::atomic_write(path, &data).map_err(|error| error.to_string())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+    use std::sync::mpsc;
     use usher_ai_review::ReviewTaskId;
-
-    fn snapshot(revision: &str) -> Arc<ReviewTaskState> {
+    fn snapshot(id: &str) -> Arc<ReviewTaskState> {
         Arc::new(ReviewTaskState {
-            order: vec![ReviewTaskId(revision.into())],
+            order: vec![ReviewTaskId(id.into())],
             ..Default::default()
         })
     }
-
-    fn assert_done(done: mpsc::Receiver<()>, handle: JoinHandle<()>) {
-        done.recv_timeout(Duration::from_secs(2))
-            .expect("worker did not stop");
-        handle.join().unwrap();
-    }
-
     #[test]
-    fn idle_shutdown_exits_with_sender_still_alive() {
-        let (sender, receiver) = mpsc::channel();
-        let (done, finished) = mpsc::channel();
-        let handle = std::thread::spawn(move || {
-            run(receiver, |_| panic!("no snapshot was queued"));
-            done.send(()).unwrap();
-        });
-        sender.send(TaskPersistenceCommand::Shutdown).unwrap();
-        assert_done(finished, handle);
-    }
-
-    #[test]
-    fn queued_shutdown_persists_latest_before_barrier_and_ignores_later_data() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("tasks.json");
-        let (sender, receiver) = mpsc::channel();
-        sender
-            .send(TaskPersistenceCommand::Persist(snapshot("old")))
-            .unwrap();
-        sender
-            .send(TaskPersistenceCommand::Persist(snapshot("latest")))
-            .unwrap();
-        sender.send(TaskPersistenceCommand::Shutdown).unwrap();
-        sender
-            .send(TaskPersistenceCommand::Persist(snapshot("after-close")))
-            .unwrap();
-        let (done, finished) = mpsc::channel();
-        let output = path.clone();
-        let handle = std::thread::spawn(move || {
-            run(receiver, |state| {
-                persist_task_state(&output, &state).unwrap()
-            });
-            done.send(()).unwrap();
-        });
-        assert_done(finished, handle);
-        let persisted: ReviewTaskState =
-            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-        assert_eq!(persisted.order, snapshot("latest").order);
-    }
-
-    #[test]
-    fn shutdown_during_write_drains_newer_snapshot_even_when_write_fails() {
-        let (sender, receiver) = mpsc::channel();
-        let (entered, writing) = mpsc::channel();
-        let (release, resume) = mpsc::channel();
-        let (done, finished) = mpsc::channel();
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let observed = seen.clone();
-        let directory = tempfile::tempdir().unwrap();
-        let invalid_file = directory.path().to_path_buf();
-        let handle = std::thread::spawn(move || {
-            run(receiver, |state| {
-                observed.lock().unwrap().push(state.order[0].0.clone());
-                if state.order[0].0 == "writing" {
-                    entered.send(()).unwrap();
-                    resume.recv_timeout(Duration::from_secs(2)).unwrap();
-                }
-                assert!(persist_task_state(&invalid_file, &state).is_err());
-            });
-            done.send(()).unwrap();
-        });
-        sender
-            .send(TaskPersistenceCommand::Persist(snapshot("writing")))
-            .unwrap();
-        writing.recv_timeout(Duration::from_secs(2)).unwrap();
-        sender
-            .send(TaskPersistenceCommand::Persist(snapshot("latest")))
-            .unwrap();
-        sender.send(TaskPersistenceCommand::Shutdown).unwrap();
-        release.send(()).unwrap();
-        assert_done(finished, handle);
-        assert_eq!(*seen.lock().unwrap(), ["writing", "latest"]);
-    }
-
-    #[test]
-    fn disabled_worker_drains_and_repeated_shutdown_is_safe() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("tasks.json");
-        let worker =
-            TaskPersistenceWorker::start(path.clone(), directory.path().join("sessions"), false);
-        worker
-            .sender
-            .send(TaskPersistenceCommand::Persist(snapshot("disabled")))
-            .unwrap();
-        let (done, finished) = mpsc::channel();
-        let handle = std::thread::spawn(move || {
-            worker.shutdown();
-            worker.shutdown();
-            done.send(()).unwrap();
-        });
-        assert_done(finished, handle);
+    fn idle_and_repeated_shutdown_do_not_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tasks.json");
+        let worker = TaskPersistenceWorker::start(path.clone(), dir.path().join("sessions"), true);
+        worker.shutdown();
+        worker.shutdown();
         assert!(!path.exists());
+        assert!(worker.sender.send(1, snapshot("late")).is_err());
+    }
+    #[test]
+    fn disabled_writes_and_io_errors_still_complete_shutdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("disabled.json");
+        let worker = TaskPersistenceWorker::start(path.clone(), dir.path().join("sessions"), false);
+        worker.sender.send(1, snapshot("disabled")).unwrap();
+        worker.shutdown();
+        assert!(!path.exists());
+        let worker = TaskPersistenceWorker::start(
+            dir.path().to_path_buf(),
+            dir.path().join("sessions"),
+            true,
+        );
+        worker.sender.send(1, snapshot("error")).unwrap();
+        worker.shutdown();
+        worker.shutdown();
+        assert!(dir.path().is_dir());
+    }
+    #[test]
+    fn hydration_can_explicitly_persist_after_writes_are_enabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tasks.json");
+        let worker = TaskPersistenceWorker::start(path.clone(), dir.path().join("sessions"), false);
+        let state = snapshot("hydrated");
+        worker.sender.send(1, state.clone()).unwrap();
+        worker.sender.writer.flush().unwrap();
+        assert!(!path.exists());
+        worker.set_writes_allowed(true);
+        worker.sender.send(1, state).unwrap();
+        worker.shutdown();
+        let saved: ReviewTaskState = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved.order[0].0, "hydrated");
+    }
+    #[test]
+    fn shutdown_during_write_flushes_the_latest_pending_task_snapshot() {
+        let (started, ready) = mpsc::channel();
+        let (release, gate) = mpsc::channel();
+        let gate = Mutex::new(gate);
+        let saved = Arc::new(Mutex::new(Vec::new()));
+        let record = saved.clone();
+        let writer = LatestPersistence::start(
+            "task-write-test",
+            Duration::ZERO,
+            move |state: &ReviewTaskState| {
+                if state.order[0].0 == "first" {
+                    started.send(()).unwrap();
+                    gate.lock().unwrap().recv().unwrap();
+                }
+                record.lock().unwrap().push(state.order[0].0.clone());
+                Ok(())
+            },
+            |_, _| {},
+        )
+        .unwrap();
+        let worker = TaskPersistenceWorker::with_writer(writer, Arc::new(AtomicBool::new(true)));
+        worker.sender.send(1, snapshot("first")).unwrap();
+        ready.recv_timeout(Duration::from_secs(1)).unwrap();
+        worker.sender.send(2, snapshot("middle")).unwrap();
+        worker.sender.send(3, snapshot("last")).unwrap();
+        assert!(worker.sender.send(2, snapshot("obsolete")).is_err());
+        let (done, wait) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            worker.shutdown();
+            done.send(()).unwrap();
+        });
+        assert!(wait.recv_timeout(Duration::from_millis(30)).is_err());
+        release.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(1)).unwrap();
+        thread.join().unwrap();
+        assert_eq!(*saved.lock().unwrap(), vec!["first", "last"]);
     }
 }

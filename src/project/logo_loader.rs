@@ -10,8 +10,7 @@ use tokio::sync::Notify;
 use usher_state_store::Subscription;
 
 use super::logo::{
-    download_remote_logo_to_cache, find_cached_remote_logo_path, invalidate_cached_logo_image,
-    is_valid_logo_remote_url, logo_image_cache_key, refresh_logo_preview,
+    download_remote_logo_to_cache, find_cached_remote_logo_path, is_valid_logo_remote_url,
 };
 use super::logo_requests::MAX_LOGO_REQUESTS;
 use super::state::ProjectStateFacade;
@@ -32,23 +31,8 @@ struct PendingInputs {
 }
 
 impl LogoLoader {
-    pub(super) fn start(state: ProjectStateFacade, window: slint::Weak<MainWindow>) -> Self {
-        let preview_state = state.clone();
-        Self::start_with_completion(state, move |url, success| {
-            let url = url.to_owned();
-            let window = window.clone();
-            let state = preview_state.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if success {
-                    invalidate_cached_logo_image(&logo_image_cache_key(&url));
-                }
-                if let Some(ui) = window.upgrade()
-                    && ui.get_project_new_logo().as_str().trim() == url
-                {
-                    refresh_logo_preview(&ui, &state, &url);
-                }
-            });
-        })
+    pub(super) fn start(state: ProjectStateFacade, _window: slint::Weak<MainWindow>) -> Self {
+        Self::start_with_completion(state, |_, _| {})
     }
 
     fn start_with_completion(

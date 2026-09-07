@@ -111,7 +111,7 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
    updated in place with `set_row_data`; progress commits must not rebuild or
    rescan the PR list. Application shutdown cancels every running review before
    joining persistence workers.
-   Task persistence may coalesce snapshots before a Shutdown command, but must
+   Task persistence retains at most one pending snapshot plus one active write. It must
    process the latest preceding snapshot and then exit without waiting for
    senders to be dropped. Disabled/failed writes must still honor the barrier;
    repeated shutdown is safe. This drains already queued commits, not a promise
@@ -146,7 +146,7 @@ Settings 持久化 1 到 8 的并发上限、具名本地 Markdown 规则、一�
 9. Task UI 订阅使用两个独立 selector：任务行包含进度，PR 列表徽标排除逐 chunk 进度；
    既有 Slint 行使用 `set_row_data` 原地更新，进度 commit 不得重建或重扫 PR 列表。
    应用 shutdown 必须先取消全部运行中 Review，再 join 持久化 Worker。
-   任务持久化可以合并 Shutdown 命令前的快照，但必须处理此前的最新快照后退出，
+   任务持久化最多保留一个待写快照和一个正在写入的快照，关闭必须处理此前最新快照后退出，
    不得依赖 sender 被释放。禁用写入或写入失败仍必须尊重关闭屏障，重复关闭安全。
    此契约排空已经入队的 commit，不承诺捕获尚未停止的发布方在未来提交的状态。
 10. 超大 diff 按文件/行边界切分；每个续块重复文件头与指向下一旧/新行位置的数字 hunk
@@ -687,3 +687,13 @@ Prompt 诊断另外只记录 catalog id/version、实际回复 locale、消息�
 - 切换到 Detached 后激活同一回复；确认 AI Review 仍可见。随后关闭面板并离开 PR
   Review，确认投影 action 已清空，而 Detached Preview 和后台工作继续存在。
 - 分别编译启用/关闭 feature，运行库测试，并记录编译时间/产物及首次使用/关闭稳定 RSS。
+
+Task persistence uses the shared latest writer. Store revisions may not regress;
+explicitly persisting the same hydration revision after enabling writes remains
+supported and receives a new submission revision for the flush/shutdown barrier.
+Task, current-result, PR badge and configuration UI snapshots use one queued
+latest-value delivery; scheduler actions are still processed individually.
+
+任务持久化复用共享 latest writer，Store revision 不得回退。启用写入后仍支持显式
+补写同一 hydration revision，以新的提交版本纳入 flush/shutdown 屏障。任务、当前
+结果、PR 标记和配置 UI 快照最多一个最新值投递回调；调度器动作仍逐项处理。

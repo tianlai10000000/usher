@@ -1,3 +1,5 @@
+import { ListView } from "@material";
+import { GitHubVirtualListScrollbar } from "../github_scroll_view.slint";
 import { AppState } from "../../state/app_state.slint";
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
@@ -22,8 +24,7 @@ export struct JobStepItem {
     log: string,
     has-log: bool,
     log-loaded: bool,
-    // One entry per rendered log line so Slint can use a fixed GitHub-like
-    // row height (Text has no line-height). Built on the UI thread only.
+    // Lazy, virtualized source-line model; wrapped rows keep their source number.
     log-lines: [JobLogLineItem],
     duration: string,
     default-expanded: bool,
@@ -32,6 +33,11 @@ export struct JobStepItem {
 // One GitHub Actions log source line. Long content wraps onto continuation
 // lines while the original source line number remains on the first visual row.
 component GitHubActionsLogLineRow inherits Rectangle {
+    init => {
+        if AppState.benchmark-job-log-created-rows >= 0 {
+            AppState.benchmark-job-log-created-rows += 1;
+        }
+    }
     in property <JobLogLineItem> line;
     in property <int> line-number;
     in property <color> foreground;
@@ -333,38 +339,45 @@ component GitHubActionsJobStepRow inherits Rectangle {
 
         if root.expanded: Rectangle {
             width: parent.width;
-            height: max(48px, log-rows.preferred-height + 24px);
+            // Use a bounded source-row budget; wrapped lines scroll within the pane.
+            height: min(420px, max(60px, root.step.log-lines.length * 36px + 24px));
             vertical-stretch: 0;
             background: root.log-canvas;
 
             // Each source line owns a variable-height row. Wrapped continuation
             // lines stay indented under the message and do not repeat the
             // source line number, matching GitHub Actions.
-            log-rows := VerticalLayout {
-                x: 0px;
+            if !root.step.log-loaded: Text {
+                x: 64px;
+                y: 12px;
+                width: parent.width - 80px;
+                height: 28px;
+                text: I18n.jobs-loading-logs;
+                color: root.fg-muted;
+                font-size: 12px;
+                font-family: "monospace";
+            }
+            log-rows := ListView {
                 y: 12px;
                 width: parent.width;
-                spacing: 0px;
-                vertical-stretch: 0;
-
-                if !root.step.log-loaded: Text {
-                    x: 64px;
-                    width: parent.width - 80px;
-                    height: 28px;
-                    text: I18n.jobs-loading-logs;
-                    vertical-alignment: center;
-                    color: root.fg-muted;
-                    font-size: 12px;
-                    font-family: "monospace";
-                }
-
+                height: parent.height - 24px;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                 for line[index] in root.step.log-lines: GitHubActionsLogLineRow {
-                    width: parent.width;
+                    width: log-rows.visible-width;
                     line: line;
                     line-number: index + 1;
                     foreground: root.fg-default;
                     muted-foreground: root.fg-muted;
                 }
+            }
+            GitHubVirtualListScrollbar {
+                x: parent.width - self.width;
+                y: 12px;
+                height: parent.height - 24px;
+                viewport-y <=> log-rows.viewport-y;
+                visible-height: log-rows.visible-height;
+                content-height: log-rows.viewport-height;
             }
         }
     }

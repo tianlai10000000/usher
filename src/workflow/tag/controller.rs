@@ -13,10 +13,6 @@ use std::process::{Command as StdCommand, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
-use tokio::process::Command as TokioCommand;
-use tokio::sync::mpsc;
-use tokio::time::{Duration as TokioDuration, sleep};
 
 use super::commands::{create_tag_plan, remove_tag_plan};
 use super::version::{is_valid_semver_tag, next_semver_for_mode, parse_semver_tag};
@@ -25,27 +21,7 @@ const TAG_MODE_LOCAL: &str = "local";
 const TAG_MODE_REMOTE: &str = "remote";
 const TAG_BUMP_PATCH: &str = "patch";
 
-const MAX_STEP_LOG_BYTES: usize = 32 * 1024;
-
-fn clamp_step_log(mut log: String) -> String {
-    if log.len() <= MAX_STEP_LOG_BYTES {
-        return log;
-    }
-
-    let keep_from = log.len().saturating_sub(MAX_STEP_LOG_BYTES);
-    let mut start = keep_from;
-    while start < log.len() && !log.is_char_boundary(start) {
-        start += 1;
-    }
-
-    let tail = log.split_off(start);
-    format!(
-        "[Truncated] Log was {} bytes; showing last {} bytes.\n\n{}",
-        keep_from + tail.len(),
-        tail.len(),
-        tail
-    )
-}
+pub(super) use super::command_output::{clamp_step_log, run_command};
 
 fn format_command_log(rendered: &str, stdout: &str, stderr: &str) -> String {
     let mut lines = vec![format!("Run {rendered}")];
@@ -54,8 +30,8 @@ fn format_command_log(rendered: &str, stdout: &str, stderr: &str) -> String {
     clamp_step_log(lines.join("\n"))
 }
 
-fn set_step_log(step: &mut JobStepData, log: impl Into<String>) {
-    step.log = clamp_step_log(log.into());
+pub(super) fn set_step_log(step: &mut JobStepData, log: impl Into<String>) {
+    step.set_log(clamp_step_log(log.into()));
 }
 
 static TAG_CANCEL_TOKEN: OnceLock<Mutex<Option<Arc<AtomicBool>>>> = OnceLock::new();
@@ -90,6 +66,7 @@ fn request_tag_cancel() -> bool {
 }
 
 pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
+    super::benchmark::setup(ui);
     log::info!("[Workflow][Tag] Binding Tag tab callbacks");
     let ui_weak_stop = ui.as_weak();
     let ui_weak_log = ui.as_weak();
@@ -374,7 +351,15 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             return;
         };
 
-        let (project_id, project_name, local_repo, mode, remove_ready, remove_initializing, running) = state_open_remove
+        let (
+            project_id,
+            project_name,
+            local_repo,
+            mode,
+            remove_ready,
+            remove_initializing,
+            running,
+        ) = state_open_remove
             .lock()
             .ok()
             .map(|guard| {
@@ -403,7 +388,10 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             });
 
         if mode == TAG_MODE_LOCAL && remove_ready && !remove_initializing && !running {
-            log::debug!("[Workflow][Tag] open remove tab reused cached initialization for '{}'", project_id);
+            log::debug!(
+                "[Workflow][Tag] open remove tab reused cached initialization for '{}'",
+                project_id
+            );
             if let Ok(mut guard) = state_open_remove.lock() {
                 guard.upsert_current(|view| {
                     view.tag_selected_tab = 1;
@@ -477,53 +465,52 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             .map_err(|error| format!("Failed to join remote tag lookup task: {}", error))
             .and_then(|result| result);
 
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = ui_weak_task.upgrade() {
-                    if let Ok(mut guard) = state_task.lock() {
-                        let current_project_id = guard.current_project.id.clone();
-                        let entry = guard.projects.entry(project_id.clone()).or_default();
-                        if entry.tag_remove_request_seq != request_seq {
-                            return;
-                        }
-                        match resolved {
-                            Ok((latest_tag, lookup_log)) => {
-                                log::info!(
-                                    "[Workflow][Tag] Remove tab initialized with latest remote tag '{}'",
-                                    latest_tag
-                                );
-                                entry.tag_remove_target = latest_tag.clone();
-                                entry.tag_add_initializing = false;
-                                entry.tag_remove_initializing = false;
-                                entry.tag_remove_ready = true;
-                                entry.tag_result = LocalizedText::message_with(
-                                    "tag.remove_ready",
-                                    [("latest_tag", latest_tag.clone())],
-                                );
-                                if let Some(first) = entry.tag_job.steps.get_mut(0) {
-                                    first.detail = LocalizedText::message_with(
-                                        "tag.step.remove_target_resolved",
-                                        [("latest_tag", latest_tag)],
-                                    );
-                                    set_step_log(first, lookup_log);
-                                }
-                            }
-                            Err(error) => {
-                                log::warn!(
-                                    "[Workflow][Tag] Remove tab initialization failed: {}",
-                                    error
-                                );
-                                entry.tag_remove_target = "v0.0.0".to_string();
-                                entry.tag_add_initializing = false;
-                                entry.tag_remove_initializing = false;
-                                entry.tag_remove_ready = false;
-                                entry.tag_result =
-                                    LocalizedText::message("tag.load_remote_failed");
-                            }
-                        }
-                        if current_project_id != project_id {
-                            return;
+            if let Ok(mut guard) = state_task.lock() {
+                let current_project_id = guard.current_project.id.clone();
+                let entry = guard.projects.entry(project_id.clone()).or_default();
+                if entry.tag_remove_request_seq != request_seq {
+                    return;
+                }
+                match resolved {
+                    Ok((latest_tag, lookup_log)) => {
+                        log::info!(
+                            "[Workflow][Tag] Remove tab initialized with latest remote tag '{}'",
+                            latest_tag
+                        );
+                        entry.tag_remove_target = latest_tag.clone();
+                        entry.tag_add_initializing = false;
+                        entry.tag_remove_initializing = false;
+                        entry.tag_remove_ready = true;
+                        entry.tag_result = LocalizedText::message_with(
+                            "tag.remove_ready",
+                            [("latest_tag", latest_tag.clone())],
+                        );
+                        if let Some(first) = entry.tag_job.steps.get_mut(0) {
+                            first.detail = LocalizedText::message_with(
+                                "tag.step.remove_target_resolved",
+                                [("latest_tag", latest_tag)],
+                            );
+                            set_step_log(first, lookup_log);
                         }
                     }
+                    Err(error) => {
+                        log::warn!(
+                            "[Workflow][Tag] Remove tab initialization failed: {}",
+                            error
+                        );
+                        entry.tag_remove_target = "v0.0.0".to_string();
+                        entry.tag_add_initializing = false;
+                        entry.tag_remove_initializing = false;
+                        entry.tag_remove_ready = false;
+                        entry.tag_result = LocalizedText::message("tag.load_remote_failed");
+                    }
+                }
+                if current_project_id != project_id {
+                    return;
+                }
+            }
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_weak_task.upgrade() {
                     initialize_current_ui(&ui, &state_task);
                 }
             });
@@ -1816,33 +1803,6 @@ async fn run_local_remove_tag_flow(
     })
 }
 
-async fn read_command_stream<R>(reader: R, sender: mpsc::UnboundedSender<String>)
-where
-    R: AsyncRead + Unpin,
-{
-    let mut reader = BufReader::new(reader);
-    let mut bytes = Vec::new();
-    loop {
-        bytes.clear();
-        match reader.read_until(b'\n', &mut bytes).await {
-            Ok(0) => break,
-            Ok(_) => {
-                while bytes
-                    .last()
-                    .is_some_and(|byte| matches!(byte, b'\n' | b'\r'))
-                {
-                    bytes.pop();
-                }
-                let _ = sender.send(String::from_utf8_lossy(&bytes).into_owned());
-            }
-            Err(error) => {
-                let _ = sender.send(format!("error: failed to read process output: {error}"));
-                break;
-            }
-        }
-    }
-}
-
 async fn inspect_latest_remote_tag_live<F>(
     local_repo: &str,
     cancel_token: &Arc<AtomicBool>,
@@ -1899,127 +1859,6 @@ where
             .unwrap_or_else(|| "v0.0.0".to_string()),
         combined_log,
     ))
-}
-
-fn append_live_log(log: &mut String, line: String) {
-    if !log.is_empty() {
-        log.push('\n');
-    }
-    log.push_str(&line);
-    *log = clamp_step_log(std::mem::take(log));
-}
-
-async fn run_command<F>(
-    command: Vec<String>,
-    cancel_token: &Arc<AtomicBool>,
-    mut on_log: F,
-) -> Result<String, String>
-where
-    F: FnMut(String),
-{
-    if command.is_empty() {
-        log::error!("[Workflow][Tag] run_command called with empty command");
-        return Err("Command vector is empty.".to_string());
-    }
-    let rendered = command.join(" ");
-    if cancel_token.load(Ordering::SeqCst) {
-        log::warn!(
-            "[Workflow][Tag] Command cancelled before start: {}",
-            rendered
-        );
-        return Err(format!("Run {}\nCancelled by user.", rendered));
-    }
-    log::info!("[Workflow][Tag] Executing command: {}", rendered);
-    let mut process = TokioCommand::new(&command[0]);
-    process.args(command.iter().skip(1));
-    process
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let mut child = process.spawn().map_err(|error| {
-        log::error!(
-            "[Workflow][Tag] Command spawn failed: {} | error={}",
-            rendered,
-            error
-        );
-        format!(
-            "Run {}\nerror: failed to spawn command: {}",
-            rendered, error
-        )
-    })?;
-
-    let stdout = child
-        .stdout
-        .take()
-        .expect("piped command stdout must be available");
-    let stderr = child
-        .stderr
-        .take()
-        .expect("piped command stderr must be available");
-    let (sender, mut receiver) = mpsc::unbounded_channel();
-    let stdout_task = tokio::spawn(read_command_stream(stdout, sender.clone()));
-    let stderr_task = tokio::spawn(read_command_stream(stderr, sender));
-
-    let mut command_log = format!("Run {rendered}");
-    on_log(command_log.clone());
-    let mut last_emit = Instant::now();
-    let mut pending_emit = false;
-    let status = loop {
-        if cancel_token.load(Ordering::SeqCst) {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
-            append_live_log(&mut command_log, "Cancelled by user.".into());
-            on_log(command_log.clone());
-            return Err(command_log);
-        }
-
-        if let Some(status) = child.try_wait().map_err(|error| {
-            format!("Run {rendered}\nerror: failed to wait for command: {error}")
-        })? {
-            break status;
-        }
-
-        tokio::select! {
-            line = receiver.recv() => {
-                if let Some(line) = line {
-                    append_live_log(&mut command_log, line);
-                    pending_emit = true;
-                    if last_emit.elapsed() >= TokioDuration::from_millis(50) {
-                        on_log(command_log.clone());
-                        last_emit = Instant::now();
-                        pending_emit = false;
-                    }
-                }
-            }
-            _ = sleep(TokioDuration::from_millis(40)) => {
-                if pending_emit && last_emit.elapsed() >= TokioDuration::from_millis(50) {
-                    on_log(command_log.clone());
-                    last_emit = Instant::now();
-                    pending_emit = false;
-                }
-            }
-        }
-    };
-
-    let _ = stdout_task.await;
-    let _ = stderr_task.await;
-    while let Ok(line) = receiver.try_recv() {
-        append_live_log(&mut command_log, line);
-    }
-    on_log(command_log.clone());
-
-    if status.success() {
-        log::info!("[Workflow][Tag] Command succeeded: {}", rendered);
-        Ok(command_log)
-    } else {
-        log::error!(
-            "[Workflow][Tag] Command failed: {} | status={}",
-            rendered,
-            status
-        );
-        Err(command_log)
-    }
 }
 
 fn read_latest_local_tag(local_repo: &str) -> Result<String, String> {
@@ -2192,16 +2031,18 @@ mod tests {
 
     #[test]
     fn slint_step_exposes_one_log_line_model_row_per_rendered_line() {
-        let step = JobStepData {
+        let mut step = JobStepData {
             definition: JobStepDefinition::new("Example", vec!["git".into(), "status".into()]),
             status: JobStepStatus::Completed,
             conclusion: Some(JobConclusion::Success),
             detail: String::new().into(),
-            log: "Run git status\nclean\ncomplete".into(),
+            log: String::new(),
+            parsed_log: Default::default(),
             duration: "0s".into(),
             default_expanded: false,
             log_requested: true,
         };
+        step.set_log("Run git status\nclean\ncomplete".into());
         let slint_step = step.to_slint();
         assert_eq!(slint_step.log_lines.row_count(), 3);
         assert_eq!(

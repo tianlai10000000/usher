@@ -7,6 +7,8 @@ export struct LanguageOption {
 }
 
 export global AppState {
+    // Disabled in production; cumulative mounts in the opt-in Job fixture.
+    in-out property <int> benchmark-job-log-created-rows: -1;
     /**
      * properties
     */

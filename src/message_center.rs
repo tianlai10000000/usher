@@ -100,14 +100,12 @@ impl MessagePageBridge {
         });
 
         let page_slot = self.page.clone();
-        let window_weak = window.as_weak();
-        let subscription = self.center.subscribe(Arc::new(move |snapshot| {
-            let page_slot = page_slot.clone();
-            let window_weak = window_weak.clone();
-            if let Err(error) = slint::invoke_from_event_loop(move || {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
+        let deliver = app_runtime::latest_ui(
+            window.as_weak(),
+            move |window, snapshot: MessageSnapshot| {
+                if std::env::var("USHER_P5_BENCHMARK").as_deref() == Ok("59") {
+                    log::info!("[P5][59] inbox_ui unread={}", snapshot.unread_count);
+                }
                 window.set_message_unread_count(saturating_i32(snapshot.unread_count));
                 let page = page_slot
                     .lock()
@@ -119,10 +117,9 @@ impl MessagePageBridge {
                 {
                     apply_page_snapshot(&page, snapshot);
                 }
-            }) {
-                log::debug!("[Messages] UI snapshot dropped during shutdown: {error}");
-            }
-        }));
+            },
+        );
+        let subscription = self.center.subscribe(Arc::new(deliver));
         *self
             .subscription
             .lock()

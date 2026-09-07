@@ -8,10 +8,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 
-use crate::MainWindow;
 use crate::http::{self, RequestOptions};
-
-use super::state::ProjectStateFacade;
 
 const PROJECT_LOGO_RASTER_MAX_SIDE: u32 = 128;
 
@@ -297,41 +294,6 @@ pub(super) async fn download_remote_logo_to_cache(url: &str) -> Option<PathBuf> 
         tokio::fs::write(&cache_path, bytes.as_slice()).await.ok()?;
     }
     Some(cache_path)
-}
-
-pub(super) fn refresh_logo_preview(ui: &MainWindow, state: &ProjectStateFacade, logo: &str) {
-    let trimmed = logo.trim();
-    let normalized = normalize_project_logo(logo);
-    let status = if state.remote_logo_failed(&normalized) {
-        "projects.invalid_logo_default"
-    } else {
-        preview_logo_status_key(trimmed)
-    };
-    ui.set_project_logo_preview_status(crate::i18n::tr(status).into_owned().into());
-    if is_valid_logo_remote_url(&normalized) && find_cached_remote_logo_path(&normalized).is_some()
-    {
-        // Re-read from disk so a previously cached pending-default cannot stick.
-        invalidate_cached_logo_image(&logo_image_cache_key(&normalized));
-    }
-    ui.set_project_logo_preview_image(resolve_project_logo_image(&normalized));
-}
-
-pub(super) fn preview_logo_status_key(value: &str) -> &'static str {
-    if value.is_empty() {
-        "projects.using_default_logo"
-    } else if is_valid_logo_path(value) {
-        "projects.logo_local_file"
-    } else if is_valid_logo_base64(value) {
-        "projects.logo_base64_image"
-    } else if is_valid_logo_remote_url(value) {
-        if find_cached_remote_logo_path(value).is_some() {
-            "projects.logo_remote_url"
-        } else {
-            "projects.logo_remote_loading"
-        }
-    } else {
-        "projects.invalid_logo_default"
-    }
 }
 
 pub(super) fn infer_ext_from_content_type(content_type: &str) -> Option<&'static str> {
