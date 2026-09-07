@@ -6,7 +6,7 @@ use slint::platform::{PointerEventButton, WindowEvent};
 
 use crate::MainWindow;
 
-/// Observe already-dispatched main-window pointer presses without knowing which
+/// Observe already-dispatched main-window pointer events without knowing which
 /// reusable surface owns the coordinate. The composition root routes the click
 /// after the target has handled links and controls.
 /// Production must call this after `Window::show()` has created its adapter.
@@ -25,12 +25,16 @@ pub fn install_for_window(app: &MainWindow) -> Result<(), slint::PlatformError> 
             previous(adapter, event, result);
         }
 
-        let WindowEvent::PointerPressed {
-            position,
-            button: PointerEventButton::Left,
-        } = event
-        else {
-            return;
+        let (position, released) = match event {
+            WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            } => (position, false),
+            WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            } => (position, true),
+            _ => return,
         };
         let Some(app) = weak.upgrade() else {
             return;
@@ -43,7 +47,11 @@ pub fn install_for_window(app: &MainWindow) -> Result<(), slint::PlatformError> 
         {
             return;
         }
-        app.invoke_post_dispatch_pointer_pressed(position.x, position.y);
+        if released {
+            app.invoke_post_dispatch_pointer_released(position.x, position.y);
+        } else {
+            app.invoke_post_dispatch_pointer_pressed(position.x, position.y);
+        }
     })))?;
 
     Ok(())

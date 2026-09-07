@@ -24,6 +24,16 @@
 
 ## Batches / 分批清单
 
+- [x] UI-113: move Settings language Select options out of form layout into the
+  shared popup foundation; add the same Select and adjacent-field regression
+  example to UI Components.
+- [ ] UI-113 visual acceptance: floating placement, outside/Escape dismissal,
+  keyboard selection, and unchanged following-field positions.
+- [x] UI-114/UI-115 follow-up: correct Select child-slot geometry, reuse Tooltip
+  placement, and observe window-wide outside clicks without intercepting controls.
+- [ ] Verify the follow-up in Settings and UI Components, including window-edge
+  placement and single-click actions in the page/sidebar/title/status areas.
+
 | Batch | Scope | Status |
 | --- | --- | --- |
 | 1 | Establish `GitHubTheme`/`GitHubMetrics`; migrate active UI away from Material palette/style globals and duplicated functional colors; remove direct vendored Material imports; rewrite UI governance docs and create migration/bug ledgers. | Accepted / 已验收 |

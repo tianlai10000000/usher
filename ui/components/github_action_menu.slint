@@ -31,6 +31,8 @@ export component GitHubActionMenu inherits FocusScope {
     in property <length> anchor-gap: 4px;
     in property <length> viewport-margin: 8px;
     in property <bool> dismiss-on-escape: true;
+    in property <length> reveal-offset: -1px;
+    in property <length> reveal-height: 0px;
     callback dismiss-requested();
     out property <bool> opens-above:
         root.side == "top"
@@ -59,6 +61,14 @@ export component GitHubActionMenu inherits FocusScope {
     private property <int> exclusive-generation: TransientOverlayState.exclusive-generation;
     private property <int> exclusive-token: 0;
 
+    changed reveal-offset => {
+        if root.open && root.reveal-offset >= 0px {
+            root.scroll-offset-y = -max(0px, min(root.content-height - root.height,
+                max(root.reveal-offset + root.reveal-height - root.height,
+                    min(-root.scroll-offset-y, root.reveal-offset))));
+        }
+    }
+
     accessible-role: list;
 
     changed open => {
@@ -67,7 +77,9 @@ export component GitHubActionMenu inherits FocusScope {
             // exclusive-generation notification cannot dismiss this opener.
             root.exclusive-token = TransientOverlayState.exclusive-generation + 1;
             TransientOverlayState.claim-exclusive();
-            root.scroll-offset-y = 0px;
+            root.scroll-offset-y = root.reveal-offset < 0px ? 0px
+                : -max(0px, min(root.content-height - root.height,
+                    root.reveal-offset + root.reveal-height - root.height));
             root.focus();
         } else if root.has-focus {
             root.clear-focus();
@@ -217,6 +229,7 @@ export component GitHubActionListItem inherits FocusScope {
     in property <bool> selectable: false;
     in property <bool> item-enabled: true;
     in property <bool> danger: false;
+    in property <bool> keyboard-active: false;
     in property <length> bottom-padding: 0px;
     callback activated();
 
@@ -266,7 +279,7 @@ export component GitHubActionListItem inherits FocusScope {
         border-radius: GitHubMetrics.radius-medium;
         background: item-touch.pressed
             ? GitHubTheme.control-transparent-active
-            : (root.has-focus && root.keyboard-focus-visible
+            : (root.keyboard-active || (root.has-focus && root.keyboard-focus-visible)
                 ? GitHubTheme.accent-subtle
                 : (item-touch.has-hover && root.item-enabled
                     ? (root.danger
@@ -360,7 +373,7 @@ export component GitHubActionListItem inherits FocusScope {
         }
     }
 
-    if root.has-focus && root.keyboard-focus-visible: Rectangle {
+    if root.keyboard-active || (root.has-focus && root.keyboard-focus-visible): Rectangle {
         width: parent.width;
         height: parent.height;
         border-radius: GitHubMetrics.radius-medium;

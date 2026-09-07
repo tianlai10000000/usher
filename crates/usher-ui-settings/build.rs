@@ -8,9 +8,8 @@ fn prepare_language_picker(out_dir: &Path) -> std::io::Result<PathBuf> {
     let mut source = String::from(
         "import { AppState } from \"@app-state\";\n\
          import { I18n } from \"@i18n\";\n\
-         import { GitHubScrollView } from \"@scroll-view\";\n\
-         import { GitHubTheme } from \"@github-theme\";\n\
-         import { GitHubSettingsNavItem, GitHubSettingsSectionMenuButton } from \"@settings-controls\";\n\n",
+         import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from \"@select\";\n\
+         import { GitHubSettingsSectionMenuButton } from \"@settings-controls\";\n\n",
     );
     let locales = usher_i18n::available_locales();
 
@@ -31,48 +30,50 @@ fn prepare_language_picker(out_dir: &Path) -> std::io::Result<PathBuf> {
         let option_count = locales.len() + 1;
         writeln!(
             source,
-            "export component {component} inherits VerticalLayout {{\n    callback changed();\n    in property <int> reset-revision: 0;\n    private property <bool> open: false;\n    private property <string> menu-selection: \"\";\n    width: 100%;\n    spacing: root.open ? 4px : 0px;\n    changed reset-revision => {{\n        root.open = false;\n        root.menu-selection = {selection};\n    }}\n\n    Rectangle {{\n        width: parent.width;\n        height: 40px;\n        background: transparent;"
+            "export component {component} inherits Rectangle {{\n    callback changed();\n    in property <int> reset-revision: 0;\n    private property <int> commit-revision: GitHubSelectState.commit-revision;\n    width: 100%;\n    height: 40px;\n    changed reset-revision => {{ GitHubSelectState.open = false; }}\n    changed commit-revision => {{\n        if GitHubSelectState.owner == {component:?} {{ root.changed(); }}\n    }}\n"
         )
         .expect("writing to String cannot fail");
         write_trigger(
             &mut source,
+            component,
             selection,
             usher_i18n::AUTO_LANGUAGE,
             auto_label,
+            0,
         );
-        for locale in locales {
+        for (index, locale) in locales.iter().enumerate() {
             write_trigger(
                 &mut source,
+                component,
                 selection,
                 locale.id,
                 &format!("{:?}", locale.native_name),
+                index + 1,
             );
         }
         writeln!(
             source,
-            "    }}\n\n    Rectangle {{\n        width: parent.width;\n        height: root.open ? min(264px, {}px) : 0px;\n        visible: root.open;\n        border-radius: 6px;\n        border-width: 1px;\n        border-color: GitHubTheme.border-default;\n        background: GitHubTheme.canvas-default;\n        clip: true;\n\n        GitHubScrollView {{\n            x: 4px;\n            y: 4px;\n            width: parent.width - 8px;\n            height: parent.height - 8px;\n            show-scrollbar: {};\n\n            Rectangle {{\n                width: parent.width;\n                height: {}px;\n                background: transparent;",
-            option_count * 32 + 8,
-            option_count > 8,
-            option_count * 32,
+            "}}\n\nexport component {component}Overlay inherits GitHubSelectPopup {{\n    owner: {component:?};\n    option-count: {option_count};\n    selected(index) => {{ root.select-option(index); }}"
         )
         .expect("writing to String cannot fail");
-        write_option(
-            &mut source,
-            usher_i18n::AUTO_LANGUAGE,
-            auto_label,
-            select_callback,
-            0,
-        );
+        write_option(&mut source, usher_i18n::AUTO_LANGUAGE, auto_label, 0);
         for (index, locale) in locales.iter().enumerate() {
             write_option(
                 &mut source,
                 locale.id,
                 &format!("{:?}", locale.native_name),
-                select_callback,
                 index + 1,
             );
         }
-        source.push_str("            }\n        }\n    }\n}\n\n");
+        source.push_str("\n    function select-option(index: int) {\n");
+        for (index, id) in std::iter::once(usher_i18n::AUTO_LANGUAGE)
+            .chain(locales.iter().map(|locale| locale.id))
+            .enumerate()
+        {
+            writeln!(source, "        if index == {index} {{\n            GitHubSelectState.selected-value = {id:?};\n            {select_callback}({id:?});\n        }}")
+                .expect("writing to String cannot fail");
+        }
+        source.push_str("        GitHubSelectState.commit-revision += 1;\n        GitHubSelectState.open = false;\n    }\n}\n\n");
     }
 
     if !fs::read(&path).is_ok_and(|existing| existing == source.as_bytes()) {
@@ -81,18 +82,25 @@ fn prepare_language_picker(out_dir: &Path) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
-fn write_trigger(source: &mut String, selection: &str, id: &str, label: &str) {
+fn write_trigger(
+    source: &mut String,
+    component: &str,
+    selection: &str,
+    id: &str,
+    label: &str,
+    index: usize,
+) {
     writeln!(
         source,
-        "\n        GitHubSettingsSectionMenuButton {{\n            width: parent.width;\n            visible: {selection} == {id:?};\n            text: {label};\n            open: root.open;\n            clicked => {{\n                root.menu-selection = {selection};\n                root.open = !root.open;\n            }}\n        }}"
+        "\n        GitHubSettingsSectionMenuButton {{\n            x: 0px;\n            y: 0px;\n            width: parent.width;\n            visible: {selection} == {id:?};\n            text: {label};\n            open: GitHubSelectState.open && GitHubSelectState.owner == {component:?};\n            restore-focus-on-close: GitHubSelectState.restore-focus;\n            clicked => {{\n                if self.open {{ GitHubSelectState.close(true); }} else {{\n                    GitHubSelectState.show({component:?}, {selection}, {index}, root.absolute-position.x, root.absolute-position.y, root.width, root.height);\n                }}\n            }}\n        }}"
     )
     .expect("writing to String cannot fail");
 }
 
-fn write_option(source: &mut String, id: &str, label: &str, select_callback: &str, index: usize) {
+fn write_option(source: &mut String, id: &str, label: &str, index: usize) {
     writeln!(
         source,
-        "\n                GitHubSettingsNavItem {{\n                    y: {}px;\n                    width: parent.width;\n                    text: {label};\n                    selected: root.menu-selection == {id:?};\n                    clicked => {{\n                        root.menu-selection = {id:?};\n                        {select_callback}({id:?});\n                        root.changed();\n                        root.open = false;\n                    }}\n                }}",
+        "\n        GitHubSelectOption {{\n            x: 0px;\n            y: {}px;\n            width: root.option-width;\n            text: {label};\n            selected: GitHubSelectState.selected-value == {id:?};\n            active: GitHubSelectState.open && GitHubSelectState.owner == root.owner && GitHubSelectState.active-index == {index};\n            activated => {{ root.select-option({index}); }}\n        }}",
         index * 32,
     )
     .expect("writing to String cannot fail");
@@ -130,6 +138,10 @@ fn main() {
             ("ai-review-settings".to_string(), ai_review_settings_library),
             ("i18n".to_string(), i18n.library_path),
             ("language-picker".to_string(), language_picker),
+            (
+                "select".to_string(),
+                repository_root.join("ui/components/input/github_select.slint"),
+            ),
             (
                 "app-state".to_string(),
                 repository_root.join("ui/state/app_state.slint"),

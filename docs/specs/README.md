@@ -30,7 +30,8 @@ The UI design specification defines `GitHub*` component naming,
 contracts, shared Button/IconButton/Link/Tooltip/CounterLabel/Copy/Spinner/form-control
 foundations, shared shell/title-bar breadcrumb/PageHeader/ScrollView/Progress foundations,
 UnderlineNav/SegmentedControl/Actions Job foundations,
-Dialog/borderless ActionMenu/bordered SelectMenu/Banner overlay contracts,
+Dialog/borderless ActionMenu/bordered SelectMenu/form Select popup (shared Tooltip
+placement and non-blocking window-wide dismissal)/Banner overlay contracts,
 compact PR-list branch chips, the Material dependency boundary,
 the mandatory UI Components playground/property-matrix contract,
 repository-wide component placement (`ui/components/<feature>/`) and route-view

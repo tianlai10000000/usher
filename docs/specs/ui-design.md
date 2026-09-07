@@ -488,6 +488,34 @@ expanded/collapsed, and success confirmation.
 - `GitHubCopyButton`: 32×32 invisible icon button, centered 16 px Copy
   Octicon, persistent tooltip, and Copy→Check confirmation only after the
   clipboard callback returns success.
+- Form Select: `GitHubSelectPopup` and `GitHubSelectOption` pair with the shared
+  `GitHubSettingsSectionMenuButton` trigger. Opening never changes form height
+  or pushes following fields. Mount the menu at the owning window/factory root
+  outside scrolling layouts, using the Tooltip's `GitHubFloatingOverlayHost`
+  for bounded flip/shift placement and `GitHubActionMenu` for its surface, with outside-click
+  dismissal, Escape cancellation, restored trigger focus, bounded internal
+  scrolling, arrow/Home/End navigation, and Enter/Space selection. The selected
+  option has a default-foreground Check with no navigation stripe or persistent
+  selected fill. The trigger reports expanded/disabled accessibility state.
+  Keep Settings' manifest-generated fixed language leaves. UI Components must
+  exercise this same Select with a following field and a disabled trigger.
+  Option rows must use the actual menu-content width and explicit coordinates.
+  Outside dismissal observes pointer release after the target handles its click, including
+  sidebar/title/status chrome and the isolated Settings factory; it must not
+  intercept that click or restore focus away from the clicked control. The
+  full-window keyboard scope must disable automatic pointer focus acquisition.
+  References: [Primer Select](https://primer.style/product/components/select/)
+  and [SelectPanel dismissal](https://primer.style/product/components/select-panel/).
+- 表单 Select 使用共享 `GitHubSelectPopup`、`GitHubSelectOption` 与
+  `GitHubSettingsSectionMenuButton` 触发器；展开不得改变表单高度或挤压后续字段。
+  浮层在所属窗口/factory 根层挂载，复用 `GitHubActionMenu`，负责外部关闭和焦点恢复，支持 Escape 取消、方向键/Home/End 导航、
+  Enter/Space 选择和有界内部滚动。选中项使用默认前景色勾选标记，不使用导航条或
+  常驻选中底色。Settings 保留 manifest 生成的固定语言叶子；UI Components 必须
+  展示同一 Select、后续字段与禁用触发器。
+  定位复用 Tooltip 的 `GitHubFloatingOverlayHost`，支持上下翻转、边缘约束和有界
+  内部滚动。选项必须使用菜单内容宽度与明确坐标。窗口级鼠标释放在目标处理完点击后通知关闭，
+  覆盖侧栏、标题栏、状态栏与 Settings factory；全窗口键盘作用域关闭鼠标自动获取焦点，
+  不得拦截首次点击或抢走目标焦点。
 - `GitHubActionMenu`: ActionList inside an AnchoredOverlay; 12 px overlay
   radius, semantic border/shadow, 4 px anchor gap, viewport collision handling,
   bounded height, internal scrolling, focus ownership, Escape dismissal, and

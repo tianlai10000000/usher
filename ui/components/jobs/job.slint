@@ -52,23 +52,32 @@ component GitHubActionsLogLineRow inherits Rectangle {
     // 20 px glyph box; 28 px min + measured centering matches that density.
     private property <length> min-line-height: 28px;
     private property <length> pad-y: 7px;
-    private property <length> content-height: max(
+    // Slint's preferred height is the shaped advance, not a paint-safe glyph
+    // box. FemtoVG can otherwise clip CJK and punctuation at the lower edge.
+    private property <length> glyph-safety-height: 4px;
+    private property <length> measured-content-height: max(
         1px,
         line-measure.preferred-height
     );
-    private property <length> single-line-height: max(1px, single-line-measure.preferred-height);
-    private property <bool> wraps: root.content-height > root.single-line-height + 1px;
+    private property <length> measured-single-line-height:
+        max(1px, single-line-measure.preferred-height);
+    private property <length> content-height:
+        root.measured-content-height + root.glyph-safety-height;
+    private property <length> single-line-height:
+        root.measured-single-line-height + root.glyph-safety-height;
+    private property <bool> wraps:
+        root.measured-content-height > root.measured-single-line-height + 1px;
     // Prefer measured-box centering over Text vertical-alignment:center —
     // font ascent/descent makes glyphs look optically high in the wash.
     private property <length> content-y: root.wraps
         ? root.pad-y
-        : (root.height - root.content-height) / 2;
+        : (root.height - root.measured-content-height) / 2;
     private property <length> number-y: root.wraps
         ? root.pad-y
-        : (root.height - root.single-line-height) / 2;
+        : (root.height - root.measured-single-line-height) / 2;
 
     width: 100%;
-    height: max(root.min-line-height, root.content-height + root.pad-y * 2);
+    height: max(root.min-line-height, root.measured-content-height + root.pad-y * 2);
     background: root.line.kind == "warning" ? root.attention-background
         : (root.line.kind == "error" ? root.danger-background
         : (root.line.kind == "notice" ? root.accent-background

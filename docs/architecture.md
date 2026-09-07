@@ -365,6 +365,27 @@ canonical selection into picker-local state; option styling reads that snapshot
 instead of a global binding that the real renderer may leave stale while the
 option surface is hidden.
 
+Both language pickers use the shared `GitHubSelectPopup`/`GitHubSelectOption`
+form-control foundation. Only the 40 px trigger contributes to form layout;
+the Settings factory root mounts the overlay outside the scrolling form.
+`GitHubFloatingOverlayHost`, also used by Tooltips, owns flip/shift and
+pixel-aligned placement; Select bounds the width and available vertical height,
+while `GitHubActionMenu` provides the surface, scrolling, and focus lifecycle.
+Option leaves use the explicit menu-content width and a zero horizontal origin,
+not the outer factory width. Native
+`PopupWindow` must not be used from the isolated factory product because its
+window context is separate from the visible host. Escape cancels, arrow/Home/End keys move the active option, and
+Enter/Space commits it. Options use a leading Check rather than navigation-row
+selection styling. UI Components exercises the same popup with an adjacent
+field and a disabled trigger, with its overlay mounted at `MainWindow` root.
+There is no full-page input scrim. The existing window pointer observer reports
+outside releases after the target handles its click; the Settings bridge forwards page-local
+coordinates into its isolated global graph. The Select excludes its trigger and
+resolved surface from dismissal, forwards native/chrome dismissal as well, and
+does not restore trigger focus after an outside click. The full-window keyboard
+scope disables pointer focus acquisition, so other controls act on the first
+click. Escape and selection retain trigger focus restoration.
+
 Credential, endpoint, and AI Agent text fields use page-local edit ownership
 while Settings is open. The code-hosting groups commit their complete drafts only
 through their visible Save commands. AI Agent additionally owns one committed

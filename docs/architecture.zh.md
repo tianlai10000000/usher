@@ -294,6 +294,22 @@ id 或选中状态。每次展开菜单时，picker 都会把当前规范化选�
 选项样式读取该快照，而不直接依赖真实渲染器在选项 surface 隐藏期间可能未失效的
 global binding。
 
+两个语言选择器统一复用 `GitHubSelectPopup`/`GitHubSelectOption` 表单基础组件。
+只有 40px 触发器参与表单布局；Settings factory 根层在滚动表单外挂载浮层，复用
+Tooltip 同样使用的 `GitHubFloatingOverlayHost` 负责翻转、边缘位移与像素对齐；
+Select 限制宽度及可用垂直高度，`GitHubActionMenu` 提供表面、滚动与焦点生命周期。
+选项叶子使用明确的菜单内容宽度和零水平起点，不能继承外层 factory 的宽度。
+独立 factory 的窗口上下文与可见 host
+不同，禁止在其中使用原生 `PopupWindow` 承载选项。
+Escape 取消，方向键及 Home/End 移动活动选项，Enter/Space 确认选择。
+选项用前导勾选标记表示当前值，不再复用导航行的选中样式。UI Components 使用同一
+弹层，并包含相邻输入框与禁用触发器；示例浮层挂载在 `MainWindow` 根层。
+Select 不铺设整页输入遮罩。现有窗口指针观察器在目标处理完点击后报告鼠标释放，
+Settings bridge 将页面局部坐标转发到独立 global graph，排除触发器与实际菜单区域
+后关闭，同时转发原生标题栏等窗口级关闭通知。外部点击关闭不抢回触发器焦点，其他
+控件第一次点击即生效；全窗口键盘作用域关闭鼠标自动获取焦点，避免吞掉首次按下。
+Escape 和确认选择仍恢复触发器焦点。
+
 Settings 打开期间，凭据、Endpoint 与 AI Agent 文本字段都采用页面局部编辑所有权；
 代码托管分组只有点击各自可见的 Save 命令才提交完整草稿。AI Agent 另用一份已提交的
 强类型 Store 快照供 Settings 之外的 Chat 与 Review 消费。选择预设只在独立页面草稿中

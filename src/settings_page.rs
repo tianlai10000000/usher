@@ -118,6 +118,14 @@ impl SettingsPageBridge {
                 page.set_viewport_height(height);
             });
         });
+        let bridge = self.clone();
+        window.on_settings_select_pointer_released(move |x, y| {
+            bridge.with_page(|page| page.invoke_select_pointer_released(x, y));
+        });
+        let bridge = self.clone();
+        window.on_settings_select_dismiss(move || {
+            bridge.with_page(|page| page.invoke_dismiss_select());
+        });
     }
 
     pub(crate) fn set_git_tokens_saved(&self, saved: bool) {
@@ -965,10 +973,26 @@ mod tests {
     }
 
     fn select_language(page: &GitHubSettingsPage, label: &str) {
-        ElementHandle::find_by_accessible_label(page, label)
+        let option = ElementHandle::find_by_accessible_label(page, label)
             .find(|element| element.accessible_checked().is_some())
-            .unwrap_or_else(|| panic!("language option {label:?}"))
-            .mock_single_click(PointerEventButton::Left);
+            .unwrap_or_else(|| panic!("language option {label:?}"));
+        option.mock_single_click(PointerEventButton::Left);
+        assert!(language_rows(page).is_empty(), "selection closes the menu");
+    }
+
+    fn click_settings_position(page: &GitHubSettingsPage, position: slint::LogicalPosition) {
+        use slint::platform::WindowEvent;
+        page.window()
+            .dispatch_event(WindowEvent::PointerMoved { position });
+        page.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        page.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+        page.invoke_select_pointer_released(position.x, position.y);
     }
 
     fn select_settings_section(page: &GitHubSettingsPage, label: &str) {
@@ -1009,6 +1033,135 @@ mod tests {
             ("English".to_string(), selected_label == "English"),
             ("简体中文".to_string(), selected_label == "简体中文"),
         ]
+    }
+
+    #[test]
+    fn language_select_floats_dismisses_and_supports_keyboard_selection() {
+        use slint::platform::{Key, WindowEvent};
+
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let page = GitHubSettingsPage::new().expect("settings page");
+        crate::i18n::apply_preference("en").expect("English labels");
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        let weak = page.as_weak();
+        SettingsAppState::get(&page).on_set_language(move |value| {
+            sync_language_state(&weak.upgrade().unwrap(), value.as_str());
+        });
+
+        let popup_count = || usize::from(!language_rows(&page).is_empty());
+        let press = |key: Key| {
+            page.window()
+                .dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+            page.window()
+                .dispatch_event(WindowEvent::KeyReleased { text: key.into() });
+        };
+        for (width, height) in [(550.0, 600.0), (1000.0, 768.0), (1280.0, 900.0)] {
+            page.set_viewport_width(width);
+            page.set_viewport_height(height);
+            for dark in [false, true] {
+                SettingsAppState::get(&page).set_effective_dark_mode(dark);
+                sync_language_state(&page, "en");
+                let appearance = || {
+                    ElementHandle::find_by_accessible_label(&page, "Light")
+                        .next()
+                        .expect("following appearance control")
+                        .absolute_position()
+                };
+                let before = appearance();
+                open_language_picker(&page);
+                assert_eq!(popup_count(), 1);
+                let menu = ElementHandle::find_by_element_id(&page, "GitHubSelectPopup::menu")
+                    .next()
+                    .expect("language menu surface");
+                let menu_position = menu.absolute_position();
+                let menu_size = menu.size();
+                assert!(menu_position.x >= 8.0 && menu_position.y >= 8.0);
+                assert!(menu_position.x + menu_size.width <= width - 7.5);
+                assert!(menu_position.y + menu_size.height <= height - 7.5);
+                for label in ["System default", "English", "简体中文"] {
+                    let row = ElementHandle::find_by_accessible_label(&page, label)
+                        .find(|element| element.accessible_checked().is_some())
+                        .expect("visible language option");
+                    let position = row.absolute_position();
+                    let size = row.size();
+                    assert!(
+                        (position.x - menu_position.x - 4.0).abs() < 0.5,
+                        "{label}: option must start inside the menu, not the page"
+                    );
+                    assert!((size.width - (menu_size.width - 8.0)).abs() < 0.5);
+                    assert!(position.y >= menu_position.y + 3.5);
+                    assert!(position.y + size.height <= menu_position.y + menu_size.height - 3.5);
+                }
+                assert_eq!(
+                    appearance(),
+                    before,
+                    "opening must not move following fields"
+                );
+                click_settings_position(&page, slint::LogicalPosition::new(4.0, 4.0));
+                assert_eq!(popup_count(), 0, "blank outside click dismisses");
+                assert_eq!(
+                    SettingsAppState::get(&page).get_language_selection().id,
+                    "en"
+                );
+
+                open_language_picker(&page);
+                press(Key::DownArrow);
+                press(Key::Escape);
+                assert_eq!(popup_count(), 0, "Escape dismisses");
+                assert_eq!(
+                    SettingsAppState::get(&page).get_language_selection().id,
+                    "en"
+                );
+
+                // Focus returns to the trigger after dismissal.
+                press(Key::Return);
+                assert_eq!(popup_count(), 1, "Enter reopens the focused trigger");
+                press(Key::DownArrow);
+                press(Key::Return);
+                assert_eq!(popup_count(), 0, "Enter commits and closes");
+                assert_eq!(
+                    SettingsAppState::get(&page).get_language_selection().id,
+                    "zh-CN"
+                );
+                assert_eq!(appearance(), before);
+            }
+        }
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id)
+            .expect("restore fallback language");
+    }
+
+    #[test]
+    fn language_select_does_not_consume_another_controls_first_click() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let _locale_guard = crate::i18n::test_locale_guard();
+        i_slint_backend_testing::init_no_event_loop();
+        let page = GitHubSettingsPage::new().unwrap();
+        page.set_viewport_width(550.0);
+        page.set_viewport_height(600.0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+        crate::i18n::apply_preference("en").unwrap();
+        sync_language_state(&page, "en");
+        let clicks = Rc::new(Cell::new(0));
+        let observed = clicks.clone();
+        SettingsAppState::get(&page).on_toggle_theme(move |_| observed.set(observed.get() + 1));
+        open_language_picker(&page);
+        let light = ElementHandle::find_by_accessible_label(&page, "Light")
+            .next()
+            .unwrap();
+        let position = light.absolute_position();
+        let size = light.size();
+        click_settings_position(
+            &page,
+            slint::LogicalPosition::new(
+                position.x + size.width / 2.0,
+                position.y + size.height / 2.0,
+            ),
+        );
+        assert_eq!(clicks.get(), 1, "the same click must dismiss and activate");
+        assert!(language_rows(&page).is_empty());
+        crate::i18n::apply_preference(usher_i18n::fallback_locale().id).unwrap();
     }
 
     #[test]
@@ -1109,6 +1262,19 @@ mod tests {
             language_rows(&page),
             expected_language_rows("跟随系统", "简体中文")
         );
+
+        window.invoke_post_dispatch_pointer_released(0.0, 0.0);
+        assert!(
+            language_rows(&page).is_empty(),
+            "window chrome dismisses factory menu"
+        );
+        open_language_picker(&page);
+        window.invoke_dismiss_transient_overlays();
+        assert!(
+            language_rows(&page).is_empty(),
+            "native title-bar dismissal reaches factory"
+        );
+        open_language_picker(&page);
 
         select_language(&page, "English");
         open_section_picker(&page);

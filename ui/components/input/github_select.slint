@@ -1,0 +1,166 @@
+import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
+import { GitHubActionMenu, GitHubActionListItem } from "../github_action_menu.slint";
+import { GitHubFloatingOverlayHost } from "../github_floating_overlay.slint";
+import { GitHubTooltipPlacement, GitHubTooltipAlignment } from "../../state/tooltip_overlay_state.slint";
+
+export struct GitHubSelectGeometry { x: length, y: length, width: length, height: length }
+
+// Transient presentation is local to the mounted UI tree. Feature callbacks
+// retain ownership of committed values, including inside factory products.
+export global GitHubSelectState {
+    in-out property <bool> open: false;
+    in-out property <string> owner: "";
+    in-out property <string> selected-value: "";
+    in-out property <int> active-index: 0;
+    in-out property <bool> keyboard-navigation: false;
+    in-out property <int> commit-revision: 0;
+    in-out property <length> anchor-x;
+    in-out property <length> anchor-y;
+    in-out property <length> anchor-width;
+    in-out property <length> anchor-height;
+    in-out property <GitHubSelectGeometry> surface;
+    in-out property <bool> restore-focus: true;
+
+    public function close(restore: bool) {
+        root.restore-focus = restore;
+        root.open = false;
+    }
+
+    public function pointer-released(x: length, y: length) {
+        if root.open
+            && !(x >= root.surface.x && x < root.surface.x + root.surface.width
+                && y >= root.surface.y && y < root.surface.y + root.surface.height)
+            && !(x >= root.anchor-x && x < root.anchor-x + root.anchor-width
+                && y >= root.anchor-y && y < root.anchor-y + root.anchor-height) {
+            root.close(false);
+        }
+    }
+
+    public function show(owner: string, value: string, index: int,
+            x: length, y: length, width: length, height: length) {
+        root.owner = owner;
+        root.selected-value = value;
+        root.active-index = index;
+        root.keyboard-navigation = false;
+        root.anchor-x = x;
+        root.anchor-y = y;
+        root.anchor-width = width;
+        root.anchor-height = height;
+        root.restore-focus = true;
+        root.open = true;
+    }
+}
+
+// Mount at the owning page/window root, outside every scrolling layout.
+export component GitHubSelectPopup inherits FocusScope {
+    in property <string> owner;
+    in property <int> option-count;
+    callback selected(int);
+    private property <bool> open: GitHubSelectState.open && GitHubSelectState.owner == root.owner;
+    private property <length> popup-width:
+        max(0px, min(GitHubSelectState.anchor-width, root.width - GitHubMetrics.size-16));
+    private property <length> anchor-top: GitHubSelectState.anchor-y - root.absolute-position.y;
+    private property <length> available-height: max(0px, max(
+        root.anchor-top - GitHubMetrics.size-12,
+        root.height - root.anchor-top - GitHubSelectState.anchor-height - GitHubMetrics.size-12));
+    private property <length> popup-height: min(264px, root.available-height,
+        root.option-count * GitHubMetrics.size-32 + GitHubMetrics.size-8);
+    out property <length> option-width: max(0px, root.popup-width - GitHubMetrics.size-8);
+    private property <GitHubSelectGeometry> surface-geometry: {
+        x: menu.absolute-position.x, y: menu.absolute-position.y,
+        width: menu.width, height: menu.height,
+    };
+    changed open => {
+        if root.open { GitHubSelectState.surface = root.surface-geometry; }
+    }
+    changed surface-geometry => {
+        if root.open { GitHubSelectState.surface = root.surface-geometry; }
+    }
+    x: 0px;
+    y: 0px;
+    width: 100%;
+    height: 100%;
+    visible: root.open;
+    // This scope only captures descendant keyboard events. Taking pointer
+    // focus here would consume clicks intended for controls behind the host.
+    focus-on-click: false;
+    focus-on-tab-navigation: false;
+
+    capture-key-pressed(event) => {
+        if event.text == Key.Escape || event.text == Key.Tab {
+            GitHubSelectState.close(event.text == Key.Escape);
+            return event.text == Key.Escape ? accept : reject;
+        }
+        if event.text == Key.DownArrow || event.text == Key.UpArrow {
+            GitHubSelectState.keyboard-navigation = true;
+            GitHubSelectState.active-index = mod(GitHubSelectState.active-index + root.option-count
+                + (event.text == Key.DownArrow ? 1 : -1), max(1, root.option-count));
+            return accept;
+        }
+        if event.text == Key.Home || event.text == Key.End {
+            GitHubSelectState.keyboard-navigation = true;
+            GitHubSelectState.active-index = event.text == Key.Home ? 0 : max(0, root.option-count - 1);
+            return accept;
+        }
+        if event.text == Key.Return || event.text == " " {
+            root.selected(GitHubSelectState.active-index);
+            return accept;
+        }
+        return reject;
+    }
+
+    GitHubFloatingOverlayHost {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        anchor-x: GitHubSelectState.anchor-x;
+        anchor-y: GitHubSelectState.anchor-y;
+        anchor-width: GitHubSelectState.anchor-width;
+        anchor-height: GitHubSelectState.anchor-height;
+        floating-width: root.popup-width;
+        floating-height: root.popup-height;
+        preferred-placement: GitHubTooltipPlacement.Bottom;
+        alignment: GitHubTooltipAlignment.Start;
+
+      // The shared floating host positions the surface. ActionMenu supplies
+      // its chrome, scrolling, focus, and exclusive-menu lifecycle only.
+      menu := GitHubActionMenu {
+        x: 0px;
+        y: 0px;
+        width: root.popup-width;
+        height: root.popup-height;
+        open: root.open;
+        viewport-width: root.width;
+        viewport-height: root.height;
+        anchor-x: GitHubSelectState.anchor-x - root.absolute-position.x;
+        anchor-y: GitHubSelectState.anchor-y - root.absolute-position.y;
+        anchor-width: GitHubSelectState.anchor-width;
+        anchor-height: GitHubSelectState.anchor-height;
+        menu-width: GitHubSelectState.anchor-width;
+        menu-max-height: 264px;
+        content-height: root.option-count * GitHubMetrics.size-32 + GitHubMetrics.size-8;
+        reveal-offset: GitHubSelectState.active-index * GitHubMetrics.size-32;
+        reveal-height: GitHubMetrics.size-32 + GitHubMetrics.size-8;
+        dismiss-requested => { GitHubSelectState.close(false); }
+
+        Rectangle {
+            x: GitHubMetrics.size-4;
+            y: GitHubMetrics.size-4;
+            width: root.option-width;
+            height: root.option-count * GitHubMetrics.size-32;
+            @children
+        }
+      }
+    }
+}
+
+export component GitHubSelectOption inherits GitHubActionListItem {
+    in property <bool> active: false;
+    selectable: true;
+    selected-visual-color: GitHubTheme.fg-default;
+    keyboard-active: root.active && GitHubSelectState.keyboard-navigation;
+    changed active => {
+        if root.active { root.focus(); }
+    }
+}

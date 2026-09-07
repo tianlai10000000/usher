@@ -5,8 +5,16 @@ import { I18n } from "@i18n";
 export component GitHubSettingsSectionMenuButton inherits Rectangle {
     in property <string> text;
     in property <bool> open: false;
+    in property <bool> enabled: true;
+    in property <bool> restore-focus-on-close: false;
     callback clicked();
     private property <bool> keyboard-focus-visible: false;
+
+    changed open => {
+        if !root.open && root.visible && root.restore-focus-on-close {
+            menu-focus.focus();
+        }
+    }
 
     width: 100%;
     height: 40px;
@@ -18,13 +26,19 @@ export component GitHubSettingsSectionMenuButton inherits Rectangle {
         : GitHubTheme.control-default-rest;
     accessible-role: button;
     accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-expandable: true;
+    accessible-expanded: root.open;
+    opacity: root.enabled ? 1 : 0.5;
 
     menu-focus := FocusScope {
+        enabled: root.enabled;
         width: 100%;
         height: 100%;
         key-pressed(event) => {
             root.keyboard-focus-visible = true;
-            if event.text == Key.Return || event.text == " " {
+            if root.enabled && (event.text == Key.Return || event.text == " "
+                    || event.text == Key.DownArrow || event.text == Key.UpArrow) {
                 root.clicked();
                 return accept;
             }
@@ -62,6 +76,7 @@ export component GitHubSettingsSectionMenuButton inherits Rectangle {
     }
 
     menu-touch := TouchArea {
+        enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => {
             root.keyboard-focus-visible = false;

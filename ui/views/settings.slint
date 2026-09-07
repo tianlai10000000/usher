@@ -9,6 +9,8 @@ import {
     GitHubSettingsSectionMenuButton
 } from "../components/settings/github_settings_controls.slint";
 import { GitHubSettingsPane } from "../components/settings/github_settings_layout.slint";
+import { ManifestInterfaceLanguagePickerOverlay, ManifestReplyLanguagePickerOverlay } from "@language-picker";
+import { GitHubSelectState } from "../components/input/github_select.slint";
 import { AiReviewRuleItem } from "@ai-review-settings";
 export { AiReviewRuleItem } from "@ai-review-settings";
 
@@ -25,6 +27,13 @@ export component GitHubSettingsPage inherits Rectangle {
     callback simulate-crash();
     callback open-log-directory();
     callback export-diagnostics();
+    callback dismiss-select();
+    callback select-pointer-released(length, length);
+    dismiss-select => { GitHubSelectState.close(false); }
+    select-pointer-released(x, y) => {
+        GitHubSelectState.pointer-released(
+            x + root.absolute-position.x, y + root.absolute-position.y);
+    }
 
     in-out property <bool> simulate-crash-active: false;
     in-out property <bool> reveal-git-tokens: false;
@@ -59,6 +68,10 @@ export component GitHubSettingsPage inherits Rectangle {
     private property <length> nav-width: 180px;
     private property <length> nav-content-gap: 32px;
 
+    changed selected-section => { GitHubSelectState.open = false; }
+    changed viewport-width => { GitHubSelectState.open = false; }
+    changed viewport-height => { GitHubSelectState.open = false; }
+
     changed route-entry-revision => {
         draft-reset-focus.focus();
         root.compact-navigation-open = false;
@@ -90,6 +103,7 @@ export component GitHubSettingsPage inherits Rectangle {
         width: root.width;
         height: root.height;
         viewport_x: 0px;
+        changed viewport_y => { GitHubSelectState.open = false; }
 
         content-host := Rectangle {
             width: settings-scroll.visible_width;
@@ -340,6 +354,9 @@ export component GitHubSettingsPage inherits Rectangle {
                     }
         }
     }
+
+    ManifestInterfaceLanguagePickerOverlay { z: 9000; }
+    ManifestReplyLanguagePickerOverlay { z: 9000; }
 
     // Settings is also an independent ComponentFactory/global graph. Mount a
     // local root portal so present and future shared controls keep full Tooltip

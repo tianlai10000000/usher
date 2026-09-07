@@ -67,6 +67,7 @@ floating_geometry_consumers=$(rg -l 'GitHubFloatingOverlayHost[[:space:]]*\{' \
 unexpected_floating_geometry=$(echo "$floating_geometry_consumers" \
     | rg -v '^ui/components/github_tooltip_overlay\.slint$' \
     | rg -v '^ui/components/messages/github_message_tooltip\.slint$' \
+    | rg -v '^ui/components/input/github_select\.slint$' \
     || true)
 if [ -n "$unexpected_floating_geometry" ]; then
     echo "UI policy: Tooltip placement must use the shared portal geometry:" >&2

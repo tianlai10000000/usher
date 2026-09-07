@@ -1,7 +1,8 @@
 import { Route } from "../../route/routeMap.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { GitHubPageHeader } from "../page/github_page_header.slint";
-import { GitHubButton, GitHubToggle, GitHubTextField, GitHubSettingsNavItem } from "../settings/github_settings_controls.slint";
+import { GitHubButton, GitHubToggle, GitHubTextField, GitHubSettingsNavItem, GitHubSettingsSectionMenuButton } from "../settings/github_settings_controls.slint";
+import { GitHubSelectState, GitHubSelectPopup, GitHubSelectOption } from "../input/github_select.slint";
 import { GitHubCompactTextField } from "../input/compact_text_field.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubCopyButton } from "../button/github_copy_button.slint";
@@ -133,6 +134,31 @@ component GitHubShowcaseStateBadge inherits Rectangle {
     }
 }
 
+global GitHubSelectDemoState {
+    in-out property <int> value: 1;
+}
+
+export component GitHubSelectDemoOverlay inherits GitHubSelectPopup {
+    owner: "showcase";
+    option-count: 3;
+    selected(index) => {
+        GitHubSelectDemoState.value = index;
+        GitHubSelectState.open = false;
+    }
+    for label[index] in ["System default", "English", "Chinese (Simplified)"]: GitHubSelectOption {
+        x: 0px;
+        y: index * GitHubMetrics.size-32;
+        width: root.option-width;
+        text: label;
+        selected: GitHubSelectDemoState.value == index;
+        active: GitHubSelectState.open && GitHubSelectState.active-index == index;
+        activated => {
+            GitHubSelectDemoState.value = index;
+            GitHubSelectState.open = false;
+        }
+    }
+}
+
 export component GitHubUiComponentsGallery inherits Rectangle {
     callback navigate(Route);
     callback open-artifact-preview-fixture(string);
@@ -152,6 +178,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
     private property <string> filter-status: "all";
     private property <string> filter-owner: "any";
     private property <string> filter-sort: "newest";
+    private property <int> select-value: GitHubSelectDemoState.value;
 
     function show-toast-example(action: int) {
         if action == 0 {
@@ -572,6 +599,49 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                     checked: root.toggle-checked;
                     toggled(value) => { root.toggle-checked = value; }
                 }
+            }
+        }
+
+        GitHubShowcaseSection {
+            title: "Select";
+            description: "";
+            content-height: 120px;
+
+            select-trigger := GitHubSettingsSectionMenuButton {
+                x: 0px;
+                y: 0px;
+                width: min(320px, parent.width / 2 - GitHubMetrics.size-8);
+                text: root.select-value == 0 ? "System default"
+                    : (root.select-value == 1 ? "English" : "Chinese (Simplified)");
+                open: GitHubSelectState.open && GitHubSelectState.owner == "showcase";
+                restore-focus-on-close: GitHubSelectState.restore-focus;
+                changed absolute-position => {
+                    if self.open { GitHubSelectState.close(false); }
+                }
+                changed width => {
+                    if self.open { GitHubSelectState.close(false); }
+                }
+                clicked => {
+                  if self.open { GitHubSelectState.close(true); } else {
+                    GitHubSelectState.show("showcase", "" + root.select-value, root.select-value,
+                        select-trigger.absolute-position.x, select-trigger.absolute-position.y,
+                        select-trigger.width, select-trigger.height);
+                  }
+                }
+            }
+            select-disabled := GitHubSettingsSectionMenuButton {
+                x: parent.width / 2 + GitHubMetrics.size-8;
+                y: 0px;
+                width: min(320px, parent.width / 2 - GitHubMetrics.size-8);
+                text: "Disabled";
+                enabled: false;
+            }
+            select-name := GitHubTextField {
+                x: 0px;
+                y: 56px;
+                width: min(320px, parent.width);
+                label: "Name";
+                placeholder: "Project name";
             }
         }
 

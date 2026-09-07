@@ -3,7 +3,7 @@ import { I18n } from "@i18n";
 import { GitHubHomePage as HomePage } from "./views/home.slint";
 import { GitHubSearchPage as SearchPage } from "./views/search.slint";
 import { GitHubAboutPage as AboutPage } from "./views/about.slint";
-import { UiComponentsFeature, UiComponentsPage } from "@ui-components";
+import { UiComponentsFeature, UiComponentsPage, UiComponentsOverlay } from "@ui-components";
 import { GitHubWorkflowPage as WorkflowPage } from "./views/workflow/workflow.slint";
 import { GitHubJobRunPage as JobRunPage } from "./views/job_run.slint";
 import { WorkflowPullRequestItem } from "./components/workflow/github_pr_flow.slint";
@@ -21,6 +21,7 @@ import { DebugLogger } from "./state/debug_logger.slint";
 import { TransientOverlayState } from "./state/transient_overlay_state.slint";
 import { TooltipOverlayState } from "./state/tooltip_overlay_state.slint";
 import { GitHubTooltipOverlayHost } from "./components/github_tooltip_overlay.slint";
+import { GitHubSelectState } from "./components/input/github_select.slint";
 import { GitHubBreadcrumb } from "./components/navigation/github_breadcrumb.slint";
 import { NotificationManager, Notification, NotificationType, NotificationDelivery } from "./components/notify/notification.slint";
 import { NotificationIcons } from "./components/notify/icons.slint";
@@ -316,6 +317,7 @@ export component MainWindow inherits Window {
     // Backend bridges report a post-target window click without knowing which
     // reusable surface is mounted. The composition root owns region routing.
     callback post-dispatch-pointer-pressed(length, length);
+    callback post-dispatch-pointer-released(length, length);
     // One root-window key boundary. Rust owns normalization, scope, conflict
     // detection, command lookup, and dispatch for application shortcuts.
     callback app-shortcut-key-pressed(string, bool, bool, bool, bool) -> bool;
@@ -602,6 +604,13 @@ export component MainWindow inherits Window {
         // status bar without exposing that spacer.
         page-stack.height + 4px;
     callback settings-page-viewport-changed(length, length);
+    callback settings-select-pointer-released(length, length);
+    callback settings-select-dismiss();
+    private property <int> select-dismiss-revision: TransientOverlayState.dismiss-revision;
+    changed select-dismiss-revision => {
+        GitHubSelectState.close(false);
+        root.settings-select-dismiss();
+    }
     changed settings-page-viewport-width => {
         root.settings-page-viewport-changed(
             root.settings-page-viewport-width,
@@ -991,6 +1000,8 @@ export component MainWindow inherits Window {
     }
 
     changed current-route => {
+        GitHubSelectState.open = false;
+        root.settings-select-dismiss();
         root.ai-review-route-visible-changed(
             root.current-route == Route.PrReview && root.ai-review-panel-visible
         );
@@ -1054,6 +1065,8 @@ export component MainWindow inherits Window {
     }
 
     dismiss-transient-overlays => {
+        GitHubSelectState.close(false);
+        root.settings-select-dismiss();
         TransientOverlayState.dismiss-all();
     }
 
@@ -1064,6 +1077,15 @@ export component MainWindow inherits Window {
             && y >= root.ai-review-content-y
             && y < root.ai-review-content-y + root.ai-review-content-height {
             root.dismiss-transient-overlays();
+        }
+    }
+
+    post-dispatch-pointer-released(x, y) => {
+        GitHubSelectState.pointer-released(x, y);
+        if root.current-route == Route.Settings {
+            root.settings-select-pointer-released(
+                x - page-stack.absolute-position.x,
+                y - page-stack.absolute-position.y);
         }
     }
 
@@ -2937,6 +2959,8 @@ export component MainWindow inherits Window {
     // Shared tooltip portal: locators inside clipped page/scroll hosts publish
     // here so tips are never truncated by ancestor clip (z alone cannot escape).
     // The full-window host has no input handler; only its clamped tip child paints.
+    if root.current-route == Route.UiComponents: UiComponentsOverlay { z: 9000; }
+
     GitHubTooltipOverlayHost {
         x: 0px;
         y: 0px;

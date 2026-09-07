@@ -1118,7 +1118,7 @@ fn install_app_event_monitor(window: *mut Object) -> bool {
 
     // Observe title-bar clicks and key-down events in one application-local
     // monitor. Key codes avoid input-method-dependent logical punctuation.
-    // NSEventMaskLeftMouseDown = 1 << 1; NSEventMaskKeyDown = 1 << 10.
+    // LeftMouseDown/Up are bits 1/2; KeyDown is bit 10.
     let handler = RcBlock::new(move |event_ptr: *mut c_void| -> *mut c_void {
         let event = event_ptr.cast::<Object>();
         if event.is_null() {
@@ -1162,7 +1162,9 @@ fn install_app_event_monitor(window: *mut Object) -> bool {
         let click_y = (window_frame.size.height - location.y) as f32;
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(ui) = TITLEBAR_UI.get().and_then(slint::Weak::upgrade) {
-                if titlebar_clicked {
+                if event_type == 2 {
+                    ui.invoke_post_dispatch_pointer_released(click_x, click_y);
+                } else if titlebar_clicked {
                     ui.invoke_dismiss_transient_overlays();
                 } else {
                     ui.invoke_post_dispatch_pointer_pressed(click_x, click_y);
@@ -1175,7 +1177,7 @@ fn install_app_event_monitor(window: *mut Object) -> bool {
     let monitor: *mut Object = unsafe {
         msg_send![
             event_class,
-            addLocalMonitorForEventsMatchingMask: 2u64 | (1u64 << 10)
+            addLocalMonitorForEventsMatchingMask: 2u64 | 4u64 | (1u64 << 10)
             handler: &*handler
         ]
     };
