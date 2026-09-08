@@ -7335,7 +7335,7 @@ checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "usher"
-version = "0.0.8-alpha.1"
+version = "0.0.9-alpha.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -7400,7 +7400,7 @@ dependencies = [
 
 [[package]]
 name = "usher-ai-review"
-version = "0.0.8-alpha.1"
+version = "0.0.9-alpha.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -7409,14 +7409,14 @@ dependencies = [
 
 [[package]]
 name = "usher-fs"
-version = "0.0.8-alpha.1"
+version = "0.0.9-alpha.1"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "usher-i18n"
-version = "0.0.8-alpha.1"
+version = "0.0.9-alpha.1"
 dependencies = [
  "rspolib",
  "serde",
@@ -7426,7 +7426,7 @@ dependencies = [
 
 [[package]]
 name = "usher-messages"
-version = "0.0.8-alpha.1"
+version = "0.0.9-alpha.1"
 dependencies = [
  "chrono",
  "directories",
@@ -7443,7 +7443,7 @@ dependencies = [
 
 [[package]]
 name = "usher-preview"
-version = "0.0.8-alpha.1"
+version = "0.0.9-alpha.1"
 dependencies = [
  "image",
  "pulldown-cmark",
@@ -7460,15 +7460,15 @@ dependencies = [
 
 [[package]]
 name = "usher-search"
-version = "0.1.0"
+version = "0.0.9-alpha.1"
 
 [[package]]
 name = "usher-state-store"
-version = "0.0.8-alpha.1"
+version = "0.0.9-alpha.1"
 
 [[package]]
 name = "usher-ui"
-version = "0.0.7-alpha.1"
+version = "0.0.9-alpha.1"
 dependencies = [
  "slint",
  "slint-build",
@@ -7477,7 +7477,7 @@ dependencies = [
 
 [[package]]
 name = "usher-ui-settings"
-version = "0.0.8-alpha.1"
+version = "0.0.9-alpha.1"
 dependencies = [
  "slint",
  "slint-build",
@@ -7486,7 +7486,7 @@ dependencies = [
 
 [[package]]
 name = "usher-virtual-list"
-version = "0.1.0"
+version = "0.0.9-alpha.1"
 dependencies = [
  "virtualizer",
 ]

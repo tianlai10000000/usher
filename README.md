@@ -188,6 +188,11 @@ scripts/benchmark-memory.sh --runs 3 --scenarios home --fixture home-v1
 
 The command builds the selected release renderer, starts a fresh process per run, exercises fixed window/fullscreen phases, and writes raw TSV samples, summaries, and application logs under the ignored `memory-benchmark-results/` directory. Window automation requires Accessibility permission. Use `--prepare-hook` for fixed Workflow, PR Review, Chat, or Terminal fixtures; the executable receives `PID RUN SCENARIO`. See `--help` for renderer and sampling options.
 
+The hosted Nightly performance schedule is temporarily paused to avoid
+automatic macOS runner usage. The complete workflow remains available through
+manual `workflow_dispatch`; restore its commented `schedule` block when daily
+performance gates should resume.
+
 ## Configuration and local data
 
 Usher uses `directories::ProjectDirs::from("com", "usher", "app")` to select platform-native locations.
@@ -265,6 +270,9 @@ Pass a target explicitly when it cannot be inferred:
 ```
 
 The GitHub release workflow produces macOS archives/DMGs and Windows ZIP bundles.
+A pushed `v*` tag is the only automatic build trigger and starts the Release
+workflow. Direct `main` pushes and pull requests do not start a second build;
+CI remains available through manual `workflow_dispatch` when needed.
 
 ## Documentation
 

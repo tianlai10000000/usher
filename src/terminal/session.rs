@@ -13,6 +13,7 @@ pub struct PtySession {
     _pair: PtyPair,
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    #[cfg(unix)]
     process_id: Option<u32>,
 }
 
@@ -46,6 +47,7 @@ impl PtySession {
             .slave
             .spawn_command(cmd)
             .map_err(|error| format!("spawn shell failed: {error}"))?;
+        #[cfg(unix)]
         let process_id = child.process_id();
 
         let mut reader = pair
@@ -80,6 +82,7 @@ impl PtySession {
             _pair: pair,
             writer,
             child,
+            #[cfg(unix)]
             process_id,
         })
     }
@@ -107,7 +110,11 @@ impl PtySession {
     }
 
     pub fn terminate(&mut self) {
+        #[cfg(unix)]
         self.signal_process_tree(libc::SIGTERM);
+        #[cfg(not(unix))]
+        let _ = self.child.kill();
+
         let deadline = Instant::now() + Duration::from_millis(500);
         while Instant::now() < deadline {
             match self.child.try_wait() {
@@ -120,6 +127,7 @@ impl PtySession {
             }
         }
 
+        #[cfg(unix)]
         self.signal_process_tree(libc::SIGKILL);
         let _ = self.child.kill();
         if let Err(error) = self.child.wait() {
@@ -152,11 +160,6 @@ impl PtySession {
         } else {
             let _ = self.child.kill();
         }
-    }
-
-    #[cfg(not(unix))]
-    fn signal_process_tree(&mut self, _signal: libc::c_int) {
-        let _ = self.child.kill();
     }
 }
 

@@ -1,8 +1,10 @@
 name: Nightly performance gates
 
 on:
-  schedule:
-    - cron: "0 18 * * *"
+  # Scheduled execution is temporarily paused to avoid automatic hosted
+  # macOS runner usage. Restore this block when nightly gates are re-enabled:
+  # schedule:
+  #   - cron: "0 18 * * *"
   workflow_dispatch:
 
 permissions:

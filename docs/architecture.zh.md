@@ -109,7 +109,9 @@ commit 持久化。叶子模块不反向导入 controller；拆分不改变缓�
 调度、generation guard、存储格式或关闭优先级。
 
 结构门禁保留原 controller/根窗口预算，并增加提取模块规模与反向 controller
-依赖检查。CI 覆盖 PR、`main` push 和手工触发。Nightly 只构建一个 Release
+依赖检查。CI 仅支持手工触发；直接 push `main` 或创建 PR 都不会启动第二个
+workflow。push `v*` tag 是唯一的自动构建触发器，由 Release workflow 负责。
+Nightly 只构建一个 Release
 二进制，先运行原有三进程 Home RSS/footprint 门禁，再通过
 `scripts/benchmark-hot-paths.py` 串行运行 Project、Job、Preview 代码/段落、
 Find。每个热点使用相同哈希执行三组 AB/BA/AB 重复性对照；绝对 RSS、阶段增长、
@@ -470,7 +472,7 @@ unpacked 策略升级后，开发者应执行一次完整 `cargo clean`；后续
 Slint 窗口启动时不显示标准标题。macOS 等待原生标题栏附件时不挂载替代的 Slint
 控件；该区域只显示最终 AppKit 侧栏与历史控件。
 
-Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可在运行时关闭，Release 基准仍可通过 `USHER_MEMORY_DIAGNOSTICS=1` 强制启用。`[Memory][Diag]` 记录当前/峰值 RSS 与物理 footprint、相对上次/启动基线的增量、进程生命周期高水位、运行/场景标识，以及最近页面、逻辑/物理窗口尺寸、缩放和 Terminal 可见性；同时保留 VM 分类、macOS 全部 malloc zone 汇总的在用/保留/slack 容量、region、Mach port、线程、fault 与 page-in。`[Memory][UI Models]` 区分 AI Review 源 rows/blocks 与 retained/virtual delegate 创建计数，区分已挂载内容与实际绘制内容，并关联 PR 上下文 Preview host；`[Memory][UI]` 关联稳定后的页面/窗口变化，`[Workflow][PR Review][Memory]` 等功能归属日志只记录有界 model/cache 的数量和容量，不得输出源码内容或凭据。采样任务复用共享 runtime，并由正常的 pre-shutdown 流程停止。`scripts/benchmark-memory.sh` 负责 macOS Release 测量协议并汇总外部 RSS/footprint 采样。仅在显式设置 `USHER_MEMORY_WINDOW_CONTROL=signal-file-v1` 时，基准专用信号 Worker 才读取每个 run 独立的命令文件，并把 AppKit resize/fullscreen 请求投递到 Slint event loop；pre-shutdown 会关闭其信号 handle。外部 Swift helper 只读取 CoreGraphics 窗口状态，用于确认每次切换并独立记录实际全屏尺寸。基准元数据记录应用变体与二进制哈希；比较器只允许渲染器、应用所有权或 Tokio worker 中的一个维度变化，其他 fixture/协议不匹配一律拒绝。`.github/workflows/nightly-performance.yml` 每日使用 3 个隔离进程运行静态 Release Home 协议；`scripts/check-memory-benchmark-thresholds.py` 必须观察到预期路由，并在上传原始证据前同时检查 RSS/footprint 绝对峰值与周期中位增长预算。
+Debug 构建默认启用进程内存诊断；持久化的 Settings 控制项可在运行时关闭，Release 基准仍可通过 `USHER_MEMORY_DIAGNOSTICS=1` 强制启用。`[Memory][Diag]` 记录当前/峰值 RSS 与物理 footprint、相对上次/启动基线的增量、进程生命周期高水位、运行/场景标识，以及最近页面、逻辑/物理窗口尺寸、缩放和 Terminal 可见性；同时保留 VM 分类、macOS 全部 malloc zone 汇总的在用/保留/slack 容量、region、Mach port、线程、fault 与 page-in。`[Memory][UI Models]` 区分 AI Review 源 rows/blocks 与 retained/virtual delegate 创建计数，区分已挂载内容与实际绘制内容，并关联 PR 上下文 Preview host；`[Memory][UI]` 关联稳定后的页面/窗口变化，`[Workflow][PR Review][Memory]` 等功能归属日志只记录有界 model/cache 的数量和容量，不得输出源码内容或凭据。采样任务复用共享 runtime，并由正常的 pre-shutdown 流程停止。`scripts/benchmark-memory.sh` 负责 macOS Release 测量协议并汇总外部 RSS/footprint 采样。仅在显式设置 `USHER_MEMORY_WINDOW_CONTROL=signal-file-v1` 时，基准专用信号 Worker 才读取每个 run 独立的命令文件，并把 AppKit resize/fullscreen 请求投递到 Slint event loop；pre-shutdown 会关闭其信号 handle。外部 Swift helper 只读取 CoreGraphics 窗口状态，用于确认每次切换并独立记录实际全屏尺寸。基准元数据记录应用变体与二进制哈希；比较器只允许渲染器、应用所有权或 Tokio worker 中的一个维度变化，其他 fixture/协议不匹配一律拒绝。`.github/workflows/nightly-performance.yml` 保留完整性能门禁，但其托管定时触发已暂时暂停，目前只有 `workflow_dispatch` 可以启动。手动运行时会使用 3 个隔离进程执行静态 Release Home 协议；`scripts/check-memory-benchmark-thresholds.py` 必须观察到预期路由，并在上传原始证据前同时检查 RSS/footprint 绝对峰值与周期中位增长预算。
 
 ## 并发模型
 

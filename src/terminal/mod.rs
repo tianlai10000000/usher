@@ -14,6 +14,7 @@ use render::{RenderedTerminalLine, TerminalCursorState, TerminalRenderState};
 use session::{PtySession, SessionEvent};
 use slint::{ComponentHandle, ModelRc, Timer, VecModel};
 use std::cell::RefCell;
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::sync::{

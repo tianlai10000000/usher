@@ -1,6 +1,6 @@
 msgid ""
 msgstr ""
-"Project-Id-Version: Usher 0.0.8-alpha.1\n"
+"Project-Id-Version: Usher 0.0.9-alpha.1\n"
 "Language: zh-CN\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"

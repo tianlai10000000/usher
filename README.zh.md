@@ -176,6 +176,10 @@ scripts/benchmark-memory.sh --runs 3 --scenarios home --fixture home-v1
 
 该命令会构建选定的 Release 渲染器，每轮启动全新进程，执行固定窗口尺寸/全屏阶段，并把原始 TSV、汇总与应用日志写入已忽略的 `memory-benchmark-results/`。窗口自动化需要辅助功能权限。固定 Workflow、PR Review、Chat 或 Terminal fixture 时使用 `--prepare-hook`；可执行 hook 会收到 `PID RUN SCENARIO`。渲染器与采样选项见 `--help`。
 
+为避免自动消耗托管 macOS runner，Nightly performance 的定时触发目前暂时暂停。
+完整 workflow 仍可通过 `workflow_dispatch` 手动运行；需要恢复每日性能门禁时，取消
+其中 `schedule` 配置的注释即可。
+
 ## 配置和本地数据
 
 Usher 使用 `directories::ProjectDirs::from("com", "usher", "app")` 选择各平台的原生目录。
@@ -252,6 +256,9 @@ material-1.7.1-fixed/            内置 Slint v1.17.1 Material 库
 ```
 
 GitHub Release 工作流会生成 macOS 压缩包/DMG 和 Windows ZIP Bundle。
+push `v*` tag 是唯一的自动构建触发器，只会启动 Release workflow；直接 push
+`main` 或创建 Pull Request 都不会再启动第二次构建。需要额外验证时仍可通过
+`workflow_dispatch` 手动运行 CI。
 
 ## 文档
 
