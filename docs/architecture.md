@@ -250,8 +250,18 @@ Cold parser cache misses publish `ParserLoading` and `ParserReady` progress.
 The application facade maps these to the shared spinner label through a weak
 window on the Slint event loop and checks the request generation both before and
 after scheduling, so canceled work cannot overwrite a newer Preview.
-The feature-owned Parley layout bridge measures every block at a settled content
-width and supplies one exact extent model to `usher-virtual-list`, the Preview
+The provider worker also prepares immutable measurement input. `measurement.rs`
+measures blocks on the shared blocking pool, keyed by document revision, settled
+width and font family. `app_runtime/latest_compute.rs` retains one active
+calculation, one replaceable input and one output, cancels stale generations
+between blocks, and drains active work during shutdown. `virtual_layout.rs`
+keeps the last exact layout until a current result arrives; host-local epochs
+refresh layout without resetting the document or scroll position. New documents
+reuse the preparation indicator until measurement completes. Both hosts use the
+same contract. `projection_model.rs` lazily converts at most 32 cached blocks
+and 128 cached code lines per converted block; fences keep their full geometry
+while mounting visible lines plus four lines of overscan on each side. Copy
+still uses the complete source. The bridge supplies one exact extent model to `usher-virtual-list`, the Preview
 `Flickable`, and the application-owned Primer scrollbar. Ordinary scrolling
 reuses one stable `VecModel` while the viewport remains inside the exact
 three-block overscan guard. Crossing that guard incrementally removes and appends
@@ -860,7 +870,22 @@ width approximations for punctuation, CJK fallback, kerning, bold, and italic
 runs while retaining a 256-layout cache ceiling. Wrapped rows continue to use
 Slint's native UTF-8 `TextInput.word-wrap` geometry.
 
-Each explicit Find navigation command completes its calculation and optional viewport write immediately. There is no pending request for later scrolling or layout work to cancel or restart. Query changes, manual scrolling, resize, and focus changes preserve the query, counter, active result, and active highlight without moving the viewport.
+`pr_review/find_bridge.rs` owns the event-loop Find model and callback bindings;
+`find_worker.rs` scans shared immutable source/projection data on the shared
+blocking pool using `usher-search`. The latest-computation mailbox bounds work
+to one active scan, one pending query and one output, with generation cancellation
+on typing, line replacement, close and review reset. Results contain compact hit
+ranges and a row/pane index; converted hit and row-model caches each hold at most
+128 entries. Storage remains proportional to the active file and its hit count.
+Row paint reuses an index only for the same source model and query, otherwise it
+resolves the requested mounted row locally.
+
+Typing keeps the 180 ms debounce, clears stale results, and selects/highlights the
+first result when the current scan completes. Completion never moves the viewport.
+Each explicit Find navigation command uses completed results for at most one
+viewport write. A command during a pending scan flushes the debounce but is not
+replayed later. Manual scrolling, resize and focus changes preserve completed
+query presentation without moving the viewport through Find.
 
 Commit links in Conversation and Commits reuse the Files changed workspace by resolving the selected SHA and applying it as a one-item commit range. The review controller records the originating Conversation or Commits tab as a feature-local drill-down checkpoint, so shell Back restores that tab before the next Back returns to the Workflow PR list. When the commit list is still lazy, the controller completes that load before applying the pending selection; Copy SHA remains independent.
 

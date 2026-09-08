@@ -517,6 +517,7 @@ export component MainWindow inherits Window {
     in-out property <ArtifactPreviewKind> artifact-preview-kind: ArtifactPreviewKind.None;
     in property <[ArtifactPreviewBlock]> artifact-preview-blocks: [];
     in-out property <int> artifact-preview-markdown-layout-revision: 0;
+    in-out property <int> artifact-preview-markdown-layout-epoch: 0;
     in-out property <string> artifact-preview-plain-text: "";
     in-out property <image> artifact-preview-image;
     in-out property <string> artifact-preview-error: "";
@@ -723,6 +724,7 @@ export component MainWindow inherits Window {
     in property <int> workflow-pr-review-max-code-columns: 0;
     in property <string> workflow-pr-review-longest-code-line;
     in property <int> workflow-pr-review-line-content-revision: 0;
+    in property <int> workflow-pr-review-find-result-revision: 0;
     in property <int> workflow-pr-review-line-model-revision: 0;
     in property <bool> workflow-pr-review-scroll-diagnostics-enabled: false;
     in property <int> workflow-pr-review-hunk-scroll-anchor-source-index: -1;
@@ -1809,6 +1811,7 @@ export component MainWindow inherits Window {
                 && !root.artifact-preview-pr-side-docked-visible;
             performance-optimized: root.artifact-preview-performance-optimized;
             markdown-layout-revision: root.artifact-preview-markdown-layout-revision;
+            markdown-layout-epoch: root.artifact-preview-markdown-layout-epoch;
             application-font-family: root.application-font-family;
             code-font-family: root.workflow-pr-review-code-font-family;
             layout-markdown-window(
@@ -2288,6 +2291,7 @@ export component MainWindow inherits Window {
         max-code-columns: root.workflow-pr-review-max-code-columns;
         longest-code-line: root.workflow-pr-review-longest-code-line;
         line-content-revision: root.workflow-pr-review-line-content-revision;
+        find-result-revision: root.workflow-pr-review-find-result-revision;
         line-model-revision: root.workflow-pr-review-line-model-revision;
         scroll-diagnostics-enabled: root.workflow-pr-review-scroll-diagnostics-enabled;
         hunk-scroll-anchor-source-index: root.workflow-pr-review-hunk-scroll-anchor-source-index;

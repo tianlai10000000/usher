@@ -1,4 +1,5 @@
 use std::sync::Arc;
+pub(crate) mod latest_compute;
 
 use tokio::runtime::{Builder, Runtime};
 

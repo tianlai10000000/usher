@@ -26,9 +26,12 @@ use crate::{
     ArtifactPreviewKind, ArtifactPreviewWindow, MainWindow,
 };
 
+mod benchmark;
 #[cfg(feature = "test-fixtures")]
 mod fixtures;
+mod measurement;
 pub(crate) mod performance;
+mod projection_model;
 mod virtual_layout;
 
 use virtual_layout::MarkdownVirtualLayoutBridge;
@@ -542,6 +545,7 @@ fn preparation_progress_message(progress: PreviewPreparationProgress) -> String 
 }
 
 pub(crate) fn setup(ui: &MainWindow, settings: &PreviewSettings) -> ArtifactPreviewHandle {
+    benchmark::setup(ui);
     let performance_optimized =
         std::env::var("USHER_PREVIEW_PERF_VARIANT").as_deref() != Ok("baseline");
     ui.set_artifact_preview_performance_optimized(performance_optimized);
@@ -559,9 +563,25 @@ pub(crate) fn setup(ui: &MainWindow, settings: &PreviewSettings) -> ArtifactPrev
             Rc::new(RefCell::new(MarkdownVirtualLayoutBridge::from_environment()));
         runtime.docked_virtual_layout.clone()
     });
+    let weak = ui.as_weak();
+    let acknowledge = Arc::new(docked_virtual_layout.borrow().notification_acknowledger());
+    docked_virtual_layout.borrow_mut().enable_worker(move || {
+        let weak = weak.clone();
+        let acknowledge = acknowledge.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            acknowledge();
+            if let Some(ui) = weak.upgrade() {
+                ui.set_artifact_preview_markdown_layout_epoch(
+                    ui.get_artifact_preview_markdown_layout_epoch()
+                        .wrapping_add(1),
+                );
+            }
+        });
+    });
     let layout_bridge = docked_virtual_layout.clone();
     ui.on_artifact_preview_layout_markdown_window(
         move |revision, blocks, scroll_offset, visible_height, content_width, font_family| {
+            let started = std::time::Instant::now();
             let mut layout_bridge = layout_bridge.borrow_mut();
             let window = layout_bridge.layout(
                 revision,
@@ -574,6 +594,7 @@ pub(crate) fn setup(ui: &MainWindow, settings: &PreviewSettings) -> ArtifactPrev
             if let Some((projected, mounted_rows)) = layout_bridge.take_scroll_activity() {
                 performance::mark_scroll("docked-divider", projected, mounted_rows);
             }
+            benchmark::layout(started, &window);
             window
         },
     );
@@ -729,26 +750,32 @@ struct UiPreparedPayload {
 }
 
 enum UiPreparedContent {
-    Markdown(Vec<UiPreparedMarkdownBlock>),
+    Markdown(
+        Vec<UiPreparedMarkdownBlock>,
+        Arc<Vec<measurement::MeasurementBlock>>,
+    ),
     PlainText(String),
     Image(usher_preview::DecodedImage),
 }
 
+#[derive(Clone)]
 struct UiPreparedMarkdownBlock {
     kind: ArtifactPreviewBlockKind,
     styled: slint::StyledText,
     list_marker: String,
     list_depth: i32,
-    code_lines: Vec<UiPreparedCodeLine>,
+    code_lines: Arc<Vec<UiPreparedCodeLine>>,
     code_language: String,
     plain_text: String,
     layout_spans: Vec<ArtifactPreviewInlineSpan>,
 }
 
+#[derive(Clone)]
 struct UiPreparedCodeLine {
     tokens: Vec<UiPreparedCodeToken>,
 }
 
+#[derive(Clone)]
 struct UiPreparedCodeToken {
     text: String,
     light_color: [u8; 4],
@@ -760,18 +787,12 @@ struct UiPreparedCodeToken {
 impl UiPreparedPayload {
     fn into_ui_payload(self) -> UiPayload {
         let (kind, blocks, plain_text, image) = match self.content {
-            UiPreparedContent::Markdown(blocks) => {
-                let blocks = blocks
-                    .into_iter()
-                    .map(UiPreparedMarkdownBlock::into_ui_block)
-                    .collect::<Vec<_>>();
-                (
-                    ArtifactPreviewKind::Markdown,
-                    ModelRc::new(Rc::new(VecModel::from(blocks))),
-                    "".into(),
-                    slint::Image::default(),
-                )
-            }
+            UiPreparedContent::Markdown(blocks, measurements) => (
+                ArtifactPreviewKind::Markdown,
+                ModelRc::new(projection_model::MarkdownModel::new(blocks, measurements)),
+                "".into(),
+                slint::Image::default(),
+            ),
             UiPreparedContent::PlainText(text) => (
                 ArtifactPreviewKind::PlainText,
                 ModelRc::default(),
@@ -834,7 +855,21 @@ fn adapt_prepared_worker(
                 .collect::<Result<Vec<_>, usher_preview::PreviewError>>()?;
             UiPreparedPayload {
                 title: prepared.title,
-                content: UiPreparedContent::Markdown(blocks),
+                content: {
+                    let measurements = Arc::new(
+                        blocks
+                            .iter()
+                            .map(|block| measurement::MeasurementBlock {
+                                kind: block.kind,
+                                plain_text: block.plain_text.clone(),
+                                list_depth: block.list_depth,
+                                code_language: block.code_language.clone(),
+                                layout_spans: block.layout_spans.clone(),
+                            })
+                            .collect(),
+                    );
+                    UiPreparedContent::Markdown(blocks, measurements)
+                },
                 can_copy,
                 can_open_external,
                 copy_content: document.plain_text,
@@ -878,35 +913,7 @@ impl UiPreparedMarkdownBlock {
             styled: self.styled,
             list_marker: self.list_marker.into(),
             list_depth: self.list_depth,
-            code_lines: ModelRc::new(Rc::new(VecModel::from(
-                self.code_lines
-                    .into_iter()
-                    .map(|line| ArtifactPreviewCodeLine {
-                        tokens: ModelRc::new(Rc::new(VecModel::from(
-                            line.tokens
-                                .into_iter()
-                                .map(|token| ArtifactPreviewCodeToken {
-                                    text: token.text.into(),
-                                    light_color: slint::Color::from_argb_u8(
-                                        token.light_color[0],
-                                        token.light_color[1],
-                                        token.light_color[2],
-                                        token.light_color[3],
-                                    ),
-                                    dark_color: slint::Color::from_argb_u8(
-                                        token.dark_color[0],
-                                        token.dark_color[1],
-                                        token.dark_color[2],
-                                        token.dark_color[3],
-                                    ),
-                                    bold: token.bold,
-                                    italic: token.italic,
-                                })
-                                .collect::<Vec<_>>(),
-                        ))),
-                    })
-                    .collect::<Vec<_>>(),
-            ))),
+            code_lines: ModelRc::new(projection_model::CodeLinesModel::new(self.code_lines)),
             code_language: self.code_language.into(),
             plain_text: self.plain_text.into(),
             layout_spans: ModelRc::new(Rc::new(VecModel::from(self.layout_spans))),
@@ -958,7 +965,7 @@ fn adapt_markdown_block(block: &CoreMarkdownBlock) -> UiPreparedMarkdownBlock {
         styled: styled_text_for(&display_block),
         list_marker,
         list_depth,
-        code_lines: prepared_code_lines(block),
+        code_lines: Arc::new(prepared_code_lines(block)),
         code_language: block.code_language.clone(),
         plain_text: display_block.text,
         layout_spans,
@@ -1299,6 +1306,19 @@ fn ensure_detached_window(
     window.set_native_titlebar_actions(cfg!(target_os = "macos"));
     let detached_virtual_layout =
         Rc::new(RefCell::new(MarkdownVirtualLayoutBridge::from_environment()));
+    let weak = window.as_weak();
+    let acknowledge = Arc::new(detached_virtual_layout.borrow().notification_acknowledger());
+    detached_virtual_layout.borrow_mut().enable_worker(move || {
+        let weak = weak.clone();
+        let acknowledge = acknowledge.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            acknowledge();
+            if let Some(window) = weak.upgrade() {
+                window
+                    .set_markdown_layout_epoch(window.get_markdown_layout_epoch().wrapping_add(1));
+            }
+        });
+    });
     window.on_layout_markdown_window(
         move |revision, blocks, scroll_offset, visible_height, content_width, font_family| {
             let mut layout_bridge = detached_virtual_layout.borrow_mut();

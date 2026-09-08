@@ -346,6 +346,38 @@ ASCII Markdown 标点前残留的一层转义（包括行内代码 identifier）
 target 继续逐字节保留。
 解析后仍以普通正文成对残留的 `**` 视为模型格式残渣并隐藏；单个字面量仍保留显示。
 
+## Large-document computation / 大文档计算
+
+- The provider worker prepares immutable, sendable measurement input. Stable
+  document revision, width and font family key an exact Parley measurement on
+  the shared blocking pool. New requests replace the single pending input and
+  cancel older work between blocks; stale results never commit to either host.
+- Layout retains its previous exact width/extent while a replacement is pending.
+  A new document shows the existing preparation indicator until exact extents
+  arrive. Completion invalidates a host-local layout epoch, not the document
+  revision, so it does not reset scrolling. Closing clears pending computation
+  and heavy projections; shutdown cancels and drains active calculations.
+- A fenced block keeps its full geometric height but mounts only visible code
+  lines plus four lines of overscan on each side. Line indices and prepared
+  light/dark tokens preserve source order. UI conversion caches hold at most
+  32 blocks and 128 code lines per converted block; scrolling never converts the
+  complete fence. Copy still uses the complete original payload.
+- Regression covers 12,000-line fences, mixed CJK/English paragraphs, exact
+  synchronous/worker extent equality, obsolete-document cancellation, bounded
+  conversion, resize completion, final-tail reachability and host close.
+
+- Provider Worker 准备不可变、可跨线程的测量输入；文档版本、稳定宽度和字体族
+  共同标识共享 blocking pool 上的精确 Parley 测量。最多一个待处理输入，新请求
+  在 block 边界取消旧工作，过期结果不得提交给任一 Host。
+- 替换测量期间保留上一份精确宽度和 extent；新文档在结果到来前显示已有准备
+  指示器。完成只更新 Host 局部布局 epoch，不修改文档 revision，不重置滚动。
+  关闭清理待处理计算及重投影，退出取消并等待正在执行的计算。
+- 围栏保留完整几何高度，只挂载可见代码行及前后各四行 overscan。源码顺序与已
+  准备的亮/暗色 token 不变；UI 转换缓存最多 32 个 block、每个已转换 block 最多
+  128 个代码行，滚动不得转换完整围栏。复制仍使用完整原始 payload。
+- 回归涵盖 12,000 行围栏、中英文段落、同步/后台精确 extent 一致性、过期文档
+  取消、有界转换、resize 完成、最终尾部可达及 Host 关闭。
+
 ## Chat integration / Chat 集成
 
 Chat no longer owns Markdown block rendering or width-dependent wrapping. A

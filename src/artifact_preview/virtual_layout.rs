@@ -1,35 +1,18 @@
 //! Exact Markdown geometry for the Preview virtual surface.
 
-use std::borrow::Cow;
-use std::rc::Rc;
-
-use parley::fontique::GenericFamily;
-#[cfg(not(test))]
-use parley::fontique::SourceCache;
-use parley::style::{
-    FontFamily, FontFamilyName, FontStyle, FontWeight, LineHeight, OverflowWrap, TextWrapMode,
-    WordBreak,
-};
-use parley::{FontContext, LayoutContext, StyleProperty};
+#[cfg(test)]
+use super::measurement::block_padding_top;
+use super::measurement::{MeasurementBlock, Measurer};
+use crate::app_runtime::latest_compute::LatestCompute;
+use crate::{ArtifactPreviewBlock, ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow};
+#[cfg(test)]
+use crate::{ArtifactPreviewBlockKind, ArtifactPreviewInlineKind};
 use slint::{Model, ModelRc, VecModel};
+use std::rc::Rc;
+use std::sync::Arc;
 use usher_virtual_list::{VirtualList, VirtualWindow};
 
-use crate::{
-    ArtifactPreviewBlock, ArtifactPreviewBlockKind, ArtifactPreviewInlineKind,
-    ArtifactPreviewVirtualRow, ArtifactPreviewVirtualWindow,
-};
-
 const MARKDOWN_OVERSCAN_BLOCKS: usize = 3;
-const MAX_CONTENT_WIDTH: f32 = 800.0;
-const WIDE_HORIZONTAL_PADDING: f32 = 48.0;
-const NARROW_HORIZONTAL_PADDING: f32 = 32.0;
-const NARROW_BREAKPOINT: f32 = 560.0;
-const DOCUMENT_TOP_PADDING: f32 = 12.0;
-const DOCUMENT_BOTTOM_PADDING: f32 = 32.0;
-const GLYPH_SAFETY_HEIGHT: f32 = 4.0;
-const BODY_LINE_HEIGHT: f32 = 22.0;
-const CODE_LINE_HEIGHT: f32 = 19.0;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LayoutKey {
     revision: i32,
@@ -51,8 +34,11 @@ pub(super) struct MarkdownVirtualLayoutBridge {
     projection_policy: ProjectionPolicy,
     last_scroll_offset: Option<u64>,
     pending_scroll_activity: Option<(bool, usize)>,
-    font_context: FontContext,
-    layout_context: LayoutContext<()>,
+    measurer: Measurer,
+    worker: LatestCompute<MeasureRequest, MeasureResult>,
+    wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    requested: Option<LayoutKey>,
+    measurements: Option<(i32, Arc<Vec<MeasurementBlock>>)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,27 +79,38 @@ impl MarkdownVirtualLayoutBridge {
             projection_policy,
             last_scroll_offset: None,
             pending_scroll_activity: None,
-            font_context: preview_font_context(),
-            layout_context: LayoutContext::new(),
+            measurer: Measurer::default(),
+            worker: LatestCompute::new(),
+            wake: None,
+            requested: None,
+            measurements: None,
         }
     }
 }
 
-#[cfg(not(test))]
-fn preview_font_context() -> FontContext {
-    FontContext {
-        collection: slint::fontique_010::shared_collection(),
-        source_cache: SourceCache::default(),
-    }
+struct MeasureRequest {
+    key: LayoutKey,
+    blocks: Arc<Vec<MeasurementBlock>>,
+    collection: parley::fontique::Collection,
 }
-
-#[cfg(test)]
-fn preview_font_context() -> FontContext {
-    FontContext::new()
+struct MeasureResult {
+    key: LayoutKey,
+    extents: Vec<u32>,
 }
 
 impl MarkdownVirtualLayoutBridge {
+    pub(super) fn enable_worker(&mut self, wake: impl Fn() + Send + Sync + 'static) {
+        self.wake = Some(Arc::new(wake));
+    }
+    pub(super) fn notification_acknowledger(&self) -> impl Fn() + Send + Sync + 'static {
+        let worker = self.worker.clone();
+        move || worker.acknowledge()
+    }
+
     pub(super) fn reset_document(&mut self) {
+        self.worker.cancel();
+        self.requested = None;
+        self.measurements = None;
         self.list
             .replace_item_extents(&[], MARKDOWN_OVERSCAN_BLOCKS);
         self.layout_key = None;
@@ -124,8 +121,7 @@ impl MarkdownVirtualLayoutBridge {
         self.projection_guard = None;
         self.last_scroll_offset = None;
         self.pending_scroll_activity = None;
-        self.font_context = preview_font_context();
-        self.layout_context = LayoutContext::new();
+        self.measurer = Measurer::default();
     }
 
     pub(super) fn layout(
@@ -144,28 +140,95 @@ impl MarkdownVirtualLayoutBridge {
             font_family: font_family.to_owned(),
             block_count: blocks.row_count(),
         };
-        if self.layout_key.as_ref() != Some(&key) {
-            let text_width = markdown_block_width(content_width);
-            let last_index = blocks.row_count().saturating_sub(1);
-            let mut previous_kind = None;
-            let mut extents = Vec::with_capacity(blocks.row_count());
-            for (index, block) in blocks.iter().enumerate() {
-                extents.push(self.block_extent(
-                    &block,
-                    text_width,
-                    font_family,
-                    previous_kind,
-                    index == 0,
-                    index == last_index,
-                ));
-                previous_kind = Some(block.kind);
+        if let Some(result) = self.worker.take_output() {
+            if result.key == key {
+                self.install_extents(result.key, result.extents);
+            } else if self.requested.as_ref() == Some(&result.key) {
+                self.requested = None;
             }
-            self.list
-                .replace_item_extents(&extents, MARKDOWN_OVERSCAN_BLOCKS);
-            self.content_extent = extents.iter().map(|extent| u64::from(*extent)).sum();
-            self.layout_key = Some(key);
-            self.projection_guard = None;
-            self.projected_indices.clear();
+        }
+        if self.layout_key.as_ref() == Some(&key)
+            && self
+                .requested
+                .as_ref()
+                .is_some_and(|requested| requested != &key)
+        {
+            self.worker.cancel();
+            self.requested = None;
+        }
+        if self.layout_key.as_ref() != Some(&key) && self.requested.as_ref() != Some(&key) {
+            let document_changed = self
+                .layout_key
+                .as_ref()
+                .is_none_or(|old| old.revision != revision);
+            let input = if let Some(model) = blocks
+                .as_any()
+                .downcast_ref::<super::projection_model::MarkdownModel>()
+            {
+                model.measurements.clone()
+            } else if let Some((cached_revision, input)) = &self.measurements {
+                if *cached_revision == revision {
+                    input.clone()
+                } else {
+                    snapshot(blocks)
+                }
+            } else {
+                snapshot(blocks)
+            };
+            self.measurements = Some((revision, input.clone()));
+            if let Some(wake) = self.wake.clone() {
+                self.requested = Some(key.clone());
+                if document_changed {
+                    self.rows_model.set_vec(Vec::new());
+                    self.projected_indices.clear();
+                    self.content_extent = 0;
+                    self.projection_guard = None;
+                    self.layout_key = None;
+                }
+                self.worker.submit(
+                    MeasureRequest {
+                        key: key.clone(),
+                        blocks: input,
+                        collection: self.measurer.collection(),
+                    },
+                    |request, token| {
+                        let started = std::time::Instant::now();
+                        let mut measurer = Measurer::with_collection(request.collection);
+                        let extents = measurer.measure(
+                            &request.blocks,
+                            f32::from_bits(request.key.content_width_bits),
+                            &request.key.font_family,
+                            || token.cancelled(),
+                        )?;
+                        if super::benchmark::enabled() {
+                            log::info!(
+                                "[P5][60] measure_us={} blocks={}",
+                                started.elapsed().as_micros(),
+                                extents.len()
+                            );
+                        }
+                        Some(MeasureResult {
+                            key: request.key,
+                            extents,
+                        })
+                    },
+                    move || wake(),
+                );
+            } else {
+                let extents = self
+                    .measurer
+                    .measure(&input, content_width, font_family, || false)
+                    .unwrap();
+                self.install_extents(key.clone(), extents);
+            }
+        }
+        if self.layout_key.is_none() {
+            return ArtifactPreviewVirtualWindow {
+                rows: self.rows.clone(),
+                loading: true,
+                layout_width: content_width,
+                ..Default::default()
+            };
         }
 
         let viewport_extent = u64::from(to_u32(viewport_extent).max(1));
@@ -191,6 +254,11 @@ impl MarkdownVirtualLayoutBridge {
 
         let output = ArtifactPreviewVirtualWindow {
             rows,
+            loading: self.layout_key.as_ref() != Some(&key),
+            layout_width: self
+                .layout_key
+                .as_ref()
+                .map_or(content_width, |key| f32::from_bits(key.content_width_bits)),
             scroll_offset: scroll_offset.min(f32::MAX as u64) as f32,
             content_height: self.content_extent.min(f32::MAX as u64) as f32,
             projection_revision: self.projection_commits.min(i32::MAX as u64) as i32,
@@ -333,259 +401,57 @@ impl MarkdownVirtualLayoutBridge {
         self.projected_indices = next_indices;
     }
 
+    fn install_extents(&mut self, key: LayoutKey, extents: Vec<u32>) {
+        self.requested = None;
+        self.list
+            .replace_item_extents(&extents, MARKDOWN_OVERSCAN_BLOCKS);
+        self.content_extent = extents.iter().map(|extent| u64::from(*extent)).sum();
+        self.layout_key = Some(key);
+        self.projection_guard = None;
+        self.projected_indices.clear();
+    }
+    #[cfg(test)]
     fn block_extent(
         &mut self,
         block: &ArtifactPreviewBlock,
-        block_width: f32,
-        application_font_family: &str,
-        previous_kind: Option<ArtifactPreviewBlockKind>,
+        width: f32,
+        font: &str,
+        previous: Option<ArtifactPreviewBlockKind>,
         first: bool,
         last: bool,
     ) -> u32 {
-        let edge_padding = if first { DOCUMENT_TOP_PADDING } else { 0.0 }
-            + if last { DOCUMENT_BOTTOM_PADDING } else { 0.0 };
-        if block.kind == ArtifactPreviewBlockKind::Rule {
-            return to_u32(57.0 + edge_padding).max(1);
-        }
-
-        let metrics = block_metrics(block.kind);
-        let padding_top = block_padding_top(block.kind, previous_kind, first, &block.code_language);
-        if block.kind == ArtifactPreviewBlockKind::CodeBlock {
-            let line_count = block.plain_text.as_str().lines().count().max(1) as f32;
-            return to_u32(
-                line_count * CODE_LINE_HEIGHT + padding_top + metrics.padding_bottom + edge_padding,
-            )
-            .max(1);
-        }
-        let content_inset = block_content_inset(block);
-        let text_width = if block.kind == ArtifactPreviewBlockKind::ListItem {
-            block_width - content_inset
-        } else {
-            block_width - content_inset * 2.0
-        }
-        .max(1.0);
-        let family = if block.kind == ArtifactPreviewBlockKind::CodeBlock {
-            "monospace"
-        } else {
-            application_font_family
-        };
-        let text_height = self.measure_text(block, family, metrics.font_size, text_width);
-        to_u32(
-            text_height + GLYPH_SAFETY_HEIGHT + padding_top + metrics.padding_bottom + edge_padding,
+        self.measurer.block_extent(
+            &measurement_block(block),
+            width,
+            font,
+            previous,
+            first,
+            last,
         )
-        .max(1)
-    }
-
-    fn measure_text(
-        &mut self,
-        block: &ArtifactPreviewBlock,
-        family: &str,
-        font_size: f32,
-        wrap_width: f32,
-    ) -> f32 {
-        let text = block.plain_text.as_str();
-        let families = [
-            FontFamilyName::named(family),
-            FontFamilyName::Generic(GenericFamily::SansSerif),
-            FontFamilyName::Generic(GenericFamily::SystemUi),
-        ];
-        let mut builder =
-            self.layout_context
-                .ranged_builder(&mut self.font_context, text, 1.0, false);
-        builder.push_default(FontFamily::List(Cow::Borrowed(&families)));
-        builder.push_default(StyleProperty::FontSize(font_size));
-        builder.push_default(StyleProperty::WordBreak(WordBreak::Normal));
-        builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
-        builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
-        if !matches!(
-            block.kind,
-            ArtifactPreviewBlockKind::Heading1
-                | ArtifactPreviewBlockKind::Heading2
-                | ArtifactPreviewBlockKind::Heading3
-                | ArtifactPreviewBlockKind::Heading4
-                | ArtifactPreviewBlockKind::Heading5
-                | ArtifactPreviewBlockKind::Heading6
-        ) {
-            builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
-                BODY_LINE_HEIGHT,
-            )));
-        }
-
-        if matches!(
-            block.kind,
-            ArtifactPreviewBlockKind::Heading1
-                | ArtifactPreviewBlockKind::Heading2
-                | ArtifactPreviewBlockKind::Heading3
-                | ArtifactPreviewBlockKind::Heading4
-                | ArtifactPreviewBlockKind::Heading5
-                | ArtifactPreviewBlockKind::Heading6
-        ) {
-            builder.push_default(StyleProperty::FontWeight(FontWeight::BOLD));
-        }
-        for span in block.layout_spans.iter() {
-            let start = usize::try_from(span.start.max(0))
-                .unwrap_or(0)
-                .min(text.len());
-            let end = usize::try_from(span.end.max(span.start).max(0))
-                .unwrap_or(text.len())
-                .min(text.len());
-            if start >= end || !text.is_char_boundary(start) || !text.is_char_boundary(end) {
-                continue;
-            }
-            match span.kind {
-                ArtifactPreviewInlineKind::Strong => {
-                    builder.push(StyleProperty::FontWeight(FontWeight::BOLD), start..end)
-                }
-                ArtifactPreviewInlineKind::Emphasis => {
-                    builder.push(StyleProperty::FontStyle(FontStyle::Italic), start..end)
-                }
-                ArtifactPreviewInlineKind::Code => builder.push(
-                    StyleProperty::FontFamily(FontFamily::Single(FontFamilyName::Generic(
-                        GenericFamily::Monospace,
-                    ))),
-                    start..end,
-                ),
-                ArtifactPreviewInlineKind::Text
-                | ArtifactPreviewInlineKind::Strikethrough
-                | ArtifactPreviewInlineKind::Link => {}
-            }
-        }
-        let mut layout = builder.build(text);
-        layout.break_all_lines(Some(wrap_width));
-        layout.height().max(font_size)
     }
 }
-
-#[derive(Clone, Copy)]
-struct BlockMetrics {
-    font_size: f32,
-    padding_bottom: f32,
-}
-
-fn block_metrics(kind: ArtifactPreviewBlockKind) -> BlockMetrics {
-    match kind {
-        ArtifactPreviewBlockKind::Heading1 => BlockMetrics {
-            font_size: 24.0,
-            padding_bottom: 0.0,
-        },
-        ArtifactPreviewBlockKind::Heading2 => BlockMetrics {
-            font_size: 20.0,
-            padding_bottom: 0.0,
-        },
-        ArtifactPreviewBlockKind::Heading3 => BlockMetrics {
-            font_size: 17.0,
-            padding_bottom: 0.0,
-        },
-        ArtifactPreviewBlockKind::Heading4 => BlockMetrics {
-            font_size: 15.0,
-            padding_bottom: 0.0,
-        },
-        ArtifactPreviewBlockKind::Heading5 | ArtifactPreviewBlockKind::Heading6 => BlockMetrics {
-            font_size: 15.0,
-            padding_bottom: 0.0,
-        },
-        ArtifactPreviewBlockKind::CodeBlock => BlockMetrics {
-            font_size: 12.0,
-            padding_bottom: 10.0,
-        },
-        ArtifactPreviewBlockKind::Quote => BlockMetrics {
-            font_size: 14.0,
-            padding_bottom: 8.0,
-        },
-        ArtifactPreviewBlockKind::TableRow => BlockMetrics {
-            font_size: 12.0,
-            padding_bottom: 10.0,
-        },
-        ArtifactPreviewBlockKind::ListItem => BlockMetrics {
-            font_size: 14.0,
-            padding_bottom: 0.0,
-        },
-        ArtifactPreviewBlockKind::Paragraph | ArtifactPreviewBlockKind::Rule => BlockMetrics {
-            font_size: 14.0,
-            padding_bottom: 0.0,
-        },
+impl Drop for MarkdownVirtualLayoutBridge {
+    fn drop(&mut self) {
+        self.worker.cancel();
     }
 }
-
-fn block_content_inset(block: &ArtifactPreviewBlock) -> f32 {
-    match block.kind {
-        ArtifactPreviewBlockKind::CodeBlock | ArtifactPreviewBlockKind::Quote => 12.0,
-        ArtifactPreviewBlockKind::TableRow => 8.0,
-        ArtifactPreviewBlockKind::ListItem => block.list_depth.clamp(0, 2) as f32 * 24.0 + 24.0,
-        _ => 0.0,
+fn measurement_block(block: &ArtifactPreviewBlock) -> MeasurementBlock {
+    MeasurementBlock {
+        kind: block.kind,
+        plain_text: block.plain_text.to_string(),
+        list_depth: block.list_depth,
+        code_language: block.code_language.to_string(),
+        layout_spans: block.layout_spans.iter().collect(),
     }
 }
-
-fn block_padding_top(
-    kind: ArtifactPreviewBlockKind,
-    previous: Option<ArtifactPreviewBlockKind>,
-    first: bool,
-    code_language: &str,
-) -> f32 {
-    if is_heading(kind) {
-        return 20.0;
-    }
-    match kind {
-        ArtifactPreviewBlockKind::CodeBlock => {
-            if code_language.is_empty() {
-                10.0
-            } else {
-                32.0
-            }
-        }
-        ArtifactPreviewBlockKind::Quote => 8.0,
-        ArtifactPreviewBlockKind::TableRow => 10.0,
-        ArtifactPreviewBlockKind::ListItem => match previous {
-            Some(ArtifactPreviewBlockKind::ListItem) | None => 0.0,
-            Some(previous)
-                if previous == ArtifactPreviewBlockKind::Paragraph || is_heading(previous) =>
-            {
-                10.0
-            }
-            Some(ArtifactPreviewBlockKind::CodeBlock) => 14.0,
-            Some(ArtifactPreviewBlockKind::Quote) => 8.0,
-            Some(_) => 0.0,
-        },
-        ArtifactPreviewBlockKind::Paragraph => {
-            if first {
-                return 0.0;
-            }
-            match previous {
-                Some(ArtifactPreviewBlockKind::Paragraph) => 20.0,
-                Some(ArtifactPreviewBlockKind::ListItem) => 10.0,
-                Some(previous) if is_heading(previous) => 10.0,
-                Some(ArtifactPreviewBlockKind::CodeBlock) => 14.0,
-                Some(ArtifactPreviewBlockKind::Quote) => 8.0,
-                Some(ArtifactPreviewBlockKind::Rule) => 0.0,
-                Some(_) | None => 11.0,
-            }
-        }
-        ArtifactPreviewBlockKind::Rule => 28.0,
-        _ => 11.0,
-    }
-}
-
-fn is_heading(kind: ArtifactPreviewBlockKind) -> bool {
-    matches!(
-        kind,
-        ArtifactPreviewBlockKind::Heading1
-            | ArtifactPreviewBlockKind::Heading2
-            | ArtifactPreviewBlockKind::Heading3
-            | ArtifactPreviewBlockKind::Heading4
-            | ArtifactPreviewBlockKind::Heading5
-            | ArtifactPreviewBlockKind::Heading6
+fn snapshot(blocks: &ModelRc<ArtifactPreviewBlock>) -> Arc<Vec<MeasurementBlock>> {
+    Arc::new(
+        blocks
+            .iter()
+            .map(|block| measurement_block(&block))
+            .collect(),
     )
 }
-
-fn markdown_block_width(content_width: f32) -> f32 {
-    let horizontal_padding = if content_width < NARROW_BREAKPOINT {
-        NARROW_HORIZONTAL_PADDING
-    } else {
-        WIDE_HORIZONTAL_PADDING
-    };
-    (content_width.min(MAX_CONTENT_WIDTH) - horizontal_padding).max(1.0)
-}
-
 fn positive(value: f32) -> f32 {
     if value.is_finite() {
         value.max(1.0)
@@ -593,7 +459,6 @@ fn positive(value: f32) -> f32 {
         1.0
     }
 }
-
 fn to_u32(value: f32) -> u32 {
     if value.is_finite() {
         value.ceil().clamp(0.0, u32::MAX as f32) as u32
@@ -601,7 +466,6 @@ fn to_u32(value: f32) -> u32 {
         0
     }
 }
-
 fn to_u64(value: f32) -> u64 {
     if value.is_finite() {
         value.round().clamp(0.0, u64::MAX as f32) as u64
@@ -613,6 +477,65 @@ fn to_u64(value: f32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_matches_exact_layout_and_rejects_replaced_document() {
+        let blocks = ModelRc::new(VecModel::from(vec![
+            block(
+                ArtifactPreviewBlockKind::Paragraph,
+                &"English 中文 **text** ".repeat(200),
+            ),
+            block(
+                ArtifactPreviewBlockKind::CodeBlock,
+                &"code();\n".repeat(12000),
+            ),
+        ]));
+        let mut expected = MarkdownVirtualLayoutBridge::default();
+        let precise = expected.layout(2, &blocks, 0.0, 420.0, 520.0, "sans-serif");
+        let mut bridge = MarkdownVirtualLayoutBridge::default();
+        let (notify, ready) = std::sync::mpsc::channel();
+        let acknowledge = bridge.notification_acknowledger();
+        bridge.enable_worker(move || {
+            notify.send(()).unwrap();
+        });
+        let first = bridge.layout(1, &blocks, 0.0, 420.0, 300.0, "sans-serif");
+        assert!(first.loading);
+        bridge.layout(2, &blocks, 0.0, 420.0, 520.0, "sans-serif");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            ready
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .unwrap();
+            acknowledge();
+            let result = bridge.layout(2, &blocks, 0.0, 420.0, 520.0, "sans-serif");
+            if !result.loading {
+                assert_eq!(result.content_height, precise.content_height);
+                assert_eq!(result.layout_width, 520.0);
+                break;
+            }
+        }
+        bridge.reset_document();
+        assert!(bridge.worker.take_output().is_none());
+        assert_eq!(bridge.rows.row_count(), 0);
+    }
+
+    #[test]
+    fn returning_to_current_width_cancels_pending_width_request() {
+        let blocks = ModelRc::new(VecModel::from(vec![block(
+            ArtifactPreviewBlockKind::Paragraph,
+            "body",
+        )]));
+        let mut bridge = MarkdownVirtualLayoutBridge::default();
+        bridge.layout(1, &blocks, 0.0, 420.0, 520.0, "sans-serif");
+        let mut stale = bridge.layout_key.clone().unwrap();
+        stale.content_width_bits = 300.0f32.to_bits();
+        bridge.requested = Some(stale);
+        let current = bridge.layout(1, &blocks, 0.0, 420.0, 520.0, "sans-serif");
+        assert!(!current.loading);
+        assert!(bridge.requested.is_none());
+        let resized = bridge.layout(1, &blocks, 0.0, 420.0, 300.0, "sans-serif");
+        assert_eq!(resized.layout_width, 300.0);
+    }
 
     fn block(kind: ArtifactPreviewBlockKind, text: &str) -> ArtifactPreviewBlock {
         ArtifactPreviewBlock {

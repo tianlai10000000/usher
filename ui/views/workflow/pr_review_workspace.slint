@@ -365,6 +365,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
 
     function close-diff-find() {
         diff-find-debounce.stop();
+        root.find-diff-matches("", root.diff-view == "split");
         root.diff-find-open = false;
         root.diff-find-focus-pending = false;
         root.diff-find-query = "";
@@ -398,7 +399,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         if (!root.diff-find-open) {
             return;
         }
-        root.diff-find-effective-query = root.diff-find-query;
+        root.diff-find-effective-query = "";
         root.diff-find-matches = root.find-diff-matches(
             root.diff-find-query,
             root.diff-view == "split"
@@ -408,6 +409,7 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
             root.sync-diff-find-current();
             return;
         }
+        root.diff-find-effective-query = root.diff-find-query;
         if (root.diff-find-index < 0 || root.diff-find-index >= root.diff-find-matches.length) {
             root.diff-find-index = 0;
         }
@@ -415,8 +417,8 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
     }
 
     function step-diff-find(backward: bool) {
-        // Enter / next / previous resolve a pending debounced refresh first so
-        // stepping always walks the results of the visible query.
+        // Flush the debounce; navigation requires a completed result set.
+        // Completion itself never replays a viewport command after scrolling.
         if (diff-find-debounce.running) {
             root.refresh-diff-find-matches();
         }
@@ -489,9 +491,17 @@ export component GitHubPullRequestReviewPage inherits PullRequestReviewPageContr
         // scroll revision. The debounce keeps full-file scans off every
         // keystroke; Enter and the next/previous arrows flush it immediately.
         root.diff-find-index = -1;
+        root.find-diff-matches("", root.diff-view == "split");
+        root.diff-find-effective-query = "";
+        root.sync-diff-find-current();
         if (root.diff-find-open) {
             diff-find-debounce.start();
         }
+    }
+    changed find-result-revision => {
+        root.diff-find-index = root.diff-find-matches.length > 0 ? 0 : -1;
+        root.diff-find-effective-query = root.diff-find-matches.length > 0 ? root.diff-find-query : "";
+        root.sync-diff-find-current();
     }
     changed review-dialog-open => {
         if (root.review-dialog-open) {

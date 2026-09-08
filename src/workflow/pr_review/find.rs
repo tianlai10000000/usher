@@ -5,6 +5,7 @@
 //! find bar in the selected-file toolbar and resolves matches against the
 //! current projected line model.
 
+#[cfg(test)]
 use std::collections::HashMap;
 
 use slint::{Model, ModelRc, SharedString, VecModel};
@@ -13,8 +14,11 @@ use usher_search::{MatchCase, find_non_overlapping};
 use crate::workflow::syntax_highlight::character_columns;
 use crate::{WorkflowPrDiffFindMatch, WorkflowPrDiffLine};
 
+#[cfg(test)]
 use super::diff_model::LazyPrDiffLineModel;
+#[cfg(test)]
 use super::diff_projection::DiffRowProjection;
+#[cfg(test)]
 use super::hunk::sanitize_diff_content;
 use super::selection::soft_wrap_visual_line_index;
 
@@ -24,6 +28,7 @@ use super::selection::soft_wrap_visual_line_index;
 /// Lazy diff models are scanned through their raw provider lines so a
 /// full-file search never materializes converted rows (tokens, shared strings)
 /// or churns the bounded visible-row cache.
+#[cfg(test)]
 pub(super) fn collect_diff_find_matches(
     lines: &ModelRc<WorkflowPrDiffLine>,
     query: &str,
@@ -78,6 +83,7 @@ pub(super) fn collect_diff_find_matches(
 /// queries only see unified projections (split rows expose empty `content`),
 /// split queries only see split pane content, spanning rows surface `hunk` /
 /// `meta` kinds and are never copyable.
+#[cfg(test)]
 fn collect_source_find_matches(
     model: &LazyPrDiffLineModel,
     needle: &str,
@@ -134,6 +140,7 @@ fn collect_source_find_matches(
 
 /// Materialized rows carry sanitized content (tabs expanded, newlines
 /// stripped); sanitize raw provider text only when it would differ.
+#[cfg(test)]
 fn push_source_matches(
     out: &mut Vec<WorkflowPrDiffFindMatch>,
     line: i32,
@@ -151,12 +158,14 @@ fn push_source_matches(
 
 /// O(1) per-row lookup over the most recent full find refresh. Rows without
 /// matches share one empty model, so mounted-row bindings allocate nothing.
+#[cfg(test)]
 pub(super) struct DiffFindRowTable {
     query: String,
     rows: HashMap<(i32, u8), ModelRc<WorkflowPrDiffFindMatch>>,
     empty: ModelRc<WorkflowPrDiffFindMatch>,
 }
 
+#[cfg(test)]
 impl DiffFindRowTable {
     pub(super) fn new() -> Self {
         Self {
@@ -204,6 +213,7 @@ impl DiffFindRowTable {
     }
 }
 
+#[cfg(test)]
 fn side_key(side: &str) -> u8 {
     match side {
         "left" => 1,

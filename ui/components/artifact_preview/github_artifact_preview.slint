@@ -81,11 +81,21 @@ export struct ArtifactPreviewVirtualWindow {
     scroll-offset: float,
     content-height: float,
     projection-revision: int,
+    layout-width: float,
+    loading: bool,
 }
 
 component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
     in property <ArtifactPreviewBlock> block;
     in property <length> forced-height: 0px;
+    in property <bool> virtual-code: false;
+    in property <length> code-viewport-offset: 0px;
+    in property <length> code-viewport-height: 0px;
+    private property <int> first-code-line: root.virtual-code
+        ? min(root.block.code-lines.length, max(0, Math.floor((root.code-viewport-offset - root.block-padding-top) / root.code-line-height) - 4)) : 0;
+    private property <int> visible-code-lines: root.virtual-code
+        ? min(root.block.code-lines.length - root.first-code-line, Math.ceil(root.code-viewport-height / root.code-line-height) + 8)
+        : root.block.code-lines.length;
     in property <bool> first-block: false;
     in property <ArtifactPreviewBlockKind> previous-kind: ArtifactPreviewBlockKind.Paragraph;
     in property <string> body-font-family: "sans-serif";
@@ -164,7 +174,9 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
                 : block-text.height)
             + root.block-padding-top + root.block-padding-bottom;
     height: root.forced-height > 0px ? root.forced-height : root.intrinsic-height;
-    clip: root.is-code;
+    // Rounded clipping would allocate a texture as tall as the entire fence.
+    // The virtual line window clips its own bounded, square viewport instead.
+    clip: root.is-code && !root.virtual-code;
     background: root.is-code ? GitHubTheme.canvas-subtle
         : root.is-quote ? GitHubTheme.border-default
         : transparent;
@@ -249,31 +261,43 @@ component GitHubArtifactPreviewMarkdownBlock inherits Rectangle {
         link-clicked(url) => { root.open-link(url); }
     }
 
-    code-lines := VerticalLayout {
+    code-lines := Rectangle {
         visible: root.block.kind == ArtifactPreviewBlockKind.CodeBlock;
         x: root.content-inset;
-        y: root.block-padding-top;
+        y: root.block-padding-top + root.first-code-line * root.code-line-height;
         width: parent.width - self.x * 2;
-        height: max(1, root.block.code-lines.length) * root.code-line-height;
-        spacing: 0px;
+        height: max(1, root.visible-code-lines) * root.code-line-height;
+        clip: true;
 
-        for line in root.block.code-lines: code-line := HorizontalLayout {
+        VerticalLayout {
             width: parent.width;
-            height: root.code-line-height;
+            height: parent.height;
             spacing: 0px;
 
-            for token in line.tokens: Text {
-                width: self.preferred-width;
-                height: parent.height;
-                text: token.text;
-                color: GitHubTheme.dark-mode ? token.dark-color : token.light-color;
-                font-family: root.code-font-family;
-                font-size: GitHubMarkdownMetrics.code-font-size;
-                font-weight: token.bold ? 600 : 400;
-                font-italic: token.italic;
-                vertical-alignment: center;
-                wrap: no-wrap;
-                overflow: clip;
+            for line-index in root.visible-code-lines: code-line := HorizontalLayout {
+                private property <ArtifactPreviewCodeLine> line: root.block.code-lines[root.first-code-line + line-index];
+                init => {
+                    if AppState.benchmark-preview-created-lines >= 0 {
+                        AppState.benchmark-preview-created-lines += 1;
+                    }
+                }
+                width: parent.width;
+                height: root.code-line-height;
+                spacing: 0px;
+
+                for token in code-line.line.tokens: Text {
+                    width: self.preferred-width;
+                    height: parent.height;
+                    text: token.text;
+                    color: GitHubTheme.dark-mode ? token.dark-color : token.light-color;
+                    font-family: root.code-font-family;
+                    font-size: GitHubMarkdownMetrics.code-font-size;
+                    font-weight: token.bold ? 600 : 400;
+                    font-italic: token.italic;
+                    vertical-alignment: center;
+                    wrap: no-wrap;
+                    overflow: clip;
+                }
             }
         }
     }
@@ -351,6 +375,7 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
     in property <bool> layout-resizing: false;
     in property <bool> virtualized-markdown: true;
     in property <int> markdown-layout-revision: 0;
+    in property <int> markdown-layout-epoch: 0;
     in property <string> application-font-family: ".AppleSystemUIFont";
     in property <string> code-font-family: "Menlo";
     private property <string> markdown-body-font-family:
@@ -422,6 +447,16 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
         private property <length> observed-visible-height: markdown-scroll.height;
         private property <length> observed-content-width: root.width;
         private property <int> observed-layout-revision: root.markdown-layout-revision;
+        private property <int> observed-layout-epoch: root.markdown-layout-epoch;
+        changed observed-layout-epoch => { self.refresh-window(); }
+        private property <string> observed-font: root.markdown-body-font-family;
+        changed observed-font => { self.refresh-window(); }
+        private property <float> benchmark-offset: AppState.benchmark-preview-offset;
+        changed benchmark-offset => {
+            if self.benchmark-offset >= 0 {
+                markdown-scroll.viewport-y = -max(0px, markdown-scroll.viewport-height - markdown-scroll.height) * self.benchmark-offset;
+            }
+        }
 
         function refresh-window() {
             if self.refreshing-window {
@@ -438,6 +473,8 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
             );
             let clamped-y = -next.scroll-offset * 1px;
             if next.projection-revision != self.virtual-window.projection-revision
+                    || next.loading != self.virtual-window.loading
+                    || Math.abs(next.layout-width - self.virtual-window.layout-width) > 0.5
                     || Math.abs(next.content-height - self.virtual-window.content-height) > 0.5 {
                 self.virtual-window = next;
             }
@@ -445,6 +482,12 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
                 markdown-scroll.viewport-y = clamped-y;
             }
             self.refreshing-window = false;
+            if AppState.benchmark-preview-created-lines >= 0 {
+                AppState.benchmark-preview-extent = self.virtual-window.content-height;
+                AppState.benchmark-preview-tail = self.virtual-window.rows.length > 0
+                    && self.virtual-window.rows[self.virtual-window.rows.length - 1].index == root.markdown-blocks.length - 1
+                    && Math.abs(markdown-scroll.viewport-y + max(0px, markdown-scroll.viewport-height - markdown-scroll.height)) < 1px;
+            }
         }
 
         init => { self.refresh-window(); }
@@ -473,8 +516,8 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
                 markdown-list-block := GitHubArtifactPreviewMarkdownBlock {
                     x: (parent.width - self.width) / 2;
                     y: row.start <= 0.5 ? GitHubMetrics.size-12 : 0px;
-                    width: min(parent.width, 800px)
-                        - (root.width < 560px
+                    width: min(markdown-virtual-host.virtual-window.layout-width * 1px, 800px)
+                        - (markdown-virtual-host.virtual-window.layout-width < 560
                             ? GitHubMetrics.size-32
                             : GitHubMetrics.size-48);
                     forced-height: max(
@@ -486,6 +529,9 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
                                 : 0px)
                     );
                     block: row.block;
+                    virtual-code: true;
+                    code-viewport-offset: -markdown-scroll.viewport-y - row.start * 1px - self.y;
+                    code-viewport-height: markdown-scroll.height;
                     first-block: row.index == 0;
                     previous-kind: row.index > 0
                         ? root.markdown-blocks[row.index - 1].kind
@@ -496,6 +542,12 @@ export component GitHubArtifactPreviewSurface inherits Rectangle {
                     open-link(url) => { root.open-link(url); }
                 }
             }
+        }
+
+        if self.virtual-window.loading && self.virtual-window.rows.length == 0: GitHubCenteredLoadingState {
+            width: parent.width;
+            height: parent.height;
+            label: root.loading-message;
         }
 
         GitHubVirtualListScrollbar {
@@ -590,6 +642,7 @@ export component GitHubArtifactPreviewPanel inherits Rectangle {
     in property <bool> content-suspended: false;
     in property <bool> performance-optimized: true;
     in property <int> markdown-layout-revision: 0;
+    in property <int> markdown-layout-epoch: 0;
     in property <string> application-font-family: ".AppleSystemUIFont";
     in property <string> code-font-family: "Menlo";
     callback layout-markdown-window(
@@ -706,6 +759,7 @@ export component GitHubArtifactPreviewPanel inherits Rectangle {
             layout-resizing: root.layout-resizing;
             virtualized-markdown: root.performance-optimized;
             markdown-layout-revision: root.markdown-layout-revision;
+            markdown-layout-epoch: root.markdown-layout-epoch;
             application-font-family: root.application-font-family;
             code-font-family: root.code-font-family;
             layout-markdown-window(
@@ -765,6 +819,7 @@ export component ArtifactPreviewWindow inherits Window {
     in property <bool> performance-optimized: true;
     in property <bool> native-titlebar-actions: false;
     in property <int> markdown-layout-revision: 0;
+    in property <int> markdown-layout-epoch: 0;
     in-out property <bool> native-live-resizing: false;
     out property <bool> layout-resizing:
         root.native-live-resizing || root.fallback-live-resizing;
@@ -829,6 +884,7 @@ export component ArtifactPreviewWindow inherits Window {
         content-suspended: false;
         performance-optimized: root.performance-optimized;
         markdown-layout-revision: root.markdown-layout-revision;
+            markdown-layout-epoch: root.markdown-layout-epoch;
         application-font-family: root.application-font-family;
         code-font-family: root.code-font-family;
         layout-markdown-window(

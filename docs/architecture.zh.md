@@ -212,8 +212,15 @@ H1-H6 不自动添加分隔线；引用缩进和低对比代码 Surface 共用�
 Markdown/HTML 二次转换；主题切换不重复解析或高亮；不引入 WebView 或浏览器 runtime。
 冷解析器 cache miss 发布 `ParserLoading` 与 `ParserReady` 进度。应用门面通过 weak
 window 在 Slint event loop 上更新共享 spinner 文案，并在投递前后都检查 request
-generation，取消或过期任务不能覆盖新 Preview。Feature 自有 Parley 布局桥在稳定内容
-宽度下测量全部 block，并把同一份精确 extent model 提供给 `usher-virtual-list`、Preview
+generation，取消或过期任务不能覆盖新 Preview。Provider Worker 另行准备不可变测量
+快照；`measurement.rs` 在共享 blocking pool 上按文档版本、稳定宽度、字体测量全部
+block。`app_runtime/latest_compute.rs` 限制为一个执行中计算、一个最新待处理输入及
+一个待提交结果，在 block 边界取消旧代际，退出时取消并排空，关闭时清除缓存。
+`virtual_layout.rs` 保留上一份精确布局直到最新结果到来，完成只推进 Host 局部 epoch，
+不重置文档或滚动。新文档测量期间复用准备指示器；两种 Host 都使用相同契约。
+`projection_model.rs` 懒转换最多缓存 32 个 block 和每个 block 的 128 个代码行。
+代码围栏保持完整几何高度，只挂载可见行及前后各四行，复制仍使用完整源码。
+布局桥把同一份精确 extent model 提供给 `usher-virtual-list`、Preview
 `Flickable` 与应用自有 Primer scrollbar；普通滚动只更新有界的可见 block 投影。因此
 viewport 位于精确的 3-block overscan 安全区内时复用同一个稳定 `VecModel`；跨出安全区
 只增量删除/追加边界行，不替换 model，也不提高有界挂载行峰值。Slint 仅在投影 revision
@@ -683,7 +690,17 @@ AI Review 只发出 finding 位置，位置解释统一由 PR Review 负责。�
 run 上的显示列/独立前缀宽度近似，同时把缓存上限固定为 256 个 layout。换行代码继续
 使用 Slint 原生 UTF-8 `TextInput.word-wrap` 几何。
 
-每次显式 Find 导航命令都会立即完成计算和可选的 viewport 写入，不存在等待后续滚动或布局处理的请求。修改查询、手动滚动、resize 和焦点变化只保留查询、计数、当前结果与当前高亮，不移动 viewport。
+`pr_review/find_bridge.rs` 负责 event loop 上的 Find model 和 callback 绑定；
+`find_worker.rs` 在共享 blocking pool 使用 `usher-search` 扫描共享的不可变源码与行投影。
+最新计算邮箱最多保留一个执行中扫描、一个待处理查询和一个输出；输入、行 model 替换、
+关闭和审核状态重置会取消过期代际。结果保存紧凑命中范围和行/侧索引，命中转换缓存与
+行 model 缓存分别最多 128 项；总体存储仍随当前文件与命中数增长。行级绘制只在源码
+model 和查询相同时复用索引，否则只计算本次请求的已挂载行。
+
+输入保留 180 ms 去抖并清空过期结果，当前扫描完成时选中/高亮首项，完成通知不移动
+viewport。显式 Find 导航使用已完成结果，至多写一次 viewport；扫描未完成时的命令
+只刷新去抖、不在之后重放。手动滚动、resize 和焦点变化保留已完成的查询展示，不通过
+Find 移动 viewport。
 
 Conversation 与 Commits 的 commit 链接会按 SHA 定位并复用 Files changed 工作区，把当前 commit 应用为单项范围。审核控制器会把来源 Conversation 或 Commits Tab 记录为 feature 页内下钻返回点，因此 Shell Back 会先恢复来源 Tab，下一次 Back 才返回 Workflow 的 PR 列表；如果 commits 尚未加载，控制器会在加载完成后应用待处理选择，复制 SHA 保持独立。
 

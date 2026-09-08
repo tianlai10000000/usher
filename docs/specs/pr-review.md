@@ -65,6 +65,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/workflow/pr_review/file_tree.rs` owns pure local file-tree construction, path/extension/manifest/viewed filtering, and folder flattening.
 - `src/workflow/pr_review/diff_projection.rs` owns provider-neutral Unified/Split row projection and stable hunk scroll anchors.
 - `src/workflow/pr_review/diff_model.rs` owns the read-only Slint lazy line model, its 64-row converted-data cache, and normalized-diff-to-UI row/token conversion.
+- `src/workflow/pr_review/find_worker.rs` owns cancellable source scanning and compact hit/row indexes; `find_bridge.rs` owns the event-loop mailbox, model notification and bounded lazy Find projection.
 - `src/workflow/pr_review/selection.rs` owns wrapped-row pointer hit testing, selectable-row rules, display-column slicing, and clipboard text projection.
 - `src/workflow/pr_review/timeline.rs` owns Conversation/Commit Slint model conversion, deterministic row sizing and connection/grouping rules, plus display/chronological commit-range mapping.
 - `src/git/model.rs`, `locator.rs`, and `diff.rs` own provider-neutral models, remote location, and unified-diff parsing. Provider modules own request/response handling; Gitee authentication/endpoints, decoding, Conversation/Commit normalization, readiness, and revert capability are isolated under `src/git/gitee/`.
@@ -82,6 +83,7 @@ Close/reopen, inline draft reviews, merge queues, and auto-merge are not part of
 - `src/workflow/pr_review/file_tree.rs` 负责纯本地文件树构建，以及路径、扩展名、manifest、viewed 筛选和目录扁平化。
 - `src/workflow/pr_review/diff_projection.rs` 负责与 Provider 无关的 Unified/Split 行投影和稳定的 hunk 滚动锚点。
 - `src/workflow/pr_review/diff_model.rs` 负责只读 Slint 惰性行 model、64 行转换缓存，以及归一化 Diff 到 UI 行/token 的转换。
+- `src/workflow/pr_review/find_worker.rs` 负责可取消的源码扫描与紧凑命中/行索引；`find_bridge.rs` 负责 event loop 邮箱、model 通知及有界惰性 Find 投影。
 - `src/workflow/pr_review/selection.rs` 负责换行后的指针命中、可选择行规则、显示列切片和剪贴板文本投影。
 - `src/workflow/pr_review/timeline.rs` 负责 Conversation/Commit Slint model 转换、确定性行高和连接/分组规则，以及展示顺序与时间顺序之间的 commit range 映射。
 - `src/git/model.rs`、`locator.rs`、`diff.rs` 分别负责 Provider-neutral 模型、remote 定位和 unified diff 解析。Provider 模块负责请求/响应；Gitee 的鉴权/endpoint、解码、Conversation/Commit 归一化、readiness 和 revert capability 分别隔离在 `src/git/gitee/` 下。
@@ -225,8 +227,10 @@ rebuilt during scrolling.
 12. Syntax highlighting is produced in Rust with `syntect` using the selected file path; Slint receives styled token models and never parses source languages. The Files changed code column supports GitHub-style drag selection (Unified and Split) without a separate selection mode: selection geometry uses the measured monospace cell advance and display columns (including tabs and wide glyphs), wrapped rows keep Slint auto-wrap (`TextInput.word-wrap`) and use its native UTF-8 selection geometry so continuation-line double-click paints the complete logical word, and line-number gutters plus `+`/`-` markers stay outside the selectable region. Wrapped Unified gutter glyphs use the same natural first-line font box as wrapped code; unwrapped rows retain the nominal 22px slot. Double-click expands to the same character-class run (alphanumeric/`_`, whitespace, or other punctuation), and triple-click selects the full code column line; the multi-click streak is owned by the review workspace so virtual-window projection cannot break the gesture. ⌘/Ctrl+F opens a compact editor-style find bar in the selected-file toolbar (GitHub's PR Files changed page has no first-party find chrome and relies on browser find-in-page; Usher mirrors the CodeMirror/GitHub file-editor find panel: query, `current/total` or `No results`, previous/next, and close). Matching is case-insensitive over copyable code columns only and uses `usher-search` for Unicode-safe non-overlapping occurrences. Enter/Shift+Enter navigate each occurrence in source order with wraparound, including multiple matches on one logical line. Viewport reveal follows Blink `CenterIfNeeded`: a fully visible active match does not scroll; a partially or fully hidden match is centered and clamped to content bounds. Wrapped code resolves the occurrence to its visual subline first, so multiple visible matches on one visual line change only highlight/counter. The PR adapter performs one command-time calculation and at most one viewport write; it has no Find positioning timer, viewport observer, recycled-row geometry report, or persistent reveal state. Width/height changes and scrolling never reposition the active match. Mounted overscan rows use bounded paint-only match models: the active match is Blink orange `#ff9632` and other matches are Blink yellow `#ffff00`; these models never read or write viewport state. Escape closes find before clearing a selection. Hunk headers (`@@ … @@`) and meta rows are never selectable and are omitted from ⌘/Ctrl+A ranges and clipboard text, matching GitHub. Cross-row pointer hit testing walks the projected model's actual per-row wrap heights and word-wrap boundaries, so dragging forward or backward into a wrapped endpoint can stop at an exact character instead of treating visual rows as logical diff rows. The diff Flickable must not arbitrate pointer drags: vertical code drags remain selection gestures, while wheel/touchpad and scrollbar scrolling stay enabled. Multi-line ranges copy newline-joined plain text through a silent clipboard write; ⌘/Ctrl+A selects the complete Unified diff or the active Split pane, and Escape clears the active range. Switching file, tab, diff view, or the line-model revision clears selection. Selection must preserve exact virtualization: no whole-file TextInput or duplicate token model may be created; only mounted overscan delegates own lightweight read-only TextInput instances for wrapped selection rendering.
 12.1. Find reveal is an explicit one-shot operation. Only Enter, Shift+Enter,
 or the Find previous/next controls calculate and write a target viewport.
-Typing atomically replaces the result set and immediately selects/highlights its
-first result, without positioning the viewport. Focus changes, wheel/touchpad
+Typing clears stale results and atomically selects/highlights the first result
+when the current background scan completes, without positioning the viewport.
+Navigation during a pending scan flushes the debounce but is not replayed later.
+Focus changes, wheel/touchpad
 input, direct scrollbar-thumb dragging, resize, virtual-list measurement, and
 layout reflow likewise perform no Find positioning work. Closing Find clears
 the query, results, and active highlight.
@@ -259,8 +263,9 @@ Find reveal. Enter adds only the match's wrapped intra-row offset and never
 materializes preceding lazy rows.
 Inactive matches use Blink yellow `#ffff00`, the active match remains orange
 `#ff9632`, and bounded row-local paint models/repeaters exist only for mounted
-rows while Find is open. Each row model matches that invocation's query directly,
-never a separately refreshed shared result cache. They never read or write
+rows while Find is open. A row model may reuse a completed index only when source
+model and query match this invocation, otherwise it scans that row locally.
+They never read or write
 viewport state.
 
 13. Tabs expand to four-column stops before highlighting. Visible token and whitespace widths use the selected monospace face's measured advance. The longest expanded line is measured with that same face; this pixel width drives both the horizontal scroll extent and every diff-row background, so scrolling fully right cannot reveal an unpainted strip. Display columns (including double-width CJK characters) remain the fallback while no measured line is available.
@@ -341,8 +346,9 @@ overscan model，直接拖拽滑块与释放后渲染完全相同的换行内容
 11.1. PR diff 源码在所有语法下都保持正体。语法颜色和粗体可以变化，但主题提供的斜体 scope 必须在绘制与文字几何计算前统一移除。
 12. 语法高亮由 Rust 使用 `syntect` 并根据当前文件路径生成；Slint 只接收带样式的 token model，不解析源码语言。Files changed 代码栏支持 GitHub 风格拖拽选中（Unified/Split），无需单独进入选择模式：选区几何使用实测等宽字符步进与显示列（含 Tab 和双宽字符），换行时只绘制实际命中的视觉片段，行号栏与 `+`/`-` 不在可选区域内。双击按相同字符类扩展选中单词（字母数字/`_`、空白、其余标点各自成组），三击选中整行代码列；连击状态保存在审核工作区，避免虚拟窗口投影打断手势。⌘/Ctrl+F 在选中文件工具栏打开紧凑的编辑器式查找栏（GitHub 的 PR Files changed 没有应用内查找，网页依赖浏览器检索；Usher 对齐 CodeMirror/GitHub 文件编辑器查找面板：查询框、`当前/总数` 或 `No results`、上一个/下一个、关闭）。匹配只覆盖可复制代码列，并通过 `usher-search` 生成 Unicode 安全、非重叠的命中；Enter/Shift+Enter 按源码顺序首尾循环，逻辑同一行内的每次出现均为独立结果。视口揭示遵循 Blink `CenterIfNeeded`：活动命中完整可见时不滚动，部分或完全不可见时居中并按内容边界夹紧；软换行代码先解析到命中所在视觉子行，因此同一可见视觉行的多个结果只切高亮与计数。PR adapter 只在命令执行时计算一次并至多写一次 viewport；不存在 Find 定位 timer、viewport observer、回收行几何上报或持久 reveal 状态，宽高变化与滚动均不得重新定位当前命中。已挂载 overscan 行使用有界、仅绘制用途的匹配 model：当前命中使用 Blink 橙色 `#ff9632`，其他命中使用 Blink 黄色 `#ffff00`，这些 model 绝不读写 viewport 状态。Escape 先关闭查找再清除选区。Hunk 头（`@@ … @@`）与 meta 行不可选中，且不会出现在 ⌘/Ctrl+A 选区或剪贴板文本中，行为与 GitHub 一致。Diff Flickable 不得仲裁指针拖动：代码区垂直拖动始终属于选中手势，滚轮/触控板与滚动条仍可滚动。跨行选区以换行拼接纯文本并静默写入剪贴板；⌘/Ctrl+A 选中完整 Unified diff 或当前 Split 侧，Escape 清除选区。切换文件、Tab、Diff view 或 line-model revision 时清除选区。选中必须保留精确虚拟化：不得创建整文件 TextInput 或重复 token model，只有已挂载 overscan delegate 才拥有用于换行选区渲染的轻量只读 TextInput。
 12.1. Find 揭示是显式的一次性操作，只有 Enter、Shift+Enter 或 Find 上一个/下一个
-控件可以计算并写入目标 viewport。输入时原子替换结果集并立即选中/高亮第 1 项，但不
-定位 viewport。焦点变化、滚轮/触控板输入、直接拖拽滚动条滑块、resize、虚拟列表测量
+控件可以计算并写入目标 viewport。输入清空过期结果，当前后台扫描完成时原子选中/高亮
+第 1 项，但不定位 viewport。扫描未完成时导航只刷新去抖，不在之后重放。
+焦点变化、滚轮/触控板输入、直接拖拽滚动条滑块、resize、虚拟列表测量
 和布局重排同样不执行 Find 定位。关闭 Find 才清空查询、结果与当前高亮。
 12.2. 源码继续由原生 Slint 根据 `syntect` token model 绘制，禁止嵌入 WebView
 或浏览器编辑器。所有未换行鼠标终点（token 内、跨 token 或跨行拖拽目标）、选区绘制和
@@ -363,8 +369,8 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
 行 extent，前缀和统一驱动 content height、offset/index 映射、有界 overscan 渲染、
 滑块拖拽与 Find reveal。Enter 只增加命中在本行内的换行偏移，不实例化此前 lazy 行。
 非活动命中使用 Blink 黄色 `#ffff00`，当前命中继续使用橙色 `#ff9632`；仅绘制用途的行级 model/repeater
-只在 Find 打开时为已挂载行创建，并直接匹配本次调用的 query，禁止读取另行刷新的共享结果
-缓存；它们绝不读取或写入 viewport 状态。
+只在 Find 打开时为已挂载行创建；源码 model 与本次 query 同时一致时可复用已完成索引，
+否则只扫描本次请求行，禁止使用过期缓存；它们绝不读取或写入 viewport 状态。
 
 13. 高亮前将 Tab 按四列制表位展开；可见 token 和空白宽度使用当前等宽字体的实际测量值。最长的已展开代码行使用同一字体测量，该像素宽度同时驱动横向滚动范围和每行 Diff 背景，滚动到最右端不得露出未绘制区域；没有可测量行时才回退到显示列数（包括双宽中日韩字符）。
 14. PR 列表、PR 详情/diff 和仓库源码请求必须按当前项目持久化的 `repo_type` 分发；分发层同时校验其与 `remote_repo` 一致，任何调用方都不得静默回退到其他 Provider。
@@ -417,9 +423,14 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
 
 ### P2 performance invariants / P2 性能不变量
 
-- Diff Find scans the immutable raw diff projection rather than materialized
-  Slint rows. Query changes debounce for 180 ms, and one query-scoped row table
-  supplies mounted-row paint models without rescanning the complete diff.
+- Diff Find scans shared immutable raw source/projection on the shared blocking
+  pool after a 180 ms debounce. The mailbox retains one active scan, one latest
+  pending input and one output; typing, source replacement, close and review
+  reset cancel obsolete generations. Compact hit ranges and a row/pane index
+  avoid full-file Slint materialization; converted hit and row-model caches each
+  retain at most 128 entries. Total result storage remains proportional to hits.
+  Cancellation is checked between rows and every 256 projected hits; the shared
+  matching engine's single-line call is not interruptible internally.
 - Avatar downloads have an independent three-second timeout and a 2 MiB size
   limit. A process-level cache retains at most 16 send-safe RGBA pixel entries; the Slint
   event loop separately reuses up to 128 `slint::Image` values across
@@ -431,8 +442,11 @@ Rust `virtualizer` 引擎，Feature 只依赖本地门面。轻量行指标与�
   heavy subtrees follow the same conditional-mount rule; opacity alone must not
   retain those trees.
 
-- Diff Find 直接扫描不可变的原始 diff 投影，不扫描已物化的 Slint 行；查询变化使用
-  180 ms 去抖，并由查询级 row table 为已挂载行提供绘制 model，禁止逐行重复全量扫描。
+- Diff Find 在 180 ms 去抖后于共享 blocking pool 扫描共享不可变源码/投影；邮箱最多
+  保留一个执行中扫描、一个最新待处理输入和一个输出，输入、源码替换、关闭和审核重置
+  会取消过期代际。紧凑命中范围与行/侧索引避免全文件 Slint 物化，命中转换和行 model
+  缓存分别最多 128 项，总结果存储仍随命中数增长。每行及每 256 个投影命中检查取消；
+  共享匹配引擎单行调用内部暂不能中断。
 - 头像下载各自使用三秒超时与 2 MiB 上限；进程级缓存最多保存 16 条可跨线程的 RGBA 像素，
   Slint event loop 另复用最多 128 个 `slint::Image`，供 Conversation/Commits model
   重建共同使用。Provider 数据到达后必须立即提交 Conversation/Commits 正文；头像完成

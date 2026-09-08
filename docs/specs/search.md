@@ -40,12 +40,13 @@ these primitives.
    and the active match with orange `#ff9632`. Row-local match models and paint
    repeaters exist only while Find is open, contain only hits for that mounted
    row/pane, and never participate in viewport positioning. A row projection
-   must derive from the query passed to that invocation; it must not read a
-   separately refreshed full-result cache whose update order can lag the input.
+   must derive from the query passed to that invocation. It may reuse a completed
+   index only when both source-model identity and query match; otherwise it must
+   resolve that mounted row locally, never use stale cached results.
 9. Reveal is command-scoped, following CodeMirror and VS Code: only Enter,
    Shift+Enter, or the Find previous/next controls perform one calculation and
    at most one viewport write. Query changes atomically replace the result set
-   and immediately select/highlight its first result, but never position the
+   and select/highlight its first result on completion, but never position the
    viewport. Opening Find, focus changes, resize, virtual-list measurement,
    wheel/touch scrolling, and scrollbar-thumb dragging likewise never position
    the viewport. These events preserve the current query/result presentation;
@@ -85,10 +86,11 @@ these primitives.
 8. 虚拟化 Diff 使用 Blink 黄色 `#ffff00` 绘制非活动命中，使用橙色 `#ff9632`
    绘制当前命中。行级命中 model 与绘制 repeater 仅在 Find 打开时存在，只包含当前已挂载
    行/侧的命中，并且绝不参与 viewport 定位。行级投影必须直接使用本次调用传入的 query，
-   禁止读取另行刷新的全量结果缓存，以免输入与缓存写入顺序不同步。
+   只有源码 model 身份和 query 同时一致时才可复用已完成索引，否则只计算该已挂载行，
+   禁止使用过期缓存。
 9. 揭示按命令隔离，与 CodeMirror、VS Code 一致：只有 Enter、Shift+Enter 或 Find
    上一个/下一个控件执行一次计算并至多写一次 viewport。修改查询必须原子替换结果集并
-   立即选中/高亮新结果的第 1 项，但不得定位 viewport。打开 Find、焦点变化、窗口 resize、
+   在计算完成时选中/高亮新结果的第 1 项，但不得定位 viewport。打开 Find、焦点变化、窗口 resize、
    虚拟列表测量、滚轮/触控滚动和拖拽滚动条滑块同样不得定位 viewport。这些事件保留当前
    查询/结果展示；只有关闭 Find 才清空。
 10. 普通滚动路径中禁止存在 Find 定位 timer 或回收行几何上报。虚拟列表 adapter 可以
@@ -127,6 +129,21 @@ that lifecycle because its row extents are deterministic at the stable width:
 <https://codemirror.net/docs/ref/#view.EditorView.requestMeasure>
 
 ## Regression Checklist / 回归清单
+
+PR Find scans shared immutable source on the shared blocking pool after the
+180 ms debounce. Typing cancels previous work and clears stale presentation;
+only the current source/query generation may publish. At most one scan, one
+pending input and one pending output are retained. Converted hits and row-model
+caches each hold at most 128 entries. Completion selects the first hit without
+reveal. Navigation while results are pending flushes the debounce but is not
+queued or replayed; a subsequent explicit command navigates completed results.
+Close, source replacement and review reset cancel work and release caches.
+
+PR Find 在 180 ms 去抖后于共享 blocking pool 扫描共享不可变源码。输入取消之前的
+工作并清空过期展示；仅当前源码/查询代际可发布。最多保留一个扫描、一个待处理输入和
+一个待发布输出，命中转换和行 model 缓存分别最多 128 项。完成时选中首项但不揭示；
+结果未完成时的导航仅刷新去抖，不排队重放，后续显式命令才导航已完成结果。
+关闭、源码替换和审核状态重置取消计算并释放缓存。
 
 - Cover case-sensitive and insensitive matching, CJK text, Unicode lowercase
   expansion, repeated occurrences on one line, empty results, and wraparound.

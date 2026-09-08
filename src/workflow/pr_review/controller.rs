@@ -30,10 +30,10 @@ use crate::git::{
 };
 use crate::project::{ProjectRepositoryMetadata, load_repository_metadata};
 use crate::{
-    MainWindow, Route, WorkflowPrDiffFile, WorkflowPrDiffFindMatch, WorkflowPrDiffGlyphRange,
-    WorkflowPrDiffGlyphRect, WorkflowPrDiffLine, WorkflowPrDiffRowMetric,
-    WorkflowPrDiffSelectionHit, WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice,
-    WorkflowPrDiffVirtualWindow, WorkflowPrFileExtensionFilter, WorkflowPrTreeItem,
+    MainWindow, Route, WorkflowPrDiffFile, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect,
+    WorkflowPrDiffLine, WorkflowPrDiffRowMetric, WorkflowPrDiffSelectionHit,
+    WorkflowPrDiffSelectionRange, WorkflowPrDiffTextSlice, WorkflowPrDiffVirtualWindow,
+    WorkflowPrFileExtensionFilter, WorkflowPrTreeItem,
 };
 
 use super::super::bindings::{show_error, show_success};
@@ -51,10 +51,7 @@ use super::diff_projection::{
     DiffLineSide, display_row_for_location, hunk_scroll_anchor_source_index,
 };
 use super::file_tree::{build_tree_items, extension_counts};
-use super::find::{
-    DiffFindRowTable, collect_diff_find_matches, collect_diff_find_row_matches,
-    diff_find_intra_item_offset,
-};
+use super::find::diff_find_intra_item_offset;
 use super::hunk::{
     HUNK_CONTEXT_PAGE_SIZE, HunkExpansionDirection, expand_all_hunk_context_from_sources,
     expand_hunk_context_around_line_from_sources, expand_hunk_context_from_sources,
@@ -297,6 +294,7 @@ pub(crate) fn bind_pr_review(
     ui: &MainWindow,
     pr_list_controller: WorkflowPrListController,
 ) -> WorkflowPrReviewController {
+    super::find_benchmark::setup(ui);
     let controller = WorkflowPrReviewController {
         pr_list_controller,
         project_alias: Arc::new(Mutex::new(String::new())),
@@ -967,43 +965,7 @@ pub(crate) fn bind_pr_review(
         )
     });
 
-    // Full-refresh results grouped per (row, pane) so mounted-row bindings do
-    // an O(1) lookup instead of rescanning their line on every evaluation.
-    let find_row_table = Rc::new(RefCell::new(DiffFindRowTable::new()));
-
-    let ui_weak = ui.as_weak();
-    let row_table = find_row_table.clone();
-    ui.on_workflow_pr_review_find_diff_matches(move |query, split| {
-        let Some(ui) = ui_weak.upgrade() else {
-            return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
-        };
-        let matches =
-            collect_diff_find_matches(&ui.get_workflow_pr_review_lines(), query.as_str(), split);
-        row_table.borrow_mut().rebuild(query.as_str(), &matches);
-        ModelRc::new(VecModel::from(matches))
-    });
-
-    let ui_weak = ui.as_weak();
-    let row_table = find_row_table.clone();
-    ui.on_workflow_pr_review_find_diff_row_matches(move |line, side, query| {
-        if let Some(row_matches) = row_table
-            .borrow()
-            .lookup(line, side.as_str(), query.as_str())
-        {
-            return row_matches;
-        }
-        // The table lags the query only transiently (e.g. a row binding fires
-        // before the debounced refresh); resolve just this row from scratch.
-        let Some(ui) = ui_weak.upgrade() else {
-            return ModelRc::new(VecModel::from(Vec::<WorkflowPrDiffFindMatch>::new()));
-        };
-        collect_diff_find_row_matches(
-            &ui.get_workflow_pr_review_lines(),
-            line,
-            side.as_str(),
-            query.as_str(),
-        )
-    });
+    super::find_bridge::bind(ui);
 
     ui.on_workflow_pr_review_step_diff_find_index(move |current, count, backward| {
         step_match_index(
@@ -1211,6 +1173,7 @@ impl WorkflowPrReviewController {
     }
 
     fn reset_request_scoped_state(&self, ui: &MainWindow, reset_tab: bool) {
+        super::find_bridge::cancel();
         if let Ok(mut location) = self.location_reveal.lock() {
             *location = None;
         }
@@ -4074,6 +4037,7 @@ fn set_line_model(
     lines: ModelRc<WorkflowPrDiffLine>,
     metrics: ModelRc<WorkflowPrDiffRowMetric>,
 ) {
+    super::find_bridge::cancel();
     ui.set_workflow_pr_review_lines(lines);
     ui.set_workflow_pr_review_line_metrics(metrics);
     ui.set_workflow_pr_review_line_content_revision(

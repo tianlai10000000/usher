@@ -23,7 +23,7 @@ const VISIBLE_LINE_CACHE_CAPACITY: usize = 64;
 pub(super) struct LazyPrDiffLineModel {
     file: Arc<PullRequestDiffFile>,
     highlighted: Arc<Vec<HighlightedLine>>,
-    rows_projection: Vec<DiffRowProjection>,
+    rows_projection: Arc<Vec<DiffRowProjection>>,
     rows: RefCell<LazyLineCache>,
 }
 
@@ -37,7 +37,7 @@ impl LazyPrDiffLineModel {
         Self {
             file,
             highlighted,
-            rows_projection,
+            rows_projection: Arc::new(rows_projection),
             rows: RefCell::new(LazyLineCache::new(VISIBLE_LINE_CACHE_CAPACITY)),
         }
     }
@@ -86,13 +86,23 @@ impl LazyPrDiffLineModel {
 
     /// Raw provider lines backing this model. In-diff find scans these directly
     /// so a full-file search never materializes (or evicts) converted rows.
+    #[cfg(test)]
     pub(super) fn source_file(&self) -> &PullRequestDiffFile {
         &self.file
     }
 
     /// Display-row projection over [`Self::source_file`], in model row order.
+    #[cfg(test)]
     pub(super) fn source_projection(&self) -> &[DiffRowProjection] {
         &self.rows_projection
+    }
+
+    pub(super) fn shared_file(&self) -> Arc<PullRequestDiffFile> {
+        self.file.clone()
+    }
+
+    pub(super) fn shared_projection(&self) -> Arc<Vec<DiffRowProjection>> {
+        self.rows_projection.clone()
     }
 
     #[cfg(test)]

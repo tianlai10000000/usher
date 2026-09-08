@@ -7,6 +7,10 @@ export struct LanguageOption {
 }
 
 export global AppState {
+    in-out property <int> benchmark-preview-created-lines: -1;
+    in-out property <float> benchmark-preview-offset: -1;
+    in-out property <float> benchmark-preview-extent: 0;
+    in-out property <bool> benchmark-preview-tail: false;
     // Disabled in production; cumulative mounts in the opt-in Job fixture.
     in-out property <int> benchmark-job-log-created-rows: -1;
     /**
