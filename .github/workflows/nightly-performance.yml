@@ -14,9 +14,9 @@ env:
 
 jobs:
   memory:
-    name: Release memory thresholds
+    name: Release memory and hot-path thresholds
     runs-on: macos-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,9 +36,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nightly-performance-
 
+      - name: Build Release benchmark executable
+        id: release
+        run: cargo build --release --locked
+
       - name: Run isolated Home memory benchmark
         run: |
           scripts/benchmark-memory.sh \
+            --no-build \
             --runs 3 \
             --scenarios home \
             --protocol static \
@@ -65,10 +70,21 @@ jobs:
             --max-rss-cycle-growth-mib 16 \
             --max-footprint-cycle-growth-mib 16
 
+      - name: Run Project, Job, Preview and Find gates
+        # Home and hot paths share this Release binary. A/B use identical
+        # hashes here; absolute budgets detect regressions across nightlies.
+        if: ${{ !cancelled() && steps.release.outcome == 'success' }}
+        run: |
+          python3 scripts/benchmark-hot-paths.py \
+            --binary target/release/usher \
+            --output memory-benchmark-results/hot-paths
+
       - name: Upload benchmark evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nightly-memory-${{ github.run_id }}
-          path: memory-benchmark-results/nightly/
+          path: |
+            memory-benchmark-results/nightly/
+            memory-benchmark-results/hot-paths/
           retention-days: 14

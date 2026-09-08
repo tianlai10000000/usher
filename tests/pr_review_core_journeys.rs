@@ -111,10 +111,12 @@ fn diff_find_starts_its_debounce_for_the_first_query() {
 
     let queries = Rc::new(RefCell::new(Vec::new()));
     let observed = queries.clone();
-    window.on_workflow_pr_review_find_diff_matches(move |query, _| {
-        observed.borrow_mut().push(query.to_string());
-        ModelRc::new(VecModel::from(Vec::new()))
-    });
+    window
+        .global::<usher_lib::PrDiffBridge>()
+        .on_workflow_pr_review_find_diff_matches(move |query, _| {
+            observed.borrow_mut().push(query.to_string());
+            ModelRc::new(VecModel::from(Vec::new()))
+        });
 
     ElementHandle::find_by_element_id(&window, "GitHubFileFilterField::filter-input")
         .next()
@@ -128,9 +130,11 @@ fn diff_find_starts_its_debounce_for_the_first_query() {
     input.set_accessible_value("the");
     i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
 
-    assert_eq!(queries.borrow().as_slice(), [""]);
+    // Opening initializes Find; typing immediately cancels the old generation
+    // with an empty query before the debounced replacement is submitted.
+    assert_eq!(queries.borrow().as_slice(), ["", ""]);
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(180));
-    assert_eq!(queries.borrow().as_slice(), ["", "the"]);
+    assert_eq!(queries.borrow().as_slice(), ["", "", "the"]);
 }
 
 #[test]

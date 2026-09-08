@@ -83,6 +83,7 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/shortcuts/` | Application command IDs, declarative key bindings, platform-normalized matching, route scopes, conflict validation, dispatch, and display labels. |
 | `src/app_lifecycle.rs` | Composition-level lifecycle registrations for Chat transition visibility and Workflow-scope cleanup. |
 | `src/settings.rs` | TOML settings model and serialized atomic persistence, including AI Agent credentials and the configurable RAG endpoint. |
+| `src/settings_feedback.rs` | Shared settings-save worker completion, saved-state reset timer, and localized toast feedback; the composition root only binds actions. |
 | `src/ai/` | Shared OpenAI-compatible AI Agent transport and settings state; `agent.rs` owns connection tests and chat completions used by AI Chat and AI Code Review, while `settings_state.rs` owns the typed automatically persisted configuration facade. It does not own RAG transport. |
 | `src/network.rs` | Connectivity ownership and `AppState.network-online`: macOS uses SystemConfiguration reachability callbacks; other platforms use a no-packet route check with offline backoff. |
 | `src/http/mod.rs` | The single shared reqwest client, per-request total/body-idle timeout policy, centralized response-body reads, interceptors, error normalization, and optional UI feedback. |
@@ -93,6 +94,38 @@ External integrations currently include Git executables, GitHub/GitLab/Gitee-com
 | `src/dialog.rs` | Imperative `DialogManager` binding and action dispatch; it owns no visual variant. |
 
 Repository endpoint definitions and executable behavior are intentionally separated: `src/git/` may reference constants from `src/codereview/api/`, while `src/codereview/api/` must not depend on `src/git/`, `src/http/`, reqwest, or serde.
+
+PR Review keeps loading, context and navigation in `controller.rs`; its child
+`controller/actions.rs` owns remote review/merge/revert commands and capability
+presentation, while `controller/diff_bindings.rs` owns event-loop geometry,
+selection, virtual-list and Find bindings. `controller/diagnostics.rs` owns
+opt-in scroll/reveal evidence. The stateless `PrDiffBridge` global in
+`ui/features/pr_review/diff_bridge.slint` declares that feature's Diff callback
+API; `ui/main.slint` routes page events through it and re-exports its generated
+Rust API. It holds no shared domain state or persistence.
+
+Chat's `interactive.rs` retains route/request orchestration and timers;
+`viewport_policy.rs` owns coverage/window-shift/anchor settlement policy and
+`message_model.rs` owns the stable incremental Slint row model. AI Review's
+`sessions.rs` owns Review/PR Chat session serialization and interrupted-task
+hydration; `controller.rs` schedules those operations and `task_persistence.rs`
+continues to own automatic task commit persistence. These leaf owners do not
+import their controllers; extraction does not change cache bounds, event-loop
+scheduling, generation guards, persisted formats, or shutdown priorities.
+
+The architecture gate retains the original controller/root budgets and also
+checks extracted owners and reverse controller dependencies. CI runs on pull
+requests, `main` pushes, and manual dispatch. Nightly builds one Release binary,
+runs the existing three-process Home RSS/footprint gate, then serial Project,
+Job, Preview code/paragraphs and Find fixtures through
+`scripts/benchmark-hot-paths.py`. Each hot path runs three AB/BA/AB pairs with
+identical hashes as repeatability cohorts; absolute RSS, phase growth,
+callback latency and fixture-effect budgets prevent relative comparisons from
+hiding regressions. An explicit `--baseline` supports before/after comparisons.
+Missing/invalid raw samples, incomplete fixtures and failed subprocesses fail
+the gate. Logs, per-run state/samples and the consolidated report are uploaded
+even on failure. These short, fixed fixtures do not establish long-term memory
+bounds or replace manual input/paint validation.
 
 ### Slint UI
 

@@ -1,5 +1,7 @@
 import { GitHubNavigationSidebar, GitHubSidebarRightEdge, NavItem } from "./components/navigation/custom_nav_drawer.slint";
 import { I18n } from "@i18n";
+import { PrDiffBridge } from "./features/pr_review/diff_bridge.slint";
+export { PrDiffBridge } from "./features/pr_review/diff_bridge.slint";
 import { GitHubHomePage as HomePage } from "./views/home.slint";
 import { GitHubSearchPage as SearchPage } from "./views/search.slint";
 import { GitHubAboutPage as AboutPage } from "./views/about.slint";
@@ -848,20 +850,6 @@ export component MainWindow inherits Window {
     callback workflow-pr-review-copy-commit-sha(string) -> bool;
     callback workflow-pr-review-copy-source-branch(string) -> bool;
     callback workflow-pr-review-copy-diff-selection(int, int, int, int, string);
-    callback workflow-pr-review-resolve-diff-selection(int, float, float, float, float, float, float, string, float, string) -> WorkflowPrDiffSelectionHit;
-    pure callback workflow-pr-review-resolve-diff-token-hit(string, float, float, string, float, bool, bool) -> int;
-    pure callback workflow-pr-review-resolve-diff-token-range(string, int, int, float, string, float, bool, bool) -> WorkflowPrDiffGlyphRange;
-    pure callback workflow-pr-review-resolve-diff-wrapped-range(string, int, int, float, float, string, float) -> [WorkflowPrDiffGlyphRect];
-    pure callback workflow-pr-review-resolve-diff-selection-slice(int, string, int, int) -> WorkflowPrDiffTextSlice;
-    pure callback workflow-pr-review-resolve-diff-wrap-line-start(int, string, int, int) -> int;
-    callback workflow-pr-review-resolve-diff-click-range(int, int, string, int) -> WorkflowPrDiffSelectionRange;
-    callback workflow-pr-review-find-diff-matches(string, bool) -> [WorkflowPrDiffFindMatch];
-    pure callback workflow-pr-review-find-diff-row-matches(int, string, string) -> [WorkflowPrDiffFindMatch];
-    pure callback workflow-pr-review-step-diff-find-index(int, int, bool) -> int;
-    callback workflow-pr-review-resolve-diff-find-viewport-y(int, int, float, float, string, float, float, float) -> float;
-    callback workflow-pr-review-resolve-location-viewport-y(int, float, float) -> float;
-    callback workflow-pr-review-layout-diff-virtual-window(int, [WorkflowPrDiffRowMetric], float, float, float, float, float, float) -> WorkflowPrDiffVirtualWindow;
-    callback workflow-pr-review-diagnose-diff-scroll(string, float, float, float, float, bool, bool, bool, int, int, int);
     callback workflow-pr-review-view-file();
     callback workflow-pr-review-reveal-location(string, int, string, string);
     callback workflow-pr-review-view-location-file(string, string);
@@ -2375,41 +2363,41 @@ export component MainWindow inherits Window {
             root.workflow-pr-review-copy-diff-selection(start-line, start-col, end-line, end-col, side);
         }
         resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side) => {
-            root.workflow-pr-review-resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side)
+            PrDiffBridge.workflow-pr-review-resolve-diff-selection(line, x, y, row-height, code-width, cell-width, line-pitch, family, size, side)
         }
         resolve-diff-token-hit(text, x, width, family, size, bold, italic) => {
-            root.workflow-pr-review-resolve-diff-token-hit(text, x, width, family, size, bold, italic)
+            PrDiffBridge.workflow-pr-review-resolve-diff-token-hit(text, x, width, family, size, bold, italic)
         }
         resolve-diff-token-range(text, start, end, width, family, size, bold, italic) => {
-            root.workflow-pr-review-resolve-diff-token-range(
+            PrDiffBridge.workflow-pr-review-resolve-diff-token-range(
                 text, start, end, width, family, size, bold, italic
             )
         }
         resolve-diff-wrapped-range(text, start, end, width, pitch, family, size) => {
-            root.workflow-pr-review-resolve-diff-wrapped-range(
+            PrDiffBridge.workflow-pr-review-resolve-diff-wrapped-range(
                 text, start, end, width, pitch, family, size
             )
         }
         resolve-diff-selection-slice(line, side, start-col, end-col) => {
-            root.workflow-pr-review-resolve-diff-selection-slice(line, side, start-col, end-col)
+            PrDiffBridge.workflow-pr-review-resolve-diff-selection-slice(line, side, start-col, end-col)
         }
         resolve-diff-wrap-line-start(line, side, caret, max-cols) => {
-            root.workflow-pr-review-resolve-diff-wrap-line-start(line, side, caret, max-cols)
+            PrDiffBridge.workflow-pr-review-resolve-diff-wrap-line-start(line, side, caret, max-cols)
         }
         resolve-diff-click-range(line, column, side, mode) => {
-            root.workflow-pr-review-resolve-diff-click-range(line, column, side, mode)
+            PrDiffBridge.workflow-pr-review-resolve-diff-click-range(line, column, side, mode)
         }
         find-diff-matches(query, split) => {
-            root.workflow-pr-review-find-diff-matches(query, split)
+            PrDiffBridge.workflow-pr-review-find-diff-matches(query, split)
         }
         find-diff-row-matches(line, side, query) => {
-            root.workflow-pr-review-find-diff-row-matches(line, side, query)
+            PrDiffBridge.workflow-pr-review-find-diff-row-matches(line, side, query)
         }
         step-diff-find-index(current, count, backward) => {
-            root.workflow-pr-review-step-diff-find-index(current, count, backward)
+            PrDiffBridge.workflow-pr-review-step-diff-find-index(current, count, backward)
         }
         resolve-diff-find-viewport-y(line, start-char, code-width, cell-width, side, current-viewport-y, visible-height, content-height) => {
-            root.workflow-pr-review-resolve-diff-find-viewport-y(
+            PrDiffBridge.workflow-pr-review-resolve-diff-find-viewport-y(
                 line,
                 start-char,
                 code-width,
@@ -2421,14 +2409,14 @@ export component MainWindow inherits Window {
             )
         }
         resolve-location-viewport-y(line, current-viewport-y, visible-height) => {
-            root.workflow-pr-review-resolve-location-viewport-y(
+            PrDiffBridge.workflow-pr-review-resolve-location-viewport-y(
                 line,
                 current-viewport-y,
                 visible-height
             )
         }
         layout-diff-virtual-window(revision, metrics, scroll-offset, visible-height, code-width, cell-width, code-line-height, hunk-line-height) => {
-            root.workflow-pr-review-layout-diff-virtual-window(
+            PrDiffBridge.workflow-pr-review-layout-diff-virtual-window(
                 revision,
                 metrics,
                 scroll-offset,
@@ -2440,7 +2428,7 @@ export component MainWindow inherits Window {
             )
         }
         diagnose-diff-scroll(kind, viewport-y, requested-y, visible-height, viewport-height, find-open, find-focused, hunk-pending, find-revision, line-revision, hunk-attempts) => {
-            root.workflow-pr-review-diagnose-diff-scroll(
+            PrDiffBridge.workflow-pr-review-diagnose-diff-scroll(
                 kind,
                 viewport-y,
                 requested-y,

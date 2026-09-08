@@ -11,7 +11,7 @@ use crate::chat::virtual_layout::{
     get_adaptive_row_height_px, smooth_adaptive_row_height_px,
 };
 use crate::{MainWindow, Route, ToastManager, ToastOptions};
-use slint::{ComponentHandle, Global, Model, ModelRc, VecModel};
+use slint::{ComponentHandle, Global, Model};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -20,25 +20,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-// 微调参数：适当放宽可用宽度预算，降低中文段落过早换行概率
-const WRAP_WIDTH_TUNING_FACTOR: f32 = 1.10;
 const LOADING_PHASE_INTERVAL_MS: u64 = 700; // 低频点点动画，降低发送中主线程更新压力
 const LOADING_PHASE_ANIMATION_ENABLED: bool = false;
-// Fixed buckets keep the decision independent from adaptive row-height updates.
-// Move the bounded window before the viewport consumes its pixel overscan, but
-// only while motion is observed. Idle polls never replace the message model.
-const VIRTUAL_SCROLL_BUCKET_HEIGHT_PX: f32 = 64.0;
-const BASELINE_SCROLL_UPDATE_BUCKET_STEP: i32 = 16;
-const OPTIMIZED_SCROLL_UPDATE_BUCKET_STEP: i32 = 16;
-const AUTO_LOAD_MORE_TOP_THRESHOLD_PX: f32 = 160.0;
-const AUTO_LOAD_MORE_REARM_THRESHOLD_PX: f32 = 320.0;
-const MOUNTED_EDGE_GUARD_PX: f32 = 2400.0;
-const LAYOUT_SETTLE_DELAY_MS: u64 = 80;
-const ANCHOR_SETTLE_INTERVAL_MS: u64 = 16;
-const ANCHOR_STABLE_FRAMES: u8 = 2;
-const ANCHOR_MAX_FRAMES: u8 = 16;
-const ANCHOR_EPSILON_PX: f32 = 0.5;
-const MAX_NEW_ROWS_PER_SCROLL_COMMIT: usize = 2;
 const STICK_TO_BOTTOM_THRESHOLD_PX: f32 = 96.0;
 
 /// Chat sessions bootstrap on a blocking worker; `None` marks the loading
@@ -67,61 +50,16 @@ impl ChatDrafts {
     }
 }
 
-fn virtual_scroll_bucket(scroll_offset_px: f32) -> i32 {
-    (scroll_offset_px.max(0.0) / VIRTUAL_SCROLL_BUCKET_HEIGHT_PX).floor() as i32
-}
-
-fn should_shift_virtual_window(applied_bucket: i32, observed_bucket: i32, step: i32) -> bool {
-    (observed_bucket - applied_bucket).abs() >= step
-}
-
-fn should_shift_near_mounted_edge(
-    geometries: &HashMap<i32, MessageGeometry>,
-    scroll_offset: f32,
-    viewport_height: f32,
-    moving_down: bool,
-    has_more_in_direction: bool,
-) -> bool {
-    if !has_more_in_direction || geometries.is_empty() {
-        return false;
-    }
-    let mounted_top = geometries
-        .values()
-        .map(|geometry| geometry.y)
-        .fold(f32::INFINITY, f32::min);
-    let mounted_bottom = geometries
-        .values()
-        .map(|geometry| geometry.y + geometry.height)
-        .fold(f32::NEG_INFINITY, f32::max);
-    if moving_down {
-        scroll_offset + viewport_height + MOUNTED_EDGE_GUARD_PX >= mounted_bottom
-    } else {
-        scroll_offset - MOUNTED_EDGE_GUARD_PX <= mounted_top
-    }
-}
-
-fn should_shift_near_estimated_edge(
-    top_spacer_px: f32,
-    bottom_spacer_px: f32,
-    document_height_px: f32,
-    scroll_offset_px: f32,
-    viewport_height_px: f32,
-    moving_down: bool,
-    has_more_in_direction: bool,
-) -> bool {
-    if !has_more_in_direction || document_height_px <= 0.0 {
-        return false;
-    }
-    let mounted_top = top_spacer_px.max(0.0);
-    let mounted_bottom = (document_height_px - bottom_spacer_px).max(mounted_top);
-    // This is the geometry-callback fallback, not a second overscan guard.
-    // Trigger only at the estimated boundary so it cannot multiply commits.
-    if moving_down {
-        scroll_offset_px + viewport_height_px + 1.0 >= mounted_bottom
-    } else {
-        scroll_offset_px - 1.0 <= mounted_top
-    }
-}
+#[cfg(test)]
+use super::viewport_policy::VisibleAnchor;
+use super::viewport_policy::{
+    ANCHOR_SETTLE_INTERVAL_MS, AnchorPurpose, AnchorSettle, AnchorStep, LAYOUT_SETTLE_DELAY_MS,
+    MAX_NEW_ROWS_PER_SCROLL_COMMIT, MOUNTED_EDGE_GUARD_PX, MessageGeometry,
+    compute_wrap_width_for_chat_width, estimated_window_covers_viewport,
+    limit_incremental_virtual_shift, scroll_update_bucket_step, select_visible_anchor,
+    shifted_prepend_window, should_shift_near_estimated_edge, should_shift_near_mounted_edge,
+    should_shift_virtual_window, update_auto_load_armed, virtual_scroll_bucket,
+};
 
 fn should_shift_near_virtual_edge(
     ui: &MainWindow,
@@ -156,270 +94,6 @@ fn should_shift_near_virtual_edge(
         has_more_in_direction,
     );
     (near_mounted, near_mounted || near_estimated)
-}
-
-fn estimated_window_covers_viewport(
-    top_spacer_px: f32,
-    bottom_spacer_px: f32,
-    document_height_px: f32,
-    scroll_offset_px: f32,
-    viewport_height_px: f32,
-) -> bool {
-    const COVERAGE_TOLERANCE_PX: f32 = 1.0;
-    let mounted_bottom = (document_height_px - bottom_spacer_px).max(top_spacer_px);
-    top_spacer_px <= scroll_offset_px + COVERAGE_TOLERANCE_PX
-        && mounted_bottom + COVERAGE_TOLERANCE_PX >= scroll_offset_px + viewport_height_px
-}
-
-fn limit_incremental_virtual_shift(
-    previous: VirtualRenderSignature,
-    desired_start: usize,
-    desired_end: usize,
-    max_new_rows: usize,
-) -> (usize, usize) {
-    if max_new_rows == 0 || desired_start >= desired_end {
-        return (desired_start, desired_end);
-    }
-
-    let overlap_start = previous.start.max(desired_start);
-    let overlap_end = previous.end.min(desired_end);
-    if overlap_start >= overlap_end {
-        // A scrollbar jump must cover the destination viewport immediately.
-        return (desired_start, desired_end);
-    }
-
-    let desired_len = desired_end - desired_start;
-    let previous_len = previous.end - previous.start;
-    let next_len = desired_len.min(previous_len.saturating_add(max_new_rows));
-    if desired_start < previous.start {
-        let start = previous
-            .start
-            .saturating_sub(max_new_rows)
-            .max(desired_start);
-        return (start, (start + next_len).min(previous.total_len));
-    }
-    if desired_end > previous.end {
-        let end = previous
-            .end
-            .saturating_add(max_new_rows)
-            .min(desired_end)
-            .min(previous.total_len);
-        return (end.saturating_sub(next_len), end);
-    }
-    (desired_start, desired_end)
-}
-
-fn scroll_update_bucket_step() -> i32 {
-    if crate::chat::performance::variant().is_optimized() {
-        OPTIMIZED_SCROLL_UPDATE_BUCKET_STEP
-    } else {
-        BASELINE_SCROLL_UPDATE_BUCKET_STEP
-    }
-}
-
-fn update_auto_load_armed(armed: bool, scroll_offset_px: f32) -> (bool, bool) {
-    if scroll_offset_px > AUTO_LOAD_MORE_REARM_THRESHOLD_PX {
-        (true, false)
-    } else if armed && scroll_offset_px <= AUTO_LOAD_MORE_TOP_THRESHOLD_PX {
-        (false, true)
-    } else {
-        (armed, false)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct MessageGeometry {
-    y: f32,
-    height: f32,
-    revision: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct VisibleAnchor {
-    message_id: i32,
-    content_y: f32,
-    scroll_offset: f32,
-    geometry_revision: u64,
-}
-
-fn select_visible_anchor(
-    geometries: &HashMap<i32, MessageGeometry>,
-    scroll_offset: f32,
-    viewport_height: f32,
-) -> Option<VisibleAnchor> {
-    let viewport_bottom = scroll_offset + viewport_height.max(1.0);
-    geometries
-        .iter()
-        .filter(|(_, geometry)| geometry.height > 0.0)
-        .min_by(|(left_id, left), (right_id, right)| {
-            let rank = |geometry: &MessageGeometry| {
-                let bottom = geometry.y + geometry.height;
-                if geometry.y >= scroll_offset - 1.0 && bottom <= viewport_bottom + 1.0 {
-                    0
-                } else if bottom > scroll_offset && geometry.y < viewport_bottom {
-                    1
-                } else if geometry.y >= viewport_bottom {
-                    2
-                } else {
-                    3
-                }
-            };
-            let left_rank = rank(left);
-            let right_rank = rank(right);
-            left_rank
-                .cmp(&right_rank)
-                .then_with(|| {
-                    if left_rank == 3 {
-                        right.y.total_cmp(&left.y)
-                    } else {
-                        left.y.total_cmp(&right.y)
-                    }
-                })
-                .then_with(|| left_id.cmp(right_id))
-        })
-        .map(|(message_id, geometry)| VisibleAnchor {
-            message_id: *message_id,
-            content_y: geometry.y,
-            scroll_offset,
-            geometry_revision: geometry.revision,
-        })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AnchorPurpose {
-    HistoryPrepend,
-    SettledLayout,
-    VirtualWindow,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct AnchorSettle {
-    generation: u64,
-    mode: ChatMode,
-    purpose: AnchorPurpose,
-    message_id: i32,
-    viewport_y: f32,
-    original_scroll_offset: f32,
-    expected_scroll_offset: f32,
-    capture_geometry_revision: u64,
-    input_revision: u64,
-    last_observed_y: Option<f32>,
-    stable_frames: u8,
-    frames_left: u8,
-    max_correction_px: Option<f32>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum AnchorStep {
-    Wait,
-    Write(f32),
-    Complete,
-    Cancel,
-}
-
-impl AnchorSettle {
-    fn new(
-        generation: u64,
-        mode: ChatMode,
-        purpose: AnchorPurpose,
-        anchor: VisibleAnchor,
-        input_revision: u64,
-        max_correction_px: Option<f32>,
-    ) -> Self {
-        Self {
-            generation,
-            mode,
-            purpose,
-            message_id: anchor.message_id,
-            viewport_y: anchor.content_y - anchor.scroll_offset,
-            original_scroll_offset: anchor.scroll_offset,
-            expected_scroll_offset: anchor.scroll_offset,
-            capture_geometry_revision: anchor.geometry_revision,
-            input_revision,
-            last_observed_y: None,
-            stable_frames: 0,
-            frames_left: ANCHOR_MAX_FRAMES,
-            max_correction_px,
-        }
-    }
-
-    fn step(
-        &mut self,
-        mode: ChatMode,
-        input_revision: u64,
-        current_scroll_offset: f32,
-        observation: Option<MessageGeometry>,
-    ) -> AnchorStep {
-        if self.mode != mode
-            || self.input_revision != input_revision
-            || (current_scroll_offset - self.expected_scroll_offset).abs() > 1.0
-            || self.frames_left == 0
-        {
-            return AnchorStep::Cancel;
-        }
-        self.frames_left -= 1;
-
-        let Some(observation) = observation else {
-            return AnchorStep::Wait;
-        };
-        if observation.revision <= self.capture_geometry_revision {
-            return AnchorStep::Wait;
-        }
-
-        let target = (observation.y - self.viewport_y).max(0.0);
-        if self
-            .max_correction_px
-            .is_some_and(|maximum| (target - self.original_scroll_offset).abs() > maximum)
-        {
-            return AnchorStep::Cancel;
-        }
-
-        if (target - current_scroll_offset).abs() > ANCHOR_EPSILON_PX {
-            self.expected_scroll_offset = target;
-            self.last_observed_y = Some(observation.y);
-            self.stable_frames = 0;
-            return AnchorStep::Write(target);
-        }
-
-        let geometry_is_stable = self
-            .last_observed_y
-            .is_some_and(|previous| (previous - observation.y).abs() <= ANCHOR_EPSILON_PX);
-        self.expected_scroll_offset = target;
-        self.last_observed_y = Some(observation.y);
-        if geometry_is_stable {
-            self.stable_frames = self.stable_frames.saturating_add(1);
-            if self.stable_frames >= ANCHOR_STABLE_FRAMES {
-                return AnchorStep::Complete;
-            }
-        } else {
-            self.stable_frames = 0;
-        }
-        AnchorStep::Wait
-    }
-}
-
-fn shifted_prepend_window(
-    previous: VirtualRenderSignature,
-    total_len: usize,
-    anchor_index: usize,
-) -> Option<(usize, usize)> {
-    if total_len <= previous.total_len || previous.start >= previous.end {
-        return None;
-    }
-    let inserted = total_len - previous.total_len;
-    let old_start = previous.start.checked_add(inserted)?;
-    let old_end = previous.end.checked_add(inserted)?;
-    if old_end > total_len || !(old_start..old_end).contains(&anchor_index) {
-        return None;
-    }
-    // Materialize the page boundary as well as the reading anchor. Hiding the
-    // entire page in a spacer preserves a coordinate but leaves nothing to read.
-    // Keep room for the old visible rows even if the new page contains tall rows.
-    let start = old_start
-        .saturating_sub(inserted.min(16))
-        .max(anchor_index.saturating_sub(16));
-    let end = old_end.min(start + 32).max(anchor_index + 1);
-    Some((start, end))
 }
 
 thread_local! {
@@ -552,155 +226,9 @@ fn schedule_anchor_compensation(ui_weak: slint::Weak<MainWindow>) {
     schedule_anchor_compensation_after(ui_weak, std::time::Duration::ZERO);
 }
 
-struct ChatMessageModelBridge {
-    incremental: bool,
-    rows_model: Rc<VecModel<crate::ChatMessage>>,
-    mounted_keys: RefCell<Vec<ChatMessageRowKey>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ChatMessageRowKey {
-    mode: ChatMode,
-    id: i32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ModelMutationCounts {
-    inserted: usize,
-    removed: usize,
-    incremental: bool,
-}
-
-impl ChatMessageModelBridge {
-    fn new(incremental: bool) -> Self {
-        Self {
-            incremental,
-            rows_model: Rc::new(VecModel::default()),
-            mounted_keys: RefCell::new(Vec::new()),
-        }
-    }
-
-    fn bind(&self, ui: &MainWindow) {
-        if self.incremental {
-            ui.set_chat_messages(ModelRc::from(self.rows_model.clone()));
-        }
-    }
-
-    fn replace_rows(
-        &self,
-        ui: &MainWindow,
-        mode: ChatMode,
-        next_rows: Vec<crate::ChatMessage>,
-        next_top_spacer: f32,
-        next_bottom_spacer: f32,
-    ) -> ModelMutationCounts {
-        let next_keys = next_rows
-            .iter()
-            .map(|row| ChatMessageRowKey { mode, id: row.id })
-            .collect::<Vec<_>>();
-        if !self.incremental {
-            let removed = ui.get_chat_messages().row_count();
-            let inserted = next_rows.len();
-            ui.set_chat_messages(next_rows.as_slice().into());
-            *self.mounted_keys.borrow_mut() = next_keys;
-            return ModelMutationCounts {
-                inserted,
-                removed,
-                incremental: false,
-            };
-        }
-
-        let old_keys = self.mounted_keys.borrow().clone();
-        if old_keys == next_keys {
-            ui.set_chat_virtual_top_spacer(next_top_spacer);
-            ui.set_chat_virtual_bottom_spacer(next_bottom_spacer);
-            return ModelMutationCounts {
-                inserted: 0,
-                removed: 0,
-                incremental: true,
-            };
-        }
-
-        let old_top_spacer = ui.get_chat_virtual_top_spacer();
-        let old_bottom_spacer = ui.get_chat_virtual_bottom_spacer();
-        if next_top_spacer > old_top_spacer {
-            ui.set_chat_virtual_top_spacer(next_top_spacer);
-        }
-        if next_bottom_spacer > old_bottom_spacer {
-            ui.set_chat_virtual_bottom_spacer(next_bottom_spacer);
-        }
-
-        let overlap = longest_contiguous_overlap(&old_keys, &next_keys);
-        let (inserted, removed) = if let Some((old_start, next_start, overlap_len)) = overlap {
-            for (index, row) in next_rows.iter().take(next_start).cloned().enumerate() {
-                self.rows_model.insert(index, row);
-            }
-            for row in next_rows.iter().skip(next_start + overlap_len).cloned() {
-                self.rows_model.push(row);
-            }
-            for _ in 0..old_start {
-                self.rows_model.remove(next_start);
-            }
-            let old_suffix = old_keys.len().saturating_sub(old_start + overlap_len);
-            for _ in 0..old_suffix {
-                self.rows_model.remove(next_start + overlap_len);
-            }
-            (
-                next_rows.len().saturating_sub(overlap_len),
-                old_keys.len().saturating_sub(overlap_len),
-            )
-        } else {
-            self.rows_model.set_vec(next_rows);
-            (next_keys.len(), old_keys.len())
-        };
-        if next_top_spacer <= old_top_spacer {
-            ui.set_chat_virtual_top_spacer(next_top_spacer);
-        }
-        if next_bottom_spacer <= old_bottom_spacer {
-            ui.set_chat_virtual_bottom_spacer(next_bottom_spacer);
-        }
-        *self.mounted_keys.borrow_mut() = next_keys;
-        ModelMutationCounts {
-            inserted,
-            removed,
-            incremental: overlap.is_some(),
-        }
-    }
-
-    fn clear(&self, ui: &MainWindow) {
-        self.mounted_keys.borrow_mut().clear();
-        if self.incremental {
-            self.rows_model.set_vec(Vec::new());
-        } else {
-            ui.set_chat_messages([].as_slice().into());
-        }
-    }
-}
-
-fn longest_contiguous_overlap<T: PartialEq>(
-    old: &[T],
-    next: &[T],
-) -> Option<(usize, usize, usize)> {
-    let mut best = None;
-    for (old_start, old_id) in old.iter().enumerate() {
-        for (next_start, next_id) in next.iter().enumerate() {
-            if old_id != next_id {
-                continue;
-            }
-            let mut len = 0;
-            while old_start + len < old.len()
-                && next_start + len < next.len()
-                && old[old_start + len] == next[next_start + len]
-            {
-                len += 1;
-            }
-            if best.is_none_or(|(_, _, best_len)| len > best_len) {
-                best = Some((old_start, next_start, len));
-            }
-        }
-    }
-    best
-}
+use super::message_model::ChatMessageModelBridge;
+#[cfg(test)]
+use super::message_model::{ChatMessageRowKey, longest_contiguous_overlap};
 
 fn update_virtual_spacers(ui: &MainWindow, top_spacer: f32, bottom_spacer: f32) {
     let was_active = MODEL_MUTATION_IN_PROGRESS.with(|active| active.replace(true));
@@ -856,19 +384,6 @@ fn active_wrap_width_px(ui: &MainWindow) -> i32 {
             compute_wrap_width_px(ui)
         }
     })
-}
-
-fn compute_wrap_width_for_chat_width(chat_width: f32) -> i32 {
-    let ratio = if chat_width < 720.0 {
-        0.78
-    } else if chat_width < 1200.0 {
-        0.68
-    } else {
-        0.62
-    };
-    let bubble_width = (chat_width * ratio).clamp(280.0, 960.0);
-    let content_width = (bubble_width - 24.0) * WRAP_WIDTH_TUNING_FACTOR;
-    content_width.round().clamp(200.0, 936.0) as i32
 }
 
 fn apply_chat_state_to_ui(

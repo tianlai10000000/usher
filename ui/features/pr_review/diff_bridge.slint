@@ -1,0 +1,18 @@
+// Feature-owned event-loop services; no durable or project state.
+import { WorkflowPrDiffSelectionHit, WorkflowPrDiffGlyphRange, WorkflowPrDiffGlyphRect, WorkflowPrDiffTextSlice, WorkflowPrDiffSelectionRange, WorkflowPrDiffFindMatch, WorkflowPrDiffRowMetric, WorkflowPrDiffVirtualWindow } from "../../components/pr_review/shell.slint";
+export global PrDiffBridge {
+    callback workflow-pr-review-resolve-diff-selection(int, float, float, float, float, float, float, string, float, string) -> WorkflowPrDiffSelectionHit;
+    pure callback workflow-pr-review-resolve-diff-token-hit(string, float, float, string, float, bool, bool) -> int;
+    pure callback workflow-pr-review-resolve-diff-token-range(string, int, int, float, string, float, bool, bool) -> WorkflowPrDiffGlyphRange;
+    pure callback workflow-pr-review-resolve-diff-wrapped-range(string, int, int, float, float, string, float) -> [WorkflowPrDiffGlyphRect];
+    pure callback workflow-pr-review-resolve-diff-selection-slice(int, string, int, int) -> WorkflowPrDiffTextSlice;
+    pure callback workflow-pr-review-resolve-diff-wrap-line-start(int, string, int, int) -> int;
+    callback workflow-pr-review-resolve-diff-click-range(int, int, string, int) -> WorkflowPrDiffSelectionRange;
+    callback workflow-pr-review-find-diff-matches(string, bool) -> [WorkflowPrDiffFindMatch];
+    pure callback workflow-pr-review-find-diff-row-matches(int, string, string) -> [WorkflowPrDiffFindMatch];
+    pure callback workflow-pr-review-step-diff-find-index(int, int, bool) -> int;
+    callback workflow-pr-review-resolve-diff-find-viewport-y(int, int, float, float, string, float, float, float) -> float;
+    callback workflow-pr-review-resolve-location-viewport-y(int, float, float) -> float;
+    callback workflow-pr-review-layout-diff-virtual-window(int, [WorkflowPrDiffRowMetric], float, float, float, float, float, float) -> WorkflowPrDiffVirtualWindow;
+    callback workflow-pr-review-diagnose-diff-scroll(string, float, float, float, float, bool, bool, bool, int, int, int);
+}

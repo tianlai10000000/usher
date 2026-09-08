@@ -22,8 +22,10 @@ review task does not own a route or require a visible page.
 - `src/ai_review/task_persistence.rs`: ordered task snapshot persistence,
   shutdown barriers, and post-write session reconciliation.
 - `src/ai_review/controller.rs`: task orchestration, Git/provider diff loading,
-  AI calls, cancellation, session persistence, notifications, and on-demand UI
+  AI calls, cancellation, session I/O scheduling, notifications, and on-demand UI
   projection.
+- `src/ai_review/sessions.rs`: worker-side Review/PR Chat session serialization
+  and loading, plus corruption-preserving interrupted-task hydration.
 - `src/agent_response/`: width-independent, bounded projection of agent-authored
   Markdown, content-identity caching, and opaque repository-file actions. It
   performs no file I/O and owns no Preview host.
@@ -42,7 +44,9 @@ review task does not own a route or require a visible page.
 - `src/ai_review/config.rs`：基于 `usher-state-store` 的门面和自动配置持久化。
 - `src/ai_review/task_persistence.rs`：有序任务快照持久化、关闭屏障与写后会话对账。
 - `src/ai_review/controller.rs`：任务编排、Git/Provider diff 获取、AI 调用、取消、
-  Session 持久化、通知和按需 UI 投影。
+  Session I/O 调度、通知和按需 UI 投影。
+- `src/ai_review/sessions.rs`：Worker 上的 Review/PR Chat 会话序列化与加载，
+  以及保留损坏文件的中断任务恢复。
 - `src/agent_response/`：Agent Markdown 的宽度无关有界投影、内容身份缓存和不透明
   仓库文件 action；不执行文件 I/O，也不拥有 Preview Host。
 - `src/artifact_preview/`：由 Worker 解析并读取用户显式激活的仓库 Markdown，再经

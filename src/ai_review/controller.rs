@@ -8,7 +8,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use slint::{ComponentHandle, Global, Model, ModelRc, SharedString, VecModel};
 use tokio::sync::Notify;
@@ -39,7 +39,7 @@ use crate::{
 
 use super::config::{ReviewConfigFacade, default_session_dir};
 use super::response::{self, ResponseVariant};
-use super::storage::{JsonLoad, load_json_preserving_corrupt, session_paths};
+use super::storage::session_paths;
 
 #[cfg(test)]
 use super::storage::reconcile_session_files;
@@ -223,13 +223,10 @@ struct PendingReviewRequest {
     extra_requirements: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct PullRequestChatSession {
-    task: ReviewTaskSummary,
-    input: ReviewInput,
-    #[serde(default)]
-    conversation: Vec<ReviewConversationMessage>,
-}
+use super::sessions::{
+    PullRequestChatSession, load_chat_session, load_session, load_task_state, persist_chat_session,
+    persist_session, unix_millis,
+};
 
 #[derive(Default)]
 struct ReviewCancellation {
@@ -3332,67 +3329,9 @@ fn fixture_result() -> ReviewResult {
     unreachable!("AI Review fixtures require the test-fixtures feature")
 }
 
-async fn persist_session(path: PathBuf, session: ReviewSession) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        let data = serde_json::to_vec(&session).map_err(|error| error.to_string())?;
-        usher_fs::atomic_write(&path, &data).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("AI review persistence worker failed: {error}"))?
-}
-
-async fn load_session(path: PathBuf) -> Result<ReviewSession, String> {
-    tokio::task::spawn_blocking(move || match load_json_preserving_corrupt(&path)? {
-        JsonLoad::Loaded(session) => Ok(session),
-        JsonLoad::Missing => Err(format!(
-            "AI review session {} does not exist.",
-            path.display()
-        )),
-        JsonLoad::CorruptPreserved { backup, error } => Err(format!(
-            "AI review session was invalid ({error}) and was preserved at {}.",
-            backup.display()
-        )),
-    })
-    .await
-    .map_err(|error| format!("AI review session loader failed: {error}"))?
-}
-
-async fn persist_chat_session(
-    path: PathBuf,
-    session: PullRequestChatSession,
-) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        let data = serde_json::to_vec(&session).map_err(|error| error.to_string())?;
-        usher_fs::atomic_write(&path, &data).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("AI review chat persistence worker failed: {error}"))?
-}
-
-async fn load_chat_session(path: PathBuf) -> Result<Option<PullRequestChatSession>, String> {
-    tokio::task::spawn_blocking(move || match load_json_preserving_corrupt(&path)? {
-        JsonLoad::Loaded(session) => Ok(Some(session)),
-        JsonLoad::Missing => Ok(None),
-        JsonLoad::CorruptPreserved { backup, error } => Err(format!(
-            "AI review chat history was invalid ({error}) and was preserved at {}.",
-            backup.display()
-        )),
-    })
-    .await
-    .map_err(|error| format!("AI review chat session loader failed: {error}"))?
-}
-
 fn new_task_id(now: u64) -> ReviewTaskId {
     let sequence = NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed);
     ReviewTaskId(format!("review-{now:x}-{sequence:x}"))
-}
-
-fn unix_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            duration.as_millis().min(u128::from(u64::MAX)) as u64
-        })
 }
 
 fn elapsed_millis(duration: Duration) -> u64 {
@@ -3415,32 +3354,6 @@ fn format_elapsed_ms(elapsed_ms: u64) -> String {
     let hours = minutes / 60;
     let remaining_minutes = minutes % 60;
     format!("{hours}h {remaining_minutes:02}m {remaining_seconds:02}s")
-}
-
-fn load_task_state(path: &Path) -> (ReviewTaskState, bool) {
-    let (mut state, writes_allowed) = match load_json_preserving_corrupt::<ReviewTaskState>(path) {
-        Ok(JsonLoad::Loaded(state)) => (state, true),
-        Ok(JsonLoad::Missing) => (ReviewTaskState::default(), true),
-        Ok(JsonLoad::CorruptPreserved { backup, error }) => {
-            log::error!(
-                "[AI Review][Task Store] Invalid state preserved at {}: {error}",
-                backup.display()
-            );
-            (ReviewTaskState::default(), true)
-        }
-        Err(error) => {
-            log::error!("[AI Review][Task Store] {error}");
-            (ReviewTaskState::default(), false)
-        }
-    };
-    for task in state.tasks.values_mut() {
-        if task.status.is_active() {
-            task.status = ReviewTaskStatus::Failed;
-            task.error = "ai_review.failure.interrupted".to_string();
-            task.updated_at_unix_ms = unix_millis();
-        }
-    }
-    (state, writes_allowed)
 }
 
 #[cfg(test)]

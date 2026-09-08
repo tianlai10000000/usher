@@ -69,6 +69,22 @@ state-store generation、AI Review enabled/disabled 公共 contract、生成体�
 P4-A 随后把远端 action-state 读取与 mutation 拆分，使 PR Review 当前使用七类独立
 generation，避免只读刷新作废已提交的远端写操作。
 
+## 2026-09-08 P5-D 职责收敛
+
+在 `8b29a8f` 上，PR Review controller 已回涨到 5315 行、Chat 2650 行、
+AI Review 3933 行、根 Rust 1117 行，根 Slint callback 为 149 个。
+#62 按远端动作、Diff event-loop 绑定、诊断、Chat 视口策略/稳定消息 model、
+AI Session I/O 和 Settings 保存反馈提取已有职责后，分别为
+4287、2165、3846、1034 行及 135 个 callback。既有测试保留原位，原门禁预算
+不变；提取模块增加独立规模和反向 controller 依赖检查。远端 action 方法仍是
+controller 子模块实现，以保留现有七类 generation 与生命周期。
+
+#63 为 `main` push 接入原 PR 质量门禁，并将真实 Project、Job、Preview、Find
+夹具纳入 Nightly。所有权以中英文架构与对应 spec 为准，实测及验收缺口见
+[`p5-d-performance.md`](p5-d-performance.md)，后续完成状态以
+[`claude-proposal.md`](../claude-proposal.md) 第 20 节为准。以下 7 月路线是历史
+记录，不再作为停止结构治理的当前依据。
+
 ## 2026-07 已完成的结构调整（历史基线）
 
 截至路线图第 18 批，已完成以下行为不变的边界调整：

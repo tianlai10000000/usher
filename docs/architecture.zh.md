@@ -81,6 +81,7 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `src/shortcuts/` | 应用命令 ID、声明式键位、平台归一化匹配、路由作用域、冲突校验、分发与展示标签。 |
 | `src/app_lifecycle.rs` | composition 层生命周期注册，负责 Chat transition 可见性与 Workflow scope 清理。 |
 | `src/settings.rs` | TOML 设置模型与串行原子持久化，包含 AI Agent 凭据和可配置 RAG endpoint。 |
+| `src/settings_feedback.rs` | 共用的设置保存 Worker 完成回写、saved 状态复位计时器及本地化 Toast；装配根只绑定动作。 |
 | `src/ai/` | 共用 OpenAI-compatible AI Agent transport、Feature 自有的强类型/持久化配置 Store 与内置 Prompt catalog；`agent.rs` 负责连通性测试及 AI Chat/AI Code Review 使用的 chat completion，不负责 RAG transport。 |
 | `src/network.rs` | 网络可达性与 `AppState.network-online`：macOS 使用 SystemConfiguration 回调，其它平台使用不发包的路由检查与离线退避。 |
 | `src/http/mod.rs` | 唯一共享 reqwest client、单请求总超时/响应体空闲超时策略、统一响应体读取、拦截器、统一错误和可选 UI 反馈。 |
@@ -91,6 +92,31 @@ PR Review 通过稳定的 Slint `@pr-review` feature package 入口暴露，与�
 | `src/dialog.rs` | 命令式 `DialogManager` 绑定与操作分发；不再拥有独立视觉变体。 |
 
 仓库接口地址与可执行行为必须保持分离：`src/git/` 可以引用 `src/codereview/api/` 中的常量，但 `src/codereview/api/` 不得依赖 `src/git/`、`src/http/`、reqwest 或 serde。
+
+PR Review 的 `controller.rs` 保留加载、上下文和导航编排；子模块
+`controller/actions.rs` 负责远端 review/merge/revert 命令及能力展示，
+`controller/diff_bindings.rs` 负责 event-loop 上的几何、选择、虚拟列表与 Find
+绑定，`controller/diagnostics.rs` 负责显式开启的滚动/定位诊断。
+`ui/features/pr_review/diff_bridge.slint` 中无状态的 `PrDiffBridge` global
+声明 Feature 的 Diff callback API；`ui/main.slint` 经它转发页面事件，并导出
+生成的 Rust API。该 global 不拥有共享领域状态或持久化。
+
+Chat 的 `interactive.rs` 保留路由/请求编排和计时器；`viewport_policy.rs`
+负责覆盖、窗口移动和锚点收敛策略，`message_model.rs` 负责稳定增量 Slint 行
+model。AI Review 的 `sessions.rs` 负责 Review/PR Chat 会话序列化及中断任务
+恢复，`controller.rs` 调度这些操作，`task_persistence.rs` 继续负责自动任务
+commit 持久化。叶子模块不反向导入 controller；拆分不改变缓存上限、event-loop
+调度、generation guard、存储格式或关闭优先级。
+
+结构门禁保留原 controller/根窗口预算，并增加提取模块规模与反向 controller
+依赖检查。CI 覆盖 PR、`main` push 和手工触发。Nightly 只构建一个 Release
+二进制，先运行原有三进程 Home RSS/footprint 门禁，再通过
+`scripts/benchmark-hot-paths.py` 串行运行 Project、Job、Preview 代码/段落、
+Find。每个热点使用相同哈希执行三组 AB/BA/AB 重复性对照；绝对 RSS、阶段增长、
+callback 耗时和夹具效果预算避免相对比较掩盖回归。显式 `--baseline` 支持优化
+前后对照。缺失/无效采样、夹具未完成或子进程失败均使门禁失败；失败时仍上传
+日志、逐进程状态/采样及汇总报告。短时固定夹具不证明长期内存上界，也不能替代
+手工输入与绘制验收。
 
 ### Slint UI
 

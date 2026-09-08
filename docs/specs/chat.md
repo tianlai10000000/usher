@@ -12,6 +12,8 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 - Width-independent UI-row projection and bounded projection cache:
   `src/chat/renderer.rs`, `src/chat/markdown.rs`.
 - Async request and route interaction: `src/chat/interactive.rs`.
+- Viewport coverage, bounded shifts and anchor settlement: `src/chat/viewport_policy.rs`.
+- Stable incremental Slint message model: `src/chat/message_model.rs`.
 - Production bounded height estimation, prefix cache, and virtual-window selection:
   `src/chat/virtual_layout.rs`.
 - Presentation: `ui/views/chat.slint`, bridged through `ui/main.slint`.
@@ -19,6 +21,8 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
 - 持久化和双 Session 状态：`src/chat/persistence.rs`、`src/chat/session.rs`。
 - 宽度无关 UI 行投影及有界投影缓存：`src/chat/renderer.rs`、`src/chat/markdown.rs`。
 - 异步请求与路由交互：`src/chat/interactive.rs`。
+- 视口覆盖、有界窗口移动与锚点收敛：`src/chat/viewport_policy.rs`。
+- 稳定增量 Slint 消息 model：`src/chat/message_model.rs`。
 - 生产使用的有界高度估算、prefix cache 与虚拟窗口选择：`src/chat/virtual_layout.rs`。
 - 展示：`ui/views/chat.slint`，通过 `ui/main.slint` 桥接。
 

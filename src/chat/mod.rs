@@ -3,12 +3,14 @@
 pub mod chat;
 pub mod interactive;
 pub mod markdown;
+mod message_model;
 pub(crate) mod performance;
 pub mod persistence;
 pub mod renderer;
 pub mod session;
 mod text_selection;
 mod timestamp;
+mod viewport_policy;
 mod virtual_layout;
 
 use crate::MainWindow;

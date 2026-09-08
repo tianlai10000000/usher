@@ -168,15 +168,17 @@ pub(super) fn bind(ui: &MainWindow) {
     BRIDGE.with(|slot| *slot.borrow_mut() = Rc::downgrade(&bridge));
     let weak = ui.as_weak();
     let full = bridge.clone();
-    ui.on_workflow_pr_review_find_diff_matches(move |query, split| {
-        weak.upgrade().map_or_else(ModelRc::default, |ui| {
-            full.matches(&ui, query.as_str(), split)
-        })
-    });
+    ui.global::<crate::PrDiffBridge>()
+        .on_workflow_pr_review_find_diff_matches(move |query, split| {
+            weak.upgrade().map_or_else(ModelRc::default, |ui| {
+                full.matches(&ui, query.as_str(), split)
+            })
+        });
     let weak = ui.as_weak();
-    ui.on_workflow_pr_review_find_diff_row_matches(move |line, side, query| {
-        weak.upgrade().map_or_else(ModelRc::default, |ui| {
-            bridge.row(&ui, line, side.as_str(), query.as_str())
-        })
-    });
+    ui.global::<crate::PrDiffBridge>()
+        .on_workflow_pr_review_find_diff_row_matches(move |line, side, query| {
+            weak.upgrade().map_or_else(ModelRc::default, |ui| {
+                bridge.row(&ui, line, side.as_str(), query.as_str())
+            })
+        });
 }

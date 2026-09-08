@@ -8,9 +8,10 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 use slint::{ComponentHandle, Global};
 
+use crate::settings_feedback::settings_toast;
 use crate::{
     CustomComponentType, MainWindow, NotificationDelivery, NotificationManager,
-    NotificationOptions, ToastManager, app_paths, app_runtime, platform, settings_toast,
+    NotificationOptions, ToastManager, app_paths, app_runtime, platform,
 };
 
 const LOG_RETENTION: Duration = Duration::from_secs(14 * 24 * 60 * 60);

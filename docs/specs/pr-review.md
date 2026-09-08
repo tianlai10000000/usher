@@ -24,6 +24,24 @@ ActionMenu，操作复用 Button/IconButton，空白与错误状态使用 Blanks
 作为可替换的虚拟化/滚动行为；排版、颜色、控件、TreeView 式层级、diff
 外壳及 Dialog 均由 GitHub 前缀的应用组件负责。vendored Material 源码只读。
 
+## Controller ownership / 控制器职责
+
+`src/workflow/pr_review/controller.rs` owns context, loading and navigation;
+`controller/actions.rs` owns remote actions and capability presentation.
+`controller/diff_bindings.rs` owns the event-loop Diff geometry, selection,
+virtual-list and Find adapters; `controller/diagnostics.rs` owns opt-in evidence.
+The stateless `PrDiffBridge` global in `ui/features/pr_review/diff_bridge.slint`
+is the Rust-facing Diff callback contract. The root only forwards page events;
+request generations, weak-window delivery and project scoping remain unchanged.
+
+`src/workflow/pr_review/controller.rs` 负责上下文、加载和导航，
+`controller/actions.rs` 负责远端动作与能力展示。`controller/diff_bindings.rs`
+负责 event-loop 上的 Diff 几何、选择、虚拟列表与 Find adapter，
+`controller/diagnostics.rs` 负责显式开启的诊断证据。
+`ui/features/pr_review/diff_bridge.slint` 中无状态的 `PrDiffBridge` global
+是面向 Rust 的 Diff callback 契约；根窗口只转发页面事件。请求 generation、
+weak window 回写和项目隔离语义不变。
+
 ## Product boundary / 产品边界
 
 The current product supports the following workflow:

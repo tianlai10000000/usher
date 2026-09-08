@@ -47,6 +47,26 @@ check_max "root Slint callbacks" "$(slint_declaration_count ui/main.slint '^[[:s
 check_max "root Slint properties" "$(slint_declaration_count ui/main.slint '^[[:space:]]*(in|out|in-out|private)[[:space:]]+property')" 410
 check_max "PR Review Slint lines" "$(line_count ui/views/workflow/pr_review_workspace.slint)" 4500
 
+# P5-D owners have their own tripwires so extraction cannot hide regrowth.
+check_max "PR Review remote actions lines" "$(line_count src/workflow/pr_review/controller/actions.rs)" 580
+check_max "PR Review Diff bindings lines" "$(line_count src/workflow/pr_review/controller/diff_bindings.rs)" 430
+check_max "PR Review diagnostics lines" "$(line_count src/workflow/pr_review/controller/diagnostics.rs)" 190
+check_max "Chat viewport policy lines" "$(line_count src/chat/viewport_policy.rs)" 390
+check_max "Chat message model lines" "$(line_count src/chat/message_model.rs)" 180
+check_max "AI Review sessions lines" "$(line_count src/ai_review/sessions.rs)" 120
+check_max "Settings save feedback lines" "$(line_count src/settings_feedback.rs)" 110
+check_max "PR Diff bridge callbacks" "$(slint_declaration_count ui/features/pr_review/diff_bridge.slint '^[[:space:]]*(pure[[:space:]]+)?callback[[:space:]]+')" 16
+
+reverse_controller_dependencies=$(rg -n 'interactive::|controller::|use super::\*' \
+    src/chat/viewport_policy.rs src/chat/message_model.rs src/ai_review/sessions.rs \
+    src/workflow/pr_review/controller/diff_bindings.rs \
+    src/workflow/pr_review/controller/diagnostics.rs || true)
+if [ -n "$reverse_controller_dependencies" ]; then
+    echo "Architecture structure: extracted leaf owners depend on controller internals:" >&2
+    echo "$reverse_controller_dependencies" >&2
+    failed=1
+fi
+
 unexpected_http_clients=$(rg -n \
     'reqwest::Client::new|reqwest::blocking::get|reqwest::Client::builder|Client::builder' \
     src crates --glob '*.rs' | rg -v '^src/http/mod\.rs:' || true)

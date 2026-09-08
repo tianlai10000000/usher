@@ -87,9 +87,13 @@ fn round(weak: slint::Weak<MainWindow>, index: usize) {
         let split = (4..8).contains(&index);
         let started = Instant::now();
         for query in ["a", "alpha", "İ", "中文", "none", "end"] {
-            let _ = ui.invoke_workflow_pr_review_find_diff_matches(query.into(), split);
+            let _ = ui
+                .global::<crate::PrDiffBridge>()
+                .invoke_workflow_pr_review_find_diff_matches(query.into(), split);
         }
-        let model = ui.invoke_workflow_pr_review_find_diff_matches("中文".into(), split);
+        let model = ui
+            .global::<crate::PrDiffBridge>()
+            .invoke_workflow_pr_review_find_diff_matches("中文".into(), split);
         log::info!(
             "[P5][61] layout_us={} round={index}",
             started.elapsed().as_micros()

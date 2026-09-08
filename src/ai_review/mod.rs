@@ -1,6 +1,7 @@
 mod config;
 mod controller;
 mod response;
+mod sessions;
 mod storage;
 mod task_persistence;
 

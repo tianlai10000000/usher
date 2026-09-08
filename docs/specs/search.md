@@ -12,6 +12,13 @@ these primitives.
 相邻结果导航与视口揭示策略；Feature 模块只负责把自身的行、左右面板、虚拟 model
 与视觉换行几何映射到这些通用原语。
 
+PR Find's asynchronous index/model bridge remains in
+`src/workflow/pr_review/find_bridge.rs`; event-loop geometry and reveal bindings
+live in `controller/diff_bindings.rs` and use the feature-owned stateless
+`PrDiffBridge` global. / PR Find 的异步索引/model bridge 仍位于
+`src/workflow/pr_review/find_bridge.rs`；event-loop 几何与定位绑定位于
+`controller/diff_bindings.rs`，使用 Feature 自有的无状态 `PrDiffBridge` global。
+
 ## Invariants / 不变量
 
 1. Matches are returned in source order and do not overlap. Each occurrence on
