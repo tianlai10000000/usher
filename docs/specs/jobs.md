@@ -37,14 +37,17 @@ References:
    contains only a display name and a command argument vector. Commands must not
    be flattened into a shell string for execution.
 2. Runtime data is separate from definitions. `JobStepData` adds status,
-   conclusion, detail, bounded log output, measured duration, and the initial
-   disclosure state.
+   conclusion, detail, bounded log output, optional semantic `Duration`, and
+   the initial disclosure state. Queued and unmeasured steps store no duration;
+   the presenter alone projects empty, in-progress, and compact completed text.
 3. `JobSnapshot` is the single source of truth for one execution. It owns job
    status, optional conclusion, total measured duration, and ordered step
    snapshots.
 4. Status follows GitHub's lifecycle boundary: `queued`, `in_progress`,
    `completed`. A completed job or step carries `success`, `failure`, or
-   `cancelled`; an unfinished item has no conclusion.
+   `cancelled`; an unfinished item has no conclusion. Feature controllers use
+   `JobStepData::start/finish` and `JobSnapshot::start/finish` so status,
+   conclusion, detail, duration, and initial disclosure state change together.
 5. `ui/components/jobs/job.slint` is presentation-only. It performs no process,
    filesystem, network, or timing work. Its public `execution-status`,
    `conclusion`, and `total-duration` properties let the owner bind or read the
@@ -78,7 +81,9 @@ References:
     shown.
 13. CD may adapt its project-scoped stage snapshot to `JobStepItem` for the
     common visual presenter, but the presenter must not mutate deployment state
-    or start callbacks. Branch validation is not an executable Job; it must not
+    or start callbacks. Deployment and rollback stages use separate enums, and
+    CD step status remains typed until the Slint projection boundary. Branch
+    validation is not an executable Job; it must not
     fabricate running Steps until a controller owns real execution state.
 14. `Route.JobRun` is an application-level route, not a child of Workflow and
     not a member of the Workflow lifecycle domain. Any page may navigate to it.
@@ -103,12 +108,15 @@ References:
 1. 不可变输入为有序 `Vec<JobStepDefinition>`，每项只包含展示名称与命令 argv；
    执行时不得把命令压平成 shell 字符串。
 2. 运行时数据与定义分离。`JobStepData` 在定义之外增加 status、conclusion、
-   detail、有界日志、实测耗时和初始展开状态。
+   detail、有界日志、可选的语义 `Duration` 和初始展开状态。queued 或未计时 Step
+   不保存耗时；空串、运行中提示和完成后的紧凑文本只在展示投影时生成。
 3. `JobSnapshot` 是单次执行的唯一事实来源，统一持有 Job status、可选
    conclusion、总实测耗时和有序 Step 快照。
 4. Status 遵循 GitHub 生命周期：`queued`、`in_progress`、`completed`。
    已完成 Job/Step 的 conclusion 为 `success`、`failure` 或 `cancelled`；
-   未完成项没有 conclusion。
+   未完成项没有 conclusion。Feature controller 通过 `JobStepData::start/finish`
+   与 `JobSnapshot::start/finish` 同步更新 status、conclusion、detail、duration
+   和初始展开状态。
 5. `ui/components/jobs/job.slint` 只负责展示，不执行进程、文件、网络或计时。
    外部通过公开的 `execution-status`、`conclusion`、`total-duration` 绑定或
    读取完整流程结果，无需检查每一行。
@@ -134,7 +142,8 @@ References:
     状态环，但不得出现 disclosure、手型光标或 hover 背景；只有确实可展示输出的
     running/completed Step 才可交互。
 13. CD 可以把项目级 Stage Snapshot 适配为 `JobStepItem` 交给共用视觉展示，但
-    Presenter 不得修改部署状态或启动 callback。Branch 校验不是可执行 Job；在
+    Presenter 不得修改部署状态或启动 callback。部署与回滚使用各自的阶段枚举，CD
+    Step 状态在 Slint 投影边界前保持强类型。Branch 校验不是可执行 Job；在
     Controller 尚未持有真实执行状态前，不得伪造运行中的 Steps。
 14. `Route.JobRun` 是应用级路由，不是 Workflow 子页面，也不属于 Workflow
     生命周期域；任何页面都可进入，Back 由全局 Router 历史精确返回来源路由。

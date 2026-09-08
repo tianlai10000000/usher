@@ -92,7 +92,7 @@ pub(crate) struct JobStepData {
     pub(crate) detail: LocalizedText,
     pub(crate) log: String,
     pub(crate) parsed_log: LogSnapshot,
-    pub(crate) duration: String,
+    pub(crate) duration: Option<Duration>,
     pub(crate) default_expanded: bool,
     /// Backend-owned lazy-load latch. Raw output is collected independently,
     /// but the Slint line model is not materialized until a disclosure opens.
@@ -108,7 +108,7 @@ impl JobStepData {
             detail: detail.into(),
             log: String::new(),
             parsed_log: LogSnapshot::default(),
-            duration: String::new(),
+            duration: None,
             default_expanded: false,
             log_requested: false,
         }
@@ -121,6 +121,38 @@ impl JobStepData {
         }
         self.parsed_log = self.parsed_log.update(&log);
         self.log = log;
+    }
+
+    pub(crate) fn start(&mut self, detail: impl Into<LocalizedText>) {
+        self.status = JobStepStatus::InProgress;
+        self.conclusion = None;
+        self.detail = detail.into();
+        self.duration = None;
+        self.default_expanded = false;
+    }
+
+    pub(crate) fn finish(
+        &mut self,
+        conclusion: JobConclusion,
+        duration: Option<Duration>,
+        detail: impl Into<LocalizedText>,
+        default_expanded: bool,
+    ) {
+        self.status = JobStepStatus::Completed;
+        self.conclusion = Some(conclusion);
+        self.detail = detail.into();
+        self.duration = duration;
+        self.default_expanded = default_expanded;
+    }
+
+    fn formatted_duration(&self) -> String {
+        self.duration.map(format_duration).unwrap_or_else(|| {
+            if self.status == JobStepStatus::InProgress {
+                "…".to_string()
+            } else {
+                String::new()
+            }
+        })
     }
 
     #[cfg(test)]
@@ -154,7 +186,7 @@ impl JobStepData {
             has_log: !self.log.is_empty() || self.status == JobStepStatus::InProgress,
             log_loaded: materialize_log,
             log_lines,
-            duration: self.duration.as_str().into(),
+            duration: self.formatted_duration().into(),
             default_expanded: self.default_expanded,
         }
     }
@@ -164,7 +196,7 @@ impl JobStepData {
 pub(crate) struct JobSnapshot {
     pub(crate) status: JobExecutionStatus,
     pub(crate) conclusion: Option<JobConclusion>,
-    pub(crate) total_duration: String,
+    pub(crate) total_duration: Option<Duration>,
     pub(crate) steps: Vec<JobStepData>,
 }
 
@@ -173,7 +205,7 @@ impl JobSnapshot {
         Self {
             status: JobExecutionStatus::Queued,
             conclusion: None,
-            total_duration: String::new(),
+            total_duration: None,
             steps,
         }
     }
@@ -181,7 +213,7 @@ impl JobSnapshot {
     pub(crate) fn start(&mut self, steps: Vec<JobStepData>) {
         self.status = JobExecutionStatus::InProgress;
         self.conclusion = None;
-        self.total_duration.clear();
+        self.total_duration = None;
         self.steps = steps;
     }
 
@@ -204,12 +236,12 @@ impl JobSnapshot {
     pub(crate) fn finish(
         &mut self,
         conclusion: JobConclusion,
-        total_duration: String,
+        total_duration: Duration,
         steps: Vec<JobStepData>,
     ) {
         self.status = JobExecutionStatus::Completed;
         self.conclusion = Some(conclusion);
-        self.total_duration = total_duration;
+        self.total_duration = Some(total_duration);
         let mut steps = steps;
         preserve_log_requests(&self.steps, &mut steps);
         self.steps = steps;
@@ -267,10 +299,15 @@ mod tests {
         snapshot.start(vec![queued.clone()]);
         assert_eq!(snapshot.status, JobExecutionStatus::InProgress);
 
-        snapshot.finish(JobConclusion::Success, "2s".into(), vec![queued]);
+        snapshot.finish(JobConclusion::Success, Duration::from_secs(2), vec![queued]);
         assert_eq!(snapshot.status, JobExecutionStatus::Completed);
         assert_eq!(snapshot.conclusion, Some(JobConclusion::Success));
-        assert_eq!(snapshot.total_duration, "2s");
+        assert_eq!(snapshot.total_duration, Some(Duration::from_secs(2)));
+
+        snapshot.start(snapshot.steps.clone());
+        assert_eq!(snapshot.status, JobExecutionStatus::InProgress);
+        assert_eq!(snapshot.conclusion, None);
+        assert_eq!(snapshot.total_duration, None);
     }
 
     #[test]
@@ -297,7 +334,12 @@ mod tests {
             JobStepDefinition::new("Build", vec!["cargo".into(), "build".into()]),
             "Build project.",
         );
-        step.status = super::JobStepStatus::Completed;
+        step.finish(
+            JobConclusion::Success,
+            Some(Duration::from_secs(1)),
+            "Build complete.",
+            false,
+        );
         step.set_log("warning: cached dependency".into());
 
         assert_eq!(step.to_slint().log_lines.row_count(), 0);
@@ -305,5 +347,54 @@ mod tests {
         let item = step.to_slint();
         assert_eq!(item.log_lines.row_count(), 1);
         assert_eq!(item.log_lines.row_data(0).unwrap().kind.as_str(), "warning");
+    }
+
+    #[test]
+    fn step_lifecycle_projects_only_semantic_duration_values() {
+        let mut step = JobStepData::queued(
+            JobStepDefinition::new("Build", vec!["cargo".into(), "build".into()]),
+            "Waiting.",
+        );
+        assert_eq!(step.duration, None);
+        assert_eq!(step.to_slint().duration, "");
+
+        step.start("Building.");
+        assert_eq!(step.status, super::JobStepStatus::InProgress);
+        assert_eq!(step.conclusion, None);
+        assert_eq!(step.duration, None);
+        assert_eq!(step.to_slint().duration, "…");
+
+        step.finish(
+            JobConclusion::Failure,
+            Some(Duration::from_millis(999)),
+            "Build failed.",
+            true,
+        );
+        assert_eq!(step.status, super::JobStepStatus::Completed);
+        assert_eq!(step.conclusion, Some(JobConclusion::Failure));
+        assert_eq!(step.to_slint().duration, "0s");
+        assert!(step.default_expanded);
+
+        step.finish(
+            JobConclusion::Cancelled,
+            None,
+            "Cancelled before start.",
+            false,
+        );
+        assert_eq!(step.to_slint().duration, "");
+        assert!(!step.default_expanded);
+    }
+
+    #[test]
+    fn set_log_keeps_raw_and_parsed_snapshots_consistent() {
+        let mut step = JobStepData::queued(JobStepDefinition::new("Build", vec![]), "Waiting.");
+        step.set_log("first\nwarning: retained".into());
+
+        assert_eq!(step.log, "first\nwarning: retained");
+        step.log_requested = true;
+        let item = step.to_slint();
+        assert_eq!(item.log_lines.row_count(), 2);
+        assert_eq!(item.log_lines.row_data(0).unwrap().text, "first");
+        assert_eq!(item.log_lines.row_data(1).unwrap().kind, "warning");
     }
 }

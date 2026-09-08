@@ -15,17 +15,52 @@ pub(crate) struct CdRequest {
     pub(crate) commit: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CdStepStatus {
+    Pending,
+    Running,
+    Success,
+    RolledBack,
+}
+
+impl CdStepStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Success => "success",
+            Self::RolledBack => "rolled_back",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeploymentStage {
+    Build,
+    Test,
+    Deploy,
+    Verify,
+    Done,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RollbackStage {
+    Deploy,
+    Verify,
+    Done,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct CdSnapshot {
     pub(crate) running: bool,
     pub(crate) summary: LocalizedText,
-    pub(crate) build_status: String,
+    pub(crate) build_status: CdStepStatus,
     pub(crate) build_detail: LocalizedText,
-    pub(crate) test_status: String,
+    pub(crate) test_status: CdStepStatus,
     pub(crate) test_detail: LocalizedText,
-    pub(crate) deploy_status: String,
+    pub(crate) deploy_status: CdStepStatus,
     pub(crate) deploy_detail: LocalizedText,
-    pub(crate) verify_status: String,
+    pub(crate) verify_status: CdStepStatus,
     pub(crate) verify_detail: LocalizedText,
 }
 
@@ -33,13 +68,13 @@ pub(crate) fn default_cd_snapshot() -> CdSnapshot {
     CdSnapshot {
         running: false,
         summary: LocalizedText::message("cd.no_deployment"),
-        build_status: "pending".to_string(),
+        build_status: CdStepStatus::Pending,
         build_detail: LocalizedText::message("cd.waiting_to_start"),
-        test_status: "pending".to_string(),
+        test_status: CdStepStatus::Pending,
         test_detail: LocalizedText::message("cd.waiting_to_start"),
-        deploy_status: "pending".to_string(),
+        deploy_status: CdStepStatus::Pending,
         deploy_detail: LocalizedText::message("cd.waiting_to_start"),
-        verify_status: "pending".to_string(),
+        verify_status: CdStepStatus::Pending,
         verify_detail: LocalizedText::message("cd.waiting_to_start"),
     }
 }
@@ -57,7 +92,7 @@ pub(crate) fn validate_cd_request(req: &CdRequest) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn deployment_snapshot(req: &CdRequest, stage: &str) -> CdSnapshot {
+pub(crate) fn deployment_snapshot(req: &CdRequest, stage: DeploymentStage) -> CdSnapshot {
     let mut snapshot = default_cd_snapshot();
     snapshot.running = true;
     snapshot.summary = LocalizedText::message_with(
@@ -70,35 +105,35 @@ pub(crate) fn deployment_snapshot(req: &CdRequest, stage: &str) -> CdSnapshot {
     );
 
     match stage {
-        "build" => {
-            snapshot.build_status = "running".to_string();
+        DeploymentStage::Build => {
+            snapshot.build_status = CdStepStatus::Running;
             snapshot.build_detail = LocalizedText::message("cd.compiling_artifacts");
         }
-        "test" => {
-            snapshot.build_status = "success".to_string();
+        DeploymentStage::Test => {
+            snapshot.build_status = CdStepStatus::Success;
             snapshot.build_detail = LocalizedText::message("cd.artifacts_compiled");
-            snapshot.test_status = "running".to_string();
+            snapshot.test_status = CdStepStatus::Running;
             snapshot.test_detail = LocalizedText::message("cd.executing_tests");
         }
-        "deploy" => {
-            snapshot.build_status = "success".to_string();
+        DeploymentStage::Deploy => {
+            snapshot.build_status = CdStepStatus::Success;
             snapshot.build_detail = LocalizedText::message("cd.artifacts_compiled");
-            snapshot.test_status = "success".to_string();
+            snapshot.test_status = CdStepStatus::Success;
             snapshot.test_detail = LocalizedText::message("cd.tests_passed");
-            snapshot.deploy_status = "running".to_string();
+            snapshot.deploy_status = CdStepStatus::Running;
             snapshot.deploy_detail = LocalizedText::message("cd.rolling_out");
         }
-        "verify" => {
-            snapshot.build_status = "success".to_string();
+        DeploymentStage::Verify => {
+            snapshot.build_status = CdStepStatus::Success;
             snapshot.build_detail = LocalizedText::message("cd.artifacts_compiled");
-            snapshot.test_status = "success".to_string();
+            snapshot.test_status = CdStepStatus::Success;
             snapshot.test_detail = LocalizedText::message("cd.tests_passed");
-            snapshot.deploy_status = "success".to_string();
+            snapshot.deploy_status = CdStepStatus::Success;
             snapshot.deploy_detail = LocalizedText::message("cd.release_promoted");
-            snapshot.verify_status = "running".to_string();
+            snapshot.verify_status = CdStepStatus::Running;
             snapshot.verify_detail = LocalizedText::message("cd.verifying_deployment");
         }
-        "done" => {
+        DeploymentStage::Done => {
             snapshot.running = false;
             snapshot.summary = LocalizedText::message_with(
                 "cd.deployment_finished",
@@ -107,56 +142,54 @@ pub(crate) fn deployment_snapshot(req: &CdRequest, stage: &str) -> CdSnapshot {
                     ("environment", req.environment.clone()),
                 ],
             );
-            snapshot.build_status = "success".to_string();
+            snapshot.build_status = CdStepStatus::Success;
             snapshot.build_detail = LocalizedText::message("cd.artifacts_compiled");
-            snapshot.test_status = "success".to_string();
+            snapshot.test_status = CdStepStatus::Success;
             snapshot.test_detail = LocalizedText::message("cd.tests_passed");
-            snapshot.deploy_status = "success".to_string();
+            snapshot.deploy_status = CdStepStatus::Success;
             snapshot.deploy_detail = LocalizedText::message("cd.release_promoted");
-            snapshot.verify_status = "success".to_string();
+            snapshot.verify_status = CdStepStatus::Success;
             snapshot.verify_detail = LocalizedText::message("cd.deployment_verified");
         }
-        _ => {}
     }
 
     snapshot
 }
 
-pub(crate) fn rollback_snapshot(commit: &str, stage: &str) -> CdSnapshot {
+pub(crate) fn rollback_snapshot(commit: &str, stage: RollbackStage) -> CdSnapshot {
     let mut snapshot = default_cd_snapshot();
     snapshot.running = true;
     snapshot.summary = LocalizedText::message_with(
         "cd.rolling_back_summary",
         [("commit", commit.trim().to_string())],
     );
-    snapshot.build_status = "success".to_string();
+    snapshot.build_status = CdStepStatus::Success;
     snapshot.build_detail = LocalizedText::message("cd.using_verified_artifacts");
-    snapshot.test_status = "success".to_string();
+    snapshot.test_status = CdStepStatus::Success;
     snapshot.test_detail = LocalizedText::message("cd.reusing_stable_test");
 
     match stage {
-        "deploy" => {
-            snapshot.deploy_status = "running".to_string();
+        RollbackStage::Deploy => {
+            snapshot.deploy_status = CdStepStatus::Running;
             snapshot.deploy_detail = LocalizedText::message("cd.switching_traffic");
         }
-        "verify" => {
-            snapshot.deploy_status = "rolled_back".to_string();
+        RollbackStage::Verify => {
+            snapshot.deploy_status = CdStepStatus::RolledBack;
             snapshot.deploy_detail = LocalizedText::message("cd.traffic_restored");
-            snapshot.verify_status = "running".to_string();
+            snapshot.verify_status = CdStepStatus::Running;
             snapshot.verify_detail = LocalizedText::message("cd.verifying_rollback");
         }
-        "done" => {
+        RollbackStage::Done => {
             snapshot.running = false;
             snapshot.summary = LocalizedText::message_with(
                 "cd.rollback_finished",
                 [("commit", commit.trim().to_string())],
             );
-            snapshot.deploy_status = "rolled_back".to_string();
+            snapshot.deploy_status = CdStepStatus::RolledBack;
             snapshot.deploy_detail = LocalizedText::message("cd.traffic_restored");
-            snapshot.verify_status = "success".to_string();
+            snapshot.verify_status = CdStepStatus::Success;
             snapshot.verify_detail = LocalizedText::message("cd.rollback_verified");
         }
-        _ => {}
     }
 
     snapshot
@@ -165,13 +198,13 @@ pub(crate) fn rollback_snapshot(commit: &str, stage: &str) -> CdSnapshot {
 pub(crate) fn apply_cd_snapshot(ui: &MainWindow, snapshot: &CdSnapshot) {
     ui.set_workflow_cd_running(snapshot.running);
     ui.set_workflow_cd_summary(snapshot.summary.resolve().into());
-    ui.set_workflow_cd_build_status(snapshot.build_status.clone().into());
+    ui.set_workflow_cd_build_status(snapshot.build_status.as_str().into());
     ui.set_workflow_cd_build_detail(snapshot.build_detail.resolve().into());
-    ui.set_workflow_cd_test_status(snapshot.test_status.clone().into());
+    ui.set_workflow_cd_test_status(snapshot.test_status.as_str().into());
     ui.set_workflow_cd_test_detail(snapshot.test_detail.resolve().into());
-    ui.set_workflow_cd_deploy_status(snapshot.deploy_status.clone().into());
+    ui.set_workflow_cd_deploy_status(snapshot.deploy_status.as_str().into());
     ui.set_workflow_cd_deploy_detail(snapshot.deploy_detail.resolve().into());
-    ui.set_workflow_cd_verify_status(snapshot.verify_status.clone().into());
+    ui.set_workflow_cd_verify_status(snapshot.verify_status.as_str().into());
     ui.set_workflow_cd_verify_detail(snapshot.verify_detail.resolve().into());
 }
 
@@ -223,7 +256,7 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
             guard.cd_running = true;
         }
 
-        let first_snapshot = deployment_snapshot(&req, "build");
+        let first_snapshot = deployment_snapshot(&req, DeploymentStage::Build);
         {
             let Ok(mut guard) = state_start.lock() else {
                 return;
@@ -241,11 +274,16 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
             .map(|guard| guard.current_project.id.clone())
             .unwrap_or_else(|| "default".to_string());
         runtime_start.spawn(async move {
-            let stages = ["test", "deploy", "verify", "done"];
+            let stages = [
+                DeploymentStage::Test,
+                DeploymentStage::Deploy,
+                DeploymentStage::Verify,
+                DeploymentStage::Done,
+            ];
             for stage in stages {
                 tokio::time::sleep(Duration::from_millis(700)).await;
                 let snapshot = deployment_snapshot(&req, stage);
-                let completed = stage == "done";
+                let completed = stage == DeploymentStage::Done;
                 let _ = slint::invoke_from_event_loop({
                     let ui_weak_task = ui_weak_task.clone();
                     let state_task = state_task.clone();
@@ -303,7 +341,7 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
             guard.cd_running = true;
         }
 
-        let first_snapshot = rollback_snapshot(&commit, "deploy");
+        let first_snapshot = rollback_snapshot(&commit, RollbackStage::Deploy);
         {
             let Ok(mut guard) = state_rollback.lock() else {
                 return;
@@ -321,10 +359,10 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
             .map(|guard| guard.current_project.id.clone())
             .unwrap_or_else(|| "default".to_string());
         runtime_rollback.spawn(async move {
-            for stage in ["verify", "done"] {
+            for stage in [RollbackStage::Verify, RollbackStage::Done] {
                 tokio::time::sleep(Duration::from_millis(700)).await;
                 let snapshot = rollback_snapshot(&commit, stage);
-                let completed = stage == "done";
+                let completed = stage == RollbackStage::Done;
                 let _ = slint::invoke_from_event_loop({
                     let ui_weak_task = ui_weak_task.clone();
                     let state_task = state_task.clone();
@@ -357,4 +395,174 @@ pub(crate) fn bind_cd(ui: &MainWindow, shared_state: SharedWorkflowState) {
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request() -> CdRequest {
+        CdRequest {
+            environment: "production".into(),
+            release: "v1.2.3".into(),
+            commit: "abc123".into(),
+        }
+    }
+
+    fn statuses(snapshot: &CdSnapshot) -> [CdStepStatus; 4] {
+        [
+            snapshot.build_status,
+            snapshot.test_status,
+            snapshot.deploy_status,
+            snapshot.verify_status,
+        ]
+    }
+
+    fn details(snapshot: &CdSnapshot) -> [String; 4] {
+        [
+            snapshot.build_detail.source_text(),
+            snapshot.test_detail.source_text(),
+            snapshot.deploy_detail.source_text(),
+            snapshot.verify_detail.source_text(),
+        ]
+    }
+
+    #[test]
+    fn every_deployment_stage_produces_a_complete_typed_snapshot() {
+        use CdStepStatus::{Pending, Running, Success};
+        let cases = [
+            (
+                DeploymentStage::Build,
+                true,
+                [Running, Pending, Pending, Pending],
+                [
+                    "cd.compiling_artifacts",
+                    "cd.waiting_to_start",
+                    "cd.waiting_to_start",
+                    "cd.waiting_to_start",
+                ],
+            ),
+            (
+                DeploymentStage::Test,
+                true,
+                [Success, Running, Pending, Pending],
+                [
+                    "cd.artifacts_compiled",
+                    "cd.executing_tests",
+                    "cd.waiting_to_start",
+                    "cd.waiting_to_start",
+                ],
+            ),
+            (
+                DeploymentStage::Deploy,
+                true,
+                [Success, Success, Running, Pending],
+                [
+                    "cd.artifacts_compiled",
+                    "cd.tests_passed",
+                    "cd.rolling_out",
+                    "cd.waiting_to_start",
+                ],
+            ),
+            (
+                DeploymentStage::Verify,
+                true,
+                [Success, Success, Success, Running],
+                [
+                    "cd.artifacts_compiled",
+                    "cd.tests_passed",
+                    "cd.release_promoted",
+                    "cd.verifying_deployment",
+                ],
+            ),
+            (
+                DeploymentStage::Done,
+                false,
+                [Success, Success, Success, Success],
+                [
+                    "cd.artifacts_compiled",
+                    "cd.tests_passed",
+                    "cd.release_promoted",
+                    "cd.deployment_verified",
+                ],
+            ),
+        ];
+
+        for (stage, running, expected_statuses, expected_details) in cases {
+            let snapshot = deployment_snapshot(&request(), stage);
+            assert_eq!(snapshot.running, running, "{stage:?}");
+            assert_eq!(statuses(&snapshot), expected_statuses, "{stage:?}");
+            assert_eq!(
+                details(&snapshot),
+                expected_details.map(|key| LocalizedText::message(key).source_text()),
+                "{stage:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_rollback_stage_produces_a_complete_typed_snapshot() {
+        use CdStepStatus::{Pending, RolledBack, Running, Success};
+        let cases = [
+            (
+                RollbackStage::Deploy,
+                true,
+                [Success, Success, Running, Pending],
+                [
+                    "cd.using_verified_artifacts",
+                    "cd.reusing_stable_test",
+                    "cd.switching_traffic",
+                    "cd.waiting_to_start",
+                ],
+            ),
+            (
+                RollbackStage::Verify,
+                true,
+                [Success, Success, RolledBack, Running],
+                [
+                    "cd.using_verified_artifacts",
+                    "cd.reusing_stable_test",
+                    "cd.traffic_restored",
+                    "cd.verifying_rollback",
+                ],
+            ),
+            (
+                RollbackStage::Done,
+                false,
+                [Success, Success, RolledBack, Success],
+                [
+                    "cd.using_verified_artifacts",
+                    "cd.reusing_stable_test",
+                    "cd.traffic_restored",
+                    "cd.rollback_verified",
+                ],
+            ),
+        ];
+
+        for (stage, running, expected_statuses, expected_details) in cases {
+            let snapshot = rollback_snapshot("abc123", stage);
+            assert_eq!(snapshot.running, running, "{stage:?}");
+            assert_eq!(statuses(&snapshot), expected_statuses, "{stage:?}");
+            assert_eq!(
+                details(&snapshot),
+                expected_details.map(|key| LocalizedText::message(key).source_text()),
+                "{stage:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_statuses_project_to_the_existing_slint_protocol() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().expect("main window");
+        let snapshot = rollback_snapshot("abc123", RollbackStage::Verify);
+
+        apply_cd_snapshot(&ui, &snapshot);
+
+        assert_eq!(ui.get_workflow_cd_build_status(), "success");
+        assert_eq!(ui.get_workflow_cd_test_status(), "success");
+        assert_eq!(ui.get_workflow_cd_deploy_status(), "rolled_back");
+        assert_eq!(ui.get_workflow_cd_verify_status(), "running");
+        assert!(ui.get_workflow_cd_running());
+    }
 }

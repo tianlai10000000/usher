@@ -90,8 +90,8 @@ Git command plans, progress reporting, and cancellation.
 - `src/workflow/tag.rs`: stable binding/refresh façade.
 - `src/workflow/tag/controller.rs`: UI callbacks, project state, sequencing, progress,
   cancellation, and command execution.
-- `src/workflow/tag/version.rs`: pure semantic-version parsing and bump rules.
-- `src/workflow/tag/commands.rs`: pure create/remove Git argv plans.
+- `src/workflow/tag/version.rs`: typed semantic-version parsing, bump rules, and the Slint string boundary.
+- `src/workflow/tag/commands.rs`: typed create/remove Git argv plans and their immutable Job step projection.
 - `src/workflow/tag/command_output.rs`: bounded streaming transport, tail retention and reader lifecycle.
 - `src/jobs/`: reusable immutable step definitions, runtime snapshots, and Job Run projection.
 - `ui/components/jobs/job.slint`: shared `GitHubActionsJob` presenter.
@@ -101,8 +101,8 @@ Git command plans, progress reporting, and cancellation.
 
 - `src/workflow/tag.rs`：稳定的绑定/刷新 façade。
 - `src/workflow/tag/controller.rs`：UI callback、项目状态、序列、进度、取消和命令执行。
-- `src/workflow/tag/version.rs`：纯 SemVer 解析和递增规则。
-- `src/workflow/tag/commands.rs`：纯创建/删除 Git argv 计划。
+- `src/workflow/tag/version.rs`：强类型 SemVer 解析、递增规则及 Slint 字符串边界。
+- `src/workflow/tag/commands.rs`：强类型创建/删除 Git argv 计划及其不可变 Job Step 投影。
 - `src/jobs/`：可复用的不可变 Step 定义、运行时快照与 Job Run 投影。
 - `ui/components/jobs/job.slint`：共享的 `GitHubActionsJob` 展示组件。
 - `ui/views/job_run.slint`：应用级共享执行路由。

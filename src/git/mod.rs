@@ -710,10 +710,46 @@ mod tests {
     fn parses_unified_diff_hunks_for_provider_normalization() {
         let lines =
             parse_unified_diff("@@ -4,2 +4,3 @@ fn example() {\n context\n-old\n+new\n+extra");
-        assert_eq!(lines[0].kind, "hunk");
+        assert_eq!(lines[0].kind, crate::git::DiffLineKind::Hunk);
         assert_eq!((lines[1].old_line, lines[1].new_line), (4, 4));
         assert_eq!((lines[2].old_line, lines[2].new_line), (5, 0));
         assert_eq!((lines[3].old_line, lines[3].new_line), (0, 5));
         assert_eq!((lines[4].old_line, lines[4].new_line), (0, 6));
+    }
+
+    #[test]
+    fn diff_domain_aliases_normalize_at_the_provider_boundary() {
+        assert_eq!(
+            crate::git::DiffLineKind::from_provider("new"),
+            crate::git::DiffLineKind::Addition
+        );
+        assert_eq!(
+            crate::git::DiffLineKind::from_provider("old"),
+            crate::git::DiffLineKind::Deletion
+        );
+        assert_eq!(
+            crate::git::DiffLineKind::from_provider("match"),
+            crate::git::DiffLineKind::Hunk
+        );
+        assert_eq!(
+            crate::git::DiffLineKind::from_provider("unknown"),
+            crate::git::DiffLineKind::Context
+        );
+        assert_eq!(
+            crate::git::DiffChangeType::from_provider("added"),
+            crate::git::DiffChangeType::New
+        );
+        assert_eq!(
+            crate::git::DiffChangeType::from_provider("removed"),
+            crate::git::DiffChangeType::Deleted
+        );
+        assert_eq!(
+            crate::git::DiffChangeType::from_provider("renamed"),
+            crate::git::DiffChangeType::Renamed
+        );
+        assert_eq!(
+            crate::git::DiffChangeType::from_provider("modified"),
+            crate::git::DiffChangeType::Modified
+        );
     }
 }

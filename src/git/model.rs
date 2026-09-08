@@ -97,15 +97,98 @@ pub(crate) struct PullRequestFilters {
 pub(crate) struct PullRequestDiffLine {
     pub(crate) old_line: i32,
     pub(crate) new_line: i32,
-    pub(crate) kind: String,
+    pub(crate) kind: DiffLineKind,
     pub(crate) content: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiffLineKind {
+    Addition,
+    Deletion,
+    Context,
+    Hunk,
+    Meta,
+}
+
+impl DiffLineKind {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Addition => "addition",
+            Self::Deletion => "deletion",
+            Self::Context => "context",
+            Self::Hunk => "hunk",
+            Self::Meta => "meta",
+        }
+    }
+
+    pub(crate) fn from_provider(value: &str) -> Self {
+        match value {
+            "addition" | "added" | "new" => Self::Addition,
+            "deletion" | "removed" | "old" => Self::Deletion,
+            "hunk" | "match" => Self::Hunk,
+            "meta" => Self::Meta,
+            _ => Self::Context,
+        }
+    }
+}
+
+impl From<&str> for DiffLineKind {
+    fn from(value: &str) -> Self {
+        Self::from_provider(value)
+    }
+}
+
+impl From<String> for DiffLineKind {
+    fn from(value: String) -> Self {
+        Self::from_provider(value.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiffChangeType {
+    New,
+    Deleted,
+    Renamed,
+    Modified,
+}
+
+impl DiffChangeType {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::New => "new_file",
+            Self::Deleted => "deleted_file",
+            Self::Renamed => "renamed_file",
+            Self::Modified => "edit_file",
+        }
+    }
+
+    pub(crate) fn from_provider(value: &str) -> Self {
+        match value {
+            "added" | "new" | "new_file" => Self::New,
+            "deleted" | "removed" | "deleted_file" => Self::Deleted,
+            "renamed" | "renamed_file" => Self::Renamed,
+            _ => Self::Modified,
+        }
+    }
+}
+
+impl From<&str> for DiffChangeType {
+    fn from(value: &str) -> Self {
+        Self::from_provider(value)
+    }
+}
+
+impl From<String> for DiffChangeType {
+    fn from(value: String) -> Self {
+        Self::from_provider(value.as_str())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PullRequestDiffFile {
     pub(crate) path: String,
     pub(crate) old_path: String,
-    pub(crate) change_type: String,
+    pub(crate) change_type: DiffChangeType,
     pub(crate) added_lines: u32,
     pub(crate) removed_lines: u32,
     pub(crate) viewed: bool,

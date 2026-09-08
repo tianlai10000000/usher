@@ -1,12 +1,22 @@
-//! Pure Git command planning for Tag workflows.
+//! Pure Git command and Job step planning for Tag workflows.
 
 use crate::i18n::LocalizedText;
+use crate::jobs::{JobStepData, JobStepDefinition};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct PlannedCommand {
     pub(super) name: LocalizedText,
     pub(super) argv: Vec<String>,
     pub(super) detail: LocalizedText,
+}
+
+impl PlannedCommand {
+    fn queued_step(&self) -> JobStepData {
+        JobStepData::queued(
+            JobStepDefinition::new(self.name.clone(), self.argv.clone()),
+            self.detail.clone(),
+        )
+    }
 }
 
 fn git(repo: &str, args: &[&str]) -> Vec<String> {
@@ -69,12 +79,73 @@ pub(super) fn create_tag_plan(repo: &str, version: &str, description: &str) -> V
     ]
 }
 
-pub(super) fn remove_tag_plan(repo: &str, tag: &str) -> Vec<Vec<String>> {
+pub(super) fn remove_tag_plan(repo: &str, tag: &str) -> Vec<PlannedCommand> {
     vec![
-        git(repo, &["rev-parse", "--show-toplevel"]),
-        git(repo, &["tag", "-d", tag]),
-        git(repo, &["push", "--delete", "origin", tag]),
+        PlannedCommand {
+            name: LocalizedText::message("tag.step.enter_repository"),
+            argv: git(repo, &["rev-parse", "--show-toplevel"]),
+            detail: LocalizedText::message("tag.step.enter_repository_detail"),
+        },
+        PlannedCommand {
+            name: LocalizedText::message("tag.step.delete_local"),
+            argv: git(repo, &["tag", "-d", tag]),
+            detail: LocalizedText::message("tag.step.delete_local_detail"),
+        },
+        PlannedCommand {
+            name: LocalizedText::message("tag.step.delete_remote"),
+            argv: git(repo, &["push", "--delete", "origin", tag]),
+            detail: LocalizedText::message("tag.step.delete_remote_detail"),
+        },
     ]
+}
+
+pub(super) fn create_tag_steps(plan: &[PlannedCommand]) -> Vec<JobStepData> {
+    let mut steps = plan
+        .iter()
+        .map(PlannedCommand::queued_step)
+        .collect::<Vec<_>>();
+    steps.push(JobStepData::queued(
+        JobStepDefinition::new(
+            LocalizedText::message("tag.step.complete"),
+            vec!["complete".into()],
+        ),
+        LocalizedText::message("tag.step.complete_detail"),
+    ));
+    steps
+}
+
+pub(super) fn remove_tag_steps(plan: &[PlannedCommand]) -> Vec<JobStepData> {
+    let mut steps = plan
+        .iter()
+        .map(PlannedCommand::queued_step)
+        .collect::<Vec<_>>();
+    steps.push(JobStepData::queued(
+        JobStepDefinition::new(
+            LocalizedText::message("tag.step.refresh_remote"),
+            vec!["git".into(), "fetch".into(), "--tags".into()],
+        ),
+        LocalizedText::message("tag.step.refresh_remote_detail"),
+    ));
+    steps.push(JobStepData::queued(
+        JobStepDefinition::new(
+            LocalizedText::message("tag.step.complete"),
+            vec!["complete".into()],
+        ),
+        LocalizedText::message("tag.step.remove_complete_waiting"),
+    ));
+    steps
+}
+
+pub(crate) fn default_create_tag_steps() -> Vec<JobStepData> {
+    create_tag_steps(&create_tag_plan(
+        "<repository>",
+        "<version>",
+        "<description>",
+    ))
+}
+
+pub(super) fn default_remove_tag_steps() -> Vec<JobStepData> {
+    remove_tag_steps(&remove_tag_plan("<repository>", "<tag>"))
 }
 
 #[cfg(test)]
@@ -103,10 +174,48 @@ mod tests {
     #[test]
     fn remove_plan_deletes_local_then_remote_tag() {
         let plan = remove_tag_plan("/repo", "v2.0.0");
-        assert_eq!(plan[1], ["git", "-C", "/repo", "tag", "-d", "v2.0.0"]);
+        assert_eq!(plan[1].argv, ["git", "-C", "/repo", "tag", "-d", "v2.0.0"]);
         assert_eq!(
-            plan[2],
+            plan[2].argv,
             ["git", "-C", "/repo", "push", "--delete", "origin", "v2.0.0"]
+        );
+    }
+
+    #[test]
+    fn create_steps_preserve_each_planned_command_before_completion() {
+        let plan = create_tag_plan("/repo", "v1.2.3", "notes");
+        let steps = create_tag_steps(&plan);
+
+        assert_eq!(steps.len(), plan.len() + 1);
+        for (step, command) in steps.iter().zip(&plan) {
+            assert_eq!(step.definition.name, command.name);
+            assert_eq!(step.definition.command, command.argv);
+            assert_eq!(step.detail, command.detail);
+        }
+        assert_eq!(
+            steps.last().unwrap().definition.name,
+            LocalizedText::message("tag.step.complete")
+        );
+    }
+
+    #[test]
+    fn remove_steps_append_refresh_and_completion_after_the_plan() {
+        let plan = remove_tag_plan("/repo", "v2.0.0");
+        let steps = remove_tag_steps(&plan);
+
+        assert_eq!(steps.len(), plan.len() + 2);
+        for (step, command) in steps.iter().zip(&plan) {
+            assert_eq!(step.definition.name, command.name);
+            assert_eq!(step.definition.command, command.argv);
+            assert_eq!(step.detail, command.detail);
+        }
+        assert_eq!(
+            steps[plan.len()].definition.name,
+            LocalizedText::message("tag.step.refresh_remote")
+        );
+        assert_eq!(
+            steps[plan.len() + 1].definition.name,
+            LocalizedText::message("tag.step.complete")
         );
     }
 }

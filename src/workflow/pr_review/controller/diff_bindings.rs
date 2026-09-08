@@ -167,14 +167,18 @@ pub(super) fn bind(ui: &MainWindow) {
                             _ => line.content.as_str(),
                         };
                         text_geometry::hit_test_wrapped(
-                            content,
+                            text_geometry::TextGeometryOptions {
+                                text: content,
+                                rendered_width: width,
+                                line_pitch,
+                                family: family.as_str(),
+                                font_size,
+                                weight: 400,
+                                italic: false,
+                                scale_factor,
+                            },
                             local_x,
                             local_y,
-                            width,
-                            line_pitch,
-                            family.as_str(),
-                            font_size,
-                            scale_factor,
                         )
                     },
                 )
@@ -189,14 +193,17 @@ pub(super) fn bind(ui: &MainWindow) {
                     .upgrade()
                     .map_or(1.0, |ui| ui.window().scale_factor());
                 text_geometry::hit_test(
-                    text.as_str(),
+                    text_geometry::TextGeometryOptions {
+                        text: text.as_str(),
+                        rendered_width: token_width,
+                        line_pitch: 0.0,
+                        family: family.as_str(),
+                        font_size,
+                        weight: if bold { 600 } else { 400 },
+                        italic,
+                        scale_factor,
+                    },
                     pointer_x,
-                    token_width,
-                    family.as_str(),
-                    font_size,
-                    if bold { 600 } else { 400 },
-                    italic,
-                    scale_factor,
                 )
             },
         );
@@ -209,15 +216,18 @@ pub(super) fn bind(ui: &MainWindow) {
                     .upgrade()
                     .map_or(1.0, |ui| ui.window().scale_factor());
                 let geometry = text_geometry::range_geometry(
-                    text.as_str(),
+                    text_geometry::TextGeometryOptions {
+                        text: text.as_str(),
+                        rendered_width: token_width,
+                        line_pitch: 0.0,
+                        family: family.as_str(),
+                        font_size,
+                        weight: if bold { 600 } else { 400 },
+                        italic,
+                        scale_factor,
+                    },
                     start,
                     end,
-                    token_width,
-                    family.as_str(),
-                    font_size,
-                    if bold { 600 } else { 400 },
-                    italic,
-                    scale_factor,
                 );
                 WorkflowPrDiffGlyphRange {
                     x: geometry.x,
@@ -235,14 +245,18 @@ pub(super) fn bind(ui: &MainWindow) {
                     .map_or(1.0, |ui| ui.window().scale_factor());
                 ModelRc::new(VecModel::from(
                     text_geometry::wrapped_range_geometry(
-                        text.as_str(),
+                        text_geometry::TextGeometryOptions {
+                            text: text.as_str(),
+                            rendered_width: width,
+                            line_pitch,
+                            family: family.as_str(),
+                            font_size,
+                            weight: 400,
+                            italic: false,
+                            scale_factor,
+                        },
                         start,
                         end,
-                        width,
-                        line_pitch,
-                        family.as_str(),
-                        font_size,
-                        scale_factor,
                     )
                     .into_iter()
                     .map(|geometry| WorkflowPrDiffGlyphRect {

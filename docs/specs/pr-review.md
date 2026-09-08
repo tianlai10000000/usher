@@ -122,7 +122,8 @@ An implementation in another stack should preserve these provider-neutral record
 | `PullRequestPage` | items, total, `total_exact`, optional page count | The UI distinguishes an exact total from a lower bound. Page size is 10. |
 | `PullRequestItem` | number, title, author, source branch, target branch, updated time, web URL | A missing branch is shown as `—`; parseable timestamps are rendered as `YYYY-MM-DD HH:MM:SS +08:00`. |
 | `PullRequestDiffDetail` | files, added/removed totals, commit count, optional conversation count, base SHA, head SHA, start SHA, too-many-commits flag | The summary commit and conversation counts keep the lazy Commits/Conversation tab badges accurate before those tab payloads load. Commit-range compares leave `conversation_count` unset so they cannot wipe the PR-level badge. The SHA values are immutable source references for later context expansion. |
-| `PullRequestDiffFile` | path, old path, change type, added/removed counts, lines | Change types are `new_file`, `deleted_file`, `renamed_file`, or `edit_file`. |
+| `PullRequestDiffFile` | path, old path, change type, added/removed counts, lines | Rust uses `DiffChangeType`; provider aliases normalize at decode time and Slint receives `new_file`, `deleted_file`, `renamed_file`, or `edit_file`. |
+| `PullRequestDiffLine` | old/new line, line kind, content | Rust uses `DiffLineKind` for addition, deletion, context, hunk, and meta; strings are generated only for Slint projection. |
 | `PullRequestDiffLine` | old line, new line, kind, content | Kinds are normalized to hunk/context/addition/deletion before rendering. Content is one visual source line and contains no CR/LF controls. |
 | `PullRequestConversationItem` | id, kind, author, optional avatar URL/author association, body, created time, state | Description, comments, reviews, and provider system events share one chronological presentation model. GitHub review responses expand into an atomic `review_summary` + optional `review` card pair; state controls the semantic wording (`commented`, `approved these changes`, or `requested changes`) and `AUTHOR` controls the Author badge. Historical reviewer assignment comes from GitHub `review_requested` timeline events or Gitee public PR operation logs, never from the provider's current requested-reviewer list. Every provider renders that activity with GitHub semantics: a 32 px muted eye badge, a 20 px actor avatar, and `requested a review from <reviewer>` with the reviewer emphasized. Approval/rejection records render as GitHub `review_summary` rows with a 40 px reviewer avatar and a 32 px muted check/x badge; Gitee `allow merge` operation records normalize to the same approved row, and provider-native wording or green approval markers never enter the UI. Gitee public operation logs supply recorded actor/time; Gitee Enterprise PAT reads use explicit reviewer `approve_status` from MR detail and therefore render only active approved/rejected states returned by v8. A Gitee merger comes from the merge operation first, then a dedicated merge identity such as `merge_user` / `merged_by`; those sources may enrich one another's display label, display/remark names take precedence over login names, and full email addresses are never rendered as actor labels. The PR author is never used as a merger fallback. Relative time follows GitHub Primer `<relative-time>` defaults (`yesterday`, `last week`, or past `P30D` `on Mar 19` / `on Mar 19, 2025`) and remains inline with the event text; absolute time stays in a tooltip. A merged event suppresses the redundant closed event emitted for the same merged PR. GitHub, GitLab, and both Gitee profiles normalize provider and commit-author avatar fields; the controller downloads bounded avatar payloads off the event loop, while the UI falls back to an author initial. Description/comment/review cards and the composer share the same 52 px avatar/content grid. Timeline connectors are computed between semantic neighbors: a terminal merge stops its rail, while consecutive `review_summary` + `review` pairs retain one continuous rail between the preceding card and the next summary marker. Conversation body text is decoded inside each provider adapter: GitHub/GitLab use `body`; Gitee public v5 prefers `body`; Gitee Enterprise reads `note`, then `body`/`comment`, then string `content` only (object `content` is diff context). Structured activity kinds `commits` / `commit` / `merged` / `event` / `review_requested` render GitHub-style rows. A `commits` header and its consecutive `commit` children form one atomic sorting block; the children render newest→oldest. |
 | `PullRequestCommit` | SHA, title/message, author, authored time, verified | Commit signatures are shown only when the provider reports verification. |
@@ -265,7 +266,11 @@ Unicode line breaking; wrapped selection and Find ranges use Parley selection
 geometry. Adjacent fallback-font fragments on the same visual line are merged,
 while genuinely separated bidirectional fragments remain separate; visual-line
 rectangles use a fixed pitch and never overlap. Its LRU-style cache is
-bounded to 256 layouts. Geometry is limited to direct pointer interaction, the
+bounded to 256 layouts. The Rust facade carries text, rendered width, line
+pitch, font family/size/weight/italic, and scale factor in one named options
+value assembled by `controller/diff_bindings.rs`; the existing `PrDiffBridge`
+Slint callback signatures remain the UI contract. Geometry is limited to direct
+pointer interaction, the
 single active mounted Find row, or runs intersecting the current selection.
 Display columns remain only for virtual row extent/reveal estimates, never caret
 or active-range bounds; per-character UI models and token-by-match cross-product
@@ -376,7 +381,10 @@ cursor/cluster 几何。Adapter 复用 Slint 字体集合以及可见 run 的字
 和 scale factor，再将 shaped 坐标归一到 Slint 实际 token 宽度。换行鼠标终点使用同一
 门面及 Parley Unicode 断行；换行选区与 Find 范围使用 Parley selection 几何。同一视觉行
 中相邻的 fallback-font fragment 必须合并，真正分离的双向文本 fragment 保持分离；视觉行
-矩形使用固定 pitch 且不得重叠。LRU 风格缓存最多保留 256 个 layout。几何计算仅限直接鼠标
+矩形使用固定 pitch 且不得重叠。LRU 风格缓存最多保留 256 个 layout。Rust 门面用一个具名
+options 值承载 text、rendered width、line pitch、字体族/字号/字重/斜体和 scale factor，
+由 `controller/diff_bindings.rs` 在边界组装；既有 `PrDiffBridge` Slint callback 签名继续作为
+UI 契约。几何计算仅限直接鼠标
 交互、当前命中所在的单个已挂载行或与当前选区相交的 run。显示列只用于虚拟行 extent/
 reveal 估计，不得用于 caret 或当前范围边界；虚拟化行禁止创建逐字符 UI model 或
 token×match 交叉 repeater。

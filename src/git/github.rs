@@ -387,12 +387,11 @@ fn decode_diff_file(value: &Value) -> PullRequestDiffFile {
     let path = string_field(value, "filename").unwrap_or_else(|| "Unknown file".to_string());
     let old_path = string_field(value, "previous_filename").unwrap_or_else(|| path.clone());
     let change_type = match string_field(value, "status").as_deref() {
-        Some("added") => "new_file",
-        Some("removed") => "deleted_file",
-        Some("renamed") => "renamed_file",
-        _ => "edit_file",
-    }
-    .to_string();
+        Some("added") => crate::git::DiffChangeType::New,
+        Some("removed") => crate::git::DiffChangeType::Deleted,
+        Some("renamed") => crate::git::DiffChangeType::Renamed,
+        _ => crate::git::DiffChangeType::Modified,
+    };
     let added_lines = value_u32(value, "additions").unwrap_or(0);
     let removed_lines = value_u32(value, "deletions").unwrap_or(0);
     let lines = string_field(value, "patch")

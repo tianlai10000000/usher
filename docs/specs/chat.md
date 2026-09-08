@@ -157,7 +157,9 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     RAG continues to use the repository-knowledge endpoint in `src/chat/chat.rs`.
 30. AI and RAG persist to separate JSONL files: `im/ai_chat_history.jsonl` and
     the legacy `im/chat_history.jsonl`. Pagination, next IDs, loaded tails, and
-    sending state are isolated by mode.
+    sending state are isolated by mode. Each mode represents an active request
+    with one optional monotonic start instant; its presence is the sending state
+    and its absence is idle, so the timer and sending flag cannot diverge.
 31. AI requests include at most the latest 20 loaded AI messages plus the
     `general_chat` system instruction from `src/ai/prompts.toml`, including the
     effective `[ai.agent].reply_language` instruction. Switching mode while a response is in
@@ -284,7 +286,9 @@ This is the stable contract for the shared AI/RAG Chat presentation, isolated pe
     `[ai.agent]` 配置的 OpenAI-compatible Provider；RAG 继续使用
     `src/chat/chat.rs` 中的仓库知识 endpoint。
 30. AI 与 RAG 分别持久化到 `im/ai_chat_history.jsonl` 和旧有
-    `im/chat_history.jsonl`；分页、next ID、加载尾部和发送状态按模式隔离。
+    `im/chat_history.jsonl`；分页、next ID、加载尾部和发送状态按模式隔离。每个模式
+    用一个可选的单调时钟起点表示活动请求：存在即发送中、缺失即空闲，计时器与发送
+    标记不能分离。
 31. AI 请求最多携带最近 20 条已加载 AI 消息，以及 `src/ai/prompts.toml` 中包含
     `[ai.agent].reply_language` 实际语言指令的 `general_chat` system 指令。
     响应进行中切换模式不得取消请求、写入另一历史、清除另一模式 sending 状态，或把

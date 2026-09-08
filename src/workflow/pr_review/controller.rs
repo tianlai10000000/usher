@@ -1744,10 +1744,10 @@ impl WorkflowPrReviewController {
         } else {
             file.old_path.clone()
         };
-        let base_request = (file.change_type != "new_file")
+        let base_request = (file.change_type != crate::git::DiffChangeType::New)
             .then_some((base_sha, base_path))
             .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
-        let head_request = (file.change_type != "deleted_file")
+        let head_request = (file.change_type != crate::git::DiffChangeType::Deleted)
             .then_some((head_sha, file.path.clone()))
             .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
         let base_key = base_request
@@ -2165,10 +2165,10 @@ impl WorkflowPrReviewController {
         } else {
             file.old_path.clone()
         };
-        let base_request = (file.change_type != "new_file")
+        let base_request = (file.change_type != crate::git::DiffChangeType::New)
             .then_some((base_sha.clone(), base_path))
             .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
-        let head_request = (file.change_type != "deleted_file")
+        let head_request = (file.change_type != crate::git::DiffChangeType::Deleted)
             .then_some((head_sha.clone(), file.path.clone()))
             .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
         if base_request.is_none() && head_request.is_none() {
@@ -2317,10 +2317,10 @@ impl WorkflowPrReviewController {
         } else {
             file.old_path.clone()
         };
-        let base_request = (file.change_type != "new_file")
+        let base_request = (file.change_type != crate::git::DiffChangeType::New)
             .then_some((base_sha.clone(), base_path))
             .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
-        let head_request = (file.change_type != "deleted_file")
+        let head_request = (file.change_type != crate::git::DiffChangeType::Deleted)
             .then_some((head_sha.clone(), file.path.clone()))
             .filter(|(reference, path)| !reference.is_empty() && !path.is_empty());
         if base_request.is_none() && head_request.is_none() {
@@ -2504,7 +2504,7 @@ impl WorkflowPrReviewController {
         let Some((file, head_sha, base_sha, metadata)) = selected else {
             return;
         };
-        let use_new_side = file.change_type != "deleted_file";
+        let use_new_side = file.change_type != crate::git::DiffChangeType::Deleted;
         let path = if use_new_side {
             file.path.clone()
         } else {
@@ -2862,7 +2862,7 @@ fn ai_review_fixture_diff_detail(pull_request_number: &str) -> PullRequestDiffDe
         files: vec![PullRequestDiffFile {
             path: "src/fixture_0000.rs".to_string(),
             old_path: "src/fixture_0000.rs".to_string(),
-            change_type: "edit_file".to_string(),
+            change_type: crate::git::DiffChangeType::Modified,
             added_lines: 3,
             removed_lines: 0,
             viewed: false,
@@ -2870,43 +2870,43 @@ fn ai_review_fixture_diff_detail(pull_request_number: &str) -> PullRequestDiffDe
                 PullRequestDiffLine {
                     old_line: 0,
                     new_line: 0,
-                    kind: "hunk".to_string(),
+                    kind: crate::git::DiffLineKind::Hunk,
                     content: "@@ -8,3 +8,6 @@ fn persist_valid_input() {".to_string(),
                 },
                 PullRequestDiffLine {
                     old_line: 8,
                     new_line: 8,
-                    kind: "context".to_string(),
+                    kind: crate::git::DiffLineKind::Context,
                     content: "let result = validate(input);".to_string(),
                 },
                 PullRequestDiffLine {
                     old_line: 0,
                     new_line: 9,
-                    kind: "addition".to_string(),
+                    kind: crate::git::DiffLineKind::Addition,
                     content: "record_validation(result);".to_string(),
                 },
                 PullRequestDiffLine {
                     old_line: 0,
                     new_line: 10,
-                    kind: "addition".to_string(),
+                    kind: crate::git::DiffLineKind::Addition,
                     content: "notify_observers(result);".to_string(),
                 },
                 PullRequestDiffLine {
                     old_line: 9,
                     new_line: 11,
-                    kind: "context".to_string(),
+                    kind: crate::git::DiffLineKind::Context,
                     content: "let value = normalize(input);".to_string(),
                 },
                 PullRequestDiffLine {
                     old_line: 0,
                     new_line: 12,
-                    kind: "addition".to_string(),
+                    kind: crate::git::DiffLineKind::Addition,
                     content: "persist(input);".to_string(),
                 },
                 PullRequestDiffLine {
                     old_line: 10,
                     new_line: 13,
-                    kind: "context".to_string(),
+                    kind: crate::git::DiffLineKind::Context,
                     content: "Ok(value)".to_string(),
                 },
             ],
@@ -2949,7 +2949,7 @@ fn memory_benchmark_diff_detail(seed: usize) -> PullRequestDiffDetail {
             PullRequestDiffFile {
                 path: format!("src/fixture-{seed}/file-{file_index:03}.rs"),
                 old_path: format!("src/fixture-{seed}/file-{file_index:03}.rs"),
-                change_type: "edit_file".to_string(),
+                change_type: crate::git::DiffChangeType::Modified,
                 added_lines: line_count as u32,
                 removed_lines: 0,
                 viewed: false,
@@ -2965,7 +2965,7 @@ fn memory_benchmark_diff_detail(seed: usize) -> PullRequestDiffDetail {
                         PullRequestDiffLine {
                             old_line: line_index as i32 + 1,
                             new_line: line_index as i32 + 1,
-                            kind: "context".to_string(),
+                            kind: crate::git::DiffLineKind::Context,
                             content,
                         }
                     })
@@ -3300,7 +3300,7 @@ mod tests {
         PullRequestDiffFile {
             path: path.to_string(),
             old_path: path.to_string(),
-            change_type: "edit_file".to_string(),
+            change_type: crate::git::DiffChangeType::Modified,
             added_lines: 1,
             removed_lines: 0,
             viewed: false,
@@ -3315,7 +3315,9 @@ mod tests {
         assert_eq!(detail.head_sha, "fixture-head-42");
         assert_eq!(file.path, "src/fixture_0000.rs");
         assert!(file.lines.iter().any(|line| {
-            line.new_line == 12 && line.kind == "addition" && line.content == "persist(input);"
+            line.new_line == 12
+                && line.kind == crate::git::DiffLineKind::Addition
+                && line.content == "persist(input);"
         }));
     }
 
@@ -3324,7 +3326,7 @@ mod tests {
         let line = |content: String| PullRequestDiffLine {
             old_line: 0,
             new_line: 1,
-            kind: "addition".to_string(),
+            kind: crate::git::DiffLineKind::Addition,
             content,
         };
 
@@ -3417,7 +3419,7 @@ mod tests {
             .push(PullRequestDiffLine {
                 old_line: 1,
                 new_line: 1,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "expanded".to_string(),
             });
 
@@ -3584,7 +3586,7 @@ mod tests {
                 PullRequestDiffFile {
                     path: format!("src/fixture/file-{file_index:03}.rs"),
                     old_path: format!("src/fixture/file-{file_index:03}.rs"),
-                    change_type: "edit_file".to_string(),
+                    change_type: crate::git::DiffChangeType::Modified,
                     added_lines: line_count as u32,
                     removed_lines: 0,
                     viewed: false,
@@ -3600,7 +3602,7 @@ mod tests {
                             PullRequestDiffLine {
                                 old_line: line_index as i32 + 1,
                                 new_line: line_index as i32 + 1,
-                                kind: "context".to_string(),
+                                kind: crate::git::DiffLineKind::Context,
                                 content,
                             }
                         })
@@ -3711,13 +3713,13 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -30,2 +30,2 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 30,
                 new_line: 30,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 30".to_string(),
             },
         ];
@@ -3756,19 +3758,19 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 10,
                 new_line: 10,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 10".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -40,1 +40,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 40,
                 new_line: 40,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 40".to_string(),
             },
         ];
@@ -3787,7 +3789,7 @@ mod tests {
         ));
         assert_eq!(file.lines[1].new_line, 11);
         assert_eq!(file.lines[5].new_line, 15);
-        assert_eq!(file.lines[6].kind, "hunk");
+        assert_eq!(file.lines[6].kind, crate::git::DiffLineKind::Hunk);
         assert!(hunk_can_expand_down(&file, 6));
     }
 
@@ -3798,19 +3800,19 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 10,
                 new_line: 10,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 10".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -40,1 +40,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 40,
                 new_line: 40,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 40".to_string(),
             },
         ];
@@ -3841,19 +3843,19 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 10,
                 new_line: 10,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "short".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -40,1 +40,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 40,
                 new_line: 40,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "short".to_string(),
             },
         ];
@@ -3884,19 +3886,19 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 10,
                 new_line: 10,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 10".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -80,1 +80,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 80,
                 new_line: 80,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 80".to_string(),
             },
         ];
@@ -3922,7 +3924,7 @@ mod tests {
         let second_hunk_index = file
             .lines
             .iter()
-            .position(|line| line.kind == "hunk")
+            .position(|line| line.kind == crate::git::DiffLineKind::Hunk)
             .expect("separator should survive the first partial expansion");
         let second_original = file.clone();
         assert!(expand_hunk_context(
@@ -3946,19 +3948,19 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 57,
                 new_line: 57,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 57".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -62,1 +62,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 62,
                 new_line: 62,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 62".to_string(),
             },
         ];
@@ -3975,7 +3977,12 @@ mod tests {
             i32::MAX as usize,
             HunkExpansionDirection::All,
         ));
-        assert!(!updated.lines.iter().any(|line| line.kind == "hunk"));
+        assert!(
+            !updated
+                .lines
+                .iter()
+                .any(|line| line.kind == crate::git::DiffLineKind::Hunk)
+        );
         assert_eq!(
             updated.lines.get(1).map(|line| line.new_line),
             Some(58),
@@ -3991,19 +3998,19 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 17,
                 new_line: 17,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 17".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -51,1 +51,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 51,
                 new_line: 51,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 51".to_string(),
             },
         ];
@@ -4020,21 +4027,21 @@ mod tests {
             HUNK_CONTEXT_PAGE_SIZE,
             HunkExpansionDirection::Down,
         ));
-        assert!(
-            file.lines.iter().any(|line| {
-                line.old_line == 38 && line.new_line == 38 && line.kind == "context"
-            })
-        );
+        assert!(file.lines.iter().any(|line| {
+            line.old_line == 38
+                && line.new_line == 38
+                && line.kind == crate::git::DiffLineKind::Context
+        }));
         assert!(
             !file
                 .lines
                 .iter()
-                .any(|line| line.old_line == 39 && line.kind == "context")
+                .any(|line| line.old_line == 39 && line.kind == crate::git::DiffLineKind::Context)
         );
         let hunk_index = file
             .lines
             .iter()
-            .position(|line| line.kind == "hunk")
+            .position(|line| line.kind == crate::git::DiffLineKind::Hunk)
             .expect("partially expanded gap keeps its hunk control");
         assert!(hunk_can_expand_all(&file, hunk_index));
 
@@ -4046,7 +4053,12 @@ mod tests {
             i32::MAX as usize,
             HunkExpansionDirection::All,
         ));
-        assert!(!file.lines.iter().any(|line| line.kind == "hunk"));
+        assert!(
+            !file
+                .lines
+                .iter()
+                .any(|line| line.kind == crate::git::DiffLineKind::Hunk)
+        );
         assert!((17..=51).all(|number| {
             file.lines
                 .iter()
@@ -4061,19 +4073,19 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 17,
                 new_line: 17,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 17".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -39,1 +38,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 39,
                 new_line: 38,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 39".to_string(),
             },
         ];
@@ -4109,7 +4121,7 @@ mod tests {
         assert!(file.lines.iter().any(|line| {
             line.old_line == 38
                 && line.new_line == 0
-                && line.kind == "deletion"
+                && line.kind == crate::git::DiffLineKind::Deletion
                 && line.content == "base-only line 38"
         }));
     }
@@ -4121,19 +4133,19 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 57,
                 new_line: 57,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 57".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -62,1 +62,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 62,
                 new_line: 62,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 62".to_string(),
             },
         ];
@@ -4149,13 +4161,13 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -40,1 +40,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 40,
                 new_line: 40,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 40".to_string(),
             },
         ];
@@ -4176,13 +4188,13 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -5,1 +4,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 5,
                 new_line: 4,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "shared tail".to_string(),
             },
         ];
@@ -4195,12 +4207,17 @@ mod tests {
             ),
             3
         );
+        assert!(file.lines.iter().any(|line| {
+            line.old_line == 3
+                && line.new_line == 0
+                && line.kind == crate::git::DiffLineKind::Deletion
+        }));
         assert!(
-            file.lines.iter().any(|line| {
-                line.old_line == 3 && line.new_line == 0 && line.kind == "deletion"
-            })
+            !file
+                .lines
+                .iter()
+                .any(|line| line.kind == crate::git::DiffLineKind::Hunk)
         );
-        assert!(!file.lines.iter().any(|line| line.kind == "hunk"));
     }
 
     #[test]
@@ -4210,19 +4227,19 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -2,1 +2,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 2,
                 new_line: 0,
-                kind: "deletion".to_string(),
+                kind: crate::git::DiffLineKind::Deletion,
                 content: "old".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 2,
-                kind: "addition".to_string(),
+                kind: crate::git::DiffLineKind::Addition,
                 content: "new".to_string(),
             },
         ];
@@ -4235,7 +4252,12 @@ mod tests {
             ),
             2
         );
-        assert!(!file.lines.iter().any(|line| line.kind == "hunk"));
+        assert!(
+            !file
+                .lines
+                .iter()
+                .any(|line| line.kind == crate::git::DiffLineKind::Hunk)
+        );
         assert_eq!(file.lines.last().map(|line| line.old_line), Some(4));
         assert_eq!(file.lines.last().map(|line| line.new_line), Some(4));
         assert_eq!(
@@ -4251,13 +4273,13 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -4,1 +4,1 @@".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 4,
                 new_line: 4,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "line 4".to_string(),
             },
         ];

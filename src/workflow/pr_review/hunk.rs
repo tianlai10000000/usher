@@ -31,10 +31,10 @@ pub(super) fn hunk_is_expandable(file: &PullRequestDiffFile, hunk_index: usize) 
     let Some(line) = file.lines.get(hunk_index) else {
         return false;
     };
-    if line.kind != "hunk" {
+    if line.kind != crate::git::DiffLineKind::Hunk {
         return false;
     }
-    let use_new_side = file.change_type != "deleted_file";
+    let use_new_side = file.change_type != crate::git::DiffChangeType::Deleted;
     let previous = file.lines[..hunk_index]
         .iter()
         .rev()
@@ -50,7 +50,7 @@ pub(super) fn hunk_can_expand_down(file: &PullRequestDiffFile, hunk_index: usize
     if !hunk_is_expandable(file, hunk_index) {
         return false;
     }
-    let use_new_side = file.change_type != "deleted_file";
+    let use_new_side = file.change_type != crate::git::DiffChangeType::Deleted;
     file.lines[..hunk_index]
         .iter()
         .rev()
@@ -67,10 +67,10 @@ pub(super) fn hunk_can_expand_all(file: &PullRequestDiffFile, hunk_index: usize)
 
 fn hunk_hidden_bounds(file: &PullRequestDiffFile, hunk_index: usize) -> Option<(i32, i32)> {
     let line = file.lines.get(hunk_index)?;
-    if line.kind != "hunk" {
+    if line.kind != crate::git::DiffLineKind::Hunk {
         return None;
     }
-    let use_new_side = file.change_type != "deleted_file";
+    let use_new_side = file.change_type != crate::git::DiffChangeType::Deleted;
     let previous = file.lines[..hunk_index]
         .iter()
         .rev()
@@ -114,7 +114,7 @@ pub(super) fn hidden_hunk_for_line(
 ) -> Option<usize> {
     (target_line > 0).then_some(())?;
     file.lines.iter().enumerate().find_map(|(index, line)| {
-        if line.kind != "hunk" {
+        if line.kind != crate::git::DiffLineKind::Hunk {
             return None;
         }
         let (previous, next) = hunk_side_bounds(file, index, use_new_side)?;
@@ -164,7 +164,7 @@ pub(super) fn expand_hunk_context_around_line_from_sources(
     let Some(marker) = file
         .lines
         .get(hunk_index)
-        .filter(|line| line.kind == "hunk")
+        .filter(|line| line.kind == crate::git::DiffLineKind::Hunk)
         .cloned()
     else {
         return false;
@@ -308,7 +308,7 @@ fn align_source_ranges(
             rows.push(PullRequestDiffLine {
                 old_line: old_lines[old_index].0,
                 new_line: new_lines[new_index].0,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: sanitize_diff_content(old_lines[old_index].1),
             });
             old_index += 1;
@@ -320,7 +320,7 @@ fn align_source_ranges(
             rows.push(PullRequestDiffLine {
                 old_line: old_lines[old_index].0,
                 new_line: 0,
-                kind: "deletion".to_string(),
+                kind: crate::git::DiffLineKind::Deletion,
                 content: sanitize_diff_content(old_lines[old_index].1),
             });
             old_index += 1;
@@ -328,7 +328,7 @@ fn align_source_ranges(
             rows.push(PullRequestDiffLine {
                 old_line: 0,
                 new_line: new_lines[new_index].0,
-                kind: "addition".to_string(),
+                kind: crate::git::DiffLineKind::Addition,
                 content: sanitize_diff_content(new_lines[new_index].1),
             });
             new_index += 1;
@@ -353,7 +353,7 @@ fn align_trailing_source_ranges(
             .map(|(old, new)| PullRequestDiffLine {
                 old_line: old.0,
                 new_line: new.0,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: sanitize_diff_content(old.1),
             })
             .collect();
@@ -435,7 +435,7 @@ pub(super) fn expand_hunk_context_from_sources(
     let new_range = new_bounds
         .map(|(previous, next)| bounded_source_range(&head_lines, previous, next, direction, limit))
         .unwrap_or_default();
-    let use_new_side = file.change_type != "deleted_file";
+    let use_new_side = file.change_type != crate::git::DiffChangeType::Deleted;
     let rows = bounded_aligned_rows(
         align_source_ranges(old_range.as_slice(), new_range.as_slice()),
         use_new_side,
@@ -459,7 +459,7 @@ pub(super) fn expand_hunk_context_from_sources(
     if file
         .lines
         .get(current_hunk_index)
-        .is_some_and(|line| line.kind == "hunk")
+        .is_some_and(|line| line.kind == crate::git::DiffLineKind::Hunk)
         && !hunk_is_expandable(file, current_hunk_index)
     {
         file.lines.remove(current_hunk_index);
@@ -478,7 +478,7 @@ pub(super) fn expand_hunk_context(
     if limit == 0 || !hunk_is_expandable(file, hunk_index) {
         return false;
     }
-    let use_new_side = file.change_type != "deleted_file";
+    let use_new_side = file.change_type != crate::git::DiffChangeType::Deleted;
     let previous = file.lines[..hunk_index]
         .iter()
         .rev()
@@ -532,7 +532,7 @@ pub(super) fn expand_hunk_context(
         revealed.push(PullRequestDiffLine {
             old_line: if use_new_side { counterpart } else { number },
             new_line: if use_new_side { number } else { counterpart },
-            kind: "context".to_string(),
+            kind: crate::git::DiffLineKind::Context,
             content: source_lines[number as usize - 1].to_string(),
         });
     }
@@ -634,11 +634,11 @@ pub(super) fn restore_original_diff(
 }
 
 pub(super) fn full_source_file(file: &PullRequestDiffFile, source: &str) -> PullRequestDiffFile {
-    let deleted = file.change_type == "deleted_file";
+    let deleted = file.change_type == crate::git::DiffChangeType::Deleted;
     PullRequestDiffFile {
         path: file.path.clone(),
         old_path: file.old_path.clone(),
-        change_type: file.change_type.clone(),
+        change_type: file.change_type,
         added_lines: file.added_lines,
         removed_lines: file.removed_lines,
         viewed: file.viewed,
@@ -650,7 +650,7 @@ pub(super) fn full_source_file(file: &PullRequestDiffFile, source: &str) -> Pull
                 PullRequestDiffLine {
                     old_line: if deleted { number } else { 0 },
                     new_line: if deleted { 0 } else { number },
-                    kind: "context".to_string(),
+                    kind: crate::git::DiffLineKind::Context,
                     content: content.to_string(),
                 }
             })
@@ -671,7 +671,7 @@ mod tests {
         PullRequestDiffLine {
             old_line,
             new_line,
-            kind: kind.to_string(),
+            kind: kind.into(),
             content: content.to_string(),
         }
     }
@@ -680,7 +680,7 @@ mod tests {
         PullRequestDiffFile {
             path: "src/lib.rs".to_string(),
             old_path: "src/lib.rs".to_string(),
-            change_type: "edit_file".to_string(),
+            change_type: crate::git::DiffChangeType::Modified,
             added_lines: 0,
             removed_lines: 0,
             viewed: false,
@@ -789,7 +789,10 @@ mod tests {
         ));
 
         assert_eq!(
-            diff.lines.iter().filter(|line| line.kind == "hunk").count(),
+            diff.lines
+                .iter()
+                .filter(|line| line.kind == crate::git::DiffLineKind::Hunk)
+                .count(),
             2
         );
         assert!(diff.lines.iter().any(|line| line.new_line == 30));
@@ -841,7 +844,7 @@ mod tests {
         assert_eq!((added.lines[1].old_line, added.lines[1].new_line), (0, 2));
 
         let mut deleted_file = original;
-        deleted_file.change_type = "deleted_file".to_string();
+        deleted_file.change_type = crate::git::DiffChangeType::Deleted;
         let deleted = full_source_file(&deleted_file, "alpha\nbeta");
         assert_eq!(
             (deleted.lines[1].old_line, deleted.lines[1].new_line),

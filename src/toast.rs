@@ -12,12 +12,10 @@ lazy_static! {
 
 static TOAST_GENERATION: AtomicU64 = AtomicU64::new(0);
 
-// Default value constants
 const DEFAULT_DURATION_TEXT: i32 = 2500;
 const DEFAULT_DURATION_SUCCESS: i32 = 2500;
 const DEFAULT_DURATION_ERROR: i32 = 3000;
-const DEFAULT_DURATION_LOADING: i32 = 0; // loading defaults to no auto-close
-// const DEFAULT_DURATION_GENERAL: i32 = 2500;
+const DEFAULT_DURATION_LOADING: i32 = 0;
 
 // Default messages stay semantic until the Toast is presented.
 const DEFAULT_MESSAGE_TEXT_KEY: &str = "toast.default.text";
@@ -25,96 +23,100 @@ const DEFAULT_MESSAGE_SUCCESS_KEY: &str = "toast.default.success";
 const DEFAULT_MESSAGE_ERROR_KEY: &str = "toast.default.error";
 const DEFAULT_MESSAGE_LOADING_KEY: &str = "toast.default.loading";
 
-// Default position
 const DEFAULT_POSITION: &str = "middle";
 
-// Parse width string, return (is_auto, width_value_px, percent_value)
-// If width_str is percentage, width_value is 0, percent_value is percentage value
-// If width_str is px, width_value is px value, percent_value is 0
-// If width_str is auto, width_is_auto is true
-fn parse_width(width_str: &str) -> (bool, f32, f32) {
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ToastWidth {
+    Auto,
+    Pixels(f32),
+    Percent(f32),
+}
+
+impl ToastWidth {
+    fn slint_values(self) -> (bool, f32, f32) {
+        match self {
+            Self::Auto => (true, 0.0, 0.0),
+            Self::Pixels(value) => (false, value, 0.0),
+            Self::Percent(value) => (false, 0.0, value),
+        }
+    }
+}
+
+fn parse_width(width_str: &str) -> ToastWidth {
     let width_str = width_str.trim();
 
     if width_str == "auto" {
-        return (true, 0.0, 0.0);
+        return ToastWidth::Auto;
     }
 
     if let Some(width) = width_str.strip_suffix("px") {
         if let Ok(value) = width.trim().parse::<f32>() {
-            return (false, value, 0.0);
+            return ToastWidth::Pixels(value);
         }
     } else if let Some(width) = width_str.strip_suffix('%')
         && let Ok(percent) = width.trim().parse::<f32>()
     {
-        return (false, 0.0, percent);
+        return ToastWidth::Percent(percent);
     }
 
-    // Default value: GitHub Primer content-sized toast.
-    (true, 0.0, 0.0)
+    ToastWidth::Auto
 }
 
-// Helper function: create Toast configuration with default values
-fn create_toast_with_defaults(
+#[derive(Debug, Clone, PartialEq)]
+struct ResolvedToast {
+    message: String,
     toast_type: ToastType,
-    options: ToastOptions,
-) -> (
-    String,
-    ToastType,
-    String,
-    String,
-    bool,
-    bool,
-    String,
-    String,
-) {
-    // If message is empty string, use default message
-    let final_message = if options.message.is_empty() {
-        i18n::tr(default_message_key(toast_type)).into_owned()
-    } else {
-        options.message.to_string()
-    };
+    position: String,
+    icon: String,
+    overlay: bool,
+    close_on_click: bool,
+    loading_type: String,
+    width_source: String,
+    width: ToastWidth,
+    duration: i32,
+}
 
-    // duration handling logic:
-    // - duration < 0: use default value
-    // - duration == 0: permanent (no auto-close)
-    // - duration > 0: use specified value
-    // let final_duration = if options.duration < 0 {
-    //     default_duration
-    // } else {
-    //     options.duration
-    // };
+impl ResolvedToast {
+    fn new(toast_type: ToastType, options: ToastOptions) -> Self {
+        let message = if options.message.is_empty() {
+            i18n::tr(default_message_key(toast_type)).into_owned()
+        } else {
+            options.message.to_string()
+        };
+        let position = if options.position.is_empty() {
+            DEFAULT_POSITION.to_string()
+        } else {
+            options.position.to_string()
+        };
+        let loading_type = if options.loading_type.is_empty() {
+            "circular".to_string()
+        } else {
+            options.loading_type.to_string()
+        };
+        let width_source = if options.width.is_empty() {
+            "auto".to_string()
+        } else {
+            options.width.to_string()
+        };
+        let duration = if options.duration < 0 {
+            default_duration(toast_type)
+        } else {
+            options.duration
+        };
 
-    // position handling: if empty, use default value
-    let final_position = if options.position.is_empty() {
-        DEFAULT_POSITION.to_string()
-    } else {
-        options.position.to_string()
-    };
-
-    // loading-type handling: if empty, use default value
-    let final_loading_type = if options.loading_type.is_empty() {
-        "circular".to_string()
-    } else {
-        options.loading_type.to_string()
-    };
-
-    // GitHub Primer Toast follows content width and caps the card at 450px.
-    let final_width = if options.width.is_empty() {
-        "auto".to_string()
-    } else {
-        options.width.to_string()
-    };
-
-    (
-        final_message,
-        toast_type,
-        final_position,
-        options.icon.to_string(),
-        options.overlay,
-        options.close_on_click,
-        final_loading_type,
-        final_width,
-    )
+        Self {
+            message,
+            toast_type,
+            position,
+            icon: options.icon.to_string(),
+            overlay: options.overlay,
+            close_on_click: options.close_on_click,
+            loading_type,
+            width: parse_width(&width_source),
+            width_source,
+            duration,
+        }
+    }
 }
 
 fn default_message_key(toast_type: ToastType) -> &'static str {
@@ -126,40 +128,33 @@ fn default_message_key(toast_type: ToastType) -> &'static str {
     }
 }
 
-// Helper function: apply Toast configuration to UI
-// This mirrors the application-owned Slint ToastOptions fields.
-#[allow(clippy::too_many_arguments)]
-fn apply_toast(
-    manager: &ToastManager,
-    message: String,
-    toast_type: ToastType,
-    position: String,
-    icon: String,
-    overlay: bool,
-    close_on_click: bool,
-    loading_type: String,
-    width: String,
-    duration: i32,
-) {
-    let generation = TOAST_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
-    // Parse width string
-    let (width_is_auto, width_value_px, width_percent) = parse_width(&width);
+fn default_duration(toast_type: ToastType) -> i32 {
+    match toast_type {
+        ToastType::Text => DEFAULT_DURATION_TEXT,
+        ToastType::Success => DEFAULT_DURATION_SUCCESS,
+        ToastType::Error => DEFAULT_DURATION_ERROR,
+        ToastType::Loading => DEFAULT_DURATION_LOADING,
+    }
+}
 
-    manager.set_message(message.clone().into());
-    manager.set_type(toast_type);
-    manager.set_position(position.clone().into());
-    manager.set_icon(icon.clone().into());
-    manager.set_overlay(overlay);
-    manager.set_close_on_click(close_on_click);
-    manager.set_loading_type(loading_type.clone().into());
-    manager.set_width(width.clone().into());
+fn apply_toast(manager: &ToastManager, toast: ResolvedToast) {
+    let generation = TOAST_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+    let (width_is_auto, width_value_px, width_percent) = toast.width.slint_values();
+
+    manager.set_message(toast.message.into());
+    manager.set_type(toast.toast_type);
+    manager.set_position(toast.position.into());
+    manager.set_icon(toast.icon.into());
+    manager.set_overlay(toast.overlay);
+    manager.set_close_on_click(toast.close_on_click);
+    manager.set_loading_type(toast.loading_type.into());
+    manager.set_width(toast.width_source.into());
     manager.set_width_is_auto(width_is_auto);
     manager.set_width_value(width_value_px);
     manager.set_width_percent(width_percent);
     manager.set_visible(true);
 
-    // If duration > 0, set auto-close timer
-    if duration > 0 {
+    if toast.duration > 0 {
         let ui_weak = {
             let guard = UI_WEAK
                 .lock()
@@ -168,7 +163,7 @@ fn apply_toast(
         };
 
         if let Some(weak) = ui_weak {
-            Timer::single_shot(Duration::from_millis(duration as u64), move || {
+            Timer::single_shot(Duration::from_millis(toast.duration as u64), move || {
                 if TOAST_GENERATION.load(Ordering::Relaxed) != generation {
                     return;
                 }
@@ -181,6 +176,13 @@ fn apply_toast(
     }
 }
 
+fn show_toast(ui: &MainWindow, toast_type: ToastType, options: ToastOptions) {
+    apply_toast(
+        &ToastManager::get(ui),
+        ResolvedToast::new(toast_type, options),
+    );
+}
+
 // Toast manager initialization and callback binding function
 pub fn setup_toast(ui: &MainWindow) {
     let ui_weak = ui.as_weak();
@@ -190,149 +192,38 @@ pub fn setup_toast(ui: &MainWindow) {
 
     let manager = ToastManager::get(ui);
 
-    // Convenience method callback - success
     let ui_weak_success = ui_weak.clone();
     manager.on_success(move |options: ToastOptions| {
         if let Some(ui) = ui_weak_success.upgrade() {
-            let manager = ToastManager::get(&ui);
-            let options_clone = options.clone();
-            let (message, toast_type, position, icon, overlay, close_on_click, loading_type, width) =
-                create_toast_with_defaults(ToastType::Success, options_clone.clone());
-            let duration = if options_clone.duration < 0 {
-                DEFAULT_DURATION_SUCCESS
-            } else {
-                options_clone.duration
-            };
-            apply_toast(
-                &manager,
-                message,
-                toast_type,
-                position,
-                icon,
-                overlay,
-                close_on_click,
-                loading_type,
-                width,
-                duration,
-            );
+            show_toast(&ui, ToastType::Success, options);
         }
     });
 
-    // Convenience method callback - error
     let ui_weak_error = ui_weak.clone();
     manager.on_error(move |options: ToastOptions| {
         if let Some(ui) = ui_weak_error.upgrade() {
-            let manager = ToastManager::get(&ui);
-            let options_clone = options.clone();
-            let (message, toast_type, position, icon, overlay, close_on_click, loading_type, width) =
-                create_toast_with_defaults(ToastType::Error, options_clone.clone());
-            let duration = if options_clone.duration < 0 {
-                DEFAULT_DURATION_ERROR
-            } else {
-                options_clone.duration
-            };
-            apply_toast(
-                &manager,
-                message,
-                toast_type,
-                position,
-                icon,
-                overlay,
-                close_on_click,
-                loading_type,
-                width,
-                duration,
-            );
+            show_toast(&ui, ToastType::Error, options);
         }
     });
 
-    // Convenience method callback - info
     let ui_weak_info = ui_weak.clone();
     manager.on_info(move |options: ToastOptions| {
         if let Some(ui) = ui_weak_info.upgrade() {
-            let manager = ToastManager::get(&ui);
-            let options_clone = options.clone();
-            let (message, toast_type, position, icon, overlay, close_on_click, loading_type, width) =
-                create_toast_with_defaults(ToastType::Text, options_clone.clone());
-            let duration = if options_clone.duration < 0 {
-                DEFAULT_DURATION_TEXT
-            } else {
-                options_clone.duration
-            };
-            apply_toast(
-                &manager,
-                message,
-                toast_type,
-                position,
-                icon,
-                overlay,
-                close_on_click,
-                loading_type,
-                width,
-                duration,
-            );
+            show_toast(&ui, ToastType::Text, options);
         }
     });
 
-    // Convenience method callback - loading
     let ui_weak_loading = ui_weak.clone();
     manager.on_loading(move |options: ToastOptions| {
         if let Some(ui) = ui_weak_loading.upgrade() {
-            let manager = ToastManager::get(&ui);
-            let options_clone = options.clone();
-            let (message, toast_type, position, icon, overlay, close_on_click, loading_type, width) =
-                create_toast_with_defaults(ToastType::Loading, options_clone.clone());
-            let duration = if options_clone.duration < 0 {
-                DEFAULT_DURATION_LOADING
-            } else {
-                options_clone.duration
-            };
-            apply_toast(
-                &manager,
-                message,
-                toast_type,
-                position,
-                icon,
-                overlay,
-                close_on_click,
-                loading_type,
-                width,
-                duration,
-            );
+            show_toast(&ui, ToastType::Loading, options);
         }
     });
 
-    // Generic method callback - show
     let ui_weak_show = ui_weak.clone();
     manager.on_show(move |toast_type: ToastType, options: ToastOptions| {
         if let Some(ui) = ui_weak_show.upgrade() {
-            let manager = ToastManager::get(&ui);
-            let options_clone = options.clone();
-            let (message, toast_type, position, icon, overlay, close_on_click, loading_type, width) =
-                create_toast_with_defaults(toast_type, options_clone.clone());
-            let default_duration = match toast_type {
-                ToastType::Text => DEFAULT_DURATION_TEXT,
-                ToastType::Success => DEFAULT_DURATION_SUCCESS,
-                ToastType::Error => DEFAULT_DURATION_ERROR,
-                ToastType::Loading => DEFAULT_DURATION_LOADING,
-            };
-            let duration = if options_clone.duration < 0 {
-                default_duration
-            } else {
-                options_clone.duration
-            };
-            apply_toast(
-                &manager,
-                message,
-                toast_type,
-                position,
-                icon,
-                overlay,
-                close_on_click,
-                loading_type,
-                width,
-                duration,
-            );
+            show_toast(&ui, toast_type, options);
         }
     });
 
@@ -351,6 +242,13 @@ pub fn setup_toast(ui: &MainWindow) {
 mod tests {
     use super::*;
 
+    fn options() -> ToastOptions {
+        ToastOptions {
+            duration: -1,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn default_messages_are_resolved_from_each_locale_catalog() {
         let cases = [
@@ -365,5 +263,92 @@ mod tests {
             assert_eq!(usher_i18n::translate_for("en", key), english);
             assert_eq!(usher_i18n::translate_for("zh-CN", key), chinese);
         }
+    }
+
+    #[test]
+    fn width_parser_preserves_existing_auto_pixel_percent_and_fallback_semantics() {
+        assert_eq!(parse_width("auto").slint_values(), (true, 0.0, 0.0));
+        assert_eq!(parse_width(" 320px ").slint_values(), (false, 320.0, 0.0));
+        assert_eq!(parse_width(" 45% ").slint_values(), (false, 0.0, 45.0));
+        assert_eq!(parse_width("invalid").slint_values(), (true, 0.0, 0.0));
+        assert_eq!(parse_width("-2px").slint_values(), (false, -2.0, 0.0));
+    }
+
+    #[test]
+    fn toast_defaults_preserve_options_and_type_specific_duration_contract() {
+        let mut custom = options();
+        custom.message = "custom".into();
+        custom.position = "top".into();
+        custom.icon = "icon.svg".into();
+        custom.overlay = true;
+        custom.close_on_click = true;
+        custom.loading_type = "linear".into();
+        custom.width = "75%".into();
+
+        let resolved = ResolvedToast::new(ToastType::Error, custom);
+        assert_eq!(resolved.message, "custom");
+        assert_eq!(resolved.toast_type, ToastType::Error);
+        assert_eq!(resolved.position, "top");
+        assert_eq!(resolved.icon, "icon.svg");
+        assert!(resolved.overlay);
+        assert!(resolved.close_on_click);
+        assert_eq!(resolved.loading_type, "linear");
+        assert_eq!(resolved.width_source, "75%");
+
+        for (toast_type, duration) in [
+            (ToastType::Text, DEFAULT_DURATION_TEXT),
+            (ToastType::Success, DEFAULT_DURATION_SUCCESS),
+            (ToastType::Error, DEFAULT_DURATION_ERROR),
+            (ToastType::Loading, DEFAULT_DURATION_LOADING),
+        ] {
+            let resolved = ResolvedToast::new(toast_type, options());
+            assert_eq!(resolved.position, DEFAULT_POSITION);
+            assert_eq!(resolved.loading_type, "circular");
+            assert_eq!(resolved.width_source, "auto");
+            assert_eq!(resolved.duration, duration);
+        }
+
+        for duration in [0, 1234] {
+            let mut explicit = options();
+            explicit.duration = duration;
+            assert_eq!(
+                ResolvedToast::new(ToastType::Success, explicit).duration,
+                duration
+            );
+        }
+    }
+
+    #[test]
+    fn callbacks_apply_the_resolved_configuration_to_the_slint_manager() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().unwrap();
+        setup_toast(&ui);
+        let manager = ToastManager::get(&ui);
+        let mut custom = options();
+        custom.message = "saved".into();
+        custom.duration = 0;
+        custom.position = "top".into();
+        custom.icon = "icon.svg".into();
+        custom.overlay = true;
+        custom.close_on_click = true;
+        custom.loading_type = "linear".into();
+        custom.width = "75%".into();
+
+        manager.invoke_success(custom);
+
+        assert!(manager.get_visible());
+        assert_eq!(manager.get_message(), "saved");
+        assert_eq!(manager.get_type(), ToastType::Success);
+        assert_eq!(manager.get_position(), "top");
+        assert_eq!(manager.get_icon(), "icon.svg");
+        assert!(manager.get_overlay());
+        assert!(manager.get_close_on_click());
+        assert_eq!(manager.get_loading_type(), "linear");
+        assert_eq!(manager.get_width(), "75%");
+        assert!(!manager.get_width_is_auto());
+        assert_eq!(manager.get_width_percent(), 75.0);
+
+        manager.invoke_dismiss();
+        assert!(!manager.get_visible());
     }
 }

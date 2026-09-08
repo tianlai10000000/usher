@@ -17,8 +17,6 @@ pub(crate) enum ChatMode {
 
 #[derive(Debug, Default)]
 pub(crate) struct ChatRequestState {
-    ai_sending: bool,
-    rag_sending: bool,
     ai_started_at: Option<Instant>,
     rag_started_at: Option<Instant>,
 }
@@ -26,35 +24,25 @@ pub(crate) struct ChatRequestState {
 impl ChatRequestState {
     pub(crate) fn is_sending(&self, mode: ChatMode) -> bool {
         match mode {
-            ChatMode::Ai => self.ai_sending,
-            ChatMode::Rag => self.rag_sending,
+            ChatMode::Ai => self.ai_started_at,
+            ChatMode::Rag => self.rag_started_at,
         }
+        .is_some()
     }
 
     pub(crate) fn start(&mut self, mode: ChatMode, started_at: Instant) {
         match mode {
-            ChatMode::Ai => {
-                self.ai_sending = true;
-                self.ai_started_at = Some(started_at);
-            }
-            ChatMode::Rag => {
-                self.rag_sending = true;
-                self.rag_started_at = Some(started_at);
-            }
+            ChatMode::Ai => self.ai_started_at = Some(started_at),
+            ChatMode::Rag => self.rag_started_at = Some(started_at),
         }
     }
 
     pub(crate) fn finish(&mut self, mode: ChatMode) -> Option<Duration> {
         match mode {
-            ChatMode::Ai => {
-                self.ai_sending = false;
-                self.ai_started_at.take().map(|started| started.elapsed())
-            }
-            ChatMode::Rag => {
-                self.rag_sending = false;
-                self.rag_started_at.take().map(|started| started.elapsed())
-            }
+            ChatMode::Ai => self.ai_started_at.take(),
+            ChatMode::Rag => self.rag_started_at.take(),
         }
+        .map(|started| started.elapsed())
     }
 
     pub(crate) fn elapsed_seconds(&self, mode: ChatMode) -> u64 {
@@ -497,6 +485,31 @@ mod tests {
         state.finish(ChatMode::Ai);
         assert!(!state.is_sending(ChatMode::Ai));
         assert!(state.is_sending(ChatMode::Rag));
+    }
+
+    #[test]
+    fn finishing_is_idempotent_and_a_new_start_replaces_the_elapsed_origin() {
+        let mut state = ChatRequestState::default();
+        state.start(
+            ChatMode::Ai,
+            Instant::now() - std::time::Duration::from_secs(5),
+        );
+        assert!(state.elapsed_seconds(ChatMode::Ai) >= 5);
+        assert!(
+            state
+                .finish(ChatMode::Ai)
+                .is_some_and(|elapsed| elapsed.as_secs() >= 5)
+        );
+        assert_eq!(state.finish(ChatMode::Ai), None);
+        assert_eq!(state.elapsed_seconds(ChatMode::Ai), 0);
+
+        state.start(
+            ChatMode::Ai,
+            Instant::now() - std::time::Duration::from_secs(2),
+        );
+        assert!(state.is_sending(ChatMode::Ai));
+        assert!(state.elapsed_seconds(ChatMode::Ai) >= 2);
+        assert!(state.elapsed_seconds(ChatMode::Ai) < 5);
     }
 
     #[test]

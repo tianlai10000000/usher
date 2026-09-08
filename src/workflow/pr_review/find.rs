@@ -100,7 +100,10 @@ fn collect_source_find_matches(
                 let Some(line) = file.lines.get(source_index) else {
                     continue;
                 };
-                if matches!(line.kind.as_str(), "hunk" | "meta") {
+                if matches!(
+                    line.kind,
+                    crate::git::DiffLineKind::Hunk | crate::git::DiffLineKind::Meta
+                ) {
                     continue;
                 }
                 push_source_matches(&mut matches, row as i32, line.content.as_str(), needle, "");
@@ -494,7 +497,7 @@ mod tests {
         PullRequestDiffLine {
             old_line,
             new_line,
-            kind: kind.to_string(),
+            kind: kind.into(),
             content: content.to_string(),
         }
     }
@@ -517,7 +520,7 @@ mod tests {
         let file = PullRequestDiffFile {
             path: "src/lib.rs".to_string(),
             old_path: "src/lib.rs".to_string(),
-            change_type: "edit_file".to_string(),
+            change_type: crate::git::DiffChangeType::Modified,
             added_lines: 1,
             removed_lines: 2,
             viewed: false,

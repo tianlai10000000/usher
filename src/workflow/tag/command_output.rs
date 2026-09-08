@@ -29,14 +29,29 @@ pub(super) fn clamp_step_log(mut log: String) -> String {
     result
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputStream {
+    Stdout,
+    Stderr,
+}
+
+impl OutputStream {
+    fn index(self) -> usize {
+        match self {
+            Self::Stdout => 0,
+            Self::Stderr => 1,
+        }
+    }
+}
+
 enum Output {
-    Bytes(usize, Vec<u8>),
-    End(usize),
-    Error(String),
+    Bytes(OutputStream, Vec<u8>),
+    End(OutputStream),
+    Error(OutputStream, String),
 }
 async fn read_stream<R: AsyncRead + Unpin>(
     mut reader: R,
-    stream: usize,
+    stream: OutputStream,
     sender: mpsc::Sender<Output>,
 ) {
     let mut bytes = [0; CHUNK_BYTES];
@@ -57,9 +72,10 @@ async fn read_stream<R: AsyncRead + Unpin>(
             }
             Err(error) => {
                 let _ = sender
-                    .send(Output::Error(format!(
-                        "error: failed to read process output: {error}\n"
-                    )))
+                    .send(Output::Error(
+                        stream,
+                        format!("error: failed to read process output: {error}\n"),
+                    ))
                     .await;
                 let _ = sender.send(Output::End(stream)).await;
                 break;
@@ -130,21 +146,70 @@ impl Drop for Readers {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CommandFailureKind {
+    EmptyCommand,
+    Cancelled,
+    Spawn,
+    Wait,
+    ReadStdout,
+    ReadStderr,
+    OutputConsumer,
+    DrainTimeout,
+    ExitStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CommandSuccess {
+    pub(super) log: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CommandFailure {
+    pub(super) kind: CommandFailureKind,
+    pub(super) log: String,
+}
+
+impl CommandFailure {
+    pub(super) fn is_cancelled(&self) -> bool {
+        self.kind == CommandFailureKind::Cancelled
+    }
+}
+
 pub(super) async fn run_command<F>(
     command: Vec<String>,
     cancel: &Arc<AtomicBool>,
-    mut on_log: F,
-) -> Result<String, String>
+    on_log: F,
+) -> Result<CommandSuccess, CommandFailure>
 where
     F: FnMut(String),
 {
+    run_command_with_stdout(command, cancel, on_log, |_| Ok(())).await
+}
+
+pub(super) async fn run_command_with_stdout<F, S>(
+    command: Vec<String>,
+    cancel: &Arc<AtomicBool>,
+    mut on_log: F,
+    mut on_stdout: S,
+) -> Result<CommandSuccess, CommandFailure>
+where
+    F: FnMut(String),
+    S: FnMut(&str) -> Result<(), String>,
+{
     let Some(program) = command.first() else {
-        return Err("Command vector is empty.".into());
+        return Err(CommandFailure {
+            kind: CommandFailureKind::EmptyCommand,
+            log: "Command vector is empty.".into(),
+        });
     };
     let rendered = command.join(" ");
     let mut log = clamp_step_log(format!("Run {rendered}\n"));
     if cancel.load(Ordering::Acquire) {
-        return Err(format!("{log}Cancelled by user."));
+        return Err(CommandFailure {
+            kind: CommandFailureKind::Cancelled,
+            log: format!("{log}Cancelled by user."),
+        });
     }
     log::info!("[Workflow][Tag] Executing command: {rendered}");
     let mut child = Command::new(program)
@@ -154,11 +219,22 @@ where
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|error| format!("{log}error: failed to spawn command: {error}"))?;
+        .map_err(|error| CommandFailure {
+            kind: CommandFailureKind::Spawn,
+            log: format!("{log}error: failed to spawn command: {error}"),
+        })?;
     let (sender, mut receiver) = mpsc::channel(QUEUE_CHUNKS);
     let mut readers = Readers(vec![
-        tokio::spawn(read_stream(child.stdout.take().unwrap(), 0, sender.clone())),
-        tokio::spawn(read_stream(child.stderr.take().unwrap(), 1, sender)),
+        tokio::spawn(read_stream(
+            child.stdout.take().unwrap(),
+            OutputStream::Stdout,
+            sender.clone(),
+        )),
+        tokio::spawn(read_stream(
+            child.stderr.take().unwrap(),
+            OutputStream::Stderr,
+            sender,
+        )),
     ]);
     let mut decoders = [Decoder::default(), Decoder::default()];
     let mut status = None;
@@ -169,13 +245,13 @@ where
     let mut peak_queue = 0;
     let mut received = 0usize;
     on_log(log.clone());
-    let result = loop {
+    let result: Result<(), CommandFailureKind> = loop {
         if cancel.load(Ordering::Acquire) {
             let _ = child.start_kill();
             let _ = child.wait().await;
             log.push_str("\nCancelled by user.");
             log = clamp_step_log(log);
-            break false;
+            break Err(CommandFailureKind::Cancelled);
         }
         if status.is_none() {
             match child.try_wait() {
@@ -186,12 +262,16 @@ where
                 Ok(None) => {}
                 Err(error) => {
                     log.push_str(&format!("\nerror: failed to wait for command: {error}"));
-                    break false;
+                    break Err(CommandFailureKind::Wait);
                 }
             }
         }
-        if channel_closed && status.is_some() {
-            break status.unwrap().success();
+        if channel_closed && let Some(status) = status {
+            break if status.success() {
+                Ok(())
+            } else {
+                Err(CommandFailureKind::ExitStatus)
+            };
         }
         // A descendant may keep inherited pipes open after the direct child exits.
         if exited_at.is_some_and(|time| time.elapsed() >= Duration::from_secs(2)) {
@@ -199,17 +279,31 @@ where
                 "\nerror: output pipes remained open after process exit; stopped draining.",
             );
             log = clamp_step_log(log);
-            break false;
+            break Err(CommandFailureKind::DrainTimeout);
         }
         tokio::select! {
             item = receiver.recv(), if !channel_closed => {
                 peak_queue = peak_queue.max(receiver.len());
-                let text = match item {
-                    Some(Output::Bytes(stream, bytes)) => { received += bytes.len(); decoders[stream].push(&bytes, false) },
-                    Some(Output::End(stream)) => decoders[stream].push(&[], true),
-                    Some(Output::Error(error)) => error,
-                    None => { channel_closed = true; String::new() },
+                let (stream, text) = match item {
+                    Some(Output::Bytes(stream, bytes)) => { received += bytes.len(); (Some(stream), decoders[stream.index()].push(&bytes, false)) },
+                    Some(Output::End(stream)) => (Some(stream), decoders[stream.index()].push(&[], true)),
+                    Some(Output::Error(stream, error)) => {
+                        log.push_str(&error);
+                        log = clamp_step_log(log);
+                        break Err(match stream {
+                            OutputStream::Stdout => CommandFailureKind::ReadStdout,
+                            OutputStream::Stderr => CommandFailureKind::ReadStderr,
+                        });
+                    }
+                    None => { channel_closed = true; (None, String::new()) },
                 };
+                if stream == Some(OutputStream::Stdout)
+                    && let Err(error) = on_stdout(&text)
+                {
+                    log.push_str(&format!("\nerror: failed to consume stdout: {error}"));
+                    log = clamp_step_log(log);
+                    break Err(CommandFailureKind::OutputConsumer);
+                }
                 if !text.is_empty() { log.push_str(&text); log = clamp_step_log(log); pending = true; }
             }
             _ = tokio::time::sleep(Duration::from_millis(40)) => {}
@@ -220,6 +314,10 @@ where
             pending = false;
         }
     };
+    if result.is_err() && status.is_none() {
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+    }
     // Cancel blocked sends before awaiting readers, on every exit path.
     for handle in &readers.0 {
         handle.abort();
@@ -236,7 +334,10 @@ where
             log.len()
         );
     }
-    if result { Ok(log) } else { Err(log) }
+    match result {
+        Ok(()) => Ok(CommandSuccess { log }),
+        Err(kind) => Err(CommandFailure { kind, log }),
+    }
 }
 
 #[cfg(test)]
@@ -262,7 +363,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel(QUEUE_CHUNKS);
         let task = tokio::spawn(read_stream(
             std::io::Cursor::new(vec![b'x'; 1024 * 1024]),
-            0,
+            OutputStream::Stdout,
             sender,
         ));
         tokio::time::sleep(Duration::from_millis(30)).await;
@@ -279,8 +380,8 @@ mod tests {
     async fn drains_both_pipes_after_exit_and_cancels_busy_readers() {
         let token = Arc::new(AtomicBool::new(false));
         let output = tokio::time::timeout(Duration::from_secs(5), run_command(vec!["sh".into(), "-c".into(), "head -c 1048576 /dev/zero; printf '\\nTAIL-OUT\\n'; head -c 1048576 /dev/zero >&2; printf '\\nTAIL-ERR\\n' >&2".into()], &token, |_| {})).await.unwrap().unwrap();
-        assert!(output.ends_with("TAIL-ERR\n"));
-        assert!(output.len() <= MAX_STEP_LOG_BYTES);
+        assert!(output.log.ends_with("TAIL-ERR\n"));
+        assert!(output.log.len() <= MAX_STEP_LOG_BYTES);
         let trigger = token.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -301,6 +402,37 @@ mod tests {
         .await
         .unwrap()
         .unwrap_err();
-        assert!(output.ends_with("Cancelled by user."));
+        assert_eq!(output.kind, CommandFailureKind::Cancelled);
+        assert!(output.log.ends_with("Cancelled by user."));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn distinguishes_spawn_exit_and_stdout_consumer_failures() {
+        let token = Arc::new(AtomicBool::new(false));
+        let spawn = run_command(vec!["/definitely/not/a/program".into()], &token, |_| {})
+            .await
+            .unwrap_err();
+        assert_eq!(spawn.kind, CommandFailureKind::Spawn);
+
+        let exit = run_command(
+            vec!["sh".into(), "-c".into(), "exit 7".into()],
+            &token,
+            |_| {},
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(exit.kind, CommandFailureKind::ExitStatus);
+
+        let consumer = run_command_with_stdout(
+            vec!["sh".into(), "-c".into(), "printf output".into()],
+            &token,
+            |_| {},
+            |_| Err("fixture rejected output".into()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(consumer.kind, CommandFailureKind::OutputConsumer);
+        assert!(consumer.log.contains("fixture rejected output"));
     }
 }

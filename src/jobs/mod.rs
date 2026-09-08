@@ -125,7 +125,13 @@ pub(crate) fn apply_job_run(
             .unwrap_or_default()
             .into(),
     );
-    ui.set_job_run_total_duration(snapshot.total_duration.clone().into());
+    ui.set_job_run_total_duration(
+        snapshot
+            .total_duration
+            .map(format_duration)
+            .unwrap_or_default()
+            .into(),
+    );
     ui.set_job_run_running(running);
     presenter::apply(ui, &descriptor.source, snapshot);
 }

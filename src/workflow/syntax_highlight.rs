@@ -127,7 +127,7 @@ fn syntax_for_vue_hunk<'a>(
 ) -> &'a SyntaxReference {
     let hunk = lines[start..]
         .iter()
-        .take_while(|line| line.kind != "hunk")
+        .take_while(|line| line.kind != crate::git::DiffLineKind::Hunk)
         .map(|line| line.content.trim())
         .collect::<Vec<_>>();
     if hunk.first().is_some_and(|line| line.starts_with('<')) {
@@ -401,7 +401,7 @@ mod tests {
         let lines = vec![PullRequestDiffLine {
             old_line: 1,
             new_line: 1,
-            kind: "context".to_string(),
+            kind: crate::git::DiffLineKind::Context,
             content: "\tlet answer: u32 = 42; // value".to_string(),
         }];
 
@@ -431,7 +431,7 @@ mod tests {
         let lines = vec![PullRequestDiffLine {
             old_line: 0,
             new_line: 1,
-            kind: "addition".to_string(),
+            kind: crate::git::DiffLineKind::Addition,
             content: "import value from 'package'; const count: number = 42;".to_string(),
         }];
 
@@ -449,7 +449,7 @@ mod tests {
         let lines = vec![PullRequestDiffLine {
             old_line: 0,
             new_line: 1,
-            kind: "addition".to_string(),
+            kind: crate::git::DiffLineKind::Addition,
             content: "The current product supports the following workflow:".to_string(),
         }];
 
@@ -465,7 +465,7 @@ mod tests {
         let lines = vec![PullRequestDiffLine {
             old_line: 1,
             new_line: 1,
-            kind: "context".to_string(),
+            kind: crate::git::DiffLineKind::Context,
             content: "const value =\r\n'中文';\n".to_string(),
         }];
 
@@ -505,13 +505,13 @@ mod tests {
             PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: crate::git::DiffLineKind::Hunk,
                 content: "@@ -1,2 +1,2 @@ <template>".to_string(),
             },
             PullRequestDiffLine {
                 old_line: 1,
                 new_line: 1,
-                kind: "context".to_string(),
+                kind: crate::git::DiffLineKind::Context,
                 content: "  <div class=\"dialog\">{{ title }}</div>".to_string(),
             },
         ];

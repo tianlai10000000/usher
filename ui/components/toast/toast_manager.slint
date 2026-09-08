@@ -8,7 +8,7 @@ export enum ToastType {
 // Toast 选项结构体，用于类似 JavaScript 的对象参数传入
 export struct ToastOptions {
     message: string,         // 默认为空字符串""，表示使用默认消息
-    duration: int,           // <= 0 表示使用默认值，0 表示永久显示
+    duration: int,           // < 0 使用类型默认值，0 永久显示，> 0 为毫秒数
     position: string,        // "top" | "middle" | "bottom"，默认为 "middle"
     icon: string,            // 自定义图标路径，为空字符串时使用默认图标
     overlay: bool,           // 是否显示遮罩层，默认为 false

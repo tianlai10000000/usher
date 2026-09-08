@@ -1594,28 +1594,33 @@ fn decode_diff_file(value: &Value) -> PullRequestDiffFile {
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        "new_file"
+        crate::git::DiffChangeType::New
     } else if value
         .get("deleted_file")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        "deleted_file"
+        crate::git::DiffChangeType::Deleted
     } else if value
         .get("renamed_file")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        "renamed_file"
+        crate::git::DiffChangeType::Renamed
     } else {
-        "edit_file"
-    }
-    .to_string();
+        crate::git::DiffChangeType::Modified
+    };
     let lines = string_field(value, "diff")
         .map(|diff| parse_unified_diff(diff.as_str()))
         .unwrap_or_default();
-    let added_lines = lines.iter().filter(|line| line.kind == "addition").count() as u32;
-    let removed_lines = lines.iter().filter(|line| line.kind == "deletion").count() as u32;
+    let added_lines = lines
+        .iter()
+        .filter(|line| line.kind == crate::git::DiffLineKind::Addition)
+        .count() as u32;
+    let removed_lines = lines
+        .iter()
+        .filter(|line| line.kind == crate::git::DiffLineKind::Deletion)
+        .count() as u32;
     if lines.is_empty() {
         return unavailable_diff_file(
             path,

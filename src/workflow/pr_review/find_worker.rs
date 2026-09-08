@@ -89,7 +89,10 @@ pub(super) fn scan(
                 continue;
             };
             let line = &result.source.file.lines[index];
-            if matches!(line.kind.as_str(), "hunk" | "meta") {
+            if matches!(
+                line.kind,
+                crate::git::DiffLineKind::Hunk | crate::git::DiffLineKind::Meta
+            ) {
                 continue;
             }
             let text = source_text(&line.content);

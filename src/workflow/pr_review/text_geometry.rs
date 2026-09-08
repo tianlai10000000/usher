@@ -174,30 +174,32 @@ pub(super) struct TextGlyphRect {
     pub height: f32,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn hit_test(
-    text: &str,
-    pointer_x: f32,
-    rendered_width: f32,
-    family: &str,
-    font_size: f32,
-    weight: u16,
-    italic: bool,
-    scale_factor: f32,
-) -> i32 {
-    if text.is_empty() || rendered_width <= 0.0 {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct TextGeometryOptions<'a> {
+    pub text: &'a str,
+    pub rendered_width: f32,
+    pub line_pitch: f32,
+    pub family: &'a str,
+    pub font_size: f32,
+    pub weight: u16,
+    pub italic: bool,
+    pub scale_factor: f32,
+}
+
+pub(super) fn hit_test(options: TextGeometryOptions<'_>, pointer_x: f32) -> i32 {
+    if options.text.is_empty() || options.rendered_width <= 0.0 {
         return 0;
     }
     TEXT_GEOMETRY.with_borrow_mut(|slot| {
         let engine = slot.get_or_insert_with(ParleyTextGeometry::new);
         engine.with_layout(
-            text,
-            family,
-            font_size,
-            weight,
-            italic,
-            scale_factor,
-            |layout| char_index_at_point(layout, text, pointer_x, rendered_width),
+            options.text,
+            options.family,
+            options.font_size,
+            options.weight,
+            options.italic,
+            options.scale_factor,
+            |layout| char_index_at_point(layout, options.text, pointer_x, options.rendered_width),
         )
     })
 }
@@ -221,32 +223,26 @@ where
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn hit_test_wrapped(
-    text: &str,
+    options: TextGeometryOptions<'_>,
     pointer_x: f32,
     pointer_y: f32,
-    rendered_width: f32,
-    line_pitch: f32,
-    family: &str,
-    font_size: f32,
-    scale_factor: f32,
 ) -> i32 {
-    if text.is_empty() {
+    if options.text.is_empty() {
         return 0;
     }
     TEXT_GEOMETRY.with_borrow_mut(|slot| {
         let engine = slot.get_or_insert_with(ParleyTextGeometry::new);
         hit_test_wrapped_with_engine(
             engine,
-            text,
+            options.text,
             pointer_x,
             pointer_y,
-            rendered_width,
-            line_pitch,
-            family,
-            font_size,
-            scale_factor,
+            options.rendered_width,
+            options.line_pitch,
+            options.family,
+            options.font_size,
+            options.scale_factor,
         )
     })
 }
@@ -324,67 +320,54 @@ where
     preceding_chars
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn range_geometry(
-    text: &str,
+    options: TextGeometryOptions<'_>,
     start_char: i32,
     end_char: i32,
-    rendered_width: f32,
-    family: &str,
-    font_size: f32,
-    weight: u16,
-    italic: bool,
-    scale_factor: f32,
 ) -> TextRangeGeometry {
-    if text.is_empty() || rendered_width <= 0.0 || end_char <= start_char {
+    if options.text.is_empty() || options.rendered_width <= 0.0 || end_char <= start_char {
         return TextRangeGeometry::default();
     }
-    let char_count = text.chars().count() as i32;
+    let char_count = options.text.chars().count() as i32;
     let start = start_char.clamp(0, char_count) as usize;
     let end = end_char.clamp(start as i32, char_count) as usize;
-    let start_byte = byte_offset_at_char(text, start);
-    let end_byte = byte_offset_at_char(text, end);
+    let start_byte = byte_offset_at_char(options.text, start);
+    let end_byte = byte_offset_at_char(options.text, end);
 
     TEXT_GEOMETRY.with_borrow_mut(|slot| {
         let engine = slot.get_or_insert_with(ParleyTextGeometry::new);
         engine.with_layout(
-            text,
-            family,
-            font_size,
-            weight,
-            italic,
-            scale_factor,
-            |layout| range_in_layout(layout, start_byte, end_byte, rendered_width),
+            options.text,
+            options.family,
+            options.font_size,
+            options.weight,
+            options.italic,
+            options.scale_factor,
+            |layout| range_in_layout(layout, start_byte, end_byte, options.rendered_width),
         )
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn wrapped_range_geometry(
-    text: &str,
+    options: TextGeometryOptions<'_>,
     start_char: i32,
     end_char: i32,
-    rendered_width: f32,
-    line_pitch: f32,
-    family: &str,
-    font_size: f32,
-    scale_factor: f32,
 ) -> Vec<TextGlyphRect> {
-    if text.is_empty() || rendered_width <= 0.0 || end_char <= start_char {
+    if options.text.is_empty() || options.rendered_width <= 0.0 || end_char <= start_char {
         return Vec::new();
     }
     TEXT_GEOMETRY.with_borrow_mut(|slot| {
         let engine = slot.get_or_insert_with(ParleyTextGeometry::new);
         wrapped_range_geometry_with_engine(
             engine,
-            text,
+            options.text,
             start_char,
             end_char,
-            rendered_width,
-            line_pitch,
-            family,
-            font_size,
-            scale_factor,
+            options.rendered_width,
+            options.line_pitch,
+            options.family,
+            options.font_size,
+            options.scale_factor,
         )
     })
 }

@@ -1,8 +1,6 @@
 //! Opt-in, offline Job fixture shared by the before/after Release executables.
 use super::controller::{run_command, set_step_log};
-use crate::jobs::{
-    JobConclusion, JobRunDescriptor, JobSnapshot, JobStepData, JobStepDefinition, JobStepStatus,
-};
+use crate::jobs::{JobConclusion, JobRunDescriptor, JobSnapshot, JobStepData, JobStepDefinition};
 use crate::{AppState, MainWindow, Route};
 use slint::{ComponentHandle, Global, Model};
 use std::sync::{
@@ -45,7 +43,7 @@ a.start();b.start();a.join();b.join()
 "#;
             let command = vec![python.clone(), "-c".into(), script.into()];
             let mut step = JobStepData::queued(JobStepDefinition::new("Output stress", vec!["fixture".into()]), "Bounded output");
-            step.status = JobStepStatus::InProgress;
+            step.start("Bounded output");
             step.default_expanded = true;
             step.log_requested = true;
             let mut snapshot = JobSnapshot::queued(vec![step]);
@@ -55,17 +53,25 @@ a.start();b.start();a.join();b.join()
                 set_step_log(&mut snapshot.steps[0], log);
                 publish(window.clone(), snapshot.clone(), true);
             }).await;
-            let output_ok = output.as_ref().is_ok_and(|log| log.contains("TAIL-1-15") && log.contains("TAIL-2-15"));
+            let output_ok = output.as_ref().is_ok_and(|result| result.log.contains("TAIL-1-15") && result.log.contains("TAIL-2-15"));
             let token = Arc::new(AtomicBool::new(false));
             let trigger = token.clone();
             tokio::spawn(async move { tokio::time::sleep(Duration::from_millis(250)).await; trigger.store(true, Ordering::Release); });
             let cancel_started = Instant::now();
             let cancelled = run_command(vec![python, "-c".into(), "import os,time\nwhile True:\n os.write(1,b'cancel-log\\n'*512);time.sleep(.01)".into()], &token, |_| {}).await;
-            let cancel_ok = cancelled.as_ref().is_err_and(|log| log.contains("Cancelled by user."));
+            let cancel_ok = cancelled.as_ref().is_err_and(|failure| failure.is_cancelled() && failure.log.contains("Cancelled by user."));
             let cancel_ms = cancel_started.elapsed().as_millis();
-            snapshot.steps[0].status = JobStepStatus::Completed;
-            snapshot.steps[0].conclusion = Some(JobConclusion::Success);
-            snapshot.finish(JobConclusion::Success, "5s".into(), snapshot.steps.clone());
+            snapshot.steps[0].finish(
+                JobConclusion::Success,
+                Some(started.elapsed()),
+                "Bounded output complete",
+                true,
+            );
+            snapshot.finish(
+                JobConclusion::Success,
+                Duration::from_secs(5),
+                snapshot.steps.clone(),
+            );
             publish(window.clone(), snapshot, false);
             tokio::time::sleep(Duration::from_secs(2)).await;
             let _ = slint::invoke_from_event_loop(move || {

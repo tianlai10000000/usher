@@ -197,7 +197,7 @@ pub(super) fn to_slint_file(file: &PullRequestDiffFile) -> WorkflowPrDiffFile {
     WorkflowPrDiffFile {
         path: file.path.clone().into(),
         old_path: file.old_path.clone().into(),
-        change_type: file.change_type.clone().into(),
+        change_type: file.change_type.as_str().into(),
         added_lines: file.added_lines as i32,
         removed_lines: file.removed_lines as i32,
         viewed: file.viewed,
@@ -241,7 +241,7 @@ fn to_slint_line(
     WorkflowPrDiffLine {
         old_line: line.old_line,
         new_line: line.new_line,
-        kind: line.kind.clone().into(),
+        kind: line.kind.as_str().into(),
         // Keep one sanitized plain-text copy for the live-resize/wrap path and
         // clipboard. Tabs are expanded here to match highlighted tokens.
         content: sanitize_diff_content(line.content.as_str()).into(),
@@ -283,8 +283,8 @@ fn to_slint_split_line(
         new_line: source.map(|line| line.new_line).unwrap_or(0),
         kind: if spanning {
             source
-                .map(|line| line.kind.clone())
-                .unwrap_or_else(|| "meta".to_string())
+                .map(|line| line.kind.as_str())
+                .unwrap_or("meta")
                 .into()
         } else {
             "split".into()
@@ -355,7 +355,7 @@ fn split_side(
             .get(index)
             .map(|line| line.columns as i32)
             .unwrap_or(0),
-        line.kind.clone(),
+        line.kind.as_str().to_string(),
         sanitize_diff_content(line.content.as_str()),
         tokens,
     )
@@ -447,7 +447,7 @@ mod tests {
         let file = PullRequestDiffFile {
             path: "src/lib.rs".to_string(),
             old_path: "src/lib.rs".to_string(),
-            change_type: "edit_file".to_string(),
+            change_type: crate::git::DiffChangeType::Modified,
             added_lines: 1,
             removed_lines: 0,
             viewed: false,
@@ -455,7 +455,7 @@ mod tests {
                 .map(|index| PullRequestDiffLine {
                     old_line: index + 1,
                     new_line: index + 1,
-                    kind: "context".to_string(),
+                    kind: crate::git::DiffLineKind::Context,
                     content: format!("line {index}"),
                 })
                 .collect(),
@@ -493,7 +493,7 @@ mod tests {
         let file = PullRequestDiffFile {
             path: "src/lib.rs".to_string(),
             old_path: "src/lib.rs".to_string(),
-            change_type: "edit_file".to_string(),
+            change_type: crate::git::DiffChangeType::Modified,
             added_lines: 1,
             removed_lines: 1,
             viewed: false,
@@ -501,13 +501,13 @@ mod tests {
                 PullRequestDiffLine {
                     old_line: 1,
                     new_line: 0,
-                    kind: "deletion".to_string(),
+                    kind: crate::git::DiffLineKind::Deletion,
                     content: "old value".to_string(),
                 },
                 PullRequestDiffLine {
                     old_line: 0,
                     new_line: 1,
-                    kind: "addition".to_string(),
+                    kind: crate::git::DiffLineKind::Addition,
                     content: "new value".to_string(),
                 },
             ],

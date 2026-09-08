@@ -87,8 +87,8 @@ pub(super) fn diff_row_projection(
     let mut index = 0;
     while index < lines.len() {
         let line = &lines[index];
-        match line.kind.as_str() {
-            "hunk" | "meta" => {
+        match line.kind {
+            crate::git::DiffLineKind::Hunk | crate::git::DiffLineKind::Meta => {
                 rows.push(DiffRowProjection::Split {
                     left: Some(index),
                     right: None,
@@ -97,7 +97,7 @@ pub(super) fn diff_row_projection(
                 });
                 index += 1;
             }
-            "context" => {
+            crate::git::DiffLineKind::Context => {
                 rows.push(DiffRowProjection::Split {
                     left: Some(index),
                     right: Some(index),
@@ -109,15 +109,24 @@ pub(super) fn diff_row_projection(
             _ => {
                 let block_start = index;
                 while index < lines.len()
-                    && !matches!(lines[index].kind.as_str(), "hunk" | "meta" | "context")
+                    && !matches!(
+                        lines[index].kind,
+                        crate::git::DiffLineKind::Hunk
+                            | crate::git::DiffLineKind::Meta
+                            | crate::git::DiffLineKind::Context
+                    )
                 {
                     index += 1;
                 }
                 let deletions = (block_start..index)
-                    .filter(|candidate| lines[*candidate].kind == "deletion")
+                    .filter(|candidate| {
+                        lines[*candidate].kind == crate::git::DiffLineKind::Deletion
+                    })
                     .collect::<Vec<_>>();
                 let additions = (block_start..index)
-                    .filter(|candidate| lines[*candidate].kind == "addition")
+                    .filter(|candidate| {
+                        lines[*candidate].kind == crate::git::DiffLineKind::Addition
+                    })
                     .collect::<Vec<_>>();
                 let row_count = deletions.len().max(additions.len());
                 for offset in 0..row_count {
@@ -144,7 +153,7 @@ pub(super) fn hunk_scroll_anchor_source_index(
     let Some(original_hunk) = original.lines.get(original_hunk_index) else {
         return -1;
     };
-    if original_hunk.kind != "hunk" {
+    if original_hunk.kind != crate::git::DiffLineKind::Hunk {
         return -1;
     }
     if original_hunk_index >= updated.lines.len() {
@@ -172,7 +181,7 @@ mod tests {
         PullRequestDiffLine {
             old_line,
             new_line,
-            kind: kind.to_string(),
+            kind: kind.into(),
             content: content.to_string(),
         }
     }

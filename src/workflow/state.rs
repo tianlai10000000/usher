@@ -1,7 +1,8 @@
 use crate::MainWindow;
 use crate::i18n::LocalizedText;
-use crate::jobs::{JobRunDescriptor, JobSnapshot, JobStepData, JobStepDefinition, apply_job_run};
+use crate::jobs::{JobRunDescriptor, JobSnapshot, JobStepData, apply_job_run};
 use crate::workflow::cd::{CdSnapshot, apply_cd_snapshot, default_cd_snapshot};
+use crate::workflow::tag::{VersionBump, default_create_tag_steps};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -87,7 +88,7 @@ pub(crate) struct WorkflowViewState {
     pub(crate) tag_result: LocalizedText,
     pub(crate) tag_selected_tab: i32,
     pub(crate) tag_mode: String,
-    pub(crate) tag_version_mode: String,
+    pub(crate) tag_version_mode: VersionBump,
     pub(crate) tag_current_version: String,
     pub(crate) tag_next_version: String,
     pub(crate) tag_remove_target: String,
@@ -110,7 +111,7 @@ impl Default for WorkflowViewState {
             tag_result: LocalizedText::message("workflow.ready_tags"),
             tag_selected_tab: 0,
             tag_mode: "local".to_string(),
-            tag_version_mode: "patch".to_string(),
+            tag_version_mode: VersionBump::default(),
             tag_current_version: "v0.0.0".to_string(),
             tag_next_version: "v0.0.1".to_string(),
             tag_remove_target: "v0.0.0".to_string(),
@@ -212,7 +213,7 @@ pub(crate) fn initialize_ui(
     ui.set_workflow_tag_result(state.tag_result.resolve().into());
     ui.set_workflow_tag_selected_tab(state.tag_selected_tab);
     ui.set_workflow_tag_mode(state.tag_mode.clone().into());
-    ui.set_workflow_tag_version_mode(state.tag_version_mode.clone().into());
+    ui.set_workflow_tag_version_mode(state.tag_version_mode.as_ui_str().into());
     if state.tag_mode == "remote" {
         let unavailable = crate::i18n::tr("common.unavailable").into_owned();
         ui.set_workflow_tag_current_version(unavailable.clone().into());
@@ -263,69 +264,18 @@ pub(crate) fn normalize_project_alias(value: &str) -> String {
 }
 
 pub(crate) fn default_tag_steps() -> Vec<JobStepData> {
-    vec![
-        queued_step(
-            "tag.step.enter_repository",
-            &["git", "rev-parse", "--show-toplevel"],
-            "tag.step.enter_repository_detail",
-        ),
-        queued_step(
-            "tag.step.checkout_release",
-            &["git", "checkout", "release"],
-            "tag.step.checkout_release_detail",
-        ),
-        queued_step(
-            "tag.step.pull_release",
-            &["git", "pull", "origin", "release"],
-            "tag.step.pull_release_detail",
-        ),
-        queued_step(
-            "tag.step.checkout_main",
-            &["git", "checkout", "main"],
-            "tag.step.checkout_main_detail",
-        ),
-        queued_step(
-            "tag.step.rebase_main",
-            &["git", "rebase", "release"],
-            "tag.step.rebase_main_detail",
-        ),
-        queued_step(
-            "tag.step.push_main",
-            &["git", "push", "origin", "main"],
-            "tag.step.push_main_detail",
-        ),
-        queued_step(
-            "tag.step.create_annotated",
-            &["git", "tag", "-a", "<version>"],
-            "tag.step.create_annotated_detail",
-        ),
-        queued_step(
-            "tag.step.push_tag",
-            &["git", "push", "origin", "<version>"],
-            "tag.step.push_tag_detail",
-        ),
-        queued_step(
-            "tag.step.complete",
-            &["complete"],
-            "tag.step.complete_detail",
-        ),
-    ]
-}
-
-fn queued_step(name_key: &'static str, command: &[&str], detail_key: &'static str) -> JobStepData {
-    JobStepData::queued(
-        JobStepDefinition::new(
-            LocalizedText::message(name_key),
-            command.iter().map(|part| (*part).to_string()).collect(),
-        ),
-        LocalizedText::message(detail_key),
-    )
+    default_create_tag_steps()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{WorkflowViewState, clear_heavy_view_state};
+    use super::{
+        VersionBump, WorkflowProjectContext, WorkflowViewState, clear_heavy_view_state,
+        initialize_ui,
+    };
+    use crate::MainWindow;
     use crate::jobs::{JobConclusion, JobStepStatus};
+    use std::time::Duration;
 
     #[test]
     fn route_cleanup_preserves_tag_execution_history() {
@@ -334,10 +284,13 @@ mod tests {
             tag_result: "Tag workflow failed at step 2.".into(),
             ..WorkflowViewState::default()
         };
-        view.tag_job.steps[0].status = JobStepStatus::Completed;
-        view.tag_job.steps[0].conclusion = Some(JobConclusion::Success);
+        view.tag_job.steps[0].finish(
+            JobConclusion::Success,
+            Some(Duration::from_secs(1)),
+            "Complete",
+            false,
+        );
         view.tag_job.steps[0].set_log("preserved log".into());
-        view.tag_job.steps[0].duration = "1s".into();
         view.job_run.active = true;
         view.job_run.source = "tag".to_string();
 
@@ -354,7 +307,7 @@ mod tests {
             Some(JobConclusion::Success)
         );
         assert_eq!(view.tag_job.steps[0].log.as_str(), "preserved log");
-        assert_eq!(view.tag_job.steps[0].duration.as_str(), "1s");
+        assert_eq!(view.tag_job.steps[0].duration, Some(Duration::from_secs(1)));
         assert!(view.job_run.active);
         assert_eq!(view.job_run.source, "tag");
     }
@@ -362,6 +315,8 @@ mod tests {
     #[test]
     fn resetting_tag_plan_clears_the_published_job_run() {
         let mut view = WorkflowViewState::default();
+        assert_eq!(view.tag_version_mode, VersionBump::Patch);
+        view.tag_job.steps[0].finish(JobConclusion::Failure, None, "Failed", true);
         view.job_run.active = true;
         view.job_run.source = "tag".to_string();
 
@@ -369,5 +324,24 @@ mod tests {
 
         assert!(!view.job_run.active);
         assert!(view.job_run.source.is_empty());
+        assert!(view.tag_job.steps.iter().all(|step| {
+            step.status == JobStepStatus::Queued
+                && step.conclusion.is_none()
+                && !step.default_expanded
+        }));
+    }
+
+    #[test]
+    fn version_bump_projects_to_the_existing_slint_string_protocol() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().expect("main window");
+        let view = WorkflowViewState {
+            tag_version_mode: VersionBump::Major,
+            ..WorkflowViewState::default()
+        };
+
+        initialize_ui(&ui, &WorkflowProjectContext::default(), &view);
+
+        assert_eq!(ui.get_workflow_tag_version_mode().as_str(), "major");
     }
 }

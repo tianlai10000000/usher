@@ -155,12 +155,11 @@ where
             .text_bytes
             .saturating_add(file.path.len())
             .saturating_add(file.old_path.len())
-            .saturating_add(file.change_type.len());
+            .saturating_add(file.change_type.as_str().len());
         stats.estimated_heap_bytes = stats
             .estimated_heap_bytes
             .saturating_add(file.path.capacity())
             .saturating_add(file.old_path.capacity())
-            .saturating_add(file.change_type.capacity())
             .saturating_add(
                 file.lines
                     .capacity()
@@ -170,11 +169,10 @@ where
         for line in &file.lines {
             stats.text_bytes = stats
                 .text_bytes
-                .saturating_add(line.kind.len())
+                .saturating_add(line.kind.as_str().len())
                 .saturating_add(line.content.len());
             stats.estimated_heap_bytes = stats
                 .estimated_heap_bytes
-                .saturating_add(line.kind.capacity())
                 .saturating_add(line.content.capacity());
         }
     }

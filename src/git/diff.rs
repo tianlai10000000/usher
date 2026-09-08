@@ -1,4 +1,4 @@
-use super::{PullRequestDiffFile, PullRequestDiffLine};
+use super::{DiffChangeType, DiffLineKind, PullRequestDiffFile, PullRequestDiffLine};
 
 pub(super) fn parse_unified_diff(diff: &str) -> Vec<PullRequestDiffLine> {
     let mut lines = Vec::new();
@@ -13,7 +13,7 @@ pub(super) fn parse_unified_diff(diff: &str) -> Vec<PullRequestDiffLine> {
             lines.push(PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "hunk".to_string(),
+                kind: DiffLineKind::Hunk,
                 content: raw.to_string(),
             });
             continue;
@@ -22,7 +22,7 @@ pub(super) fn parse_unified_diff(diff: &str) -> Vec<PullRequestDiffLine> {
             lines.push(PullRequestDiffLine {
                 old_line: 0,
                 new_line: 0,
-                kind: "meta".to_string(),
+                kind: DiffLineKind::Meta,
                 content: raw.to_string(),
             });
             continue;
@@ -30,23 +30,23 @@ pub(super) fn parse_unified_diff(diff: &str) -> Vec<PullRequestDiffLine> {
         let (kind, old_number, new_number, content) = if let Some(content) = raw.strip_prefix('+') {
             let current = new_line;
             new_line = new_line.saturating_add(1);
-            ("addition", 0, current, content)
+            (DiffLineKind::Addition, 0, current, content)
         } else if let Some(content) = raw.strip_prefix('-') {
             let current = old_line;
             old_line = old_line.saturating_add(1);
-            ("deletion", current, 0, content)
+            (DiffLineKind::Deletion, current, 0, content)
         } else {
             let content = raw.strip_prefix(' ').unwrap_or(raw);
             let current_old = old_line;
             let current_new = new_line;
             old_line = old_line.saturating_add(1);
             new_line = new_line.saturating_add(1);
-            ("context", current_old, current_new, content)
+            (DiffLineKind::Context, current_old, current_new, content)
         };
         lines.push(PullRequestDiffLine {
             old_line: old_number,
             new_line: new_number,
-            kind: kind.to_string(),
+            kind,
             content: content.to_string(),
         });
     }
@@ -73,7 +73,7 @@ fn parse_hunk_range(value: &str, prefix: char) -> Option<i32> {
 pub(super) fn unavailable_diff_file(
     path: String,
     old_path: String,
-    change_type: String,
+    change_type: DiffChangeType,
     added_lines: u32,
     removed_lines: u32,
     message: &str,
@@ -88,7 +88,7 @@ pub(super) fn unavailable_diff_file(
         lines: vec![PullRequestDiffLine {
             old_line: 0,
             new_line: 0,
-            kind: "meta".to_string(),
+            kind: DiffLineKind::Meta,
             content: message.to_string(),
         }],
     }

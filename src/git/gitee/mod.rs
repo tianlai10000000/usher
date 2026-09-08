@@ -449,12 +449,11 @@ async fn get_public_pull_request_diff(
                 .or_else(|| string_field(value, "old_path"))
                 .unwrap_or_else(|| path.clone());
             let change_type = match string_field(value, "status").as_deref() {
-                Some("added") => "new_file",
-                Some("removed") => "deleted_file",
-                Some("renamed") => "renamed_file",
-                _ => "edit_file",
-            }
-            .to_string();
+                Some("added") => crate::git::DiffChangeType::New,
+                Some("removed") => crate::git::DiffChangeType::Deleted,
+                Some("renamed") => crate::git::DiffChangeType::Renamed,
+                _ => crate::git::DiffChangeType::Modified,
+            };
             let added_lines = value_u32(value, "additions").unwrap_or(0);
             let removed_lines = value_u32(value, "deletions").unwrap_or(0);
             let lines = string_field(value, "patch")
@@ -612,41 +611,48 @@ fn decode_compare_diff_file(value: &Value) -> PullRequestDiffFile {
         .or_else(|| string_field(value, "old_path"))
         .unwrap_or_else(|| path.clone());
     let change_type = match string_field(value, "status").as_deref() {
-        Some("added") => "new_file",
-        Some("removed") => "deleted_file",
-        Some("renamed") => "renamed_file",
+        Some("added") => crate::git::DiffChangeType::New,
+        Some("removed") => crate::git::DiffChangeType::Deleted,
+        Some("renamed") => crate::git::DiffChangeType::Renamed,
         _ if value
             .get("new_file")
             .and_then(Value::as_bool)
             .unwrap_or(false) =>
         {
-            "new_file"
+            crate::git::DiffChangeType::New
         }
         _ if value
             .get("deleted_file")
             .and_then(Value::as_bool)
             .unwrap_or(false) =>
         {
-            "deleted_file"
+            crate::git::DiffChangeType::Deleted
         }
         _ if value
             .get("renamed_file")
             .and_then(Value::as_bool)
             .unwrap_or(false) =>
         {
-            "renamed_file"
+            crate::git::DiffChangeType::Renamed
         }
-        _ => "edit_file",
-    }
-    .to_string();
+        _ => crate::git::DiffChangeType::Modified,
+    };
     let lines = string_field(value, "patch")
         .or_else(|| string_field(value, "diff"))
         .map(|diff| super::parse_unified_diff(diff.as_str()))
         .unwrap_or_default();
-    let added_lines = value_u32(value, "additions")
-        .unwrap_or_else(|| lines.iter().filter(|line| line.kind == "addition").count() as u32);
-    let removed_lines = value_u32(value, "deletions")
-        .unwrap_or_else(|| lines.iter().filter(|line| line.kind == "deletion").count() as u32);
+    let added_lines = value_u32(value, "additions").unwrap_or_else(|| {
+        lines
+            .iter()
+            .filter(|line| line.kind == crate::git::DiffLineKind::Addition)
+            .count() as u32
+    });
+    let removed_lines = value_u32(value, "deletions").unwrap_or_else(|| {
+        lines
+            .iter()
+            .filter(|line| line.kind == crate::git::DiffLineKind::Deletion)
+            .count() as u32
+    });
     if lines.is_empty() {
         return super::unavailable_diff_file(
             path,
@@ -3501,7 +3507,10 @@ mod tests {
 
         let detail = decode_pull_request_diff(&payload).unwrap();
         assert_eq!(detail.files.len(), 1);
-        assert_eq!(detail.files[0].lines[0].kind, "deletion");
+        assert_eq!(
+            detail.files[0].lines[0].kind,
+            crate::git::DiffLineKind::Deletion
+        );
         assert_eq!(detail.files[0].lines[1].new_line, 7);
         assert_eq!(detail.files[0].lines[1].content, "let new = true && ready;");
         assert_eq!(detail.head_sha, "head");

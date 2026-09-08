@@ -101,7 +101,7 @@ pub(super) fn decode_diff_file(value: &Value) -> PullRequestDiffFile {
         lines.push(PullRequestDiffLine {
             old_line: 0,
             new_line: 0,
-            kind: "meta".to_string(),
+            kind: crate::git::DiffLineKind::Meta,
             content: "Binary, image, or oversized diff content is not available.".to_string(),
         });
     }
@@ -109,29 +109,31 @@ pub(super) fn decode_diff_file(value: &Value) -> PullRequestDiffFile {
     PullRequestDiffFile {
         path,
         old_path,
-        change_type: string_field(statistic, "type").unwrap_or_else(|| {
-            if value
-                .get("new_file")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                "new_file".to_string()
-            } else if value
-                .get("deleted_file")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                "deleted_file".to_string()
-            } else if value
-                .get("renamed_file")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                "renamed_file".to_string()
-            } else {
-                "edit_file".to_string()
-            }
-        }),
+        change_type: string_field(statistic, "type")
+            .map(|value| crate::git::DiffChangeType::from_provider(value.as_str()))
+            .unwrap_or_else(|| {
+                if value
+                    .get("new_file")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    crate::git::DiffChangeType::New
+                } else if value
+                    .get("deleted_file")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    crate::git::DiffChangeType::Deleted
+                } else if value
+                    .get("renamed_file")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    crate::git::DiffChangeType::Renamed
+                } else {
+                    crate::git::DiffChangeType::Modified
+                }
+            }),
         added_lines: value_u32(value, "added_lines").unwrap_or(0),
         removed_lines: value_u32(value, "removed_lines").unwrap_or(0),
         // Gitee documents statistic.viewed as file read permission, not the
@@ -146,13 +148,7 @@ pub(super) fn decode_diff_line(value: &Value) -> PullRequestDiffLine {
     PullRequestDiffLine {
         old_line: nested_line_number(value, "old_line"),
         new_line: nested_line_number(value, "new_line"),
-        kind: match raw_kind.as_str() {
-            "new" => "addition",
-            "old" => "deletion",
-            "match" => "hunk",
-            _ => "context",
-        }
-        .to_string(),
+        kind: crate::git::DiffLineKind::from_provider(raw_kind.as_str()),
         content: html_diff_line_to_text(
             string_field(value, "line_content")
                 .unwrap_or_default()

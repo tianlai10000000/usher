@@ -2965,12 +2965,12 @@ fn unified_diff_from_detail(detail: &crate::git::PullRequestDiffDetail) -> Strin
             // Only the provider-reported kind identifies hunk headers. Body
             // lines whose content merely starts with "@@" must keep their
             // +/-/space prefix, or the AI receives shifted line numbers.
-            if line.kind == "hunk" {
+            if line.kind == crate::git::DiffLineKind::Hunk {
                 output.push_str(line.content.as_str());
             } else {
-                output.push(match line.kind.as_str() {
-                    "addition" | "added" => '+',
-                    "deletion" | "removed" => '-',
+                output.push(match line.kind {
+                    crate::git::DiffLineKind::Addition => '+',
+                    crate::git::DiffLineKind::Deletion => '-',
                     _ => ' ',
                 });
                 output.push_str(line.content.as_str());
@@ -3755,7 +3755,7 @@ mod tests {
             files: vec![PullRequestDiffFile {
                 path: "src/lib.rs".to_string(),
                 old_path: "src/lib.rs".to_string(),
-                change_type: "modified".to_string(),
+                change_type: crate::git::DiffChangeType::Modified,
                 added_lines: 1,
                 removed_lines: 1,
                 viewed: false,
@@ -3763,13 +3763,13 @@ mod tests {
                     PullRequestDiffLine {
                         old_line: 1,
                         new_line: 0,
-                        kind: "deletion".to_string(),
+                        kind: crate::git::DiffLineKind::Deletion,
                         content: "old()".to_string(),
                     },
                     PullRequestDiffLine {
                         old_line: 0,
                         new_line: 1,
-                        kind: "addition".to_string(),
+                        kind: crate::git::DiffLineKind::Addition,
                         content: "new()".to_string(),
                     },
                 ],
@@ -3796,7 +3796,7 @@ mod tests {
             files: vec![PullRequestDiffFile {
                 path: "src/lib.rs".to_string(),
                 old_path: "src/lib.rs".to_string(),
-                change_type: "modified".to_string(),
+                change_type: crate::git::DiffChangeType::Modified,
                 added_lines: 1,
                 removed_lines: 0,
                 viewed: false,
@@ -3804,13 +3804,13 @@ mod tests {
                     PullRequestDiffLine {
                         old_line: 0,
                         new_line: 0,
-                        kind: "hunk".to_string(),
+                        kind: crate::git::DiffLineKind::Hunk,
                         content: "@@ -1,0 +1,1 @@".to_string(),
                     },
                     PullRequestDiffLine {
                         old_line: 0,
                         new_line: 1,
-                        kind: "addition".to_string(),
+                        kind: crate::git::DiffLineKind::Addition,
                         content: "@@ inner attribute in raw text".to_string(),
                     },
                 ],

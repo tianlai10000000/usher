@@ -1,8 +1,7 @@
 use crate::app_runtime::shared_runtime;
 use crate::i18n::LocalizedText;
 use crate::jobs::{
-    JobConclusion, JobRunDescriptor, JobStepData, JobStepDefinition, JobStepStatus,
-    format_duration, register_job_run_source,
+    JobConclusion, JobRunDescriptor, JobStepData, JobStepStatus, register_job_run_source,
 };
 use crate::workflow::bindings::{show_error, show_success};
 use crate::workflow::state::{SharedWorkflowState, default_tag_steps, initialize_current_ui};
@@ -12,14 +11,19 @@ use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use super::commands::{create_tag_plan, remove_tag_plan};
-use super::version::{is_valid_semver_tag, next_semver_for_mode, parse_semver_tag};
+use super::command_output::{CommandFailure, CommandFailureKind, run_command_with_stdout};
+use super::commands::{
+    create_tag_plan, create_tag_steps, default_remove_tag_steps, remove_tag_plan, remove_tag_steps,
+};
+use super::version::{
+    RemoteTagParser, VersionBump, is_valid_semver_tag, latest_remote_tag, next_semver,
+    parse_semver_tag,
+};
 
 const TAG_MODE_LOCAL: &str = "local";
 const TAG_MODE_REMOTE: &str = "remote";
-const TAG_BUMP_PATCH: &str = "patch";
 
 pub(super) use super::command_output::{clamp_step_log, run_command};
 
@@ -147,11 +151,11 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             log::warn!("[Workflow][Tag] select version mode ignored: UI already dropped");
             return;
         };
+        let bump = VersionBump::from_ui(version_mode.as_str());
         if let Ok(mut guard) = state_bump.lock() {
             guard.upsert_current(|view| {
-                view.tag_version_mode = version_mode.to_string();
-                view.tag_next_version =
-                    next_semver_for_mode(&view.tag_current_version, version_mode.as_str());
+                view.tag_version_mode = bump;
+                view.tag_next_version = next_semver(&view.tag_current_version, bump);
                 if !view.tag_running {
                     view.reset_tag_job(default_tag_steps());
                     view.tag_result = if view.tag_mode == TAG_MODE_REMOTE {
@@ -161,7 +165,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                             "tag.local_ready",
                             [
                                 ("current_tag", view.tag_current_version.clone()),
-                                ("bump", version_mode.to_string()),
+                                ("bump", bump.as_ui_str().to_string()),
                             ],
                         )
                     };
@@ -197,7 +201,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         ctx.name.clone(),
                         ctx.local_repo.clone(),
                         view.tag_mode.clone(),
-                        view.tag_version_mode.clone(),
+                        view.tag_version_mode,
                         view.tag_add_ready,
                         view.tag_add_initializing,
                         view.tag_running,
@@ -210,7 +214,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     "Default Project".to_string(),
                     String::new(),
                     TAG_MODE_LOCAL.to_string(),
-                    TAG_BUMP_PATCH.to_string(),
+                    VersionBump::default(),
                     false,
                     false,
                     false,
@@ -229,7 +233,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         "tag.local_ready",
                         [
                             ("current_tag", view.tag_current_version.clone()),
-                            ("bump", view.tag_version_mode.clone()),
+                            ("bump", view.tag_version_mode.as_ui_str().to_string()),
                         ],
                     );
                 });
@@ -308,7 +312,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                     latest_tag
                                 );
                                 entry.tag_current_version = latest_tag.clone();
-                                entry.tag_next_version = next_semver_for_mode(&latest_tag, &bump_mode);
+                                entry.tag_next_version = next_semver(&latest_tag, bump_mode);
                                 entry.tag_remove_target = latest_tag.clone();
                                 entry.tag_add_initializing = false;
                                 entry.tag_add_ready = true;
@@ -316,14 +320,14 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                     "tag.local_ready",
                                     [
                                         ("current_tag", latest_tag),
-                                        ("bump", bump_mode.clone()),
+                                        ("bump", bump_mode.as_ui_str().to_string()),
                                     ],
                                 );
                             }
                             Err(error) => {
                                 log::warn!("[Workflow][Tag] Add tab initialization failed: {}", error);
                                 entry.tag_current_version = "v0.0.0".to_string();
-                                entry.tag_next_version = next_semver_for_mode("v0.0.0", &bump_mode);
+                                entry.tag_next_version = next_semver("v0.0.0", bump_mode);
                                 entry.tag_remove_target = "v0.0.0".to_string();
                                 entry.tag_add_initializing = false;
                                 entry.tag_add_ready = false;
@@ -540,7 +544,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         ctx.name.clone(),
                         ctx.local_repo.clone(),
                         view.tag_mode.clone(),
-                        view.tag_version_mode.clone(),
+                        view.tag_version_mode,
                         view.tag_running,
                         view.tag_add_initializing,
                     )
@@ -551,7 +555,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     "Default Project".to_string(),
                     String::new(),
                     TAG_MODE_LOCAL.to_string(),
-                    TAG_BUMP_PATCH.to_string(),
+                    VersionBump::default(),
                     false,
                     false,
                 )
@@ -560,7 +564,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             "[Workflow][Tag] Run context: project='{}', mode='{}', bump='{}', repo='{}', running={}",
             project_name,
             mode,
-            bump_mode,
+            bump_mode.as_ui_str(),
             local_repo,
             already_running
         );
@@ -627,6 +631,8 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             return;
         }
 
+        let queued_plan = create_tag_plan(&local_repo, &version, description.as_str());
+        let queued_steps = create_tag_steps(&queued_plan);
         if let Ok(mut guard) = state_run.lock() {
             guard.upsert_current(|view| {
                 view.tag_running = true;
@@ -643,7 +649,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     ],
                 );
                 view.tag_next_version = version.clone();
-                view.tag_job.start(default_tag_steps());
+                view.tag_job.start(queued_steps);
                 view.job_run = JobRunDescriptor {
                     active: true,
                     source: "tag".to_string(),
@@ -720,7 +726,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 cancel_token.clone(),
             )
             .await;
-            let total_duration = format_duration(job_started.elapsed());
+            let total_duration = job_started.elapsed();
             let was_cancelled = cancel_token.load(Ordering::SeqCst);
             clear_cancel_token(&cancel_token);
             let _ = slint::invoke_from_event_loop(move || {
@@ -758,13 +764,13 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                     guard.projects.entry(project_id.clone()).or_default();
                                 entry.tag_current_version = success.current_version.clone();
                                 entry.tag_next_version =
-                                    next_semver_for_mode(&success.current_version, &bump_mode);
+                                    next_semver(&success.current_version, bump_mode);
                                 entry.tag_remove_target = success.current_version.clone();
                                 entry.tag_add_ready = false;
                                 entry.tag_remove_ready = false;
                                 entry.tag_job.finish(
                                     conclusion,
-                                    total_duration.clone(),
+                                    total_duration,
                                     success.steps.clone(),
                                 );
                             }
@@ -774,7 +780,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_add_ready = false;
                                 entry.tag_job.finish(
                                     conclusion,
-                                    total_duration.clone(),
+                                    total_duration,
                                     failure.steps.clone(),
                                 );
                             }
@@ -831,7 +837,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                             ctx.name.clone(),
                             ctx.local_repo.clone(),
                             view.tag_mode.clone(),
-                            view.tag_version_mode.clone(),
+                            view.tag_version_mode,
                             view.tag_running,
                             view.tag_remove_initializing,
                         )
@@ -842,7 +848,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         "Default Project".to_string(),
                         String::new(),
                         TAG_MODE_LOCAL.to_string(),
-                        TAG_BUMP_PATCH.to_string(),
+                        VersionBump::default(),
                         false,
                         false,
                     )
@@ -897,6 +903,8 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
             return;
         }
 
+        let queued_plan = remove_tag_plan(&local_repo, &tag);
+        let queued_steps = remove_tag_steps(&queued_plan);
         if let Ok(mut guard) = state_remove.lock() {
             guard.upsert_current(|view| {
                 view.tag_running = true;
@@ -911,7 +919,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                     [("project", project_name.clone()), ("mode", mode.clone())],
                 );
                 view.tag_remove_target = tag.clone();
-                view.tag_job.start(default_remove_tag_steps());
+                view.tag_job.start(queued_steps);
                 view.job_run = JobRunDescriptor {
                     active: true,
                     source: "tag".to_string(),
@@ -972,7 +980,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 cancel_token.clone(),
             )
             .await;
-            let total_duration = format_duration(job_started.elapsed());
+            let total_duration = job_started.elapsed();
             let was_cancelled = cancel_token.load(Ordering::SeqCst);
             clear_cancel_token(&cancel_token);
             let _ = slint::invoke_from_event_loop(move || {
@@ -1013,13 +1021,13 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 let entry = guard.projects.entry(project_id.clone()).or_default();
                                 entry.tag_current_version = success.current_version.clone();
                                 entry.tag_next_version =
-                                    next_semver_for_mode(&success.current_version, &bump_mode);
+                                    next_semver(&success.current_version, bump_mode);
                                 entry.tag_remove_target = success.current_version.clone();
                                 entry.tag_add_ready = false;
                                 entry.tag_remove_ready = false;
                                 entry.tag_job.finish(
                                     conclusion,
-                                    total_duration.clone(),
+                                    total_duration,
                                     success.steps.clone(),
                                 );
                             }
@@ -1028,7 +1036,7 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                                 entry.tag_remove_ready = false;
                                 entry.tag_job.finish(
                                     conclusion,
-                                    total_duration.clone(),
+                                    total_duration,
                                     failure.steps.clone(),
                                 );
                             }
@@ -1083,9 +1091,12 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                 view.tag_result = LocalizedText::message("tag.stop_pausing");
                 for step in &mut view.tag_job.steps {
                     if step.status == JobStepStatus::InProgress {
-                        step.status = JobStepStatus::Completed;
-                        step.conclusion = Some(JobConclusion::Cancelled);
-                        step.detail = LocalizedText::message("tag.cancel_waiting_for_command");
+                        step.finish(
+                            JobConclusion::Cancelled,
+                            None,
+                            LocalizedText::message("tag.cancel_waiting_for_command"),
+                            false,
+                        );
                         let current_log = step.log.to_string();
                         let updated_log = if current_log.is_empty() {
                             "[Stop] Cancel requested by user.".to_string()
@@ -1094,9 +1105,12 @@ pub(crate) fn bind_tag(ui: &MainWindow, shared_state: SharedWorkflowState) {
                         };
                         set_step_log(step, updated_log);
                     } else if step.status == JobStepStatus::Queued {
-                        step.status = JobStepStatus::Completed;
-                        step.conclusion = Some(JobConclusion::Cancelled);
-                        step.detail = LocalizedText::message("tag.paused_after_cancel");
+                        step.finish(
+                            JobConclusion::Cancelled,
+                            None,
+                            LocalizedText::message("tag.paused_after_cancel"),
+                            false,
+                        );
                     }
                 }
             });
@@ -1127,7 +1141,7 @@ pub(crate) fn refresh_tag_context(
                     ctx.id.clone(),
                     view.tag_mode.clone(),
                     ctx.local_repo.clone(),
-                    view.tag_version_mode.clone(),
+                    view.tag_version_mode,
                 )
             })
         })
@@ -1136,13 +1150,13 @@ pub(crate) fn refresh_tag_context(
                 "default".to_string(),
                 TAG_MODE_LOCAL.to_string(),
                 String::new(),
-                TAG_BUMP_PATCH.to_string(),
+                VersionBump::default(),
             )
         });
     log::info!(
         "[Workflow][Tag] Refresh context snapshot: mode='{}', bump='{}', repo='{}'",
         mode,
-        bump_mode,
+        bump_mode.as_ui_str(),
         local_repo
     );
 
@@ -1227,7 +1241,7 @@ pub(crate) fn refresh_tag_context(
                             current_tag
                         );
                         entry.tag_current_version = current_tag.clone();
-                        entry.tag_next_version = next_semver_for_mode(&current_tag, &bump_mode);
+                        entry.tag_next_version = next_semver(&current_tag, bump_mode);
                         entry.tag_remove_target = current_tag.clone();
                         entry.tag_add_initializing = false;
                         entry.tag_add_ready = true;
@@ -1236,7 +1250,10 @@ pub(crate) fn refresh_tag_context(
                         } else {
                             LocalizedText::message_with(
                                 "tag.local_ready",
-                                [("current_tag", current_tag), ("bump", bump_mode.clone())],
+                                [
+                                    ("current_tag", current_tag),
+                                    ("bump", bump_mode.as_ui_str().to_string()),
+                                ],
                             )
                         };
                     }
@@ -1247,7 +1264,7 @@ pub(crate) fn refresh_tag_context(
                         );
                         maybe_error = Some(error.clone());
                         entry.tag_current_version = "v0.0.0".to_string();
-                        entry.tag_next_version = next_semver_for_mode("v0.0.0", &bump_mode);
+                        entry.tag_next_version = next_semver("v0.0.0", bump_mode);
                         entry.tag_remove_target = "v0.0.0".to_string();
                         entry.tag_add_initializing = false;
                         entry.tag_add_ready = false;
@@ -1284,52 +1301,6 @@ struct TagRunFailure {
 
 type TagProgressReporter = Arc<dyn Fn(Vec<JobStepData>, LocalizedText) + Send + Sync>;
 
-fn default_remove_tag_steps() -> Vec<JobStepData> {
-    vec![
-        JobStepData::queued(
-            JobStepDefinition::new(
-                LocalizedText::message("tag.step.enter_repository"),
-                vec!["git".into(), "rev-parse".into(), "--show-toplevel".into()],
-            ),
-            LocalizedText::message("tag.step.enter_repository_detail"),
-        ),
-        JobStepData::queued(
-            JobStepDefinition::new(
-                LocalizedText::message("tag.step.delete_local"),
-                vec!["git".into(), "tag".into(), "-d".into(), "<tag>".into()],
-            ),
-            LocalizedText::message("tag.step.delete_local_detail"),
-        ),
-        JobStepData::queued(
-            JobStepDefinition::new(
-                LocalizedText::message("tag.step.delete_remote"),
-                vec![
-                    "git".into(),
-                    "push".into(),
-                    "--delete".into(),
-                    "origin".into(),
-                    "<tag>".into(),
-                ],
-            ),
-            LocalizedText::message("tag.step.delete_remote_detail"),
-        ),
-        JobStepData::queued(
-            JobStepDefinition::new(
-                LocalizedText::message("tag.step.refresh_remote"),
-                vec!["git".into(), "fetch".into(), "--tags".into()],
-            ),
-            LocalizedText::message("tag.step.refresh_remote_detail"),
-        ),
-        JobStepData::queued(
-            JobStepDefinition::new(
-                LocalizedText::message("tag.step.complete"),
-                vec!["complete".into()],
-            ),
-            LocalizedText::message("tag.step.remove_complete_waiting"),
-        ),
-    ]
-}
-
 async fn run_local_tag_flow(
     repo: &str,
     version: &str,
@@ -1344,30 +1315,18 @@ async fn run_local_tag_flow(
         description.len()
     );
     let commands = create_tag_plan(repo, version, description);
-    let mut steps: Vec<JobStepData> = commands
-        .iter()
-        .map(|planned| {
-            JobStepData::queued(
-                JobStepDefinition::new(planned.name.clone(), planned.argv.clone()),
-                planned.detail.clone(),
-            )
-        })
-        .collect();
-    steps.push(JobStepData::queued(
-        JobStepDefinition::new(
-            LocalizedText::message("tag.step.complete"),
-            vec!["complete".into()],
-        ),
-        LocalizedText::message("tag.step.complete_detail"),
-    ));
+    let mut steps = create_tag_steps(&commands);
 
     for (index, planned) in commands.iter().enumerate() {
         let command = &planned.argv;
         let detail = &planned.detail;
         if cancel_token.load(Ordering::SeqCst) {
-            steps[index].status = JobStepStatus::Completed;
-            steps[index].conclusion = Some(JobConclusion::Cancelled);
-            steps[index].detail = LocalizedText::message("tag.cancelled_before_step_detail");
+            steps[index].finish(
+                JobConclusion::Cancelled,
+                None,
+                LocalizedText::message("tag.cancelled_before_step_detail"),
+                false,
+            );
             set_step_log(&mut steps[index], "[Stop] Cancel requested by user.");
             return Err(TagRunFailure {
                 summary: LocalizedText::message_with(
@@ -1384,10 +1343,7 @@ async fn run_local_tag_flow(
             command.join(" ")
         );
         let step_started = Instant::now();
-        steps[index].status = JobStepStatus::InProgress;
-        steps[index].conclusion = None;
-        steps[index].duration = "…".into();
-        steps[index].detail = detail.clone();
+        steps[index].start(detail.clone());
         if let Some(progress) = on_progress.as_ref() {
             progress(
                 steps.clone(),
@@ -1415,12 +1371,11 @@ async fn run_local_tag_flow(
             }
         })
         .await;
-        steps[index].duration = format_duration(step_started.elapsed());
+        let elapsed = step_started.elapsed();
         match result {
-            Ok(log) => {
-                steps[index].status = JobStepStatus::Completed;
-                steps[index].conclusion = Some(JobConclusion::Success);
-                set_step_log(&mut steps[index], log);
+            Ok(success) => {
+                steps[index].finish(JobConclusion::Success, Some(elapsed), detail.clone(), false);
+                set_step_log(&mut steps[index], success.log);
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
                         steps.clone(),
@@ -1439,17 +1394,23 @@ async fn run_local_tag_flow(
                     steps[index].definition.name
                 );
             }
-            Err(log) => {
-                if cancel_token.load(Ordering::SeqCst) {
-                    steps[index].status = JobStepStatus::Completed;
-                    steps[index].conclusion = Some(JobConclusion::Cancelled);
-                    set_step_log(&mut steps[index], log.clone());
-                    steps[index].detail = LocalizedText::message("tag.cancelled_paused_detail");
+            Err(failure) => {
+                if failure.is_cancelled() {
+                    steps[index].finish(
+                        JobConclusion::Cancelled,
+                        Some(elapsed),
+                        LocalizedText::message("tag.cancelled_paused_detail"),
+                        false,
+                    );
+                    set_step_log(&mut steps[index], failure.log.clone());
                     for remaining in steps.iter_mut().skip(index + 1) {
                         if remaining.status == JobStepStatus::Queued {
-                            remaining.status = JobStepStatus::Completed;
-                            remaining.conclusion = Some(JobConclusion::Cancelled);
-                            remaining.detail = LocalizedText::message("tag.paused_after_cancel");
+                            remaining.finish(
+                                JobConclusion::Cancelled,
+                                None,
+                                LocalizedText::message("tag.paused_after_cancel"),
+                                false,
+                            );
                         }
                     }
                     if let Some(progress) = on_progress.as_ref() {
@@ -1474,11 +1435,13 @@ async fn run_local_tag_flow(
                         steps,
                     });
                 }
-                steps[index].status = JobStepStatus::Completed;
-                steps[index].conclusion = Some(JobConclusion::Failure);
-                steps[index].default_expanded = true;
-                set_step_log(&mut steps[index], log.clone());
-                steps[index].detail = LocalizedText::message("tag.command_failed_detail");
+                steps[index].finish(
+                    JobConclusion::Failure,
+                    Some(elapsed),
+                    LocalizedText::message("tag.command_failed_detail"),
+                    true,
+                );
+                set_step_log(&mut steps[index], failure.log);
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
                         steps.clone(),
@@ -1507,11 +1470,13 @@ async fn run_local_tag_flow(
         }
     }
 
-    let complete_index = 8;
-    steps[complete_index].status = JobStepStatus::Completed;
-    steps[complete_index].conclusion = Some(JobConclusion::Success);
-    steps[complete_index].duration = "0s".into();
-    steps[complete_index].detail = LocalizedText::message("tag.create_finished_detail");
+    let complete_index = commands.len();
+    steps[complete_index].finish(
+        JobConclusion::Success,
+        Some(Duration::ZERO),
+        LocalizedText::message("tag.create_finished_detail"),
+        false,
+    );
     set_step_log(
         &mut steps[complete_index],
         format!(
@@ -1547,16 +1512,17 @@ async fn run_local_remove_tag_flow(
     cancel_token: Arc<AtomicBool>,
 ) -> Result<TagRunSuccess, TagRunFailure> {
     let commands = remove_tag_plan(repo, tag);
-    let mut steps = default_remove_tag_steps();
-    for (step, command) in steps.iter_mut().zip(commands.iter()) {
-        step.definition.command = command.clone();
-    }
+    let mut steps = remove_tag_steps(&commands);
 
-    for (index, command) in commands.iter().enumerate() {
+    for (index, planned) in commands.iter().enumerate() {
+        let command = &planned.argv;
         if cancel_token.load(Ordering::SeqCst) {
-            steps[index].status = JobStepStatus::Completed;
-            steps[index].conclusion = Some(JobConclusion::Cancelled);
-            steps[index].detail = LocalizedText::message("tag.cancelled_before_step_detail");
+            steps[index].finish(
+                JobConclusion::Cancelled,
+                None,
+                LocalizedText::message("tag.cancelled_before_step_detail"),
+                false,
+            );
             set_step_log(&mut steps[index], "[Stop] Cancel requested by user.");
             return Err(TagRunFailure {
                 summary: LocalizedText::message_with(
@@ -1568,9 +1534,7 @@ async fn run_local_remove_tag_flow(
         }
 
         let step_started = Instant::now();
-        steps[index].status = JobStepStatus::InProgress;
-        steps[index].conclusion = None;
-        steps[index].duration = "…".into();
+        steps[index].start(planned.detail.clone());
         if let Some(progress) = on_progress.as_ref() {
             progress(
                 steps.clone(),
@@ -1598,12 +1562,16 @@ async fn run_local_remove_tag_flow(
             }
         })
         .await;
-        steps[index].duration = format_duration(step_started.elapsed());
+        let elapsed = step_started.elapsed();
         match result {
-            Ok(log) => {
-                steps[index].status = JobStepStatus::Completed;
-                steps[index].conclusion = Some(JobConclusion::Success);
-                set_step_log(&mut steps[index], log);
+            Ok(success) => {
+                steps[index].finish(
+                    JobConclusion::Success,
+                    Some(elapsed),
+                    planned.detail.clone(),
+                    false,
+                );
+                set_step_log(&mut steps[index], success.log);
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
                         steps.clone(),
@@ -1617,17 +1585,23 @@ async fn run_local_remove_tag_flow(
                     );
                 }
             }
-            Err(log) => {
-                if cancel_token.load(Ordering::SeqCst) {
-                    steps[index].status = JobStepStatus::Completed;
-                    steps[index].conclusion = Some(JobConclusion::Cancelled);
-                    set_step_log(&mut steps[index], log.clone());
-                    steps[index].detail = LocalizedText::message("tag.cancelled_paused_detail");
+            Err(failure) => {
+                if failure.is_cancelled() {
+                    steps[index].finish(
+                        JobConclusion::Cancelled,
+                        Some(elapsed),
+                        LocalizedText::message("tag.cancelled_paused_detail"),
+                        false,
+                    );
+                    set_step_log(&mut steps[index], failure.log.clone());
                     for remaining in steps.iter_mut().skip(index + 1) {
                         if remaining.status == JobStepStatus::Queued {
-                            remaining.status = JobStepStatus::Completed;
-                            remaining.conclusion = Some(JobConclusion::Cancelled);
-                            remaining.detail = LocalizedText::message("tag.paused_after_cancel");
+                            remaining.finish(
+                                JobConclusion::Cancelled,
+                                None,
+                                LocalizedText::message("tag.paused_after_cancel"),
+                                false,
+                            );
                         }
                     }
                     if let Some(progress) = on_progress.as_ref() {
@@ -1647,11 +1621,13 @@ async fn run_local_remove_tag_flow(
                         steps,
                     });
                 }
-                steps[index].status = JobStepStatus::Completed;
-                steps[index].conclusion = Some(JobConclusion::Failure);
-                steps[index].default_expanded = true;
-                set_step_log(&mut steps[index], log);
-                steps[index].detail = LocalizedText::message("tag.command_failed_detail");
+                steps[index].finish(
+                    JobConclusion::Failure,
+                    Some(elapsed),
+                    LocalizedText::message("tag.command_failed_detail"),
+                    true,
+                );
+                set_step_log(&mut steps[index], failure.log);
                 if let Some(progress) = on_progress.as_ref() {
                     progress(
                         steps.clone(),
@@ -1675,11 +1651,15 @@ async fn run_local_remove_tag_flow(
         }
     }
 
-    let refresh_index = 3;
+    let refresh_index = commands.len();
+    let refresh_step = (refresh_index + 1).to_string();
     if cancel_token.load(Ordering::SeqCst) {
-        steps[refresh_index].status = JobStepStatus::Completed;
-        steps[refresh_index].conclusion = Some(JobConclusion::Cancelled);
-        steps[refresh_index].detail = LocalizedText::message("tag.cancelled_before_refresh_detail");
+        steps[refresh_index].finish(
+            JobConclusion::Cancelled,
+            None,
+            LocalizedText::message("tag.cancelled_before_refresh_detail"),
+            false,
+        );
         set_step_log(
             &mut steps[refresh_index],
             "[Stop] Cancel requested by user.",
@@ -1690,22 +1670,25 @@ async fn run_local_remove_tag_flow(
         });
     }
     let refresh_started = Instant::now();
-    steps[refresh_index].status = JobStepStatus::InProgress;
-    steps[refresh_index].conclusion = None;
-    steps[refresh_index].duration = "…".into();
-    steps[refresh_index].detail = LocalizedText::message("tag.step.refresh_remote_detail");
+    steps[refresh_index].start(LocalizedText::message("tag.step.refresh_remote_detail"));
     if let Some(progress) = on_progress.as_ref() {
         progress(
             steps.clone(),
             LocalizedText::message_with(
                 "tag.progress_running",
-                [("current", "4".to_string()), ("total", "4".to_string())],
+                [
+                    ("current", refresh_step.clone()),
+                    ("total", refresh_step.clone()),
+                ],
             ),
         );
     }
     let refresh_summary = LocalizedText::message_with(
         "tag.progress_running",
-        [("current", "4".to_string()), ("total", "4".to_string())],
+        [
+            ("current", refresh_step.clone()),
+            ("total", refresh_step.clone()),
+        ],
     );
     let refresh_result = inspect_latest_remote_tag_live(repo, &cancel_token, |live_log| {
         set_step_log(&mut steps[refresh_index], live_log);
@@ -1714,25 +1697,25 @@ async fn run_local_remove_tag_flow(
         }
     })
     .await;
+    let refresh_duration = refresh_started.elapsed();
     let (latest_tag, refresh_log) = match refresh_result {
         Ok(result) => result,
         Err(error) => {
-            steps[refresh_index].status = JobStepStatus::Completed;
-            steps[refresh_index].conclusion = Some(if cancel_token.load(Ordering::SeqCst) {
+            let cancelled = error.is_cancelled();
+            let conclusion = if cancelled {
                 JobConclusion::Cancelled
             } else {
                 JobConclusion::Failure
-            });
-            steps[refresh_index].default_expanded = true;
-            steps[refresh_index].duration = format_duration(refresh_started.elapsed());
-            steps[refresh_index].detail = if cancel_token.load(Ordering::SeqCst) {
+            };
+            let detail = if cancelled {
                 LocalizedText::message("tag.cancelled_paused_detail")
             } else {
                 LocalizedText::message("tag.refresh_remote_failed_detail")
             };
-            set_step_log(&mut steps[refresh_index], error);
+            steps[refresh_index].finish(conclusion, Some(refresh_duration), detail, true);
+            set_step_log(&mut steps[refresh_index], error.log);
             return Err(TagRunFailure {
-                summary: if cancel_token.load(Ordering::SeqCst) {
+                summary: if cancelled {
                     LocalizedText::message("tag.cancelled_during_refresh")
                 } else {
                     LocalizedText::message_with(
@@ -1744,12 +1727,14 @@ async fn run_local_remove_tag_flow(
             });
         }
     };
-    steps[refresh_index].status = JobStepStatus::Completed;
-    steps[refresh_index].conclusion = Some(JobConclusion::Success);
-    steps[refresh_index].duration = format_duration(refresh_started.elapsed());
-    steps[refresh_index].detail = LocalizedText::message_with(
-        "tag.step.latest_remote_tag",
-        [("latest_tag", latest_tag.clone())],
+    steps[refresh_index].finish(
+        JobConclusion::Success,
+        Some(refresh_duration),
+        LocalizedText::message_with(
+            "tag.step.latest_remote_tag",
+            [("latest_tag", latest_tag.clone())],
+        ),
+        false,
     );
     set_step_log(&mut steps[refresh_index], refresh_log);
     if let Some(progress) = on_progress.as_ref() {
@@ -1757,18 +1742,20 @@ async fn run_local_remove_tag_flow(
             steps.clone(),
             LocalizedText::message_with(
                 "tag.progress_completed",
-                [("current", "4".to_string()), ("total", "4".to_string())],
+                [("current", refresh_step.clone()), ("total", refresh_step)],
             ),
         );
     }
 
-    let complete_index = 4;
-    steps[complete_index].status = JobStepStatus::Completed;
-    steps[complete_index].conclusion = Some(JobConclusion::Success);
-    steps[complete_index].duration = "0s".into();
-    steps[complete_index].detail = LocalizedText::message_with(
-        "tag.remove_finished_detail",
-        [("latest_tag", latest_tag.clone())],
+    let complete_index = refresh_index + 1;
+    steps[complete_index].finish(
+        JobConclusion::Success,
+        Some(Duration::ZERO),
+        LocalizedText::message_with(
+            "tag.remove_finished_detail",
+            [("latest_tag", latest_tag.clone())],
+        ),
+        false,
     );
     set_step_log(
         &mut steps[complete_index],
@@ -1807,7 +1794,7 @@ async fn inspect_latest_remote_tag_live<F>(
     local_repo: &str,
     cancel_token: &Arc<AtomicBool>,
     mut on_log: F,
-) -> Result<(String, String), String>
+) -> Result<(String, String), CommandFailure>
 where
     F: FnMut(String),
 {
@@ -1820,7 +1807,7 @@ where
         "--tags".to_string(),
         "--force".to_string(),
     ];
-    let fetch_log = run_command(fetch_command, cancel_token, &mut on_log).await?;
+    let fetch = run_command(fetch_command, cancel_token, &mut on_log).await?;
 
     let list_command = vec![
         "git".to_string(),
@@ -1831,34 +1818,20 @@ where
         "--refs".to_string(),
         "origin".to_string(),
     ];
-    let list_log = run_command(list_command, cancel_token, |log| {
-        on_log(clamp_step_log(format!("{fetch_log}\n{log}")));
-    })
+    let mut parser = RemoteTagParser::default();
+    let list = run_command_with_stdout(
+        list_command,
+        cancel_token,
+        |log| on_log(clamp_step_log(format!("{}\n{log}", fetch.log))),
+        |stdout| parser.push(stdout).map_err(|error| error.to_string()),
+    )
     .await?;
-    let combined_log = clamp_step_log(format!("{fetch_log}\n{list_log}"));
-
-    let mut latest: Option<(String, (u64, u64, u64))> = None;
-    for line in list_log.lines() {
-        let Some(tag_ref) = line.split_whitespace().nth(1) else {
-            continue;
-        };
-        let Some(tag) = tag_ref.strip_prefix("refs/tags/") else {
-            continue;
-        };
-        let Some(parsed) = parse_semver_tag(tag) else {
-            continue;
-        };
-        match latest.as_ref() {
-            Some((_, current)) if *current >= parsed => {}
-            _ => latest = Some((tag.to_string(), parsed)),
-        }
-    }
-    Ok((
-        latest
-            .map(|(tag, _)| tag)
-            .unwrap_or_else(|| "v0.0.0".to_string()),
-        combined_log,
-    ))
+    let combined_log = clamp_step_log(format!("{}\n{}", fetch.log, list.log));
+    let latest = parser.finish().map_err(|error| CommandFailure {
+        kind: CommandFailureKind::OutputConsumer,
+        log: clamp_step_log(format!("{combined_log}\nerror: {error}")),
+    })?;
+    Ok((latest, combined_log))
 }
 
 fn read_latest_local_tag(local_repo: &str) -> Result<String, String> {
@@ -1926,7 +1899,7 @@ fn inspect_latest_remote_tag(local_repo: &str) -> Result<(String, String), Strin
         "--tags".to_string(),
         "--force".to_string(),
     ];
-    run_command_blocking(fetch_cmd)?;
+    run_command_blocking(fetch_cmd).map_err(|failure| failure.log)?;
 
     let list_cmd = vec![
         "git".to_string(),
@@ -1939,28 +1912,8 @@ fn inspect_latest_remote_tag(local_repo: &str) -> Result<(String, String), Strin
     ];
     // Run `ls-remote` once and reuse its stdout for parsing instead of
     // spawning the same network command a second time.
-    let (_, stdout) = run_command_blocking(list_cmd)?;
-
-    let mut latest: Option<(String, (u64, u64, u64))> = None;
-    for line in stdout.lines() {
-        let Some(tag_ref) = line.split_whitespace().nth(1) else {
-            continue;
-        };
-        let Some(tag) = tag_ref.strip_prefix("refs/tags/") else {
-            continue;
-        };
-        let Some(parsed) = parse_semver_tag(tag) else {
-            continue;
-        };
-        match latest.as_ref() {
-            Some((_, current)) if *current >= parsed => {}
-            _ => latest = Some((tag.to_string(), parsed)),
-        }
-    }
-
-    let latest_tag = latest
-        .map(|(tag, _)| tag)
-        .unwrap_or_else(|| "v0.0.0".to_string());
+    let output = run_command_blocking(list_cmd).map_err(|failure| failure.log)?;
+    let latest_tag = latest_remote_tag(&output.stdout).map_err(|error| error.to_string())?;
     let combined_log = format!(
         "[Init] Refreshed remote tags and resolved latest semantic tag: {}",
         latest_tag
@@ -1972,34 +1925,48 @@ fn inspect_latest_remote_tag(local_repo: &str) -> Result<(String, String), Strin
     Ok((latest_tag, combined_log))
 }
 
-/// Runs a command to completion, returning `(formatted_log, stdout)` so
-/// callers can parse the output without re-executing the command.
-fn run_command_blocking(command: Vec<String>) -> Result<(String, String), String> {
-    if command.is_empty() {
-        return Err("Command vector is empty.".to_string());
-    }
+/// Successful blocking commands retain stdout for business parsing.
+struct BlockingCommandSuccess {
+    stdout: String,
+}
+
+fn run_command_blocking(command: Vec<String>) -> Result<BlockingCommandSuccess, CommandFailure> {
+    let Some(program) = command.first() else {
+        return Err(CommandFailure {
+            kind: CommandFailureKind::EmptyCommand,
+            log: "Command vector is empty.".to_string(),
+        });
+    };
     let rendered = command.join(" ");
-    let output = StdCommand::new(&command[0])
+    let output = StdCommand::new(program)
         .args(command.iter().skip(1))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .map_err(|error| format!("Run {}\nFailed to spawn command: {}", rendered, error))?;
+        .map_err(|error| CommandFailure {
+            kind: CommandFailureKind::Spawn,
+            log: format!("Run {rendered}\nFailed to spawn command: {error}"),
+        })?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let log = format_command_log(&rendered, &stdout, &stderr);
     if output.status.success() {
-        Ok((log, stdout.into_owned()))
+        Ok(BlockingCommandSuccess {
+            stdout: stdout.into_owned(),
+        })
     } else {
-        Err(log)
+        Err(CommandFailure {
+            kind: CommandFailureKind::ExitStatus,
+            log,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{format_command_log, format_duration, run_command};
-    use crate::jobs::{JobConclusion, JobStepData, JobStepDefinition, JobStepStatus};
+    use super::{format_command_log, run_command};
+    use crate::jobs::{JobConclusion, JobStepData, JobStepDefinition};
     use slint::Model;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
@@ -2031,17 +1998,12 @@ mod tests {
 
     #[test]
     fn slint_step_exposes_one_log_line_model_row_per_rendered_line() {
-        let mut step = JobStepData {
-            definition: JobStepDefinition::new("Example", vec!["git".into(), "status".into()]),
-            status: JobStepStatus::Completed,
-            conclusion: Some(JobConclusion::Success),
-            detail: String::new().into(),
-            log: String::new(),
-            parsed_log: Default::default(),
-            duration: "0s".into(),
-            default_expanded: false,
-            log_requested: true,
-        };
+        let mut step = JobStepData::queued(
+            JobStepDefinition::new("Example", vec!["git".into(), "status".into()]),
+            "",
+        );
+        step.finish(JobConclusion::Success, Some(Duration::ZERO), "", false);
+        step.log_requested = true;
         step.set_log("Run git status\nclean\ncomplete".into());
         let slint_step = step.to_slint();
         assert_eq!(slint_step.log_lines.row_count(), 3);
@@ -2057,12 +2019,6 @@ mod tests {
             slint_step.log_lines.row_data(2).unwrap().text.as_str(),
             "complete"
         );
-    }
-
-    #[test]
-    fn step_duration_matches_githubs_compact_units() {
-        assert_eq!(format_duration(Duration::from_millis(999)), "0s");
-        assert_eq!(format_duration(Duration::from_secs(65)), "1m 5s");
     }
 
     #[cfg(unix)]
@@ -2082,7 +2038,7 @@ mod tests {
         .await
         .expect("shell command should succeed");
 
-        assert!(result.contains("error: second"));
+        assert!(result.log.contains("error: second"));
         assert!(
             snapshots
                 .iter()

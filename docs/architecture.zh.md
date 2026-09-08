@@ -608,7 +608,8 @@ PrefixCache 边界。每个 adapter 只增量补拉缺失的完整 Provider 页�
 Workflow 顶层 PR/Tag/Branch/CD 导航和 Tag Add/Remove 导航统一复用
 `GitHubUnderlineNavItem`；Tag Scope 与语义版本选项统一复用
 `GitHubSegmentedControl*`。Branch 展示现有项目级校验计划，CD 展示现有分阶段
-部署和回退 Controller，不再渲染不可用占位页。Branch/CD 的 Field、Action 和
+部署和回退 Controller，不再渲染不可用占位页。CD 分别使用部署/回滚阶段枚举，Step
+状态在 Slint 投影前保持强类型。Branch/CD 的 Field、Action 和
 Result 统一位于 `ui/components/workflow/`，在紧凑宽度下自适应，并使用应用自有
 GitHub 控件。
 
@@ -636,21 +637,26 @@ GitHub 控件。
 
 应用 Shell 统一拥有一个 240px 桌面侧栏。持久化固定状态驱动同一个可中断、按显示帧推进的弹簧，移动侧栏、内容表面、标题栏分割线和状态栏绘制起点。Slint 显示动画时钟把真实帧间隔交给闭式阻尼振子，因此在 120Hz 屏幕上每个渲染帧都会更新位置，延迟帧也不会积累固定步长误差；目标反转保留当前进度和速度。路由只在运动开始时采用一次目标布局宽度，状态栏透明宿主与右侧常驻工具组保持窗口坐标。连续点击标题栏按钮重定向同一运动，不排队旧回调。原生 Live Resize 会把侧栏运动吸附到目标，冻结已挂载路由宽度，并在拖拽结束后一次应用最终宽度。固定态边界 Elevation 由主内容面拥有并只向侧栏方向投射；取消固定后，窗口左侧 8px Hover 热区把同一侧栏作为只有边框、尾部上下圆角的根层临时浮层打开。macOS 通过原生标题栏附件提供侧栏、Back 和 Forward。面包屑占用剩余原生标题栏安全区，原生附件、Slint 面包屑和尾部操作统一按完整 46px inset 中轴线对齐。macOS 的 `NSVisualEffectView` 固定为 240px 宽，只在侧栏下方提供 Menu/BehindWindow 材质；Slint 渲染器下方另有与当前主题 Canvas 一致的全窗口不透明原生底面，GPU Surface resize 晚一帧时也不会在右侧露出壁纸蓝色。Vibrancy 安装先切换全尺寸透明标题栏样式，再在窗口仍不透明时挂上 Effect 与底面，最后才打开透明窗口路径并使用近透明背景而非 `clearColor`；整个过程在启动窗口 alpha 门控期间的同一个 AppKit 事务内完成，避免启动瞬间半透明 Slint 侧栏透出桌面内容。固定侧栏 Rectangle 在 Effect 上绘制随焦点变化的最终表面；失去 Key 时隐藏 Effect。临时 Hover 侧栏保持独立不透明浮层。按钮可用状态由 Router 历史驱动；三端共享 Router callback 和侧栏偏好，平台代码不持有路由历史。
 
-Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。`RepoContext` 一次性校验当前项目持久化的 Provider/id 与 `remote_repo`，随后列表、详情/diff、仓库文件、review state、review submit、merge 和 revert 均由对象安全的 `GitProvider` 分发；`ProviderCapabilities` 统一暴露 endpoint 能力，UI 不自行推断。共享 JSON 解码与分页 helper 归 `src/git/json.rs` 所有。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，其 feature 自有 state-store façade 为 diff、高亮、展开、Conversation、Commits、远端 action-state 读取和远端 mutation 保存七类独立强类型 generation。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 在 adapter 边界解码，每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写均由对应 generation 防止迟到响应污染当前项目或 PR。
+Workflow PR 列表与全窗口审核工作区统一通过 `src/git/` 的 Provider-neutral façade 请求数据。`RepoContext` 一次性校验当前项目持久化的 Provider/id 与 `remote_repo`，随后列表、详情/diff、仓库文件、review state、review submit、merge 和 revert 均由对象安全的 `GitProvider` 分发；`ProviderCapabilities` 统一暴露 endpoint 能力，UI 不自行推断。共享 JSON 解码与分页 helper 归 `src/git/json.rs` 所有。`workflow/pr_review.rs` 是稳定 façade，`workflow/pr_review/controller.rs` 负责异步编排和 UI 回写；共享缓存/Diff 所有权与头像 I/O 分别位于 `cache.rs`、`avatar.rs`。固定源码对齐与 hunk 展开纯算法位于 `workflow/pr_review/hunk.rs`，本地文件树构建与分类位于 `workflow/pr_review/file_tree.rs`，Unified/Split 行映射位于 `workflow/pr_review/diff_projection.rs`，Slint 惰性行适配器位于 `workflow/pr_review/diff_model.rs`，选择几何与剪贴板投影位于 `workflow/pr_review/selection.rs`，Conversation/Commit 展示与范围映射位于 `workflow/pr_review/timeline.rs`。审核控制器只持有一份共享且不可变的归一化 diff，其 feature 自有 state-store façade 为 diff、高亮、展开、Conversation、Commits、远端 action-state 读取和远端 mutation 保存七类独立强类型 generation。归一化详情会把每个基础文件移动到独立 `Arc` 中，当前文件的惰性 model 与高亮任务直接共享该分配，不再深拷贝全部行；只有展开 hunk 时才创建对应文件的写时复制 override。Provider HTML 与 Diff 别名在 adapter 边界解码。`DiffChangeType` 和 `DiffLineKind` 在仓库、hunk、搜索、高亮与 AI unified-diff 逻辑中保持强类型，仅由 Slint 惰性适配器投影为既有字符串。每条 diff 记录在进入固定高度的 Slint 行渲染前都会归一为不含 CR/LF 控制符的单个视觉源码行。收起文件时删除 override 并重新使用共享基础文件。hunk 展开或应用内查看完整文件时按固定 head/base commit 懒加载源码；修改文件展开时会在本地对齐两份固定版本，确保单侧独有行不会丢失。每文件 Diff 高亮使用 4 项 LRU，固定源码文本使用 3 项 LRU；完整文件高亮 model 只是临时 UI 状态。当前 Diff 通过只读惰性适配器暴露给 Slint，最多物化 64 行转换后的 UI 数据；完整高亮结果继续由 Rust 持有，以保留任意语言支持和快速滚动。所有异步回写均由对应 generation 防止迟到响应污染当前项目或 PR。
 
 PR Review 将逻辑选区与 shaped-text 几何分离：`selection.rs` 负责行/字符范围和剪贴板
 投影；`text_geometry.rs` 是 styled-run 与软换行 caret 命中及范围边界的可替换数值门面，
 默认 adapter 使用有界 Parley 0.10 cursor/selection 几何、Slint 共享字体集合和精确 run
-样式。换行范围会合并同一视觉行内相接的 fallback-font fragment，并使用固定 pitch、互不
+样式。四个 Rust 入口统一接收由 `controller/diff_bindings.rs` 组装的
+`TextGeometryOptions`，`PrDiffBridge` 的 Slint callback 协议保持不变。换行范围会合并
+同一视觉行内相接的 fallback-font fragment，并使用固定 pitch、互不
 重叠的绘制矩形。Slint 继续
 原生绘制 `syntect` token model，且不导入 Parley 类型。不嵌入 WebView/浏览器编辑器；
 门面缓存有界，滚动或 resize 路径不执行 Find viewport 定位工作。
 
 Tag 工作流采用相同的 façade 模式：`workflow/tag.rs` 暴露绑定和刷新，
-`tag/controller.rs` 负责项目状态、UI 序列、取消和命令执行，`tag/version.rs` 与
-`tag/commands.rs` 保存可直接单测的纯规则。应用级 `src/jobs/` model
+`tag/controller.rs` 负责项目状态、UI 序列、取消和命令执行，`tag/version.rs`
+负责强类型 SemVer 递增规则及 Slint 字符串边界，`tag/commands.rs` 负责强类型
+创建/删除计划及其到不可变 Job Step 定义的投影，并显式追加刷新/完成步骤。应用级 `src/jobs/` model
 把不可变的 `name + argv` Step 定义与运行时数据分开，并用单个 `JobSnapshot`
-统一持有 Job status、conclusion、总耗时和有序 Steps。来源 Feature 发布
+统一持有 Job status、conclusion、总耗时和有序 Steps。运行时耗时在 UI 投影前保持为
+可选的 `Duration` 语义值；Step 与 Job 生命周期方法把 status、conclusion、detail、
+duration 和初始展开状态作为一次转换统一更新。来源 Feature 发布
 `JobRunDescriptor` 与快照，并用稳定 source key 注册 Stop 和日志懒加载动作。
 `Route.JobRun` 不属于 Workflow 生命周期域，因此可从任意页面进入，并由全局 Router
 历史精确返回来源；该路由只读取通用 Job Run 属性，不读取 Workflow 或 Tag 属性。
@@ -766,7 +772,7 @@ Provider adapters
 
 ### Chat
 
-聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。新记录持久化带本地时区偏移的完整 RFC 3339 时间，终态 assistant 行同时保存实测 `elapsed_ms`。Rust 展示投影按本地自然日转换时间标签，并把耗时转换为紧凑元数据；旧版记录继续兼容原样显示。等待中的对话只使用一个页面级实时 tick 和按模式保存的单调起始时刻；切换模式或重新挂载 Chat 时恢复实际耗时而不重新计时。AI 与 RAG 分别保留 composer 草稿，迟到的持久化失败也会把内容恢复到原模式草稿。启动时最近一段只加载到 Rust session；Chat 组件及有界 Slint 消息 model 仅在 Chat 路由挂载。加载更早分页时，先在 Session 锁内准备 Store 请求，释放锁执行 JSONL IO，再回锁校验并提交分页。离开 Chat 会销毁 UI 树并清空 Slint model/投影缓存，重新进入时从 session 重建可见窗口。Assistant 消息保留宽度无关的可读文本投影；超过 1,200 个 Unicode scalar value 的投影在 Chat 内有界展示，并通过现有标题入口打开完整回复。格式化 block 由 `usher-preview` 后台准备并交给应用级预览 Host 展示。迟到的历史分页或 assistant 响应继续更新持久化/session，但不得填充隐藏 UI。
+聊天历史以 append-only JSONL 保存到 `im/chat_history.jsonl`。新记录持久化带本地时区偏移的完整 RFC 3339 时间，终态 assistant 行同时保存实测 `elapsed_ms`。Rust 展示投影按本地自然日转换时间标签，并把耗时转换为紧凑元数据；旧版记录继续兼容原样显示。等待中的对话只使用一个页面级实时 tick 和按模式保存的可选单调起始时刻；起点存在即表示发送中。切换模式或重新挂载 Chat 时恢复实际耗时而不重新计时。AI 与 RAG 分别保留 composer 草稿，迟到的持久化失败也会把内容恢复到原模式草稿。启动时最近一段只加载到 Rust session；Chat 组件及有界 Slint 消息 model 仅在 Chat 路由挂载。加载更早分页时，先在 Session 锁内准备 Store 请求，释放锁执行 JSONL IO，再回锁校验并提交分页。离开 Chat 会销毁 UI 树并清空 Slint model/投影缓存，重新进入时从 session 重建可见窗口。Assistant 消息保留宽度无关的可读文本投影；超过 1,200 个 Unicode scalar value 的投影在 Chat 内有界展示，并通过现有标题入口打开完整回复。格式化 block 由 `usher-preview` 后台准备并交给应用级预览 Host 展示。迟到的历史分页或 assistant 响应继续更新持久化/session，但不得填充隐藏 UI。
 
 生产路径默认启用有界虚拟窗口：一个稳定 `VecModel` 最多挂载 32 行，每行只实例化
 当前角色子树，并使用 width-keyed prefix 估算的上下 spacer。启动加载最近 20 条，显式或

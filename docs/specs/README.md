@@ -17,7 +17,7 @@ Spec 描述稳定行为和不变量；架构文档解释职责与数据流；历
 | [Artifact preview framework](artifact-preview.md) | Current: cancellable exact worker layout and virtual code lines / 当前：可取消的后台精确布局与代码行虚拟化 | `crates/usher-preview/`, `src/artifact_preview/`, `ui/components/artifact_preview/`, Settings and all preview callers |
 | [Project repository metadata](project-repository.md) | Current: bounded Logo retries and projection / 当前：Logo 有界重试与投影 | `src/project/mod.rs`, `src/git/`, `src/codereview/api/` |
 | [Pull request workflow](pr-review.md) | Current / 当前 | `src/workflow/pr_list.rs`, `src/workflow/pr_review.rs`, `src/workflow/pr_review/`, `src/git/`, `ui/features/pr_review/`, `ui/views/workflow/`, `ui/components/workflow/` |
-| [Reusable job runs](jobs.md) | Current: bounded output and virtualized logs / 当前：有界输出与日志虚拟化 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
+| [Reusable job runs](jobs.md) | Current: typed lifecycle/durations, bounded output, virtualized logs / 当前：类型化生命周期/耗时、有界输出与日志虚拟化 | `src/jobs/`, `ui/views/job_run.slint`, `ui/components/jobs/`, feature controllers |
 | [Tag workflow](tag.md) | Current / 当前 | `src/workflow/tag.rs`, `src/workflow/tag/`, `src/workflow/state.rs`, `ui/views/workflow/` |
 | [Terminal behavior](terminal.md) | Current / 当前 | `src/terminal/`, `ui/components/drawer/terminal_drawer.slint`, `ui/main.slint` |
 | [Application keyboard shortcuts](shortcuts.md) | Current / 当前 | `src/shortcuts/`, `ui/main.slint`, `src/platform/` |

@@ -196,7 +196,7 @@ fn flatten_tree<T>(
             expanded: false,
             added_lines: file.added_lines as i32,
             removed_lines: file.removed_lines as i32,
-            change_type: file.change_type.clone().into(),
+            change_type: file.change_type.as_str().into(),
             file_count: 0,
         });
     }
