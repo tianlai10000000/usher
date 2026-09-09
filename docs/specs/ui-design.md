@@ -228,17 +228,22 @@ expanded/collapsed, and success confirmation.
   accessible action label. It shows the label as a tooltip on hover or focus
   unless the caller selects the documented About/dismiss exception.
 - `GitHubSegmentedControl`: the shared Primer track for one immediately applied
-  choice among closely related options. Its icon-only variant uses 32 px medium
-  segments, accessible pressed/selected state, and one independent knob above
-  the persistent track. Selection moves that knob for 200 ms with Primer's
-  `cubic-bezier(0.6, 0, 0.2, 1)` move easing; hover/pressed feedback remains a
-  4 px inset on unselected items. Project list/grid selection must use this
-  component rather than two independent IconButtons.
+  choice among closely related options. Text and icon-only variants use an
+  accessible pressed/selected state and one independent variable-width knob
+  above the persistent track. Selection moves and resizes that knob for 200 ms
+  with Primer's `cubic-bezier(0.6, 0, 0.2, 1)` easeInOut token; hover/pressed
+  feedback remains a 4 px inset on unselected items. The default text and icon
+  controls use the 32 px medium size; dense toolbars may opt into 28 px small
+  text controls. Pointer selection must not show a keyboard focus outline.
+  Project list/grid selection must use this component rather than two
+  independent IconButtons.
 - `GitHubSegmentedControl` 是用于在紧密相关选项中即时应用单一选择的共享 Primer
-  轨道。图标版本使用 32px 中号分段、可访问的按下/选中状态，以及位于常驻轨道之上
-  的独立 knob。切换时 knob 使用 Primer 的 200ms、
-  `cubic-bezier(0.6, 0, 0.2, 1)` 位移动效；未选项的 hover/pressed 反馈保持 4px
-  内缩。Project 的列表/网格切换必须复用该组件，不能继续使用两个独立 IconButton。
+  轨道。文本和纯图标版本都使用可访问的按下/选中状态，以及位于常驻轨道之上的独立
+  可变宽 knob。切换时 knob 的位置和宽度使用 Primer 的 200ms、
+  `cubic-bezier(0.6, 0, 0.2, 1)` easeInOut 动效；未选项的 hover/pressed 反馈保持
+  4px 内缩。文本和图标控件默认使用 32px 中号尺寸，密集工具栏可选择 28px 小号文本
+  控件。鼠标选择不得显示键盘焦点轮廓。Project 的列表/网格切换必须复用该组件，
+  不能继续使用两个独立 IconButton。
 - A Codex-style title-bar toggle built on `GitHubIconButton` must keep hover,
   selected, and selected-plus-hover visually distinct. In light mode the
   sampled reference values are: hover uses `#f5f5f5` background with

@@ -3,7 +3,7 @@ import { GitHubTheme, GitHubMetrics } from "../theme/github_theme.slint";
 import { GitHubIconButton } from "../components/button/github_icon_button.slint";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
 import { GitHubCenteredLoadingState } from "../components/github_spinner.slint";
-import { GitHubSegmentedControl, GitHubSegmentedControlDivider, GitHubSegmentedControlItem } from "../components/github_segmented_control.slint";
+import { GitHubSegmentedControl } from "../components/github_segmented_control.slint";
 import { GitHubMessageBubble, GitHubChatWelcomeView, GitHubChatHistoryControl, ChatHistoryControlState, MessageRole, MessageStatus, ChatMessage, ChatSelectionRect } from "../components/chat/github_chat_components.slint";
 import { I18n } from "@i18n";
 
@@ -219,18 +219,12 @@ export component GitHubChatPage inherits Rectangle {
                 x: GitHubMetrics.size-16;
                 y: (parent.height - self.height) / 2;
                 group-label: I18n.chat-mode;
-
-                GitHubSegmentedControlItem {
-                    label: I18n.chat-ai-title;
-                    selected: root.ai-mode;
-                    clicked => { root.switch-mode(true); }
-                }
-                GitHubSegmentedControlDivider {}
-                GitHubSegmentedControlItem {
-                    label: "RAG";
-                    selected: !root.ai-mode;
-                    clicked => { root.switch-mode(false); }
-                }
+                items: [
+                    { label: I18n.chat-ai-title, count: -1, count-suffix-offset: 0, enabled: true },
+                    { label: "RAG", count: -1, count-suffix-offset: 0, enabled: true },
+                ];
+                selected-index: root.ai-mode ? 0 : 1;
+                selection-changed(index) => { root.switch-mode(index == 0); }
             }
 
             Text {

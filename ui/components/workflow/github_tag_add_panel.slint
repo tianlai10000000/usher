@@ -2,11 +2,7 @@ import { GitHubTagField, GitHubTagReadonlyField } from "./fields.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import { I18n } from "@i18n";
 import { GitHubTagActionButton } from "./tag_controls.slint";
-import {
-    GitHubSegmentedControl,
-    GitHubSegmentedControlItem,
-    GitHubSegmentedControlDivider,
-} from "../github_segmented_control.slint";
+import { GitHubSegmentedControl } from "../github_segmented_control.slint";
 
 export component GitHubTagAddPanel {
     in property <string> version-mode: "patch";
@@ -52,32 +48,15 @@ export component GitHubTagAddPanel {
 
             GitHubSegmentedControl {
                 group-label: I18n.tag-semantic-bump;
-
-                GitHubSegmentedControlItem {
-                    label: I18n.tag-patch;
-                    selected: root.version-mode == "patch";
-                    item-enabled: !root.running && !root.initializing;
-                    clicked => {
-                        root.select-version-mode("patch");
-                    }
-                }
-                GitHubSegmentedControlDivider { }
-                GitHubSegmentedControlItem {
-                    label: I18n.tag-minor;
-                    selected: root.version-mode == "minor";
-                    item-enabled: !root.running && !root.initializing;
-                    clicked => {
-                        root.select-version-mode("minor");
-                    }
-                }
-                GitHubSegmentedControlDivider { }
-                GitHubSegmentedControlItem {
-                    label: I18n.tag-major;
-                    selected: root.version-mode == "major";
-                    item-enabled: !root.running && !root.initializing;
-                    clicked => {
-                        root.select-version-mode("major");
-                    }
+                control-size: 28px;
+                items: [
+                    { label: I18n.tag-patch, count: -1, count-suffix-offset: 0, enabled: !root.running && !root.initializing },
+                    { label: I18n.tag-minor, count: -1, count-suffix-offset: 0, enabled: !root.running && !root.initializing },
+                    { label: I18n.tag-major, count: -1, count-suffix-offset: 0, enabled: !root.running && !root.initializing },
+                ];
+                selected-index: root.version-mode == "patch" ? 0 : root.version-mode == "minor" ? 1 : 2;
+                selection-changed(index) => {
+                    root.select-version-mode(index == 0 ? "patch" : index == 1 ? "minor" : "major");
                 }
             }
         }

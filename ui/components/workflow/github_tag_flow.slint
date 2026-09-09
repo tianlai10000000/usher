@@ -2,11 +2,7 @@ import { GitHubTagAddPanel } from "./github_tag_add_panel.slint";
 import { GitHubTagRemovePanel } from "./github_tag_remove_panel.slint";
 import { GitHubTheme } from "../../theme/github_theme.slint";
 import { I18n } from "@i18n";
-import {
-    GitHubSegmentedControl,
-    GitHubSegmentedControlItem,
-    GitHubSegmentedControlDivider,
-} from "../github_segmented_control.slint";
+import { GitHubSegmentedControl } from "../github_segmented_control.slint";
 import { GitHubUnderlineNav, GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
 // GitHub Primer UnderlineNav item. Durable contract:
 // docs/specs/ui-design.md “UnderlineNav tabs”.
@@ -68,20 +64,13 @@ export component GitHubTagFlow {
 
                 GitHubSegmentedControl {
                     group-label: I18n.tag-repository-scope;
-
-                    GitHubSegmentedControlItem {
-                        label: I18n.workflow-local;
-                        selected: root.mode != "remote";
-                        item-enabled: !root.running;
-                        clicked => { root.change-mode("local"); }
-                    }
-                    GitHubSegmentedControlDivider { }
-                    GitHubSegmentedControlItem {
-                        label: I18n.workflow-remote;
-                        selected: root.mode == "remote";
-                        item-enabled: !root.running;
-                        clicked => { root.change-mode("remote"); }
-                    }
+                    control-size: 28px;
+                    items: [
+                        { label: I18n.workflow-local, count: -1, count-suffix-offset: 0, enabled: !root.running },
+                        { label: I18n.workflow-remote, count: -1, count-suffix-offset: 0, enabled: !root.running },
+                    ];
+                    selected-index: root.mode == "remote" ? 1 : 0;
+                    selection-changed(index) => { root.change-mode(index == 0 ? "local" : "remote"); }
                 }
             }
         }

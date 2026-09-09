@@ -12,7 +12,7 @@ import { GitHubCounterLabel, GitHubCounterScheme } from "../label/github_counter
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubProgressBar } from "../github_progress_bar.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
-import { GitHubSegmentedControl, GitHubSegmentedControlItem, GitHubSegmentedControlDivider, GitHubSegmentedControlIconOnly } from "../github_segmented_control.slint";
+import { GitHubSegmentedControl, GitHubSegmentedControlIconOnly } from "../github_segmented_control.slint";
 import { GitHubUnderlineNav, GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
 import { GitHubActionMenu, GitHubActionListItem } from "../github_action_menu.slint";
 import { GitHubFilterMenuButton, GitHubFilterMenuFrame, GitHubFilterMenuItem } from "../github_filter_menu.slint";
@@ -656,23 +656,13 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 x: 0px;
                 y: 28px;
                 group-label: "Clone method";
-                GitHubSegmentedControlItem {
-                    label: "HTTPS";
-                    selected: root.selected-segment == 0;
-                    clicked => { root.selected-segment = 0; }
-                }
-                GitHubSegmentedControlDivider {}
-                GitHubSegmentedControlItem {
-                    label: "SSH";
-                    selected: root.selected-segment == 1;
-                    clicked => { root.selected-segment = 1; }
-                }
-                GitHubSegmentedControlDivider {}
-                GitHubSegmentedControlItem {
-                    label: "GitHub CLI";
-                    selected: root.selected-segment == 2;
-                    clicked => { root.selected-segment = 2; }
-                }
+                items: [
+                    { label: "HTTPS", count: -1, count-suffix-offset: 0, enabled: true },
+                    { label: "SSH", count: -1, count-suffix-offset: 0, enabled: true },
+                    { label: "GitHub CLI", count: -1, count-suffix-offset: 0, enabled: true },
+                ];
+                selected-index: root.selected-segment;
+                selection-changed(index) => { root.selected-segment = index; }
             }
 
             GitHubShowcaseLabel { x: 0px; y: 76px; width: 160px; height: 20px; label: "Disabled state"; }
@@ -680,9 +670,11 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 x: 0px;
                 y: 100px;
                 group-label: "Disabled segmented control state";
-                GitHubSegmentedControlItem { label: "Available"; selected: true; }
-                GitHubSegmentedControlDivider {}
-                GitHubSegmentedControlItem { label: "Disabled"; item-enabled: false; }
+                items: [
+                    { label: "Available", count: -1, count-suffix-offset: 0, enabled: true },
+                    { label: "Disabled", count: -1, count-suffix-offset: 0, enabled: false },
+                ];
+                selected-index: 0;
             }
 
             GitHubShowcaseLabel { x: 0px; y: 144px; width: 200px; height: 20px; label: "Icon-only with motion"; }

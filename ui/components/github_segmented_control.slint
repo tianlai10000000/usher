@@ -12,58 +12,38 @@ export struct GitHubSegmentedControlIconItemData {
     enabled: bool,
 }
 
-// Shared compact Primer SegmentedControl shell.
-// Width hugs the segment row. Do not let the outer chrome grow past the items
-// or trailing empty hit-space appears after the last segment.
-export component GitHubSegmentedControl inherits Rectangle {
-    in property <string> group-label;
-
-    horizontal-stretch: 0;
-    vertical-stretch: 0;
-    width: segments.preferred-width;
-    height: GitHubMetrics.control-small-size;
-    border-radius: GitHubMetrics.radius-medium;
-    border-width: GitHubMetrics.border-thin;
-    border-color: GitHubTheme.border-default;
-    background: GitHubTheme.control-track-rest;
-    clip: true;
-    accessible-role: list;
-    accessible-label: root.group-label;
-
-    segments := HorizontalLayout {
-        width: self.preferred-width;
-        height: parent.height;
-        spacing: 0px;
-        alignment: start;
-        horizontal-stretch: 0;
-        @children
-    }
+export struct GitHubSegmentedControlItemData {
+    label: string,
+    count: int,
+    count-suffix-offset: int,
+    enabled: bool,
 }
 
-export component GitHubSegmentedControlItem inherits FocusScope {
-    // Static caption. Prefer `count` for live numeric suffixes.
-    // Never concatenate the changing number into a single string property —
-    // that binding freezes after the first paint on independently compiled
-    // ComponentFactory pages. Render label / "(" / count / ")" as separate
-    // Text nodes so the integer can update on its own.
+// Primer text segment. The selected surface belongs to the parent control so
+// one variable-width knob can move continuously between items.
+component GitHubSegmentedControlTextItem inherits FocusScope {
     in property <string> label;
     in property <int> count: -1;
-    // Locale typography metadata may opt into a small suffix correction when
-    // its fallback font does not share the Latin digit baseline.
     in property <int> count-suffix-offset: 0;
     in property <bool> selected: false;
     in property <bool> item-enabled: true;
+    in property <length> control-size: GitHubMetrics.control-medium-size;
     callback clicked();
+    callback selected-geometry(length, length);
 
     private property <bool> show-count: root.count >= 0;
     private property <bool> keyboard-focus-visible: false;
     private property <length> segment-width:
         max(GitHubMetrics.size-48 + GitHubMetrics.size-8,
             label-measure.preferred-width + GitHubMetrics.size-24);
+    private property <length> label-font-size: root.control-size <= GitHubMetrics.control-small-size
+        ? GitHubMetrics.text-small
+        : GitHubMetrics.text-medium;
 
+    focus-on-click: false;
     horizontal-stretch: 0;
     width: root.segment-width;
-    height: GitHubMetrics.control-small-size;
+    height: root.control-size;
     vertical-stretch: 0;
     opacity: root.item-enabled ? 1 : 0.55;
     accessible-role: button;
@@ -77,7 +57,7 @@ export component GitHubSegmentedControlItem inherits FocusScope {
         root.keyboard-focus-visible = true;
         if (root.item-enabled
                 && (event.text == Key.Return || event.text == " ")) {
-            root.clicked();
+            if !root.selected { root.clicked(); }
             return accept;
         }
         return reject;
@@ -89,60 +69,64 @@ export component GitHubSegmentedControlItem inherits FocusScope {
         root.keyboard-focus-visible = false;
     }
 
-    // Invisible measure row reserves selected-state weight so divider
-    // positions stay stable when selection toggles font-weight.
+    function publish-selected-geometry() {
+        if root.selected {
+            root.selected-geometry(root.x, root.width);
+        }
+    }
+
+    init => { root.publish-selected-geometry(); }
+    changed selected => { root.publish-selected-geometry(); }
+    changed x => { root.publish-selected-geometry(); }
+    changed width => { root.publish-selected-geometry(); }
+
+    // Reserve selected-state weight so the item's width never changes when
+    // its label becomes semibold.
     label-measure := HorizontalLayout {
-        // `visible: false` removes this row from Slint layout measurement and
-        // made segment-width fall back to its minimum, clipping count suffixes
-        // such as "Read (3)". Keep it mounted but fully transparent.
         opacity: 0;
         spacing: 0px;
         alignment: start;
         Text {
             text: root.label;
-            font-size: GitHubMetrics.text-small;
+            font-size: root.label-font-size;
             font-weight: 600;
             wrap: no-wrap;
         }
         if root.show-count: Text {
             text: " (";
-            font-size: GitHubMetrics.text-small;
+            font-size: root.label-font-size;
             font-weight: 600;
             wrap: no-wrap;
         }
         if root.show-count: Text {
             text: root.count;
-            font-size: GitHubMetrics.text-small;
+            font-size: root.label-font-size;
             font-weight: 600;
             wrap: no-wrap;
         }
         if root.show-count: Text {
             text: ")";
-            font-size: GitHubMetrics.text-small;
+            font-size: root.label-font-size;
             font-weight: 600;
             wrap: no-wrap;
         }
     }
 
-    Rectangle {
-        x: root.selected ? 0px : GitHubMetrics.size-4;
-        y: root.selected ? 0px : GitHubMetrics.size-4;
-        width: parent.width - (root.selected ? 0px : GitHubMetrics.size-8);
-        height: parent.height - (root.selected ? 0px : GitHubMetrics.size-8);
-        border-radius: root.selected
-            ? GitHubMetrics.radius-medium
-            : GitHubMetrics.radius-medium - GitHubMetrics.size-2;
-        border-width: root.selected ? GitHubMetrics.border-thin : 0px;
-        border-color: GitHubTheme.control-knob-border;
-        background: !root.item-enabled
+    // Unselected hover/active feedback is inset 4px, matching Primer's
+    // SegmentedControl button content surface.
+    feedback := Rectangle {
+        x: GitHubMetrics.size-4;
+        y: GitHubMetrics.size-4;
+        width: parent.width - GitHubMetrics.size-8;
+        height: parent.height - GitHubMetrics.size-8;
+        border-radius: GitHubMetrics.radius-medium - GitHubMetrics.size-2;
+        background: root.selected || !root.item-enabled
             ? transparent
-            : root.selected
-                ? GitHubTheme.control-knob-rest
-                : segment-touch.pressed
-                    ? GitHubTheme.control-track-active
-                    : segment-touch.has-hover
-                    ? GitHubTheme.control-track-hover
-                    : transparent;
+            : segment-touch.pressed
+                ? GitHubTheme.control-track-active
+                : segment-touch.has-hover
+                ? GitHubTheme.control-track-hover
+                : transparent;
         animate background {
             duration: 200ms;
             easing: cubic-bezier(0.6, 0, 0.2, 1);
@@ -173,7 +157,7 @@ export component GitHubSegmentedControlItem inherits FocusScope {
 
         label-text := Text {
             text: root.label;
-            font-size: GitHubMetrics.text-small;
+            font-size: root.label-font-size;
             font-weight: root.selected ? 600 : 400;
             color: GitHubTheme.fg-default;
             vertical-alignment: center;
@@ -194,21 +178,21 @@ export component GitHubSegmentedControlItem inherits FocusScope {
 
                 Text {
                     text: " (";
-                    font-size: GitHubMetrics.text-small;
+                    font-size: root.label-font-size;
                     font-weight: root.selected ? 600 : 400;
                     color: GitHubTheme.fg-default;
                     wrap: no-wrap;
                 }
                 Text {
                     text: root.count;
-                    font-size: GitHubMetrics.text-small;
+                    font-size: root.label-font-size;
                     font-weight: root.selected ? 600 : 400;
                     color: GitHubTheme.fg-default;
                     wrap: no-wrap;
                 }
                 Text {
                     text: ")";
-                    font-size: GitHubMetrics.text-small;
+                    font-size: root.label-font-size;
                     font-weight: root.selected ? 600 : 400;
                     color: GitHubTheme.fg-default;
                     wrap: no-wrap;
@@ -224,18 +208,85 @@ export component GitHubSegmentedControlItem inherits FocusScope {
         mouse-cursor: self.enabled ? pointer : default;
         clicked => {
             root.keyboard-focus-visible = false;
-            root.focus();
-            root.clicked();
+            if !root.selected { root.clicked(); }
         }
     }
 }
 
-export component GitHubSegmentedControlDivider inherits Rectangle {
+// Current Primer SegmentedControl uses one absolutely positioned knob for
+// text and icon variants. Its inset moves for 200ms with easeInOut.
+export component GitHubSegmentedControl inherits Rectangle {
+    in property <[GitHubSegmentedControlItemData]> items: [];
+    in property <int> selected-index: 0;
+    in property <string> group-label;
+    in property <length> control-size: GitHubMetrics.control-medium-size;
+    callback selection-changed(int);
+
+    private property <int> bounded-selected-index: root.items.length == 0
+        ? 0
+        : max(0, min(root.selected-index, root.items.length - 1));
+    private property <length> knob-x: 0px;
+    private property <length> knob-width: 0px;
+
     horizontal-stretch: 0;
-    width: GitHubMetrics.border-thin;
-    height: GitHubMetrics.control-small-size;
-    background: GitHubTheme.border-default;
     vertical-stretch: 0;
+    width: segments.preferred-width;
+    height: root.control-size;
+    border-radius: GitHubMetrics.radius-medium;
+    border-width: GitHubMetrics.border-thin;
+    border-color: GitHubTheme.border-default;
+    background: GitHubTheme.control-track-rest;
+    clip: true;
+    accessible-role: list;
+    accessible-label: root.group-label;
+
+    if root.knob-width > 0px: knob := Rectangle {
+        x: root.knob-x;
+        y: 0px;
+        width: root.knob-width;
+        height: parent.height;
+        border-radius: GitHubMetrics.radius-medium;
+        border-width: GitHubMetrics.border-thin;
+        border-color: GitHubTheme.control-knob-border;
+        background: GitHubTheme.control-knob-rest;
+        animate x, width {
+            duration: 200ms;
+            easing: cubic-bezier(0.6, 0, 0.2, 1);
+        }
+    }
+
+    segments := HorizontalLayout {
+        width: self.preferred-width;
+        height: parent.height;
+        spacing: 0px;
+        alignment: start;
+        horizontal-stretch: 0;
+
+        for item[index] in root.items: GitHubSegmentedControlTextItem {
+            label: item.label;
+            count: item.count;
+            count-suffix-offset: item.count-suffix-offset;
+            selected: index == root.bounded-selected-index;
+            item-enabled: item.enabled;
+            control-size: root.control-size;
+            selected-geometry(item-x, item-width) => {
+                root.knob-x = item-x;
+                root.knob-width = item-width;
+            }
+            clicked => { root.selection-changed(index); }
+
+            if index < root.items.length - 1: Rectangle {
+                x: parent.width - GitHubMetrics.border-thin;
+                y: GitHubMetrics.size-8;
+                width: GitHubMetrics.border-thin;
+                height: parent.height - GitHubMetrics.size-16;
+                background: index == root.bounded-selected-index
+                    || index + 1 == root.bounded-selected-index
+                    ? transparent
+                    : GitHubTheme.border-default;
+            }
+        }
+    }
 }
 
 // Primer SegmentedControl.IconButton item. The selected surface belongs to the
@@ -264,7 +315,7 @@ component GitHubSegmentedControlIconItem inherits FocusScope {
         root.keyboard-focus-visible = true;
         if (root.item-enabled
                 && (event.text == Key.Return || event.text == " ")) {
-            root.activate();
+            root.activate(true);
             return accept;
         }
         return reject;
@@ -277,12 +328,11 @@ component GitHubSegmentedControlIconItem inherits FocusScope {
     }
     focus-lost => { root.keyboard-focus-visible = false; }
 
-    function activate() {
-        root.keyboard-focus-visible = false;
+    function activate(from-keyboard: bool) {
+        root.keyboard-focus-visible = from-keyboard;
         root.tooltip-dismissed = true;
         TooltipOverlayState.dismiss-all();
-        root.focus();
-        root.clicked();
+        if !root.selected { root.clicked(); }
     }
 
     // Primer leaves a 4px inset around hover/pressed feedback. The selected
@@ -337,7 +387,7 @@ component GitHubSegmentedControlIconItem inherits FocusScope {
         changed has-hover => {
             if !self.has-hover { root.tooltip-dismissed = false; }
         }
-        clicked => { root.activate(); }
+        clicked => { root.activate(false); }
     }
 
     if root.label != "": GitHubTooltip {

@@ -4,11 +4,7 @@ import { I18n } from "@i18n";
 import { GitHubScrollView } from "../components/github_scroll_view.slint";
 import { GitHubBlankslate } from "../components/github_blankslate.slint";
 import { GitHubButton } from "../components/settings/github_settings_controls.slint";
-import {
-    GitHubSegmentedControl,
-    GitHubSegmentedControlDivider,
-    GitHubSegmentedControlItem
-} from "../components/github_segmented_control.slint";
+import { GitHubSegmentedControl } from "../components/github_segmented_control.slint";
 import { GitHubPageHeader } from "../components/page/github_page_header.slint";
 import {
     GitHubMessageListItem,
@@ -147,30 +143,13 @@ export component GitHubMessagesPage inherits Rectangle {
                 x: 0px;
                 y: root.filters-y;
                 group-label: I18n.messages-filter;
-
-                GitHubSegmentedControlItem {
-                    label: I18n.common-all;
-                    count: root.total-count;
-                    count-suffix-offset: root.filter-count-suffix-offset;
-                    selected: root.selected-filter == 0;
-                    clicked => { root.selected-filter = 0; }
-                }
-                GitHubSegmentedControlDivider {}
-                GitHubSegmentedControlItem {
-                    label: I18n.common-unread;
-                    count: root.unread-count;
-                    count-suffix-offset: root.filter-count-suffix-offset;
-                    selected: root.selected-filter == 1;
-                    clicked => { root.selected-filter = 1; }
-                }
-                GitHubSegmentedControlDivider {}
-                GitHubSegmentedControlItem {
-                    label: I18n.common-read;
-                    count: root.read-count;
-                    count-suffix-offset: root.filter-count-suffix-offset;
-                    selected: root.selected-filter == 2;
-                    clicked => { root.selected-filter = 2; }
-                }
+                items: [
+                    { label: I18n.common-all, count: root.total-count, count-suffix-offset: root.filter-count-suffix-offset, enabled: true },
+                    { label: I18n.common-unread, count: root.unread-count, count-suffix-offset: root.filter-count-suffix-offset, enabled: true },
+                    { label: I18n.common-read, count: root.read-count, count-suffix-offset: root.filter-count-suffix-offset, enabled: true },
+                ];
+                selected-index: root.selected-filter;
+                selection-changed(index) => { root.selected-filter = index; }
             }
 
             message-list := VerticalLayout {

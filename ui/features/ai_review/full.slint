@@ -4,7 +4,7 @@ import { GitHubScrollView, GitHubVirtualListScrollbar } from "../../components/g
 import { GitHubIconButton } from "../../components/button/github_icon_button.slint";
 import { GitHubCenteredLoadingState, GitHubSpinner } from "../../components/github_spinner.slint";
 import { GitHubAiReviewFindingRow, GitHubAiReviewUserMessage } from "../../components/ai_review/github_ai_review_components.slint";
-import { GitHubSegmentedControl, GitHubSegmentedControlDivider, GitHubSegmentedControlItem } from "../../components/github_segmented_control.slint";
+import { GitHubSegmentedControl } from "../../components/github_segmented_control.slint";
 import { AgentResponseBlock, GitHubAgentResponse } from "../../components/agent_response/github_agent_response.slint";
 import { AiReviewPanelContract, AiReviewFindingItem, AiReviewConversationItem, AiReviewResponseVisualRow } from "./contract.slint";
 import { I18n } from "@i18n";
@@ -1031,17 +1031,12 @@ export component GitHubAiReviewPanel inherits AiReviewPanelContract {
             x: 16px;
             y: 10px;
             group-label: I18n.ai-review-composer-mode;
-            GitHubSegmentedControlItem {
-                label: I18n.ai-review-ask;
-                selected: !root.review-again-mode;
-                clicked => { root.review-again-mode = false; }
-            }
-            GitHubSegmentedControlDivider {}
-            GitHubSegmentedControlItem {
-                label: I18n.ai-review-review-again;
-                selected: root.review-again-mode;
-                clicked => { root.review-again-mode = true; }
-            }
+            items: [
+                { label: I18n.ai-review-ask, count: -1, count-suffix-offset: 0, enabled: true },
+                { label: I18n.ai-review-review-again, count: -1, count-suffix-offset: 0, enabled: true },
+            ];
+            selected-index: root.review-again-mode ? 1 : 0;
+            selection-changed(index) => { root.review-again-mode = index == 1; }
         }
 
         composer-box := Rectangle {
