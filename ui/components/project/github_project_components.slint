@@ -1,6 +1,7 @@
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubIconButton } from "../button/github_icon_button.slint";
 import { GitHubMetadataLabel } from "../github_metadata_label.slint";
+import { GitHubSegmentedControlIconOnly } from "../github_segmented_control.slint";
 import { GitHubTheme, GitHubMetrics } from "../../theme/github_theme.slint";
 import { I18n } from "@i18n";
 
@@ -148,26 +149,28 @@ export component GitHubProjectSearchField inherits Rectangle {
 export component GitHubProjectViewSwitcher inherits Rectangle {
     in-out property <string> mode: "grid";
 
-    width: 72px;
+    width: GitHubMetrics.control-medium-size * 2;
     height: GitHubMetrics.control-medium-size;
     background: transparent;
 
-    GitHubProjectIconButton {
-        x: 0px;
-        icon: @image-url("../../assets/icons/octicon-list-unordered-16.svg");
-        tooltip: I18n.tooltip-list-view;
-        invisible: false;
-        selected: root.mode == "list";
-        clicked => { root.mode = "list"; }
-    }
-
-    GitHubProjectIconButton {
-        x: 40px;
-        icon: @image-url("../../assets/icons/octicon-table-16.svg");
-        tooltip: I18n.tooltip-grid-view;
-        invisible: false;
-        selected: root.mode == "grid";
-        clicked => { root.mode = "grid"; }
+    GitHubSegmentedControlIconOnly {
+        items: [
+            {
+                icon: @image-url("../../assets/icons/octicon-list-unordered-16.svg"),
+                label: I18n.tooltip-list-view,
+                enabled: true,
+            },
+            {
+                icon: @image-url("../../assets/icons/octicon-table-16.svg"),
+                label: I18n.tooltip-grid-view,
+                enabled: true,
+            },
+        ];
+        selected-index: root.mode == "list" ? 0 : 1;
+        group-label: I18n.tooltip-list-view + " / " + I18n.tooltip-grid-view;
+        selection-changed(index) => {
+            root.mode = index == 0 ? "list" : "grid";
+        }
     }
 }
 

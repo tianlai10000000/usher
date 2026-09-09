@@ -12,7 +12,7 @@ import { GitHubCounterLabel, GitHubCounterScheme } from "../label/github_counter
 import { GitHubSpinner } from "../github_spinner.slint";
 import { GitHubProgressBar } from "../github_progress_bar.slint";
 import { GitHubBlankslate } from "../github_blankslate.slint";
-import { GitHubSegmentedControl, GitHubSegmentedControlItem, GitHubSegmentedControlDivider } from "../github_segmented_control.slint";
+import { GitHubSegmentedControl, GitHubSegmentedControlItem, GitHubSegmentedControlDivider, GitHubSegmentedControlIconOnly } from "../github_segmented_control.slint";
 import { GitHubUnderlineNav, GitHubUnderlineNavItem } from "../navigation/github_underline_nav.slint";
 import { GitHubActionMenu, GitHubActionListItem } from "../github_action_menu.slint";
 import { GitHubFilterMenuButton, GitHubFilterMenuFrame, GitHubFilterMenuItem } from "../github_filter_menu.slint";
@@ -165,6 +165,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
 
     private property <bool> toggle-checked: true;
     private property <int> selected-segment: 0;
+    private property <int> selected-icon-segment: 1;
     private property <int> selected-tab: 0;
     private property <int> selected-action: 0;
     private property <string> field-text: "";
@@ -648,7 +649,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
         GitHubShowcaseSection {
             title: "Selection and navigation";
             description: "SegmentedControl, UnderlineNav, SettingsNavItem, and ActionList selected/disabled/danger states.";
-            content-height: 316px;
+            content-height: 384px;
 
             GitHubShowcaseLabel { x: 0px; y: 0px; width: 200px; height: 20px; label: "SegmentedControl - clone method"; }
             GitHubSegmentedControl {
@@ -684,10 +685,31 @@ export component GitHubUiComponentsGallery inherits Rectangle {
                 GitHubSegmentedControlItem { label: "Disabled"; item-enabled: false; }
             }
 
-            GitHubShowcaseLabel { x: 0px; y: 144px; width: 160px; height: 20px; label: "UnderlineNav"; }
+            GitHubShowcaseLabel { x: 0px; y: 144px; width: 200px; height: 20px; label: "Icon-only with motion"; }
+            GitHubSegmentedControlIconOnly {
+                x: 0px;
+                y: 168px;
+                items: [
+                    {
+                        icon: @image-url("../../assets/icons/octicon-list-unordered-16.svg"),
+                        label: "List view",
+                        enabled: true,
+                    },
+                    {
+                        icon: @image-url("../../assets/icons/octicon-table-16.svg"),
+                        label: "Grid view",
+                        enabled: true,
+                    },
+                ];
+                selected-index: root.selected-icon-segment;
+                group-label: "Project view";
+                selection-changed(index) => { root.selected-icon-segment = index; }
+            }
+
+            GitHubShowcaseLabel { x: 0px; y: 212px; width: 160px; height: 20px; label: "UnderlineNav"; }
             GitHubUnderlineNav {
                 x: 0px;
-                y: 172px;
+                y: 240px;
                 width: parent.width;
                 height: 48px;
                 group-label: "Underline navigation examples";
@@ -708,7 +730,7 @@ export component GitHubUiComponentsGallery inherits Rectangle {
 
             GitHubShowcaseSampleSurface {
                 x: 0px;
-                y: 236px;
+                y: 304px;
                 width: parent.width;
                 height: 72px;
 

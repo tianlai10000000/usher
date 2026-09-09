@@ -60,9 +60,9 @@ This specification covers provider metadata resolved on the Project page and the
     recoverable inline error/retry states; an empty search result is distinct
     from an empty registry.
 14. The Project page uses the shared GitHub/Primer PageHeader, Blankslate,
-    Button, IconButton, TextField, Dialog, and ScrollView contracts. Required
-    dialog fields remain visibly labeled, validation is descriptive, and
-    deletion remains a confirmed danger action.
+    Button, IconButton, SegmentedControl, TextField, Dialog, and ScrollView
+    contracts. Required dialog fields remain visibly labeled, validation is
+    descriptive, and deletion remains a confirmed danger action.
 15. `is_pr_auto_update` currently means one-shot PR-count prefetch, not a
     recurring background refresh. When enabled, the Project list fetches the
     FAT/UAT/PROD overview while it is loaded or rebuilt, and Workflow fetches
@@ -127,8 +127,8 @@ This specification covers provider metadata resolved on the Project page and the
     加载状态及可恢复的行内错误/重试状态；搜索无结果与项目注册表为空是两个
     不同状态。
 14. Project 页面统一复用 GitHub/Primer PageHeader、Blankslate、Button、
-    IconButton、TextField、Dialog 和 ScrollView 契约。对话框必填字段始终有
-    可见标签，校验信息必须可描述，删除操作必须使用危险语义并二次确认。
+    IconButton、SegmentedControl、TextField、Dialog 和 ScrollView 契约。
+    对话框必填字段始终有可见标签，校验信息必须可描述，删除操作必须使用危险语义并二次确认。
 15. `is_pr_auto_update` 当前表示“一次性预取 PR 数量”，而不是后台周期刷新。
     开启后，Project 列表加载或重建时会请求 FAT/UAT/PROD 概览；打开该项目的
     Workflow 时也会请求同一概览。当前实现没有轮询间隔或自动重试定时器。

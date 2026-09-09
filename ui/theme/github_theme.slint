@@ -73,6 +73,14 @@ export global GitHubTheme {
     out property <color> control-default-active: root.dark-mode ? #343b43 : #d8dee4;
     out property <color> control-muted-rest: root.dark-mode ? #21262d : #eaeef2;
     out property <color> control-muted-hover: root.dark-mode ? #30363d : #eaeef2;
+    // Primer controlTrack/controlKnob roles used by SegmentedControl. Keep
+    // these separate from ordinary Button surfaces: the selected knob moves
+    // above a persistent muted track.
+    out property <color> control-track-rest: root.dark-mode ? #010409 : #e6eaef;
+    out property <color> control-track-hover: root.dark-mode ? #2a313c : #e0e6eb;
+    out property <color> control-track-active: root.dark-mode ? #2f3742 : #dae0e7;
+    out property <color> control-knob-rest: root.dark-mode ? #262c36 : #ffffff;
+    out property <color> control-knob-border: root.border-default;
     out property <color> control-raised-hover: root.dark-mode ? #262c36 : #f3f4f6;
     out property <color> control-soft-hover: root.dark-mode ? #656c7633 : #e6eaef;
     out property <color> control-soft-rest: root.dark-mode ? #656c7626 : #eff2f5;
